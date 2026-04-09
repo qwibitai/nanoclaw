@@ -167,6 +167,20 @@ Key files:
 - `src/db.ts` - SQLite operations (messages, groups, sessions, state)
 - `groups/*/CLAUDE.md` - Per-group memory
 
+## Factory Mode (Optional)
+
+NanoClaw can run with a factory harness for phase-based execution, deterministic validation, and subagent routing.
+
+Key commands:
+
+```bash
+python3 .codex/scripts/stage_orchestrator.py
+python3 .codex/scripts/validate_artifacts.py --allow-missing-run
+python3 .codex/scripts/validate_work.py
+```
+
+See `WORKFLOW.md`, `docs/FACTORY.md`, and `docs/QUALITY.md` for the full contract.
+
 ## FAQ
 
 **Why Docker by default?**

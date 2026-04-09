@@ -1,0 +1,4 @@
+*.json
+!README.md
+!reviews/
+!reviews/.gitkeep

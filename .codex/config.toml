@@ -1,0 +1,19 @@
+model = "gpt-5.3-codex"
+model_reasoning_effort = "medium"
+plan_mode_reasoning_effort = "high"
+personality = "pragmatic"
+sandbox_mode = "danger-full-access"
+web_search = "cached"
+
+[features]
+codex_hooks = true
+multi_agent = true
+streamable_shell = true
+skills = true
+
+[agents]
+max_threads = 6
+max_depth = 1
+
+[projects."/workspace"]
+trust_level = "trusted"

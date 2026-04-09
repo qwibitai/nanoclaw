@@ -1,0 +1,25 @@
+name: factory-scaffold
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  scaffold-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check scaffold files
+        run: python3 .codex/scripts/check_factory_scaffold.py
+      - name: Check AGENTS hygiene
+        run: python3 .codex/scripts/check_agents_hygiene.py
+      - name: Compile factory scripts
+        run: python3 -m compileall .codex/scripts
+      - name: Unit test gate validation logic
+        run: python3 -m unittest discover -s .codex/scripts/tests -p "test_*.py"
+      - name: Validate artifact contract (scaffold-safe)
+        run: python3 .codex/scripts/validate_artifacts.py --allow-missing-run

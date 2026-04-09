@@ -13,3 +13,6 @@ The files in this directory are original design documents and developer referenc
 | [DEBUG_CHECKLIST.md](DEBUG_CHECKLIST.md) | [Troubleshooting](https://docs.nanoclaw.dev/advanced/troubleshooting) |
 | [docker-sandboxes.md](docker-sandboxes.md) | [Docker Sandboxes](https://docs.nanoclaw.dev/advanced/docker-sandboxes) |
 | [APPLE-CONTAINER-NETWORKING.md](APPLE-CONTAINER-NETWORKING.md) | [Container runtime](https://docs.nanoclaw.dev/advanced/container-runtime) |
+| [FACTORY.md](FACTORY.md) | Local factory harness contract |
+| [QUALITY.md](QUALITY.md) | Local validation and review gate contract |
+| [validation-loop.md](validation-loop.md) | Local deterministic validation loop |
