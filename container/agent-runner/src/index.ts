@@ -1579,10 +1579,17 @@ async function main(): Promise<void> {
         queryResult = await runQuery(prompt, sessionId, queryCtx, resumeAt);
       } catch (runErr) {
         const runErrMsg = runErr instanceof Error ? runErr.message : String(runErr);
-        const is429 = runErrMsg.includes('429') || /rate.?limit/i.test(runErrMsg) || /overloaded/i.test(runErrMsg);
+        const isPromptTooLong = runErrMsg.includes('prompt is too long') || runErrMsg.includes('prompt_too_long') || runErrMsg.includes('maximum context length');
+        const isRetryable = !isPromptTooLong && (
+          runErrMsg.includes('429') ||
+          /rate.?limit/i.test(runErrMsg) ||
+          /overloaded/i.test(runErrMsg) ||
+          runErrMsg.includes('upstream_error') ||
+          runErrMsg.includes('External provider returned')
+        );
         const backupKey = sdkEnv['ANTHROPIC_API_KEY_2'];
-        if (is429 && backupKey && sdkEnv['ANTHROPIC_API_KEY'] !== backupKey) {
-          log(`429/rate-limit detected, rotating to ANTHROPIC_API_KEY_2`);
+        if (isRetryable && backupKey && sdkEnv['ANTHROPIC_API_KEY'] !== backupKey) {
+          log(`retryable error detected (${runErrMsg.slice(0, 80)}), rotating to ANTHROPIC_API_KEY_2`);
           sdkEnv['ANTHROPIC_API_KEY'] = backupKey;
           queryResult = await runQuery(prompt, sessionId, queryCtx, resumeAt);
         } else {
