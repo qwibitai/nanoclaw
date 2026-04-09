@@ -65,6 +65,7 @@ vi.mock('./container-runtime.js', () => ({
 // Mock credential-proxy
 vi.mock('./credential-proxy.js', () => ({
   detectAuthMode: vi.fn(() => 'api-key'),
+  detectProvider: vi.fn(() => 'anthropic'),
 }));
 
 // Create a controllable fake ChildProcess

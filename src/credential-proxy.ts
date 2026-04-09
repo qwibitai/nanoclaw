@@ -100,7 +100,8 @@ export function startCredentialProxy(
           }
           // OpenRouter requires these for rate limit attribution
           headers['http-referer'] =
-            secrets.OPENROUTER_SITE_URL || 'https://github.com/abheejit/learnclaw';
+            secrets.OPENROUTER_SITE_URL ||
+            'https://github.com/abheejit/learnclaw';
           headers['x-title'] = secrets.OPENROUTER_SITE_NAME || 'LearnClaw';
         } else if (provider === 'openai') {
           // OpenAI-compatible: Bearer token in Authorization header
@@ -126,11 +127,15 @@ export function startCredentialProxy(
           }
         }
 
+        // Prepend the upstream base path (e.g. /api/v1 for OpenRouter)
+        const upstreamBasePath = upstreamUrl.pathname.replace(/\/$/, '');
+        const upstreamPath = upstreamBasePath + (req.url || '/');
+
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
+            path: upstreamPath,
             method: req.method,
             headers,
           } as RequestOptions,
@@ -157,7 +162,10 @@ export function startCredentialProxy(
     });
 
     server.listen(port, host, () => {
-      logger.info({ port, host, provider, authMode }, 'Credential proxy started');
+      logger.info(
+        { port, host, provider, authMode },
+        'Credential proxy started',
+      );
       resolve(server);
     });
 

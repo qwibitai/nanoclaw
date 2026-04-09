@@ -25,8 +25,8 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { detectAuthMode } from './credential-proxy.js';
-import { AGENT_PROVIDER, AGENT_MODEL } from './config.js';
+import { detectAuthMode, detectProvider } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -242,10 +242,12 @@ function buildContainerArgs(
   // API key mode: SDK sends x-api-key, proxy replaces with real key.
   // OAuth mode:   SDK exchanges placeholder token for temp API key,
   //               proxy injects real OAuth token on that exchange request.
-  // Pass provider selection to container agent runner
-  args.push('-e', `AGENT_PROVIDER=${AGENT_PROVIDER}`);
-  if (AGENT_MODEL) {
-    args.push('-e', `AGENT_MODEL=${AGENT_MODEL}`);
+  // Pass provider selection to container agent runner (read from .env file at runtime)
+  const agentProvider = detectProvider();
+  const agentModel = readEnvFile(['AGENT_MODEL']).AGENT_MODEL || '';
+  args.push('-e', `AGENT_PROVIDER=${agentProvider}`);
+  if (agentModel) {
+    args.push('-e', `AGENT_MODEL=${agentModel}`);
   }
 
   const authMode = detectAuthMode();
