@@ -5,7 +5,7 @@ description: Install the claw CLI tool — run NanoClaw agent containers from th
 
 # claw — NanoClaw CLI
 
-`claw` is a Python CLI that sends prompts directly to a NanoClaw agent container from the terminal. It reads registered groups from the NanoClaw database, picks up secrets from `.env`, and pipes a JSON payload into a container run — no chat app required.
+`claw` is a Python CLI that sends prompts directly to a NanoClaw agent container from the terminal. It reads registered groups from the NanoClaw database, connects to the OneCLI proxy for credential injection, and pipes a JSON payload into a container run — no chat app required.
 
 ## What it does
 
@@ -16,7 +16,7 @@ description: Install the claw CLI tool — run NanoClaw agent containers from th
 - List all registered groups with `--list-groups`
 - Auto-detects `container` or `docker` runtime (or override with `--runtime`)
 - Prints the agent's response to stdout; session ID to stderr
-- Verbose mode (`-v`) shows the command, redacted payload, and exit code
+- Verbose mode (`-v`) shows the command, payload, and exit code
 
 ## Prerequisites
 
@@ -93,7 +93,7 @@ claw --runtime docker "Hello"
 # Use a custom image tag (e.g. after rebuilding with a new tag)
 claw --image nanoclaw-agent:dev "Hello"
 
-# Verbose mode (debug info, secrets redacted)
+# Verbose mode (debug info)
 claw -v "Hello"
 
 # Custom timeout for long-running tasks
@@ -106,9 +106,13 @@ claw --timeout 600 "Run the full analysis"
 
 Install Docker Desktop or Apple Container (macOS 15+), or pass `--runtime` explicitly.
 
-### "no secrets found in .env"
+### "ONECLI_URL not set"
 
-The script auto-detects your NanoClaw directory and reads `.env` from it. Check that the file exists and contains at least one of: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`.
+The script needs `ONECLI_URL` to connect to the OneCLI proxy for credential injection. Set it in your `.env` file or as an environment variable. If OneCLI is not installed, run `/init-onecli` first.
+
+### "OneCLI gateway not reachable"
+
+The OneCLI proxy is not running or not reachable at the configured URL. Ensure OneCLI is started and the URL is correct.
 
 ### Container times out
 

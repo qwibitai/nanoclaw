@@ -17,13 +17,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import re
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 # ── Globals ─────────────────────────────────────────────────────────────────
@@ -58,15 +62,22 @@ DB_PATH      = NANOCLAW_DIR / "store" / "messages.db"
 ENV_FILE     = NANOCLAW_DIR / ".env"
 IMAGE        = "nanoclaw-agent:latest"
 
-SECRET_KEYS = [
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_AUTH_TOKEN",
-    "OLLAMA_HOST",
-]
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def read_env_value(env_file: Path, key: str) -> str | None:
+    """Read a single value from a .env file."""
+    if not env_file.exists():
+        return None
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            k, _, v = line.partition("=")
+            if k.strip() == key:
+                return v.strip()
+    return None
+
 
 def detect_runtime(preference: str | None) -> str:
     if preference:
@@ -78,22 +89,6 @@ def detect_runtime(preference: str | None) -> str:
             dbg(f"runtime: auto-detected {rt} at {result.stdout.decode().strip()}")
             return rt
     sys.exit("error: neither 'container' nor 'docker' found. Install one or pass --runtime.")
-
-
-def read_secrets(env_file: Path) -> dict:
-    secrets = {}
-    if not env_file.exists():
-        return secrets
-    for line in env_file.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" in line:
-            key, _, val = line.partition("=")
-            key = key.strip()
-            if key in SECRET_KEYS:
-                secrets[key] = val.strip()
-    return secrets
 
 
 def get_groups(db: Path) -> list[dict]:
@@ -119,6 +114,65 @@ def find_group(groups: list[dict], query: str) -> dict | None:
         names = ", ".join(f'"{g["name"]}"' for g in matches)
         sys.exit(f"error: ambiguous group '{query}'. Matches: {names}")
     return None
+
+
+# ── OneCLI Integration ──────────────────────────────────────────────────────
+
+_SYSTEM_CA_PATHS = [
+    Path("/etc/ssl/cert.pem"),                   # macOS
+    Path("/etc/ssl/certs/ca-certificates.crt"),  # Debian/Ubuntu
+    Path("/etc/pki/tls/certs/ca-bundle.crt"),    # RHEL/CentOS/Fedora
+]
+
+_temp_files: list[Path] = []
+
+
+def _cleanup_temp_files():
+    for f in _temp_files:
+        try:
+            f.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+atexit.register(_cleanup_temp_files)
+
+
+def apply_onecli_proxy(cmd: list[str], onecli_url: str) -> bool:
+    """Fetch OneCLI container config and apply proxy args. Returns True on success."""
+    url = f"{onecli_url.rstrip('/')}/api/container-config"
+    dbg(f"onecli: fetching {url}")
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            config = json.loads(resp.read())
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
+        dbg(f"onecli: unavailable ({e})")
+        return False
+
+    for key, val in config.get("env", {}).items():
+        cmd += ["-e", f"{key}={val}"]
+
+    ca_cert = config.get("caCertificate", "")
+    ca_path = config.get("caCertificateContainerPath", "")
+    if ca_cert and ca_path:
+        f = tempfile.NamedTemporaryFile(prefix="onecli-ca-", suffix=".pem", delete=False)
+        f.write(ca_cert.encode())
+        f.close()
+        _temp_files.append(Path(f.name))
+        cmd += ["-v", f"{f.name}:{ca_path}:ro"]
+
+        system_ca = next((p for p in _SYSTEM_CA_PATHS if p.exists()), None)
+        if system_ca:
+            combined = tempfile.NamedTemporaryFile(prefix="onecli-combined-ca-", suffix=".pem", delete=False)
+            combined.write(system_ca.read_bytes())
+            combined.write(b"\n")
+            combined.write(ca_cert.encode())
+            combined.close()
+            _temp_files.append(Path(combined.name))
+            cmd += ["-e", "SSL_CERT_FILE=/tmp/onecli-combined-ca.pem"]
+            cmd += ["-v", f"{combined.name}:/tmp/onecli-combined-ca.pem:ro"]
+
+    dbg("onecli: proxy config applied")
+    return True
 
 
 def build_mounts(folder: str, is_main: bool) -> list[tuple[str, str, bool]]:
@@ -154,8 +208,20 @@ def build_mounts(folder: str, is_main: bool) -> list[tuple[str, str, bool]]:
 
 def run_container(runtime: str, image: str, payload: dict,
                   folder: str | None = None, is_main: bool = False,
-                  timeout: int = 300) -> None:
+                  timeout: int = 300, onecli_url: str | None = None) -> None:
     cmd = [runtime, "run", "-i", "--rm"]
+
+    # OneCLI proxy handles credential injection at the network level
+    if onecli_url:
+        if apply_onecli_proxy(cmd, onecli_url):
+            dbg("onecli: gateway config applied")
+        else:
+            print("warning: OneCLI gateway not reachable — container will have no credentials", file=sys.stderr)
+
+    # Host gateway resolution (macOS handles this natively)
+    if sys.platform == "linux":
+        cmd += ["--add-host=host.docker.internal:host-gateway"]
+
     if folder:
         for host, container, readonly in build_mounts(folder, is_main):
             if readonly:
@@ -165,11 +231,8 @@ def run_container(runtime: str, image: str, payload: dict,
     cmd.append(image)
     dbg(f"cmd: {' '.join(cmd)}")
 
-    # Show payload sans secrets
     if VERBOSE:
-        safe = {k: v for k, v in payload.items() if k != "secrets"}
-        safe["secrets"] = {k: "***" for k in payload.get("secrets", {})}
-        dbg(f"payload: {json.dumps(safe, indent=2)}")
+        dbg(f"payload: {json.dumps(payload, indent=2)}")
 
     proc = subprocess.Popen(
         cmd,
@@ -291,7 +354,7 @@ def main():
     parser.add_argument("--timeout", type=int, default=300, metavar="SECS",
                         help="Max seconds to wait for a response (default: 300)")
     parser.add_argument("-v", "--verbose", action="store_true",
-                        help="Show debug info: cmd, payload (secrets redacted), stdout lines, exit code")
+                        help="Show debug info: cmd, payload, stdout lines, exit code")
     args = parser.parse_args()
 
     global VERBOSE
@@ -347,16 +410,16 @@ def main():
             sys.exit("error: no group specified and no main group found. Use -g or -j.")
 
     runtime = detect_runtime(args.runtime)
-    secrets = read_secrets(ENV_FILE)
+    onecli_url = (os.environ.get("ONECLI_URL")
+                  or read_env_value(ENV_FILE, "ONECLI_URL"))
 
-    if not secrets:
-        print("warning: no secrets found in .env — agent may not be authenticated", file=sys.stderr)
+    if not onecli_url:
+        print("warning: ONECLI_URL not set — container will have no credentials", file=sys.stderr)
 
     payload: dict = {
         "prompt": prompt,
         "chatJid": jid,
         "isMain": is_main,
-        "secrets": secrets,
     }
     if group_name:
         payload["groupFolder"] = group_name
@@ -367,7 +430,7 @@ def main():
     print(f"[{group_name or jid}] running via {runtime}...", file=sys.stderr)
     run_container(runtime, args.image, payload,
                   folder=group_folder, is_main=is_main,
-                  timeout=args.timeout)
+                  timeout=args.timeout, onecli_url=onecli_url)
 
 
 if __name__ == "__main__":
