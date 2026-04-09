@@ -616,7 +616,7 @@ describe('message query LIMIT', () => {
     expect(messages).toHaveLength(10);
   });
 
-  it('excludes reaction events from triggering agent wake-ups', () => {
+  it('includes reaction events in message stream', () => {
     const ts = '2024-06-01T00:00:00.000Z';
     storeMessage({
       id: 'rx-1',
@@ -638,8 +638,9 @@ describe('message query LIMIT', () => {
       is_from_me: false,
     });
     const { messages } = getNewMessages(['group@g.us'], ts, 'Andy');
-    expect(messages).toHaveLength(1);
-    expect(messages[0].content).toBe('3oz formula');
+    expect(messages).toHaveLength(2);
+    expect(messages[0].content).toContain('[reaction:add]');
+    expect(messages[1].content).toBe('3oz formula');
   });
 });
 

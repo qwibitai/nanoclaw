@@ -373,8 +373,6 @@ export function getNewMessages(
   const placeholders = jids.map(() => '?').join(',');
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
-  // Also exclude reaction events — they are stored for context but must not
-  // wake the agent (reactions were causing hallucinated feedings in #emilio-care).
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
@@ -383,7 +381,6 @@ export function getNewMessages(
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
         AND is_bot_message = 0 AND content NOT LIKE ?
-        AND content NOT LIKE '[reaction:%'
         AND content != '' AND content IS NOT NULL
       ORDER BY timestamp DESC
       LIMIT ?
