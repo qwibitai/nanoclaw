@@ -82,6 +82,10 @@ export const AGENT_PROVIDER: AgentProvider = (() => {
 // Model to use. For openrouter/openai providers this is required.
 // e.g. "anthropic/claude-3.5-sonnet", "meta-llama/llama-3.1-70b", "ollama/llama3.1"
 export const AGENT_MODEL = process.env.AGENT_MODEL || '';
+export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
+  .split(',')
+  .map((t) => t.trim())
+  .filter(Boolean);
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
