@@ -15,7 +15,8 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | File | Purpose |
 |------|---------|
 | `src/index.ts` | Orchestrator: state, message loop, agent invocation |
-| `src/qwen-runner.ts` | Spawns Qwen CLI agent, parses stream-json output |
+| `src/inbound-debounce.ts` | Per-group message debouncer (800ms default, `DEBOUNCE_MS` env) |
+| `src/qwen-runner.ts` | Spawns Qwen CLI agent, parses stream-json output, classifies errors |
 | `src/channels/registry.ts` | Channel registry (self-registration at startup) |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |

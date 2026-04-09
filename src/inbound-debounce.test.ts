@@ -29,9 +29,9 @@ describe('InboundDebouncer', () => {
 
     db.push('group-a');
     vi.advanceTimersByTime(300);
-    db.push('group-a');       // resets the 500ms window
+    db.push('group-a'); // resets the 500ms window
     vi.advanceTimersByTime(300);
-    expect(dispatched).toEqual([]);  // still waiting
+    expect(dispatched).toEqual([]); // still waiting
     vi.advanceTimersByTime(200);
     expect(dispatched).toEqual(['group-a']);
   });
