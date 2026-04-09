@@ -15,11 +15,16 @@
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
+import { createRequire } from 'module';
 import { encodingForModel } from 'js-tiktoken';
+
+const require = createRequire(import.meta.url);
+const Database = require('better-sqlite3');
 
 const ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const GROUPS_DIR = join(ROOT, 'groups');
 const CONTAINER_SKILLS = join(ROOT, 'container', 'skills');
+const DB_PATH = join(ROOT, 'store', 'messages.db');
 
 const BUDGETS = {
   globalClaudeMd: 750,
@@ -128,11 +133,79 @@ function checkUpstream() {
   }
 }
 
+// ── 4. Token usage ─────────────────────────────────────────────────
+
+let usageReport = '';
+
+function checkTokenUsage() {
+  if (!existsSync(DB_PATH)) return;
+
+  try {
+    const db = new Database(DB_PATH, { readonly: true });
+
+    // Check if table exists
+    const tableExists = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='token_usage'")
+      .get();
+    if (!tableExists) {
+      db.close();
+      return;
+    }
+
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const rows = db
+      .prepare(
+        `SELECT group_folder,
+                SUM(input_tokens) as total_input,
+                SUM(output_tokens) as total_output,
+                SUM(cache_read_input_tokens) as total_cache_read,
+                SUM(cost_usd) as total_cost,
+                COUNT(*) as runs
+         FROM token_usage
+         WHERE timestamp >= ?
+         GROUP BY group_folder
+         ORDER BY total_cost DESC`,
+      )
+      .all(weekAgo);
+
+    if (rows.length === 0) {
+      db.close();
+      return;
+    }
+
+    let totalCost = 0;
+    let totalInput = 0;
+    let totalOutput = 0;
+    let totalRuns = 0;
+
+    const lines = rows.map((r) => {
+      totalCost += r.total_cost;
+      totalInput += r.total_input;
+      totalOutput += r.total_output;
+      totalRuns += r.runs;
+      const name = r.group_folder.replace(/^discord_/, '');
+      return `  ${name}: ${r.runs} runs · ${fmt(r.total_input)}in/${fmt(r.total_output)}out · $${r.total_cost.toFixed(2)}`;
+    });
+
+    usageReport = `\n**Token usage (7d):** ${totalRuns} runs · ${fmt(totalInput)}in/${fmt(totalOutput)}out · **$${totalCost.toFixed(2)}**\n${lines.join('\n')}`;
+    db.close();
+  } catch {
+    // DB not available or schema mismatch — skip silently
+  }
+}
+
+function fmt(n) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
 // ── Run ────────────────────────────────────────────────────────────
 
 checkBudgets();
 checkRefs();
 checkUpstream();
+checkTokenUsage();
 
 const now = new Date().toLocaleDateString('en-US', {
   weekday: 'long',
@@ -142,10 +215,10 @@ const now = new Date().toLocaleDateString('en-US', {
 
 if (issues.length === 0) {
   console.log(
-    `**Weekly Review — ${now}**\n✅ All clear. ${stats.filesChecked} files checked, ${stats.refsChecked} refs validated, upstream in sync.`,
+    `**Weekly Review — ${now}**\n✅ All clear. ${stats.filesChecked} files checked, ${stats.refsChecked} refs validated, upstream in sync.${usageReport}`,
   );
 } else {
   console.log(
-    `**Weekly Review — ${now}**\n${stats.filesChecked} files checked, ${stats.refsChecked} refs validated.\n\n${issues.map((i) => `- ${i}`).join('\n')}`,
+    `**Weekly Review — ${now}**\n${stats.filesChecked} files checked, ${stats.refsChecked} refs validated.\n\n${issues.map((i) => `- ${i}`).join('\n')}${usageReport}`,
   );
 }

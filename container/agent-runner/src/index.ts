@@ -35,11 +35,20 @@ interface ContainerInput {
   script?: string;
 }
 
+interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+  cost_usd: number;
+}
+
 interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: TokenUsage;
 }
 
 interface SessionEntry {
@@ -451,6 +460,15 @@ async function runQuery(
   // the orchestrator posting result.result).
   let sentViaIpc = false;
 
+  // Accumulate token usage across all result messages in this query
+  const cumulativeUsage: TokenUsage = {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cost_usd: 0,
+  };
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
@@ -715,13 +733,32 @@ async function runQuery(
       resultCount++;
       const textResult =
         'result' in message ? (message as { result?: string }).result : null;
+
+      // Accumulate token usage from result messages
+      const msgAny = message as {
+        usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
+        modelUsage?: Record<string, { costUSD?: number; inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number }>;
+      };
+      if (msgAny.usage) {
+        cumulativeUsage.input_tokens += msgAny.usage.input_tokens || 0;
+        cumulativeUsage.output_tokens += msgAny.usage.output_tokens || 0;
+        cumulativeUsage.cache_read_input_tokens += msgAny.usage.cache_read_input_tokens || 0;
+        cumulativeUsage.cache_creation_input_tokens += msgAny.usage.cache_creation_input_tokens || 0;
+      }
+      if (msgAny.modelUsage) {
+        for (const model of Object.values(msgAny.modelUsage)) {
+          cumulativeUsage.cost_usd += model.costUSD || 0;
+        }
+      }
+
       log(
-        `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
+        `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''} tokens=${cumulativeUsage.input_tokens}in/${cumulativeUsage.output_tokens}out cost=$${cumulativeUsage.cost_usd.toFixed(4)}`,
       );
       writeOutput({
         status: 'success',
         result: sentViaIpc ? null : textResult || null,
         newSessionId,
+        usage: cumulativeUsage,
       });
       // Reset per-turn flag: in streaming mode this same query() handles
       // multiple user inputs. Without resetting, a previous turn's plain

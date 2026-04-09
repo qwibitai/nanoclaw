@@ -45,6 +45,7 @@ import {
   setRegisteredGroup,
   setRouterState,
   setSession,
+  logTokenUsage,
   storeChatMetadata,
   storeMessage,
   storeReaction,
@@ -374,12 +375,24 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  // Wrap onOutput to track session ID from streamed results
+  // Wrap onOutput to track session ID and log token usage from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
+        }
+        if (output.usage && output.usage.input_tokens > 0) {
+          logTokenUsage({
+            group_folder: group.folder,
+            input_tokens: output.usage.input_tokens,
+            output_tokens: output.usage.output_tokens,
+            cache_read_input_tokens: output.usage.cache_read_input_tokens,
+            cache_creation_input_tokens:
+              output.usage.cache_creation_input_tokens,
+            cost_usd: output.usage.cost_usd,
+            timestamp: new Date().toISOString(),
+          });
         }
         await onOutput(output);
       }

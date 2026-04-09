@@ -84,6 +84,18 @@ function createSchema(database: Database.Database): void {
       requires_trigger INTEGER DEFAULT 1
     );
 
+    CREATE TABLE IF NOT EXISTS token_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_folder TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL NOT NULL DEFAULT 0,
+      timestamp TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_token_usage_group_ts ON token_usage(group_folder, timestamp);
+
     CREATE TABLE IF NOT EXISTS reactions (
       id TEXT PRIMARY KEY,
       chat_jid TEXT NOT NULL,
@@ -579,6 +591,71 @@ export function logTaskRun(log: TaskRunLog): void {
     log.result,
     log.error,
   );
+}
+
+// --- Token usage ---
+
+export interface TokenUsageEntry {
+  group_folder: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+  cost_usd: number;
+  timestamp: string;
+}
+
+export function logTokenUsage(entry: TokenUsageEntry): void {
+  db.prepare(
+    `
+    INSERT INTO token_usage (group_folder, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cost_usd, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `,
+  ).run(
+    entry.group_folder,
+    entry.input_tokens,
+    entry.output_tokens,
+    entry.cache_read_input_tokens,
+    entry.cache_creation_input_tokens,
+    entry.cost_usd,
+    entry.timestamp,
+  );
+}
+
+export function getTokenUsageSince(since: string): Array<{
+  group_folder: string;
+  total_input: number;
+  total_output: number;
+  total_cache_read: number;
+  total_cache_creation: number;
+  total_cost: number;
+  runs: number;
+}> {
+  return db
+    .prepare(
+      `
+    SELECT group_folder,
+           SUM(input_tokens) as total_input,
+           SUM(output_tokens) as total_output,
+           SUM(cache_read_input_tokens) as total_cache_read,
+           SUM(cache_creation_input_tokens) as total_cache_creation,
+           SUM(cost_usd) as total_cost,
+           COUNT(*) as runs
+    FROM token_usage
+    WHERE timestamp >= ?
+    GROUP BY group_folder
+    ORDER BY total_cost DESC
+  `,
+    )
+    .all(since) as Array<{
+    group_folder: string;
+    total_input: number;
+    total_output: number;
+    total_cache_read: number;
+    total_cache_creation: number;
+    total_cost: number;
+    runs: number;
+  }>;
 }
 
 // --- Router state accessors ---

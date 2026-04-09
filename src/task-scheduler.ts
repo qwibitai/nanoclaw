@@ -13,6 +13,7 @@ import {
   getDueTasks,
   getTaskById,
   logTaskRun,
+  logTokenUsage,
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
@@ -190,6 +191,19 @@ async function runTask(
           // Forward result to user (sendMessage handles formatting)
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
           scheduleClose();
+        }
+        if (streamedOutput.usage && streamedOutput.usage.input_tokens > 0) {
+          logTokenUsage({
+            group_folder: task.group_folder,
+            input_tokens: streamedOutput.usage.input_tokens,
+            output_tokens: streamedOutput.usage.output_tokens,
+            cache_read_input_tokens:
+              streamedOutput.usage.cache_read_input_tokens,
+            cache_creation_input_tokens:
+              streamedOutput.usage.cache_creation_input_tokens,
+            cost_usd: streamedOutput.usage.cost_usd,
+            timestamp: new Date().toISOString(),
+          });
         }
         if (streamedOutput.status === 'success') {
           deps.queue.notifyIdle(task.chat_jid);
