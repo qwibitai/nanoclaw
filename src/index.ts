@@ -293,7 +293,13 @@ async function processGroupMessages(groupFolder: string): Promise<boolean> {
   // Stable active channel: track which channel the user is actively using
   // Key: active_jid:<folder>, Value: the JID of the active channel
   const activeJidKey = `active_jid:${groupFolder}`;
-  let activeJid = getRouterState(activeJidKey);
+  const previousActiveJid = getRouterState(activeJidKey);
+  let activeJid = previousActiveJid;
+
+  logger.info(
+    { group: group.name, folder: groupFolder, jids, previousActiveJid },
+    'Processing bundle for group',
+  );
 
   // Check if any message in the bundle is from a different channel
   // Switch to that channel (only for non-bot messages)
@@ -301,6 +307,17 @@ async function processGroupMessages(groupFolder: string): Promise<boolean> {
     if (msg.is_bot_message) continue; // Don't switch on bot messages
     const msgChannel = findChannel(channels, msg.chat_jid);
     const currentChannel = activeJid ? findChannel(channels, activeJid) : null;
+
+    logger.info(
+      {
+        group: group.name,
+        msgJid: msg.chat_jid,
+        msgChannel: msgChannel?.name,
+        currentChannel: currentChannel?.name,
+        isBot: msg.is_bot_message,
+      },
+      'Checking message for channel switch',
+    );
 
     // If this message is from a different channel than current, switch
     if (
@@ -322,10 +339,19 @@ async function processGroupMessages(groupFolder: string): Promise<boolean> {
     const lastMessage = missedMessages[missedMessages.length - 1];
     activeJid = lastMessage.chat_jid;
     setRouterState(activeJidKey, activeJid);
+    logger.info(
+      { group: group.name, activeJid },
+      'First time setting active channel',
+    );
   }
 
   primaryJid = activeJid;
   primaryChannel = findChannel(channels, primaryJid);
+
+  logger.info(
+    { group: group.name, primaryJid, primaryChannel: primaryChannel?.name },
+    'Final channel selection',
+  );
 
   if (!primaryChannel) {
     logger.warn(
