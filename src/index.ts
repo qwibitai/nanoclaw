@@ -30,6 +30,7 @@ import {
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
 import {
+  createTask,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -39,6 +40,7 @@ import {
   getMessagesSince,
   getNewMessages,
   getRouterState,
+  getTaskById,
   initDatabase,
   setRegisteredGroup,
   setRouterState,
@@ -187,6 +189,32 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
+
+  // Auto-create a lightweight heartbeat for trigger-required groups so each
+  // group's own container runs check-unanswered (scoped to its chat_jid),
+  // preventing the main heartbeat from responding in the wrong chat.
+  if (group.requiresTrigger !== false && !group.isMain) {
+    const heartbeatId = `heartbeat-${group.folder}`;
+    if (!getTaskById(heartbeatId)) {
+      createTask({
+        id: heartbeatId,
+        group_folder: group.folder,
+        chat_jid: jid,
+        prompt:
+          'Run the check-unanswered script only: python3 /home/node/.claude/skills/tessl__check-unanswered/scripts/check-unanswered.py — then react and reply to each unanswered message. Do NOT query the database directly. Do NOT check email, calendar, or system health.',
+        schedule_type: 'cron',
+        schedule_value: '*/15 * * * *',
+        context_mode: 'group',
+        next_run: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        status: 'active',
+        created_at: new Date().toISOString(),
+      });
+      logger.info(
+        { jid, folder: group.folder },
+        'Auto-created heartbeat for trigger-required group',
+      );
+    }
+  }
 }
 
 /**
