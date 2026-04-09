@@ -327,6 +327,7 @@ function createPreCompactHook(assistantName?: string, threadId?: string): HookCa
 const SECRET_ENV_VARS = [
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_API_KEY_2',
+  'ANTHROPIC_API_KEY_3',
   'CLAUDE_CODE_OAUTH_TOKEN',
   'GMAIL_OAUTH_PATH',
   'GMAIL_CREDENTIALS_PATH',
@@ -1584,26 +1585,35 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
+      // Collect fallback keys in rotation order, skipping missing/empty ones.
+      const fallbackKeys = (['ANTHROPIC_API_KEY_2', 'ANTHROPIC_API_KEY_3'] as const)
+        .map(k => sdkEnv[k])
+        .filter((k): k is string => typeof k === 'string' && k.length > 0);
+      let nextFallback = 0;
       let queryResult;
-      try {
-        queryResult = await runQuery(prompt, sessionId, queryCtx, resumeAt);
-      } catch (runErr) {
-        const runErrMsg = runErr instanceof Error ? runErr.message : String(runErr);
-        const isPromptTooLong = runErrMsg.includes('prompt is too long') || runErrMsg.includes('prompt_too_long') || runErrMsg.includes('maximum context length');
-        const isRetryable = !isPromptTooLong && (
-          runErrMsg.includes('429') ||
-          /rate.?limit/i.test(runErrMsg) ||
-          /overloaded/i.test(runErrMsg) ||
-          runErrMsg.includes('upstream_error') ||
-          runErrMsg.includes('External provider returned')
-        );
-        const backupKey = sdkEnv['ANTHROPIC_API_KEY_2'];
-        if (isRetryable && backupKey && sdkEnv['ANTHROPIC_API_KEY'] !== backupKey) {
-          log(`retryable error detected (${runErrMsg.slice(0, 80)}), rotating to ANTHROPIC_API_KEY_2`);
-          sdkEnv['ANTHROPIC_API_KEY'] = backupKey;
+      for (;;) {
+        try {
           queryResult = await runQuery(prompt, sessionId, queryCtx, resumeAt);
-        } else {
-          throw runErr;
+          break;
+        } catch (runErr) {
+          const runErrMsg = runErr instanceof Error ? runErr.message : String(runErr);
+          const isPromptTooLong = runErrMsg.includes('prompt is too long') || runErrMsg.includes('prompt_too_long') || runErrMsg.includes('maximum context length');
+          const isRetryable = !isPromptTooLong && (
+            runErrMsg.includes('429') ||
+            /rate.?limit/i.test(runErrMsg) ||
+            /overloaded/i.test(runErrMsg) ||
+            runErrMsg.includes('upstream_error') ||
+            runErrMsg.includes('External provider returned')
+          );
+          const rotateKey = isRetryable && nextFallback < fallbackKeys.length
+            ? fallbackKeys[nextFallback++]
+            : undefined;
+          if (rotateKey && sdkEnv['ANTHROPIC_API_KEY'] !== rotateKey) {
+            log(`retryable error (${runErrMsg.slice(0, 80)}), rotating to key ${nextFallback + 1}`);
+            sdkEnv['ANTHROPIC_API_KEY'] = rotateKey;
+          } else {
+            throw runErr;
+          }
         }
       }
       if (queryResult.newSessionId) {

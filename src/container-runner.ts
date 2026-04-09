@@ -3387,9 +3387,10 @@ function readSecrets(
     })(),
     // Anthropic API key + base URL — passed directly to the SDK via sdkEnv.
     // When set, these bypass the OneCLI proxy for Claude API calls.
-    // ANTHROPIC_API_KEY_2 is the fallback key used when key 1 gets 429'd.
+    // ANTHROPIC_API_KEY_2/3 are fallbacks cycled through on 429/upstream errors.
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_API_KEY_2',
+    'ANTHROPIC_API_KEY_3',
     'ANTHROPIC_BASE_URL',
   ];
   const secrets = readEnvFile(envKeys);
