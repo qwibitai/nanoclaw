@@ -36,6 +36,7 @@ import {
   deleteSession,
   getAllTasks,
   getLastBotMessageTimestamp,
+  getMessageById,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -142,6 +143,20 @@ function saveState(): void {
   setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
 }
 
+/**
+ * Check if a message is a reply to or quote of a bot message.
+ * Channels render quotes as "[Replying to NAME: ...]" prefixes,
+ * and some provide a reply_to_message_id field.
+ */
+function isReplyToBot(msg: NewMessage): boolean {
+  if (msg.content.startsWith(`[Replying to ${ASSISTANT_NAME}:`)) return true;
+  if (msg.reply_to_message_id) {
+    const original = getMessageById(msg.reply_to_message_id, msg.chat_jid);
+    if (original?.is_bot_message) return true;
+  }
+  return false;
+}
+
 function registerGroup(jid: string, group: RegisteredGroup): void {
   let groupDir: string;
   try {
@@ -245,7 +260,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
-        triggerPattern.test(m.content.trim()) &&
+        (triggerPattern.test(m.content.trim()) || isReplyToBot(m)) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
@@ -495,7 +510,7 @@ async function startMessageLoop(): Promise<void> {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                triggerPattern.test(m.content.trim()) &&
+                (triggerPattern.test(m.content.trim()) || isReplyToBot(m)) &&
                 (m.is_from_me ||
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );

@@ -404,6 +404,21 @@ export function getLastBotMessageTimestamp(
   return row?.ts ?? undefined;
 }
 
+export function getMessageById(
+  messageId: string,
+  chatJid: string,
+): NewMessage | null {
+  const row = db
+    .prepare(
+      `SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
+              is_bot_message, reply_to_message_id, reply_to_message_content, reply_to_sender_name
+       FROM messages
+       WHERE id = ? AND chat_jid = ?`,
+    )
+    .get(messageId, chatJid) as NewMessage | undefined;
+  return row ?? null;
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
