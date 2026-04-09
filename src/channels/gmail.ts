@@ -288,9 +288,7 @@ export class GmailChannel implements Channel {
     }
 
     const jidPrefix =
-      this.accountAlias !== 'default'
-        ? `gmail-${this.accountAlias}`
-        : 'gmail';
+      this.accountAlias !== 'default' ? `gmail-${this.accountAlias}` : 'gmail';
     const chatJid = `${jidPrefix}:${threadId}`;
 
     // Cache thread metadata for replies
@@ -377,34 +375,13 @@ export class GmailChannel implements Channel {
   }
 }
 
-// Multi-account Gmail registration
-// Each account gets its own channel instance with isolated credentials.
-// Add/remove accounts by editing this array.
-const GMAIL_ACCOUNTS: GmailAccountConfig[] = [
-  { alias: 'personal', credDir: path.join(os.homedir(), '.gmail-mcp') },
-  {
-    alias: 'whoisxml',
-    credDir: path.join(os.homedir(), '.gmail-mcp-jonathan'),
-  },
-  {
-    alias: 'attaxion',
-    credDir: path.join(os.homedir(), '.gmail-mcp-attaxion'),
-  },
-];
-
-for (const account of GMAIL_ACCOUNTS) {
-  const channelName = `gmail-${account.alias}`;
-  registerChannel(channelName, (opts: ChannelOpts) => {
-    if (
-      !fs.existsSync(path.join(account.credDir, 'gcp-oauth.keys.json')) ||
-      !fs.existsSync(path.join(account.credDir, 'credentials.json'))
-    ) {
-      logger.warn(
-        { alias: account.alias, credDir: account.credDir },
-        'Gmail: credentials not found',
-      );
-      return null;
-    }
-    return new GmailChannel(opts, account.alias, account.credDir);
-  });
-}
+// Gmail channel DISABLED — email triage is handled by inbox_superpilot.
+// The channel code is kept for reference but not registered.
+// To re-enable, uncomment the registration block below.
+//
+// const GMAIL_ACCOUNTS: GmailAccountConfig[] = [
+//   { alias: 'personal', credDir: path.join(os.homedir(), '.gmail-mcp') },
+//   { alias: 'whoisxml', credDir: path.join(os.homedir(), '.gmail-mcp-jonathan') },
+//   { alias: 'attaxion', credDir: path.join(os.homedir(), '.gmail-mcp-attaxion') },
+//   { alias: 'dev', credDir: path.join(os.homedir(), '.gmail-mcp-dev') },
+// ];
