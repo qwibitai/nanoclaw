@@ -367,6 +367,29 @@ export class AgentImpl
     return [...this._channels.values()];
   }
 
+  private async sendOutboundMessage(
+    jid: string,
+    rawText: string,
+    channel?: Channel,
+  ): Promise<boolean> {
+    const targetChannel = channel ?? findChannel(this.channelArray, jid);
+    if (!targetChannel) {
+      logger.warn({ jid }, 'No channel owns JID, cannot send');
+      return false;
+    }
+
+    const text = formatOutbound(rawText);
+    if (!text) return false;
+
+    await targetChannel.sendMessage(jid, text);
+    this.emit('message.out', {
+      jid,
+      text,
+      timestamp: new Date().toISOString(),
+    });
+    return true;
+  }
+
   // ─── Group management ────────────────────────────────────────────
 
   /** Register a group for message processing. Only after start(). */
@@ -524,19 +547,24 @@ export class AgentImpl
         this.config.dataDir,
       );
       if (result.ok) {
-        await channel.sendMessage(chatJid, result.url);
+        await this.sendOutboundMessage(chatJid, result.url, channel);
       } else {
-        await channel.sendMessage(
+        await this.sendOutboundMessage(
           chatJid,
           `Remote Control failed: ${result.error}`,
+          channel,
         );
       }
     } else {
       const result = stopRemoteControl(this.config.dataDir);
       if (result.ok) {
-        await channel.sendMessage(chatJid, 'Remote Control session ended.');
+        await this.sendOutboundMessage(
+          chatJid,
+          'Remote Control session ended.',
+          channel,
+        );
       } else {
-        await channel.sendMessage(chatJid, result.error);
+        await this.sendOutboundMessage(chatJid, result.error, channel);
       }
     }
   }
@@ -623,8 +651,11 @@ export class AgentImpl
             `Agent output: ${raw.length} chars`,
           );
           if (text) {
-            await channel.sendMessage(chatJid, text);
-            outputSentToUser = true;
+            outputSentToUser = await this.sendOutboundMessage(
+              chatJid,
+              raw,
+              channel,
+            );
           }
           resetIdleTimer();
         }
@@ -904,13 +935,7 @@ export class AgentImpl
       onProcess: (groupJid, boxName, _containerName, groupFolder) =>
         this.queue.registerBox(groupJid, boxName, groupFolder),
       sendMessage: async (jid, rawText) => {
-        const channel = findChannel(this.channelArray, jid);
-        if (!channel) {
-          logger.warn({ jid }, 'No channel owns JID, cannot send');
-          return;
-        }
-        const text = formatOutbound(rawText);
-        if (text) await channel.sendMessage(jid, text);
+        await this.sendOutboundMessage(jid, rawText);
       },
     });
 
@@ -919,10 +944,9 @@ export class AgentImpl
       ipcPollInterval: this.runtimeConfig.ipcPollInterval,
       timezone: this.runtimeConfig.timezone,
       db: this.db,
-      sendMessage: (jid, text) => {
-        const channel = findChannel(this.channelArray, jid);
-        if (!channel) throw new Error(`No channel for JID: ${jid}`);
-        return channel.sendMessage(jid, text);
+      sendMessage: async (jid, text) => {
+        const sent = await this.sendOutboundMessage(jid, text);
+        if (!sent) throw new Error(`No channel for JID: ${jid}`);
       },
       registeredGroups: () => this._registeredGroups,
       registerGroup: (jid, group) => this.registerGroup(jid, group),

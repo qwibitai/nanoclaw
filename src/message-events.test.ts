@@ -14,6 +14,7 @@ import {
 } from './agent-config.js';
 import { buildRuntimeConfig } from './runtime-config.js';
 import { _initTestDatabase, AgentDb } from './db.js';
+import type { Channel } from './types.js';
 
 let tmpDir: string;
 const rtConfig = buildRuntimeConfig({}, '/tmp/agentlite-test-pkg');
@@ -33,6 +34,26 @@ function createAgent(name: string): AgentImpl {
 }
 
 let db: AgentDb;
+
+function createMockChannel(): Channel & {
+  sendCalls: Array<{ jid: string; text: string }>;
+} {
+  return {
+    name: 'mock',
+    sendCalls: [],
+    async connect(): Promise<void> {},
+    async disconnect(): Promise<void> {},
+    async sendMessage(jid: string, text: string): Promise<void> {
+      this.sendCalls.push({ jid, text });
+    },
+    isConnected(): boolean {
+      return true;
+    },
+    ownsJid(jid: string): boolean {
+      return jid.startsWith('mock:');
+    },
+  };
+}
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlite-msg-'));
@@ -202,6 +223,75 @@ describe('message.in event', () => {
       sender: 'telegram-user',
       text: 'hello from telegram',
       timestamp: '2026-04-07T14:00:00Z',
+    });
+  });
+});
+
+describe('message.out event', () => {
+  it('emits message.out when sending outbound text', async () => {
+    const agent = createAgent('test');
+    const channel = createMockChannel();
+    const events: unknown[] = [];
+    agent.on('message.out', (evt) => events.push(evt));
+
+    (
+      agent as unknown as {
+        _channels: Map<string, Channel>;
+        sendOutboundMessage: (jid: string, text: string) => Promise<boolean>;
+      }
+    )._channels.set('mock', channel);
+
+    const sent = await (
+      agent as unknown as {
+        sendOutboundMessage: (jid: string, text: string) => Promise<boolean>;
+      }
+    ).sendOutboundMessage('mock:123', 'partial update');
+
+    expect(sent).toBe(true);
+    expect(channel.sendCalls).toEqual([
+      { jid: 'mock:123', text: 'partial update' },
+    ]);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      jid: 'mock:123',
+      text: 'partial update',
+    });
+    expect(
+      Number.isNaN(Date.parse((events[0] as { timestamp: string }).timestamp)),
+    ).toBe(false);
+  });
+
+  it('strips internal tags and suppresses empty outbound chunks', async () => {
+    const agent = createAgent('test');
+    const channel = createMockChannel();
+    const events: unknown[] = [];
+    agent.on('message.out', (evt) => events.push(evt));
+
+    (
+      agent as unknown as {
+        _channels: Map<string, Channel>;
+        sendOutboundMessage: (jid: string, text: string) => Promise<boolean>;
+      }
+    )._channels.set('mock', channel);
+
+    const sentVisible = await (
+      agent as unknown as {
+        sendOutboundMessage: (jid: string, text: string) => Promise<boolean>;
+      }
+    ).sendOutboundMessage('mock:123', '<internal>hidden</internal>\nhello');
+    const sentHidden = await (
+      agent as unknown as {
+        sendOutboundMessage: (jid: string, text: string) => Promise<boolean>;
+      }
+    ).sendOutboundMessage('mock:123', '<internal>hidden only</internal>');
+
+    expect(sentVisible).toBe(true);
+    expect(sentHidden).toBe(false);
+    expect(channel.sendCalls).toEqual([{ jid: 'mock:123', text: 'hello' }]);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      jid: 'mock:123',
+      text: 'hello',
     });
   });
 });
