@@ -1,56 +1,35 @@
+/**
+ * Gateway session manager — thin wrapper over the store client.
+ *
+ * Previously held sessions in-memory (lost on restart).
+ * Now delegates to the Nexus Store process for persistence.
+ */
+
 import type { ChannelType, Session } from '../shared/types.ts';
+import * as store from '../shared/store-client.ts';
 
-const sessions = new Map<string, Session>();
-
-function makeSessionId(channelType: ChannelType, channelId: string): string {
-  return `${channelType}-${channelId}`;
-}
-
-export function getOrCreateSession(
+export async function getOrCreateSession(
   channelType: ChannelType,
   channelId: string,
-): Session {
-  const id = makeSessionId(channelType, channelId);
-  let session = sessions.get(id);
-  if (!session) {
-    session = {
-      id,
-      channelType,
-      channelId,
-      lastActivity: new Date().toISOString(),
-      messageCount: 0,
-    };
-    sessions.set(id, session);
-  }
-  return session;
+): Promise<Session> {
+  return store.getOrCreateSession(channelType, channelId);
 }
 
-export function updateSessionAgent(
+export async function updateSessionAgent(
   sessionId: string,
   agentSessionId: string,
-): void {
-  const session = sessions.get(sessionId);
-  if (session) {
-    session.agentSessionId = agentSessionId;
-  }
+): Promise<void> {
+  await store.saveAgentSessionId(sessionId, agentSessionId);
 }
 
-export function touchSession(sessionId: string): void {
-  const session = sessions.get(sessionId);
-  if (session) {
-    session.lastActivity = new Date().toISOString();
-    session.messageCount++;
-  }
+export async function touchSession(sessionId: string): Promise<void> {
+  await store.touchSession(sessionId);
 }
 
-export function getSessions(): Session[] {
-  return [...sessions.values()];
+export async function getSessions(): Promise<Session[]> {
+  return store.listSessions();
 }
 
-export function getSession(id: string): Session | undefined {
-  return sessions.get(id);
-}
-
-export function getSessionCount(): number {
-  return sessions.size;
+export function getSessionCount(): Promise<number> {
+  return store.listSessions().then((s) => s.length);
 }

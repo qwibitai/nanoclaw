@@ -20,7 +20,8 @@ export function enqueue(
   agentSessionId?: string,
   attachments?: Attachment[],
 ): WorkItem {
-  touchSession(sessionId);
+  // Fire-and-forget: touch session in store (async, don't block enqueue)
+  touchSession(sessionId).catch(() => {});
   const item: WorkItem = {
     id: crypto.randomUUID(),
     sessionId,
@@ -44,14 +45,15 @@ export function dequeue(): WorkItem | null {
   return item;
 }
 
-export function complete(result: WorkResult): void {
+export function complete(result: WorkResult): boolean {
   const item = processing.get(result.id);
   if (item) {
     processing.delete(result.id);
     if (result.sessionId) {
-      updateSessionAgent(item.sessionId, result.sessionId);
+      // Fire-and-forget: persist agent session ID in store
+      updateSessionAgent(item.sessionId, result.sessionId).catch(() => {});
     }
-    results.set(item.sessionId, result);
+    results.set(result.id, result);
 
     for (const cb of completionCallbacks) {
       try {
@@ -60,13 +62,22 @@ export function complete(result: WorkResult): void {
         // Don't let callback errors break the queue
       }
     }
+    return true;
   }
+  // Item not in processing (gateway may have restarted) — still store the result
+  if (result.gatewaySessionId) {
+    results.set(result.id, result);
+    if (result.sessionId) {
+      updateSessionAgent(result.gatewaySessionId, result.sessionId).catch(() => {});
+    }
+  }
+  return false;
 }
 
-export function consumeResult(sessionId: string): WorkResult | null {
-  const result = results.get(sessionId);
+export function consumeResult(workItemId: string): WorkResult | null {
+  const result = results.get(workItemId);
   if (result) {
-    results.delete(sessionId);
+    results.delete(workItemId);
   }
   return result ?? null;
 }

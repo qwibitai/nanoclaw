@@ -1,5 +1,6 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { logger } from '../shared/logger.ts';
+import { SKILLS_DIR, KNOWLEDGE_DIR } from '../shared/config.ts';
 
 export interface AgentResult {
   status: 'success' | 'error';
@@ -23,6 +24,7 @@ export async function runAgent(options: {
       prompt: options.prompt,
       options: {
         cwd: options.cwd,
+        additionalDirectories: [SKILLS_DIR, KNOWLEDGE_DIR],
         resume: options.sessionId,
         model: 'sonnet',
         allowedTools: [

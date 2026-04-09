@@ -1,24 +1,22 @@
+/**
+ * Gateway event log — delegates to the Nexus Store.
+ *
+ * Previously held events in-memory (lost on restart).
+ * Now persists via the store process.
+ */
+
 import type { ActivityEvent } from '../shared/types.ts';
-
-const MAX_EVENTS = 100;
-
-const events: ActivityEvent[] = [];
+import * as store from '../shared/store-client.ts';
 
 export function logEvent(
   event: Omit<ActivityEvent, 'id' | 'timestamp'>,
-): ActivityEvent {
-  const full: ActivityEvent = {
-    id: crypto.randomUUID(),
-    timestamp: new Date().toISOString(),
-    ...event,
-  };
-  events.push(full);
-  if (events.length > MAX_EVENTS) {
-    events.splice(0, events.length - MAX_EVENTS);
-  }
-  return full;
+): void {
+  // Fire-and-forget: don't block the caller waiting for persistence
+  store.logEvent(event).catch(() => {});
 }
 
-export function getRecentEvents(count = 50): ActivityEvent[] {
-  return events.slice(-count).reverse();
+export async function getRecentEvents(
+  count = 50,
+): Promise<ActivityEvent[]> {
+  return store.listEvents(count);
 }

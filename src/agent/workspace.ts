@@ -9,10 +9,19 @@ import {
   WORKSPACE_DIR,
 } from '../shared/config.ts';
 import { logger } from '../shared/logger.ts';
+import * as store from '../shared/store-client.ts';
 
 function dirExists(path: string): boolean {
   try {
     return Deno.statSync(path).isDirectory;
+  } catch {
+    return false;
+  }
+}
+
+function fileExists(path: string): boolean {
+  try {
+    return Deno.statSync(path).isFile;
   } catch {
     return false;
   }
@@ -39,16 +48,12 @@ function readFilesRecursive(
   return results;
 }
 
-function copyDirSync(src: string, dest: string): void {
-  Deno.mkdirSync(dest, { recursive: true });
-  for (const entry of Deno.readDirSync(src)) {
-    const srcPath = resolve(src, entry.name);
-    const destPath = resolve(dest, entry.name);
-    if (entry.isDirectory) {
-      copyDirSync(srcPath, destPath);
-    } else {
-      Deno.copyFileSync(srcPath, destPath);
-    }
+function readOperatorContext(): string {
+  const contextPath = resolve(OPERATORS_DIR, OPERATOR_SLUG, 'context.md');
+  try {
+    return Deno.readTextFileSync(contextPath);
+  } catch {
+    return `Operator: ${OPERATOR_NAME}`;
   }
 }
 
@@ -59,16 +64,16 @@ export function buildWorkspace(groupId: string): {
   const workDir = resolve(WORKSPACE_DIR, groupId);
   Deno.mkdirSync(workDir, { recursive: true });
 
-  // Read operator context
-  const contextPath = resolve(OPERATORS_DIR, OPERATOR_SLUG, 'context.md');
-  let operatorContext: string;
-  try {
-    operatorContext = Deno.readTextFileSync(contextPath);
-  } catch {
-    operatorContext = `Operator: ${OPERATOR_NAME}`;
+  const operatorContext = readOperatorContext();
+
+  // Reuse workspace if CLAUDE.md already exists (built on first message)
+  const claudeMdPath = resolve(workDir, 'CLAUDE.md');
+  if (fileExists(claudeMdPath)) {
+    logger.debug({ groupId }, 'Workspace reused');
+    return { cwd: workDir, systemPrompt: operatorContext };
   }
 
-  // Read all skills
+  // First message in session — build CLAUDE.md
   const skills = readFilesRecursive(SKILLS_DIR, '.md');
   const skillsSection =
     skills.length > 0
@@ -80,7 +85,6 @@ export function buildWorkspace(groupId: string): {
           .join('\n\n---\n\n')
       : 'No skills loaded.';
 
-  // Read all knowledge
   const knowledge = readFilesRecursive(KNOWLEDGE_DIR, '.md');
   const knowledgeSection =
     knowledge.length > 0
@@ -92,7 +96,6 @@ export function buildWorkspace(groupId: string): {
           .join('\n\n---\n\n')
       : 'No knowledge files loaded.';
 
-  // Build CLAUDE.md
   const claudeMd = `# ${ASSISTANT_NAME}
 
 You are ${ASSISTANT_NAME}, the AI assistant for ${OPERATOR_NAME}.
@@ -110,16 +113,7 @@ ${skillsSection}
 ${knowledgeSection}
 `;
 
-  // Write CLAUDE.md to workspace
-  Deno.writeTextFileSync(resolve(workDir, 'CLAUDE.md'), claudeMd);
-
-  // Copy skills and knowledge into workspace so agent can Read them
-  if (dirExists(SKILLS_DIR)) {
-    copyDirSync(SKILLS_DIR, resolve(workDir, 'skills'));
-  }
-  if (dirExists(KNOWLEDGE_DIR)) {
-    copyDirSync(KNOWLEDGE_DIR, resolve(workDir, 'knowledge'));
-  }
+  Deno.writeTextFileSync(claudeMdPath, claudeMd);
 
   logger.info(
     { groupId, skills: skills.length, knowledge: knowledge.length },
@@ -130,4 +124,38 @@ ${knowledgeSection}
     cwd: workDir,
     systemPrompt: operatorContext,
   };
+}
+
+/**
+ * Delete workspace directories for sessions inactive for more than 7 days.
+ * Called once at agent startup.
+ */
+export async function cleanupOldWorkspaces(): Promise<void> {
+  if (!dirExists(WORKSPACE_DIR)) return;
+
+  const sessions = await store.listSessions();
+  const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  let cleaned = 0;
+
+  for (const entry of Deno.readDirSync(WORKSPACE_DIR)) {
+    if (!entry.isDirectory) continue;
+    const session = sessionMap.get(entry.name);
+    const isStale =
+      !session || new Date(session.lastActivity).getTime() < cutoff;
+
+    if (isStale) {
+      const dir = resolve(WORKSPACE_DIR, entry.name);
+      try {
+        Deno.removeSync(dir, { recursive: true });
+        cleaned++;
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+  }
+
+  if (cleaned > 0) {
+    logger.info({ cleaned }, 'Old workspaces cleaned up');
+  }
 }

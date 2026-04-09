@@ -1,11 +1,14 @@
 import { logger } from '../shared/logger.ts';
+import { buildLandingPage } from '../shared/landing.ts';
 import type { WorkResult } from '../shared/types.ts';
 import { getChannels } from './channels.ts';
-import { getOrCreateSession, getSessions, getSessionCount } from './sessions.ts';
+import { getSessions } from './sessions.ts';
+import * as storeClient from '../shared/store-client.ts';
 import { getDiscordStatus, getInviteUrl } from './discord.ts';
 import {
   APP_VERSION,
   ASSISTANT_NAME,
+  GATEWAY_PORT,
   OPERATOR_NAME,
   OPERATOR_SLUG,
 } from '../shared/config.ts';
@@ -57,31 +60,7 @@ async function handler(req: Request): Promise<Response> {
   try {
     // --- Landing page ---
     if (path === '/' && req.method === 'GET') {
-      const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${ASSISTANT_NAME} — ${OPERATOR_NAME}</title>
-  <style>
-    body { font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f5f5f4; color: #1c1917; }
-    .container { text-align: center; padding: 2rem; }
-    h1 { font-size: 2rem; font-weight: 700; margin: 0 0 0.5rem; }
-    p { color: #78716c; margin: 0.25rem 0; }
-    .badge { display: inline-block; background: #d1fae5; color: #065f46; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; margin-top: 1rem; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>${ASSISTANT_NAME}</h1>
-    <p>${OPERATOR_NAME}</p>
-    <p style="font-size: 0.875rem; margin-top: 0.5rem;">Simtricity Nexus Agent Platform</p>
-    <div class="badge">v${APP_VERSION}</div>
-    <p style="font-size: 0.75rem; margin-top: 1.5rem;"><a href="/licenses" style="color: #78716c;">Licenses</a></p>
-  </div>
-</body>
-</html>`;
-      return new Response(html, {
+      return new Response(buildLandingPage('Gateway', GATEWAY_PORT), {
         headers: { 'Content-Type': 'text/html; charset=utf-8' },
       });
     }
@@ -143,7 +122,7 @@ async function handler(req: Request): Promise<Response> {
         operator: { name: OPERATOR_NAME, slug: OPERATOR_SLUG },
         skills: loadSkills(),
         channels: getChannels(),
-        sessions: getSessionCount(),
+        sessions: (await getSessions()).length,
         onecli: getOneCLIStatus(),
         pendingWork: queue.getPendingCount(),
         processingWork: queue.getProcessingCount(),
@@ -152,7 +131,7 @@ async function handler(req: Request): Promise<Response> {
 
     if (path === '/api/activity' && req.method === 'GET') {
       const count = parseInt(url.searchParams.get('count') ?? '50', 10);
-      return json(getRecentEvents(count));
+      return json(await getRecentEvents(count));
     }
 
     if (path === '/api/chat' && req.method === 'POST') {
@@ -167,7 +146,7 @@ async function handler(req: Request): Promise<Response> {
         return json({ error: 'message is required' }, 400);
       }
 
-      const session = getOrCreateSession('web-chat', channelId);
+      const session = await storeClient.getOrCreateSession('web-chat', channelId);
       const item = queue.enqueue(
         session.id,
         'web-chat',
@@ -189,9 +168,8 @@ async function handler(req: Request): Promise<Response> {
     }
 
     if (path === '/api/chat/response' && req.method === 'GET') {
-      const channelId = url.searchParams.get('groupId') || 'default';
-      const sessionId = `web-chat-${channelId}`;
-      const result = queue.consumeResult(sessionId);
+      const workItemId = url.searchParams.get('id') || '';
+      const result = queue.consumeResult(workItemId);
 
       if (!result) {
         return json({ status: 'pending' });
@@ -229,22 +207,26 @@ async function handler(req: Request): Promise<Response> {
 
     if (path === '/work/complete' && req.method === 'POST') {
       const result = (await req.json()) as WorkResult;
-      queue.complete(result);
+      const callbackFired = queue.complete(result);
 
-      const eventType =
-        result.status === 'success' ? 'agent_complete' : 'agent_error';
-      const summary =
-        result.status === 'success'
-          ? (result.result?.slice(0, 80) ?? '(empty response)') +
-            ((result.result?.length ?? 0) > 80 ? '...' : '')
-          : `Error: ${result.error ?? 'unknown'}`;
+      // If item wasn't in processing map (e.g., gateway restarted),
+      // log the event using fields from WorkResult directly
+      if (!callbackFired) {
+        const eventType =
+          result.status === 'success' ? 'agent_complete' : 'agent_error';
+        const summary =
+          result.status === 'success'
+            ? (result.result?.slice(0, 80) ?? '(empty response)') +
+              ((result.result?.length ?? 0) > 80 ? '...' : '')
+            : `Error: ${result.error ?? 'unknown'}`;
 
-      logEvent({
-        type: eventType,
-        channel: 'agent',
-        groupId: result.id,
-        summary,
-      });
+        logEvent({
+          type: eventType,
+          channel: result.channel || 'unknown',
+          groupId: result.gatewaySessionId || result.id,
+          summary,
+        });
+      }
 
       logger.info({ id: result.id, status: result.status }, 'Work completed');
       return json({ status: 'ok' });
@@ -256,7 +238,26 @@ async function handler(req: Request): Promise<Response> {
     }
 
     if (path === '/api/sessions' && req.method === 'GET') {
-      return json(getSessions());
+      return json(await getSessions());
+    }
+
+    // GET /api/sessions/:id/messages — parsed chat history from JSONL
+    const sessionMsgMatch = path.match(
+      /^\/api\/sessions\/([^/]+)\/messages$/,
+    );
+    if (sessionMsgMatch && req.method === 'GET') {
+      const sessionId = decodeURIComponent(sessionMsgMatch[1]);
+      return json(await storeClient.getMessages(sessionId));
+    }
+
+    // DELETE /api/sessions/:id
+    const sessionDeleteMatch = path.match(
+      /^\/api\/sessions\/([^/]+)$/,
+    );
+    if (sessionDeleteMatch && req.method === 'DELETE') {
+      const sessionId = decodeURIComponent(sessionDeleteMatch[1]);
+      await storeClient.deleteSession(sessionId);
+      return json({ status: 'ok' });
     }
 
     if (path === '/api/discord/status' && req.method === 'GET') {

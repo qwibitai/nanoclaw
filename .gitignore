@@ -25,6 +25,6 @@ dev-data/
 
 # NanoClaw legacy state
 .nanoclaw/
-store/
+/store/
 data/
 logs/

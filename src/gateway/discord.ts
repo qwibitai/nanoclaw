@@ -12,7 +12,7 @@ import { logger } from '../shared/logger.ts';
 import { DISCORD_BOT_TOKEN } from '../shared/config.ts';
 import type { Attachment } from '../shared/types.ts';
 import { registerChannel } from './channels.ts';
-import { getOrCreateSession } from './sessions.ts';
+import * as storeClient from '../shared/store-client.ts';
 import * as queue from './queue.ts';
 import { logEvent } from './event-log.ts';
 import type { WorkItem, WorkResult } from '../shared/types.ts';
@@ -53,24 +53,32 @@ export async function initDiscord(): Promise<void> {
     });
 
     client.on(Events.MessageCreate, async (message: {
-      author: { bot: boolean; username: string };
+      author: { bot: boolean; username: string; id: string; displayName?: string };
       content: string;
       channelId: string;
       // deno-lint-ignore no-explicit-any
       attachments: { size: number; values: () => IterableIterator<any> };
-      channel: { send: (text: string) => Promise<void>; sendTyping: () => Promise<void> };
-      guild?: { name: string };
+      channel: { send: (text: string) => Promise<void>; sendTyping: () => Promise<void>; name?: string };
+      guild?: { name: string; id: string };
+      // deno-lint-ignore no-explicit-any
+      member?: { displayName?: string; roles?: { cache: { map: (fn: (r: any) => string) => string[] } } };
     }) => {
       if (message.author.bot) return;
 
       const channelId = message.channelId;
-      const session = getOrCreateSession('discord', channelId);
+      const session = await storeClient.getOrCreateSession('discord', channelId);
 
       // Show typing while processing
       message.channel.sendTyping().catch(() => {});
 
+      // Build context prefix with Discord metadata
+      const displayName = message.member?.displayName || message.author.displayName || message.author.username;
+      const serverName = message.guild?.name ?? 'DM';
+      const channelName = message.channel.name ?? channelId;
+      const contextPrefix = `[Discord — Server: ${serverName}, Channel: #${channelName}]\n[From: ${displayName} (@${message.author.username}, ID: ${message.author.id})]\n\n`;
+
       // Collect attachments as URLs (agent process downloads them)
-      let prompt = message.content || '';
+      let prompt = contextPrefix + (message.content || '');
       const attachments: Attachment[] = [];
 
       if (message.attachments.size > 0) {

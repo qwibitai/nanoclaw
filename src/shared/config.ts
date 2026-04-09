@@ -10,6 +10,8 @@ const envConfig = readEnvFile([
   'ONECLI_API_KEY',
   'OPERATOR_SLUG',
   'OPERATOR_NAME',
+  'STORE_PORT',
+  'STORE_URL',
 ]);
 
 const PROJECT_ROOT = Deno.cwd();
@@ -71,6 +73,16 @@ function readVersion(): string {
 export const APP_VERSION = readVersion();
 
 export const WORKER_POLL_INTERVAL = 2000;
+
+// Store process
+export const STORE_PORT = parseInt(
+  Deno.env.get('STORE_PORT') || envConfig.STORE_PORT || '3002',
+  10,
+);
+export const STORE_URL =
+  Deno.env.get('STORE_URL') || envConfig.STORE_URL || 'http://localhost:3002';
+export const STORE_DIR =
+  Deno.env.get('STORE_DIR') || resolve(OPERATOR_DATA_DIR, 'store');
 
 // Process isolation: gateway and agent use separate /tmp namespaces.
 // They must NOT share filesystem state — all data flows through WorkItems.

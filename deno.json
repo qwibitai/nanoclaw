@@ -1,10 +1,13 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "nodeModulesDir": "auto",
   "tasks": {
+    "dev": "bash scripts/stop.sh; deno run -A src/store/index.ts & sleep 1 && deno run -A src/gateway/index.ts & deno run -A src/agent/index.ts & wait",
+    "stop": "bash scripts/stop.sh",
     "gateway": "deno run -A src/gateway/index.ts",
     "agent": "deno run -A src/agent/index.ts",
-    "check": "deno check src/shared/ src/gateway/ src/agent/",
+    "store": "deno run -A src/store/index.ts",
+    "check": "deno check src/shared/ src/gateway/ src/agent/ src/store/",
     "fmt": "deno fmt src/ skills/ knowledge/",
     "lint": "deno lint src/",
     "deploy:mgf": "bash scripts/deploy.sh foundry simt-nexus-mgf",

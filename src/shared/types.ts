@@ -40,6 +40,8 @@ export interface WorkItem {
 
 export interface WorkResult {
   id: string;
+  gatewaySessionId: string;
+  channel: string;
   status: 'success' | 'error';
   result: string | null;
   sessionId?: string;

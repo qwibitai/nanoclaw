@@ -7,6 +7,8 @@ dockerfile = "Dockerfile"
 [env]
 ASSISTANT_NAME = "Nexus"
 GATEWAY_PORT = "3001"
+STORE_PORT = "3002"
+STORE_DIR = "/data/store"
 
 # Per-operator secrets (set via fly secrets set):
 # ANTHROPIC_API_KEY
@@ -14,10 +16,13 @@ GATEWAY_PORT = "3001"
 # OPERATOR_SLUG
 # OPERATOR_NAME
 # GATEWAY_URL (internal DNS for agent -> gateway)
+# STORE_URL (internal DNS for gateway/agent -> store)
+# DISCORD_BOT_TOKEN
 
 [processes]
 gateway = "deno run -A src/gateway/index.ts"
 agent = "deno run -A src/agent/index.ts"
+store = "deno run -A src/store/index.ts"
 
 [http_service]
 internal_port = 3001
@@ -48,6 +53,16 @@ processes = ["gateway"]
 size = "shared-cpu-2x"
 memory = "1gb"
 processes = ["agent"]
+
+[[vm]]
+size = "shared-cpu-1x"
+memory = "512mb"
+processes = ["store"]
+
+[[mounts]]
+source = "simt_store"
+destination = "/data/store"
+processes = ["store"]
 
 [[restart]]
 policy = "on-failure"

@@ -32,6 +32,9 @@ COPY .build-data/ dev-data/
 # Tell the app where operator data lives inside the container
 ENV NEXUS_DATA_DIR=/app/dev-data
 
+# Store data directory (Fly Volume mounts here)
+RUN mkdir -p /data/store && chown -R nexus:nexus /data/store
+
 # Workspace and Claude settings for non-root user
 RUN mkdir -p /tmp/nexus-workspace && chown -R nexus:nexus /tmp/nexus-workspace
 RUN mkdir -p /home/nexus/.claude && \
@@ -46,4 +49,4 @@ USER nexus
 
 EXPOSE 3001
 
-# CMD set per process group in fly.toml (gateway, agent)
+# CMD set per process group in fly.toml (gateway, agent, store)

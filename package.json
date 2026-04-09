@@ -1,6 +1,6 @@
 {
   "name": "simt-nexus",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Simtricity Nexus — AI agent platform for energy community Operators",
   "type": "module",
   "dependencies": {

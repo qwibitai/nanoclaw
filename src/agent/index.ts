@@ -1,10 +1,108 @@
 import { resolve } from '@std/path';
-import { GATEWAY_URL, WORKER_POLL_INTERVAL, WORKSPACE_DIR } from '../shared/config.ts';
+import { GATEWAY_URL, WORKER_POLL_INTERVAL, WORKSPACE_DIR, STORE_URL } from '../shared/config.ts';
 import { logger } from '../shared/logger.ts';
+import { setStoreUrl, saveJsonl, getJsonl } from '../shared/store-client.ts';
 import type { Attachment, WorkItem, WorkResult } from '../shared/types.ts';
 import { runAgent } from './agent.ts';
 import { getSessionId, saveSessionId } from './sessions.ts';
-import { buildWorkspace } from './workspace.ts';
+import { buildWorkspace, cleanupOldWorkspaces } from './workspace.ts';
+
+/**
+ * Compute the Agent SDK session directory from a workspace cwd.
+ * The SDK stores sessions at ~/.claude/projects/<encoded-cwd>/
+ * where encoded-cwd replaces every non-alphanumeric char with -
+ */
+function getAgentSessionDir(cwd: string): string {
+  const encoded = cwd.replace(/[^a-zA-Z0-9]/g, '-');
+  const home = Deno.env.get('HOME') || '/home/nexus';
+  return resolve(home, '.claude', 'projects', encoded);
+}
+
+/**
+ * Get the path to a session's JSONL file.
+ */
+function getJsonlPath(agentSessionId: string, cwd: string): string {
+  const dir = getAgentSessionDir(cwd);
+  return resolve(dir, `${agentSessionId}.jsonl`);
+}
+
+/**
+ * Get JSONL file size (0 if doesn't exist).
+ */
+function jsonlFileSize(path: string): number {
+  try {
+    return Deno.statSync(path).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Restore JSONL from store only if the file doesn't exist locally.
+ * On first message after restart/deploy, the file is missing and we restore.
+ * On subsequent messages, the file exists and we skip (already have it).
+ */
+async function restoreJsonl(
+  gatewaySessionId: string,
+  agentSessionId: string | undefined,
+  cwd: string,
+): Promise<void> {
+  if (!agentSessionId) return;
+  const file = getJsonlPath(agentSessionId, cwd);
+
+  // Skip if we already have the file locally
+  if (jsonlFileSize(file) > 0) {
+    logger.debug({ gatewaySessionId }, 'JSONL exists locally, skipping restore');
+    return;
+  }
+
+  try {
+    const content = await getJsonl(gatewaySessionId);
+    if (!content) return;
+    const dir = getAgentSessionDir(cwd);
+    Deno.mkdirSync(dir, { recursive: true });
+    Deno.writeFileSync(file, content);
+    logger.info({ gatewaySessionId, size: content.length }, 'JSONL restored from store');
+  } catch (err) {
+    logger.warn({ err }, 'Failed to restore JSONL from store');
+  }
+}
+
+/**
+ * Save JSONL to store only if the file size changed (new messages added).
+ */
+async function persistJsonl(
+  gatewaySessionId: string,
+  agentSessionId: string | undefined,
+  cwd: string,
+  sizeBefore: number,
+): Promise<void> {
+  if (!agentSessionId) return;
+  const file = getJsonlPath(agentSessionId, cwd);
+  const sizeAfter = jsonlFileSize(file);
+
+  if (sizeAfter <= sizeBefore) {
+    logger.debug({ gatewaySessionId }, 'JSONL unchanged, skipping upload');
+    return;
+  }
+
+  try {
+    const content = Deno.readFileSync(file);
+    await saveJsonl(gatewaySessionId, content);
+    logger.debug(
+      { gatewaySessionId, sizeBefore, sizeAfter },
+      'JSONL saved to store',
+    );
+  } catch (err) {
+    logger.warn({ err }, 'Failed to persist JSONL to store');
+  }
+}
+
+// Configure store client
+setStoreUrl(STORE_URL);
+
+// Clean up workspaces for sessions inactive > 7 days
+cleanupOldWorkspaces().catch(() => {});
 
 async function fetchWork(): Promise<WorkItem | null> {
   try {
@@ -63,9 +161,18 @@ async function processWork(item: WorkItem): Promise<void> {
 
   // Use Agent SDK session ID from the gateway session, or from local persistence
   const agentSessionId =
-    item.agentSessionId || getSessionId(item.sessionId);
+    item.agentSessionId || (await getSessionId(item.sessionId));
 
   const { cwd, systemPrompt } = buildWorkspace(item.sessionId);
+
+  // Restore JSONL from store if not present locally (first message after restart)
+  await restoreJsonl(item.sessionId, agentSessionId, cwd);
+
+  // Track JSONL size before query to detect changes
+  const jsonlPath = agentSessionId
+    ? getJsonlPath(agentSessionId, cwd)
+    : '';
+  const jsonlSizeBefore = jsonlPath ? jsonlFileSize(jsonlPath) : 0;
 
   // Download attachments to workspace before running agent
   let prompt = item.prompt;
@@ -86,13 +193,27 @@ async function processWork(item: WorkItem): Promise<void> {
     systemPrompt,
   });
 
-  // Persist Agent SDK session ID locally for resume across restarts
+  // Persist Agent SDK session ID and JSONL transcript
+  const finalSessionId = agentResult.sessionId || agentSessionId;
   if (agentResult.sessionId) {
-    saveSessionId(item.sessionId, agentResult.sessionId);
+    await saveSessionId(item.sessionId, agentResult.sessionId);
   }
+  const finalJsonlPath = finalSessionId
+    ? getJsonlPath(finalSessionId, cwd)
+    : jsonlPath;
+  const finalSizeBefore =
+    finalSessionId === agentSessionId ? jsonlSizeBefore : 0;
+  await persistJsonl(
+    item.sessionId,
+    finalSessionId,
+    cwd,
+    finalSizeBefore,
+  );
 
   const result: WorkResult = {
     id: item.id,
+    gatewaySessionId: item.sessionId,
+    channel: item.channel,
     status: agentResult.status,
     result: agentResult.result,
     sessionId: agentResult.sessionId,
@@ -120,6 +241,8 @@ async function pollLoop(): Promise<void> {
         logger.error({ err, id: item.id }, 'Error processing work item');
         await submitResult({
           id: item.id,
+          gatewaySessionId: item.sessionId,
+          channel: item.channel,
           status: 'error',
           result: null,
           error: err instanceof Error ? err.message : String(err),
