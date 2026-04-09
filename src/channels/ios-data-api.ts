@@ -30,6 +30,7 @@ import {
   updateTask as updateDevTask,
   type DevTask,
 } from '../dev-tasks.js';
+import { getReport, isValidReportId, listReports } from '../reports.js';
 
 const SIGMA_REPO = path.join(
   process.env.HOME || '/Users/fambot',
@@ -573,6 +574,26 @@ export function handleDataApi(
     authGuard(req, res, token, () =>
       handleDeletePipTask(res, deletePipTaskMatch[1]),
     );
+    return true;
+  }
+
+  // --- Reports endpoints ---
+  // FamBot is the primary reader for Pip reports. Returns raw markdown so the
+  // iOS client can render with swift-markdown-ui (native typography, GFM
+  // tables). The dashboard channel has its own /dashboard/api/reports that
+  // pre-renders HTML for the web view — both delegate to src/reports.ts.
+
+  // List reports: GET /api/reports
+  if (req.method === 'GET' && url === '/api/reports') {
+    authGuard(req, res, token, () => handleListReports(res));
+    return true;
+  }
+
+  // Get single report: GET /api/reports/:id
+  const getReportMatch =
+    req.method === 'GET' && url.match(/^\/api\/reports\/([^/]+)$/);
+  if (getReportMatch) {
+    authGuard(req, res, token, () => handleGetReport(res, getReportMatch[1]));
     return true;
   }
 
@@ -1212,6 +1233,45 @@ function handleDeletePipTask(res: http.ServerResponse, id: string): void {
     logger.error({ err, taskId: id }, 'Failed to delete pip task');
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Failed to delete task' }));
+  }
+}
+
+// MARK: - Reports
+
+function handleListReports(res: http.ServerResponse): void {
+  try {
+    const reports = listReports();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ reports }));
+  } catch (err) {
+    logger.error({ err }, 'Failed to list reports');
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Failed to list reports' }));
+  }
+}
+
+function handleGetReport(res: http.ServerResponse, id: string): void {
+  if (!isValidReportId(id)) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid report id' }));
+    return;
+  }
+  try {
+    const report = getReport(id);
+    if (!report) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Report not found' }));
+      return;
+    }
+    // Return raw markdown. iOS renders with swift-markdown-ui — we want the
+    // native renderer to own typography, table layout, and theming, not a
+    // pre-baked HTML string.
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(report));
+  } catch (err) {
+    logger.error({ err, reportId: id }, 'Failed to get report');
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Failed to get report' }));
   }
 }
 
