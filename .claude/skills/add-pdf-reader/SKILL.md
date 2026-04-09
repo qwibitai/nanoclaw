@@ -49,8 +49,8 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 ### Validate
 
 ```bash
-npm run build
-npx vitest run src/channels/whatsapp.test.ts
+pnpm run build
+pnpm exec vitest run src/channels/whatsapp.test.ts
 ```
 
 ### Rebuild container

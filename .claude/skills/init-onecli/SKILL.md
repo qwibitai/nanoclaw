@@ -57,8 +57,10 @@ If `@onecli-sh/sdk` is NOT in package.json, the codebase hasn't been updated to 
 ### Install the gateway and CLI
 
 ```bash
-curl -fsSL onecli.sh/install | sh
-curl -fsSL onecli.sh/cli/install | sh
+# onecli/onecli v1.14.1 (pinned to commit hash)
+curl -fsSL https://raw.githubusercontent.com/onecli/onecli/e22d0aafa978d54daeca55dfa45f5b65c8d9b052/scripts/install.sh | sh
+# onecli/onecli-cli v1.2.1 (pinned to commit hash)
+curl -fsSL https://raw.githubusercontent.com/onecli/onecli-cli/a455389407273dc305d669014e8e2b4f8e93e2e5/scripts/install.sh | sh
 ```
 
 Verify: `onecli version`
@@ -231,10 +233,10 @@ Ask them to let you know when done.
 ## Phase 4: Build and restart
 
 ```bash
-npm run build
+pnpm run build
 ```
 
-If build fails, diagnose and fix. Common issue: `@onecli-sh/sdk` not installed — run `npm install` first.
+If build fails, diagnose and fix. Common issue: `@onecli-sh/sdk` not installed — run `pnpm install` first.
 
 Restart the service:
 - macOS (launchd): `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`

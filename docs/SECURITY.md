@@ -31,7 +31,7 @@ This is the primary security boundary. Rather than relying on application-level 
 **Default Blocked Patterns:**
 ```
 .ssh, .gnupg, .aws, .azure, .gcloud, .kube, .docker,
-credentials, .env, .netrc, .npmrc, id_rsa, id_ed25519,
+credentials, .env, .netrc, .npmrc, .pnpmrc, id_rsa, id_ed25519,
 private_key, .secret
 ```
 

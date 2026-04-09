@@ -281,7 +281,7 @@ Example entries at different detail levels:
 
 **How to apply:**
 
-1. Add dependency: `npm install deepl-node`
+1. Add dependency: `pnpm install deepl-node`
 
 2. In `src/router.ts`, add import at top:
    ```typescript
@@ -391,7 +391,7 @@ For behavior customizations (CLAUDE.md files): copy from the main tree. These ar
 ## 2.6 Validate in worktree
 
 ```bash
-cd "$WORKTREE" && npm install && npm run build && npm test
+cd "$WORKTREE" && pnpm install && pnpm run build && pnpm test
 ```
 
 If build fails, show the error. Fix only issues caused by the migration. If unclear, ask the user.
@@ -417,7 +417,7 @@ If testing live:
    ln -s "$PROJECT_ROOT/.env" "$WORKTREE/.env"
    ```
 
-3. Start from worktree: `cd "$WORKTREE" && npm run dev`
+3. Start from worktree: `cd "$WORKTREE" && pnpm run dev`
 
 4. Ask the user to send a test message from their phone. Wait for them to confirm it works.
 
@@ -461,7 +461,7 @@ Do NOT use `git checkout -B` to create an intermediate branch — this caused is
 
 ## 2.9 Post-upgrade
 
-Run `npm install && npm run build` in the main tree to confirm.
+Run `pnpm install && pnpm run build` in the main tree to confirm.
 
 Restart the service:
 ```bash

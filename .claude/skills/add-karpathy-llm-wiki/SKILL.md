@@ -19,7 +19,7 @@ AskUserQuestion: "Which group should have the wiki?"
 2. **Dedicated group** — create a new group just for the wiki
 3. **Other** — pick an existing group
 
-If dedicated: ask which channel and chat, then register with `npx tsx setup/index.ts --step register`.
+If dedicated: ask which channel and chat, then register with `pnpm exec tsx setup/index.ts --step register`.
 
 ## Step 3: Design collaboratively
 
@@ -74,7 +74,7 @@ AskUserQuestion: "Want periodic wiki health checks?"
 If yes, create a NanoClaw scheduled task that runs in the wiki group. This is NOT a Claude Code cron job — it's a NanoClaw group task that runs in the agent container. Insert it into the SQLite database:
 
 ```bash
-npx tsx -e "
+pnpm exec tsx -e "
 const Database = require('better-sqlite3');
 const { CronExpressionParser } = require('cron-parser');
 const db = new Database('store/messages.db');
@@ -101,7 +101,7 @@ Use the group's `folder` and `chat_jid` from the registered groups table. Cron e
 ## Step 6: Build and restart
 
 ```bash
-npm run build
+pnpm run build
 ./container/build.sh
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw

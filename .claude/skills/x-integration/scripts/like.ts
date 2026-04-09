@@ -1,7 +1,7 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env pnpm exec tsx
 /**
  * X Integration - Like Tweet
- * Usage: echo '{"tweetUrl":"https://x.com/user/status/123"}' | npx tsx like.ts
+ * Usage: echo '{"tweetUrl":"https://x.com/user/status/123"}' | pnpm exec tsx like.ts
  */
 
 import { getBrowserContext, navigateToTweet, runScript, config, ScriptResult } from '../lib/browser.js';

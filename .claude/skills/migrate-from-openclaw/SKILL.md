@@ -36,7 +36,7 @@ Keep it factual and terse — this is for machine recovery after compaction, not
 Run the discovery script to find and summarize the OpenClaw installation:
 
 ```bash
-npx tsx ${CLAUDE_SKILL_DIR}/scripts/discover-openclaw.ts
+pnpm exec tsx ${CLAUDE_SKILL_DIR}/scripts/discover-openclaw.ts
 ```
 
 If the user specifies a custom path, pass it: `--state-dir <path>`
@@ -106,7 +106,7 @@ The discovery script provides detected groups in the GROUPS field (format: `chan
 For each group the user wants to bring over, pre-register it:
 
 ```bash
-npx tsx setup/index.ts --step register -- --jid "<nanoclaw_jid>" --name "<group_name>" --folder "<channel>_<slug>" --trigger "@<confirmed_name>" --channel <channel> --assistant-name "<confirmed_name>"
+pnpm exec tsx setup/index.ts --step register -- --jid "<nanoclaw_jid>" --name "<group_name>" --folder "<channel>_<slug>" --trigger "@<confirmed_name>" --channel <channel> --assistant-name "<confirmed_name>"
 ```
 
 Only pass `--assistant-name` on the first registration (it updates all CLAUDE.md templates globally).
@@ -115,7 +115,7 @@ Folder naming: `<channel>_<name-slug>` (e.g. `whatsapp_family-chat`, `telegram_d
 
 For the first/primary group, add `--is-main --no-trigger-required`. Other groups default to requiring a trigger prefix.
 
-**Important:** Registration requires the database to exist. If the environment step hasn't been run yet, run it first: `npx tsx setup/index.ts --step environment`. Registration also creates the group folder under `groups/` and copies the CLAUDE.md template.
+**Important:** Registration requires the database to exist. If the environment step hasn't been run yet, run it first: `pnpm exec tsx setup/index.ts --step environment`. Registration also creates the group folder under `groups/` and copies the CLAUDE.md template.
 
 Register groups from all channels — including channels NanoClaw doesn't yet support (signal, matrix, etc.). The registration stores the JID and metadata in the database, ready for when that channel is added later. Groups won't receive messages until their channel code is installed, but the registration, group folder, and CLAUDE.md will be ready.
 
@@ -295,7 +295,7 @@ For each detected plugin, present the name to the user and discuss whether to se
 
 1. **If NanoClaw has a matching skill** — check the available NanoClaw skills list for an equivalent (e.g. `/add-voice-transcription` for whisper). If found, save the API key to `.env` and invoke that skill.
 
-2. **If the OpenClaw plugin was an MCP server** — read its config to find the exact package name and command. Install the same MCP server (e.g. `npx -y <exact-package-from-config>`). Don't search for or guess at MCP packages — only install what was explicitly configured.
+2. **If the OpenClaw plugin was an MCP server** — read its config to find the exact package name and command. Install the same MCP server (e.g. `pnpm dlx <exact-package-from-config>`). Don't search for or guess at MCP packages — only install what was explicitly configured.
 
 3. **If the OpenClaw plugin was a CLI tool** — read the config to identify the exact tool. If it's an npm package, add it to the container's Dockerfile. Add a note to the group's CLAUDE.md that the tool is available and how to invoke it.
 
@@ -324,7 +324,7 @@ Run the credential extraction script with `--write-env .env` so it writes creden
 First, run without `--write-env` to preview:
 
 ```bash
-npx tsx ${CLAUDE_SKILL_DIR}/scripts/extract-channel-credentials.ts --state-dir <STATE_DIR> --channel <name>
+pnpm exec tsx ${CLAUDE_SKILL_DIR}/scripts/extract-channel-credentials.ts --state-dir <STATE_DIR> --channel <name>
 ```
 
 Parse the status block. Key fields: HAS_CREDENTIAL, CREDENTIAL_MASKED, NANOCLAW_ENV_VAR.
@@ -339,7 +339,7 @@ If HAS_CREDENTIAL=true: Show the masked credential (`CREDENTIAL_MASKED`). AskUse
 If using the credential:
 
 ```bash
-npx tsx ${CLAUDE_SKILL_DIR}/scripts/extract-channel-credentials.ts --state-dir <STATE_DIR> --channel <name> --write-env .env
+pnpm exec tsx ${CLAUDE_SKILL_DIR}/scripts/extract-channel-credentials.ts --state-dir <STATE_DIR> --channel <name> --write-env .env
 ```
 
 The script writes the credential directly to `.env` using the correct NanoClaw variable name (e.g. `TELEGRAM_BOT_TOKEN`). Check the status block for `WRITTEN_TO` and `WRITTEN_COUNT` to confirm.

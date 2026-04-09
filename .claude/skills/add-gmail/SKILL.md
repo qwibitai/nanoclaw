@@ -70,9 +70,9 @@ When you receive an email notification (messages starting with `[Email from ...`
 ### Validate code changes
 
 ```bash
-npm install
-npm run build
-npx vitest run src/channels/gmail.test.ts
+pnpm install
+pnpm run build
+pnpm exec vitest run src/channels/gmail.test.ts
 ```
 
 All tests must pass (including the new Gmail tests) and build must be clean before proceeding.
@@ -136,10 +136,10 @@ Tell the user:
 Run the authorization:
 
 ```bash
-npx -y @gongrzhe/server-gmail-autoauth-mcp auth
+pnpm dlx @gongrzhe/server-gmail-autoauth-mcp auth
 ```
 
-If that fails (some versions don't have an auth subcommand), try `timeout 60 npx -y @gongrzhe/server-gmail-autoauth-mcp || true`. Verify with `ls ~/.gmail-mcp/credentials.json`.
+If that fails (some versions don't have an auth subcommand), try `timeout 60 pnpm dlx @gongrzhe/server-gmail-autoauth-mcp || true`. Verify with `ls ~/.gmail-mcp/credentials.json`.
 
 ### Build and restart
 
@@ -158,7 +158,7 @@ cd container && ./build.sh
 Then compile and restart:
 
 ```bash
-npm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw
 ```
@@ -192,7 +192,7 @@ tail -f logs/nanoclaw.log
 Test directly:
 
 ```bash
-npx -y @gongrzhe/server-gmail-autoauth-mcp
+pnpm dlx @gongrzhe/server-gmail-autoauth-mcp
 ```
 
 ### OAuth token expired
@@ -201,7 +201,7 @@ Re-authorize:
 
 ```bash
 rm ~/.gmail-mcp/credentials.json
-npx -y @gongrzhe/server-gmail-autoauth-mcp
+pnpm dlx @gongrzhe/server-gmail-autoauth-mcp
 ```
 
 ### Container can't access Gmail
@@ -222,7 +222,7 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 2. Remove `gmail` MCP server and `mcp__gmail__*` from `container/agent-runner/src/index.ts`
 3. Rebuild and restart
 4. Clear stale agent-runner copies: `rm -r data/sessions/*/agent-runner-src 2>/dev/null || true`
-5. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
+5. Rebuild: `cd container && ./build.sh && cd .. && pnpm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
 
 ### Channel mode
 
@@ -230,7 +230,7 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 2. Remove `import './gmail.js'` from `src/channels/index.ts`
 3. Remove `~/.gmail-mcp` mount from `src/container-runner.ts`
 4. Remove `gmail` MCP server and `mcp__gmail__*` from `container/agent-runner/src/index.ts`
-5. Uninstall: `npm uninstall googleapis`
+5. Uninstall: `pnpm remove googleapis`
 6. Rebuild and restart
 7. Clear stale agent-runner copies: `rm -r data/sessions/*/agent-runner-src 2>/dev/null || true`
-8. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
+8. Rebuild: `cd container && ./build.sh && cd .. && pnpm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)

@@ -87,7 +87,7 @@ done
 ### Validate code changes
 
 ```bash
-npm run build
+pnpm run build
 ./container/build.sh
 ```
 

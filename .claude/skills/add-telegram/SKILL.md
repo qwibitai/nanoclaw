@@ -13,54 +13,45 @@ This skill adds Telegram support to NanoClaw, then walks through interactive set
 
 Check if `src/channels/telegram.ts` exists. If it does, skip to Phase 3 (Setup). The code changes are already in place.
 
-### Ask the user
-
-Use `AskUserQuestion` to collect configuration:
-
-AskUserQuestion: Do you have a Telegram bot token, or do you need to create one?
-
-If they have one, collect it now. If not, we'll create one in Phase 3.
-
 ## Phase 2: Apply Code Changes
 
-### Ensure channel remote
+### Clone the Telegram channel repo
 
 ```bash
-git remote -v
+git clone https://github.com/qwibitai/nanoclaw-telegram.git /tmp/nanoclaw-telegram
 ```
 
-If `telegram` is missing, add it:
+### Copy the required files
 
 ```bash
-git remote add telegram https://github.com/qwibitai/nanoclaw-telegram.git
+cp /tmp/nanoclaw-telegram/src/channels/telegram.ts src/channels/telegram.ts
+cp /tmp/nanoclaw-telegram/src/channels/telegram.test.ts src/channels/telegram.test.ts
 ```
 
-### Merge the skill branch
+### Add the grammy dependency
+
+Add `grammy` to `package.json` dependencies. Read the cloned repo's `package.json` to get the exact version pinned there, then add it to the local `package.json` with that same version.
+
+### Update the channel barrel file
+
+Append the Telegram import to `src/channels/index.ts`:
+
+```typescript
+import './telegram.js';
+```
+
+### Clean up the clone
 
 ```bash
-git fetch telegram main
-git merge telegram/main || {
-  git checkout --theirs package-lock.json
-  git add package-lock.json
-  git merge --continue
-}
+rm -rf /tmp/nanoclaw-telegram
 ```
-
-This merges in:
-- `src/channels/telegram.ts` (TelegramChannel class with self-registration via `registerChannel`)
-- `src/channels/telegram.test.ts` (unit tests with grammy mock)
-- `import './telegram.js'` appended to the channel barrel file `src/channels/index.ts`
-- `grammy` npm dependency in `package.json`
-- `TELEGRAM_BOT_TOKEN` in `.env.example`
-
-If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate code changes
 
 ```bash
-npm install
-npm run build
-npx vitest run src/channels/telegram.test.ts
+pnpm install
+pnpm run build
+pnpm exec vitest run src/channels/telegram.test.ts
 ```
 
 All tests must pass (including the new Telegram tests) and build must be clean before proceeding.
@@ -69,9 +60,9 @@ All tests must pass (including the new Telegram tests) and build must be clean b
 
 ### Create Telegram Bot (if needed)
 
-If the user doesn't have a bot token, tell them:
+Tell the user:
 
-> I need you to create a Telegram bot:
+> If you do not already have a Telegram bot token, create one now:
 >
 > 1. Open Telegram and search for `@BotFather`
 > 2. Send `/newbot` and follow prompts:
@@ -79,19 +70,19 @@ If the user doesn't have a bot token, tell them:
 >    - Bot username: Must end with "bot" (e.g., "andy_ai_bot")
 > 3. Copy the bot token (looks like `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`)
 
-Wait for the user to provide the token.
-
 ### Configure environment
 
-Add to `.env`:
+Ensure `.env` contains the `TELEGRAM_BOT_TOKEN` variable. If it is not already present, append it:
 
 ```bash
-TELEGRAM_BOT_TOKEN=<their-token>
+echo 'TELEGRAM_BOT_TOKEN=' >> .env
 ```
 
-Channels auto-enable when their credentials are present — no extra configuration needed.
+Tell the user:
 
-Sync to container environment:
+> Open `.env` and fill in your bot token next to `TELEGRAM_BOT_TOKEN=`. Channels auto-enable when their credentials are present — no extra configuration needed.
+
+Once the user confirms the token is set, sync to the container environment:
 
 ```bash
 mkdir -p data/env && cp .env data/env/env
@@ -114,12 +105,31 @@ Tell the user:
 ### Build and restart
 
 ```bash
-npm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw
 ```
 
 ## Phase 4: Registration
+
+### Ensure service is running
+
+The bot must be running to respond to `/chatid`. Build and start the service if it is not already running:
+
+```bash
+pnpm run build
+```
+
+Then either start the service or run in the foreground:
+
+```bash
+# Foreground (for testing):
+pnpm run dev
+
+# Or load the service (macOS):
+launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+# Linux: systemctl --user start nanoclaw
+```
 
 ### Get Chat ID
 
@@ -133,18 +143,18 @@ Wait for the user to provide the chat ID (format: `tg:123456789` or `tg:-1001234
 
 ### Register the chat
 
-The chat ID, name, and folder name are needed. Use `npx tsx setup/index.ts --step register` with the appropriate flags.
+The chat ID, name, and folder name are needed. Use `pnpm exec tsx setup/index.ts --step register` with the appropriate flags.
 
 For a main chat (responds to all messages):
 
 ```bash
-npx tsx setup/index.ts --step register -- --jid "tg:<chat-id>" --name "<chat-name>" --folder "telegram_main" --trigger "@${ASSISTANT_NAME}" --channel telegram --no-trigger-required --is-main
+pnpm exec tsx setup/index.ts --step register -- --jid "tg:<chat-id>" --name "<chat-name>" --folder "telegram_main" --trigger "@${ASSISTANT_NAME}" --channel telegram --no-trigger-required --is-main
 ```
 
 For additional chats (trigger-only):
 
 ```bash
-npx tsx setup/index.ts --step register -- --jid "tg:<chat-id>" --name "<chat-name>" --folder "telegram_<group-name>" --trigger "@${ASSISTANT_NAME}" --channel telegram
+pnpm exec tsx setup/index.ts --step register -- --jid "tg:<chat-id>" --name "<chat-name>" --folder "telegram_<group-name>" --trigger "@${ASSISTANT_NAME}" --channel telegram
 ```
 
 ## Phase 5: Verify
@@ -189,16 +199,16 @@ If `/chatid` doesn't work:
 
 ## After Setup
 
-If running `npm run dev` while the service is active:
+If running `pnpm run dev` while the service is active:
 ```bash
 # macOS:
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-npm run dev
+pnpm run dev
 # When done testing:
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 # Linux:
 # systemctl --user stop nanoclaw
-# npm run dev
+# pnpm run dev
 # systemctl --user start nanoclaw
 ```
 
@@ -210,5 +220,5 @@ To remove Telegram integration:
 2. Remove `import './telegram.js'` from `src/channels/index.ts`
 3. Remove `TELEGRAM_BOT_TOKEN` from `.env`
 4. Remove Telegram registrations from SQLite: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE 'tg:%'"`
-5. Uninstall: `npm uninstall grammy`
-6. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+5. Uninstall: `pnpm remove grammy`
+6. Rebuild: `pnpm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `pnpm run build && systemctl --user restart nanoclaw` (Linux)

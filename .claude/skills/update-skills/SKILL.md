@@ -110,8 +110,8 @@ If a merge fails badly (e.g., cannot resolve conflicts):
 # Step 4: Validation
 
 After all selected skills are merged:
-- `npm run build`
-- `npm test` (do not fail the flow if tests are not configured)
+- `pnpm run build`
+- `pnpm test` (do not fail the flow if tests are not configured)
 
 If build fails:
 - Show the error.

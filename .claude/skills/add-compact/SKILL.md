@@ -39,8 +39,8 @@ This adds:
 ### Validate
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm run build
 ```
 
 ### Rebuild container
@@ -60,7 +60,7 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 
 ### Integration Test
 
-1. Start NanoClaw in dev mode: `npm run dev`
+1. Start NanoClaw in dev mode: `pnpm run dev`
 2. From the **main group** (self-chat), send exactly: `/compact`
 3. Verify:
    - The agent acknowledges compaction (e.g., "Conversation compacted.")
@@ -104,8 +104,8 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 git clone <your-fork> /tmp/nanoclaw-test
 cd /tmp/nanoclaw-test
 claude  # then run /add-compact
-npm run build
-npm test
+pnpm run build
+pnpm test
 ./container/build.sh
 # Manual: send /compact from main group, verify compaction + continuation
 # Manual: send @<assistant> /compact from non-main as non-admin, verify denial
