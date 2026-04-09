@@ -29,12 +29,15 @@ export interface ProxyConfig {
 
 const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const TOKEN_ENDPOINT = 'https://platform.claude.com/v1/oauth/token';
-const MIN_REFRESH_DELAY_MS = 30_000;     // 30 seconds
-const REFRESH_MARGIN_MS = 5 * 60_000;    // 5 minutes before expiry
-const RETRY_DELAY_MS = 60_000;           // 1 minute on failure
+const MIN_REFRESH_DELAY_MS = 30_000; // 30 seconds
+const REFRESH_MARGIN_MS = 5 * 60_000; // 5 minutes before expiry
+const RETRY_DELAY_MS = 60_000; // 1 minute on failure
 
 /** Simple HTTPS POST that returns parsed JSON. */
-function fetchJson(url: string, body: Record<string, string>): Promise<Record<string, unknown>> {
+function fetchJson(
+  url: string,
+  body: Record<string, string>,
+): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const payload = JSON.stringify(body);
@@ -54,7 +57,12 @@ function fetchJson(url: string, body: Record<string, string>): Promise<Record<st
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => {
           try {
-            resolve(JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>);
+            resolve(
+              JSON.parse(Buffer.concat(chunks).toString()) as Record<
+                string,
+                unknown
+              >,
+            );
           } catch (err) {
             reject(new Error(`Failed to parse token response: ${err}`));
           }
@@ -126,7 +134,10 @@ export function startCredentialProxy(
   }
 
   function scheduleRefresh(expiresAt: number, refreshToken: string): void {
-    const delay = Math.max(expiresAt - Date.now() - REFRESH_MARGIN_MS, MIN_REFRESH_DELAY_MS);
+    const delay = Math.max(
+      expiresAt - Date.now() - REFRESH_MARGIN_MS,
+      MIN_REFRESH_DELAY_MS,
+    );
     logger.info({ delayMs: delay }, 'Scheduling OAuth token refresh');
     refreshTimer = setTimeout(() => doRefresh(refreshToken), delay);
   }
@@ -140,7 +151,9 @@ export function startCredentialProxy(
       });
 
       if (typeof data.access_token !== 'string') {
-        throw new Error(`Token response missing access_token: ${JSON.stringify(data)}`);
+        throw new Error(
+          `Token response missing access_token: ${JSON.stringify(data)}`,
+        );
       }
 
       oauthToken = data.access_token as string;

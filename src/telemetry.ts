@@ -20,20 +20,29 @@ const envConfig = readEnvFile([
 ]);
 
 const TELEMETRY_URL =
-  process.env.TELEMETRY_URL || envConfig.TELEMETRY_URL ||
-  process.env.TELEMETRY_API_URL || envConfig.TELEMETRY_API_URL || '';
-const BOT_ID =
-  process.env.TELEMETRY_BOT_ID || envConfig.TELEMETRY_BOT_ID || '';
+  process.env.TELEMETRY_URL ||
+  envConfig.TELEMETRY_URL ||
+  process.env.TELEMETRY_API_URL ||
+  envConfig.TELEMETRY_API_URL ||
+  '';
+const BOT_ID = process.env.TELEMETRY_BOT_ID || envConfig.TELEMETRY_BOT_ID || '';
 const TOKEN =
-  process.env.TELEMETRY_REGISTRATION_TOKEN || envConfig.TELEMETRY_REGISTRATION_TOKEN || '';
+  process.env.TELEMETRY_REGISTRATION_TOKEN ||
+  envConfig.TELEMETRY_REGISTRATION_TOKEN ||
+  '';
 
 const enabled = !!(TELEMETRY_URL && BOT_ID && TOKEN);
 
 if (!enabled) {
-  console.warn('[telemetry] Disabled — missing TELEMETRY_URL, TELEMETRY_BOT_ID, or TELEMETRY_REGISTRATION_TOKEN');
+  console.warn(
+    '[telemetry] Disabled — missing TELEMETRY_URL, TELEMETRY_BOT_ID, or TELEMETRY_REGISTRATION_TOKEN',
+  );
 }
 
-async function emit(eventType: string, payload: Record<string, unknown>): Promise<void> {
+async function emit(
+  eventType: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
   if (!enabled) return;
 
   try {
@@ -61,7 +70,11 @@ async function emit(eventType: string, payload: Record<string, unknown>): Promis
 }
 
 /** Incoming message received from a user */
-export function emitMessageIn(channel: string, groupName: string, messageCount: number): void {
+export function emitMessageIn(
+  channel: string,
+  groupName: string,
+  messageCount: number,
+): void {
   emit('message', {
     direction: 'in',
     channel,
@@ -70,7 +83,11 @@ export function emitMessageIn(channel: string, groupName: string, messageCount: 
 }
 
 /** Outgoing response sent to user */
-export function emitMessageOut(channel: string, groupName: string, textLength: number): void {
+export function emitMessageOut(
+  channel: string,
+  groupName: string,
+  textLength: number,
+): void {
   emit('message', {
     direction: 'out',
     channel,
@@ -79,7 +96,11 @@ export function emitMessageOut(channel: string, groupName: string, textLength: n
 }
 
 /** Error during processing */
-export function emitError(category: string, errorMessage: string, group?: string): void {
+export function emitError(
+  category: string,
+  errorMessage: string,
+  group?: string,
+): void {
   emit('error', {
     category,
     error_message: errorMessage,
@@ -88,7 +109,10 @@ export function emitError(category: string, errorMessage: string, group?: string
 }
 
 /** Heartbeat with status info */
-export function emitHeartbeat(activeGroups: number, pendingMessages: number): void {
+export function emitHeartbeat(
+  activeGroups: number,
+  pendingMessages: number,
+): void {
   emit('heartbeat', {
     active_groups: activeGroups,
     pending_messages: pendingMessages,
@@ -96,7 +120,10 @@ export function emitHeartbeat(activeGroups: number, pendingMessages: number): vo
 }
 
 /** Channel connect/disconnect */
-export function emitChannelStatus(channelName: string, status: 'connected' | 'disconnected'): void {
+export function emitChannelStatus(
+  channelName: string,
+  status: 'connected' | 'disconnected',
+): void {
   emit('channel_status', {
     channel_name: channelName,
     status,

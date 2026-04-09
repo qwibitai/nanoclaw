@@ -61,7 +61,13 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { ensureWatcherTasks } from './watcher-registration.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
-import { emitMessageIn, emitMessageOut, emitError, emitHeartbeat, emitChannelStatus } from './telemetry.js';
+import {
+  emitMessageIn,
+  emitMessageOut,
+  emitError,
+  emitHeartbeat,
+  emitChannelStatus,
+} from './telemetry.js';
 import { shouldRespondToGroup } from './smart-trigger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -217,7 +223,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
 
   // Telemetry: inbound messages
-  const channelType = channel.constructor.name.replace('Channel', '').toLowerCase();
+  const channelType = channel.constructor.name
+    .replace('Channel', '')
+    .toLowerCase();
   emitMessageIn(channelType, group.name, missedMessages.length);
 
   // Track idle timer for closing stdin when agent is idle

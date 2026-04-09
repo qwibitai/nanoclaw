@@ -24,7 +24,11 @@ function parseCredentialJson(raw: string): OAuthCredentials | null {
   try {
     const data = JSON.parse(raw);
     const oauth = data?.claudeAiOauth;
-    if (!oauth || typeof oauth.accessToken !== 'string' || typeof oauth.refreshToken !== 'string') {
+    if (
+      !oauth ||
+      typeof oauth.accessToken !== 'string' ||
+      typeof oauth.refreshToken !== 'string'
+    ) {
       return null;
     }
     return {
@@ -81,7 +85,9 @@ export function readCredentials(): OAuthCredentials | null {
 
   const creds = parseCredentialJson(raw);
   if (!creds) {
-    logger.warn('Credential JSON parsed but missing required fields (accessToken/refreshToken)');
+    logger.warn(
+      'Credential JSON parsed but missing required fields (accessToken/refreshToken)',
+    );
   }
   return creds;
 }
@@ -108,18 +114,21 @@ export function writeCredentials(creds: OAuthCredentials): void {
     refreshToken: creds.refreshToken,
     expiresAt: creds.expiresAt,
     scopes: creds.scopes,
-    ...(creds.subscriptionType !== undefined && { subscriptionType: creds.subscriptionType }),
-    ...(creds.rateLimitTier !== undefined && { rateLimitTier: creds.rateLimitTier }),
+    ...(creds.subscriptionType !== undefined && {
+      subscriptionType: creds.subscriptionType,
+    }),
+    ...(creds.rateLimitTier !== undefined && {
+      rateLimitTier: creds.rateLimitTier,
+    }),
   };
 
   const json = JSON.stringify(existing);
 
   if (platform() === 'darwin') {
     try {
-      execSync(
-        `security delete-generic-password -s "${KEYCHAIN_SERVICE}"`,
-        { stdio: 'ignore' },
-      );
+      execSync(`security delete-generic-password -s "${KEYCHAIN_SERVICE}"`, {
+        stdio: 'ignore',
+      });
     } catch {
       // Entry may not exist yet; that's fine
     }
