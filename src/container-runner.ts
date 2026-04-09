@@ -170,10 +170,14 @@ function buildVolumeMounts(
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
+  // Skills listed in mainOnlySkills are only copied to the main group —
+  // they self-gate to main anyway and waste context in other groups.
+  const mainOnlySkills = new Set(['capabilities', 'status', 'agent-browser']);
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
     for (const skillDir of fs.readdirSync(skillsSrc)) {
+      if (!isMain && mainOnlySkills.has(skillDir)) continue;
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
