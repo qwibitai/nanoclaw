@@ -252,13 +252,29 @@ describe('claude-session', () => {
 
       // The sandbox is an allow-list, not a deny-list — the worktree path
       // is the read/write boundary and anything outside it is implicitly
-      // denied. Assert the shape that claude-session.ts actually builds.
+      // denied. Pin the full shape so a regression that widens the
+      // allow-list (e.g. adds /Users, ~/.ssh, or a second writable dir)
+      // fails this test immediately. This is the actual security contract.
       const options = mockQuery.mock.calls[0][0].options;
-      expect(options?.sandbox?.filesystem?.allowRead).toContain(
-        '/tmp/sigma-task-1',
+      const filesystem = options?.sandbox?.filesystem;
+
+      // Write boundary: exactly one entry, the worktree path. A regression
+      // that widens allowWrite is the biggest latent risk.
+      expect(filesystem?.allowWrite).toEqual(['/tmp/sigma-task-1']);
+
+      // Read boundary: worktree + the narrow set of system/config paths
+      // Claude needs to find its auth, binaries, and standard libraries.
+      // Length pins the list so a new entry can't sneak in unnoticed.
+      expect(filesystem?.allowRead).toHaveLength(6);
+      expect(filesystem?.allowRead).toContain('/tmp/sigma-task-1');
+      expect(filesystem?.allowRead).toContain('/usr/local');
+      expect(filesystem?.allowRead).toContain('/usr/bin');
+      expect(filesystem?.allowRead).toContain('/bin');
+      expect(filesystem?.allowRead).toEqual(
+        expect.arrayContaining([expect.stringMatching(/\.claude$/)]),
       );
-      expect(options?.sandbox?.filesystem?.allowWrite).toContain(
-        '/tmp/sigma-task-1',
+      expect(filesystem?.allowRead).toEqual(
+        expect.arrayContaining([expect.stringMatching(/\.local\/bin$/)]),
       );
     });
   });
