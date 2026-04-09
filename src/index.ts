@@ -3,19 +3,6 @@ import path from 'path';
 
 import { OneCLI } from '@onecli-sh/sdk';
 
-// Debug logging for Signal routing investigation
-function debugLog(message: string, data?: Record<string, unknown>): void {
-  const logPath = '/workspace/project/store/debug.log';
-  const timestamp = new Date().toISOString();
-  const dataStr = data ? ' ' + JSON.stringify(data) : '';
-  const line = `[${timestamp}] ${message}${dataStr}\n`;
-  try {
-    fs.appendFileSync(logPath, line);
-  } catch {
-    // Ignore write errors
-  }
-}
-
 import {
   ASSISTANT_NAME,
   DEFAULT_TRIGGER,
