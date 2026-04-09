@@ -1201,9 +1201,19 @@ async function runQuery(
       }
       // Claude Code SDK may return result: null when text was only sent via
       // streaming events. Fall back to the last assistant text block content.
+      // Detect API errors surfaced as result text (SDK returns subtype=success
+      // even when the response body is an upstream error). Throw so the retry
+      // wrapper in main() can rotate keys and re-run the query.
+      const effectiveResult = textResult || lastAssistantText || null;
+      const isApiErrorResult = typeof effectiveResult === 'string' &&
+        effectiveResult.startsWith('API Error:') &&
+        (effectiveResult.includes('upstream_error') || effectiveResult.includes('External provider returned') || effectiveResult.includes('429'));
+      if (isApiErrorResult) {
+        throw new Error(effectiveResult);
+      }
       writeOutput({
         status: 'success',
-        result: textResult || lastAssistantText || null,
+        result: effectiveResult,
         newSessionId,
         modelsUsedThisTurn
       });
