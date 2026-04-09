@@ -11,7 +11,10 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AgentImpl } from './agent-impl.js';
-import { buildAgentConfig } from './agent-config.js';
+import {
+  buildAgentConfig,
+  resolveSerializableAgentSettings,
+} from './agent-config.js';
 import { buildRuntimeConfig } from './runtime-config.js';
 import { GroupQueue } from './group-queue.js';
 
@@ -19,11 +22,14 @@ let tmpDir: string;
 const rtConfig = buildRuntimeConfig({}, '/tmp/agentlite-test-pkg');
 
 function createAgent(name: string, baseDir: string): AgentImpl {
-  const agentConfig = buildAgentConfig(
-    name,
-    { workdir: path.join(baseDir, 'agents', name) },
-    baseDir,
-  );
+  const agentConfig = buildAgentConfig({
+    agentId: `${name}00000000`.slice(0, 8),
+    ...resolveSerializableAgentSettings(
+      name,
+      { workdir: path.join(baseDir, 'agents', name) },
+      baseDir,
+    ),
+  });
   return new AgentImpl(agentConfig, rtConfig);
 }
 
@@ -54,6 +60,19 @@ describe('Agent path isolation', () => {
     );
   });
 
+  it('uses the provided persisted agent id', () => {
+    const config = buildAgentConfig({
+      agentId: 'alice001',
+      ...resolveSerializableAgentSettings(
+        'alice',
+        { workdir: path.join(tmpDir, 'agents', 'alice') },
+        tmpDir,
+      ),
+    });
+
+    expect(config.agentId).toBe('alice001');
+  });
+
   it('two agents have independent paths', () => {
     const alice = createAgent('alice', tmpDir);
     const bob = createAgent('bob', tmpDir);
@@ -69,6 +88,11 @@ describe('Agent path isolation', () => {
     const b = createAgent('main', tmpDir);
     expect(a.name).toBe('alice');
     expect(b.name).toBe('main');
+  });
+
+  it('agent.id propagates from constructor', () => {
+    const agent = createAgent('alice', tmpDir);
+    expect(agent.id).toBe(agent.config.agentId);
   });
 });
 

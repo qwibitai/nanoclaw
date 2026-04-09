@@ -66,12 +66,12 @@ export function ensureRuntimeReady(): void {
   }
 }
 
-/** Kill orphaned AgentLite boxes from previous runs. Scoped by instanceName if provided. */
-export async function cleanupOrphans(instanceName?: string): Promise<void> {
+/** Kill orphaned AgentLite boxes from previous runs. Scoped by agent id if provided. */
+export async function cleanupOrphans(agentId?: string): Promise<void> {
   try {
     const rt = getRuntime();
     const boxes = await rt.listInfo();
-    const prefix = instanceName ? `agentlite-${instanceName}-` : 'agentlite-';
+    const prefix = agentId ? `agentlite-${agentId}-` : 'agentlite-';
     const orphans = boxes.filter(
       (b: { name?: string; state: { running: boolean } }) =>
         b.name && b.name.startsWith(prefix) && b.state.running,

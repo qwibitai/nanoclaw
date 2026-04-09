@@ -5,7 +5,7 @@
  * ```typescript
  * import { telegram } from '@boxlite-ai/agentlite/channels/telegram';
  *
- * const agent = agentlite.createAgent('main', {
+ * const agent = agentlite.getOrCreateAgent('main', {
  *   channels: { telegram: telegram({ token: process.env.TG_TOKEN! }) },
  * });
  * ```

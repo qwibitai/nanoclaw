@@ -30,8 +30,8 @@ async function main(): Promise<void> {
 
   const agentlite = await createAgentLite(platformOpts);
 
-  const instanceName = process.env.AGENTLITE_INSTANCE || 'main';
-  const agent = agentlite.createAgent(instanceName, {
+  const agentName = process.env.AGENTLITE_AGENT_NAME || 'main';
+  const agent = agentlite.getOrCreateAgent(agentName, {
     ...agentOpts,
     channels,
   });

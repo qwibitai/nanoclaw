@@ -2,10 +2,16 @@ import { describe, it, expect, beforeEach } from 'vitest';
 
 import { _initTestDatabase, AgentDb } from './db.js';
 import { AgentImpl } from './agent-impl.js';
-import { buildAgentConfig } from './agent-config.js';
+import {
+  buildAgentConfig,
+  resolveSerializableAgentSettings,
+} from './agent-config.js';
 import { buildRuntimeConfig } from './runtime-config.js';
 
-const agentConfig = buildAgentConfig('test', undefined, '/tmp/agentlite-test');
+const agentConfig = buildAgentConfig({
+  agentId: 'test0001',
+  ...resolveSerializableAgentSettings('test', undefined, '/tmp/agentlite-test'),
+});
 const runtimeConfig = buildRuntimeConfig({}, '/tmp/agentlite-test-pkg');
 const testInstance = new AgentImpl(agentConfig, runtimeConfig);
 

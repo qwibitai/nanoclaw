@@ -9,8 +9,11 @@ import { createAgentLite } from '@boxlite-ai/agentlite';
 import { telegram } from '@boxlite-ai/agentlite/channels/telegram';
 
 const agentlite = await createAgentLite({ workdir: './data' });
-const agent = agentlite.createAgent('main', { name: 'Andy' });
-agent.addChannel('telegram', telegram({ token: process.env.TELEGRAM_BOT_TOKEN! }));
+const agent = agentlite.getOrCreateAgent('main', { name: 'Andy' });
+agent.addChannel(
+  'telegram',
+  telegram({ token: process.env.TELEGRAM_BOT_TOKEN! }),
+);
 await agent.start();
 ```
 
@@ -45,6 +48,7 @@ Talk to your assistant with the trigger word (default: `@Andy`):
 ```
 
 From the main channel (your self-chat), you can manage groups and tasks:
+
 ```
 @Andy list all scheduled tasks across groups
 @Andy pause the Monday briefing task
@@ -68,6 +72,7 @@ Single Node.js process. Channels register dynamically via the SDK. Agents execut
 For the full architecture details, see [docs/SPEC.md](docs/SPEC.md).
 
 Key files:
+
 - `src/api/sdk.ts` - Public API: `createAgentLite()`, `AgentLite` interface
 - `src/api/agent.ts` - Public API: `Agent` interface
 - `src/api/channel-driver.ts` - Public API: `ChannelDriver` interface

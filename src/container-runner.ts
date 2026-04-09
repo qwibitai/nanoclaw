@@ -43,8 +43,8 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
-  /** Instance name for multi-instance support. Scopes container names. */
-  instanceName?: string;
+  /** Agent id used to scope runtime box names. */
+  agentId?: string;
   workDir?: string;
   /** Override config.GROUPS_DIR for per-instance group paths. */
   groupsDir?: string;
@@ -356,8 +356,8 @@ export async function runContainerAgent(
     input.mountAllowlist,
   );
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const instancePrefix = input.instanceName ? `${input.instanceName}-` : '';
-  const containerName = `agentlite-${instancePrefix}${safeName}-${Date.now()}`;
+  const agentPrefix = input.agentId ? `${input.agentId}-` : '';
+  const containerName = `agentlite-${agentPrefix}${safeName}-${Date.now()}`;
   // Main group uses the default OneCLI agent; others use their own agent.
   const agentIdentifier = input.isMain
     ? undefined
