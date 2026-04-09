@@ -14,6 +14,7 @@ import {
   POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
+import { MessageChunker, detectChannelFromJid } from './message-chunker.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -363,11 +364,59 @@ async function processGroupMessages(groupFolder: string): Promise<boolean> {
   // Track the latest partial text from the current streaming round
   let currentRoundText = '';
 
+  // Message chunking for long streaming output
+  const chunker = new MessageChunker(detectChannelFromJid(primaryJid));
+  // splitPoint: character offset in fullText where current message started
+  // When 0, we're on the first message; when > 0, we're on a continuation message
+  // For editing, we send fullText.slice(splitPoint) to only include new content
+  let splitPoint = 0;
+
   const flushEdit = async () => {
     if (pendingEditText && streamingMessageId && primaryChannel?.editMessage) {
-      const text = pendingEditText;
+      const fullText = pendingEditText;
       pendingEditText = null;
-      await primaryChannel.editMessage(primaryJid, streamingMessageId, text);
+
+      // The continuation content (what we're editing into the current message)
+      const continuationText = fullText.slice(splitPoint);
+
+      // Check if continuation is approaching the threshold
+      const check = chunker.checkThreshold('', continuationText);
+
+      if (check.needsChunk) {
+        // Need to split the continuation and start a new message
+        const { first, rest } = chunker.splitAtBoundary(
+          continuationText,
+          chunker.getThreshold(),
+        );
+
+        // Finalize current message with first chunk
+        const finalText = fullText.slice(0, splitPoint) + first;
+        await primaryChannel.editMessage(primaryJid, streamingMessageId, first);
+        logger.info(
+          { length: first.length, totalChunks: 1 },
+          'Stream chunk finalized (threshold reached)',
+        );
+
+        // Start a new message with rest
+        if (rest && primaryChannel.sendMessageReturningId) {
+          streamingMessageId = await primaryChannel.sendMessageReturningId(
+            primaryJid,
+            rest,
+          );
+          splitPoint = fullText.length - rest.length;
+
+          // Update tracking variables for the new chunk
+          // completedText stays the same (it's before splitPoint)
+          // currentRoundText becomes the rest (will be updated on next partial)
+        }
+      } else {
+        // Normal edit - send the continuation to current message
+        await primaryChannel.editMessage(
+          primaryJid,
+          streamingMessageId,
+          continuationText,
+        );
+      }
     }
   };
 
@@ -477,6 +526,7 @@ async function processGroupMessages(groupFolder: string): Promise<boolean> {
           streamingMessageId = null;
           completedText = '';
           currentRoundText = '';
+          splitPoint = 0;
         } else {
           // No streaming happened, or channel doesn't support it
           await primaryChannel?.sendMessage(primaryJid, text);
@@ -493,6 +543,7 @@ async function processGroupMessages(groupFolder: string): Promise<boolean> {
       streamingMessageId = null;
       completedText = '';
       currentRoundText = '';
+      splitPoint = 0;
       queue.notifyIdle(groupFolder);
     }
 
