@@ -43,15 +43,33 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
-## WhatsApp Formatting (and other messaging apps)
+## Message Formatting
 
-Do NOT use markdown headings (##) in WhatsApp messages. Only use:
-- *Bold* (single asterisks) (NEVER **double asterisks**)
-- _Italic_ (underscores)
-- • Bullets (bullet points)
-- ```Code blocks``` (triple backticks)
+Format messages based on the channel. Check the group folder name prefix:
 
-Keep messages clean and readable for WhatsApp.
+### Slack channels (folder starts with `slack_`)
+
+Use Slack mrkdwn syntax. Run `/slack-formatting` for the full reference. Key rules:
+- `*bold*` (single asterisks)
+- `_italic_` (underscores)
+- `<https://url|link text>` for links (NOT `[text](url)`)
+- `•` bullets (no numbered lists)
+- `:emoji:` shortcodes like `:white_check_mark:`, `:rocket:`
+- `>` for block quotes
+- No `##` headings — use `*Bold text*` instead
+
+### WhatsApp/Telegram (folder starts with `whatsapp_` or `telegram_`)
+
+- `*bold*` (single asterisks, NEVER **double**)
+- `_italic_` (underscores)
+- `•` bullet points
+- ` ``` ` code blocks
+
+No `##` headings. No `[links](url)`. No `**double stars**`.
+
+### Discord (folder starts with `discord_`)
+
+Standard Markdown: `**bold**`, `*italic*`, `[links](url)`, `# headings`.
 
 ---
 
@@ -59,17 +77,22 @@ Keep messages clean and readable for WhatsApp.
 
 This is the **main channel**, which has elevated privileges.
 
+## Authentication
+
+Anthropic credentials must be either an API key from console.anthropic.com (`ANTHROPIC_API_KEY`) or a long-lived OAuth token from `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`). Short-lived tokens from the system keychain or `~/.claude/.credentials.json` expire within hours and can cause recurring container 401s. The `/setup` skill walks through this. OneCLI manages credentials (including Anthropic auth) — run `onecli --help`.
+
 ## Container Mounts
 
-Main has read-only access to the project and read-write access to its group folder:
+Main has read-only access to the project, read-write access to the store (SQLite DB), and read-write access to its group folder:
 
 | Container Path | Host Path | Access |
 |----------------|-----------|--------|
 | `/workspace/project` | Project root | read-only |
+| `/workspace/project/store` | `store/` | read-write |
 | `/workspace/group` | `groups/main/` | read-write |
 
 Key paths inside the container:
-- `/workspace/project/store/messages.db` - SQLite database
+- `/workspace/project/store/messages.db` - SQLite database (read-write)
 - `/workspace/project/store/messages.db` (registered_groups table) - Group config
 - `/workspace/project/groups/` - All group folders
 
@@ -150,10 +173,11 @@ Fields:
 ### Adding a Group
 
 1. Query the database to find the group's JID
-2. Use the `register_group` MCP tool with the JID, name, folder, and trigger
-3. Optionally include `containerConfig` for additional mounts
-4. The group folder is created automatically: `/workspace/project/groups/{folder-name}/`
-5. Optionally create an initial `CLAUDE.md` for the group
+2. Ask the user whether the group should require a trigger word before registering
+3. Use the `register_group` MCP tool with the JID, name, folder, trigger, and the chosen `requiresTrigger` setting
+4. Optionally include `containerConfig` for additional mounts
+5. The group folder is created automatically: `/workspace/project/groups/{folder-name}/`
+6. Optionally create an initial `CLAUDE.md` for the group
 
 Folder naming convention — channel prefix with underscore separator:
 - WhatsApp "Family Chat" → `whatsapp_family-chat`
@@ -234,7 +258,7 @@ Read `/workspace/project/data/registered_groups.json` and format it nicely.
 
 ## Global Memory
 
-You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts that should apply to all groups. Only update global memory when explicitly asked to "remember this globally" or similar.
+You can read and write to `/workspace/global/CLAUDE.md` for facts that should apply to all groups. Only update global memory when explicitly asked to "remember this globally" or similar.
 
 ---
 
@@ -244,3 +268,42 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+---
+
+## Task Scripts
+
+For any recurring task, use `schedule_task`. Frequent agent invocations — especially multiple times a day — consume API credits and can risk account restrictions. If a simple check can determine whether action is needed, add a `script` — it runs first, and the agent is only called when the check passes. This keeps invocations to a minimum.
+
+### How it works
+
+1. You provide a bash `script` alongside the `prompt` when scheduling
+2. When the task fires, the script runs first (30-second timeout)
+3. Script prints JSON to stdout: `{ "wakeAgent": true/false, "data": {...} }`
+4. If `wakeAgent: false` — nothing happens, task waits for next run
+5. If `wakeAgent: true` — you wake up and receive the script's data + prompt
+
+### Always test your script first
+
+Before scheduling, run the script in your sandbox to verify it works:
+
+```bash
+bash -c 'node --input-type=module -e "
+  const r = await fetch(\"https://api.github.com/repos/owner/repo/pulls?state=open\");
+  const prs = await r.json();
+  console.log(JSON.stringify({ wakeAgent: prs.length > 0, data: prs.slice(0, 5) }));
+"'
+```
+
+### When NOT to use scripts
+
+If a task requires your judgment every time (daily briefings, reminders, reports), skip the script — just use a regular prompt.
+
+### Frequent task guidance
+
+If a user wants tasks running more than ~2x daily and a script can't reduce agent wake-ups:
+
+- Explain that each wake-up uses API credits and risks rate limits
+- Suggest restructuring with a script that checks the condition first
+- If the user needs an LLM to evaluate data, suggest using an API key with direct Anthropic API calls inside the script
+- Help the user find the minimum viable frequency
