@@ -333,6 +333,20 @@ const SECRET_ENV_VARS = [
   'GMAIL_CREDENTIALS_PATH',
 ];
 
+function isPromptTooLongError(msg: string): boolean {
+  return msg.includes('prompt is too long') ||
+    msg.includes('prompt_too_long') ||
+    msg.includes('maximum context length');
+}
+
+function isRetryableError(msg: string): boolean {
+  return msg.includes('429') ||
+    /rate.?limit/i.test(msg) ||
+    /overloaded/i.test(msg) ||
+    msg.includes('upstream_error') ||
+    msg.includes('External provider returned');
+}
+
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
     const preInput = input as PreToolUseHookInput;
@@ -1206,10 +1220,11 @@ async function runQuery(
       // even when the response body is an upstream error). Throw so the retry
       // wrapper in main() can rotate keys and re-run the query.
       const effectiveResult = textResult || lastAssistantText || null;
-      const isApiErrorResult = typeof effectiveResult === 'string' &&
-        effectiveResult.startsWith('API Error:') &&
-        (effectiveResult.includes('upstream_error') || effectiveResult.includes('External provider returned') || effectiveResult.includes('429'));
-      if (isApiErrorResult) {
+      // SDK surfaces upstream errors as result text with "API Error:" prefix
+      // (sdk/cli.js internal format — re-verify on SDK upgrades).
+      if (typeof effectiveResult === 'string' &&
+          effectiveResult.startsWith('API Error:') &&
+          isRetryableError(effectiveResult)) {
         throw new Error(effectiveResult);
       }
       writeOutput({
@@ -1581,15 +1596,17 @@ async function main(): Promise<void> {
   // Query loop: run query → wait for IPC message → run new query → repeat
   const queryCtx: QueryContext = { mcpServerPath, containerInput, sdkEnv, buildSystemPrompt, plugins };
   let resumeAt: string | undefined;
+  // Fallback keys tried in order on retryable errors. Hoisted outside the
+  // message loop so rotation position and the active key both persist for
+  // the container lifetime — once key N is exhausted, key N+1 stays active.
+  const fallbackKeys = (['ANTHROPIC_API_KEY_2', 'ANTHROPIC_API_KEY_3'] as const)
+    .map(k => sdkEnv[k])
+    .filter((k): k is string => typeof k === 'string' && k.length > 0);
+  let nextFallback = 0;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      // Collect fallback keys in rotation order, skipping missing/empty ones.
-      const fallbackKeys = (['ANTHROPIC_API_KEY_2', 'ANTHROPIC_API_KEY_3'] as const)
-        .map(k => sdkEnv[k])
-        .filter((k): k is string => typeof k === 'string' && k.length > 0);
-      let nextFallback = 0;
       let queryResult;
       for (;;) {
         try {
@@ -1597,19 +1614,14 @@ async function main(): Promise<void> {
           break;
         } catch (runErr) {
           const runErrMsg = runErr instanceof Error ? runErr.message : String(runErr);
-          const isPromptTooLong = runErrMsg.includes('prompt is too long') || runErrMsg.includes('prompt_too_long') || runErrMsg.includes('maximum context length');
-          const isRetryable = !isPromptTooLong && (
-            runErrMsg.includes('429') ||
-            /rate.?limit/i.test(runErrMsg) ||
-            /overloaded/i.test(runErrMsg) ||
-            runErrMsg.includes('upstream_error') ||
-            runErrMsg.includes('External provider returned')
-          );
-          const rotateKey = isRetryable && nextFallback < fallbackKeys.length
+          const keyIndex = nextFallback;
+          const rotateKey = !isPromptTooLongError(runErrMsg) &&
+            isRetryableError(runErrMsg) &&
+            keyIndex < fallbackKeys.length
             ? fallbackKeys[nextFallback++]
             : undefined;
           if (rotateKey && sdkEnv['ANTHROPIC_API_KEY'] !== rotateKey) {
-            log(`retryable error (${runErrMsg.slice(0, 80)}), rotating to key ${nextFallback + 1}`);
+            log(`retryable error (${runErrMsg.slice(0, 80)}), rotating to ANTHROPIC_API_KEY_${keyIndex + 2}`);
             sdkEnv['ANTHROPIC_API_KEY'] = rotateKey;
           } else {
             throw runErr;
@@ -1662,14 +1674,11 @@ async function main(): Promise<void> {
     log(`Agent error: ${errorMessage}`);
 
     // Detect prompt_too_long errors for auto-recovery by the host
-    const isPromptTooLong =
-      errorMessage.includes('prompt is too long') ||
-      errorMessage.includes('prompt_too_long') ||
-      errorMessage.includes('maximum context length');
+    const promptTooLong = isPromptTooLongError(errorMessage);
 
     // Try to retrieve session summary for recovery context
     let summary: string | undefined;
-    if (isPromptTooLong && sessionId) {
+    if (promptTooLong && sessionId) {
       const claudeDir = '/home/node/.claude';
       const indexPath = path.join(claudeDir, 'projects', 'default', 'sessions-index.json');
       summary = getSessionSummary(sessionId, indexPath) || undefined;
@@ -1680,7 +1689,7 @@ async function main(): Promise<void> {
       result: summary ? `[Previous context summary]: ${summary}` : null,
       newSessionId: sessionId,
       error: errorMessage,
-      errorType: isPromptTooLong ? 'prompt_too_long' : 'general',
+      errorType: promptTooLong ? 'prompt_too_long' : 'general',
     });
     process.exit(1);
   }

@@ -95,22 +95,28 @@ fi
 # This avoids re-analyzing all repos (typically 20+) when a thread only
 # touches 1-2, and avoids stale-index re-analysis caused by prior commits.
 mkdir -p /home/node/.gitnexus
+# Collect all repos with an existing index, then register in one Node process.
+_gitnexus_repos=()
 for gitdir in $(find /workspace -maxdepth 3 -name .git \( -type d -o -type f \) 2>/dev/null); do
   repo=$(dirname "$gitdir")
-  if [ -f "$repo/.gitnexus/meta.json" ]; then
-    node -e '
-      const fs=require("fs"),p=require("path");
-      const repo="'"$repo"'";
-      const meta=JSON.parse(fs.readFileSync(p.join(repo,".gitnexus","meta.json"),"utf8"));
-      const regPath=p.join(process.env.HOME,".gitnexus","registry.json");
-      const reg=fs.existsSync(regPath)?JSON.parse(fs.readFileSync(regPath,"utf8")):[];
-      if(!reg.some(r=>r.path===repo)){
+  [ -f "$repo/.gitnexus/meta.json" ] && _gitnexus_repos+=("$repo")
+done
+if [ ${#_gitnexus_repos[@]} -gt 0 ]; then
+  node -e '
+    const fs=require("fs"),p=require("path");
+    const regPath=p.join(process.env.HOME,".gitnexus","registry.json");
+    const reg=fs.existsSync(regPath)?JSON.parse(fs.readFileSync(regPath,"utf8")):[];
+    for(const repo of process.argv.slice(1)){
+      if(reg.some(r=>r.path===repo)) continue;
+      try{
+        const meta=JSON.parse(fs.readFileSync(p.join(repo,".gitnexus","meta.json"),"utf8"));
         reg.push({name:p.basename(repo),path:repo,storagePath:p.join(repo,".gitnexus"),
           indexedAt:meta.indexedAt,lastCommit:meta.lastCommit,stats:meta.stats});
-        fs.writeFileSync(regPath,JSON.stringify(reg,null,2)+"\n");
-      }
-    ' 2>/dev/null && echo "[entrypoint] GitNexus: registered $repo" >&2 || true
-  fi
-done
+      }catch{}
+    }
+    fs.writeFileSync(regPath,JSON.stringify(reg,null,2)+"\n");
+  ' "${_gitnexus_repos[@]}" 2>/dev/null \
+    && echo "[entrypoint] GitNexus: registered ${#_gitnexus_repos[@]} repo(s)" >&2 || true
+fi
 
 node /tmp/dist/index.js < /tmp/input.json
