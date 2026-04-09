@@ -11,7 +11,10 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentImpl } from './agent-impl.js';
-import { buildAgentConfig } from './agent-config.js';
+import {
+  buildAgentConfig,
+  resolveSerializableAgentSettings,
+} from './agent-config.js';
 import { buildRuntimeConfig } from './runtime-config.js';
 import { _initTestDatabase } from './db.js';
 import type { Channel } from './types.js';
@@ -21,11 +24,14 @@ let tmpDir: string;
 const rtConfig = buildRuntimeConfig({}, '/tmp/agentlite-test-pkg');
 
 function createAgent(name: string): AgentImpl {
-  const config = buildAgentConfig(
-    name,
-    { workdir: path.join(tmpDir, 'agents', name) },
-    tmpDir,
-  );
+  const config = buildAgentConfig({
+    agentId: `${name}00000000`.slice(0, 8),
+    ...resolveSerializableAgentSettings(
+      name,
+      { workdir: path.join(tmpDir, 'agents', name) },
+      tmpDir,
+    ),
+  });
   return new AgentImpl(config, rtConfig);
 }
 

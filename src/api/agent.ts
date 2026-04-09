@@ -12,6 +12,8 @@ import type {
 
 /** Per-project agent runtime. Manages channels and per-chat VMs. */
 export interface Agent {
+  /** Stable internal nanoid used for runtime identifiers. */
+  readonly id: string;
   /** Agent name (the key used in createAgent()). */
   readonly name: string;
 

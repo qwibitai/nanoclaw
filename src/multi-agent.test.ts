@@ -9,18 +9,24 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AgentImpl } from './agent-impl.js';
-import { buildAgentConfig } from './agent-config.js';
+import {
+  buildAgentConfig,
+  resolveSerializableAgentSettings,
+} from './agent-config.js';
 import { buildRuntimeConfig } from './runtime-config.js';
 
 let tmpDir: string;
 const rtConfig = buildRuntimeConfig({}, '/tmp/agentlite-test-pkg');
 
 function createAgent(name: string): AgentImpl {
-  const config = buildAgentConfig(
-    name,
-    { workdir: path.join(tmpDir, 'agents', name) },
-    tmpDir,
-  );
+  const config = buildAgentConfig({
+    agentId: `${name}00000000`.slice(0, 8),
+    ...resolveSerializableAgentSettings(
+      name,
+      { workdir: path.join(tmpDir, 'agents', name) },
+      tmpDir,
+    ),
+  });
   return new AgentImpl(config, rtConfig);
 }
 
@@ -42,6 +48,14 @@ describe('Multi-agent isolation', () => {
     const bob = createAgent('bob');
     expect(alice.name).toBe('alice');
     expect(bob.name).toBe('bob');
+  });
+
+  it('two agents retain their provided ids', () => {
+    const alice = createAgent('alice');
+    const bob = createAgent('bob');
+
+    expect(alice.id).toBe('alice000');
+    expect(bob.id).toBe('bob00000');
   });
 
   it('two agents have independent workdir paths', () => {
@@ -99,16 +113,22 @@ describe('Multi-agent isolation', () => {
   });
 
   it('custom assistant names per agent', () => {
-    const aliceConfig = buildAgentConfig(
-      'alice',
-      { name: 'Alice', workdir: path.join(tmpDir, 'agents', 'alice') },
-      tmpDir,
-    );
-    const bobConfig = buildAgentConfig(
-      'bob',
-      { name: 'Bob', workdir: path.join(tmpDir, 'agents', 'bob') },
-      tmpDir,
-    );
+    const aliceConfig = buildAgentConfig({
+      agentId: 'alice001',
+      ...resolveSerializableAgentSettings(
+        'alice',
+        { name: 'Alice', workdir: path.join(tmpDir, 'agents', 'alice') },
+        tmpDir,
+      ),
+    });
+    const bobConfig = buildAgentConfig({
+      agentId: 'bob00001',
+      ...resolveSerializableAgentSettings(
+        'bob',
+        { name: 'Bob', workdir: path.join(tmpDir, 'agents', 'bob') },
+        tmpDir,
+      ),
+    });
 
     const alice = new AgentImpl(aliceConfig, rtConfig);
     const bob = new AgentImpl(bobConfig, rtConfig);

@@ -7,7 +7,7 @@
  * import { telegram } from '@boxlite-ai/agentlite/channels/telegram';
  *
  * const agentlite = await createAgentLite({ workdir: './data' });
- * const agent = agentlite.createAgent('main', {
+ * const agent = agentlite.getOrCreateAgent('main', {
  *   name: 'Andy',
  *   channels: { telegram: telegram({ token: process.env.TG_TOKEN! }) },
  * });
@@ -47,11 +47,13 @@ import type { AgentLiteOptions, AgentOptions } from './options.js';
 
 /** Platform-level runtime. Creates and manages Agents. */
 export interface AgentLite {
-  /** All active agents. */
+  /** All known agents, including restored stopped agents. */
   readonly agents: ReadonlyMap<string, Agent>;
 
-  /** Create a named Agent with isolated workdir, channels, and per-chat VMs. */
+  /** Create a new named Agent with isolated workdir, channels, and per-chat VMs. */
   createAgent(name: string, options?: AgentOptions): Agent;
+  /** Return an existing Agent if restored, otherwise create and persist a new one. */
+  getOrCreateAgent(name: string, options?: AgentOptions): Agent;
   /** Stop and remove a named Agent. */
   deleteAgent(name: string): Promise<void>;
   /** Stop all agents and release resources. */

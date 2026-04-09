@@ -22,14 +22,14 @@ export interface AgentLiteOptions {
 
 /** Options for creating an Agent. */
 export interface AgentOptions {
-  /** Agent-specific data directory. Default: {base}/agents/{name} */
+  /** Agent-specific data directory. Persisted in the platform registry. Default: {base}/agents/{name} */
   workdir?: string;
-  /** Assistant trigger name (used in @Name patterns). Default: 'Andy' */
+  /** Assistant trigger name (used in @Name patterns). Persisted in the platform registry. Default: 'Andy' */
   name?: string;
-  /** Resolve credentials injected into agent containers. Falls back to OneCLI if not set. */
+  /** Resolve credentials injected into agent containers. Runtime-only, never persisted. */
   credentials?: CredentialResolver;
-  /** Mount allowlist for container security. Blocks all mounts if not provided. */
+  /** Mount allowlist for container security. Persisted in the platform registry. */
   mountAllowlist?: MountAllowlist;
-  /** Initial channels. Factories are called at agent.start() time. */
+  /** Initial channels. Factories are called at agent.start() time and are never persisted. */
   channels?: Record<string, ChannelDriverFactory>;
 }

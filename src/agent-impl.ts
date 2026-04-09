@@ -16,7 +16,7 @@ import type { TypedEmitter } from './typed-emitter.js';
 import type { AgentEvents } from './api/events.js';
 import type { AgentConfig } from './agent-config.js';
 import type { RuntimeConfig } from './runtime-config.js';
-import type { AgentOptions } from './api/options.js';
+import type { AgentOptions, CredentialResolver } from './api/options.js';
 import type {
   AvailableGroup,
   RegisterGroupOptions,
@@ -110,6 +110,7 @@ export class AgentImpl
   private _started = false;
   private _onecli: any = null;
   private _options: AgentOptions | undefined;
+  private credentialResolver: CredentialResolver | null = null;
 
   // --- Per-agent subsystem handles ---
   private db!: AgentDb;
@@ -127,15 +128,41 @@ export class AgentImpl
     this.config = agentConfig;
     this.runtimeConfig = runtimeConfig;
     this._options = options;
+    this.credentialResolver = options?.credentials ?? null;
     this.queue = new GroupQueue({
       dataDir: this.config.dataDir,
       maxConcurrent: runtimeConfig.maxConcurrentContainers,
     });
   }
 
+  /** Stable internal nanoid used for runtime identifiers. */
+  get id(): string {
+    return this.config.agentId;
+  }
+
   /** Agent name (the key used in agentlite.createAgent()). */
   get name(): string {
     return this.config.agentName;
+  }
+
+  /** @internal — merge runtime-only options for restored agents. */
+  mergeRuntimeOptions(options?: AgentOptions): void {
+    if (!options) return;
+
+    const existingChannels = this._options?.channels ?? {};
+    const nextChannels = options.channels
+      ? { ...existingChannels, ...options.channels }
+      : existingChannels;
+
+    this._options = {
+      ...this._options,
+      channels: nextChannels,
+      credentials: options.credentials ?? this.credentialResolver ?? undefined,
+    };
+
+    if (options.credentials) {
+      this.credentialResolver = options.credentials;
+    }
   }
 
   // ─── Public API ──────────────────────────────────────────────────
@@ -204,7 +231,7 @@ export class AgentImpl
     fs.mkdirSync(this.config.dataDir, { recursive: true });
 
     this.copyGroupTemplates();
-    await cleanupOrphans(this.name);
+    await cleanupOrphans(this.id);
 
     this.resolvedMountAllowlist = resolveMountAllowlist(
       this.config.mountAllowlist,
@@ -684,10 +711,10 @@ export class AgentImpl
           chatJid,
           isMain,
           assistantName: this.config.assistantName,
-          instanceName: this.name,
+          agentId: this.id,
           groupsDir: this.config.groupsDir,
           dataDir: this.config.dataDir,
-          credentialResolver: this.config.credentials ?? undefined,
+          credentialResolver: this.credentialResolver ?? undefined,
           mountAllowlist: this.resolvedMountAllowlist,
         },
         this.runtimeConfig,
@@ -869,7 +896,7 @@ export class AgentImpl
       workDir: this.config.workDir,
       groupsDir: this.config.groupsDir,
       dataDir: this.config.dataDir,
-      credentialResolver: this.config.credentials ?? undefined,
+      credentialResolver: this.credentialResolver ?? undefined,
       mountAllowlist: this.resolvedMountAllowlist,
       registeredGroups: () => this._registeredGroups,
       getSessions: () => this.sessions,

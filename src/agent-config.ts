@@ -1,57 +1,87 @@
 /**
  * AgentConfig — immutable configuration for a single Agent.
- * Created by AgentLite.createAgent(). Replaces per-instance fields from config.ts.
+ * Created from persisted agent metadata plus runtime-only options.
  */
 
 import path from 'path';
 
 import type { MountAllowlist } from './types.js';
-import type { AgentOptions, CredentialResolver } from './api/options.js';
+import type { AgentOptions } from './api/options.js';
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Immutable config for one Agent — identity, paths, security, credentials. */
-export interface AgentConfig {
-  // Identity
+function normalizeJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, child]) => [key, normalizeJson(child)]),
+    );
+  }
+  return value;
+}
+
+export function serializeMountAllowlist(
+  mountAllowlist: MountAllowlist | null,
+): string | null {
+  return mountAllowlist === null
+    ? null
+    : JSON.stringify(normalizeJson(mountAllowlist));
+}
+
+export interface SerializableAgentSettings {
   readonly agentName: string;
   readonly assistantName: string;
-  readonly triggerPattern: RegExp;
-
-  // Paths (derived from workDir)
   readonly workDir: string;
+  readonly mountAllowlist: MountAllowlist | null;
+}
+
+export interface PersistedAgentSettings extends SerializableAgentSettings {
+  readonly agentId: string;
+}
+
+/** Immutable config for one Agent — identity, paths, and security. */
+export interface AgentConfig extends PersistedAgentSettings {
+  readonly triggerPattern: RegExp;
   readonly storeDir: string;
   readonly groupsDir: string;
   readonly dataDir: string;
-
-  // Security
-  readonly mountAllowlist: MountAllowlist | null;
-
-  // Credentials
-  readonly credentials: CredentialResolver | null;
 }
 
-/** Build an immutable AgentConfig from agent name + options + base workdir. */
-export function buildAgentConfig(
+/** Resolve the serializable subset of AgentOptions that is stored in the registry. */
+export function resolveSerializableAgentSettings(
   agentName: string,
   opts: AgentOptions | undefined,
   baseWorkdir: string,
-): AgentConfig {
-  const assistantName = opts?.name ?? 'Andy';
-  const workdir = path.resolve(
-    opts?.workdir ?? path.join(baseWorkdir, 'agents', agentName),
-  );
-
+): SerializableAgentSettings {
   return {
     agentName,
-    assistantName,
-    triggerPattern: new RegExp(`^@${escapeRegex(assistantName)}\\b`, 'i'),
-    workDir: workdir,
-    storeDir: path.join(workdir, 'store'),
-    groupsDir: path.join(workdir, 'groups'),
-    dataDir: path.join(workdir, 'data'),
+    assistantName: opts?.name ?? 'Andy',
+    workDir: path.resolve(
+      opts?.workdir ?? path.join(baseWorkdir, 'agents', agentName),
+    ),
     mountAllowlist: opts?.mountAllowlist ?? null,
-    credentials: opts?.credentials ?? null,
+  };
+}
+
+/** Build an immutable AgentConfig from persisted registry metadata. */
+export function buildAgentConfig(input: PersistedAgentSettings): AgentConfig {
+  const workDir = path.resolve(input.workDir);
+
+  return {
+    agentId: input.agentId,
+    agentName: input.agentName,
+    assistantName: input.assistantName,
+    triggerPattern: new RegExp(`^@${escapeRegex(input.assistantName)}\\b`, 'i'),
+    workDir,
+    storeDir: path.join(workDir, 'store'),
+    groupsDir: path.join(workDir, 'groups'),
+    dataDir: path.join(workDir, 'data'),
+    mountAllowlist: input.mountAllowlist,
   };
 }

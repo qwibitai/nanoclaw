@@ -9,11 +9,43 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import {
+  buildAgentConfig,
+  resolveSerializableAgentSettings,
+  serializeMountAllowlist,
+  type SerializableAgentSettings,
+} from './agent-config.js';
+import {
+  initAgentRegistryDb,
+  type AgentRegistryDb,
+  type AgentRegistryRecord,
+} from './agent-registry-db.js';
 import { buildRuntimeConfig } from './runtime-config.js';
-import { buildAgentConfig } from './agent-config.js';
 import type { AgentLiteOptions, AgentOptions } from './api/options.js';
 import type { Agent } from './api/agent.js';
 import type { AgentLite } from './api/sdk.js';
+
+interface RuntimeOptionsAwareAgent extends Agent {
+  mergeRuntimeOptions(options?: AgentOptions): void;
+  readonly config: {
+    assistantName: string;
+    workDir: string;
+    mountAllowlist: import('./types.js').MountAllowlist | null;
+  };
+}
+
+function toRuntimeOptions(
+  record: AgentRegistryRecord,
+  options?: AgentOptions,
+): AgentOptions {
+  return {
+    workdir: record.workDir,
+    name: record.assistantName,
+    mountAllowlist: record.mountAllowlist ?? undefined,
+    channels: options?.channels,
+    credentials: options?.credentials,
+  };
+}
 
 // ─── Impl factory (called by api/sdk.ts) ───────────────────────────
 
@@ -33,6 +65,7 @@ class AgentLiteImpl implements AgentLite {
   private _agentModule: typeof import('./agent-impl.js') | null = null;
   private _runtimeConfig: ReturnType<typeof buildRuntimeConfig>;
   private _options: AgentLiteOptions;
+  private _registry: AgentRegistryDb | null = null;
 
   constructor(options?: AgentLiteOptions) {
     this._options = options ?? {};
@@ -47,6 +80,13 @@ class AgentLiteImpl implements AgentLite {
     return this._agents;
   }
 
+  private get registry(): AgentRegistryDb {
+    if (!this._registry) {
+      throw new Error('Agent registry not initialized');
+    }
+    return this._registry;
+  }
+
   /** @internal */
   async _init(): Promise<void> {
     const boxRuntime = await import('./box-runtime.js');
@@ -55,35 +95,62 @@ class AgentLiteImpl implements AgentLite {
     );
     boxRuntime.ensureRuntimeReady();
     this._agentModule = await import('./agent-impl.js');
+    this._registry = initAgentRegistryDb(this._runtimeConfig.workdir);
+    this.restorePersistedAgents();
   }
 
   createAgent(name: string, options?: AgentOptions): Agent {
     if (!this._agentModule) {
       throw new Error('AgentLite not initialized');
     }
-    if (this._agents.has(name)) {
+    if (this._agents.has(name) || this.registry.getAgent(name)) {
       throw new Error(`Agent "${name}" already exists`);
     }
 
-    const agentConfig = buildAgentConfig(
+    const settings = resolveSerializableAgentSettings(
       name,
       options,
       this._runtimeConfig.workdir,
     );
-    const agent = new this._agentModule.AgentImpl(
-      agentConfig,
-      this._runtimeConfig,
-      options,
-    );
-    this._agents.set(name, agent);
-    return agent;
+    const persisted = this.registry.createAgent(settings);
+
+    try {
+      const agent = this.instantiateAgent(persisted, options);
+      this._agents.set(name, agent);
+      return agent;
+    } catch (err) {
+      this.registry.deleteAgent(name);
+      throw err;
+    }
+  }
+
+  getOrCreateAgent(name: string, options?: AgentOptions): Agent {
+    const existing = this._agents.get(name);
+    if (existing) {
+      const runtimeAgent = existing as RuntimeOptionsAwareAgent;
+      this.assertSerializableOptionsMatch(name, runtimeAgent.config, options);
+      runtimeAgent.mergeRuntimeOptions(options);
+      return existing;
+    }
+
+    const persisted = this.registry.getAgent(name);
+    if (persisted) {
+      this.assertSerializableOptionsMatch(name, persisted, options);
+      const agent = this.instantiateAgent(persisted, options);
+      this._agents.set(name, agent);
+      return agent;
+    }
+
+    return this.createAgent(name, options);
   }
 
   async deleteAgent(name: string): Promise<void> {
     const agent = this._agents.get(name);
-    if (!agent) return;
-    await agent.stop();
-    this._agents.delete(name);
+    if (agent) {
+      await agent.stop();
+      this._agents.delete(name);
+    }
+    this.registry.deleteAgent(name);
   }
 
   async stop(): Promise<void> {
@@ -91,5 +158,70 @@ class AgentLiteImpl implements AgentLite {
       await agent.stop();
     }
     this._agents.clear();
+  }
+
+  private restorePersistedAgents(): void {
+    for (const record of this.registry.listAgents()) {
+      this._agents.set(record.agentName, this.instantiateAgent(record));
+    }
+  }
+
+  private instantiateAgent(
+    record: AgentRegistryRecord,
+    runtimeOptions?: AgentOptions,
+  ): Agent {
+    if (!this._agentModule) {
+      throw new Error('AgentLite not initialized');
+    }
+
+    const agentConfig = buildAgentConfig({
+      agentId: record.agentId,
+      agentName: record.agentName,
+      assistantName: record.assistantName,
+      workDir: record.workDir,
+      mountAllowlist: record.mountAllowlist,
+    });
+
+    return new this._agentModule.AgentImpl(
+      agentConfig,
+      this._runtimeConfig,
+      toRuntimeOptions(record, runtimeOptions),
+    );
+  }
+
+  private assertSerializableOptionsMatch(
+    name: string,
+    existing: Pick<
+      SerializableAgentSettings,
+      'assistantName' | 'workDir' | 'mountAllowlist'
+    >,
+    options?: AgentOptions,
+  ): void {
+    if (!options) return;
+
+    if (options.name !== undefined && options.name !== existing.assistantName) {
+      throw new Error(
+        `Agent "${name}" already exists with assistant name "${existing.assistantName}"`,
+      );
+    }
+
+    if (
+      options.workdir !== undefined &&
+      path.resolve(options.workdir) !== existing.workDir
+    ) {
+      throw new Error(
+        `Agent "${name}" already exists with workdir "${existing.workDir}"`,
+      );
+    }
+
+    if (
+      options.mountAllowlist !== undefined &&
+      serializeMountAllowlist(options.mountAllowlist) !==
+        serializeMountAllowlist(existing.mountAllowlist)
+    ) {
+      throw new Error(
+        `Agent "${name}" already exists with a different mount allowlist`,
+      );
+    }
   }
 }
