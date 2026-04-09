@@ -1,6 +1,6 @@
 # Tone Profile: Professional
 
-**Use for:** External contacts, Sunday leadership (VP+, board, exec), vendors, formal business, anyone Dave doesn't have casual rapport with. Default for unknown relationships.
+**Use for:** External contacts, company leadership (VP+, board, exec), vendors, formal business, anyone you don't have casual rapport with. Default for unknown relationships.
 
 ## Voice
 
@@ -21,7 +21,7 @@ Concise, confident, and structured. Reads like a senior technical leader who res
 
 ## Sign-off
 
-"Dave"
+"[Name]"
 
 ## Sample Phrases
 
@@ -48,18 +48,16 @@ The migration is progressing well, and we're currently leveraging several innova
 Please don't hesitate to reach out if you have any questions or need further clarification. I'd be happy to set up some time to discuss this in more detail.
 
 Best regards,
-Dave</bad>
+[Name]</bad>
 <why_bad>"I hope this finds you well", "comprehensive", "important to note", "meticulously", "seamless", "leveraging", "streamline", "Additionally", "Please don't hesitate to reach out", "Best regards". Zero information in four paragraphs.</why_bad>
 <good>Hi Sarah,
 
 The pipeline migration is on track for end of Q1. Two things worth flagging:
 
-1. The Snowflake UDTF issue is blocking the events table migration. I've escalated with their support team and expect a fix by next Wednesday.
-2. Staging validation is passing. Production cutover will happen during the maintenance window on March 28.
+1. A database compatibility issue is blocking the final table migration. I've escalated with the vendor and expect a fix by next Wednesday.
+2. Staging validation is passing. Production cutover is scheduled for the maintenance window on [date].
 
-I'll send a final status update the day before cutover. If anything shifts, I'll flag it early.
-
-Dave</good>
+I'll send a final status update the day before cutover. If anything shifts, I'll flag it early.</good>
 </example>
 
 <example type="contrast">
@@ -73,41 +71,35 @@ After careful consideration, we've determined that our current tooling adequatel
 I wish you all the best with your continued growth and success. Please don't hesitate to keep us in the loop on any future developments.
 
 Warm regards,
-Dave</bad>
+[Name]</bad>
 <why_bad>"Thank you so much", "invaluable", "After careful consideration", "at this time", "I believe there may be opportunities", "Please don't hesitate", "Warm regards". Over-polite and says nothing.</why_bad>
 <good>Hi Michael,
 
 Appreciate the walkthrough. We're set on tooling for now and not evaluating new vendors this quarter.
 
-If that changes, I'll reach out.
-
-Dave</good>
+If that changes, I'll reach out.</good>
 </example>
 
 <example>
-<context>Send a project status update to the SVP before the board meeting.</context>
-<output>Hi Raj,
+<context>Send a project status update to leadership before a board meeting.</context>
+<output>Hi [Name],
 
-Quick update ahead of Thursday's board meeting.
+Quick update ahead of the board meeting.
 
-1. Data warehouse migration: 80% complete. Remaining 20% is the events pipeline, on track for March 28 cutover.
-2. Analytics team headcount: Backfill for the senior analyst role closes next week. Two strong candidates in final rounds.
-3. Cost optimization: Snowflake spend is down 15% from the compute governance changes we shipped in February.
+1. Data warehouse migration: 80% complete. Remaining 20% is the final pipeline migration, on track for [date] cutover.
+2. Team headcount: Backfill for the senior role closes next week. Two strong candidates in final rounds.
+3. Cost optimization: Spend is down [X]% from the infrastructure changes shipped last quarter.
 
-No blockers. I'll be in the room Thursday if the board has questions.
-
-Dave</output>
+No blockers. I'll be in the room Thursday if the board has questions.</output>
 </example>
 
 <example>
 <context>Reply to a meeting invite from a director on another team asking to discuss data access policies.</context>
-<output>Hi Lisa,
+<output>Hi [Name],
 
 Thursday at 2pm works. I'll bring the current access policy doc and the audit results from last quarter.
 
-One ask: can you share the specific use cases your team is running into? I want to come prepared with options rather than starting from scratch.
-
-Dave</output>
+One ask: can you share the specific use cases your team is running into? I want to come prepared with options rather than starting from scratch.</output>
 </example>
 
 </examples>

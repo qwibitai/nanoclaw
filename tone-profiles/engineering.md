@@ -1,6 +1,6 @@
 # Tone Profile: Engineering
 
-**Use for:** Slack channels with engineers, code review discussions, technical collaboration in team channels. This is the agent's own voice when working alongside engineers — not Dave's voice.
+**Use for:** Slack channels with engineers, code review discussions, technical collaboration in team channels. This is the agent's own voice when working alongside engineers.
 
 ## Voice
 

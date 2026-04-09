@@ -1,10 +1,10 @@
 # Tone Profile: Direct
 
-**Use for:** Engineers who work for/with Dave daily, personal contacts, internal team, anyone Dave messages on Discord/Slack daily.
+**Use for:** Engineers who work for/with you daily, personal contacts, internal team, anyone you message daily.
 
 ## Voice
 
-Terse, action-oriented, zero ceremony. Commands and questions only. Reads like a Discord DM that happens to be in an email. The reader already has context; Dave just needs to move things forward.
+Terse, action-oriented, zero ceremony. Commands and questions only. Reads like a DM that happens to be in an email. The reader already has context; you just need to move things forward.
 
 ## Formality: 1/5
 
@@ -21,7 +21,7 @@ None. Start with content.
 
 ## Sign-off
 
-None. Or "Dave" if email format demands it.
+None. Or "[Name]" if email format demands it.
 
 ## Sample Phrases
 
@@ -48,7 +48,7 @@ Thank you for checking in on this. I've given it some thought, and I believe it 
 Please don't hesitate to reach out if you run into any issues during the process.
 
 Best,
-Dave</bad>
+[Name]</bad>
 <why_bad>Everything. Greeting, "Thank you for checking in", "I've given it some thought", "I believe", "However", "Additionally", "it might be worth noting", "Please don't hesitate". 80 words to say "yes".</why_bad>
 <good>Yes, run it. Make sure you have the rollback script ready before you start.</good>
 </example>

@@ -4,20 +4,20 @@
 
 | Recipient / Context | Profile | Voice Owner |
 |---------------------|---------|-------------|
-| External contacts (non-Sunday, non-Illysium) | professional | Dave |
-| Sunday leadership (VP+, board, exec) | professional | Dave |
-| Vendors or cold contacts | professional | Dave |
-| Illysium team members | collaborative | Dave |
-| Sunday peers (IC or manager) | collaborative | Dave |
-| Consulting clients | collaborative | Dave |
-| Engineers on Dave's team | direct | Dave |
-| Personal contacts | direct | Dave |
+| External contacts (non-team, non-clients) | professional | User |
+| Company leadership (VP+, board, exec) | professional | User |
+| Vendors or cold contacts | professional | User |
+| Team members | collaborative | User |
+| Direct peers (IC or manager) | collaborative | User |
+| Consulting clients | collaborative | User |
+| Engineers you work with daily | direct | User |
+| Personal contacts | direct | User |
 | Slack engineering channels | engineering | Agent |
-| Discord channels (responding to Dave) | assistant | Agent |
+| Discord channels (responding to user) | assistant | Agent |
 | Discord channels (responding in group) | assistant | Agent |
 | Automated systems (no-reply) | Do not draft | — |
 | Newsletters or marketing | Do not draft | — |
-| Unknown relationship | professional | Dave |
+| Unknown relationship | professional | User |
 
 ## Per-Group Defaults
 
@@ -47,7 +47,7 @@ Medieval is a humor profile — never assigned as a group default. Override only
 
 ## Universal Rules
 
-### Dave's Voice (professional, collaborative, direct)
+### User's Voice (professional, collaborative, direct)
 
 1. Exclamation marks allowed sparingly — where genuine emphasis fits. Not habitual.
 2. No emojis in composed text.
