@@ -1,16 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 
-import { OneCLI } from '@onecli-sh/sdk';
-
 import {
   ASSISTANT_NAME,
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  DEBOUNCE_MS,
   MAX_MESSAGES_PER_PROMPT,
-  ONECLI_URL,
   POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
@@ -19,16 +17,9 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
-import {
-  ContainerOutput,
-  runContainerAgent,
-  writeGroupsSnapshot,
-  writeTasksSnapshot,
-} from './container-runner.js';
-import {
-  cleanupOrphans,
-  ensureContainerRuntimeRunning,
-} from './container-runtime.js';
+import { writeGroupsSnapshot, writeTasksSnapshot } from './container-runner.js';
+import { ContainerOutput, runContainerAgent } from './qwen-runner.js';
+import { InboundDebouncer } from './inbound-debounce.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -77,27 +68,9 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
-
-const onecli = new OneCLI({ url: ONECLI_URL });
-
-function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
-  if (group.isMain) return;
-  const identifier = group.folder.toLowerCase().replace(/_/g, '-');
-  onecli.ensureAgent({ name: group.name, identifier }).then(
-    (res) => {
-      logger.info(
-        { jid, identifier, created: res.created },
-        'OneCLI agent ensured',
-      );
-    },
-    (err) => {
-      logger.debug(
-        { jid, identifier, err: String(err) },
-        'OneCLI agent ensure skipped',
-      );
-    },
-  );
-}
+const debouncer = new InboundDebouncer(DEBOUNCE_MS, (chatJid) =>
+  queue.enqueueMessageCheck(chatJid),
+);
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -179,9 +152,6 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
       logger.info({ folder: group.folder }, 'Created CLAUDE.md from template');
     }
   }
-
-  // Ensure a corresponding OneCLI agent exists (best-effort, non-blocking)
-  ensureOneCLIAgent(jid, group);
 
   logger.info(
     { jid, name: group.name, folder: group.folder },
@@ -411,21 +381,41 @@ async function runAgent(
       const isStaleSession =
         sessionId &&
         output.error &&
-        /no conversation found|ENOENT.*\.jsonl|session.*not found/i.test(
+        (/no conversation found|ENOENT.*\.jsonl|session.*not found/i.test(
           output.error,
-        );
+        ) ||
+          output.errorType === 'stale-session');
 
-      if (isStaleSession) {
+      // Context exhaustion: clear session so the retry (handled by GroupQueue
+      // backoff) starts a fresh conversation instead of hitting the same limit.
+      const isContextExhausted = output.errorType === 'context-exhausted';
+
+      if (isStaleSession || isContextExhausted) {
         logger.warn(
-          { group: group.name, staleSessionId: sessionId, error: output.error },
-          'Stale session detected — clearing for next retry',
+          {
+            group: group.name,
+            staleSessionId: sessionId,
+            error: output.error,
+            reason: isContextExhausted ? 'context-exhausted' : 'stale-session',
+          },
+          'Clearing session before retry',
         );
         delete sessions[group.folder];
         deleteSession(group.folder);
       }
 
+      // Non-retryable errors: return success so GroupQueue doesn't retry.
+      // The user already got an error response (or silence), retrying is pointless.
+      if (output.errorType === 'non-retryable') {
+        logger.warn(
+          { group: group.name, error: output.error },
+          'Non-retryable Qwen error, skipping retry',
+        );
+        return 'success';
+      }
+
       logger.error(
-        { group: group.name, error: output.error },
+        { group: group.name, error: output.error, errorType: output.errorType },
         'Container agent error',
       );
       return 'error';
@@ -528,9 +518,11 @@ async function startMessageLoop(): Promise<void> {
               ?.catch((err) =>
                 logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
               );
+            debouncer.cancel(chatJid);
           } else {
-            // No active container — enqueue for a new one
-            queue.enqueueMessageCheck(chatJid);
+            // No active container — debounce before enqueuing so rapid
+            // multi-message sequences land in a single agent turn.
+            debouncer.push(chatJid);
           }
         }
       }
@@ -563,28 +555,17 @@ function recoverPendingMessages(): void {
   }
 }
 
-function ensureContainerSystemRunning(): void {
-  ensureContainerRuntimeRunning();
-  cleanupOrphans();
-}
-
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
-
-  // Ensure OneCLI agents exist for all registered groups.
-  // Recovers from missed creates (e.g. OneCLI was down at registration time).
-  for (const [jid, group] of Object.entries(registeredGroups)) {
-    ensureOneCLIAgent(jid, group);
-  }
 
   restoreRemoteControl();
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    debouncer.cancelAll();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
