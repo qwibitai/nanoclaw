@@ -30,6 +30,12 @@ function debugLog(message: string, data?: Record<string, unknown>): void {
 }
 
 import { MessageChunker, detectChannelFromJid } from './message-chunker.js';
+// Side-effect import: triggers each channel module's self-registration call
+// via registerChannelFactory(). Without this, getRegisteredChannelNames()
+// returns empty and the channel-connect loop runs zero times → FATAL.
+// Do NOT remove this even if your editor flags it as "unused" — it has no
+// named bindings precisely because the side effect IS the import.
+import './channels/index.js';
 import {
   getChannelFactory,
   getRegisteredChannelNames,
