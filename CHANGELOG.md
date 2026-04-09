@@ -139,7 +139,7 @@ For detailed release notes, see the [full changelog on the documentation site](h
 
 ## [1.1.1] - 2026-02-24
 
-- Added Qodo skills and codebase intelligence
+- Added codebase intelligence
 - Fixed WhatsApp 405 connection failures
 
 ## [1.1.0] - 2026-02-23

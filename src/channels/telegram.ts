@@ -49,12 +49,59 @@ export class TelegramChannel implements Channel {
   name = 'telegram';
 
   private bot: Bot | null = null;
+  private isStopping = false;
+  private pollingRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
     this.opts = opts;
+  }
+
+  private clearPollingRetryTimer(): void {
+    if (!this.pollingRetryTimer) return;
+    clearTimeout(this.pollingRetryTimer);
+    this.pollingRetryTimer = null;
+  }
+
+  private schedulePollingRetry(): void {
+    if (this.isStopping || !this.bot || this.pollingRetryTimer) return;
+    const retryDelayMs = 3000;
+    logger.warn({ retryDelayMs }, 'Retrying Telegram polling');
+    this.pollingRetryTimer = setTimeout(() => {
+      this.pollingRetryTimer = null;
+      this.startPolling();
+    }, retryDelayMs);
+  }
+
+  private startPolling(): void {
+    if (!this.bot || this.isStopping) return;
+
+    Promise.resolve(
+      this.bot.start({
+        onStart: (botInfo) => {
+          logger.info(
+            { username: botInfo.username, id: botInfo.id },
+            'Telegram bot connected',
+          );
+          console.log(`\n  Telegram bot: @${botInfo.username}`);
+          console.log(
+            `  Send /chatid to the bot to get a chat's registration ID\n`,
+          );
+        },
+      }),
+    )
+      .then(() => {
+        if (this.isStopping) return;
+        logger.warn('Telegram polling stopped unexpectedly');
+        this.schedulePollingRetry();
+      })
+      .catch((err) => {
+        if (this.isStopping) return;
+        logger.error({ err }, 'Telegram polling failed');
+        this.schedulePollingRetry();
+      });
   }
 
   /**
@@ -90,7 +137,10 @@ export class TelegramChannel implements Channel {
       const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
       const resp = await fetch(fileUrl);
       if (!resp.ok) {
-        logger.warn({ fileId, status: resp.status }, 'Telegram file download failed');
+        logger.warn(
+          { fileId, status: resp.status },
+          'Telegram file download failed',
+        );
         return null;
       }
 
@@ -106,6 +156,8 @@ export class TelegramChannel implements Channel {
   }
 
   async connect(): Promise<void> {
+    this.isStopping = false;
+    this.clearPollingRetryTimer();
     this.bot = new Bot(this.botToken, {
       client: {
         baseFetchConfig: { agent: https.globalAgent, compress: true },
@@ -341,22 +393,7 @@ export class TelegramChannel implements Channel {
       logger.error({ err: err.message }, 'Telegram bot error');
     });
 
-    // Start polling — returns a Promise that resolves when started
-    return new Promise<void>((resolve) => {
-      this.bot!.start({
-        onStart: (botInfo) => {
-          logger.info(
-            { username: botInfo.username, id: botInfo.id },
-            'Telegram bot connected',
-          );
-          console.log(`\n  Telegram bot: @${botInfo.username}`);
-          console.log(
-            `  Send /chatid to the bot to get a chat's registration ID\n`,
-          );
-          resolve();
-        },
-      });
-    });
+    this.startPolling();
   }
 
   async sendMessage(
@@ -407,6 +444,8 @@ export class TelegramChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
+    this.isStopping = true;
+    this.clearPollingRetryTimer();
     if (this.bot) {
       this.bot.stop();
       this.bot = null;

@@ -60,7 +60,14 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
+const WORKSPACE_GROUP_DIR =
+  process.env.NANOCLAW_WORKSPACE_GROUP_DIR || '/workspace/group';
+const WORKSPACE_GLOBAL_DIR =
+  process.env.NANOCLAW_WORKSPACE_GLOBAL_DIR || '/workspace/global';
+const WORKSPACE_EXTRA_DIR =
+  process.env.NANOCLAW_WORKSPACE_EXTRA_DIR || '/workspace/extra';
+const IPC_INPUT_DIR =
+  process.env.NANOCLAW_IPC_INPUT_DIR || '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 
@@ -127,6 +134,44 @@ function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
 }
 
+function normalizeModelValue(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function resolveConfiguredModel(): {
+  model?: string;
+  source: 'ANTHROPIC_MODEL' | 'CLAUDE_MODEL' | 'unset';
+} {
+  const anthropicModel = normalizeModelValue(process.env.ANTHROPIC_MODEL);
+  if (anthropicModel) {
+    return { model: anthropicModel, source: 'ANTHROPIC_MODEL' };
+  }
+  const claudeModel = normalizeModelValue(process.env.CLAUDE_MODEL);
+  if (claudeModel) {
+    return { model: claudeModel, source: 'CLAUDE_MODEL' };
+  }
+  return { source: 'unset' };
+}
+
+type SessionSlashKind = 'compact' | 'model';
+
+interface SessionSlashCommand {
+  command: string;
+  kind: SessionSlashKind;
+}
+
+function parseSessionSlashCommand(prompt: string): SessionSlashCommand | null {
+  const trimmed = prompt.trim();
+  if (trimmed === '/compact') {
+    return { command: '/compact', kind: 'compact' };
+  }
+  if (/^\/model(?:\s+\S+)?$/.test(trimmed)) {
+    return { command: trimmed, kind: 'model' };
+  }
+  return null;
+}
+
 function getSessionSummary(
   sessionId: string,
   transcriptPath: string,
@@ -182,7 +227,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const summary = getSessionSummary(sessionId, transcriptPath);
       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
-      const conversationsDir = '/workspace/group/conversations';
+      const conversationsDir = path.join(WORKSPACE_GROUP_DIR, 'conversations');
       fs.mkdirSync(conversationsDir, { recursive: true });
 
       const date = new Date().toISOString().split('T')[0];
@@ -377,6 +422,7 @@ async function runQuery(
   mcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
+  configuredModel: string | undefined,
   resumeAt?: string,
 ): Promise<{
   newSessionId?: string;
@@ -413,16 +459,16 @@ async function runQuery(
   let resultCount = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+  const globalClaudeMdPath = path.join(WORKSPACE_GLOBAL_DIR, 'CLAUDE.md');
   let globalClaudeMd: string | undefined;
   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
-  // Discover additional directories mounted at /workspace/extra/*
+  // Discover additional directories mounted at runtime-specific extra dir
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
-  const extraBase = '/workspace/extra';
+  const extraBase = WORKSPACE_EXTRA_DIR;
   if (fs.existsSync(extraBase)) {
     for (const entry of fs.readdirSync(extraBase)) {
       const fullPath = path.join(extraBase, entry);
@@ -438,7 +484,8 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
-      cwd: '/workspace/group',
+      model: configuredModel,
+      cwd: WORKSPACE_GROUP_DIR,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
@@ -600,6 +647,164 @@ async function runScript(script: string): Promise<ScriptResult | null> {
   });
 }
 
+interface SessionSlashRunOptions {
+  command: string;
+  kind: SessionSlashKind;
+  sessionId?: string;
+  sdkEnv: Record<string, string | undefined>;
+  assistantName?: string;
+  configuredModel?: string;
+  silent?: boolean;
+}
+
+interface SessionSlashRunResult {
+  status: 'success' | 'error';
+  newSessionId?: string;
+  hadError: boolean;
+  compactBoundarySeen: boolean;
+  resultEmitted: boolean;
+  error?: string;
+}
+
+async function runSessionSlashCommand(
+  opts: SessionSlashRunOptions,
+): Promise<SessionSlashRunResult> {
+  log(`Handling session command: ${opts.command}${opts.silent ? ' (silent)' : ''}`);
+
+  let slashSessionId = opts.sessionId;
+  let compactBoundarySeen = false;
+  let hadError = false;
+  let resultEmitted = false;
+  let errorMessage: string | undefined;
+
+  try {
+    for await (const message of query({
+      prompt: opts.command,
+      options: {
+        model: opts.configuredModel,
+        cwd: WORKSPACE_GROUP_DIR,
+        resume: opts.sessionId,
+        systemPrompt: undefined,
+        allowedTools: [],
+        env: opts.sdkEnv,
+        permissionMode: 'bypassPermissions' as const,
+        allowDangerouslySkipPermissions: true,
+        settingSources: ['project', 'user'] as const,
+        hooks: {
+          PreCompact: [{ hooks: [createPreCompactHook(opts.assistantName)] }],
+        },
+      },
+    })) {
+      const msgType =
+        message.type === 'system'
+          ? `system/${(message as { subtype?: string }).subtype}`
+          : message.type;
+      log(`[slash-cmd] type=${msgType}`);
+
+      if (message.type === 'system' && message.subtype === 'init') {
+        slashSessionId = message.session_id;
+        log(`Session after slash command: ${slashSessionId}`);
+      }
+
+      if (
+        opts.kind === 'compact' &&
+        message.type === 'system' &&
+        (message as { subtype?: string }).subtype === 'compact_boundary'
+      ) {
+        compactBoundarySeen = true;
+        log('Compact boundary observed — compaction completed');
+      }
+
+      if (message.type === 'result') {
+        const resultSubtype = (message as { subtype?: string }).subtype;
+        const textResult =
+          'result' in message ? (message as { result?: string }).result : null;
+        const resultIsError = Boolean(resultSubtype?.startsWith('error'));
+
+        if (resultIsError) {
+          hadError = true;
+          errorMessage = textResult || 'Session command failed.';
+          if (!opts.silent) {
+            writeOutput({
+              status: 'error',
+              result: null,
+              error: errorMessage,
+              newSessionId: slashSessionId,
+            });
+          }
+        } else if (!opts.silent) {
+          writeOutput({
+            status: 'success',
+            result:
+              textResult ||
+              (opts.kind === 'compact' ? 'Conversation compacted.' : null),
+            newSessionId: slashSessionId,
+          });
+        }
+
+        resultEmitted = true;
+      }
+    }
+  } catch (err) {
+    hadError = true;
+    errorMessage = err instanceof Error ? err.message : String(err);
+    log(`Slash command error: ${errorMessage}`);
+    if (!opts.silent) {
+      writeOutput({
+        status: 'error',
+        result: null,
+        error: errorMessage,
+        newSessionId: slashSessionId,
+      });
+    }
+  }
+
+  log(
+    `Slash command done. compactBoundarySeen=${compactBoundarySeen}, hadError=${hadError}, resultEmitted=${resultEmitted}`,
+  );
+
+  if (!opts.silent) {
+    if (!hadError && opts.kind === 'compact' && !compactBoundarySeen) {
+      log(
+        'WARNING: compact_boundary was not observed. Compaction may not have completed.',
+      );
+    }
+
+    if (!resultEmitted && !hadError) {
+      if (opts.kind === 'compact') {
+        writeOutput({
+          status: 'success',
+          result: compactBoundarySeen
+            ? 'Conversation compacted.'
+            : 'Compaction requested but compact_boundary was not observed.',
+          newSessionId: slashSessionId,
+        });
+      } else {
+        writeOutput({
+          status: 'success',
+          result: null,
+          newSessionId: slashSessionId,
+        });
+      }
+    } else if (!hadError) {
+      writeOutput({
+        status: 'success',
+        result: null,
+        newSessionId: slashSessionId,
+      });
+    }
+  }
+
+  return {
+    status: hadError ? 'error' : 'success',
+    newSessionId: slashSessionId,
+    hadError,
+    compactBoundarySeen,
+    resultEmitted,
+    error: errorMessage,
+  };
+}
+
 async function main(): Promise<void> {
   let containerInput: ContainerInput;
 
@@ -631,6 +836,15 @@ async function main(): Promise<void> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
+  const configuredModel = resolveConfiguredModel();
+  if (configuredModel.model) {
+    log(
+      `Configured model: ${configuredModel.model} (source: ${configuredModel.source})`,
+    );
+  } else {
+    log('Configured model: CLI default (no ANTHROPIC_MODEL/CLAUDE_MODEL set)');
+  }
+
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
@@ -652,105 +866,60 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
-  // --- Slash command handling ---
-  // Only known session slash commands are handled here. This prevents
-  // accidental interception of user prompts that happen to start with '/'.
-  const KNOWN_SESSION_COMMANDS = new Set(['/compact']);
-  const trimmedPrompt = prompt.trim();
-  const isSessionSlashCommand = KNOWN_SESSION_COMMANDS.has(trimmedPrompt);
+  // --- Session slash commands + resume model preflight ---
+  // Parse supported commands only, so normal "/" prompts are treated as user text.
+  const sessionSlashCommand = parseSessionSlashCommand(prompt);
 
-  if (isSessionSlashCommand) {
-    log(`Handling session command: ${trimmedPrompt}`);
-    let slashSessionId: string | undefined;
-    let compactBoundarySeen = false;
-    let hadError = false;
-    let resultEmitted = false;
+  // Cold-start resume protection: when resuming an existing session, silently
+  // re-apply the effective model before handling user work.
+  if (sessionId && configuredModel.model && !sessionSlashCommand) {
+    const preflight = await runSessionSlashCommand({
+      command: `/model ${configuredModel.model}`,
+      kind: 'model',
+      sessionId,
+      sdkEnv,
+      assistantName: containerInput.assistantName,
+      configuredModel: configuredModel.model,
+      silent: true,
+    });
 
-    try {
-      for await (const message of query({
-        prompt: trimmedPrompt,
-        options: {
-          cwd: '/workspace/group',
-          resume: sessionId,
-          systemPrompt: undefined,
-          allowedTools: [],
-          env: sdkEnv,
-          permissionMode: 'bypassPermissions' as const,
-          allowDangerouslySkipPermissions: true,
-          settingSources: ['project', 'user'] as const,
-          hooks: {
-            PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
-          },
-        },
-      })) {
-        const msgType = message.type === 'system'
-          ? `system/${(message as { subtype?: string }).subtype}`
-          : message.type;
-        log(`[slash-cmd] type=${msgType}`);
+    sessionId = preflight.newSessionId || sessionId;
 
-        if (message.type === 'system' && message.subtype === 'init') {
-          slashSessionId = message.session_id;
-          log(`Session after slash command: ${slashSessionId}`);
-        }
-
-        // Observe compact_boundary to confirm compaction completed
-        if (message.type === 'system' && (message as { subtype?: string }).subtype === 'compact_boundary') {
-          compactBoundarySeen = true;
-          log('Compact boundary observed — compaction completed');
-        }
-
-        if (message.type === 'result') {
-          const resultSubtype = (message as { subtype?: string }).subtype;
-          const textResult = 'result' in message ? (message as { result?: string }).result : null;
-
-          if (resultSubtype?.startsWith('error')) {
-            hadError = true;
-            writeOutput({
-              status: 'error',
-              result: null,
-              error: textResult || 'Session command failed.',
-              newSessionId: slashSessionId,
-            });
-          } else {
-            writeOutput({
-              status: 'success',
-              result: textResult || 'Conversation compacted.',
-              newSessionId: slashSessionId,
-            });
-          }
-          resultEmitted = true;
-        }
-      }
-    } catch (err) {
-      hadError = true;
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      log(`Slash command error: ${errorMsg}`);
-      writeOutput({ status: 'error', result: null, error: errorMsg });
-    }
-
-    log(`Slash command done. compactBoundarySeen=${compactBoundarySeen}, hadError=${hadError}`);
-
-    // Warn if compact_boundary was never observed — compaction may not have occurred
-    if (!hadError && !compactBoundarySeen) {
-      log('WARNING: compact_boundary was not observed. Compaction may not have completed.');
-    }
-
-    // Only emit final session marker if no result was emitted yet and no error occurred
-    if (!resultEmitted && !hadError) {
+    if (preflight.status === 'error') {
+      const errorDetail = preflight.error || 'unknown error';
+      const message = `Failed to re-apply configured model "${configuredModel.model}" on resumed session: ${errorDetail}`;
+      log(message);
       writeOutput({
-        status: 'success',
-        result: compactBoundarySeen
-          ? 'Conversation compacted.'
-          : 'Compaction requested but compact_boundary was not observed.',
-        newSessionId: slashSessionId,
+        status: 'error',
+        result: null,
+        newSessionId: sessionId,
+        error: message,
       });
-    } else if (!hadError) {
-      // Emit session-only marker so host updates session tracking
-      writeOutput({ status: 'success', result: null, newSessionId: slashSessionId });
+      process.exit(1);
+    }
+  }
+
+  // Handle explicit session slash commands.
+  if (sessionSlashCommand) {
+    const slashResult = await runSessionSlashCommand({
+      command: sessionSlashCommand.command,
+      kind: sessionSlashCommand.kind,
+      sessionId,
+      sdkEnv,
+      assistantName: containerInput.assistantName,
+      configuredModel: configuredModel.model,
+    });
+
+    if (slashResult.newSessionId) {
+      sessionId = slashResult.newSessionId;
+    }
+
+    if (slashResult.status === 'error') {
+      process.exit(1);
     }
     return;
   }
-  // --- End slash command handling ---
+  // --- End session slash handling ---
 
   // Script phase: run script before waking agent
   if (containerInput.script && containerInput.isScheduledTask) {
@@ -788,6 +957,7 @@ async function main(): Promise<void> {
         mcpServerPath,
         containerInput,
         sdkEnv,
+        configuredModel.model,
         resumeAt,
       );
       if (queryResult.newSessionId) {

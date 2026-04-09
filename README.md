@@ -126,7 +126,9 @@ Skills we'd like to see:
 - macOS, Linux, or Windows (via WSL2)
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux) for default isolated runtime
+
+If you choose `AGENT_RUNTIME=host`, container runtime is not required.
 
 ## Architecture
 
@@ -134,7 +136,7 @@ Skills we'd like to see:
 Channels --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
 ```
 
-Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
+Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. By default, agents execute in isolated Linux containers with filesystem isolation. Optional host runtime mode (`AGENT_RUNTIME=host`) runs agents directly on the host for OpenClaw-style access. Per-group message queue with concurrency control. IPC via filesystem.
 
 For the full architecture details, see the [documentation site](https://docs.nanoclaw.dev/concepts/architecture).
 
@@ -151,9 +153,19 @@ Key files:
 
 ## FAQ
 
-**Why Docker?**
+**Why Docker by default?**
 
 Docker provides cross-platform support (macOS, Linux and even Windows via WSL2) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime. For additional isolation, [Docker Sandboxes](docs/docker-sandboxes.md) run each container inside a micro VM.
+
+**Can I run outside Docker (OpenClaw-style)?**
+
+Yes. Set:
+
+```bash
+AGENT_RUNTIME=host
+```
+
+This bypasses container isolation and runs the agent process directly on your machine. Use it only if you explicitly want host-level tool access.
 
 **Can I run this on Linux or Windows?**
 
@@ -182,6 +194,25 @@ This allows you to use:
 - Custom model deployments with Anthropic-compatible APIs
 
 Note: The model must support the Anthropic API format for best compatibility.
+
+For startup model selection, use:
+
+```bash
+ANTHROPIC_MODEL=opus
+```
+
+`ANTHROPIC_MODEL` is canonical. `CLAUDE_MODEL` is still accepted as a fallback for backward compatibility.
+
+To switch an existing group session mid-conversation, use the session command:
+
+```text
+/model
+/model opus
+/model claude-opus-4-1-20250805
+/model default
+```
+
+`/model` changes are per-group and persist after successful switches.
 
 **How do I debug issues?**
 

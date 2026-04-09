@@ -78,7 +78,7 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 | Channel System | Channel registry (`src/channels/registry.ts`) | Channels self-register at startup |
 | Message Storage | SQLite (better-sqlite3) | Store messages for polling |
 | Container Runtime | Containers (Linux VMs) | Isolated environments for agent execution |
-| Agent | @anthropic-ai/claude-agent-sdk (0.2.29) | Run Claude with tools and MCP servers |
+| Agent | @anthropic-ai/claude-agent-sdk (0.2.97) | Run Claude with tools and MCP servers |
 | Browser Automation | agent-browser + Chromium | Web interaction and screenshots |
 | Runtime | Node.js 20+ | Host process for routing and scheduling |
 
@@ -344,6 +344,8 @@ export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 // Container configuration
 export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
 export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800000', 10); // 30min default
+export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL;
+export const CLAUDE_MODEL = process.env.CLAUDE_MODEL; // backward-compatible fallback
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(1, parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5);
@@ -364,6 +366,7 @@ setRegisteredGroup("1234567890@g.us", {
   trigger: "@Andy",
   added_at: new Date().toISOString(),
   containerConfig: {
+    model: "opus",
     additionalMounts: [
       {
         hostPath: "~/projects/webapp",
@@ -379,6 +382,14 @@ setRegisteredGroup("1234567890@g.us", {
 Folder names follow the convention `{channel}_{group-name}` (e.g., `whatsapp_family-chat`, `telegram_dev-team`). The main group has `isMain: true` set during registration.
 
 Additional mounts appear at `/workspace/extra/{containerPath}` inside the container.
+
+Model precedence is:
+
+1. `group.containerConfig.model`
+2. `ANTHROPIC_MODEL`
+3. `CLAUDE_MODEL`
+
+Use `/model` in a group session to switch the live model (`/model`, `/model <alias-or-name>`, `/model default`).
 
 **Mount syntax note:** Read-write mounts use `-v host:container`, but readonly mounts require `--mount "type=bind,source=...,target=...,readonly"` (the `:ro` suffix may not work on all runtimes).
 

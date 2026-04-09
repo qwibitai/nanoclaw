@@ -29,6 +29,7 @@ export interface AllowedRoot {
 
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
+  model?: string; // Optional model alias/full name for this group
   timeout?: number; // Default: 300000 (5 minutes)
 }
 

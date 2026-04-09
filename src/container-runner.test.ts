@@ -8,6 +8,7 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 // Mock config
 vi.mock('./config.js', () => ({
+  AGENT_RUNTIME: 'container',
   CONTAINER_IMAGE: 'nanoclaw-agent:latest',
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min
@@ -16,6 +17,11 @@ vi.mock('./config.js', () => ({
   IDLE_TIMEOUT: 1800000, // 30min
   ONECLI_URL: 'http://localhost:10254',
   TIMEZONE: 'America/Los_Angeles',
+  getEffectiveModelConfig: vi.fn((groupModel?: string) =>
+    groupModel
+      ? { model: groupModel, source: 'group.containerConfig.model' }
+      : { source: 'unset' },
+  ),
 }));
 
 // Mock logger
@@ -105,7 +111,13 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import {
+  runContainerAgent,
+  ContainerOutput,
+  _normalizeHostRuntimeEnvForTests,
+} from './container-runner.js';
+import { getEffectiveModelConfig } from './config.js';
+import { spawn } from 'child_process';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -134,6 +146,8 @@ describe('container-runner timeout behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+    vi.mocked(getEffectiveModelConfig).mockClear();
   });
 
   afterEach(() => {
@@ -225,5 +239,51 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+
+  it('passes effective model to container env when configured', async () => {
+    const groupWithModel: RegisteredGroup = {
+      ...testGroup,
+      containerConfig: { model: 'opus' },
+    };
+    const resultPromise = runContainerAgent(groupWithModel, testInput, () => {});
+
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(vi.mocked(getEffectiveModelConfig)).toHaveBeenCalledWith('opus');
+    const spawnCalls = vi.mocked(spawn).mock.calls;
+    expect(spawnCalls.length).toBeGreaterThan(0);
+    const args = spawnCalls[spawnCalls.length - 1][1] as string[];
+    const joinedArgs = args.join(' ');
+    expect(joinedArgs).toContain('ANTHROPIC_MODEL=opus');
+    expect(joinedArgs).toContain('CLAUDE_MODEL=opus');
+  });
+
+  it('rewrites docker-host proxy aliases for host runtime env', () => {
+    const env = _normalizeHostRuntimeEnvForTests({
+      HTTPS_PROXY:
+        'http://x:secret@host.docker.internal:10255',
+      HTTP_PROXY: 'http://gateway.docker.internal:10255',
+      ANTHROPIC_BASE_URL: 'https://host.docker.internal/v1',
+      CLAUDE_CODE_OAUTH_TOKEN: 'token',
+    });
+
+    expect(env.HTTPS_PROXY).toBe('http://x:secret@127.0.0.1:10255/');
+    expect(env.HTTP_PROXY).toBe('http://127.0.0.1:10255/');
+    expect(env.ANTHROPIC_BASE_URL).toBe('https://127.0.0.1/v1');
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('token');
+  });
+
+  it('leaves non-docker hosts unchanged when normalizing host env', () => {
+    const env = _normalizeHostRuntimeEnvForTests({
+      HTTPS_PROXY: 'http://proxy.example.com:3128',
+      ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+    });
+
+    expect(env.HTTPS_PROXY).toBe('http://proxy.example.com:3128');
+    expect(env.ANTHROPIC_BASE_URL).toBe('https://api.anthropic.com');
   });
 });

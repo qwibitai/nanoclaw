@@ -10,6 +10,8 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
   'TZ',
+  'AGENT_RUNTIME',
+  'ANTHROPIC_MODEL',
   'CLAUDE_MODEL',
 ]);
 
@@ -44,6 +46,17 @@ export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
+export type AgentRuntime = 'container' | 'host';
+
+function normalizeAgentRuntime(value?: string): AgentRuntime {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'host') return 'host';
+  return 'container';
+}
+
+export const AGENT_RUNTIME = normalizeAgentRuntime(
+  process.env.AGENT_RUNTIME || envConfig.AGENT_RUNTIME,
+);
 export const CONTAINER_TIMEOUT = parseInt(
   process.env.CONTAINER_TIMEOUT || '1800000',
   10,
@@ -53,7 +66,50 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   10,
 ); // 10MB default
 export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
-export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || envConfig.CLAUDE_MODEL;
+function normalizeModelValue(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+export const ANTHROPIC_MODEL = normalizeModelValue(
+  process.env.ANTHROPIC_MODEL || envConfig.ANTHROPIC_MODEL,
+);
+export const CLAUDE_MODEL = normalizeModelValue(
+  process.env.CLAUDE_MODEL || envConfig.CLAUDE_MODEL,
+);
+
+export type DefaultModelSource = 'ANTHROPIC_MODEL' | 'CLAUDE_MODEL' | 'unset';
+export type EffectiveModelSource =
+  | 'group.containerConfig.model'
+  | DefaultModelSource;
+
+export function getDefaultModelConfig(): {
+  model?: string;
+  source: DefaultModelSource;
+} {
+  if (ANTHROPIC_MODEL) {
+    return { model: ANTHROPIC_MODEL, source: 'ANTHROPIC_MODEL' };
+  }
+  if (CLAUDE_MODEL) {
+    return { model: CLAUDE_MODEL, source: 'CLAUDE_MODEL' };
+  }
+  return { source: 'unset' };
+}
+
+export function getEffectiveModelConfig(groupModel?: string): {
+  model?: string;
+  source: EffectiveModelSource;
+} {
+  const normalizedGroupModel = normalizeModelValue(groupModel);
+  if (normalizedGroupModel) {
+    return {
+      model: normalizedGroupModel,
+      source: 'group.containerConfig.model',
+    };
+  }
+  return getDefaultModelConfig();
+}
+
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,

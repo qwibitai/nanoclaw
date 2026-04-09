@@ -4,8 +4,10 @@ import path from 'path';
 import { OneCLI } from '@onecli-sh/sdk';
 
 import {
+  AGENT_RUNTIME,
   ASSISTANT_NAME,
   DEFAULT_TRIGGER,
+  getDefaultModelConfig,
   getTriggerPattern,
   GROUPS_DIR,
   IDLE_TIMEOUT,
@@ -62,7 +64,12 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSessionCleanup } from './session-cleanup.js';
-import { extractSessionCommand, handleSessionCommand, isSessionCommandAllowed } from './session-commands.js';
+import {
+  extractSessionCommand,
+  handleSessionCommand,
+  isSessionCommandAllowed,
+} from './session-commands.js';
+import { archiveSessionTranscript } from './session-transcript-archive.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -190,6 +197,39 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   );
 }
 
+function setGroupModelOverride(chatJid: string, model: string | undefined): void {
+  const existingGroup = registeredGroups[chatJid];
+  if (!existingGroup) return;
+
+  const prevModel = existingGroup.containerConfig?.model;
+  if (prevModel === model) return;
+
+  const nextContainerConfig = { ...(existingGroup.containerConfig || {}) };
+  if (model) {
+    nextContainerConfig.model = model;
+  } else {
+    delete nextContainerConfig.model;
+  }
+
+  const updatedGroup: RegisteredGroup = {
+    ...existingGroup,
+    containerConfig:
+      Object.keys(nextContainerConfig).length > 0
+        ? nextContainerConfig
+        : undefined,
+  };
+
+  registeredGroups[chatJid] = updatedGroup;
+  setRegisteredGroup(chatJid, updatedGroup);
+  logger.info(
+    {
+      group: updatedGroup.name,
+      modelOverride: model ?? null,
+    },
+    'Updated group model override',
+  );
+}
+
 /**
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
@@ -249,18 +289,44 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     timezone: TIMEZONE,
     deps: {
       sendMessage: (text) => channel.sendMessage(chatJid, text),
-      setTyping: (typing) => channel.setTyping?.(chatJid, typing) ?? Promise.resolve(),
-      runAgent: (prompt, onOutput) => runAgent(group, prompt, chatJid, onOutput),
+      setTyping: (typing) =>
+        channel.setTyping?.(chatJid, typing) ?? Promise.resolve(),
+      runAgent: (prompt, onOutput, options) =>
+        runAgent(group, prompt, chatJid, onOutput, options),
       closeStdin: () => queue.closeStdin(chatJid),
-      advanceCursor: (ts) => { lastAgentTimestamp[chatJid] = ts; saveState(); },
+      advanceCursor: (ts) => {
+        lastAgentTimestamp[chatJid] = ts;
+        saveState();
+      },
       formatMessages,
+      getDefaultModel: () => getDefaultModelConfig().model,
+      getGroupModelOverride: () => group.containerConfig?.model,
+      setGroupModelOverride: (value) => setGroupModelOverride(chatJid, value),
+      archiveCurrentSession: async () => {
+        const sessionId = sessions[group.folder];
+        if (!sessionId) return;
+        archiveSessionTranscript({
+          groupFolder: group.folder,
+          sessionId,
+          assistantName: ASSISTANT_NAME,
+        });
+      },
+      clearCurrentSession: () => {
+        delete sessions[group.folder];
+        deleteSession(group.folder);
+      },
       canSenderInteract: (msg) => {
-        const hasTrigger = getTriggerPattern(group.trigger).test(msg.content.trim());
+        const hasTrigger = getTriggerPattern(group.trigger).test(
+          msg.content.trim(),
+        );
         const reqTrigger = !isMainGroup && group.requiresTrigger !== false;
-        return isMainGroup || !reqTrigger || (hasTrigger && (
-          msg.is_from_me ||
-          isTriggerAllowed(chatJid, msg.sender, loadSenderAllowlist())
-        ));
+        return (
+          isMainGroup ||
+          !reqTrigger ||
+          (hasTrigger &&
+            (msg.is_from_me ||
+              isTriggerAllowed(chatJid, msg.sender, loadSenderAllowlist())))
+        );
       },
     },
   });
@@ -371,6 +437,7 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  options?: { timeoutMs?: number },
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
@@ -426,6 +493,7 @@ async function runAgent(
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
+      options,
     );
 
     if (output.newSessionId) {
@@ -519,14 +587,23 @@ async function startMessageLoop(): Promise<void> {
           // --- Session command interception (message loop) ---
           // Scan ALL messages in the batch for a session command.
           const loopCmdMsg = groupMessages.find(
-            (m) => extractSessionCommand(m.content, getTriggerPattern(group.trigger)) !== null,
+            (m) =>
+              extractSessionCommand(
+                m.content,
+                getTriggerPattern(group.trigger),
+              ) !== null,
           );
 
           if (loopCmdMsg) {
             // Only close active container if the sender is authorized — otherwise an
-            // untrusted user could kill in-flight work by sending /compact (DoS).
+            // untrusted user could kill in-flight work by sending a session command (DoS).
             // closeStdin no-ops internally when no container is active.
-            if (isSessionCommandAllowed(isMainGroup, loopCmdMsg.is_from_me === true)) {
+            if (
+              isSessionCommandAllowed(
+                isMainGroup,
+                loopCmdMsg.is_from_me === true,
+              )
+            ) {
               queue.closeStdin(chatJid);
             }
             // Enqueue so processGroupMessages handles auth + cursor advancement.
@@ -616,6 +693,10 @@ function recoverPendingMessages(): void {
 }
 
 function ensureContainerSystemRunning(): void {
+  if (AGENT_RUNTIME === 'host') {
+    logger.info('Host runtime enabled; skipping container runtime checks');
+    return;
+  }
   ensureContainerRuntimeRunning();
   cleanupOrphans();
 }

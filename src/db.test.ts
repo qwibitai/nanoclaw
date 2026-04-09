@@ -9,6 +9,7 @@ import {
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
+  getRegisteredGroup,
   getTaskById,
   setRegisteredGroup,
   storeChatMetadata,
@@ -648,5 +649,55 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+describe('registered group containerConfig model', () => {
+  it('persists containerConfig.model through set/get round-trip', () => {
+    setRegisteredGroup('group@g.us', {
+      name: 'Dev Chat',
+      folder: 'whatsapp_dev-chat',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      containerConfig: {
+        model: 'opus',
+      },
+    });
+
+    const group = getRegisteredGroup('group@g.us');
+    expect(group?.containerConfig?.model).toBe('opus');
+  });
+
+  it('preserves unrelated containerConfig fields with model', () => {
+    setRegisteredGroup('group@g.us', {
+      name: 'Dev Chat',
+      folder: 'whatsapp_dev-chat',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      containerConfig: {
+        model: 'sonnet',
+        timeout: 600000,
+        additionalMounts: [
+          {
+            hostPath: '/tmp/repo',
+            containerPath: 'repo',
+            readonly: false,
+          },
+        ],
+      },
+    });
+
+    const group = getRegisteredGroup('group@g.us');
+    expect(group?.containerConfig).toEqual({
+      model: 'sonnet',
+      timeout: 600000,
+      additionalMounts: [
+        {
+          hostPath: '/tmp/repo',
+          containerPath: 'repo',
+          readonly: false,
+        },
+      ],
+    });
   });
 });
