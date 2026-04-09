@@ -1,6 +1,22 @@
 # Google Sheets — canonical IDs and purpose
 
-All Portillo family data lives in three Google Sheets, authenticated as padenportillo@gmail.com via `mcp__google-sheets__*` tools. These IDs are the source of truth — don't create duplicates.
+All Portillo family data lives in three Google Sheets, authenticated as padenportillo@gmail.com via the utility library at `/workspace/global/scripts/lib/sheets.mjs`. These IDs are the source of truth — don't create duplicates.
+
+## How to access sheets
+
+Use the utility library via Bash:
+
+```js
+import { getAccessToken, readRange, appendRows } from '/workspace/global/scripts/lib/sheets.mjs';
+
+// Read
+const rows = await readRange('SHEET_ID', 'Tab!A:Z');
+
+// Append
+await appendRows('SHEET_ID', 'Tab!A:Z', [['col1', 'col2', ...]]);
+```
+
+Run with: `node --input-type=module -e "..."`
 
 ## Emilio Tracking
 

@@ -539,7 +539,6 @@ async function runQuery(
     'mcp__nanoclaw__*',
     'mcp__airtable__*',
     'mcp__google-calendar__*',
-    'mcp__google-sheets__*',
   ];
 
   const mcpServers: Record<string, unknown> = {
@@ -574,19 +573,6 @@ async function runQuery(
               GOOGLE_OAUTH_CREDENTIALS: process.env.GOOGLE_OAUTH_CREDENTIALS,
               GOOGLE_CALENDAR_MCP_TOKEN_PATH:
                 process.env.GOOGLE_CALENDAR_MCP_TOKEN_PATH || '',
-            },
-          },
-        }
-      : {}),
-    ...(process.env.GOOGLE_SHEETS_MCP_ENABLED
-      ? {
-          'google-sheets': {
-            command: 'mcp-google-sheets',
-            args: [],
-            env: {
-              ...networkEnv(),
-              GOOGLE_APPLICATION_CREDENTIALS:
-                process.env.GOOGLE_APPLICATION_CREDENTIALS || '',
             },
           },
         }
