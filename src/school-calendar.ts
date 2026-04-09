@@ -41,6 +41,7 @@ function parseICS(content: string): CalendarEvent[] {
   let dtstart = '';
   let dtend = '';
   let description: string | null = null;
+  let location: string | null = null;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -51,6 +52,7 @@ function parseICS(content: string): CalendarEvent[] {
       dtstart = '';
       dtend = '';
       description = null;
+      location = null;
       continue;
     }
     if (trimmed === 'END:VEVENT') {
@@ -59,6 +61,13 @@ function parseICS(content: string): CalendarEvent[] {
       if (start) {
         const isAllDay = dtstart.includes('VALUE=DATE');
         const end = parseICSDate(dtend);
+        const cleanLocation = location
+          ? location
+              .replace(/\\,/g, ',')
+              .replace(/\\;/g, ';')
+              .replace(/\\n/g, ' ')
+              .trim()
+          : null;
         events.push({
           id: uid || `school-${Date.now()}-${Math.random()}`,
           summary: summary.replace(/\\,/g, ',').replace(/\\;/g, ';'),
@@ -68,6 +77,8 @@ function parseICS(content: string): CalendarEvent[] {
           description: description
             ? description.replace(/\\n/g, '\n').replace(/\\,/g, ',').trim()
             : null,
+          location:
+            cleanLocation && cleanLocation.length > 0 ? cleanLocation : null,
           source: 'School',
           calendarUrl: null,
         });
@@ -82,6 +93,7 @@ function parseICS(content: string): CalendarEvent[] {
     else if (trimmed.startsWith('DTEND')) dtend = trimmed;
     else if (trimmed.startsWith('DESCRIPTION:'))
       description = trimmed.slice(12);
+    else if (trimmed.startsWith('LOCATION:')) location = trimmed.slice(9);
   }
 
   return events;

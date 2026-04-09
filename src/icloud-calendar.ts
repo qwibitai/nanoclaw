@@ -122,6 +122,7 @@ export interface CalendarEvent {
   endDate: string | null;
   isAllDay: boolean;
   description: string | null;
+  location: string | null;
   source: string; // calendar display name
   calendarUrl: string | null; // for deep-linking
 }
@@ -133,13 +134,18 @@ function parseVEvent(
   icsData: string,
   calendarName: string,
 ): CalendarEvent | null {
-  const lines = icsData.split(/\r?\n/);
+  // Unfold RFC 5545 continuation lines (CRLF + space/tab = line continuation)
+  const unfolded = icsData
+    .replace(/\r\n[ \t]/g, '')
+    .replace(/\n[ \t]/g, '');
+  const lines = unfolded.split(/\r?\n/);
   let inEvent = false;
   let uid = '';
   let summary = '';
   let dtstart = '';
   let dtend = '';
   let description: string | null = null;
+  let location: string | null = null;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -158,6 +164,7 @@ function parseVEvent(
     else if (line.startsWith('DTSTART')) dtstart = line;
     else if (line.startsWith('DTEND')) dtend = line;
     else if (line.startsWith('DESCRIPTION:')) description = line.slice(12);
+    else if (line.startsWith('LOCATION:')) location = line.slice(9);
   }
 
   const start = parseICSDate(dtstart);
@@ -165,6 +172,14 @@ function parseVEvent(
 
   const isAllDay = dtstart.includes('VALUE=DATE');
   const end = parseICSDate(dtend);
+
+  const cleanLocation = location
+    ? location
+        .replace(/\\,/g, ',')
+        .replace(/\\;/g, ';')
+        .replace(/\\n/g, ' ')
+        .trim()
+    : null;
 
   return {
     id: uid || `ical-${Date.now()}-${Math.random()}`,
@@ -178,6 +193,7 @@ function parseVEvent(
     description: description
       ? description.replace(/\\n/g, '\n').replace(/\\,/g, ',').trim()
       : null,
+    location: cleanLocation && cleanLocation.length > 0 ? cleanLocation : null,
     source: calendarName,
     calendarUrl: null,
   };
