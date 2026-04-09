@@ -6,7 +6,7 @@ description: >
   API/IPC contract) based on the diff. Reviewers collaborate via SendMessage before reporting.
   Use for NanoClaw codebase reviews only. Triggers on "claw review", "nanoclaw review".
   For general code review across any codebase, use /review-swarm instead.
-version: 1.0.0
+version: 1.1.0
 ---
 
 # /claw-review-swarm — NanoClaw Code Review Swarm
@@ -54,7 +54,7 @@ Runs uncommitted changes (or a specified scope) through a team of specialized re
 | `adversarial-reviewer` | Edge cases, race conditions, security issues, regex pitfalls, error handling gaps, stress failure modes |
 | `nanoclaw-reviewer` | Trigger/routing correctness, channel patterns (Slack mentions, reactions, threads), IPC conventions, credential scoping, NanoClaw idioms from CLAUDE.md |
 
-**Dynamic (select 1-3 based on the diff — cap at 5 total):**
+**Dynamic (select 1-3 based on the diff — hard cap at 4 total reviewers, 5 only in exceptional cases):**
 
 | Name | Select When | Focus |
 |------|-------------|-------|
@@ -154,11 +154,22 @@ SUGGESTION: [N] findings
 
 ---
 
-## Timeout Handling
+## Lead Authority and Deadline Enforcement
 
-If a reviewer has not sent findings within 3 minutes of the last collaboration message, send it a `SendMessage` asking for its final findings. If still no response after 1 additional minute, exclude that reviewer from the report and note: "Reviewer [name] timed out — findings excluded."
+You are the lead. You own the timeline. Reviewers work for you, not the other way around.
 
-Do not retry or respawn timed-out reviewers.
+**Do not wait indefinitely for any reviewer.** After spawning reviewers, track which have sent final findings to you. If a reviewer has not reported back within a reasonable window after others have finished:
+
+1. Send it ONE `SendMessage` demanding final findings immediately
+2. If it still does not respond after your next turn, **declare it timed out and move on** — compile the report from the reviewers who delivered
+3. Note in the report: "Reviewer [name] timed out — findings excluded"
+
+**Do not:**
+- Send repeated "still waiting" status messages — act instead
+- Hold the entire report hostage for one straggler
+- Retry or respawn timed-out reviewers
+
+**The report must ship.** A report from 3 out of 4 reviewers is valuable. A report from 0 out of 4 because you waited forever is worthless.
 
 ---
 
