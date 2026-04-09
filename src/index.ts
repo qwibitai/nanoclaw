@@ -290,9 +290,41 @@ async function processGroupMessages(groupFolder: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // Find the JID of the most recent message for reply routing
-  const lastMessage = missedMessages[missedMessages.length - 1];
-  primaryJid = lastMessage.chat_jid;
+  // Stable active channel: track which channel the user is actively using
+  // Key: active_jid:<folder>, Value: the JID of the active channel
+  const activeJidKey = `active_jid:${groupFolder}`;
+  let activeJid = getRouterState(activeJidKey);
+
+  // Check if any message in the bundle is from a different channel
+  // Switch to that channel (only for non-bot messages)
+  for (const msg of missedMessages) {
+    if (msg.is_bot_message) continue; // Don't switch on bot messages
+    const msgChannel = findChannel(channels, msg.chat_jid);
+    const currentChannel = activeJid ? findChannel(channels, activeJid) : null;
+
+    // If this message is from a different channel than current, switch
+    if (
+      msgChannel &&
+      (!currentChannel || msgChannel.name !== currentChannel.name)
+    ) {
+      activeJid = msg.chat_jid;
+      setRouterState(activeJidKey, activeJid);
+      logger.info(
+        { group: group.name, newChannel: msgChannel.name, newJid: activeJid },
+        'Active channel switched',
+      );
+      break; // Only switch once per bundle
+    }
+  }
+
+  // If no active JID set yet (first time), use the last message's JID
+  if (!activeJid) {
+    const lastMessage = missedMessages[missedMessages.length - 1];
+    activeJid = lastMessage.chat_jid;
+    setRouterState(activeJidKey, activeJid);
+  }
+
+  primaryJid = activeJid;
   primaryChannel = findChannel(channels, primaryJid);
 
   if (!primaryChannel) {
