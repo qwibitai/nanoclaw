@@ -333,36 +333,46 @@ function createSchema(database: Database.Database): void {
   // 旧スキーマ: registered_groups.folder UNIQUE を解除する
   // thread は parent と同じ folder を共有するため、folder の一意制約は不適切。
   try {
-    const tableSql = database
-      .prepare(
-        `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'registered_groups'`,
-      )
-      .get() as { sql?: string } | undefined;
-    if (tableSql?.sql?.includes('folder TEXT NOT NULL UNIQUE')) {
-      database.exec(`
-        ALTER TABLE registered_groups RENAME TO registered_groups_old;
-        CREATE TABLE registered_groups (
-          jid TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          folder TEXT NOT NULL,
-          trigger_pattern TEXT NOT NULL,
-          added_at TEXT NOT NULL,
-          container_config TEXT,
-          requires_trigger INTEGER DEFAULT 1,
-          is_main INTEGER DEFAULT 0,
-          group_type TEXT DEFAULT 'chat',
-          thread_defaults TEXT
-        );
-        INSERT INTO registered_groups (
-          jid, name, folder, trigger_pattern, added_at, container_config,
-          requires_trigger, is_main, group_type, thread_defaults
-        )
-        SELECT
-          jid, name, folder, trigger_pattern, added_at, container_config,
-          requires_trigger, is_main, group_type, thread_defaults
-        FROM registered_groups_old;
-        DROP TABLE registered_groups_old;
-      `);
+    const indexes = database.prepare(`PRAGMA index_list('registered_groups')`).all() as Array<{
+      name: string;
+      unique: number;
+    }>;
+    const hasUniqueFolderIndex = indexes.some((idx) => {
+      if (idx.unique !== 1) return false;
+      const safeIndexName = idx.name.replace(/'/g, "''");
+      const cols = database
+        .prepare(`PRAGMA index_info('${safeIndexName}')`)
+        .all() as Array<{ name: string }>;
+      return cols.length === 1 && cols[0].name === 'folder';
+    });
+    if (hasUniqueFolderIndex) {
+      const migrate = database.transaction(() => {
+        database.exec(`
+          ALTER TABLE registered_groups RENAME TO registered_groups_old;
+          CREATE TABLE registered_groups (
+            jid TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            folder TEXT NOT NULL,
+            trigger_pattern TEXT NOT NULL,
+            added_at TEXT NOT NULL,
+            container_config TEXT,
+            requires_trigger INTEGER DEFAULT 1,
+            is_main INTEGER DEFAULT 0,
+            group_type TEXT DEFAULT 'chat',
+            thread_defaults TEXT
+          );
+          INSERT INTO registered_groups (
+            jid, name, folder, trigger_pattern, added_at, container_config,
+            requires_trigger, is_main, group_type, thread_defaults
+          )
+          SELECT
+            jid, name, folder, trigger_pattern, added_at, container_config,
+            requires_trigger, is_main, group_type, thread_defaults
+          FROM registered_groups_old;
+          DROP TABLE registered_groups_old;
+        `);
+      });
+      migrate();
     }
   } catch (err) {
     logger.warn(

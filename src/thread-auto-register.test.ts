@@ -212,6 +212,7 @@ describe('_autoRegisterThread (actual auto-registration path)', () => {
   it('falls back to thread when parent thread_defaults.type is invalid at runtime', () => {
     const corruptedParent: RegisteredGroup = {
       ...parent,
+      // runtime 破損データ（DB/JSON改変）を再現するために型制約を意図的にバイパス
       thread_defaults: { type: 'main' as unknown as 'thread' },
     };
     const msg: InboundMessage = {
