@@ -35,6 +35,70 @@ const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
+// MCP skill env vars forwarded from the host into the agent container.
+// stdio MCP servers (Tailscale, Home Assistant, Ollama/LiteLLM, UnraidClaw,
+// Paperclip) read these directly from process.env inside the container.
+const MCP_SKILL_ENV_KEYS = [
+  // Tailscale
+  'TS_API_KEY',
+  'TS_API_CLIENT_ID',
+  'TS_API_CLIENT_SECRET',
+  'TS_API_TAILNET',
+  // Home Assistant
+  'HA_URL',
+  'HA_TOKEN',
+  // Ollama / LiteLLM
+  'OLLAMA_URL',
+  'LITELLM_URL',
+  'LITELLM_MASTER_KEY',
+  // UnraidClaw
+  'UNRAIDCLAW_SERVERS',
+  'UNRAIDCLAW_API_KEY',
+  'UNRAIDCLAW_URL',
+  // Paperclip
+  'PAPERCLIP_URL',
+  'PAPERCLIP_AGENT_JWT_SECRET',
+  'PAPERCLIP_AGENT_ID',
+  'PAPERCLIP_COMPANY_ID',
+];
+
+// Env keys whose values must never appear in logs.
+const SECRET_ENV_KEYS = new Set<string>([
+  'TS_API_KEY',
+  'TS_API_CLIENT_SECRET',
+  'HA_TOKEN',
+  'LITELLM_MASTER_KEY',
+  'UNRAIDCLAW_API_KEY',
+  'PAPERCLIP_AGENT_JWT_SECRET',
+]);
+
+/**
+ * Redact secret values from a container args array before logging.
+ * Detects `-e KEY=VALUE` pairs and masks the value half when KEY is in
+ * SECRET_ENV_KEYS. Non-secret -e args (like URLs and IDs) pass through
+ * unchanged for debugging.
+ */
+export function redactContainerArgs(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '-e' && i + 1 < args.length) {
+      const next = args[i + 1];
+      const eqIdx = next.indexOf('=');
+      if (eqIdx > 0) {
+        const key = next.slice(0, eqIdx);
+        if (SECRET_ENV_KEYS.has(key)) {
+          out.push(arg, `${key}=<redacted>`);
+          i++;
+          continue;
+        }
+      }
+    }
+    out.push(arg);
+  }
+  return out;
+}
+
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -268,6 +332,26 @@ async function buildContainerArgs(
     );
   }
 
+  // MCP skill credentials — forward host env vars into the container so
+  // stdio MCP servers (Tailscale, Home Assistant, Ollama/LiteLLM,
+  // UnraidClaw, Paperclip) can read them via process.env. Only forward
+  // vars that are non-empty on the host. Values are redacted from any
+  // logs of the args array — see redactContainerArgs().
+  for (const key of MCP_SKILL_ENV_KEYS) {
+    const val = process.env[key];
+    if (val) {
+      args.push('-e', `${key}=${val}`);
+    }
+  }
+
+  // Attach to a custom Docker network when configured (e.g. shared
+  // network with Ollama, Home Assistant, etc.). Falls back to Docker's
+  // default bridge when unset.
+  const dockerNetwork = process.env.NANOCLAW_DOCKER_NETWORK;
+  if (dockerNetwork && dockerNetwork.trim().length > 0) {
+    args.push('--network', dockerNetwork.trim());
+  }
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
@@ -326,7 +410,7 @@ export async function runContainerAgent(
         (m) =>
           `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
       ),
-      containerArgs: containerArgs.join(' '),
+      containerArgs: redactContainerArgs(containerArgs).join(' '),
     },
     'Container mount configuration',
   );
@@ -556,7 +640,7 @@ export async function runContainerAgent(
         }
         logLines.push(
           `=== Container Args ===`,
-          containerArgs.join(' '),
+          redactContainerArgs(containerArgs).join(' '),
           ``,
           `=== Mounts ===`,
           mounts
