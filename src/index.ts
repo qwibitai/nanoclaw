@@ -136,9 +136,10 @@ function autoRegisterThread(
 ): void {
   const td = parent.thread_defaults!;
   const requestedType = td.type;
-  const childType = requestedType === 'chat' || requestedType === 'thread'
-    ? requestedType
-    : 'thread';
+  const childType =
+    requestedType === 'chat' || requestedType === 'thread'
+      ? requestedType
+      : 'thread';
   if (requestedType && childType !== requestedType) {
     logger.warn(
       { chatJid, requestedType },

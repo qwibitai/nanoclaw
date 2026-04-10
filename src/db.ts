@@ -40,7 +40,9 @@ function parseGroupType(
 export function _sanitizeContainerConfig(
   raw: unknown,
   jid: string,
-  field: 'container_config' | 'thread_defaults.containerConfig' = 'container_config',
+  field:
+    | 'container_config'
+    | 'thread_defaults.containerConfig' = 'container_config',
 ): ContainerConfig | undefined {
   if (raw == null) return undefined;
   if (typeof raw !== 'object' || Array.isArray(raw)) {
@@ -67,7 +69,9 @@ export function _sanitizeContainerConfig(
     if (Array.isArray(src.additionalMounts)) {
       const mounts = src.additionalMounts
         .filter(
-          (m): m is {
+          (
+            m,
+          ): m is {
             hostPath: string;
             containerPath?: string;
             readonly?: boolean;
@@ -361,7 +365,10 @@ function createSchema(database: Database.Database): void {
       `);
     }
   } catch (err) {
-    logger.warn({ err }, 'Failed to migrate registered_groups folder uniqueness');
+    logger.warn(
+      { err },
+      'Failed to migrate registered_groups folder uniqueness',
+    );
   }
 
   // channel および is_group カラムが存在しない場合は追加（既存 DB のマイグレーション）
