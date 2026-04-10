@@ -462,3 +462,9 @@ When an email mentions a project or person associated with a project, use this r
 - schedule_value: "30 7 * * *" (7:30 AM CST)
 - prompt: "Run the morning-briefing skill. Generate a comprehensive briefing and send via send_message."
 - context_mode: group
+
+#### Weekly Review
+- schedule_type: cron
+- schedule_value: "0 17 * * 5" (Friday 5 PM CST)
+- prompt: "Run the weekly-review skill. Generate a comprehensive report and send via send_message."
+- context_mode: group
