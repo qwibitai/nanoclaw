@@ -7,6 +7,10 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  ANTHROPIC_API_KEY,
+  ANTHROPIC_AUTH_TOKEN,
+  ANTHROPIC_BASE_URL,
+  ANTHROPIC_MODEL,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
@@ -263,8 +267,24 @@ async function buildContainerArgs(
   } else {
     logger.warn(
       { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
+      'OneCLI gateway not reachable — checking direct credential env',
     );
+
+    // Direct credential injection (e.g. Ollama proxy): pass env vars into
+    // the container so the Claude Agent SDK can reach the model endpoint.
+    if (ANTHROPIC_BASE_URL) {
+      args.push('-e', `ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}`);
+    }
+    if (ANTHROPIC_AUTH_TOKEN) {
+      args.push('-e', `ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}`);
+    }
+    if (ANTHROPIC_API_KEY) {
+      args.push('-e', `ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}`);
+    }
+    if (ANTHROPIC_MODEL) {
+      args.push('-e', `ANTHROPIC_MODEL=${ANTHROPIC_MODEL}`);
+      args.push('-e', `CLAUDE_CODE_SUBAGENT_MODEL=${ANTHROPIC_MODEL}`);
+    }
   }
 
   // Runtime-specific args for host gateway resolution
