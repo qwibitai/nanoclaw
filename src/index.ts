@@ -146,6 +146,7 @@ import {
   handleSessionCommand,
   isSessionCommandAllowed,
 } from './session-commands.js';
+import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import {
   indexSingleThread,
@@ -1825,7 +1826,7 @@ async function runAgent(
         } else if (
           /Query closed before response received/i.test(output.error)
         ) {
-          // Generic SDK error during a resume request — could be many things
+          // Generic SDK error during a resume request -- could be many things
           // (MCP crash, network blip), but if the transcript file is also
           // missing on disk, it's almost certainly stale. Verify before
           // clearing so we don't drop sessions over transient failures.
@@ -3051,7 +3052,7 @@ async function main(): Promise<void> {
         return msgId;
       },
       resumeGateApproval: async (gateId: string) => {
-        // Resolve the in-memory gate — writes IPC response to unblock the plugin hook
+        // Resolve the in-memory gate -- writes IPC response to unblock the plugin hook
         const resolved = resolveInMemoryGate(gateId, 'approved');
         if (!resolved) {
           logger.warn({ gateId }, 'Gate not found in memory for Web UI resume');
@@ -3069,6 +3070,7 @@ async function main(): Promise<void> {
     );
   }
 
+  startSessionCleanup();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

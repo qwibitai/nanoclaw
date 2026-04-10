@@ -111,6 +111,10 @@ export interface NewMessage {
   is_from_me?: boolean;
   is_bot_message?: boolean;
   is_any_bot?: boolean; // True for messages from any bot (own or external)
+  thread_id?: string;
+  reply_to_message_id?: string;
+  reply_to_message_content?: string;
+  reply_to_sender_name?: string;
   attachments?: Attachment[];
 }
 

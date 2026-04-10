@@ -20,7 +20,14 @@ export function formatMessages(
     const displayTime = formatLocalTime(m.timestamp, timezone);
     const fromMe = m.is_from_me ? ' is_from_me="true"' : '';
     const isBot = m.is_any_bot || m.is_bot_message ? ' is_bot="true"' : '';
-    return `<message sender="${escapeXml(m.sender_name)}" sender_id="${escapeXml(m.sender)}" time="${escapeXml(displayTime)}"${fromMe}${isBot}>${escapeXml(m.content)}</message>`;
+    const replyAttr = m.reply_to_message_id
+      ? ` reply_to="${escapeXml(m.reply_to_message_id)}"`
+      : '';
+    const replySnippet =
+      m.reply_to_message_content && m.reply_to_sender_name
+        ? `\n  <quoted_message from="${escapeXml(m.reply_to_sender_name)}">${escapeXml(m.reply_to_message_content)}</quoted_message>`
+        : '';
+    return `<message sender="${escapeXml(m.sender_name)}" sender_id="${escapeXml(m.sender)}" time="${escapeXml(displayTime)}"${fromMe}${isBot}${replyAttr}>${replySnippet}${escapeXml(m.content)}</message>`;
   });
 
   const header = `<context timezone="${escapeXml(timezone)}" />\n`;
