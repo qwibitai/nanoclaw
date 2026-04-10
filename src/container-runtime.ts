@@ -3,6 +3,7 @@
  * All runtime-specific logic lives here so swapping runtimes means changing one file.
  */
 import { execSync } from 'child_process';
+import fs from 'fs';
 import os from 'os';
 
 import { logger } from './logger.js';

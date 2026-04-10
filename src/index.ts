@@ -13,6 +13,8 @@ import {
   POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
+import { startCredentialProxy } from './credential-proxy.js';
+import { syncEnvFromProcess } from './env.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -27,6 +29,7 @@ import {
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
+  PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
   deleteMessagesByJid,
@@ -696,6 +699,7 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    proxyServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
