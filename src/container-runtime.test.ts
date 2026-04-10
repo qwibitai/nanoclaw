@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock logger
 vi.mock('./logger.js', () => ({
@@ -18,6 +18,8 @@ vi.mock('child_process', () => ({
 
 import {
   CONTAINER_RUNTIME_BIN,
+  CONTAINER_HOST_GATEWAY,
+  credentialProxyHost,
   readonlyMountArgs,
   stopContainer,
   ensureContainerRuntimeRunning,
@@ -30,6 +32,37 @@ beforeEach(() => {
 });
 
 // --- Pure functions ---
+
+describe('credentialProxyHost', () => {
+  const original = process.env.NANOCLAW_DOCKER_NETWORK;
+
+  beforeEach(() => {
+    delete process.env.NANOCLAW_DOCKER_NETWORK;
+  });
+
+  afterEach(() => {
+    if (original !== undefined) {
+      process.env.NANOCLAW_DOCKER_NETWORK = original;
+    } else {
+      delete process.env.NANOCLAW_DOCKER_NETWORK;
+    }
+  });
+
+  it('returns host.docker.internal when NANOCLAW_DOCKER_NETWORK is unset', () => {
+    expect(credentialProxyHost()).toBe(CONTAINER_HOST_GATEWAY);
+    expect(credentialProxyHost()).toBe('host.docker.internal');
+  });
+
+  it('returns "NanoClaw" when NANOCLAW_DOCKER_NETWORK is set to a network name', () => {
+    process.env.NANOCLAW_DOCKER_NETWORK = 'ai-local';
+    expect(credentialProxyHost()).toBe('NanoClaw');
+  });
+
+  it('returns host gateway when NANOCLAW_DOCKER_NETWORK is set to empty string', () => {
+    process.env.NANOCLAW_DOCKER_NETWORK = '';
+    expect(credentialProxyHost()).toBe(CONTAINER_HOST_GATEWAY);
+  });
+});
 
 describe('readonlyMountArgs', () => {
   it('returns -v flag with :ro suffix', () => {
