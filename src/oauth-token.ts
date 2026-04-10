@@ -33,19 +33,26 @@ interface ClaudeCredentials {
   };
 }
 
+const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const CLAUDE_SCOPES =
+  'user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload';
+
 interface RefreshResponse {
   access_token: string;
+  refresh_token?: string;
   expires_in: number;
   expires_at?: number;
 }
 
 async function callRefreshEndpoint(
   refreshToken: string,
-): Promise<{ accessToken: string; expiresAt: number }> {
+): Promise<{ accessToken: string; refreshToken: string; expiresAt: number }> {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify({
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
+      client_id: CLAUDE_CLIENT_ID,
+      scope: CLAUDE_SCOPES,
     });
 
     const req = httpsRequest(
@@ -73,6 +80,7 @@ async function callRefreshEndpoint(
             const response: RefreshResponse = JSON.parse(data);
             resolve({
               accessToken: response.access_token,
+              refreshToken: response.refresh_token ?? refreshToken,
               expiresAt:
                 response.expires_at ?? Date.now() + response.expires_in * 1000,
             });
@@ -149,11 +157,11 @@ export async function ensureFreshOAuthToken(opts: {
 
   logger.info('OAuth token expired or near expiry, refreshing...');
   try {
-    const { accessToken, expiresAt } = await callRefreshEndpoint(
+    const { accessToken, refreshToken: newRefreshToken, expiresAt } = await callRefreshEndpoint(
       oauth.refreshToken,
     );
 
-    credentials.claudeAiOauth = { ...oauth, accessToken, expiresAt };
+    credentials.claudeAiOauth = { ...oauth, accessToken, refreshToken: newRefreshToken, expiresAt };
     fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(credentials, null, 2));
     logger.info('OAuth token refreshed and credentials.json updated');
 
