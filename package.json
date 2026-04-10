@@ -31,6 +31,7 @@
     "prepare": "husky",
     "setup": "tsx setup/index.ts",
     "auth": "tsx src/whatsapp-auth.ts",
+    "test:e2e:tasks": "tsx scripts/test-task-sdk-e2e.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",

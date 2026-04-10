@@ -415,6 +415,19 @@ export class AgentDb {
       .all() as ScheduledTask[];
   }
 
+  getTaskRunLogs(taskId: string): TaskRunLog[] {
+    return this.db
+      .prepare(
+        `
+      SELECT task_id, run_at, duration_ms, status, result, error
+      FROM task_run_logs
+      WHERE task_id = ?
+      ORDER BY run_at DESC
+    `,
+      )
+      .all(taskId) as TaskRunLog[];
+  }
+
   updateTask(
     id: string,
     updates: Partial<

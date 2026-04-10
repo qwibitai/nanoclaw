@@ -5,6 +5,8 @@ import type {
   AgentLite,
   AvailableGroup,
   RegisteredGroup,
+  Task,
+  TaskDetails,
 } from './api/sdk.js';
 
 describe('public SDK type exports', () => {
@@ -20,5 +22,21 @@ describe('public SDK type exports', () => {
     type GetOrCreateAgent = ReturnType<AgentLite['getOrCreateAgent']>;
 
     expectTypeOf<GetOrCreateAgent>().toEqualTypeOf<Agent>();
+  });
+
+  it('exposes task APIs with public task types', () => {
+    type ScheduleTaskResult = Awaited<ReturnType<Agent['scheduleTask']>>;
+    type ListTasksResult = ReturnType<Agent['listTasks']>;
+    type GetTaskResult = ReturnType<Agent['getTask']>;
+    type UpdateTaskResult = Awaited<ReturnType<Agent['updateTask']>>;
+    type PauseTaskResult = Awaited<ReturnType<Agent['pauseTask']>>;
+    type ResumeTaskResult = Awaited<ReturnType<Agent['resumeTask']>>;
+
+    expectTypeOf<ScheduleTaskResult>().toEqualTypeOf<Task>();
+    expectTypeOf<ListTasksResult>().toEqualTypeOf<Task[]>();
+    expectTypeOf<GetTaskResult>().toEqualTypeOf<TaskDetails | undefined>();
+    expectTypeOf<UpdateTaskResult>().toEqualTypeOf<Task>();
+    expectTypeOf<PauseTaskResult>().toEqualTypeOf<Task>();
+    expectTypeOf<ResumeTaskResult>().toEqualTypeOf<Task>();
   });
 });

@@ -7,6 +7,7 @@
  */
 
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 import {
@@ -16,10 +17,12 @@ import {
   type SerializableAgentSettings,
 } from './agent-config.js';
 import {
+  getAgentRegistryDbPath,
   initAgentRegistryDb,
   type AgentRegistryDb,
   type AgentRegistryRecord,
 } from './agent-registry-db.js';
+import { cleanupOrphans } from './box-runtime.js';
 import { buildRuntimeConfig } from './runtime-config.js';
 import type { AgentLiteOptions, AgentOptions } from './api/options.js';
 import type { Agent } from './api/agent.js';
@@ -146,10 +149,29 @@ class AgentLiteImpl implements AgentLite {
 
   async deleteAgent(name: string): Promise<void> {
     const agent = this._agents.get(name);
+    const record = this.registry.getAgent(name);
+
+    if (!agent && !record) {
+      return;
+    }
+
     if (agent) {
       await agent.stop();
-      this._agents.delete(name);
     }
+
+    const agentId = agent?.id ?? record?.agentId;
+    if (agentId) {
+      await cleanupOrphans(agentId);
+    }
+
+    const workDir = agent
+      ? (agent as RuntimeOptionsAwareAgent).config.workDir
+      : record?.workDir;
+    if (workDir) {
+      this.deleteAgentWorkDir(workDir);
+    }
+
+    this._agents.delete(name);
     this.registry.deleteAgent(name);
   }
 
@@ -223,5 +245,23 @@ class AgentLiteImpl implements AgentLite {
         `Agent "${name}" already exists with a different mount allowlist`,
       );
     }
+  }
+
+  private deleteAgentWorkDir(workDir: string): void {
+    const target = path.resolve(workDir);
+    const registryDbPath = getAgentRegistryDbPath(this._runtimeConfig.workdir);
+    const registryPathFromTarget = path.relative(target, registryDbPath);
+    const wouldDeleteSharedRegistry =
+      registryPathFromTarget === '' ||
+      (!registryPathFromTarget.startsWith('..') &&
+        !path.isAbsolute(registryPathFromTarget));
+
+    if (wouldDeleteSharedRegistry) {
+      throw new Error(
+        `Refusing to delete agent workdir "${target}" because it contains the shared registry`,
+      );
+    }
+
+    fs.rmSync(target, { recursive: true, force: true });
   }
 }

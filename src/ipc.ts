@@ -1,12 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 
-import { CronExpressionParser } from 'cron-parser';
-
 import { AvailableGroup } from './container-runner.js';
 import type { AgentDb } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { computeTaskNextRun, createTaskId } from './task-utils.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -214,45 +213,26 @@ export async function processTaskIpc(
 
         const scheduleType = data.schedule_type as 'cron' | 'interval' | 'once';
 
-        let nextRun: string | null = null;
-        if (scheduleType === 'cron') {
-          try {
-            const interval = CronExpressionParser.parse(data.schedule_value, {
-              tz: deps.timezone,
-            });
-            nextRun = interval.next().toISOString();
-          } catch {
-            logger.warn(
-              { scheduleValue: data.schedule_value },
-              'Invalid cron expression',
-            );
-            break;
-          }
-        } else if (scheduleType === 'interval') {
-          const ms = parseInt(data.schedule_value, 10);
-          if (isNaN(ms) || ms <= 0) {
-            logger.warn(
-              { scheduleValue: data.schedule_value },
-              'Invalid interval',
-            );
-            break;
-          }
-          nextRun = new Date(Date.now() + ms).toISOString();
-        } else if (scheduleType === 'once') {
-          const date = new Date(data.schedule_value);
-          if (isNaN(date.getTime())) {
-            logger.warn(
-              { scheduleValue: data.schedule_value },
-              'Invalid timestamp',
-            );
-            break;
-          }
-          nextRun = date.toISOString();
+        let nextRun: string;
+        try {
+          nextRun = computeTaskNextRun(
+            scheduleType,
+            data.schedule_value,
+            deps.timezone,
+          );
+        } catch (err) {
+          logger.warn(
+            {
+              scheduleType,
+              scheduleValue: data.schedule_value,
+              err: err instanceof Error ? err.message : String(err),
+            },
+            'Invalid task schedule',
+          );
+          break;
         }
 
-        const taskId =
-          data.taskId ||
-          `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const taskId = data.taskId || createTaskId();
         const contextMode =
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
@@ -368,25 +348,23 @@ export async function processTaskIpc(
             ...task,
             ...updates,
           };
-          if (updatedTask.schedule_type === 'cron') {
-            try {
-              const interval = CronExpressionParser.parse(
-                updatedTask.schedule_value,
-                { tz: deps.timezone },
-              );
-              updates.next_run = interval.next().toISOString();
-            } catch {
-              logger.warn(
-                { taskId: data.taskId, value: updatedTask.schedule_value },
-                'Invalid cron in task update',
-              );
-              break;
-            }
-          } else if (updatedTask.schedule_type === 'interval') {
-            const ms = parseInt(updatedTask.schedule_value, 10);
-            if (!isNaN(ms) && ms > 0) {
-              updates.next_run = new Date(Date.now() + ms).toISOString();
-            }
+          try {
+            updates.next_run = computeTaskNextRun(
+              updatedTask.schedule_type,
+              updatedTask.schedule_value,
+              deps.timezone,
+            );
+          } catch (err) {
+            logger.warn(
+              {
+                taskId: data.taskId,
+                scheduleType: updatedTask.schedule_type,
+                value: updatedTask.schedule_value,
+                err: err instanceof Error ? err.message : String(err),
+              },
+              'Invalid task schedule update',
+            );
+            break;
           }
         }
 

@@ -15,6 +15,22 @@ agent.addChannel(
   telegram({ token: process.env.TELEGRAM_BOT_TOKEN! }),
 );
 await agent.start();
+
+await agent.registerGroup('self-chat', {
+  name: 'Main',
+  folder: 'main',
+  trigger: 'always',
+  isMain: true,
+});
+
+const task = await agent.scheduleTask({
+  jid: 'self-chat',
+  prompt: 'Send the weekly status summary.',
+  scheduleType: 'cron',
+  scheduleValue: '0 9 * * 1',
+});
+
+console.log(task.id);
 ```
 
 ## Quick Start
@@ -75,6 +91,7 @@ Key files:
 
 - `src/api/sdk.ts` - Public API: `createAgentLite()`, `AgentLite` interface
 - `src/api/agent.ts` - Public API: `Agent` interface
+- `src/api/task.ts` - Public task types for SDK scheduling and task management
 - `src/api/channel-driver.ts` - Public API: `ChannelDriver` interface
 - `src/agentlite-impl.ts` - AgentLite implementation (hidden from consumers)
 - `src/agent-impl.ts` - Agent implementation: message loop, channels, groups
