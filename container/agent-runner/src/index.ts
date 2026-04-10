@@ -73,13 +73,8 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-// Re-export from lcm-helpers for use in this file
 import {
   getConversationId,
-  getContextWindowTokens,
-  getDetectedContextWindow,
-  setDetectedContextWindow,
-  shouldProactivelyCompact,
   parseTranscript,
   assembleLcmContext as assembleLcmContextHelper,
 } from './lcm-helpers.js';
@@ -509,8 +504,6 @@ async function runQuery(
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
-  let lastInputTokens: number | undefined;
-  let lastOutputTokens: number | undefined;
   let messageCount = 0;
   let resultCount = 0;
 
@@ -712,137 +705,6 @@ async function runScript(script: string): Promise<ScriptResult | null> {
   });
 }
 
-async function performProactiveCompaction(conversationId: string, assistantName?: string): Promise<void> {
-  log('LCM: Starting proactive compaction...');
-
-  try {
-    initLcmDatabase(LCM_DB_PATH);
-
-    // Find the transcript - look for session files
-    const projectsDir = '/home/node/.claude/projects';
-    if (!fs.existsSync(projectsDir)) {
-      log('LCM: No projects directory found, skipping proactive compaction');
-      return;
-    }
-
-    // Glob for session transcript files
-    let transcriptPath: string | null = null;
-    const findTranscript = (dir: string): string | null => {
-      try {
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          const fullPath = path.join(dir, entry.name);
-          if (entry.isDirectory()) {
-            const found = findTranscript(fullPath);
-            if (found) return found;
-          } else if (entry.name.endsWith('.jsonl')) {
-            // Pick the most recently modified .jsonl
-            if (!transcriptPath || fs.statSync(fullPath).mtimeMs > fs.statSync(transcriptPath).mtimeMs) {
-              return fullPath;
-            }
-          }
-        }
-      } catch { /* ignore permission errors */ }
-      return null;
-    };
-
-    transcriptPath = findTranscript(projectsDir);
-    if (!transcriptPath) {
-      log('LCM: No transcript file found, skipping proactive compaction');
-      return;
-    }
-
-    const content = fs.readFileSync(transcriptPath, 'utf-8');
-    const messages = parseTranscript(content);
-
-    if (messages.length === 0) {
-      log('LCM: No messages in transcript, skipping');
-      return;
-    }
-
-    // Persist messages
-    const currentMaxSeq = getMaxSequence(conversationId);
-    const startSequence = currentMaxSeq + 1;
-    const newlyInserted = lcmStoreMessages(conversationId, messages, startSequence);
-    log(`LCM: Proactive compaction stored ${newlyInserted}/${messages.length} messages`);
-
-    if (newlyInserted > 0) {
-      const compactCount = Math.max(0, messages.length - LCM_FRESHNESS_WINDOW);
-
-      if (compactCount > 0) {
-        const compactedMessages = messages.slice(0, compactCount);
-        const compactedMinSeq = startSequence;
-        const compactedMaxSeq = startSequence + compactCount - 1;
-
-        const messageIds = compactedMessages.map((msg) => {
-          return contentHash(conversationId, msg.role, msg.content);
-        });
-
-        const leafResult = await createLeafSummary(
-          compactedMessages,
-          messageIds,
-          compactedMinSeq,
-          compactedMaxSeq,
-        );
-
-        storeSummary({
-          id: leafResult.id,
-          conversation_id: conversationId,
-          depth: 0,
-          content: leafResult.content,
-          source_message_ids: JSON.stringify(leafResult.sourceMessageIds),
-          parent_summary_ids: null,
-          child_summary_ids: null,
-          min_sequence: leafResult.minSequence,
-          max_sequence: leafResult.maxSequence,
-          created_at: new Date().toISOString(),
-        });
-
-        log(`LCM: Proactive compaction created leaf summary ${leafResult.id}`);
-
-        // Check condensation
-        const leafSummaries = getSummariesForConversation(conversationId, { depth: 0 });
-        if (leafSummaries.length >= LCM_CONDENSE_THRESHOLD) {
-          const condensedSummaries = getSummariesForConversation(conversationId).filter(s => s.depth > 0);
-          const coveredLeafIds = new Set<string>();
-          for (const cs of condensedSummaries) {
-            if (cs.child_summary_ids) {
-              for (const childId of JSON.parse(cs.child_summary_ids) as string[]) {
-                coveredLeafIds.add(childId);
-              }
-            }
-          }
-          const uncoveredLeaves = leafSummaries.filter(s => !coveredLeafIds.has(s.id));
-
-          if (uncoveredLeaves.length >= LCM_CONDENSE_THRESHOLD) {
-            const toCondense = uncoveredLeaves.slice(0, LCM_CONDENSE_THRESHOLD);
-            const condensedResult = await createCondensedSummary(toCondense);
-
-            storeSummary({
-              id: condensedResult.id,
-              conversation_id: conversationId,
-              depth: condensedResult.depth,
-              content: condensedResult.content,
-              source_message_ids: null,
-              parent_summary_ids: null,
-              child_summary_ids: JSON.stringify(condensedResult.childSummaryIds),
-              min_sequence: condensedResult.minSequence,
-              max_sequence: condensedResult.maxSequence,
-              created_at: new Date().toISOString(),
-            });
-
-            log(`LCM: Proactive compaction condensed ${toCondense.length} leaves into ${condensedResult.id}`);
-          }
-        }
-      }
-    }
-
-    log('LCM: Proactive compaction complete');
-  } catch (err) {
-    log(`LCM: Proactive compaction error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
 async function main(): Promise<void> {
   let containerInput: ContainerInput;
 
@@ -870,7 +732,7 @@ async function main(): Promise<void> {
   // No real secrets exist in the container environment.
   const sdkEnv: Record<string, string | undefined> = {
     ...process.env,
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '165000',
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW || '165000',
   };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -940,14 +802,6 @@ async function main(): Promise<void> {
       }
       if (queryResult.lastAssistantUuid) {
         resumeAt = queryResult.lastAssistantUuid;
-      }
-
-      // Proactive compaction check
-      if (shouldProactivelyCompact(queryResult.lastInputTokens)) {
-        log('LCM: Proactive compaction triggered — resetting session');
-        await performProactiveCompaction(conversationId, containerInput.assistantName);
-        sessionId = undefined;
-        resumeAt = undefined;
       }
 
       // If _close was consumed during the query, exit immediately.

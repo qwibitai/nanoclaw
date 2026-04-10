@@ -17,41 +17,13 @@ export interface ParsedMessage {
 
 // --- Configuration ---
 
-const LCM_CONTEXT_WINDOW_FALLBACK = parseInt(process.env.LCM_CONTEXT_WINDOW_TOKENS || '1000000', 10);
-let detectedContextWindow: number | null = null;
-
-export function getContextWindowTokens(): number {
-  return detectedContextWindow ?? LCM_CONTEXT_WINDOW_FALLBACK;
-}
-
-export function setDetectedContextWindow(value: number): void {
-  detectedContextWindow = value;
-}
-
-export function getDetectedContextWindow(): number | null {
-  return detectedContextWindow;
-}
-
-/** @internal - for tests only */
-export function _resetDetectedContextWindow(): void {
-  detectedContextWindow = null;
-}
-
-const LCM_PROACTIVE_COMPACTION_THRESHOLD = parseInt(process.env.LCM_PROACTIVE_COMPACTION_THRESHOLD || '75', 10);
+const LCM_CONTEXT_WINDOW_TOKENS = parseInt(process.env.LCM_CONTEXT_WINDOW_TOKENS || '1000000', 10);
 const LCM_SUMMARY_BUDGET_PCT = parseInt(process.env.LCM_SUMMARY_BUDGET_PCT || '25', 10);
 
 // --- Pure functions ---
 
 export function getConversationId(input: { groupFolder: string; chatJid: string }): string {
   return `${input.groupFolder}:${input.chatJid}`;
-}
-
-export function shouldProactivelyCompact(lastInputTokens?: number): boolean {
-  if (!lastInputTokens) return false;
-  if (LCM_PROACTIVE_COMPACTION_THRESHOLD <= 0 || LCM_PROACTIVE_COMPACTION_THRESHOLD >= 100) return false;
-  const contextWindow = getContextWindowTokens();
-  const usagePct = (lastInputTokens / contextWindow) * 100;
-  return usagePct >= LCM_PROACTIVE_COMPACTION_THRESHOLD;
 }
 
 export function parseTranscript(content: string): ParsedMessage[] {
@@ -113,7 +85,7 @@ export function assembleLcmContext(conversationId: string, dbPath: string): stri
   ];
 
   // Fit within budget
-  const budgetTokens = Math.floor(LCM_SUMMARY_BUDGET_PCT / 100 * getContextWindowTokens());
+  const budgetTokens = Math.floor(LCM_SUMMARY_BUDGET_PCT / 100 * LCM_CONTEXT_WINDOW_TOKENS);
   let remainingBudget = budgetTokens;
   const selected: typeof sorted = [];
 

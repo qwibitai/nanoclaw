@@ -21,7 +21,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/` | Skills loaded inside agent containers (browser, status, formatting) |
 | `container/agent-runner/src/lcm-store.ts` | LCM SQLite database (messages + summary DAG) |
-| `container/agent-runner/src/lcm-helpers.ts` | LCM pure functions (context detection, proactive compaction, transcript parsing) |
+| `container/agent-runner/src/lcm-helpers.ts` | LCM pure functions (transcript parsing, context assembly) |
 | `container/agent-runner/src/lcm-summarize.ts` | LCM summarization (leaf + condensed summaries) |
 
 ## Secrets / Credentials / Proxy (OneCLI)
@@ -36,9 +36,9 @@ Key LCM environment variables (set via `containerConfig.env` or container defaul
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LCM_PROACTIVE_COMPACTION_THRESHOLD` | `75` | Context usage % triggering proactive compaction (0 = disabled) |
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | `165000` | Token threshold at which the SDK triggers automatic compaction |
 | `LCM_SUMMARY_MODEL` | `claude-haiku-4-5-20251001` | Model used for generating summaries |
-| `LCM_CONTEXT_WINDOW_TOKENS` | `1000000` | Fallback context window size (auto-detected from SDK when possible) |
+| `LCM_CONTEXT_WINDOW_TOKENS` | `1000000` | Context window size used for summary budget calculations |
 | `LCM_FRESHNESS_WINDOW` | `32` | Messages protected from compaction |
 
 ## Skills

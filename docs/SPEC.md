@@ -469,11 +469,9 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 
 When conversations exceed the context window, the SDK normally discards older messages during compaction. LCM preserves this history by persisting every message to a per-group SQLite database (`data/sessions/{group}/.claude/lcm.db`) and building a hierarchical summary DAG.
 
-**Proactive compaction** (primary mechanism): After each query, LCM checks context usage (`inputTokens / contextWindow`). When it exceeds a configurable threshold (`LCM_PROACTIVE_COMPACTION_THRESHOLD`, default 75%), LCM summarizes the conversation, resets the SDK session, and injects summaries into the new session's system prompt. Set to `0` to disable.
+**Compaction**: The SDK's built-in compaction triggers when context approaches `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (default 165,000 tokens, configurable via env var). The PreCompact hook intercepts this to persist messages and generate summaries before old context is discarded.
 
-**PreCompact hook** (fallback): If proactive compaction is disabled, the SDK's built-in compaction still triggers, and the PreCompact hook persists messages and generates summaries before old context is discarded.
-
-**Context assembly**: On session resume or after compaction, LCM loads summaries from the DAG and injects them into the system prompt, fitting within a configurable token budget (`LCM_SUMMARY_BUDGET_PCT`, default 25% of detected context window).
+**Context assembly**: On session resume or after compaction, LCM loads summaries from the DAG and injects them into the system prompt, fitting within a configurable token budget (`LCM_SUMMARY_BUDGET_PCT`, default 25% of context window).
 
 Conversations are keyed by a stable `conversationId` (`groupFolder:chatJid`) that survives SDK session resets. See [lcm-spec.md](lcm-spec.md) for the full specification.
 

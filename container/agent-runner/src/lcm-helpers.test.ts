@@ -1,10 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   getConversationId,
-  getContextWindowTokens,
-  setDetectedContextWindow,
-  _resetDetectedContextWindow,
-  shouldProactivelyCompact,
   parseTranscript,
   assembleLcmContext,
 } from './lcm-helpers.js';
@@ -24,53 +20,6 @@ describe('getConversationId', () => {
 
   it('handles special characters', () => {
     expect(getConversationId({ groupFolder: 'a/b', chatJid: 'c:d' })).toBe('a/b:c:d');
-  });
-});
-
-// --- getContextWindowTokens / setDetectedContextWindow / _resetDetectedContextWindow ---
-
-describe('context window detection', () => {
-  beforeEach(() => {
-    _resetDetectedContextWindow();
-  });
-
-  it('returns fallback (1M) when no detected value', () => {
-    expect(getContextWindowTokens()).toBe(1_000_000);
-  });
-
-  it('returns detected value after setDetectedContextWindow', () => {
-    setDetectedContextWindow(200_000);
-    expect(getContextWindowTokens()).toBe(200_000);
-  });
-
-  it('resets back to fallback after _resetDetectedContextWindow', () => {
-    setDetectedContextWindow(500_000);
-    _resetDetectedContextWindow();
-    expect(getContextWindowTokens()).toBe(1_000_000);
-  });
-});
-
-// --- shouldProactivelyCompact ---
-
-describe('shouldProactivelyCompact', () => {
-  beforeEach(() => {
-    _resetDetectedContextWindow();
-  });
-
-  it('returns false when lastInputTokens is undefined', () => {
-    expect(shouldProactivelyCompact(undefined)).toBe(false);
-  });
-
-  it('returns false when lastInputTokens is 0', () => {
-    expect(shouldProactivelyCompact(0)).toBe(false);
-  });
-
-  it('returns true when usage exceeds threshold (75% of 1M)', () => {
-    expect(shouldProactivelyCompact(750_001)).toBe(true);
-  });
-
-  it('returns false when usage is below threshold', () => {
-    expect(shouldProactivelyCompact(749_999)).toBe(false);
   });
 });
 
@@ -121,7 +70,6 @@ describe('parseTranscript', () => {
 
 describe('assembleLcmContext', () => {
   beforeEach(() => {
-    _resetDetectedContextWindow();
     _initTestLcmDatabase();
   });
 
