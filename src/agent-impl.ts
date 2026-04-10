@@ -23,7 +23,14 @@ import type {
   RegisteredGroup as PublicRegisteredGroup,
 } from './api/group.js';
 import type {
-  ChannelDriver,
+  ListTasksOptions,
+  ScheduleTaskOptions,
+  Task,
+  TaskDetails,
+  TaskRun,
+  UpdateTaskOptions,
+} from './api/task.js';
+import type {
   ChannelDriverFactory,
   ChannelDriverConfig,
 } from './api/channel-driver.js';
@@ -31,6 +38,8 @@ import type {
   Channel,
   NewMessage,
   RegisteredGroup as InternalRegisteredGroup,
+  ScheduledTask,
+  TaskRunLog,
 } from './types.js';
 import { logger } from './logger.js';
 
@@ -47,6 +56,7 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { computeTaskNextRun, createTaskId } from './task-utils.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -84,6 +94,33 @@ function cloneRegisteredGroup(
       : undefined,
     requiresTrigger: group.requiresTrigger,
     isMain: group.isMain,
+  };
+}
+
+function toPublicTask(task: ScheduledTask): Task {
+  return {
+    id: task.id,
+    jid: task.chat_jid,
+    groupFolder: task.group_folder,
+    prompt: task.prompt,
+    scheduleType: task.schedule_type,
+    scheduleValue: task.schedule_value,
+    contextMode: task.context_mode,
+    nextRun: task.next_run,
+    lastRun: task.last_run,
+    lastResult: task.last_result,
+    status: task.status,
+    createdAt: task.created_at,
+  };
+}
+
+function toPublicTaskRun(log: TaskRunLog): TaskRun {
+  return {
+    runAt: log.run_at,
+    durationMs: log.duration_ms,
+    status: log.status,
+    result: log.result,
+    error: log.error,
   };
 }
 
@@ -213,6 +250,152 @@ export class AgentImpl
     return Object.entries(this._registeredGroups).map(([jid, group]) =>
       cloneRegisteredGroup(jid, group),
     );
+  }
+
+  /** Schedule a task for a registered group. Only after start(). */
+  async scheduleTask(options: ScheduleTaskOptions): Promise<Task> {
+    this.requireStartedForTaskApi('scheduleTask');
+    this.requireTaskAdminAccess();
+
+    const group = this._registeredGroups[options.jid];
+    if (!group) {
+      throw new Error(
+        `Cannot schedule task: group "${options.jid}" is not registered`,
+      );
+    }
+
+    const now = new Date().toISOString();
+    const taskId = createTaskId();
+    const contextMode = options.contextMode === 'group' ? 'group' : 'isolated';
+    const nextRun = computeTaskNextRun(
+      options.scheduleType,
+      options.scheduleValue,
+      this.runtimeConfig.timezone,
+    );
+
+    this.db.createTask({
+      id: taskId,
+      group_folder: group.folder,
+      chat_jid: options.jid,
+      prompt: options.prompt,
+      schedule_type: options.scheduleType,
+      schedule_value: options.scheduleValue,
+      context_mode: contextMode,
+      next_run: nextRun,
+      status: 'active',
+      created_at: now,
+    });
+
+    this.refreshTaskSnapshots();
+
+    return this.getTaskSnapshotOrThrow(taskId);
+  }
+
+  /** List scheduled tasks. Only after start(). */
+  listTasks(options?: ListTasksOptions): Task[] {
+    this.requireStartedForTaskApi('listTasks');
+
+    return this.db
+      .getAllTasks()
+      .filter((task) => {
+        if (options?.jid && task.chat_jid !== options.jid) return false;
+        if (options?.status && task.status !== options.status) return false;
+        return true;
+      })
+      .map((task) => toPublicTask(task));
+  }
+
+  /** Get one scheduled task including run history. Only after start(). */
+  getTask(taskId: string): TaskDetails | undefined {
+    this.requireStartedForTaskApi('getTask');
+
+    const task = this.db.getTaskById(taskId);
+    if (!task) return undefined;
+
+    return {
+      ...toPublicTask(task),
+      runs: this.db.getTaskRunLogs(taskId).map((log) => toPublicTaskRun(log)),
+    };
+  }
+
+  /** Update a scheduled task. Only after start(). */
+  async updateTask(taskId: string, updates: UpdateTaskOptions): Promise<Task> {
+    this.requireStartedForTaskApi('updateTask');
+    this.requireTaskAdminAccess();
+
+    const task = this.requireExistingTask(taskId);
+    this.requireTaskUpdatable(task, 'update');
+
+    const dbUpdates: Parameters<AgentDb['updateTask']>[1] = {};
+    if (updates.prompt !== undefined) dbUpdates.prompt = updates.prompt;
+    if (updates.scheduleType !== undefined)
+      dbUpdates.schedule_type = updates.scheduleType;
+    if (updates.scheduleValue !== undefined)
+      dbUpdates.schedule_value = updates.scheduleValue;
+
+    if (
+      updates.scheduleType !== undefined ||
+      updates.scheduleValue !== undefined
+    ) {
+      const scheduleType = updates.scheduleType ?? task.schedule_type;
+      const scheduleValue = updates.scheduleValue ?? task.schedule_value;
+      dbUpdates.next_run = computeTaskNextRun(
+        scheduleType,
+        scheduleValue,
+        this.runtimeConfig.timezone,
+      );
+    }
+
+    this.db.updateTask(taskId, dbUpdates);
+    this.refreshTaskSnapshots();
+
+    return this.getTaskSnapshotOrThrow(taskId);
+  }
+
+  /** Pause an active scheduled task. Only after start(). */
+  async pauseTask(taskId: string): Promise<Task> {
+    this.requireStartedForTaskApi('pauseTask');
+    this.requireTaskAdminAccess();
+
+    const task = this.requireExistingTask(taskId);
+    if (task.status !== 'active') {
+      throw new Error(
+        `Cannot pause task "${taskId}" because it is ${task.status}`,
+      );
+    }
+
+    this.db.updateTask(taskId, { status: 'paused' });
+    this.refreshTaskSnapshots();
+
+    return this.getTaskSnapshotOrThrow(taskId);
+  }
+
+  /** Resume a paused scheduled task. Only after start(). */
+  async resumeTask(taskId: string): Promise<Task> {
+    this.requireStartedForTaskApi('resumeTask');
+    this.requireTaskAdminAccess();
+
+    const task = this.requireExistingTask(taskId);
+    if (task.status !== 'paused') {
+      throw new Error(
+        `Cannot resume task "${taskId}" because it is ${task.status}`,
+      );
+    }
+
+    this.db.updateTask(taskId, { status: 'active' });
+    this.refreshTaskSnapshots();
+
+    return this.getTaskSnapshotOrThrow(taskId);
+  }
+
+  /** Cancel and delete a scheduled task. Only after start(). */
+  async cancelTask(taskId: string): Promise<void> {
+    this.requireStartedForTaskApi('cancelTask');
+    this.requireTaskAdminAccess();
+
+    this.requireExistingTask(taskId);
+    this.db.deleteTask(taskId);
+    this.refreshTaskSnapshots();
   }
 
   /**
@@ -696,21 +879,7 @@ export class AgentImpl
     const isMain = group.isMain === true;
     const sessionId = this.sessions[group.folder];
 
-    const tasks = this.db.getAllTasks();
-    writeTasksSnapshot(
-      group.folder,
-      isMain,
-      tasks.map((t) => ({
-        id: t.id,
-        groupFolder: t.group_folder,
-        prompt: t.prompt,
-        schedule_type: t.schedule_type,
-        schedule_value: t.schedule_value,
-        status: t.status,
-        next_run: t.next_run,
-      })),
-      this.config.dataDir,
-    );
+    this.refreshTaskSnapshots();
 
     const availableGroups = this.getAvailableGroups();
     writeGroupsSnapshot(
@@ -905,6 +1074,64 @@ export class AgentImpl
       }));
   }
 
+  private requireStartedForTaskApi(methodName: string): void {
+    if (!this._started) {
+      throw new Error(`Call start() before ${methodName}()`);
+    }
+  }
+
+  private requireTaskAdminAccess(): void {
+    const hasMainGroup = Object.values(this._registeredGroups).some(
+      (group) => group.isMain === true,
+    );
+    if (!hasMainGroup) {
+      throw new Error('Task admin requires at least one registered main group');
+    }
+  }
+
+  private requireExistingTask(taskId: string): ScheduledTask {
+    const task = this.db.getTaskById(taskId);
+    if (!task) {
+      throw new Error(`Task "${taskId}" not found`);
+    }
+    return task;
+  }
+
+  private requireTaskUpdatable(task: ScheduledTask, operation: 'update'): void {
+    if (task.status === 'completed') {
+      throw new Error(`Cannot ${operation} completed task "${task.id}"`);
+    }
+  }
+
+  private getTaskSnapshotOrThrow(taskId: string): Task {
+    const task = this.db.getTaskById(taskId);
+    if (!task) {
+      throw new Error(`Task "${taskId}" not found`);
+    }
+    return toPublicTask(task);
+  }
+
+  private refreshTaskSnapshots(): void {
+    const taskRows = this.db.getAllTasks().map((task) => ({
+      id: task.id,
+      groupFolder: task.group_folder,
+      prompt: task.prompt,
+      schedule_type: task.schedule_type,
+      schedule_value: task.schedule_value,
+      status: task.status,
+      next_run: task.next_run,
+    }));
+
+    for (const group of Object.values(this._registeredGroups)) {
+      writeTasksSnapshot(
+        group.folder,
+        group.isMain === true,
+        taskRows,
+        this.config.dataDir,
+      );
+    }
+  }
+
   /** @internal — test helper for setting registered groups directly. */
   _setRegisteredGroups(groups: Record<string, InternalRegisteredGroup>): void {
     this._registeredGroups = groups;
@@ -958,26 +1185,7 @@ export class AgentImpl
       getAvailableGroups: () => this.getAvailableGroups(),
       writeGroupsSnapshot: (gf, im, ag, rj) =>
         writeGroupsSnapshot(gf, im, ag, rj, this.config.dataDir),
-      onTasksChanged: () => {
-        const tasks = this.db.getAllTasks();
-        const taskRows = tasks.map((t) => ({
-          id: t.id,
-          groupFolder: t.group_folder,
-          prompt: t.prompt,
-          schedule_type: t.schedule_type,
-          schedule_value: t.schedule_value,
-          status: t.status,
-          next_run: t.next_run,
-        }));
-        for (const group of Object.values(this._registeredGroups)) {
-          writeTasksSnapshot(
-            group.folder,
-            group.isMain === true,
-            taskRows,
-            this.config.dataDir,
-          );
-        }
-      },
+      onTasksChanged: () => this.refreshTaskSnapshots(),
     });
 
     this.queue.setProcessMessagesFn((chatJid) =>

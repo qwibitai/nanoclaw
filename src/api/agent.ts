@@ -9,6 +9,13 @@ import type {
   RegisterGroupOptions,
   RegisteredGroup,
 } from './group.js';
+import type {
+  ListTasksOptions,
+  ScheduleTaskOptions,
+  Task,
+  TaskDetails,
+  UpdateTaskOptions,
+} from './task.js';
 
 /** Per-project agent runtime. Manages channels and per-chat VMs. */
 export interface Agent {
@@ -27,6 +34,20 @@ export interface Agent {
   getRegisteredGroups(): RegisteredGroup[];
   /** Get a snapshot of discovered groups. Only after start(). */
   getAvailableGroups(): AvailableGroup[];
+  /** Schedule a task for a registered group. Only after start(). */
+  scheduleTask(options: ScheduleTaskOptions): Promise<Task>;
+  /** List scheduled tasks. Only after start(). */
+  listTasks(options?: ListTasksOptions): Task[];
+  /** Get one scheduled task including run history. Only after start(). */
+  getTask(taskId: string): TaskDetails | undefined;
+  /** Update a scheduled task. Only after start(). */
+  updateTask(taskId: string, updates: UpdateTaskOptions): Promise<Task>;
+  /** Pause an active scheduled task. Only after start(). */
+  pauseTask(taskId: string): Promise<Task>;
+  /** Resume a paused scheduled task. Only after start(). */
+  resumeTask(taskId: string): Promise<Task>;
+  /** Cancel and delete a scheduled task. Only after start(). */
+  cancelTask(taskId: string): Promise<void>;
   /** Start the agent — connects channels, begins processing messages. */
   start(): Promise<void>;
   /** Stop the agent — disconnects channels, stops processing. */

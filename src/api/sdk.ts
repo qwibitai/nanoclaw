@@ -28,6 +28,17 @@ export type {
 } from './channel-driver.js';
 export type { MountAllowlist, AllowedRoot } from './mount.js';
 export type {
+  Task,
+  TaskContextMode,
+  TaskDetails,
+  TaskRun,
+  TaskScheduleType,
+  TaskStatus,
+  ScheduleTaskOptions,
+  ListTasksOptions,
+  UpdateTaskOptions,
+} from './task.js';
+export type {
   AgentEvents,
   MessageInEvent,
   MessageOutEvent,

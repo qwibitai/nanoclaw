@@ -137,10 +137,16 @@ describe('AgentLite platform registry', () => {
     ).toThrow('workdir');
   });
 
-  it('keeps createAgent strict for restored names and removes registry rows on delete', async () => {
+  it('keeps createAgent strict for restored names, deletes the workdir, and removes registry rows on delete', async () => {
     const firstPlatform = await createAgentLiteImpl({ workdir: tmpDir });
     platforms.push(firstPlatform);
-    firstPlatform.createAgent('alice', { name: 'Alice' });
+    const agentWorkdir = path.join(tmpDir, 'custom-agents', 'alice');
+    firstPlatform.createAgent('alice', {
+      name: 'Alice',
+      workdir: agentWorkdir,
+    });
+    fs.mkdirSync(agentWorkdir, { recursive: true });
+    fs.writeFileSync(path.join(agentWorkdir, 'sentinel.txt'), 'alive', 'utf8');
     await firstPlatform.stop();
 
     const secondPlatform = await createAgentLiteImpl({ workdir: tmpDir });
@@ -152,6 +158,8 @@ describe('AgentLite platform registry', () => {
 
     await secondPlatform.deleteAgent('alice');
     expect(secondPlatform.agents.has('alice')).toBe(false);
+    expect(fs.existsSync(agentWorkdir)).toBe(false);
+    expect(fs.existsSync(getAgentRegistryDbPath(tmpDir))).toBe(true);
 
     const registry = initAgentRegistryDb(tmpDir);
     try {
