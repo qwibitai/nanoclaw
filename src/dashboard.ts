@@ -85,8 +85,8 @@ interface AppSummary {
   note: string;
 }
 
-const PORT = parseInt(process.env.NANOCLAW_DASHBOARD_PORT || '4780', 10);
-const HOST = process.env.NANOCLAW_DASHBOARD_HOST || '127.0.0.1';
+const DEFAULT_PORT = parseInt(process.env.NANOCLAW_DASHBOARD_PORT || '4780', 10);
+const DEFAULT_HOST = process.env.NANOCLAW_DASHBOARD_HOST || '127.0.0.1';
 const HEARTBEAT_STALE_MS = 5000;
 const MAX_LOG_EVENTS = 80;
 const DASHBOARD_STATE_DIR = path.join(DATA_DIR, 'dashboard');
@@ -114,6 +114,9 @@ let managedAgentOutput: Array<{
   stream: 'stdout' | 'stderr';
   line: string;
 }> = [];
+let dashboardHost = DEFAULT_HOST;
+let dashboardPort = DEFAULT_PORT;
+let snapshotInterval: NodeJS.Timeout | null = null;
 
 const sseClients = new Set<http.ServerResponse>();
 
@@ -554,8 +557,8 @@ function buildSnapshot(): Record<string, unknown> {
       : null,
     dashboard: {
       pid: process.pid,
-      host: HOST,
-      port: PORT,
+      host: dashboardHost,
+      port: dashboardPort,
       installedChannels: getRegisteredChannelNames(),
       startupBlocker: getStartupBlocker(),
       managedAgent: managedAgent
@@ -1336,12 +1339,89 @@ function handleRequest(
 }
 
 fs.mkdirSync(DASHBOARD_STATE_DIR, { recursive: true });
-initDatabase();
 
-const server = http.createServer(handleRequest);
-server.listen(PORT, HOST, () => {
-  logger.info({ host: HOST, port: PORT }, 'NanoClaw dashboard listening');
-  broadcastSnapshot();
-});
+function ensureSnapshotBroadcastLoop(): void {
+  if (snapshotInterval) return;
+  snapshotInterval = setInterval(broadcastSnapshot, 1000);
+  snapshotInterval.unref();
+}
 
-setInterval(broadcastSnapshot, 1000).unref();
+export interface DashboardListenOptions {
+  host?: string;
+  port?: number;
+  server?: http.Server;
+}
+
+export async function startDashboardServer(
+  options: DashboardListenOptions = {},
+): Promise<http.Server> {
+  initDatabase();
+  ensureSnapshotBroadcastLoop();
+
+  const requestedHost = options.host || DEFAULT_HOST;
+  const requestedPort = options.port ?? DEFAULT_PORT;
+  const server = options.server || http.createServer(handleRequest);
+
+  return await new Promise<http.Server>((resolve, reject) => {
+    let fallbackUsed = false;
+
+    const listen = (port: number): void => {
+      const onError = (err: NodeJS.ErrnoException): void => {
+        server.off('listening', onListening);
+        if (err.code === 'EADDRINUSE' && !fallbackUsed && port !== 0) {
+          fallbackUsed = true;
+          logger.warn(
+            { host: requestedHost, port },
+            'Requested NanoClaw dashboard address is in use; retrying with an ephemeral port',
+          );
+          listen(0);
+          return;
+        }
+        reject(err);
+      };
+
+      const onListening = (): void => {
+        server.off('error', onError);
+        const address = server.address();
+        if (address && typeof address !== 'string') {
+          dashboardHost = address.address;
+          dashboardPort = address.port;
+        } else {
+          dashboardHost = requestedHost;
+          dashboardPort = port;
+        }
+        logger.info(
+          {
+            host: dashboardHost,
+            port: dashboardPort,
+            requestedHost,
+            requestedPort,
+            fallbackUsed,
+          },
+          'NanoClaw dashboard listening',
+        );
+        broadcastSnapshot();
+        resolve(server);
+      };
+
+      server.once('error', onError);
+      server.once('listening', onListening);
+      server.listen(port, requestedHost);
+    };
+
+    listen(requestedPort);
+  });
+}
+
+// Guard: only run when executed directly, not when imported by tests
+const isDirectRun =
+  process.argv[1] &&
+  new URL(import.meta.url).pathname ===
+    new URL(`file://${process.argv[1]}`).pathname;
+
+if (isDirectRun) {
+  startDashboardServer().catch((err) => {
+    logger.error({ err }, 'Failed to start NanoClaw dashboard');
+    process.exit(1);
+  });
+}
