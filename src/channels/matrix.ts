@@ -127,13 +127,8 @@ export class MatrixChannel implements Channel {
     }
 
     if (ready) {
-      const masterKeyId = await crypto
-        .getCrossSigningKeyId()
-        .catch(() => null);
-      logger.info(
-        { masterKeyId },
-        'Matrix cross-signing already initialised',
-      );
+      const masterKeyId = await crypto.getCrossSigningKeyId().catch(() => null);
+      logger.info({ masterKeyId }, 'Matrix cross-signing already initialised');
       return;
     }
 
@@ -157,9 +152,7 @@ export class MatrixChannel implements Channel {
         },
       });
 
-      const masterKeyId = await crypto
-        .getCrossSigningKeyId()
-        .catch(() => null);
+      const masterKeyId = await crypto.getCrossSigningKeyId().catch(() => null);
       logger.info({ masterKeyId }, 'Matrix cross-signing bootstrapped');
     } catch (err) {
       logger.error(
