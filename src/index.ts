@@ -10,10 +10,13 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   MAX_MESSAGES_PER_PROMPT,
+  ONECLI_BIN,
+  ONECLI_OAUTH_SECRET_ID,
   ONECLI_URL,
   POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
+import { ensureFreshOAuthToken } from './oauth-token.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -748,6 +751,17 @@ async function main(): Promise<void> {
     },
   });
   startSessionCleanup();
+
+  // Proactively refresh the OAuth token every 30 minutes so it doesn't expire
+  // during periods of inactivity (container-runner only refreshes on demand).
+  const refreshOAuth = () =>
+    ensureFreshOAuthToken({
+      secretId: ONECLI_OAUTH_SECRET_ID,
+      onecliPath: ONECLI_BIN,
+    }).catch((err) => logger.warn({ err }, 'Background OAuth refresh failed'));
+  refreshOAuth();
+  setInterval(refreshOAuth, 30 * 60 * 1000);
+
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
