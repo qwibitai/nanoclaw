@@ -630,3 +630,71 @@ describe('MCP skill env var forwarding', () => {
     expect(loggedArgs).toContain('HA_URL=http://ha:8123');
   });
 });
+
+describe('NANOCLAW_DOCKER_NETWORK', () => {
+  const original = process.env.NANOCLAW_DOCKER_NETWORK;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(spawn).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    if (original !== undefined) {
+      process.env.NANOCLAW_DOCKER_NETWORK = original;
+    } else {
+      delete process.env.NANOCLAW_DOCKER_NETWORK;
+    }
+  });
+
+  function getSpawnArgs(): string[] {
+    const call = vi.mocked(spawn).mock.calls[0];
+    return call ? (call[1] as string[]) : [];
+  }
+
+  async function runOnce() {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  }
+
+  it('passes --network when NANOCLAW_DOCKER_NETWORK is set', async () => {
+    process.env.NANOCLAW_DOCKER_NETWORK = 'ai-local';
+
+    await runOnce();
+
+    const args = getSpawnArgs();
+    const idx = args.indexOf('--network');
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(args[idx + 1]).toBe('ai-local');
+  });
+
+  it('omits --network when NANOCLAW_DOCKER_NETWORK is unset', async () => {
+    delete process.env.NANOCLAW_DOCKER_NETWORK;
+
+    await runOnce();
+
+    const args = getSpawnArgs();
+    expect(args).not.toContain('--network');
+  });
+
+  it('omits --network when NANOCLAW_DOCKER_NETWORK is empty/whitespace', async () => {
+    process.env.NANOCLAW_DOCKER_NETWORK = '   ';
+
+    await runOnce();
+
+    const args = getSpawnArgs();
+    expect(args).not.toContain('--network');
+  });
+});

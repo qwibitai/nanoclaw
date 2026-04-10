@@ -432,6 +432,14 @@ function buildContainerArgs(
     args.push('-e', `PAPERCLIP_COMPANY_ID=${process.env.PAPERCLIP_COMPANY_ID}`);
   }
 
+  // Attach to a custom Docker network when configured (e.g. shared
+  // network with Ollama, Home Assistant, etc.). Falls back to Docker's
+  // default bridge when unset.
+  const dockerNetwork = process.env.NANOCLAW_DOCKER_NETWORK;
+  if (dockerNetwork && dockerNetwork.trim().length > 0) {
+    args.push('--network', dockerNetwork.trim());
+  }
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
