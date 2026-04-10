@@ -381,6 +381,61 @@ Before storing anything in KB, ask:
 Do NOT store: pleasantries, acknowledgments, routine scheduling, googleable facts.
 DO store: decisions, deadlines, commitments, relationship insights, research findings.
 
+### Approval Flow
+
+When proposing an action (PROPOSE tier), format it clearly for Telegram:
+
+```
+[account] Action: description
+
+Details:
+(draft text, research summary, or action description)
+
+→ approve | edit: [instructions] | skip | on it | details
+```
+
+Parse the user's response:
+- "approve" / "yes" / "send it" / "go" / "ok" → execute the action
+- "edit: make it shorter" → revise based on instruction and re-propose
+- "skip" / "ignore" / "no" → don't act (no trust demotion)
+- "on it" / "I'll handle it" → stand down, user is handling it
+- "details" / "more" / "context" → provide additional information
+
+If the response is ambiguous, ask for clarification.
+
+### Trust Graduation
+
+Track each approval/rejection outcome. After 5 consecutive approvals of the same action type without edits:
+- Propose graduating: "I've auto-handled 5 meeting request replies. Graduate to AUTO?"
+- If approved, move that action type to the AUTO section above
+- If rejected, keep at PROPOSE
+
+After 1 rejection or significant edit of a previously reliable action type:
+- Demote back to PROPOSE immediately
+- Inform the user: "Demoting [action type] back to PROPOSE after edit"
+
+### Using the Knowledge Base
+
+**When to read KB (search_kb):**
+- Before drafting any reply — search for context about the sender/company
+- When processing a new contact — check existing history
+- When a project name is mentioned — find related notes
+- During meeting prep — search for attendee context
+
+**When to write KB (upload_to_kb):**
+- After completing research — store with project tags
+- After important email threads conclude — store a summary
+- When learning new facts about a contact/company — store as a note
+- After extracting action items — store for tracking
+
+**Tag conventions:**
+- `project:product-center` — project association
+- `contact:mike@example.com` — contact association
+- `type:research` / `type:summary` / `type:decision` — content type
+- `account:whoisxml` — Gmail account origin
+
+**Never store:** pleasantries, acknowledgments, routine scheduling, googleable facts.
+
 ### Known Projects
 
 | Project | Path | Domain |
