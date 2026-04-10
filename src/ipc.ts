@@ -2246,8 +2246,16 @@ export function processQueryIpc(
       const gcRequestId = data.requestId;
 
       withGroupMutex(sourceGroup, async () => {
-        const worktreeDir = path.join(WORKTREES_DIR, sourceGroup, gcThreadId, gcRepo);
-        if (!fs.existsSync(worktreeDir) || !fs.existsSync(path.join(worktreeDir, '.git'))) {
+        const worktreeDir = path.join(
+          WORKTREES_DIR,
+          sourceGroup,
+          gcThreadId,
+          gcRepo,
+        );
+        if (
+          !fs.existsSync(worktreeDir) ||
+          !fs.existsSync(path.join(worktreeDir, '.git'))
+        ) {
           writeQueryResponse(ipcBaseDir, sourceGroup, gcRequestId, {
             status: 'error',
             error: `Worktree not found: ${gcRepo}`,
@@ -2257,13 +2265,29 @@ export function processQueryIpc(
 
         // Remove stale index.lock if present
         const lockFile = path.join(worktreeDir, '.git', 'index.lock');
-        try { fs.unlinkSync(lockFile); } catch { /* ignore */ }
+        try {
+          fs.unlinkSync(lockFile);
+        } catch {
+          /* ignore */
+        }
 
         try {
-          execFileSync('git', ['add', '-A'], { cwd: worktreeDir, stdio: 'pipe' });
+          execFileSync('git', ['add', '-A'], {
+            cwd: worktreeDir,
+            stdio: 'pipe',
+          });
           execFileSync(
             'git',
-            ['-c', 'user.email=agent@nanoclaw.local', '-c', 'user.name=agent', 'commit', '--no-verify', '-m', gcMessage],
+            [
+              '-c',
+              'user.email=agent@nanoclaw.local',
+              '-c',
+              'user.name=agent',
+              'commit',
+              '--no-verify',
+              '-m',
+              gcMessage,
+            ],
             { cwd: worktreeDir, stdio: 'pipe' },
           );
           const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
@@ -2306,8 +2330,16 @@ export function processQueryIpc(
       const gpRequestId = data.requestId;
 
       withGroupMutex(sourceGroup, async () => {
-        const worktreeDir = path.join(WORKTREES_DIR, sourceGroup, gpThreadId, gpRepo);
-        if (!fs.existsSync(worktreeDir) || !fs.existsSync(path.join(worktreeDir, '.git'))) {
+        const worktreeDir = path.join(
+          WORKTREES_DIR,
+          sourceGroup,
+          gpThreadId,
+          gpRepo,
+        );
+        if (
+          !fs.existsSync(worktreeDir) ||
+          !fs.existsSync(path.join(worktreeDir, '.git'))
+        ) {
           writeQueryResponse(ipcBaseDir, sourceGroup, gpRequestId, {
             status: 'error',
             error: `Worktree not found: ${gpRepo}`,
@@ -2316,11 +2348,15 @@ export function processQueryIpc(
         }
 
         try {
-          const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-            cwd: worktreeDir,
-            stdio: 'pipe',
-            encoding: 'utf-8',
-          }).trim();
+          const branch = execFileSync(
+            'git',
+            ['rev-parse', '--abbrev-ref', 'HEAD'],
+            {
+              cwd: worktreeDir,
+              stdio: 'pipe',
+              encoding: 'utf-8',
+            },
+          ).trim();
           execFileSync('git', ['push', '-u', 'origin', branch], {
             cwd: worktreeDir,
             stdio: 'pipe',
@@ -2363,8 +2399,16 @@ export function processQueryIpc(
       const prRequestId = data.requestId;
 
       withGroupMutex(sourceGroup, async () => {
-        const worktreeDir = path.join(WORKTREES_DIR, sourceGroup, prThreadId, prRepo);
-        if (!fs.existsSync(worktreeDir) || !fs.existsSync(path.join(worktreeDir, '.git'))) {
+        const worktreeDir = path.join(
+          WORKTREES_DIR,
+          sourceGroup,
+          prThreadId,
+          prRepo,
+        );
+        if (
+          !fs.existsSync(worktreeDir) ||
+          !fs.existsSync(path.join(worktreeDir, '.git'))
+        ) {
           writeQueryResponse(ipcBaseDir, sourceGroup, prRequestId, {
             status: 'error',
             error: `Worktree not found: ${prRepo}`,
@@ -2376,7 +2420,12 @@ export function processQueryIpc(
           const result = execFileSync(
             'gh',
             ['pr', 'create', '--title', prTitle, '--body', prBody],
-            { cwd: worktreeDir, stdio: 'pipe', encoding: 'utf-8', timeout: 30_000 },
+            {
+              cwd: worktreeDir,
+              stdio: 'pipe',
+              encoding: 'utf-8',
+              timeout: 30_000,
+            },
           ).trim();
           // gh pr create returns the PR URL
           writeQueryResponse(ipcBaseDir, sourceGroup, prRequestId, {

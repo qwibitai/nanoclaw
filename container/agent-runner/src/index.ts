@@ -783,18 +783,18 @@ Your cwd is \`/workspace/group\`. Writes there persist to the host group folder.
 
 \`\`\`
 # 1. Get a working directory
-create_worktree({ repo: "XZO-BACKEND" })
-# → /workspace/worktrees/XZO-BACKEND
+create_worktree({ repo: "MY-REPO" })
+# → /workspace/worktrees/MY-REPO
 
 # 2. Edit files, run tests, iterate
 
 # 3. Commit, push, open PR
-git_commit({ repo: "XZO-BACKEND", message: "feat: add places enrichment" })
-git_push({ repo: "XZO-BACKEND" })
-open_pr({ repo: "XZO-BACKEND", title: "feat: add places enrichment", body: "## Summary\\n..." })
+git_commit({ repo: "MY-REPO", message: "feat: add places enrichment" })
+git_push({ repo: "MY-REPO" })
+open_pr({ repo: "MY-REPO", title: "feat: add places enrichment", body: "## Summary\\n..." })
 \`\`\`
 
-**Resume a prior branch:** \`create_worktree({ repo: "XZO-BACKEND", branch: "feat/my-feature" })\`
+**Resume a prior branch:** \`create_worktree({ repo: "MY-REPO", branch: "feat/my-feature" })\`
 
 **New repos (not yet in the group):** \`clone_repo({ url: "https://github.com/org/repo.git" })\` — clones to the group. Note: git operations in the new repo's worktree won't work until the next session (use \`/restart\` to respawn).
 
