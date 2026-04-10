@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
+  _parseContainerConfigJson,
   _parseThreadDefaultsJson,
+  _sanitizeThreadDefaults,
   _initTestDatabase,
   createTask,
   deleteTask,
@@ -540,6 +542,42 @@ describe('registered group type', () => {
 
   it('handles malformed thread_defaults JSON safely', () => {
     expect(_parseThreadDefaultsJson('{bad-json', 'dc:broken')).toBeUndefined();
+  });
+
+  it('sanitizes invalid thread_defaults.type to non-privileged fields only', () => {
+    expect(
+      _sanitizeThreadDefaults(
+        { type: 'main', requiresTrigger: true },
+        'dc:broken-type',
+      ),
+    ).toEqual({ requiresTrigger: true });
+  });
+
+  it('handles malformed container_config JSON safely', () => {
+    expect(_parseContainerConfigJson('{bad-json', 'dc:broken')).toBeUndefined();
+  });
+
+  it('allows parent and thread groups to share the same folder', () => {
+    setRegisteredGroup('dc:parent', {
+      name: 'Parent',
+      folder: 'discord_shared',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      type: 'main',
+    });
+    setRegisteredGroup('dc:thread1', {
+      name: 'Thread',
+      folder: 'discord_shared',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:01:00.000Z',
+      type: 'thread',
+    });
+
+    const groups = getAllRegisteredGroups();
+    expect(groups['dc:parent']).toBeDefined();
+    expect(groups['dc:thread1']).toBeDefined();
+    expect(groups['dc:parent'].folder).toBe('discord_shared');
+    expect(groups['dc:thread1'].folder).toBe('discord_shared');
   });
 });
 

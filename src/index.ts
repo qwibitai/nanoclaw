@@ -135,6 +135,16 @@ function autoRegisterThread(
   parent: RegisteredGroup,
 ): void {
   const td = parent.thread_defaults!;
+  const requestedType = td.type;
+  const childType = requestedType === 'chat' || requestedType === 'thread'
+    ? requestedType
+    : 'thread';
+  if (requestedType && childType !== requestedType) {
+    logger.warn(
+      { chatJid, requestedType },
+      'Invalid or privileged thread_defaults.type detected at runtime; falling back to thread',
+    );
+  }
   const threadName = msg.sender_name
     ? `Thread (from ${msg.sender_name})`
     : 'Thread';
@@ -145,7 +155,7 @@ function autoRegisterThread(
     added_at: new Date().toISOString(),
     containerConfig: td.containerConfig ?? parent.containerConfig,
     requiresTrigger: td.requiresTrigger ?? parent.requiresTrigger,
-    type: td.type ?? 'thread',
+    type: childType,
   };
   registerGroup(chatJid, childGroup);
   logger.info(

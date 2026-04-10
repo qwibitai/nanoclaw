@@ -79,6 +79,9 @@
 保存:
 - DB に `thread_defaults` 用 JSON カラムを追加する
 - `register_group` / `update_group` IPC で保存できるようにする
+- IPC 受信時に `thread_defaults` の型を検証する（`type`/`requiresTrigger`/`containerConfig`）
+- DB 読み込み時も `container_config` / `thread_defaults` をサニタイズし、不正値は無視して継続する
+- `registered_groups` は `jid` で upsert し、`folder` は UNIQUE 制約を持たない（親と thread で共有可能）
 
 自動登録ルール:
 - thread message を受信したが、その `chat_jid` に対応する登録 group がない場合のみ発火

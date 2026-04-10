@@ -58,7 +58,7 @@ function validateThreadDefaults(
     if (!parsedType) {
       logger.warn(
         { sourceGroup, type: td.type },
-        'Invalid or privileged thread_defaults.type in register_group request',
+        'Invalid or privileged thread_defaults.type in IPC request',
       );
       return false;
     }

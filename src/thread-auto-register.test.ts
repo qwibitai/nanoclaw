@@ -208,4 +208,29 @@ describe('_autoRegisterThread (actual auto-registration path)', () => {
     expect(childType).not.toBe('override');
     expect(childType).toBe('thread');
   });
+
+  it('falls back to thread when parent thread_defaults.type is invalid at runtime', () => {
+    const corruptedParent: RegisteredGroup = {
+      ...parent,
+      thread_defaults: { type: 'main' as unknown as 'thread' },
+    };
+    const msg: InboundMessage = {
+      id: 'msg7',
+      chat_jid: threadJid,
+      sender: 'user123',
+      sender_name: 'Grace',
+      content: 'Test',
+      timestamp: '2024-01-01T00:07:00.000Z',
+      parent_jid: parentJid,
+    };
+
+    _autoRegisterThread(threadJid, msg, corruptedParent);
+
+    const childType = registeredGroups[threadJid].type;
+    expect(childType).toBe('thread');
+    expect(setRegisteredGroup).toHaveBeenCalledWith(
+      threadJid,
+      expect.objectContaining({ type: 'thread' }),
+    );
+  });
 });
