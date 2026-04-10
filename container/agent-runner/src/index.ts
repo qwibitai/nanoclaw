@@ -146,6 +146,18 @@ function readOptionalFile(filePath: string): string | null {
   }
 }
 
+function appendMemoryFile(
+  parts: string[],
+  label: string,
+  baseDir: string,
+  filename: string,
+): void {
+  const content = readOptionalFile(path.join(baseDir, filename));
+  if (!content) return;
+  parts.push(`${label} (${filename}):`);
+  parts.push(content);
+}
+
 function buildSystemPrompt(containerInput: ContainerInput): string {
   const parts = [
     `You are ${containerInput.assistantName || 'Andy'}, the NanoClaw assistant replying inside a chat.`,
@@ -165,6 +177,13 @@ function buildSystemPrompt(containerInput: ContainerInput): string {
     parts.push('Group-specific memory/context:');
     parts.push(groupMemory);
   }
+
+  appendMemoryFile(parts, 'Global personality memory', GLOBAL_DIR, 'soul.md');
+  appendMemoryFile(parts, 'Global user context', GLOBAL_DIR, 'user.md');
+  appendMemoryFile(parts, 'Global heartbeat/status context', GLOBAL_DIR, 'heartbeat.md');
+  appendMemoryFile(parts, 'Group personality memory', GROUP_DIR, 'soul.md');
+  appendMemoryFile(parts, 'Group user context', GROUP_DIR, 'user.md');
+  appendMemoryFile(parts, 'Group heartbeat/status context', GROUP_DIR, 'heartbeat.md');
 
   return parts.join('\n\n');
 }

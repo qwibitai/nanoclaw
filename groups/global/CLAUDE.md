@@ -42,6 +42,13 @@ Files you create are saved in `/workspace/group/`. Use this for notes, research,
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
 
+Extended OpenClaw-style memory files may also exist in this folder:
+- `soul.md` for deeper personality and behavioral guidance
+- `user.md` for durable user context
+- `heartbeat.md` for short-lived current priorities and status
+
+Read and maintain those files when they are relevant.
+
 When you learn something important:
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
 - Split files larger than 500 lines into folders
