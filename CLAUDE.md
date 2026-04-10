@@ -102,6 +102,12 @@ Skip `/claw-review-swarm` only for changes where correctness is self-evident (st
 
 Re-run `npm run build && npm test` after fixing any gate findings, before committing.
 
+## IPC and Container Security
+
+All `execSync` calls in IPC handlers that include agent-supplied values MUST use `execFileSync` with argument arrays. Never interpolate IPC input into shell strings — agents are untrusted and can send arbitrary values that escape shell quoting. Validate path inputs with containment checks (`path.resolve(input).startsWith(expectedParent + path.sep)`).
+
+When mounting host directories read-only into containers, verify that both read AND write operations behave as expected. Read-only mounts prevent all writes, including git index updates, object creation, and ref updates. "Git commands work" does not mean "git write commands work."
+
 ## Troubleshooting
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.
@@ -113,7 +119,7 @@ The container buildkit caches the build context aggressively. `--no-cache` alone
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **nanoclaw** (1301 symbols, 3528 relationships, 103 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **nanoclaw** (1322 symbols, 3572 relationships, 104 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

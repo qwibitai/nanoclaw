@@ -59,7 +59,7 @@ if [ ! -f "$STORE_DB" ]; then
   exit 1
 fi
 
-ACTIVE_IDS=$(sqlite3 "$STORE_DB" "SELECT session_id FROM sessions;" 2>/dev/null || true)
+ACTIVE_IDS=$(sqlite3 "$STORE_DB" "SELECT session_id FROM sessions_v2;" 2>/dev/null || true)
 
 is_active() {
   echo "$ACTIVE_IDS" | grep -qF "$1"

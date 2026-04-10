@@ -71,7 +71,9 @@ export async function handleSessionCommand(opts: {
   triggerPattern: RegExp;
   timezone: string;
   deps: SessionCommandDeps;
-}): Promise<{ handled: false } | { handled: true; success: boolean; restart?: boolean }> {
+}): Promise<
+  { handled: false } | { handled: true; success: boolean; restart?: boolean }
+> {
   const {
     missedMessages,
     isMainGroup,
