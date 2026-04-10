@@ -1,5 +1,5 @@
 {
-  "version": "0.2.0",
+  "version": "0.3.0",
   "nodeModulesDir": "auto",
   "tasks": {
     "dev": "bash scripts/stop.sh; deno run -A src/store/index.ts & sleep 1 && deno run -A src/gateway/index.ts & deno run -A src/agent/index.ts & wait",
