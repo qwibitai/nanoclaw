@@ -19,6 +19,13 @@ const envConfig = readEnvFile([
   'MCP_SERVER_ENABLED',
   'ONECLI_URL',
   'TZ',
+  'WATCH_AUTH_TOKEN',
+  'WATCH_HTTP_PORT',
+  'WATCH_HTTP_BIND',
+  'WATCH_JID',
+  'WATCH_GROUP_FOLDER',
+  'WATCH_SYNC_TIMEOUT_MS',
+  'WATCH_SIGNAL_MIRROR_JID',
 ]);
 
 export const ASSISTANT_NAME =
@@ -195,6 +202,44 @@ export const PROTON_PASS_BIN =
   process.env.PROTON_PASS_BIN ||
   path.join(HOME_DIR, '.local', 'bin', 'pass-cli');
 export const PROTON_PASS_VAULT = process.env.PROTON_PASS_VAULT || 'NanoClaw';
+
+// NanoClaw Watch — HTTP endpoint for the T-Watch S3 firmware.
+// Channel is opt-in: if WATCH_AUTH_TOKEN is empty, the factory returns null
+// and no HTTP server is started. Secrets are loaded via readEnvFile (which
+// parses .env without polluting process.env) to prevent leaking to containers.
+export const WATCH_AUTH_TOKEN =
+  process.env.WATCH_AUTH_TOKEN || envConfig.WATCH_AUTH_TOKEN || '';
+export const WATCH_HTTP_PORT = parseInt(
+  process.env.WATCH_HTTP_PORT || envConfig.WATCH_HTTP_PORT || '3000',
+  10,
+);
+export const WATCH_HTTP_BIND =
+  process.env.WATCH_HTTP_BIND || envConfig.WATCH_HTTP_BIND || '0.0.0.0';
+export const WATCH_JID =
+  process.env.WATCH_JID || envConfig.WATCH_JID || 'watch:scott';
+export const WATCH_GROUP_FOLDER =
+  process.env.WATCH_GROUP_FOLDER || envConfig.WATCH_GROUP_FOLDER || 'main';
+// Sync reply window — how long the watch's HTTP POST is held open waiting for
+// the container agent's response. A cold container spawn + agent think takes
+// ~15–25 sec in practice, so 12s was too short and most replies fell through
+// to the slower poll queue (60s polling interval). 45s gives a comfortable
+// margin and still keeps the watch's HTTP client within its own timeout.
+export const WATCH_SYNC_TIMEOUT_MS = parseInt(
+  process.env.WATCH_SYNC_TIMEOUT_MS ||
+    envConfig.WATCH_SYNC_TIMEOUT_MS ||
+    '45000',
+  10,
+);
+// Optional: mirror watch conversations to a Signal JID so Scott can read them
+// on his phone in addition to the wrist. Off by default — set to a Signal JID
+// (e.g. 'signal:198c1cdb-...') to enable. Two messages per exchange:
+//   "⌚ [Watch] Scott: <transcribed text>"   (from handleMessage)
+//   "↳ <agent reply>"                        (from sendMessage)
+// Both fast-path and slow-path replies get mirrored.
+export const WATCH_SIGNAL_MIRROR_JID =
+  process.env.WATCH_SIGNAL_MIRROR_JID ||
+  envConfig.WATCH_SIGNAL_MIRROR_JID ||
+  '';
 
 // Local Whisper transcription (whisper-cli from whisper.cpp)
 // Set WHISPER_BIN to empty string to disable and fall back to OpenAI only.

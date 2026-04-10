@@ -18,6 +18,7 @@ import {
   SIGNAL_PHONE_NUMBER,
   TIMEZONE,
   TRIGGER_PATTERN,
+  WATCH_SIGNAL_MIRROR_JID,
   WN_ACCOUNT_PUBKEY,
   messageHasTrigger,
 } from './config.js';
@@ -968,6 +969,31 @@ async function main(): Promise<void> {
     const signalChannel = channels.find((c) => c.name === 'signal');
     if (signalChannel) {
       initHealthMonitor({ adminJid: mainEntry[0], channel: signalChannel });
+    }
+  }
+
+  // Wire optional Signal mirror for the watch channel. When
+  // WATCH_SIGNAL_MIRROR_JID is configured AND both watch and signal channels
+  // are running, the watch channel will forward each user message and agent
+  // reply to that Signal JID so Scott can read watch conversations on his
+  // phone.
+  if (WATCH_SIGNAL_MIRROR_JID) {
+    const watchChannel = channels.find((c) => c.name === 'watch');
+    const signalChannel = channels.find((c) => c.name === 'signal');
+    if (watchChannel && signalChannel && 'setMirrorTarget' in watchChannel) {
+      (
+        watchChannel as unknown as {
+          setMirrorTarget: (ch: typeof signalChannel, jid: string) => void;
+        }
+      ).setMirrorTarget(signalChannel, WATCH_SIGNAL_MIRROR_JID);
+    } else {
+      logger.warn(
+        {
+          hasWatch: !!watchChannel,
+          hasSignal: !!signalChannel,
+        },
+        'WATCH_SIGNAL_MIRROR_JID set but cannot wire mirror — channel(s) missing',
+      );
     }
   }
 
