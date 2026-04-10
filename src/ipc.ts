@@ -579,7 +579,9 @@ export async function processTaskIpc(
           data,
           'group_type',
         );
-        const newType = hasGroupType ? parseIpcGroupType(data.group_type) : null;
+        const newType = hasGroupType
+          ? parseIpcGroupType(data.group_type)
+          : null;
         if (hasGroupType && !newType) {
           logger.warn(
             { sourceGroup, group_type: data.group_type },
@@ -629,10 +631,7 @@ export async function processTaskIpc(
           'Group updated via IPC',
         );
       } else {
-        logger.warn(
-          { data },
-          'Invalid update_group request - missing jid',
-        );
+        logger.warn({ data }, 'Invalid update_group request - missing jid');
       }
       break;
 
