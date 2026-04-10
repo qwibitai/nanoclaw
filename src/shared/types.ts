@@ -16,6 +16,7 @@ export interface Session {
   agentSessionId?: string;
   lastActivity: string;
   messageCount: number;
+  deletedAt?: string;
 }
 
 // --- Work Queue ---

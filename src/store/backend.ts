@@ -21,6 +21,7 @@ export interface StoreBackend {
   setAgentSession(id: string, agentSessionId: string): Promise<void>;
   getAgentSession(id: string): Promise<string | null>;
   deleteSession(id: string): Promise<void>;
+  purgeDeletedSessions(olderThanDays: number): Promise<number>;
 
   // Events
   logEvent(event: Omit<ActivityEvent, 'id' | 'timestamp'>): Promise<ActivityEvent>;
@@ -70,22 +71,33 @@ export class FilesystemBackend implements StoreBackend {
   }
 
   async listSessions(): Promise<Session[]> {
-    return Object.values(this.index.sessions);
+    return Object.values(this.index.sessions).filter((s) => !s.deletedAt);
   }
 
   async getSession(id: string): Promise<Session | null> {
-    return this.index.sessions[id] ?? null;
+    const session = this.index.sessions[id];
+    if (!session || session.deletedAt) return null;
+    return session;
   }
 
   async createSession(
     channelType: ChannelType,
     channelId: string,
   ): Promise<Session> {
-    const id = `${channelType}-${channelId}`;
-    let session = this.index.sessions[id];
-    if (session) return session;
+    // Find an active (non-deleted) session for this channel
+    const existing = Object.values(this.index.sessions).find(
+      (s) =>
+        s.channelType === channelType &&
+        s.channelId === channelId &&
+        !s.deletedAt,
+    );
+    if (existing) return existing;
 
-    session = {
+    // Generate unique session ID (like discord-1491863568646279340)
+    const uid = Date.now().toString();
+    const id = `${channelType}-${uid}`;
+
+    const session: Session = {
       id,
       channelType,
       channelId,
@@ -119,8 +131,36 @@ export class FilesystemBackend implements StoreBackend {
   }
 
   async deleteSession(id: string): Promise<void> {
-    delete this.index.sessions[id];
-    this.save();
+    const session = this.index.sessions[id];
+    if (session) {
+      session.deletedAt = new Date().toISOString();
+      this.save();
+    }
+  }
+
+  async purgeDeletedSessions(olderThanDays: number): Promise<number> {
+    const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+    let purged = 0;
+
+    for (const [id, session] of Object.entries(this.index.sessions)) {
+      if (
+        session.deletedAt &&
+        new Date(session.deletedAt).getTime() < cutoff
+      ) {
+        // Remove JSONL file
+        try {
+          const file = resolve(this.jsonlDir(), `${id}.jsonl`);
+          Deno.removeSync(file);
+        } catch {
+          // file may not exist
+        }
+        delete this.index.sessions[id];
+        purged++;
+      }
+    }
+
+    if (purged > 0) this.save();
+    return purged;
   }
 
   async logEvent(

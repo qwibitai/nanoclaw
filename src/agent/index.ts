@@ -187,17 +187,18 @@ async function processWork(item: WorkItem): Promise<void> {
     }
   }
 
-  // Memory recall — inject relevant memories before AI processes message
+  // Memory recall — inject relevant memories into system prompt (not user prompt,
+  // so they don't appear in JSONL chat history)
   const memoryBlock = await recallMemories(prompt);
-  if (memoryBlock) {
-    prompt = `${memoryBlock}\n\n${prompt}`;
-  }
+  const systemPromptWithMemory = memoryBlock
+    ? `${systemPrompt}\n\n${memoryBlock}`
+    : systemPrompt;
 
   const agentResult = await runAgent({
     prompt,
     cwd,
     sessionId: agentSessionId,
-    systemPrompt,
+    systemPrompt: systemPromptWithMemory,
   });
 
   // Persist Agent SDK session ID and JSONL transcript
