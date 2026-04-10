@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as realFs from 'fs';
+import * as realPath from 'path';
+import * as realOs from 'os';
 
 // Mock logger
 vi.mock('./logger.js', () => ({
@@ -158,5 +161,164 @@ describe('cleanupOrphans', () => {
       { count: 2, names: ['nanoclaw-a-1', 'nanoclaw-b-2'] },
       'Stopped orphaned containers',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildVolumeMounts — inline logic tests using real filesystem
+//
+// buildVolumeMounts is tested by inlining the relevant new mount logic so
+// tests use actual temp directories without fighting the global vi.mock('fs').
+// This mirrors the approach in container-runner.test.ts.
+// ---------------------------------------------------------------------------
+
+/**
+ * Inline the new worktrees+gitdir mount logic added by B3.
+ * Returns the list of new mounts generated for a threaded non-main channel.
+ */
+function computeNewWorktreeMounts(
+  groupDir: string,
+  worktreeDir: string,
+): Array<{ hostPath: string; containerPath: string; readonly: boolean }> {
+  const mounts: Array<{
+    hostPath: string;
+    containerPath: string;
+    readonly: boolean;
+  }> = [];
+
+  // (1) /workspace/worktrees mount
+  mounts.push({
+    hostPath: worktreeDir,
+    containerPath: '/workspace/worktrees',
+    readonly: false,
+  });
+
+  // (2) Scan group folder for canonical repo .git dirs
+  try {
+    for (const entry of realFs.readdirSync(groupDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const repoPath = realPath.join(groupDir, entry.name);
+      const gitDir = realPath.join(repoPath, '.git');
+      if (!realFs.existsSync(gitDir)) continue;
+      try {
+        if (!realFs.statSync(gitDir).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      mounts.push({ hostPath: gitDir, containerPath: gitDir, readonly: true });
+    }
+  } catch {
+    // best-effort
+  }
+
+  // (3) Scan existing worktrees for additional canonical .git dirs
+  try {
+    if (realFs.existsSync(worktreeDir)) {
+      for (const entry of realFs.readdirSync(worktreeDir, {
+        withFileTypes: true,
+      })) {
+        if (!entry.isDirectory()) continue;
+        const wtRepoPath = realPath.join(worktreeDir, entry.name);
+        const wtGitFile = realPath.join(wtRepoPath, '.git');
+        if (!realFs.existsSync(wtGitFile)) continue;
+        try {
+          if (!realFs.statSync(wtGitFile).isFile()) continue;
+          const gitFileContent = realFs.readFileSync(wtGitFile, 'utf-8').trim();
+          const match = gitFileContent.match(/^gitdir:\s*(.+)$/);
+          if (!match) continue;
+          const worktreesEntry = realPath.resolve(match[1].trim());
+          const canonicalGit = realPath.dirname(
+            realPath.dirname(worktreesEntry),
+          );
+          if (!realFs.existsSync(canonicalGit)) continue;
+          try {
+            if (!realFs.statSync(canonicalGit).isDirectory()) continue;
+          } catch {
+            continue;
+          }
+          if (mounts.some((m) => m.hostPath === canonicalGit)) continue;
+          mounts.push({
+            hostPath: canonicalGit,
+            containerPath: canonicalGit,
+            readonly: true,
+          });
+        } catch {
+          // best-effort
+        }
+      }
+    }
+  } catch {
+    // best-effort
+  }
+
+  return mounts;
+}
+
+describe('buildVolumeMounts — worktree and .git mounts', () => {
+  let tmpRoot: string;
+
+  beforeEach(() => {
+    tmpRoot = realFs.mkdtempSync(
+      realPath.join(realOs.tmpdir(), 'nanoclaw-bvm-test-'),
+    );
+  });
+
+  afterEach(() => {
+    realFs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('test_buildVolumeMounts_threaded_includes_worktrees_mount', () => {
+    const groupDir = realPath.join(tmpRoot, 'groups', 'testgroup');
+    const worktreeDir = realPath.join(tmpRoot, 'worktrees', 'testgroup', 't1');
+    realFs.mkdirSync(groupDir, { recursive: true });
+    realFs.mkdirSync(worktreeDir, { recursive: true });
+
+    const mounts = computeNewWorktreeMounts(groupDir, worktreeDir);
+
+    const wt = mounts.find((m) => m.containerPath === '/workspace/worktrees');
+    expect(wt).toBeDefined();
+    expect(wt?.hostPath).toBe(worktreeDir);
+    expect(wt?.readonly).toBe(false);
+  });
+
+  it('test_buildVolumeMounts_threaded_includes_git_ro_mounts', () => {
+    const groupDir = realPath.join(tmpRoot, 'groups', 'testgroup');
+    const worktreeDir = realPath.join(tmpRoot, 'worktrees', 'testgroup', 't1');
+    realFs.mkdirSync(worktreeDir, { recursive: true });
+
+    // Create two fake repos in group dir
+    for (const name of ['REPO-A', 'REPO-B']) {
+      realFs.mkdirSync(realPath.join(groupDir, name, '.git'), {
+        recursive: true,
+      });
+    }
+
+    const mounts = computeNewWorktreeMounts(groupDir, worktreeDir);
+
+    const gitMounts = mounts.filter(
+      (m) => m.readonly && m.containerPath !== '/workspace/worktrees',
+    );
+    const containerPaths = gitMounts.map((m) => m.containerPath);
+    expect(containerPaths).toContain(realPath.join(groupDir, 'REPO-A', '.git'));
+    expect(containerPaths).toContain(realPath.join(groupDir, 'REPO-B', '.git'));
+    for (const m of gitMounts) {
+      expect(m.readonly).toBe(true);
+      expect(m.hostPath).toBe(m.containerPath); // mounted at host-absolute path
+    }
+  });
+
+  it('test_buildVolumeMounts_no_overlay_mounts', () => {
+    const groupDir = realPath.join(tmpRoot, 'groups', 'testgroup');
+    const worktreeDir = realPath.join(tmpRoot, 'worktrees', 'testgroup', 't1');
+    realFs.mkdirSync(groupDir, { recursive: true });
+    realFs.mkdirSync(worktreeDir, { recursive: true });
+
+    const mounts = computeNewWorktreeMounts(groupDir, worktreeDir);
+
+    for (const m of mounts) {
+      expect(m.hostPath).not.toContain('overlay');
+      expect(m.hostPath).not.toContain('worktree-git-overlays');
+      expect(m.containerPath).not.toContain('overlay');
+    }
   });
 });

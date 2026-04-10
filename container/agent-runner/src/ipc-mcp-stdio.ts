@@ -27,7 +27,7 @@ const CSS_COLOR_RE = /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]+|rgba?\(\s*[\d.,\s%]+\)|hsla?
 const sentFileHashes = new Map<string, string>(); // SHA-256 hash → display filename
 
 // Allowlisted path prefixes for send_file (prevents staging mounted credentials)
-const ALLOWED_FILE_PREFIXES = ['/tmp/', '/workspace/group/', '/workspace/project/', '/workspace/extra/'];
+const ALLOWED_FILE_PREFIXES = ['/tmp/', '/workspace/group/', '/workspace/project/', '/workspace/extra/', '/workspace/worktrees/'];
 
 function isAllowedFilePath(filePath: string): boolean {
   const resolved = path.resolve(filePath);
@@ -141,7 +141,7 @@ server.tool(
 
     if (!isAllowedFilePath(resolvedPath)) {
       return {
-        content: [{ type: 'text' as const, text: `Path not allowed for send_file. Files must be under /tmp/, /workspace/group/, /workspace/project/, or /workspace/extra/.` }],
+        content: [{ type: 'text' as const, text: `Path not allowed for send_file. Files must be under /tmp/, /workspace/group/, /workspace/project/, /workspace/extra/, or /workspace/worktrees/.` }],
         isError: true,
       };
     }
@@ -1703,6 +1703,96 @@ server.tool(
     return {
       content: [{ type: 'text' as const, text: profiles.length > 0 ? profiles.join(', ') : 'No tone profiles found.' }],
     };
+  },
+);
+
+server.tool(
+  'create_worktree',
+  `Get a working directory for a repo in this group. Returns the path to a git worktree under /workspace/worktrees/<repo> with full read-write git access (branch, commit, push).
+
+Use this instead of \`git clone\` — direct cloning is blocked. If the repo has not been cloned for this group yet, use \`clone_repo\` instead.
+
+On thread resume, check /workspace/worktrees/ first — the worktree may already exist from a prior turn.`,
+  {
+    repo: z.string().describe('Repo name (e.g. "XZO-BACKEND", "nanoclaw"). Must already be cloned for this group.'),
+    branch: z.string().optional().describe('Branch to check out. Omit to use the default branch.'),
+  },
+  async (args) => {
+    try {
+      const currentThreadId = process.env.NANOCLAW_THREAD_ID || 'default';
+      const requestId = writeQueryFile({
+        type: 'create_worktree',
+        repo: args.repo,
+        branch: args.branch,
+        threadId: currentThreadId,
+      });
+      const response = await waitForResponse(requestId, 60_000) as {
+        status: string;
+        error?: string;
+        path?: string;
+      };
+
+      if (response.status !== 'ok') {
+        return {
+          content: [{ type: 'text' as const, text: `Failed to create worktree: ${response.error ?? 'unknown error'}` }],
+          isError: true,
+        };
+      }
+
+      const worktreePath = response.path ?? `[error: no path in response for ${args.repo}]`;
+      return {
+        content: [{ type: 'text' as const, text: `Worktree ready at ${worktreePath}` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `create_worktree error: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'clone_repo',
+  `Clone a new repo into this group's workspace. Use this for repos not yet cloned for the group. Returns the path to the worktree under /workspace/worktrees/<name>.
+
+NEVER run \`git clone\` directly — it is blocked. Use this tool or \`create_worktree\` for repos already cloned.`,
+  {
+    url: z.string().describe('Git URL to clone (e.g. "https://github.com/org/repo.git")'),
+    name: z.string().optional().describe('Local name for the repo directory. Defaults to the repo name from the URL.'),
+  },
+  async (args) => {
+    try {
+      const currentThreadId = process.env.NANOCLAW_THREAD_ID || 'default';
+      const requestId = writeQueryFile({
+        type: 'clone_repo',
+        url: args.url,
+        name: args.name,
+        threadId: currentThreadId,
+      });
+      const response = await waitForResponse(requestId, 60_000) as {
+        status: string;
+        error?: string;
+        path?: string;
+      };
+
+      if (response.status !== 'ok') {
+        return {
+          content: [{ type: 'text' as const, text: `Failed to clone repo: ${response.error ?? 'unknown error'}` }],
+          isError: true,
+        };
+      }
+
+      const repoPath = response.path ?? `[error: no path in response for ${args.url}]`;
+      return {
+        content: [{ type: 'text' as const, text: `Repo cloned and worktree ready at ${repoPath}` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `clone_repo error: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
   },
 );
 

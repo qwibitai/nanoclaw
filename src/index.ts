@@ -147,6 +147,7 @@ import {
   isSessionCommandAllowed,
 } from './session-commands.js';
 import { startSessionCleanup } from './session-cleanup.js';
+import { startWorktreeCleanup } from './worktree-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import {
   indexSingleThread,
@@ -3071,6 +3072,7 @@ async function main(): Promise<void> {
   }
 
   startSessionCleanup();
+  startWorktreeCleanup();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

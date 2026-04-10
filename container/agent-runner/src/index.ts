@@ -403,6 +403,30 @@ function createBlockSnowflakeConnectorHook(): HookCallback {
   };
 }
 
+// Blocks `git clone` unless the target directory is under /tmp/.
+// Agents must use the `create_worktree` MCP tool to get repo working directories.
+const GIT_CLONE_RE = /\bgit\s+clone\b/;
+
+function createBlockGitCloneHook(): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const preInput = input as PreToolUseHookInput;
+    const command = (preInput.tool_input as { command?: string })?.command;
+    if (!command) return {};
+
+    if (!GIT_CLONE_RE.test(command)) return {};
+
+    // Allow clones targeting /tmp/ (e.g. tool installs, ephemeral scratch)
+    const tmpCloneRe = /\bgit\s+clone\b.*\s+\/tmp\//;
+    if (tmpCloneRe.test(command)) return {};
+
+    return deny(
+      '`git clone` is blocked. Use the `create_worktree` MCP tool to get a working directory ' +
+      'for a repo under `/workspace/worktrees/<repo>`. If you need a repo that is not yet in ' +
+      'the group, use the `clone_repo` MCP tool instead.',
+    );
+  };
+}
+
 // Self-approval prevention. The plugin hook (block-destructive.ts) handles all
 // detection and gating. This hook only prevents the agent from bypassing the
 // gate by writing approval files directly via Bash.
@@ -745,37 +769,38 @@ function buildCapabilityManifest(
 }
 
 /**
- * Document the per-thread scratch + host-direct-mount workspace semantics
- * so the agent knows what persists and where to write thread-local state.
+ * Document workspace layout and repo-access model for the new lazy-worktree design.
  * Always included regardless of tool config.
  */
 function buildWorkspacePersistenceNote(): string {
   return `## Workspace Persistence
 
-Your cwd is \`/workspace/group\`. Semantics differ by channel.
+Your cwd is \`/workspace/group\`. Writes there persist to the host group folder.
 
-**Threaded channels (Slack/Discord threads):** \`/workspace/group\` is a per-thread scratch directory. On prepare, every top-level entry from the host group folder is copied in so you can read \`.context/\`, \`.claude/\`, plan files, screenshots, etc. Sensitive filenames (auth, token, secret, .env, .pem, .key, id_rsa, etc.) are excluded and invisible to you.
+**Non-repo files:** write directly to \`/workspace/group\` — files appear on the host immediately.
 
-**Existing group repos in threaded channels** (e.g. \`/workspace/group/XZO-BACKEND\`) are **git worktrees** sharing the host repo's \`.git\`, not fresh clones. They start in **detached HEAD** mode at the tip of origin's default branch. **This is normal — the worktree is NOT broken.**
+**Working with repos:** use the \`create_worktree\` MCP tool. It provisions a git worktree under \`/workspace/worktrees/<repo>\`. You can read code, run tests, and edit files freely. Git metadata (\`.git\`) is read-only inside the container for security — your edits are auto-saved by the host on session exit.
 
-Group worktrees have a **read-only \`.git\` directory** inside the container (the host bind-mount is ro for security — a rw mount would enable agent-planted git hooks to execute on the host). This means:
+\`\`\`
+# Get a working directory for an existing group repo
+create_worktree({ repo: "XZO-BACKEND" })
+# → returns /workspace/worktrees/XZO-BACKEND
 
-- ✅ **Read operations work**: \`git status\`, \`git log\`, \`git diff\`, \`git blame\`, \`git show\`, \`gitnexus analyze\`, and any other pure-read git command.
-- ❌ **Write operations will fail with EROFS**: \`git add\`, \`git commit\`, \`git checkout -b\`, \`git branch\`, \`git stash\`, \`git push\`, \`git config --local\`, \`git worktree prune/remove\`. Don't try; git will error.
-- ✅ **Working-tree file edits are preserved**: edit files normally under \`/workspace/group/<repo>/\`. At thread cleanup the host runs \`git add -A && git commit -m "rescue: ..."\` via host-side rescue (which has rw access) and pushes a rescue branch to origin. Your edits survive.
-- 🔀 **If you need multiple in-session commits or branch management** on an existing group repo, \`git clone\` the repo into \`/workspace/thread/<name>\` first. That's a full clone with its own rw \`.git\`, and \`/workspace/thread/\` is writable. Clones inside \`/workspace/thread/\` persist across turns in this thread; they do NOT automatically promote to the host group folder.
+# Optionally specify a branch to check out
+create_worktree({ repo: "XZO-BACKEND", branch: "feat/my-feature" })
+\`\`\`
 
-**Cross-thread ref namespace:** sibling threads in the same group share the source repo's \`.git/refs\` and \`.git/objects\` via the shared read-only bind mount. Branches and commits from other threads' \`git clone\`-then-commit workflows are visible via \`git log --all\` and \`git branch -a\`, but you can't delete/modify them (ro) and MUST NOT run \`git worktree prune\` or \`git worktree remove\` against sibling thread entries even if the commands were allowed.
+**New repos (not yet cloned for the group):** use the \`clone_repo\` MCP tool. It clones the repo into the group. Note: the new repo's git metadata won't be mounted until the next session — you can edit files but git commands in the worktree won't work until then.
 
-**Fresh clones you create in \`/workspace/group/\`** (\`git clone ...\` at the workspace root) are promoted to the host group folder via atomic rename at cleanup. For existing-repo work that needs rw git, prefer \`/workspace/thread/\` instead (see above).
+\`\`\`
+clone_repo({ url: "https://github.com/org/new-repo.git" })
+\`\`\`
 
-**Write boundary:** only \`/workspace/group\` and \`/workspace/thread\` are writable to you. The rest of \`/workspace/*\` is read-only (owned by a different uid on the host). Don't try to \`mkdir\` or \`git clone\` outside those two paths — it will fail with EACCES.
+**NEVER run \`git clone\` directly** — it is blocked by a hook. Always use \`create_worktree\` or \`clone_repo\`.
 
-**Non-repo scratch:** agent-created new files at the top of \`/workspace/group\` land on the host at cleanup. Edits to pre-existing *loose* host files (outside any repo) are DROPPED at cleanup (host wins on collision). Edits to files *inside* any git repo are rescued, not dropped.
+**On resume:** check \`/workspace/worktrees/\` for any repos from prior turns in this thread.
 
-**Non-threaded channels (DMs, main group):** direct mount of the host group folder. All writes persist immediately.
-
-**\`/workspace/thread/\`** is a per-thread persistent directory for intermediate work, scratch notes, draft documents, and any state you want preserved between user turns in this thread but not published to the group. Survives across messages in the same thread. Use it for plan drafts, scratch analysis, and thread-local state.`;
+**Write boundary:** \`/workspace/group\` and \`/workspace/worktrees\` are writable. Git metadata (\`.git\`) is read-only — the host handles commits on your behalf when the session ends.`;
 }
 
 function buildAllowedTools(tools: string[] | undefined): string[] {
@@ -1110,7 +1135,7 @@ async function runQuery(
       ...(sdkEnv['CLAUDE_CODE_USE_EFFORT'] || effort ? { effort: (sdkEnv['CLAUDE_CODE_USE_EFFORT'] || effort) as EffortLevel } : {}),
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName, containerInput.threadId)] }],
-        PreToolUse: [{ matcher: 'Bash', hooks: [createSelfApprovalBlockHook(), createBlockSnowflakeConnectorHook(), createSanitizeBashHook()] }],
+        PreToolUse: [{ matcher: 'Bash', hooks: [createSelfApprovalBlockHook(), createBlockGitCloneHook(), createBlockSnowflakeConnectorHook(), createSanitizeBashHook()] }],
       },
     },
   });
