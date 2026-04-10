@@ -74,6 +74,28 @@ function readVersion(): string {
 
 export const APP_VERSION = readVersion();
 
+function readBuildHash(): string {
+  try {
+    return Deno.readTextFileSync(resolve(PROJECT_ROOT, '.build-hash')).trim();
+  } catch {
+    // Local dev — read from git directly
+    try {
+      const cmd = new Deno.Command('git', {
+        args: ['rev-parse', '--short', 'HEAD'],
+        cwd: PROJECT_ROOT,
+        stdout: 'piped',
+        stderr: 'null',
+      });
+      const out = cmd.outputSync();
+      return new TextDecoder().decode(out.stdout).trim();
+    } catch {
+      return 'dev';
+    }
+  }
+}
+
+export const BUILD_HASH = readBuildHash();
+
 export const WORKER_POLL_INTERVAL = 2000;
 
 // Store process

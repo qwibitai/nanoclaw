@@ -7,6 +7,7 @@ import * as storeClient from '../shared/store-client.ts';
 import { getDiscordStatus, getInviteUrl } from './discord.ts';
 import {
   APP_VERSION,
+  BUILD_HASH,
   ASSISTANT_NAME,
   GATEWAY_PORT,
   OPERATOR_NAME,
@@ -118,6 +119,7 @@ async function handler(req: Request): Promise<Response> {
       return json({
         name: ASSISTANT_NAME,
         version: APP_VERSION,
+        build: BUILD_HASH,
         uptime: formatUptime(Date.now() - startTime),
         operator: { name: OPERATOR_NAME, slug: OPERATOR_SLUG },
         skills: loadSkills(),

@@ -37,9 +37,12 @@ mkdir -p ".build-data/operators/$SLUG/conversations"
 echo "  Staged: .build-data/operators/$SLUG/"
 ls -la ".build-data/operators/$SLUG/"
 
+# Write build hash for version tracking
+git rev-parse --short HEAD > .build-hash
+
 # Deploy to Fly
 fly deploy --app "$APP"
 
 # Clean up
-rm -rf .build-data
+rm -rf .build-data .build-hash
 echo "Done. $APP deployed with $SLUG operator data only."

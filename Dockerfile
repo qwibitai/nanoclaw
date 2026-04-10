@@ -19,6 +19,9 @@ WORKDIR /app
 COPY deno.json package.json ./
 RUN deno install
 
+# Build metadata
+COPY .build-hash ./
+
 # Application code
 COPY src/ src/
 
