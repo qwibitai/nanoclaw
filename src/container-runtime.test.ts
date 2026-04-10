@@ -180,7 +180,11 @@ function computeNewWorktreeMounts(
   groupDir: string,
   worktreeDir: string,
 ): Array<{ hostPath: string; containerPath: string; readonly: boolean }> {
-  const mounts: Array<{ hostPath: string; containerPath: string; readonly: boolean }> = [];
+  const mounts: Array<{
+    hostPath: string;
+    containerPath: string;
+    readonly: boolean;
+  }> = [];
 
   // (1) /workspace/worktrees mount
   mounts.push({
@@ -210,7 +214,9 @@ function computeNewWorktreeMounts(
   // (3) Scan existing worktrees for additional canonical .git dirs
   try {
     if (realFs.existsSync(worktreeDir)) {
-      for (const entry of realFs.readdirSync(worktreeDir, { withFileTypes: true })) {
+      for (const entry of realFs.readdirSync(worktreeDir, {
+        withFileTypes: true,
+      })) {
         if (!entry.isDirectory()) continue;
         const wtRepoPath = realPath.join(worktreeDir, entry.name);
         const wtGitFile = realPath.join(wtRepoPath, '.git');
@@ -221,7 +227,9 @@ function computeNewWorktreeMounts(
           const match = gitFileContent.match(/^gitdir:\s*(.+)$/);
           if (!match) continue;
           const worktreesEntry = realPath.resolve(match[1].trim());
-          const canonicalGit = realPath.dirname(realPath.dirname(worktreesEntry));
+          const canonicalGit = realPath.dirname(
+            realPath.dirname(worktreesEntry),
+          );
           if (!realFs.existsSync(canonicalGit)) continue;
           try {
             if (!realFs.statSync(canonicalGit).isDirectory()) continue;
@@ -229,7 +237,11 @@ function computeNewWorktreeMounts(
             continue;
           }
           if (mounts.some((m) => m.hostPath === canonicalGit)) continue;
-          mounts.push({ hostPath: canonicalGit, containerPath: canonicalGit, readonly: true });
+          mounts.push({
+            hostPath: canonicalGit,
+            containerPath: canonicalGit,
+            readonly: true,
+          });
         } catch {
           // best-effort
         }
@@ -246,7 +258,9 @@ describe('buildVolumeMounts — worktree and .git mounts', () => {
   let tmpRoot: string;
 
   beforeEach(() => {
-    tmpRoot = realFs.mkdtempSync(realPath.join(realOs.tmpdir(), 'nanoclaw-bvm-test-'));
+    tmpRoot = realFs.mkdtempSync(
+      realPath.join(realOs.tmpdir(), 'nanoclaw-bvm-test-'),
+    );
   });
 
   afterEach(() => {
@@ -274,12 +288,16 @@ describe('buildVolumeMounts — worktree and .git mounts', () => {
 
     // Create two fake repos in group dir
     for (const name of ['REPO-A', 'REPO-B']) {
-      realFs.mkdirSync(realPath.join(groupDir, name, '.git'), { recursive: true });
+      realFs.mkdirSync(realPath.join(groupDir, name, '.git'), {
+        recursive: true,
+      });
     }
 
     const mounts = computeNewWorktreeMounts(groupDir, worktreeDir);
 
-    const gitMounts = mounts.filter((m) => m.readonly && m.containerPath !== '/workspace/worktrees');
+    const gitMounts = mounts.filter(
+      (m) => m.readonly && m.containerPath !== '/workspace/worktrees',
+    );
     const containerPaths = gitMounts.map((m) => m.containerPath);
     expect(containerPaths).toContain(realPath.join(groupDir, 'REPO-A', '.git'));
     expect(containerPaths).toContain(realPath.join(groupDir, 'REPO-B', '.git'));

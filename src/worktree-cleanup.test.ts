@@ -13,25 +13,30 @@ const mockDirs = vi.hoisted(() => ({
 }));
 
 // Intercept child_process.execSync. Per-test behavior set via execOverrides.
-const execOverrides = vi.hoisted(
-  () =>
-    ({
-      fn: null as null | ((cmd: string, cwd: string) => string),
-    }),
-);
+const execOverrides = vi.hoisted(() => ({
+  fn: null as null | ((cmd: string, cwd: string) => string),
+}));
 
 vi.mock('child_process', async () => {
-  const actual = await vi.importActual<typeof import('child_process')>('child_process');
+  const actual =
+    await vi.importActual<typeof import('child_process')>('child_process');
   return {
     ...actual,
-    execSync: (cmd: unknown, opts?: { cwd?: string; encoding?: string; stdio?: unknown }) => {
+    execSync: (
+      cmd: unknown,
+      opts?: { cwd?: string; encoding?: string; stdio?: unknown },
+    ) => {
       const override = execOverrides.fn;
       if (override && typeof cmd === 'string') {
         return override(cmd, opts?.cwd ?? '');
       }
       return (actual.execSync as Function)(cmd, opts);
     },
-    execFileSync: (file: unknown, args?: unknown, opts?: { cwd?: string; encoding?: string; stdio?: unknown }) => {
+    execFileSync: (
+      file: unknown,
+      args?: unknown,
+      opts?: { cwd?: string; encoding?: string; stdio?: unknown },
+    ) => {
       const override = execOverrides.fn;
       if (override && typeof file === 'string' && Array.isArray(args)) {
         return override(`${file} ${args.join(' ')}`, opts?.cwd ?? '');
@@ -84,7 +89,12 @@ function makeTmpRoot(): string {
   return realFs.mkdtempSync(realPath.join(os.tmpdir(), 'wt-cleanup-'));
 }
 
-function makeWorktreeDir(base: string, group: string, threadId: string, repo: string): string {
+function makeWorktreeDir(
+  base: string,
+  group: string,
+  threadId: string,
+  repo: string,
+): string {
   const p = realPath.join(base, group, threadId, repo);
   realFs.mkdirSync(p, { recursive: true });
   return p;
@@ -128,7 +138,12 @@ describe('worktree-cleanup', () => {
   }
 
   it('test_cleanup_skips_dirty_worktree: does not remove a dirty worktree even if PR is merged', async () => {
-    const worktreePath = makeWorktreeDir(worktreesDir, 'group1', 'thread1', 'myrepo');
+    const worktreePath = makeWorktreeDir(
+      worktreesDir,
+      'group1',
+      'thread1',
+      'myrepo',
+    );
     const canonicalRepoPath = realPath.join(groupsDir, 'group1', 'myrepo');
     realFs.mkdirSync(canonicalRepoPath, { recursive: true });
 
@@ -160,7 +175,12 @@ describe('worktree-cleanup', () => {
   });
 
   it('test_cleanup_removes_merged_clean_worktree: removes a clean, fully-pushed worktree with merged PR', async () => {
-    const worktreePath = makeWorktreeDir(worktreesDir, 'group2', 'thread2', 'repo2');
+    const worktreePath = makeWorktreeDir(
+      worktreesDir,
+      'group2',
+      'thread2',
+      'repo2',
+    );
     const canonicalRepoPath = realPath.join(groupsDir, 'group2', 'repo2');
     realFs.mkdirSync(canonicalRepoPath, { recursive: true });
 
@@ -200,7 +220,12 @@ describe('worktree-cleanup', () => {
   });
 
   it('test_cleanup_skips_unpushed: does not remove a worktree with local-only commits', async () => {
-    const worktreePath = makeWorktreeDir(worktreesDir, 'group3', 'thread3', 'repo3');
+    const worktreePath = makeWorktreeDir(
+      worktreesDir,
+      'group3',
+      'thread3',
+      'repo3',
+    );
 
     let worktreeRemoveCalled = false;
 
@@ -225,7 +250,12 @@ describe('worktree-cleanup', () => {
   });
 
   it('test_cleanup_warns_stale: logs warning for stale worktree without removing it', async () => {
-    const worktreePath = makeWorktreeDir(worktreesDir, 'group4', 'thread4', 'repo4');
+    const worktreePath = makeWorktreeDir(
+      worktreesDir,
+      'group4',
+      'thread4',
+      'repo4',
+    );
 
     // Set mtime to 35 days ago
     const staleTime = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000);

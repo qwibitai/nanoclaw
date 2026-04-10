@@ -11,7 +11,11 @@ const STALE_WARNING_DAYS = 30;
 
 function execSafe(cmd: string, cwd: string): string | null {
   try {
-    return execSync(cmd, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    return execSync(cmd, {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
   } catch {
     return null;
   }
@@ -47,7 +51,10 @@ function isPRMerged(branch: string, worktreePath: string): boolean {
   }
 }
 
-function isBranchDeletedOnRemote(branch: string, worktreePath: string): boolean {
+function isBranchDeletedOnRemote(
+  branch: string,
+  worktreePath: string,
+): boolean {
   // If the remote tracking branch no longer exists, the branch was deleted
   const out = execSafe(`git ls-remote --heads origin ${branch}`, worktreePath);
   return out !== null && out.length === 0;
@@ -68,7 +75,10 @@ function removeWorktree(canonicalRepoPath: string, worktreePath: string): void {
     cwd: canonicalRepoPath,
     stdio: 'pipe',
   });
-  execFileSync('git', ['worktree', 'prune'], { cwd: canonicalRepoPath, stdio: 'pipe' });
+  execFileSync('git', ['worktree', 'prune'], {
+    cwd: canonicalRepoPath,
+    stdio: 'pipe',
+  });
 }
 
 async function cleanupGroupWorktrees(group: string): Promise<void> {
@@ -101,11 +111,17 @@ async function cleanupGroupWorktrees(group: string): Promise<void> {
           // SF-1: Distinguish git failure from actual dirty/unpushed state
           const dirtyResult = isDirty(worktreePath);
           if (dirtyResult === null) {
-            logger.warn({ group, threadId, repo }, 'Worktree cleanup: git status failed — skipping (possible corrupt worktree)');
+            logger.warn(
+              { group, threadId, repo },
+              'Worktree cleanup: git status failed — skipping (possible corrupt worktree)',
+            );
             return;
           }
           if (dirtyResult) {
-            logger.debug({ group, threadId, repo }, 'Worktree cleanup: skipping dirty worktree');
+            logger.debug(
+              { group, threadId, repo },
+              'Worktree cleanup: skipping dirty worktree',
+            );
             return;
           }
 
@@ -122,7 +138,10 @@ async function cleanupGroupWorktrees(group: string): Promise<void> {
 
           const unpushedResult = hasUnpushedCommits(worktreePath);
           if (unpushedResult === null) {
-            logger.warn({ group, threadId, repo }, 'Worktree cleanup: git log failed — skipping (possible corrupt worktree)');
+            logger.warn(
+              { group, threadId, repo },
+              'Worktree cleanup: git log failed — skipping (possible corrupt worktree)',
+            );
             return;
           }
           if (unpushedResult) {
@@ -153,7 +172,10 @@ async function cleanupGroupWorktrees(group: string): Promise<void> {
             );
           }
         } catch (err) {
-          logger.error({ err, group, threadId, repo }, 'Worktree cleanup: error processing worktree');
+          logger.error(
+            { err, group, threadId, repo },
+            'Worktree cleanup: error processing worktree',
+          );
         }
       });
     }
@@ -163,7 +185,10 @@ async function cleanupGroupWorktrees(group: string): Promise<void> {
       const remaining = fs.readdirSync(threadPath);
       if (remaining.length === 0) {
         fs.rmdirSync(threadPath);
-        logger.debug({ group, threadId }, 'Worktree cleanup: removed empty thread directory');
+        logger.debug(
+          { group, threadId },
+          'Worktree cleanup: removed empty thread directory',
+        );
       }
     } catch {
       // Not critical if this fails
@@ -178,7 +203,10 @@ async function runCleanup(): Promise<void> {
   try {
     groups = fs.readdirSync(WORKTREES_DIR);
   } catch (err) {
-    logger.error({ err }, 'Worktree cleanup: failed to read worktrees directory');
+    logger.error(
+      { err },
+      'Worktree cleanup: failed to read worktrees directory',
+    );
     return;
   }
 

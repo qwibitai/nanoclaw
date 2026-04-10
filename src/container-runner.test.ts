@@ -115,10 +115,7 @@ vi.mock('child_process', async () => {
   };
 });
 
-import {
-  runContainerAgent,
-  ContainerOutput,
-} from './container-runner.js';
+import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -154,8 +151,17 @@ function emitOutputMarker(
 
 // Mirrors isSensitiveTopLevelFilename from container-runner.ts
 const SENSITIVE_TOP_LEVEL_PATTERNS = [
-  'auth', 'token', 'credential', 'secret', 'password',
-  '.env', '.pem', '.key', 'id_rsa', 'id_ed25519', 'private_key',
+  'auth',
+  'token',
+  'credential',
+  'secret',
+  'password',
+  '.env',
+  '.pem',
+  '.key',
+  'id_rsa',
+  'id_ed25519',
+  'private_key',
 ];
 function isSensitive(name: string): boolean {
   const lower = name.toLowerCase();
@@ -182,13 +188,20 @@ async function runPrepareThreadWorkspace(
     if (entry.isDirectory()) {
       if (realFs.existsSync(realPath.join(srcPath, '.git'))) continue;
       try {
-        realFs.cpSync(srcPath, dstPath, { recursive: true, dereference: false });
-      } catch { /* ignore */ }
+        realFs.cpSync(srcPath, dstPath, {
+          recursive: true,
+          dereference: false,
+        });
+      } catch {
+        /* ignore */
+      }
     } else if (entry.isFile()) {
       if (isSensitive(entry.name)) continue;
       try {
         realFs.copyFileSync(srcPath, dstPath);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   }
 }
@@ -197,7 +210,11 @@ async function runPrepareThreadWorkspace(
 function findGitReposReal(dir: string): Array<{ repoPath: string }> {
   const results: Array<{ repoPath: string }> = [];
   let entries: realFs.Dirent[];
-  try { entries = realFs.readdirSync(dir, { withFileTypes: true }); } catch { return results; }
+  try {
+    entries = realFs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return results;
+  }
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const repoPath = realPath.join(dir, entry.name);
@@ -205,28 +222,44 @@ function findGitReposReal(dir: string): Array<{ repoPath: string }> {
       if (realFs.statSync(realPath.join(repoPath, '.git')).isDirectory()) {
         results.push({ repoPath });
       }
-    } catch { /* .git doesn't exist */ }
+    } catch {
+      /* .git doesn't exist */
+    }
   }
   return results;
 }
 
 // Inline mergeBackNonRepoEntries logic using realFs
-function mergeBackNonRepoEntriesReal(scratchDir: string, groupDir: string): void {
+function mergeBackNonRepoEntriesReal(
+  scratchDir: string,
+  groupDir: string,
+): void {
   let entries: realFs.Dirent[];
-  try { entries = realFs.readdirSync(scratchDir, { withFileTypes: true }); } catch { return; }
+  try {
+    entries = realFs.readdirSync(scratchDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
   for (const entry of entries) {
     const srcPath = realPath.join(scratchDir, entry.name);
     const dstPath = realPath.join(groupDir, entry.name);
     if (entry.isDirectory()) {
       if (realFs.existsSync(realPath.join(srcPath, '.git'))) continue;
       try {
-        realFs.cpSync(srcPath, dstPath, { recursive: true, dereference: false });
-      } catch { /* ignore */ }
+        realFs.cpSync(srcPath, dstPath, {
+          recursive: true,
+          dereference: false,
+        });
+      } catch {
+        /* ignore */
+      }
     } else if (entry.isFile()) {
       if (isSensitive(entry.name)) continue;
       try {
         realFs.copyFileSync(srcPath, dstPath);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   }
 }
@@ -246,8 +279,14 @@ async function runCleanupThreadWorkspace(
     for (const { repoPath } of findGitReposReal(worktreesDir)) {
       try {
         const lockFile = realPath.join(repoPath, '.git', 'index.lock');
-        try { realFs.unlinkSync(lockFile); } catch { /* no lock */ }
-        const status = execSync('git status --porcelain', { cwd: repoPath }).toString().trim();
+        try {
+          realFs.unlinkSync(lockFile);
+        } catch {
+          /* no lock */
+        }
+        const status = execSync('git status --porcelain', { cwd: repoPath })
+          .toString()
+          .trim();
         if (status) {
           execSync('git add -A', { cwd: repoPath });
           execSync(
@@ -255,7 +294,9 @@ async function runCleanupThreadWorkspace(
             { cwd: repoPath },
           );
         }
-      } catch { /* best-effort */ }
+      } catch {
+        /* best-effort */
+      }
     }
   }
 
@@ -268,14 +309,23 @@ async function runCleanupThreadWorkspace(
       const mainContent = realFs.existsSync(mainClaudeMd)
         ? realFs.readFileSync(mainClaudeMd, 'utf-8')
         : '';
-      if (scratchContent !== mainContent && scratchContent.length >= mainContent.length) {
+      if (
+        scratchContent !== mainContent &&
+        scratchContent.length >= mainContent.length
+      ) {
         realFs.writeFileSync(mainClaudeMd, scratchContent);
       }
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
   }
 
   mergeBackNonRepoEntriesReal(scratchDir, groupDir);
-  try { realFs.rmSync(scratchDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+  try {
+    realFs.rmSync(scratchDir, { recursive: true, force: true });
+  } catch {
+    /* best-effort */
+  }
 }
 
 describe('prepareThreadWorkspace', () => {
@@ -291,27 +341,56 @@ describe('prepareThreadWorkspace', () => {
 
   it('test_prepareThreadWorkspace_copies_non_repo_files', async () => {
     const groupDir = realPath.join(tmpRoot, 'groups', 'testgroup');
-    const scratchDir = realPath.join(tmpRoot, 'scratch', 'testgroup', 'thread-123');
-    const worktreesDir = realPath.join(tmpRoot, 'worktrees', 'testgroup', 'thread-123');
+    const scratchDir = realPath.join(
+      tmpRoot,
+      'scratch',
+      'testgroup',
+      'thread-123',
+    );
+    const worktreesDir = realPath.join(
+      tmpRoot,
+      'worktrees',
+      'testgroup',
+      'thread-123',
+    );
 
     realFs.mkdirSync(groupDir, { recursive: true });
     realFs.writeFileSync(realPath.join(groupDir, 'CLAUDE.md'), '# Test');
     realFs.mkdirSync(realPath.join(groupDir, '.context'), { recursive: true });
-    realFs.writeFileSync(realPath.join(groupDir, '.context', 'notes.md'), 'notes');
+    realFs.writeFileSync(
+      realPath.join(groupDir, '.context', 'notes.md'),
+      'notes',
+    );
     // Simulate git repo by creating dir with .git directory
-    realFs.mkdirSync(realPath.join(groupDir, 'XZO-BACKEND', '.git'), { recursive: true });
+    realFs.mkdirSync(realPath.join(groupDir, 'XZO-BACKEND', '.git'), {
+      recursive: true,
+    });
 
     await runPrepareThreadWorkspace(groupDir, scratchDir, worktreesDir);
 
-    expect(realFs.existsSync(realPath.join(scratchDir, 'CLAUDE.md'))).toBe(true);
+    expect(realFs.existsSync(realPath.join(scratchDir, 'CLAUDE.md'))).toBe(
+      true,
+    );
     expect(realFs.existsSync(realPath.join(scratchDir, '.context'))).toBe(true);
-    expect(realFs.existsSync(realPath.join(scratchDir, 'XZO-BACKEND'))).toBe(false);
+    expect(realFs.existsSync(realPath.join(scratchDir, 'XZO-BACKEND'))).toBe(
+      false,
+    );
   });
 
   it('test_prepareThreadWorkspace_creates_worktree_dir', async () => {
     const groupDir = realPath.join(tmpRoot, 'groups', 'testgroup');
-    const scratchDir = realPath.join(tmpRoot, 'scratch', 'testgroup', 'thread-123');
-    const worktreesDir = realPath.join(tmpRoot, 'worktrees', 'testgroup', 'thread-123');
+    const scratchDir = realPath.join(
+      tmpRoot,
+      'scratch',
+      'testgroup',
+      'thread-123',
+    );
+    const worktreesDir = realPath.join(
+      tmpRoot,
+      'worktrees',
+      'testgroup',
+      'thread-123',
+    );
 
     realFs.mkdirSync(groupDir, { recursive: true });
 
@@ -323,8 +402,18 @@ describe('prepareThreadWorkspace', () => {
 
   it('test_prepareThreadWorkspace_filters_sensitive_files', async () => {
     const groupDir = realPath.join(tmpRoot, 'groups', 'testgroup');
-    const scratchDir = realPath.join(tmpRoot, 'scratch', 'testgroup', 'thread-123');
-    const worktreesDir = realPath.join(tmpRoot, 'worktrees', 'testgroup', 'thread-123');
+    const scratchDir = realPath.join(
+      tmpRoot,
+      'scratch',
+      'testgroup',
+      'thread-123',
+    );
+    const worktreesDir = realPath.join(
+      tmpRoot,
+      'worktrees',
+      'testgroup',
+      'thread-123',
+    );
 
     realFs.mkdirSync(groupDir, { recursive: true });
     realFs.writeFileSync(realPath.join(groupDir, '.credentials.json'), '{}');
@@ -333,9 +422,13 @@ describe('prepareThreadWorkspace', () => {
 
     await runPrepareThreadWorkspace(groupDir, scratchDir, worktreesDir);
 
-    expect(realFs.existsSync(realPath.join(scratchDir, '.credentials.json'))).toBe(false);
+    expect(
+      realFs.existsSync(realPath.join(scratchDir, '.credentials.json')),
+    ).toBe(false);
     expect(realFs.existsSync(realPath.join(scratchDir, '.env'))).toBe(false);
-    expect(realFs.existsSync(realPath.join(scratchDir, 'CLAUDE.md'))).toBe(true);
+    expect(realFs.existsSync(realPath.join(scratchDir, 'CLAUDE.md'))).toBe(
+      true,
+    );
   });
 });
 
@@ -352,25 +445,51 @@ describe('cleanupThreadWorkspace', () => {
 
   it('test_cleanupThreadWorkspace_merges_claudemd', async () => {
     const groupDir = realPath.join(tmpRoot, 'groups', 'testgroup');
-    const scratchDir = realPath.join(tmpRoot, 'scratch', 'testgroup', 'thread-123');
-    const worktreesDir = realPath.join(tmpRoot, 'worktrees', 'testgroup', 'thread-123');
+    const scratchDir = realPath.join(
+      tmpRoot,
+      'scratch',
+      'testgroup',
+      'thread-123',
+    );
+    const worktreesDir = realPath.join(
+      tmpRoot,
+      'worktrees',
+      'testgroup',
+      'thread-123',
+    );
 
     realFs.mkdirSync(groupDir, { recursive: true });
     realFs.mkdirSync(scratchDir, { recursive: true });
     realFs.mkdirSync(worktreesDir, { recursive: true });
     realFs.writeFileSync(realPath.join(groupDir, 'CLAUDE.md'), 'old content');
-    realFs.writeFileSync(realPath.join(scratchDir, 'CLAUDE.md'), 'old content\nnew content appended');
+    realFs.writeFileSync(
+      realPath.join(scratchDir, 'CLAUDE.md'),
+      'old content\nnew content appended',
+    );
 
     await runCleanupThreadWorkspace(groupDir, scratchDir, worktreesDir);
 
-    const result = realFs.readFileSync(realPath.join(groupDir, 'CLAUDE.md'), 'utf-8');
+    const result = realFs.readFileSync(
+      realPath.join(groupDir, 'CLAUDE.md'),
+      'utf-8',
+    );
     expect(result).toBe('old content\nnew content appended');
   });
 
   it('test_cleanupThreadWorkspace_removes_scratch_dir', async () => {
     const groupDir = realPath.join(tmpRoot, 'groups', 'testgroup');
-    const scratchDir = realPath.join(tmpRoot, 'scratch', 'testgroup', 'thread-123');
-    const worktreesDir = realPath.join(tmpRoot, 'worktrees', 'testgroup', 'thread-123');
+    const scratchDir = realPath.join(
+      tmpRoot,
+      'scratch',
+      'testgroup',
+      'thread-123',
+    );
+    const worktreesDir = realPath.join(
+      tmpRoot,
+      'worktrees',
+      'testgroup',
+      'thread-123',
+    );
 
     realFs.mkdirSync(groupDir, { recursive: true });
     realFs.mkdirSync(scratchDir, { recursive: true });
@@ -383,10 +502,25 @@ describe('cleanupThreadWorkspace', () => {
 
   it('test_cleanupThreadWorkspace_preserves_worktree_dirs', async () => {
     const groupDir = realPath.join(tmpRoot, 'groups', 'testgroup');
-    const scratchDir = realPath.join(tmpRoot, 'scratch', 'testgroup', 'thread-123');
-    const worktreesDir = realPath.join(tmpRoot, 'worktrees', 'testgroup', 'thread-123');
+    const scratchDir = realPath.join(
+      tmpRoot,
+      'scratch',
+      'testgroup',
+      'thread-123',
+    );
+    const worktreesDir = realPath.join(
+      tmpRoot,
+      'worktrees',
+      'testgroup',
+      'thread-123',
+    );
     // A sibling dir that should NOT be touched
-    const siblingDir = realPath.join(tmpRoot, 'worktrees', 'testgroup', 'other-thread');
+    const siblingDir = realPath.join(
+      tmpRoot,
+      'worktrees',
+      'testgroup',
+      'other-thread',
+    );
 
     realFs.mkdirSync(groupDir, { recursive: true });
     realFs.mkdirSync(scratchDir, { recursive: true });
@@ -403,8 +537,18 @@ describe('cleanupThreadWorkspace', () => {
 
   it('test_cleanupThreadWorkspace_autocommits_dirty_worktree', async () => {
     const groupDir = realPath.join(tmpRoot, 'groups', 'testgroup');
-    const scratchDir = realPath.join(tmpRoot, 'scratch', 'testgroup', 'thread-xyz');
-    const worktreesDir = realPath.join(tmpRoot, 'worktrees', 'testgroup', 'thread-xyz');
+    const scratchDir = realPath.join(
+      tmpRoot,
+      'scratch',
+      'testgroup',
+      'thread-xyz',
+    );
+    const worktreesDir = realPath.join(
+      tmpRoot,
+      'worktrees',
+      'testgroup',
+      'thread-xyz',
+    );
     const worktreeRepoDir = realPath.join(worktreesDir, 'myrepo');
 
     realFs.mkdirSync(groupDir, { recursive: true });
@@ -423,14 +567,26 @@ describe('cleanupThreadWorkspace', () => {
 
     await runCleanupThreadWorkspace(groupDir, scratchDir, worktreesDir);
 
-    const log = execSync('git log --oneline', { cwd: worktreeRepoDir }).toString();
+    const log = execSync('git log --oneline', {
+      cwd: worktreeRepoDir,
+    }).toString();
     expect(log).toContain('auto-save: session exit');
   });
 
   it('test_cleanupThreadWorkspace_autocommits_dirty_worktree_matching_thread', async () => {
     const groupDir = realPath.join(tmpRoot, 'groups', 'testgroup');
-    const scratchDir = realPath.join(tmpRoot, 'scratch', 'testgroup', 'thread-abc');
-    const worktreesDir = realPath.join(tmpRoot, 'worktrees', 'testgroup', 'thread-abc');
+    const scratchDir = realPath.join(
+      tmpRoot,
+      'scratch',
+      'testgroup',
+      'thread-abc',
+    );
+    const worktreesDir = realPath.join(
+      tmpRoot,
+      'worktrees',
+      'testgroup',
+      'thread-abc',
+    );
     const worktreeRepoDir = realPath.join(worktreesDir, 'repo2');
 
     realFs.mkdirSync(groupDir, { recursive: true });
@@ -448,14 +604,26 @@ describe('cleanupThreadWorkspace', () => {
 
     await runCleanupThreadWorkspace(groupDir, scratchDir, worktreesDir);
 
-    const log = execSync('git log --oneline', { cwd: worktreeRepoDir }).toString();
+    const log = execSync('git log --oneline', {
+      cwd: worktreeRepoDir,
+    }).toString();
     expect(log).toContain('auto-save: session exit');
   });
 
   it('test_cleanupThreadWorkspace_removes_stale_lock', async () => {
     const groupDir = realPath.join(tmpRoot, 'groups', 'testgroup');
-    const scratchDir = realPath.join(tmpRoot, 'scratch', 'testgroup', 'thread-lock');
-    const worktreesDir = realPath.join(tmpRoot, 'worktrees', 'testgroup', 'thread-lock');
+    const scratchDir = realPath.join(
+      tmpRoot,
+      'scratch',
+      'testgroup',
+      'thread-lock',
+    );
+    const worktreesDir = realPath.join(
+      tmpRoot,
+      'worktrees',
+      'testgroup',
+      'thread-lock',
+    );
     const worktreeRepoDir = realPath.join(worktreesDir, 'myrepo');
 
     realFs.mkdirSync(groupDir, { recursive: true });
@@ -471,13 +639,23 @@ describe('cleanupThreadWorkspace', () => {
     execSync('git commit -m "init"', { cwd: worktreeRepoDir });
 
     // Add dirty file and stale index.lock
-    realFs.writeFileSync(realPath.join(worktreeRepoDir, 'change.txt'), 'change');
-    realFs.writeFileSync(realPath.join(worktreeRepoDir, '.git', 'index.lock'), '');
+    realFs.writeFileSync(
+      realPath.join(worktreeRepoDir, 'change.txt'),
+      'change',
+    );
+    realFs.writeFileSync(
+      realPath.join(worktreeRepoDir, '.git', 'index.lock'),
+      '',
+    );
 
     await runCleanupThreadWorkspace(groupDir, scratchDir, worktreesDir);
 
-    expect(realFs.existsSync(realPath.join(worktreeRepoDir, '.git', 'index.lock'))).toBe(false);
-    const log = execSync('git log --oneline', { cwd: worktreeRepoDir }).toString();
+    expect(
+      realFs.existsSync(realPath.join(worktreeRepoDir, '.git', 'index.lock')),
+    ).toBe(false);
+    const log = execSync('git log --oneline', {
+      cwd: worktreeRepoDir,
+    }).toString();
     expect(log).toContain('auto-save: session exit');
   });
 });
@@ -485,7 +663,10 @@ describe('cleanupThreadWorkspace', () => {
 describe('no_rescue_references', () => {
   it('test_no_rescue_references', async () => {
     const src = realFs.readFileSync(
-      realPath.join(realPath.dirname(new URL(import.meta.url).pathname), 'container-runner.ts'),
+      realPath.join(
+        realPath.dirname(new URL(import.meta.url).pathname),
+        'container-runner.ts',
+      ),
       'utf-8',
     );
     expect(src).not.toContain('rescueWorktreeChanges');
@@ -594,4 +775,3 @@ describe('container-runner timeout behavior', () => {
     expect(result.newSessionId).toBe('session-456');
   });
 });
-

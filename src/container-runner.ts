@@ -790,11 +790,8 @@ function isSensitiveTopLevelFilename(name: string): boolean {
   return SENSITIVE_TOP_LEVEL_PATTERNS.some((p) => lower.includes(p));
 }
 
-
 /** Find subdirectories that are git repos (contain a `.git` directory). */
-function findGitRepos(
-  dir: string,
-): Array<{ name: string; repoPath: string }> {
+function findGitRepos(dir: string): Array<{ name: string; repoPath: string }> {
   const results: Array<{ name: string; repoPath: string }> = [];
   let entries: fs.Dirent[];
   try {
@@ -815,7 +812,6 @@ function findGitRepos(
   }
   return results;
 }
-
 
 /**
  * Merge non-repo scratch entries back to the persistent destination after
@@ -970,7 +966,12 @@ export async function cleanupThreadWorkspace(
           }
         } catch (err) {
           logger.warn(
-            { group: groupFolder, threadId, repo: path.basename(repoPath), err },
+            {
+              group: groupFolder,
+              threadId,
+              repo: path.basename(repoPath),
+              err,
+            },
             'Failed to auto-commit worktree on session exit',
           );
         }
@@ -1361,7 +1362,9 @@ export function buildVolumeMounts(
     // cloned mid-session (their worktree .git files point back to the canonical).
     try {
       if (fs.existsSync(worktreeDir)) {
-        for (const entry of fs.readdirSync(worktreeDir, { withFileTypes: true })) {
+        for (const entry of fs.readdirSync(worktreeDir, {
+          withFileTypes: true,
+        })) {
           if (!entry.isDirectory()) continue;
           const wtRepoPath = path.join(worktreeDir, entry.name);
           const wtGitFile = path.join(wtRepoPath, '.git');
@@ -1385,9 +1388,15 @@ export function buildVolumeMounts(
             // MF-4: Validate canonicalGit is under GROUPS_DIR to prevent path traversal
             // via crafted .git files in the writable worktree area
             const resolvedCanonicalGit = path.resolve(canonicalGit);
-            if (!resolvedCanonicalGit.startsWith(path.resolve(GROUPS_DIR) + path.sep)) continue;
+            if (
+              !resolvedCanonicalGit.startsWith(
+                path.resolve(GROUPS_DIR) + path.sep,
+              )
+            )
+              continue;
             // Skip if already mounted (from the group-folder scan above)
-            if (mounts.some((m) => m.hostPath === resolvedCanonicalGit)) continue;
+            if (mounts.some((m) => m.hostPath === resolvedCanonicalGit))
+              continue;
             mounts.push({
               hostPath: resolvedCanonicalGit,
               containerPath: resolvedCanonicalGit,
@@ -2942,9 +2951,7 @@ export async function runContainerAgent(
 
       // Clean up additional-mount worktrees (fire-and-forget)
       if (mountWorktrees.length > 0) {
-        cleanupAdditionalMountWorktrees(
-          mountSessionId!,
-        ).catch((err) =>
+        cleanupAdditionalMountWorktrees(mountSessionId!).catch((err) =>
           logger.warn({ err }, 'Additional mount worktree cleanup error'),
         );
       }

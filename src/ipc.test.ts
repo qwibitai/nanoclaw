@@ -4,15 +4,16 @@ import * as realPath from 'path';
 import * as os from 'os';
 
 // Hoist the override slot so the mock factory can reference it
-const cloneOverride = vi.hoisted(
-  () => ({ fn: null as null | ((cmd: string, opts: unknown) => unknown) }),
-);
+const cloneOverride = vi.hoisted(() => ({
+  fn: null as null | ((cmd: string, opts: unknown) => unknown),
+}));
 
 // Intercept child_process.execSync at the module level. By default all calls
 // pass through to the real implementation so existing git-backed tests keep
 // working. Per-test overrides are set via cloneOverride.fn.
 vi.mock('child_process', async () => {
-  const actual = await vi.importActual<typeof import('child_process')>('child_process');
+  const actual =
+    await vi.importActual<typeof import('child_process')>('child_process');
   return {
     ...actual,
     execSync: (cmd: unknown, opts?: unknown) => {
@@ -47,12 +48,20 @@ const mockDirs = vi.hoisted(() => ({
 }));
 
 vi.mock('./config.js', () => ({
-  get DATA_DIR() { return mockDirs.DATA_DIR; },
-  get GROUPS_DIR() { return mockDirs.GROUPS_DIR; },
+  get DATA_DIR() {
+    return mockDirs.DATA_DIR;
+  },
+  get GROUPS_DIR() {
+    return mockDirs.GROUPS_DIR;
+  },
   IPC_POLL_INTERVAL: 1000,
-  get PLUGINS_DIR() { return mockDirs.PLUGINS_DIR; },
+  get PLUGINS_DIR() {
+    return mockDirs.PLUGINS_DIR;
+  },
   TIMEZONE: 'UTC',
-  get WORKTREES_DIR() { return mockDirs.WORKTREES_DIR; },
+  get WORKTREES_DIR() {
+    return mockDirs.WORKTREES_DIR;
+  },
   getParentJid: (jid: string) => jid.split(':')[0],
   parseThreadJid: () => null,
 }));
@@ -97,11 +106,15 @@ vi.mock('./memory-store.js', () => ({
 }));
 
 vi.mock('./commit-digest.js', () => ({
-  runCommitDigestForGroup: vi.fn(() => Promise.resolve({ repos: 0, commits: 0 })),
+  runCommitDigestForGroup: vi.fn(() =>
+    Promise.resolve({ repos: 0, commits: 0 }),
+  ),
 }));
 
 vi.mock('./daily-notifications.js', () => ({
-  getActivitySummary: vi.fn(() => Promise.resolve({ shipped: [], teamPRs: [], resolved: [] })),
+  getActivitySummary: vi.fn(() =>
+    Promise.resolve({ shipped: [], teamPRs: [], resolved: [] }),
+  ),
 }));
 
 vi.mock('./thread-search.js', () => ({
@@ -114,10 +127,7 @@ vi.mock('./group-folder.js', () => ({
 
 // container-runner: only mock what ipc.ts needs (withGroupMutex + AvailableGroup type)
 vi.mock('./container-runner.js', () => ({
-  withGroupMutex: <T>(
-    _group: string,
-    fn: () => Promise<T>,
-  ): Promise<T> => fn(),
+  withGroupMutex: <T>(_group: string, fn: () => Promise<T>): Promise<T> => fn(),
 }));
 
 import { processQueryIpc } from './ipc.js';
@@ -134,7 +144,12 @@ async function waitForResponse(
   requestId: string,
   timeoutMs = 5000,
 ): Promise<unknown> {
-  const filepath = realPath.join(ipcBaseDir, group, 'query_responses', `${requestId}.json`);
+  const filepath = realPath.join(
+    ipcBaseDir,
+    group,
+    'query_responses',
+    `${requestId}.json`,
+  );
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (realFs.existsSync(filepath)) {
@@ -171,7 +186,9 @@ describe('create_worktree IPC handler', () => {
   const GROUP = 'testgroup';
 
   beforeEach(() => {
-    tmpRoot = realFs.mkdtempSync(realPath.join(os.tmpdir(), 'nanoclaw-ipc-test-'));
+    tmpRoot = realFs.mkdtempSync(
+      realPath.join(os.tmpdir(), 'nanoclaw-ipc-test-'),
+    );
     ipcBaseDir = realPath.join(tmpRoot, 'ipc');
     groupsDir = realPath.join(tmpRoot, 'groups');
     worktreesDir = realPath.join(tmpRoot, 'worktrees');
@@ -191,7 +208,12 @@ describe('create_worktree IPC handler', () => {
 
   it('test_create_worktree_invalid_repo', async () => {
     processQueryIpc(
-      { type: 'create_worktree', repo: 'NONEXISTENT', threadId: 'thread-1', requestId: 'r3' },
+      {
+        type: 'create_worktree',
+        repo: 'NONEXISTENT',
+        threadId: 'thread-1',
+        requestId: 'r3',
+      },
       GROUP,
       false,
       ipcBaseDir,
@@ -199,7 +221,10 @@ describe('create_worktree IPC handler', () => {
       makeDeps({}),
     );
 
-    const resp = await waitForResponse(ipcBaseDir, GROUP, 'r3') as { status: string; error?: string };
+    const resp = (await waitForResponse(ipcBaseDir, GROUP, 'r3')) as {
+      status: string;
+      error?: string;
+    };
     expect(resp.status).toBe('error');
     expect(resp.error).toMatch(/not found/i);
   });
@@ -222,7 +247,12 @@ describe('create_worktree IPC handler', () => {
     execSync('git fetch origin', { cwd: repoDir });
 
     processQueryIpc(
-      { type: 'create_worktree', repo: 'TEST-REPO', threadId: 'thread-1', requestId: 'r1' },
+      {
+        type: 'create_worktree',
+        repo: 'TEST-REPO',
+        threadId: 'thread-1',
+        requestId: 'r1',
+      },
       GROUP,
       false,
       ipcBaseDir,
@@ -230,20 +260,24 @@ describe('create_worktree IPC handler', () => {
       makeDeps({}),
     );
 
-    const resp = await waitForResponse(ipcBaseDir, GROUP, 'r1') as {
+    const resp = (await waitForResponse(ipcBaseDir, GROUP, 'r1')) as {
       status: string;
       path?: string;
       branch?: string;
     };
     expect(resp.status).toBe('ok');
-    expect(resp.path).toBe(realPath.join(worktreesDir, GROUP, 'thread-1', 'TEST-REPO'));
+    expect(resp.path).toBe(
+      realPath.join(worktreesDir, GROUP, 'thread-1', 'TEST-REPO'),
+    );
     expect(resp.branch).toBe('thread-thread-1-TEST-REPO');
     expect(realFs.existsSync(resp.path!)).toBe(true);
 
     // Cleanup worktree
     try {
       execSync(`git worktree remove --force "${resp.path}"`, { cwd: repoDir });
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
   });
 
   it('test_create_worktree_existing_dirty', async () => {
@@ -258,16 +292,31 @@ describe('create_worktree IPC handler', () => {
     execSync('git commit -m "init"', { cwd: repoDir });
 
     // Pre-create the worktree
-    const worktreeDir = realPath.join(worktreesDir, GROUP, 'thread-1', 'TEST-REPO');
+    const worktreeDir = realPath.join(
+      worktreesDir,
+      GROUP,
+      'thread-1',
+      'TEST-REPO',
+    );
     realFs.mkdirSync(realPath.dirname(worktreeDir), { recursive: true });
     const branchName = 'thread-thread-1-TEST-REPO';
-    execSync(`git worktree add -b "${branchName}" "${worktreeDir}"`, { cwd: repoDir });
+    execSync(`git worktree add -b "${branchName}" "${worktreeDir}"`, {
+      cwd: repoDir,
+    });
 
     // Add uncommitted change
-    realFs.writeFileSync(realPath.join(worktreeDir, 'dirty.txt'), 'dirty content');
+    realFs.writeFileSync(
+      realPath.join(worktreeDir, 'dirty.txt'),
+      'dirty content',
+    );
 
     processQueryIpc(
-      { type: 'create_worktree', repo: 'TEST-REPO', threadId: 'thread-1', requestId: 'r2' },
+      {
+        type: 'create_worktree',
+        repo: 'TEST-REPO',
+        threadId: 'thread-1',
+        requestId: 'r2',
+      },
       GROUP,
       false,
       ipcBaseDir,
@@ -275,7 +324,7 @@ describe('create_worktree IPC handler', () => {
       makeDeps({}),
     );
 
-    const resp = await waitForResponse(ipcBaseDir, GROUP, 'r2') as {
+    const resp = (await waitForResponse(ipcBaseDir, GROUP, 'r2')) as {
       status: string;
       path?: string;
       branch?: string;
@@ -283,12 +332,18 @@ describe('create_worktree IPC handler', () => {
     expect(resp.status).toBe('ok');
     expect(resp.path).toBe(worktreeDir);
     // Dirty file must be preserved
-    expect(realFs.existsSync(realPath.join(worktreeDir, 'dirty.txt'))).toBe(true);
+    expect(realFs.existsSync(realPath.join(worktreeDir, 'dirty.txt'))).toBe(
+      true,
+    );
 
     // Cleanup
     try {
-      execSync(`git worktree remove --force "${worktreeDir}"`, { cwd: repoDir });
-    } catch { /* best-effort */ }
+      execSync(`git worktree remove --force "${worktreeDir}"`, {
+        cwd: repoDir,
+      });
+    } catch {
+      /* best-effort */
+    }
   });
 
   it('test_create_worktree_resume_existing_branch', async () => {
@@ -324,7 +379,7 @@ describe('create_worktree IPC handler', () => {
       makeDeps({}),
     );
 
-    const resp = await waitForResponse(ipcBaseDir, GROUP, 'r4') as {
+    const resp = (await waitForResponse(ipcBaseDir, GROUP, 'r4')) as {
       status: string;
       path?: string;
       branch?: string;
@@ -336,7 +391,9 @@ describe('create_worktree IPC handler', () => {
     // Cleanup
     try {
       execSync(`git worktree remove --force "${resp.path}"`, { cwd: repoDir });
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
   });
 
   it('test_create_worktree_new_named_branch', async () => {
@@ -355,7 +412,9 @@ describe('create_worktree IPC handler', () => {
     execSync(`git remote add origin "${remoteDir}"`, { cwd: repoDir });
     execSync('git fetch origin', { cwd: repoDir });
     // Set upstream tracking so origin/HEAD works
-    execSync('git remote set-head origin --auto', { cwd: repoDir }).toString().trim();
+    execSync('git remote set-head origin --auto', { cwd: repoDir })
+      .toString()
+      .trim();
 
     processQueryIpc(
       {
@@ -372,7 +431,7 @@ describe('create_worktree IPC handler', () => {
       makeDeps({}),
     );
 
-    const resp = await waitForResponse(ipcBaseDir, GROUP, 'r5') as {
+    const resp = (await waitForResponse(ipcBaseDir, GROUP, 'r5')) as {
       status: string;
       path?: string;
       branch?: string;
@@ -384,7 +443,9 @@ describe('create_worktree IPC handler', () => {
     // Cleanup
     try {
       execSync(`git worktree remove --force "${resp.path}"`, { cwd: repoDir });
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
   });
 });
 
@@ -399,7 +460,9 @@ describe('clone_repo IPC handler', () => {
   const GROUP = 'testgroup';
 
   beforeEach(() => {
-    tmpRoot = realFs.mkdtempSync(realPath.join(os.tmpdir(), 'nanoclaw-ipc-clonetest-'));
+    tmpRoot = realFs.mkdtempSync(
+      realPath.join(os.tmpdir(), 'nanoclaw-ipc-clonetest-'),
+    );
     ipcBaseDir = realPath.join(tmpRoot, 'ipc');
     groupsDir = realPath.join(tmpRoot, 'groups');
     realFs.mkdirSync(ipcBaseDir, { recursive: true });
@@ -423,9 +486,12 @@ describe('clone_repo IPC handler', () => {
     realFs.writeFileSync(realPath.join(existingRepoDir, 'f.txt'), 'x');
     execSync('git add -A', { cwd: existingRepoDir });
     execSync('git commit -m "init"', { cwd: existingRepoDir });
-    execSync('git remote add origin https://github.com/TestOrg/existing-repo.git', {
-      cwd: existingRepoDir,
-    });
+    execSync(
+      'git remote add origin https://github.com/TestOrg/existing-repo.git',
+      {
+        cwd: existingRepoDir,
+      },
+    );
 
     const destDir = realPath.join(groupsDir, GROUP, 'new-repo');
 
@@ -456,7 +522,7 @@ describe('clone_repo IPC handler', () => {
         makeDeps({}),
       );
 
-      const resp = await waitForResponse(ipcBaseDir, GROUP, 'r1') as {
+      const resp = (await waitForResponse(ipcBaseDir, GROUP, 'r1')) as {
         status: string;
         path?: string;
         name?: string;
@@ -469,7 +535,11 @@ describe('clone_repo IPC handler', () => {
     } finally {
       cloneOverride.fn = null;
       // Teardown
-      try { realFs.rmSync(destDir, { recursive: true, force: true }); } catch { /* ok */ }
+      try {
+        realFs.rmSync(destDir, { recursive: true, force: true });
+      } catch {
+        /* ok */
+      }
     }
   });
 
@@ -501,7 +571,7 @@ describe('clone_repo IPC handler', () => {
       makeDeps({}),
     );
 
-    const resp = await waitForResponse(ipcBaseDir, GROUP, 'r3') as {
+    const resp = (await waitForResponse(ipcBaseDir, GROUP, 'r3')) as {
       status: string;
       error?: string;
     };
@@ -529,7 +599,7 @@ describe('clone_repo IPC handler', () => {
       makeDeps({}),
     );
 
-    const resp = await waitForResponse(ipcBaseDir, GROUP, 'r2') as {
+    const resp = (await waitForResponse(ipcBaseDir, GROUP, 'r2')) as {
       status: string;
       path?: string;
       name?: string;
@@ -555,7 +625,7 @@ describe('clone_repo IPC handler', () => {
       makeDeps({}),
     );
 
-    const resp = await waitForResponse(ipcBaseDir, GROUP, 'r_ng') as {
+    const resp = (await waitForResponse(ipcBaseDir, GROUP, 'r_ng')) as {
       status: string;
       error?: string;
     };
