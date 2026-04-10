@@ -7,6 +7,7 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
   NewMessage,
+  ProcessedItem,
   RegisteredGroup,
   ScheduledTask,
   TaskRunLog,
@@ -82,6 +83,13 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS processed_items (
+      item_id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      processed_at TEXT NOT NULL,
+      action_taken TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_processed_at ON processed_items(processed_at);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -697,6 +705,37 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Processed items (email intelligence idempotency) ---
+
+export function isItemProcessed(itemId: string): boolean {
+  const row = db
+    .prepare('SELECT 1 FROM processed_items WHERE item_id = ?')
+    .get(itemId);
+  return !!row;
+}
+
+export function markItemProcessed(item: ProcessedItem): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO processed_items (item_id, source, processed_at, action_taken)
+     VALUES (?, ?, ?, ?)`,
+  ).run(item.item_id, item.source, item.processed_at, item.action_taken);
+}
+
+export function getProcessedItemsSince(since: string): ProcessedItem[] {
+  return db
+    .prepare(
+      'SELECT * FROM processed_items WHERE processed_at > ? ORDER BY processed_at DESC',
+    )
+    .all(since) as ProcessedItem[];
+}
+
+export function cleanupOldProcessedItems(olderThan: string): number {
+  const result = db
+    .prepare('DELETE FROM processed_items WHERE processed_at < ?')
+    .run(olderThan);
+  return result.changes;
 }
 
 // --- JSON migration ---

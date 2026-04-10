@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import {
   _initTestDatabase,
+  _closeDatabase,
   createTask,
   deleteTask,
   getAllChats,
@@ -10,6 +11,10 @@ import {
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  isItemProcessed,
+  markItemProcessed,
+  getProcessedItemsSince,
+  cleanupOldProcessedItems,
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
@@ -648,5 +653,61 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+describe('processed_items', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('returns false for unprocessed item', () => {
+    expect(isItemProcessed('email:thread_123')).toBe(false);
+  });
+
+  it('returns true after marking processed', () => {
+    markItemProcessed({
+      item_id: 'email:thread_123',
+      source: 'superpilot',
+      processed_at: '2026-04-10T10:00:00Z',
+      action_taken: 'propose:reply',
+    });
+    expect(isItemProcessed('email:thread_123')).toBe(true);
+  });
+
+  it('getProcessedItemsSince filters by timestamp', () => {
+    markItemProcessed({
+      item_id: 'email:old',
+      source: 'superpilot',
+      processed_at: '2026-04-09T10:00:00Z',
+      action_taken: 'skip',
+    });
+    markItemProcessed({
+      item_id: 'email:new',
+      source: 'superpilot',
+      processed_at: '2026-04-10T10:00:00Z',
+      action_taken: 'propose:reply',
+    });
+    const items = getProcessedItemsSince('2026-04-09T12:00:00Z');
+    expect(items).toHaveLength(1);
+    expect(items[0].item_id).toBe('email:new');
+  });
+
+  it('cleanupOldProcessedItems removes old entries', () => {
+    markItemProcessed({
+      item_id: 'email:ancient',
+      source: 'superpilot',
+      processed_at: '2026-03-01T10:00:00Z',
+      action_taken: 'auto:archive',
+    });
+    markItemProcessed({
+      item_id: 'email:recent',
+      source: 'superpilot',
+      processed_at: '2026-04-10T10:00:00Z',
+      action_taken: 'propose:reply',
+    });
+    const deleted = cleanupOldProcessedItems('2026-04-01T00:00:00Z');
+    expect(deleted).toBe(1);
+    expect(isItemProcessed('email:ancient')).toBe(false);
+    expect(isItemProcessed('email:recent')).toBe(true);
   });
 });
