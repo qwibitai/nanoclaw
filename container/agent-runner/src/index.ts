@@ -33,6 +33,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  compiledSystemPrompt?: string;
 }
 
 interface ContainerOutput {
@@ -62,14 +63,31 @@ interface SDKUserMessage {
 
 const WORKSPACE_GROUP_DIR =
   process.env.NANOCLAW_WORKSPACE_GROUP_DIR || '/workspace/group';
-const WORKSPACE_GLOBAL_DIR =
-  process.env.NANOCLAW_WORKSPACE_GLOBAL_DIR || '/workspace/global';
 const WORKSPACE_EXTRA_DIR =
   process.env.NANOCLAW_WORKSPACE_EXTRA_DIR || '/workspace/extra';
 const IPC_INPUT_DIR =
   process.env.NANOCLAW_IPC_INPUT_DIR || '/workspace/ipc/input';
+const IPC_MEMORY_CONTEXT_FILE =
+  process.env.NANOCLAW_IPC_MEMORY_CONTEXT_FILE ||
+  '/workspace/ipc/memory_context.json';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+function buildSystemPrompt(append?: string):
+  | {
+      type: 'preset';
+      preset: 'claude_code';
+      append: string;
+    }
+  | undefined {
+  const trimmed = append?.trim();
+  if (!trimmed) return undefined;
+  return {
+    type: 'preset',
+    preset: 'claude_code',
+    append: trimmed,
+  };
+}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -430,7 +448,8 @@ async function runQuery(
   closedDuringQuery: boolean;
 }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+  const memoryBlock = readMemoryContextBlock();
+  stream.push(memoryBlock ? `${prompt}\n\n${memoryBlock}` : prompt);
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -457,16 +476,10 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  const systemPrompt = buildSystemPrompt(containerInput.compiledSystemPrompt);
 
-  // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = path.join(WORKSPACE_GLOBAL_DIR, 'CLAUDE.md');
-  let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
-    globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
-  }
-
-  // Discover additional directories mounted at runtime-specific extra dir
-  // These are passed to the SDK so their CLAUDE.md files are loaded automatically
+  // Discover additional directories mounted at runtime-specific extra dir.
+  // These paths are exposed to the SDK for file access when present.
   const extraDirs: string[] = [];
   const extraBase = WORKSPACE_EXTRA_DIR;
   if (fs.existsSync(extraBase)) {
@@ -489,13 +502,7 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? {
-            type: 'preset' as const,
-            preset: 'claude_code' as const,
-            append: globalClaudeMd,
-          }
-        : undefined,
+      systemPrompt,
       allowedTools: [
         'Bash',
         'Read',
@@ -520,7 +527,7 @@ async function runQuery(
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
+      settingSources: ['user'],
       mcpServers: {
         nanoclaw: {
           command: 'node',
@@ -591,6 +598,21 @@ async function runQuery(
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 
+function readMemoryContextBlock(): string {
+  try {
+    if (!fs.existsSync(IPC_MEMORY_CONTEXT_FILE)) return '';
+    const parsed = JSON.parse(
+      fs.readFileSync(IPC_MEMORY_CONTEXT_FILE, 'utf-8'),
+    ) as { block?: unknown };
+    return typeof parsed.block === 'string' ? parsed.block.trim() : '';
+  } catch (err) {
+    log(
+      `Failed to load memory context block: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return '';
+  }
+}
+
 interface ScriptResult {
   wakeAgent: boolean;
   data?: unknown;
@@ -654,6 +676,7 @@ interface SessionSlashRunOptions {
   sdkEnv: Record<string, string | undefined>;
   assistantName?: string;
   configuredModel?: string;
+  systemPromptAppend?: string;
   silent?: boolean;
 }
 
@@ -669,13 +692,16 @@ interface SessionSlashRunResult {
 async function runSessionSlashCommand(
   opts: SessionSlashRunOptions,
 ): Promise<SessionSlashRunResult> {
-  log(`Handling session command: ${opts.command}${opts.silent ? ' (silent)' : ''}`);
+  log(
+    `Handling session command: ${opts.command}${opts.silent ? ' (silent)' : ''}`,
+  );
 
   let slashSessionId = opts.sessionId;
   let compactBoundarySeen = false;
   let hadError = false;
   let resultEmitted = false;
   let errorMessage: string | undefined;
+  const systemPrompt = buildSystemPrompt(opts.systemPromptAppend);
 
   try {
     for await (const message of query({
@@ -684,12 +710,12 @@ async function runSessionSlashCommand(
         model: opts.configuredModel,
         cwd: WORKSPACE_GROUP_DIR,
         resume: opts.sessionId,
-        systemPrompt: undefined,
+        systemPrompt,
         allowedTools: [],
         env: opts.sdkEnv,
         permissionMode: 'bypassPermissions' as const,
         allowDangerouslySkipPermissions: true,
-        settingSources: ['project', 'user'] as const,
+        settingSources: ['user'] as const,
         hooks: {
           PreCompact: [{ hooks: [createPreCompactHook(opts.assistantName)] }],
         },
@@ -857,6 +883,7 @@ async function main(): Promise<void> {
 
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
+  const compiledSystemPrompt = containerInput.compiledSystemPrompt?.trim();
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
@@ -880,6 +907,7 @@ async function main(): Promise<void> {
       sdkEnv,
       assistantName: containerInput.assistantName,
       configuredModel: configuredModel.model,
+      systemPromptAppend: compiledSystemPrompt,
       silent: true,
     });
 
@@ -908,6 +936,7 @@ async function main(): Promise<void> {
       sdkEnv,
       assistantName: containerInput.assistantName,
       configuredModel: configuredModel.model,
+      systemPromptAppend: compiledSystemPrompt,
     });
 
     if (slashResult.newSessionId) {
