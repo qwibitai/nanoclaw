@@ -31,9 +31,12 @@ function parseTranscript(content: string): ParsedMessage[] {
     try {
       const entry = JSON.parse(line);
       if (entry.type === 'user' && entry.message?.content) {
-        const text = typeof entry.message.content === 'string'
-          ? entry.message.content
-          : entry.message.content.map((c: { text?: string }) => c.text || '').join('');
+        const text =
+          typeof entry.message.content === 'string'
+            ? entry.message.content
+            : entry.message.content
+                .map((c: { text?: string }) => c.text || '')
+                .join('');
         if (text) messages.push({ role: 'user', content: text });
       } else if (entry.type === 'assistant' && entry.message?.content) {
         const textParts = entry.message.content
@@ -74,10 +77,11 @@ function formatTranscriptMarkdown(
   lines.push('');
 
   for (const msg of messages) {
-    const sender = msg.role === 'user' ? 'User' : (assistantName || 'Assistant');
-    const content = msg.content.length > 2000
-      ? msg.content.slice(0, 2000) + '...'
-      : msg.content;
+    const sender = msg.role === 'user' ? 'User' : assistantName || 'Assistant';
+    const content =
+      msg.content.length > 2000
+        ? msg.content.slice(0, 2000) + '...'
+        : msg.content;
     lines.push(`**${sender}**: ${content}`);
     lines.push('');
   }
@@ -98,20 +102,49 @@ function generateFallbackName(): string {
   return `conversation-${time.getHours().toString().padStart(2, '0')}${time.getMinutes().toString().padStart(2, '0')}`;
 }
 
-function getSessionSummary(sessionId: string, transcriptPath: string): string | null {
+function getSessionSummary(
+  sessionId: string,
+  transcriptPath: string,
+): string | null {
   const projectDir = path.dirname(transcriptPath);
   const indexPath = path.join(projectDir, 'sessions-index.json');
 
   if (!fs.existsSync(indexPath)) return null;
 
   try {
-    const index: SessionsIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-    const entry = index.entries.find(e => e.sessionId === sessionId);
+    const index: SessionsIndex = JSON.parse(
+      fs.readFileSync(indexPath, 'utf-8'),
+    );
+    const entry = index.entries.find((e) => e.sessionId === sessionId);
     if (entry?.summary) return entry.summary;
   } catch (err) {
-    logger.warn(`Failed to read sessions index: ${err instanceof Error ? err.message : String(err)}`);
+    logger.warn(
+      `Failed to read sessions index: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
+  return null;
+}
+
+/**
+ * Find the transcript JSONL for a session ID.
+ * Claude CLI stores transcripts at: .claude/projects/<project-slug>/<sessionId>.jsonl
+ */
+function findTranscriptPath(
+  claudeConfigDir: string,
+  sessionId: string,
+): string | null {
+  const projectsDir = path.join(claudeConfigDir, 'projects');
+  if (!fs.existsSync(projectsDir)) return null;
+
+  try {
+    for (const slug of fs.readdirSync(projectsDir)) {
+      const candidate = path.join(projectsDir, slug, `${sessionId}.jsonl`);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  } catch {
+    // ignore read errors
+  }
   return null;
 }
 
@@ -119,7 +152,7 @@ function getSessionSummary(sessionId: string, transcriptPath: string): string | 
  * Archive a session transcript to the group's conversations/ directory.
  *
  * @param sessionId  The Claude session ID
- * @param claudeConfigDir  Path to the .claude dir (contains sessions/)
+ * @param claudeConfigDir  Path to the .claude dir (contains projects/)
  * @param groupDir  Path to the group's workspace directory
  * @param assistantName  Optional name for the assistant in transcript
  */
@@ -129,10 +162,12 @@ export function archiveTranscript(
   groupDir: string,
   assistantName?: string,
 ): boolean {
-  const transcriptPath = path.join(claudeConfigDir, 'sessions', sessionId, 'transcript.jsonl');
+  const transcriptPath = findTranscriptPath(claudeConfigDir, sessionId);
 
-  if (!fs.existsSync(transcriptPath)) {
-    logger.info(`No transcript found at ${transcriptPath}`);
+  if (!transcriptPath) {
+    logger.info(
+      `No transcript found for session ${sessionId} in ${claudeConfigDir}/projects/`,
+    );
     return false;
   }
 
@@ -161,7 +196,9 @@ export function archiveTranscript(
     logger.info(`Archived conversation to ${filePath}`);
     return true;
   } catch (err) {
-    logger.warn(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
+    logger.warn(
+      `Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return false;
   }
 }
