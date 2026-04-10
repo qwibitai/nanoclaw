@@ -12,7 +12,8 @@ export function extractSessionCommand(
   let text = content.trim();
   text = text.replace(triggerPattern, '').trim();
   if (text === '/compact') return '/compact';
-  if (text === '/closethread') return '/closethread';
+  if (text === '/closethread' || text === '/kill') return '/kill';
+  if (text === '/restart') return '/restart';
   return null;
 }
 
@@ -70,7 +71,7 @@ export async function handleSessionCommand(opts: {
   triggerPattern: RegExp;
   timezone: string;
   deps: SessionCommandDeps;
-}): Promise<{ handled: false } | { handled: true; success: boolean }> {
+}): Promise<{ handled: false } | { handled: true; success: boolean; restart?: boolean }> {
   const {
     missedMessages,
     isMainGroup,
@@ -110,14 +111,23 @@ export async function handleSessionCommand(opts: {
   // AUTHORIZED: handle command
   logger.info({ group: groupName, command }, 'Session command');
 
-  // /closethread: immediately kill the container without running the agent.
+  // /kill (formerly /closethread): immediately kill the container without running the agent.
   // Intentionally skips pre-command message processing (unlike /compact) — this is a
-  // hard stop. Any messages before /closethread in the same batch are silently dropped.
-  if (command === '/closethread') {
+  // hard stop. Any messages before /kill in the same batch are silently dropped.
+  if (command === '/kill') {
     deps.closeStdin();
     deps.advanceCursor(cmdMsg.timestamp);
     await deps.sendMessage('Container closed.');
     return { handled: true, success: true };
+  }
+
+  // /restart: kill the container and respawn a fresh session.
+  // Closes stdin (triggers cleanup + auto-commit), then signals the caller to respawn.
+  if (command === '/restart') {
+    deps.closeStdin();
+    deps.advanceCursor(cmdMsg.timestamp);
+    await deps.sendMessage('Restarting session...');
+    return { handled: true, success: true, restart: true };
   }
 
   const cmdIndex = missedMessages.indexOf(cmdMsg);

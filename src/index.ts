@@ -742,7 +742,38 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       },
     },
   });
-  if (cmdResult.handled) return cmdResult.success;
+  if (cmdResult.handled) {
+    // /restart: after container closes + cleanup, respawn a fresh session.
+    // Wait for the slot to clear, then spawn a new container with a restart prompt.
+    if ('restart' in cmdResult && cmdResult.restart) {
+      // Wait for container exit + cleanup to complete (closeStdin is async)
+      await new Promise((r) => setTimeout(r, 3000));
+      const restartPrompt = 'Session restarted with fresh container mounts. Briefly acknowledge.';
+      await channel.setTyping?.(chatJid, true);
+      try {
+        const result = await runAgent(
+          group,
+          restartPrompt,
+          chatJid,
+          undefined,
+          undefined,
+          threadId,
+          undefined,
+          async (output) => {
+            const text = typeof output.result === 'string' ? output.result : '';
+            if (text) await channel.sendMessage(chatJid, text, triggerMsgId);
+          },
+        );
+        if (result === 'error') {
+          await channel.sendMessage(chatJid, 'Session restarted but agent failed to initialize.', triggerMsgId);
+        }
+      } finally {
+        await channel.setTyping?.(chatJid, false);
+      }
+      return true;
+    }
+    return cmdResult.success;
+  }
   // --- End session command interception ---
 
   // For non-main groups, check if trigger is required and present

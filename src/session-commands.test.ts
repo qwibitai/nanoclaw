@@ -40,18 +40,28 @@ describe('extractSessionCommand', () => {
     expect(extractSessionCommand('/Compact', trigger)).toBeNull();
   });
 
-  it('detects bare /closethread', () => {
-    expect(extractSessionCommand('/closethread', trigger)).toBe('/closethread');
+  it('detects bare /kill', () => {
+    expect(extractSessionCommand('/kill', trigger)).toBe('/kill');
   });
 
-  it('detects /closethread with trigger prefix', () => {
-    expect(extractSessionCommand('@Andy /closethread', trigger)).toBe(
-      '/closethread',
-    );
+  it('detects /closethread as /kill (backward compat)', () => {
+    expect(extractSessionCommand('/closethread', trigger)).toBe('/kill');
   });
 
-  it('rejects /closethread with extra text', () => {
-    expect(extractSessionCommand('/closethread now', trigger)).toBeNull();
+  it('detects /kill with trigger prefix', () => {
+    expect(extractSessionCommand('@Andy /kill', trigger)).toBe('/kill');
+  });
+
+  it('rejects /kill with extra text', () => {
+    expect(extractSessionCommand('/kill now', trigger)).toBeNull();
+  });
+
+  it('detects bare /restart', () => {
+    expect(extractSessionCommand('/restart', trigger)).toBe('/restart');
+  });
+
+  it('detects /restart with trigger prefix', () => {
+    expect(extractSessionCommand('@Andy /restart', trigger)).toBe('/restart');
   });
 });
 
