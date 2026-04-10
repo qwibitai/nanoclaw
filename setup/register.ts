@@ -7,9 +7,6 @@
 import fs from 'fs';
 import path from 'path';
 
-import Database from 'better-sqlite3';
-
-import { STORE_DIR } from '../src/config.js';
 import { isValidGroupFolder } from '../src/group-folder.js';
 import { logger } from '../src/logger.js';
 import { emitStatus } from './status.js';
@@ -86,38 +83,22 @@ export async function run(args: string[]): Promise<void> {
   // Ensure data directory exists
   fs.mkdirSync(path.join(projectRoot, 'data'), { recursive: true });
 
-  // Write to SQLite using parameterized queries (no SQL injection)
-  const dbPath = path.join(STORE_DIR, 'messages.db');
-  const timestamp = new Date().toISOString();
-  const requiresTriggerInt = parsed.requiresTrigger ? 1 : 0;
-
-  const db = new Database(dbPath);
-  // Ensure schema exists
-  db.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
-    jid TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    folder TEXT NOT NULL UNIQUE,
-    trigger_pattern TEXT NOT NULL,
-    added_at TEXT NOT NULL,
-    container_config TEXT,
-    requires_trigger INTEGER DEFAULT 1
-  )`);
-
-  db.prepare(
-    `INSERT OR REPLACE INTO registered_groups
-     (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-     VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-  ).run(
-    parsed.jid,
-    parsed.name,
-    parsed.folder,
-    parsed.trigger,
-    timestamp,
-    requiresTriggerInt,
+  const { initDatabase, setRegisteredGroup, closeDatabase } = await import(
+    '../src/db/index.js'
   );
-
-  db.close();
-  logger.info('Wrote registration to SQLite');
+  await initDatabase();
+  try {
+    await setRegisteredGroup(parsed.jid, {
+      name: parsed.name,
+      folder: parsed.folder,
+      trigger: parsed.trigger,
+      added_at: new Date().toISOString(),
+      requiresTrigger: parsed.requiresTrigger,
+    });
+    logger.info('Wrote registration to database');
+  } finally {
+    await closeDatabase();
+  }
 
   // Create group folders
   fs.mkdirSync(path.join(projectRoot, 'groups', parsed.folder, 'logs'), {

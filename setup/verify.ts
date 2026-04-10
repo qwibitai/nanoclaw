@@ -9,9 +9,6 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import Database from 'better-sqlite3';
-
-import { STORE_DIR } from '../src/config.js';
 import { logger } from '../src/logger.js';
 import {
   getPlatform,
@@ -111,20 +108,21 @@ export async function run(_args: string[]): Promise<void> {
     whatsappAuth = 'authenticated';
   }
 
-  // 5. Check registered groups (using better-sqlite3, not sqlite3 CLI)
+  // 5. Check registered groups via database adapter
   let registeredGroups = 0;
-  const dbPath = path.join(STORE_DIR, 'messages.db');
-  if (fs.existsSync(dbPath)) {
+  try {
+    const { initDatabase, getAllRegisteredGroups, closeDatabase } = await import(
+      '../src/db/index.js'
+    );
+    await initDatabase();
     try {
-      const db = new Database(dbPath, { readonly: true });
-      const row = db
-        .prepare('SELECT COUNT(*) as count FROM registered_groups')
-        .get() as { count: number };
-      registeredGroups = row.count;
-      db.close();
-    } catch {
-      // Table might not exist
+      const groups = await getAllRegisteredGroups();
+      registeredGroups = Object.keys(groups).length;
+    } finally {
+      await closeDatabase();
     }
+  } catch {
+    // Database may not be initialized yet
   }
 
   // 6. Check mount allowlist

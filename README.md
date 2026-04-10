@@ -121,10 +121,10 @@ Skills we'd like to see:
 ## Architecture
 
 ```
-WhatsApp (baileys) --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+WhatsApp (baileys) --> Database --> Polling loop --> Container (Claude Agent SDK) --> Response
 ```
 
-Single Node.js process. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
+Single Node.js process. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem. Database access goes through an adapter layer; the default database is SQLite (`store/messages.db`).
 
 Key files:
 - `src/index.ts` - Orchestrator: state, message loop, agent invocation
@@ -134,7 +134,7 @@ Key files:
 - `src/group-queue.ts` - Per-group queue with global concurrency limit
 - `src/container-runner.ts` - Spawns streaming agent containers
 - `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
+- `src/db/` - Database adapter layer (SQLite)
 - `groups/*/CLAUDE.md` - Per-group memory
 
 ## FAQ

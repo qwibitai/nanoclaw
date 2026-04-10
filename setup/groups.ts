@@ -6,9 +6,6 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import Database from 'better-sqlite3';
-
-import { STORE_DIR } from '../src/config.js';
 import { logger } from '../src/logger.js';
 import { emitStatus } from './status.js';
 
@@ -38,26 +35,30 @@ export async function run(args: string[]): Promise<void> {
 }
 
 async function listGroups(limit: number): Promise<void> {
-  const dbPath = path.join(STORE_DIR, 'messages.db');
-
-  if (!fs.existsSync(dbPath)) {
-    console.error('ERROR: database not found');
-    process.exit(1);
-  }
-
-  const db = new Database(dbPath, { readonly: true });
-  const rows = db
-    .prepare(
-      `SELECT jid, name FROM chats
-     WHERE jid LIKE '%@g.us' AND jid <> '__group_sync__' AND name <> jid
-     ORDER BY last_message_time DESC
-     LIMIT ?`,
-    )
-    .all(limit) as Array<{ jid: string; name: string }>;
-  db.close();
-
-  for (const row of rows) {
-    console.log(`${row.jid}|${row.name}`);
+  const { initDatabase, getAllChats, closeDatabase } = await import(
+    '../src/db/index.js'
+  );
+  await initDatabase();
+  try {
+    const chats = await getAllChats();
+    const groups = chats
+      .filter(
+        (c) =>
+          c.jid.endsWith('@g.us') &&
+          c.jid !== '__group_sync__' &&
+          c.name !== c.jid,
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.last_message_time).getTime() -
+          new Date(a.last_message_time).getTime(),
+      )
+      .slice(0, limit);
+    for (const g of groups) {
+      console.log(`${g.jid}|${g.name}`);
+    }
+  } finally {
+    await closeDatabase();
   }
 }
 
@@ -85,33 +86,25 @@ async function syncGroups(projectRoot: string): Promise<void> {
     process.exit(1);
   }
 
-  // Run inline sync script via node
+  // Run inline sync script — fetches WhatsApp groups and outputs JSON to stdout.
+  // DB writes happen in the parent process via the adapter layer.
   logger.info('Fetching group metadata');
   let syncOk = false;
+  const syncedGroups: Array<{ jid: string; name: string }> = [];
   try {
     const syncScript = `
 import makeWASocket, { useMultiFileAuthState, makeCacheableSignalKeyStore, Browsers } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import path from 'path';
 import fs from 'fs';
-import Database from 'better-sqlite3';
 
 const logger = pino({ level: 'silent' });
 const authDir = path.join('store', 'auth');
-const dbPath = path.join('store', 'messages.db');
 
 if (!fs.existsSync(authDir)) {
   console.error('NO_AUTH');
   process.exit(1);
 }
-
-const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
-db.exec('CREATE TABLE IF NOT EXISTS chats (jid TEXT PRIMARY KEY, name TEXT, last_message_time TEXT)');
-
-const upsert = db.prepare(
-  'INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?) ON CONFLICT(jid) DO UPDATE SET name = excluded.name'
-);
 
 const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
@@ -133,21 +126,18 @@ sock.ev.on('connection.update', async (update) => {
   if (update.connection === 'open') {
     try {
       const groups = await sock.groupFetchAllParticipating();
-      const now = new Date().toISOString();
-      let count = 0;
+      const results = [];
       for (const [jid, metadata] of Object.entries(groups)) {
         if (metadata.subject) {
-          upsert.run(jid, metadata.subject, now);
-          count++;
+          results.push({ jid, name: metadata.subject });
         }
       }
-      console.log('SYNCED:' + count);
+      console.log(JSON.stringify(results));
     } catch (err) {
       console.error('FETCH_ERROR:' + err.message);
     } finally {
       clearTimeout(timeout);
       sock.end(undefined);
-      db.close();
       process.exit(0);
     }
   } else if (update.connection === 'close') {
@@ -167,28 +157,39 @@ sock.ev.on('connection.update', async (update) => {
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     );
-    syncOk = output.includes('SYNCED:');
-    logger.info({ output: output.trim() }, 'Sync output');
+    const trimmed = output.trim();
+    if (trimmed.startsWith('[')) {
+      const parsed = JSON.parse(trimmed) as Array<{
+        jid: string;
+        name: string;
+      }>;
+      syncedGroups.push(...parsed);
+      syncOk = true;
+    }
+    logger.info({ groupCount: syncedGroups.length }, 'Sync output');
   } catch (err) {
     logger.error({ err }, 'Sync failed');
   }
 
-  // Count groups in DB using better-sqlite3 (no sqlite3 CLI)
+  const { initDatabase, storeChatMetadata, getAllChats, closeDatabase } =
+    await import('../src/db/index.js');
+  await initDatabase();
   let groupsInDb = 0;
-  const dbPath = path.join(STORE_DIR, 'messages.db');
-  if (fs.existsSync(dbPath)) {
-    try {
-      const db = new Database(dbPath, { readonly: true });
-      const row = db
-        .prepare(
-          "SELECT COUNT(*) as count FROM chats WHERE jid LIKE '%@g.us' AND jid <> '__group_sync__'",
-        )
-        .get() as { count: number };
-      groupsInDb = row.count;
-      db.close();
-    } catch {
-      // DB may not exist yet
+  try {
+    if (syncOk) {
+      const now = new Date().toISOString();
+      for (const g of syncedGroups) {
+        await storeChatMetadata(g.jid, now, g.name);
+      }
+      logger.info({ count: syncedGroups.length }, 'Wrote groups to database');
     }
+
+    const chats = await getAllChats();
+    groupsInDb = chats.filter(
+      (c) => c.jid.endsWith('@g.us') && c.jid !== '__group_sync__',
+    ).length;
+  } finally {
+    await closeDatabase();
   }
 
   const status = syncOk ? 'success' : 'failed';

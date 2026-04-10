@@ -11,14 +11,14 @@ import {
   storeChatMetadata,
   storeMessage,
   updateTask,
-} from './db.js';
+} from './db/index.js';
 
-beforeEach(() => {
-  _initTestDatabase();
+beforeEach(async () => {
+  await _initTestDatabase();
 });
 
 // Helper to store a message using the normalized NewMessage interface
-function store(overrides: {
+async function store(overrides: {
   id: string;
   chat_jid: string;
   sender: string;
@@ -27,7 +27,7 @@ function store(overrides: {
   timestamp: string;
   is_from_me?: boolean;
 }) {
-  storeMessage({
+  await storeMessage({
     id: overrides.id,
     chat_jid: overrides.chat_jid,
     sender: overrides.sender,
@@ -41,10 +41,10 @@ function store(overrides: {
 // --- storeMessage (NewMessage format) ---
 
 describe('storeMessage', () => {
-  it('stores a message and retrieves it', () => {
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+  it('stores a message and retrieves it', async () => {
+    await storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
-    store({
+    await store({
       id: 'msg-1',
       chat_jid: 'group@g.us',
       sender: '123@s.whatsapp.net',
@@ -53,7 +53,7 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:01.000Z',
     });
 
-    const messages = getMessagesSince(
+    const messages = await getMessagesSince(
       'group@g.us',
       '2024-01-01T00:00:00.000Z',
       'Andy',
@@ -65,10 +65,10 @@ describe('storeMessage', () => {
     expect(messages[0].content).toBe('hello world');
   });
 
-  it('filters out empty content', () => {
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+  it('filters out empty content', async () => {
+    await storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
-    store({
+    await store({
       id: 'msg-2',
       chat_jid: 'group@g.us',
       sender: '111@s.whatsapp.net',
@@ -77,7 +77,7 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:04.000Z',
     });
 
-    const messages = getMessagesSince(
+    const messages = await getMessagesSince(
       'group@g.us',
       '2024-01-01T00:00:00.000Z',
       'Andy',
@@ -85,10 +85,10 @@ describe('storeMessage', () => {
     expect(messages).toHaveLength(0);
   });
 
-  it('stores is_from_me flag', () => {
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+  it('stores is_from_me flag', async () => {
+    await storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
-    store({
+    await store({
       id: 'msg-3',
       chat_jid: 'group@g.us',
       sender: 'me@s.whatsapp.net',
@@ -98,8 +98,7 @@ describe('storeMessage', () => {
       is_from_me: true,
     });
 
-    // Message is stored (we can retrieve it — is_from_me doesn't affect retrieval)
-    const messages = getMessagesSince(
+    const messages = await getMessagesSince(
       'group@g.us',
       '2024-01-01T00:00:00.000Z',
       'Andy',
@@ -107,10 +106,10 @@ describe('storeMessage', () => {
     expect(messages).toHaveLength(1);
   });
 
-  it('upserts on duplicate id+chat_jid', () => {
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+  it('upserts on duplicate id+chat_jid', async () => {
+    await storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
-    store({
+    await store({
       id: 'msg-dup',
       chat_jid: 'group@g.us',
       sender: '123@s.whatsapp.net',
@@ -119,7 +118,7 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:01.000Z',
     });
 
-    store({
+    await store({
       id: 'msg-dup',
       chat_jid: 'group@g.us',
       sender: '123@s.whatsapp.net',
@@ -128,7 +127,7 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:01.000Z',
     });
 
-    const messages = getMessagesSince(
+    const messages = await getMessagesSince(
       'group@g.us',
       '2024-01-01T00:00:00.000Z',
       'Andy',
@@ -141,10 +140,10 @@ describe('storeMessage', () => {
 // --- getMessagesSince ---
 
 describe('getMessagesSince', () => {
-  beforeEach(() => {
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+  beforeEach(async () => {
+    await storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
-    store({
+    await store({
       id: 'm1',
       chat_jid: 'group@g.us',
       sender: 'Alice@s.whatsapp.net',
@@ -152,7 +151,7 @@ describe('getMessagesSince', () => {
       content: 'first',
       timestamp: '2024-01-01T00:00:01.000Z',
     });
-    store({
+    await store({
       id: 'm2',
       chat_jid: 'group@g.us',
       sender: 'Bob@s.whatsapp.net',
@@ -160,7 +159,7 @@ describe('getMessagesSince', () => {
       content: 'second',
       timestamp: '2024-01-01T00:00:02.000Z',
     });
-    storeMessage({
+    await storeMessage({
       id: 'm3',
       chat_jid: 'group@g.us',
       sender: 'Bot@s.whatsapp.net',
@@ -169,7 +168,7 @@ describe('getMessagesSince', () => {
       timestamp: '2024-01-01T00:00:03.000Z',
       is_bot_message: true,
     });
-    store({
+    await store({
       id: 'm4',
       chat_jid: 'group@g.us',
       sender: 'Carol@s.whatsapp.net',
@@ -179,19 +178,18 @@ describe('getMessagesSince', () => {
     });
   });
 
-  it('returns messages after the given timestamp', () => {
-    const msgs = getMessagesSince(
+  it('returns messages after the given timestamp', async () => {
+    const msgs = await getMessagesSince(
       'group@g.us',
       '2024-01-01T00:00:02.000Z',
       'Andy',
     );
-    // Should exclude m1, m2 (before/at timestamp), m3 (bot message)
     expect(msgs).toHaveLength(1);
     expect(msgs[0].content).toBe('third');
   });
 
-  it('excludes bot messages via is_bot_message flag', () => {
-    const msgs = getMessagesSince(
+  it('excludes bot messages via is_bot_message flag', async () => {
+    const msgs = await getMessagesSince(
       'group@g.us',
       '2024-01-01T00:00:00.000Z',
       'Andy',
@@ -200,15 +198,13 @@ describe('getMessagesSince', () => {
     expect(botMsgs).toHaveLength(0);
   });
 
-  it('returns all non-bot messages when sinceTimestamp is empty', () => {
-    const msgs = getMessagesSince('group@g.us', '', 'Andy');
-    // 3 user messages (bot message excluded)
+  it('returns all non-bot messages when sinceTimestamp is empty', async () => {
+    const msgs = await getMessagesSince('group@g.us', '', 'Andy');
     expect(msgs).toHaveLength(3);
   });
 
-  it('filters pre-migration bot messages via content prefix backstop', () => {
-    // Simulate a message written before migration: has prefix but is_bot_message = 0
-    store({
+  it('filters pre-migration bot messages via content prefix backstop', async () => {
+    await store({
       id: 'm5',
       chat_jid: 'group@g.us',
       sender: 'Bot@s.whatsapp.net',
@@ -216,7 +212,7 @@ describe('getMessagesSince', () => {
       content: 'Andy: old bot reply',
       timestamp: '2024-01-01T00:00:05.000Z',
     });
-    const msgs = getMessagesSince(
+    const msgs = await getMessagesSince(
       'group@g.us',
       '2024-01-01T00:00:04.000Z',
       'Andy',
@@ -228,11 +224,11 @@ describe('getMessagesSince', () => {
 // --- getNewMessages ---
 
 describe('getNewMessages', () => {
-  beforeEach(() => {
-    storeChatMetadata('group1@g.us', '2024-01-01T00:00:00.000Z');
-    storeChatMetadata('group2@g.us', '2024-01-01T00:00:00.000Z');
+  beforeEach(async () => {
+    await storeChatMetadata('group1@g.us', '2024-01-01T00:00:00.000Z');
+    await storeChatMetadata('group2@g.us', '2024-01-01T00:00:00.000Z');
 
-    store({
+    await store({
       id: 'a1',
       chat_jid: 'group1@g.us',
       sender: 'user@s.whatsapp.net',
@@ -240,7 +236,7 @@ describe('getNewMessages', () => {
       content: 'g1 msg1',
       timestamp: '2024-01-01T00:00:01.000Z',
     });
-    store({
+    await store({
       id: 'a2',
       chat_jid: 'group2@g.us',
       sender: 'user@s.whatsapp.net',
@@ -248,7 +244,7 @@ describe('getNewMessages', () => {
       content: 'g2 msg1',
       timestamp: '2024-01-01T00:00:02.000Z',
     });
-    storeMessage({
+    await storeMessage({
       id: 'a3',
       chat_jid: 'group1@g.us',
       sender: 'user@s.whatsapp.net',
@@ -257,7 +253,7 @@ describe('getNewMessages', () => {
       timestamp: '2024-01-01T00:00:03.000Z',
       is_bot_message: true,
     });
-    store({
+    await store({
       id: 'a4',
       chat_jid: 'group1@g.us',
       sender: 'user@s.whatsapp.net',
@@ -267,30 +263,28 @@ describe('getNewMessages', () => {
     });
   });
 
-  it('returns new messages across multiple groups', () => {
-    const { messages, newTimestamp } = getNewMessages(
+  it('returns new messages across multiple groups', async () => {
+    const { messages, newTimestamp } = await getNewMessages(
       ['group1@g.us', 'group2@g.us'],
       '2024-01-01T00:00:00.000Z',
       'Andy',
     );
-    // Excludes bot message, returns 3 user messages
     expect(messages).toHaveLength(3);
     expect(newTimestamp).toBe('2024-01-01T00:00:04.000Z');
   });
 
-  it('filters by timestamp', () => {
-    const { messages } = getNewMessages(
+  it('filters by timestamp', async () => {
+    const { messages } = await getNewMessages(
       ['group1@g.us', 'group2@g.us'],
       '2024-01-01T00:00:02.000Z',
       'Andy',
     );
-    // Only g1 msg2 (after ts, not bot)
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('g1 msg2');
   });
 
-  it('returns empty for no registered groups', () => {
-    const { messages, newTimestamp } = getNewMessages([], '', 'Andy');
+  it('returns empty for no registered groups', async () => {
+    const { messages, newTimestamp } = await getNewMessages([], '', 'Andy');
     expect(messages).toHaveLength(0);
     expect(newTimestamp).toBe('');
   });
@@ -299,32 +293,40 @@ describe('getNewMessages', () => {
 // --- storeChatMetadata ---
 
 describe('storeChatMetadata', () => {
-  it('stores chat with JID as default name', () => {
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
-    const chats = getAllChats();
+  it('stores chat with JID as default name', async () => {
+    await storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+    const chats = await getAllChats();
     expect(chats).toHaveLength(1);
     expect(chats[0].jid).toBe('group@g.us');
     expect(chats[0].name).toBe('group@g.us');
   });
 
-  it('stores chat with explicit name', () => {
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z', 'My Group');
-    const chats = getAllChats();
+  it('stores chat with explicit name', async () => {
+    await storeChatMetadata(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'My Group',
+    );
+    const chats = await getAllChats();
     expect(chats[0].name).toBe('My Group');
   });
 
-  it('updates name on subsequent call with name', () => {
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:01.000Z', 'Updated Name');
-    const chats = getAllChats();
+  it('updates name on subsequent call with name', async () => {
+    await storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+    await storeChatMetadata(
+      'group@g.us',
+      '2024-01-01T00:00:01.000Z',
+      'Updated Name',
+    );
+    const chats = await getAllChats();
     expect(chats).toHaveLength(1);
     expect(chats[0].name).toBe('Updated Name');
   });
 
-  it('preserves newer timestamp on conflict', () => {
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:05.000Z');
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:01.000Z');
-    const chats = getAllChats();
+  it('preserves newer timestamp on conflict', async () => {
+    await storeChatMetadata('group@g.us', '2024-01-01T00:00:05.000Z');
+    await storeChatMetadata('group@g.us', '2024-01-01T00:00:01.000Z');
+    const chats = await getAllChats();
     expect(chats[0].last_message_time).toBe('2024-01-01T00:00:05.000Z');
   });
 });
@@ -332,8 +334,8 @@ describe('storeChatMetadata', () => {
 // --- Task CRUD ---
 
 describe('task CRUD', () => {
-  it('creates and retrieves a task', () => {
-    createTask({
+  it('creates and retrieves a task', async () => {
+    await createTask({
       id: 'task-1',
       group_folder: 'main',
       chat_jid: 'group@g.us',
@@ -346,14 +348,14 @@ describe('task CRUD', () => {
       created_at: '2024-01-01T00:00:00.000Z',
     });
 
-    const task = getTaskById('task-1');
+    const task = await getTaskById('task-1');
     expect(task).toBeDefined();
     expect(task!.prompt).toBe('do something');
     expect(task!.status).toBe('active');
   });
 
-  it('updates task status', () => {
-    createTask({
+  it('updates task status', async () => {
+    await createTask({
       id: 'task-2',
       group_folder: 'main',
       chat_jid: 'group@g.us',
@@ -366,12 +368,12 @@ describe('task CRUD', () => {
       created_at: '2024-01-01T00:00:00.000Z',
     });
 
-    updateTask('task-2', { status: 'paused' });
-    expect(getTaskById('task-2')!.status).toBe('paused');
+    await updateTask('task-2', { status: 'paused' });
+    expect((await getTaskById('task-2'))!.status).toBe('paused');
   });
 
-  it('deletes a task and its run logs', () => {
-    createTask({
+  it('deletes a task and its run logs', async () => {
+    await createTask({
       id: 'task-3',
       group_folder: 'main',
       chat_jid: 'group@g.us',
@@ -384,7 +386,7 @@ describe('task CRUD', () => {
       created_at: '2024-01-01T00:00:00.000Z',
     });
 
-    deleteTask('task-3');
-    expect(getTaskById('task-3')).toBeUndefined();
+    await deleteTask('task-3');
+    expect(await getTaskById('task-3')).toBeUndefined();
   });
 });

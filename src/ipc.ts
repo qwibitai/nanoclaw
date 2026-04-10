@@ -10,7 +10,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { createTask, deleteTask, getTaskById, updateTask } from './db/index.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -18,9 +18,9 @@ import { RegisteredGroup } from './types.js';
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
-  registerGroup: (jid: string, group: RegisteredGroup) => void;
+  registerGroup: (jid: string, group: RegisteredGroup) => void | Promise<void>;
   syncGroupMetadata: (force: boolean) => Promise<void>;
-  getAvailableGroups: () => AvailableGroup[];
+  getAvailableGroups: () => AvailableGroup[] | Promise<AvailableGroup[]>;
   writeGroupsSnapshot: (
     groupFolder: string,
     isMain: boolean,
@@ -251,7 +251,7 @@ export async function processTaskIpc(
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
             : 'isolated';
-        createTask({
+        await createTask({
           id: taskId,
           group_folder: targetFolder,
           chat_jid: targetJid,
@@ -272,9 +272,9 @@ export async function processTaskIpc(
 
     case 'pause_task':
       if (data.taskId) {
-        const task = getTaskById(data.taskId);
+        const task = await getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'paused' });
+          await updateTask(data.taskId, { status: 'paused' });
           logger.info(
             { taskId: data.taskId, sourceGroup },
             'Task paused via IPC',
@@ -290,9 +290,9 @@ export async function processTaskIpc(
 
     case 'resume_task':
       if (data.taskId) {
-        const task = getTaskById(data.taskId);
+        const task = await getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'active' });
+          await updateTask(data.taskId, { status: 'active' });
           logger.info(
             { taskId: data.taskId, sourceGroup },
             'Task resumed via IPC',
@@ -308,9 +308,9 @@ export async function processTaskIpc(
 
     case 'cancel_task':
       if (data.taskId) {
-        const task = getTaskById(data.taskId);
+        const task = await getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
-          deleteTask(data.taskId);
+          await deleteTask(data.taskId);
           logger.info(
             { taskId: data.taskId, sourceGroup },
             'Task cancelled via IPC',
@@ -333,7 +333,7 @@ export async function processTaskIpc(
         );
         await deps.syncGroupMetadata(true);
         // Write updated snapshot immediately
-        const availableGroups = deps.getAvailableGroups();
+        const availableGroups = await deps.getAvailableGroups();
         deps.writeGroupsSnapshot(
           sourceGroup,
           true,
@@ -365,7 +365,7 @@ export async function processTaskIpc(
           );
           break;
         }
-        deps.registerGroup(data.jid, {
+        await deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
           trigger: data.trigger,

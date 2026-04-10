@@ -119,9 +119,16 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - From main: can schedule tasks for any group, view/manage all tasks
 - From other groups: can only manage that group's tasks
 
+### Database
+- All database access goes through a unified adapter layer (`src/db/index.ts`)
+- `IDatabaseAdapter` interface defines the contract; adapters implement it
+- **SQLite** (default): `better-sqlite3`, single file at `store/messages.db`, zero configuration
+- All operations are async (`Promise`-based) for adapter compatibility
+- Setup scripts, main app, and channels all go through the adapter — no direct SQLite access outside the adapter
+
 ### Group Management
 - New groups are added explicitly via the main channel
-- Groups are registered in SQLite (via the main channel or IPC `register_group` command)
+- Groups are registered in the database (via the main channel or IPC `register_group` command)
 - Each group gets a dedicated folder under `groups/`
 - Groups can have additional directories mounted via `containerConfig`
 
@@ -138,14 +145,14 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 
 ### WhatsApp
 - Using baileys library for WhatsApp Web connection
-- Messages stored in SQLite, polled by router
+- Messages stored in database (SQLite), polled by router
 - QR code authentication during setup
 
 ### Scheduler
 - Built-in scheduler runs on the host, spawns containers for task execution
 - Custom `nanoclaw` MCP server (inside container) provides scheduling tools
 - Tools: `schedule_task`, `list_tasks`, `pause_task`, `resume_task`, `cancel_task`, `send_message`
-- Tasks stored in SQLite with run history
+- Tasks stored in database with run history
 - Scheduler loop checks for due tasks every minute
 - Tasks execute Claude Agent SDK in containerized group context
 

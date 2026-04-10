@@ -16,7 +16,11 @@ import {
   ASSISTANT_NAME,
   STORE_DIR,
 } from '../config.js';
-import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
+import {
+  getLastGroupSync,
+  setLastGroupSync,
+  updateChatName,
+} from '../db/index.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -292,7 +296,7 @@ export class WhatsAppChannel implements Channel {
    */
   async syncGroupMetadata(force = false): Promise<void> {
     if (!force) {
-      const lastSync = getLastGroupSync();
+      const lastSync = await getLastGroupSync();
       if (lastSync) {
         const lastSyncTime = new Date(lastSync).getTime();
         if (Date.now() - lastSyncTime < GROUP_SYNC_INTERVAL_MS) {
@@ -309,12 +313,12 @@ export class WhatsAppChannel implements Channel {
       let count = 0;
       for (const [jid, metadata] of Object.entries(groups)) {
         if (metadata.subject) {
-          updateChatName(jid, metadata.subject);
+          await updateChatName(jid, metadata.subject);
           count++;
         }
       }
 
-      setLastGroupSync();
+      await setLastGroupSync();
       logger.info({ count }, 'Group metadata synced');
     } catch (err) {
       logger.error({ err }, 'Failed to sync group metadata');
