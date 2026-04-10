@@ -118,6 +118,7 @@ AGENT_KEY=agent_xxx
 
 ```bash
 CONTROL_PLANE_GROUP_FOLDER=main
+CONTROL_PLANE_ENABLED=false
 CONTROL_PLANE_POLL_INTERVAL_MS=10000
 CONTROL_PLANE_HEARTBEAT_INTERVAL_MS=30000
 CONTROL_PLANE_CONTEXT_MODE=group
@@ -129,6 +130,7 @@ CONTROL_PLANE_FAILURE_STATUS=blocked
 Notes:
 
 - `CONTROL_PLANE_GROUP_FOLDER` chooses which local NanoClaw group runs control-plane tasks. If omitted, NanoClaw uses the main group when one exists, otherwise the only registered group.
+- `CONTROL_PLANE_ENABLED=true` starts control-plane polling inside the normal NanoClaw agent process. Leave it `false` if you prefer running `npm run control-plane-worker` as a separate process.
 - `CONTROL_PLANE_CONTEXT_MODE=group` reuses the selected group's saved Claude session between tasks. Use `isolated` if every control-plane task should start fresh.
 - `CONTROL_PLANE_FAILURE_STATUS` is optional. If unset, the worker posts a failure message but does not force a task status change on execution failure.
 - Telegram reporting uses the selected local group's JID. If that group is a Telegram chat and your bot token is configured, the worker sends start/failure/completion updates back to that Telegram chat automatically.
@@ -138,6 +140,16 @@ Notes:
 ```bash
 npm run control-plane-worker
 ```
+
+### Start polling inside the main NanoClaw agent
+
+If you want `npm run dashboard` plus the dashboard-started agent to handle control-plane polling too, set:
+
+```bash
+CONTROL_PLANE_ENABLED=true
+```
+
+With `CONTROL_PLANE_ENABLED=true`, the normal NanoClaw agent process starts the poller automatically when `CONTROL_PLANE_URL` and `AGENT_KEY` are present. Do not run `npm run control-plane-worker` at the same time on the same machine unless you intentionally want two independent pollers.
 
 ### Example: local control plane on your LAN
 

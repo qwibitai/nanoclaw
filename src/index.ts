@@ -4,7 +4,10 @@ import path from 'path';
 import { OneCLI } from '@onecli-sh/sdk';
 
 import {
+  AGENT_KEY,
   ASSISTANT_NAME,
+  CONTROL_PLANE_ENABLED,
+  CONTROL_PLANE_URL,
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
@@ -60,6 +63,9 @@ import {
   startRemoteControl,
   stopRemoteControl,
 } from './remote-control.js';
+import { ControlPlaneClient } from './control-plane-client.js';
+import { resolveControlPlaneGroup } from './control-plane-executor.js';
+import { createControlPlaneRunner } from './control-plane-runner.js';
 import {
   isSenderAllowed,
   isTriggerAllowed,
@@ -86,6 +92,7 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let controlPlaneRunner: ReturnType<typeof createControlPlaneRunner> | null = null;
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -609,6 +616,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     syncDashboardState('shutting_down');
+    controlPlaneRunner?.stop();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     markRuntimeDashboardStopped('stopped');
@@ -811,6 +819,44 @@ async function main(): Promise<void> {
 
   syncDashboardState('running');
   setInterval(() => syncDashboardState('running'), 1000).unref();
+
+  if (CONTROL_PLANE_ENABLED) {
+    if (!CONTROL_PLANE_URL || !AGENT_KEY) {
+      logger.warn(
+        'CONTROL_PLANE_ENABLED is true but CONTROL_PLANE_URL or AGENT_KEY is missing; skipping control-plane runner',
+      );
+    } else {
+      const client = new ControlPlaneClient({
+        baseUrl: CONTROL_PLANE_URL,
+        agentKey: AGENT_KEY,
+      });
+      const selection = resolveControlPlaneGroup();
+      controlPlaneRunner = createControlPlaneRunner({
+        client,
+        resolveGroup: () => selection,
+        notifyLocalMessage: async (message) => {
+          const channel = findChannel(channels, selection.jid);
+          if (!channel) {
+            logger.warn(
+              { jid: selection.jid },
+              'No local channel owns the control-plane notification JID',
+            );
+            return;
+          }
+          const text = formatOutbound(message);
+          if (text) await channel.sendMessage(selection.jid, text);
+        },
+      });
+      void controlPlaneRunner.start();
+      logger.info(
+        {
+          groupFolder: selection.group.folder,
+          jid: selection.jid,
+        },
+        'Control-plane runner enabled inside main NanoClaw agent process',
+      );
+    }
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

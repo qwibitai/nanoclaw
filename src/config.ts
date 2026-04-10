@@ -19,6 +19,7 @@ const envConfig = readEnvFile([
   'CONTROL_PLANE_INCLUDE_BACKLOG',
   'CONTROL_PLANE_SUCCESS_STATUS',
   'CONTROL_PLANE_FAILURE_STATUS',
+  'CONTROL_PLANE_ENABLED',
 ]);
 
 export const ASSISTANT_NAME =
@@ -114,6 +115,12 @@ export const CONTROL_PLANE_SUCCESS_STATUS =
 export const CONTROL_PLANE_FAILURE_STATUS =
   process.env.CONTROL_PLANE_FAILURE_STATUS ||
   envConfig.CONTROL_PLANE_FAILURE_STATUS;
+export const CONTROL_PLANE_ENABLED =
+  (
+    process.env.CONTROL_PLANE_ENABLED ||
+    envConfig.CONTROL_PLANE_ENABLED ||
+    'false'
+  ).toLowerCase() === 'true';
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
