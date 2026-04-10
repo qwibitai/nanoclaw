@@ -7,6 +7,7 @@
     "gateway": "deno run -A src/gateway/index.ts",
     "agent": "deno run -A src/agent/index.ts",
     "store": "deno run -A src/store/index.ts",
+    "test": "deno test --allow-read --allow-write src/store/backend.test.ts src/agent/memory.test.ts",
     "check": "deno check src/shared/ src/gateway/ src/agent/ src/store/",
     "fmt": "deno fmt src/ skills/ knowledge/",
     "lint": "deno lint src/",
