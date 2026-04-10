@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -6,13 +6,15 @@ import { CronExpressionParser } from 'cron-parser';
 
 import {
   DATA_DIR,
+  GROUPS_DIR,
   IPC_POLL_INTERVAL,
   PLUGINS_DIR,
   TIMEZONE,
+  WORKTREES_DIR,
   getParentJid,
   parseThreadJid,
 } from './config.js';
-import { AvailableGroup } from './container-runner.js';
+import { AvailableGroup, withGroupMutex } from './container-runner.js';
 import {
   addBacklogItem,
   addShipLogEntry,
@@ -1228,7 +1230,7 @@ function formatMessagesForIpc(
   }));
 }
 
-function processQueryIpc(
+export function processQueryIpc(
   data: {
     type: string;
     requestId: string;
@@ -1255,6 +1257,12 @@ function processQueryIpc(
     command?: string;
     context_data?: string;
     threadId?: string;
+    // For create_worktree
+    repo?: string;
+    branch?: string;
+    // For clone_repo
+    url?: string;
+    name?: string;
   },
   sourceGroup: string,
   isMain: boolean,
@@ -1848,6 +1856,344 @@ function processQueryIpc(
         'Gate created (in-memory) — awaiting user response',
       );
       // Do NOT write a response — the plugin hook polls until the user approves/cancels.
+      break;
+    }
+
+    case 'create_worktree': {
+      if (!data.repo || !data.threadId) {
+        writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+          status: 'error',
+          error: 'Missing repo or threadId',
+        });
+        break;
+      }
+      const cwRepo = data.repo;
+      const cwThreadId = data.threadId;
+      const cwBranch = data.branch;
+      const cwRequestId = data.requestId;
+
+      withGroupMutex(sourceGroup, async () => {
+        const groupDir = path.join(GROUPS_DIR, sourceGroup);
+        const repoDir = path.resolve(groupDir, cwRepo);
+
+        // MF-3: Path traversal guard — ensure resolved path stays inside groupDir
+        if (!repoDir.startsWith(path.resolve(groupDir) + path.sep)) {
+          writeQueryResponse(ipcBaseDir, sourceGroup, cwRequestId, {
+            status: 'error',
+            error: `Invalid repo name: ${cwRepo}`,
+          });
+          return;
+        }
+
+        // Validate repo exists as a git directory in the group folder
+        if (
+          !fs.existsSync(repoDir) ||
+          !fs.existsSync(path.join(repoDir, '.git'))
+        ) {
+          writeQueryResponse(ipcBaseDir, sourceGroup, cwRequestId, {
+            status: 'error',
+            error: `Repo not found in group folder: ${cwRepo}`,
+          });
+          return;
+        }
+
+        // Fetch from origin before creating worktree, then resolve HEAD
+        try {
+          execFileSync('git', ['fetch', 'origin'], { cwd: repoDir, stdio: 'pipe' });
+        } catch (err) {
+          logger.warn(
+            { repoDir, err },
+            'create_worktree: git fetch origin failed (continuing)',
+          );
+        }
+        try {
+          execFileSync('git', ['remote', 'set-head', 'origin', '--auto'], {
+            cwd: repoDir,
+            stdio: 'pipe',
+          });
+        } catch {
+          // best-effort: origin/HEAD may already be set or remote may be offline
+        }
+
+        // MF-9: Verify origin/HEAD resolves before using it as a ref
+        let originHeadResolved = false;
+        try {
+          execFileSync('git', ['rev-parse', '--verify', 'origin/HEAD'], {
+            cwd: repoDir,
+            stdio: 'pipe',
+          });
+          originHeadResolved = true;
+        } catch {
+          // origin/HEAD not set — will fall back to error if needed
+        }
+
+        const worktreeDir = path.join(WORKTREES_DIR, sourceGroup, cwThreadId, cwRepo);
+
+        // If worktree already exists, return it as-is (idempotent)
+        if (fs.existsSync(worktreeDir)) {
+          // MF-7: Verify worktree is not corrupt before returning success
+          const wtGitFile = path.join(worktreeDir, '.git');
+          if (!fs.existsSync(wtGitFile)) {
+            // Corrupt worktree — remove and recreate below
+            logger.warn(
+              { worktreeDir, sourceGroup },
+              'create_worktree: corrupt worktree detected (missing .git), removing',
+            );
+            try {
+              fs.rmSync(worktreeDir, { recursive: true, force: true });
+            } catch {
+              // best-effort
+            }
+          } else {
+            let worktreeBranch = cwBranch || `thread-${cwThreadId}-${cwRepo}`;
+            try {
+              worktreeBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+                cwd: worktreeDir,
+                stdio: 'pipe',
+                encoding: 'utf-8',
+              }).trim();
+            } catch {
+              // best-effort
+            }
+            writeQueryResponse(ipcBaseDir, sourceGroup, cwRequestId, {
+              status: 'ok',
+              path: worktreeDir,
+              branch: worktreeBranch,
+            });
+            return;
+          }
+        }
+
+        // Resolve branch name
+        const branchName = cwBranch || `thread-${cwThreadId}-${cwRepo}`;
+
+        // MF-1: Validate branch name format before using in git commands
+        try {
+          execFileSync('git', ['check-ref-format', '--branch', branchName], {
+            cwd: repoDir,
+            stdio: 'pipe',
+          });
+        } catch {
+          writeQueryResponse(ipcBaseDir, sourceGroup, cwRequestId, {
+            status: 'error',
+            error: `Invalid branch name: ${branchName}`,
+          });
+          return;
+        }
+
+        // Determine if branch exists locally or on remote (using execFileSync for safety)
+        let branchExists = false;
+        try {
+          execFileSync('git', ['rev-parse', '--verify', branchName], {
+            cwd: repoDir,
+            stdio: 'pipe',
+          });
+          branchExists = true;
+        } catch {
+          // not local — check remote
+          try {
+            execFileSync('git', ['rev-parse', '--verify', `origin/${branchName}`], {
+              cwd: repoDir,
+              stdio: 'pipe',
+            });
+            branchExists = true;
+          } catch {
+            // not on remote either
+          }
+        }
+
+        fs.mkdirSync(path.dirname(worktreeDir), { recursive: true });
+
+        try {
+          if (branchExists) {
+            // Check out the existing branch
+            execFileSync(
+              'git', ['worktree', 'add', worktreeDir, branchName],
+              { cwd: repoDir, stdio: 'pipe' },
+            );
+          } else if (originHeadResolved) {
+            // Create new branch from remote default
+            execFileSync(
+              'git', ['worktree', 'add', '-b', branchName, worktreeDir, 'origin/HEAD'],
+              { cwd: repoDir, stdio: 'pipe' },
+            );
+          } else {
+            // MF-9: origin/HEAD not available — cannot create branch
+            writeQueryResponse(ipcBaseDir, sourceGroup, cwRequestId, {
+              status: 'error',
+              error: 'Cannot create worktree: origin/HEAD not resolved (fetch may have failed)',
+            });
+            // Clean up the parent dir we created
+            try { fs.rmdirSync(path.dirname(worktreeDir)); } catch { /* ignore */ }
+            return;
+          }
+          logger.info(
+            { repoDir, worktreeDir, branchName, sourceGroup },
+            'Worktree created via IPC',
+          );
+          writeQueryResponse(ipcBaseDir, sourceGroup, cwRequestId, {
+            status: 'ok',
+            path: worktreeDir,
+            branch: branchName,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.error(
+            { repoDir, worktreeDir, branchName, err },
+            'create_worktree: git worktree add failed',
+          );
+          // Clean up dangling parent dir on failure
+          try { fs.rmdirSync(path.dirname(worktreeDir)); } catch { /* ignore */ }
+          writeQueryResponse(ipcBaseDir, sourceGroup, cwRequestId, {
+            status: 'error',
+            error: `git worktree add failed: ${message}`,
+          });
+        }
+      }).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error({ sourceGroup, err }, 'create_worktree: mutex error');
+        writeQueryResponse(ipcBaseDir, sourceGroup, cwRequestId, {
+          status: 'error',
+          error: message,
+        });
+      });
+      break;
+    }
+
+    case 'clone_repo': {
+      if (!data.url) {
+        writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+          status: 'error',
+          error: 'Missing url',
+        });
+        break;
+      }
+      const crUrl = data.url;
+      const crRequestId = data.requestId;
+
+      // Validate it's a GitHub URL
+      let crParsedUrl: URL;
+      try {
+        crParsedUrl = new URL(crUrl);
+      } catch {
+        writeQueryResponse(ipcBaseDir, sourceGroup, crRequestId, {
+          status: 'error',
+          error: `Invalid URL: ${crUrl}`,
+        });
+        break;
+      }
+      if (crParsedUrl.hostname !== 'github.com') {
+        writeQueryResponse(ipcBaseDir, sourceGroup, crRequestId, {
+          status: 'error',
+          error: 'Only GitHub URLs are allowed',
+        });
+        break;
+      }
+
+      // Derive org from URL path (github.com/<org>/<repo>)
+      const urlParts = crParsedUrl.pathname.replace(/^\//, '').replace(/\.git$/, '').split('/');
+      if (urlParts.length < 2) {
+        writeQueryResponse(ipcBaseDir, sourceGroup, crRequestId, {
+          status: 'error',
+          error: 'Cannot derive org from URL',
+        });
+        break;
+      }
+      const crOrg = urlParts[0].toLowerCase();
+      const crRepoName = data.name || urlParts[1];
+
+      // Validate repo name (no path traversal)
+      if (/[/\\]/.test(crRepoName) || crRepoName.includes('..') || crRepoName === '.') {
+        writeQueryResponse(ipcBaseDir, sourceGroup, crRequestId, {
+          status: 'error',
+          error: `Invalid repo name: ${crRepoName}`,
+        });
+        break;
+      }
+
+      const groupDir = path.join(GROUPS_DIR, sourceGroup);
+
+      // Derive allowed org from existing repos in group folder
+      let allowedOrg: string | null = null;
+      try {
+        for (const entry of fs.readdirSync(groupDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          const repoPath = path.join(groupDir, entry.name);
+          if (!fs.existsSync(path.join(repoPath, '.git'))) continue;
+          try {
+            const remoteUrl = execSync('git remote get-url origin', {
+              cwd: repoPath,
+              stdio: 'pipe',
+              encoding: 'utf-8',
+            }).trim();
+            const remoteMatch = remoteUrl.match(/github\.com[:/]([^/]+)\//);
+            if (remoteMatch) {
+              allowedOrg = remoteMatch[1].toLowerCase();
+              break;
+            }
+          } catch {
+            // no remote — skip
+          }
+        }
+      } catch {
+        // best-effort
+      }
+
+      if (allowedOrg !== null && crOrg !== allowedOrg) {
+        writeQueryResponse(ipcBaseDir, sourceGroup, crRequestId, {
+          status: 'error',
+          error: `Org mismatch: expected ${allowedOrg}, got ${crOrg}`,
+        });
+        break;
+      }
+
+      withGroupMutex(sourceGroup, async () => {
+        const destDir = path.join(groupDir, crRepoName);
+
+        // Idempotent: repo already exists
+        if (fs.existsSync(destDir)) {
+          logger.info(
+            { destDir, sourceGroup },
+            'clone_repo: repo already exists (idempotent)',
+          );
+          writeQueryResponse(ipcBaseDir, sourceGroup, crRequestId, {
+            status: 'ok',
+            path: destDir,
+            name: crRepoName,
+          });
+          return;
+        }
+
+        try {
+          execFileSync('git', ['clone', crUrl, destDir], {
+            stdio: 'pipe',
+            timeout: 120_000,
+          });
+          logger.info(
+            { destDir, crUrl, sourceGroup },
+            'Repo cloned via IPC',
+          );
+          writeQueryResponse(ipcBaseDir, sourceGroup, crRequestId, {
+            status: 'ok',
+            path: destDir,
+            name: crRepoName,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.error({ crUrl, destDir, err }, 'clone_repo: git clone failed');
+          writeQueryResponse(ipcBaseDir, sourceGroup, crRequestId, {
+            status: 'error',
+            error: `git clone failed: ${message}`,
+          });
+        }
+      }).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error({ sourceGroup, err }, 'clone_repo: mutex error');
+        writeQueryResponse(ipcBaseDir, sourceGroup, crRequestId, {
+          status: 'error',
+          error: message,
+        });
+      });
       break;
     }
 

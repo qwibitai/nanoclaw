@@ -93,17 +93,7 @@ export const MAX_THREADS_PER_GROUP = Math.max(
   parseInt(process.env.MAX_THREADS_PER_GROUP || '6', 10) || 6,
 );
 export const WORKTREES_DIR = path.resolve(DATA_DIR, 'worktrees');
-export const WORKTREE_CACHE_DIR = path.resolve(DATA_DIR, 'worktree-cache');
-export const WORKTREE_BUNDLE_DIR = path.resolve(DATA_DIR, 'worktree-bundles');
-// Container-visible `.git` pointer overlays for threaded worktrees. Each
-// file contains a container-relative `gitdir:` pointing at the ro source
-// `.git` bind mount inside the container. Lives outside WORKTREES_DIR so
-// the overlay files don't appear as untracked entries in the scratch
-// worktree (which would get staged by `git add -A` during rescue).
-export const WORKTREE_GIT_OVERLAY_DIR = path.resolve(
-  DATA_DIR,
-  'worktree-git-overlays',
-);
+// Migration note: delete data/worktree-cache/ and data/worktree-git-overlays/ directories on the host if they exist.
 export const GROUP_THREAD_KEY = '__group__';
 
 export function escapeRegex(str: string): string {

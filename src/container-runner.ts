@@ -23,9 +23,6 @@ import {
   RESIDENTIAL_PROXY_URL,
   TIMEZONE,
   WORKTREES_DIR,
-  WORKTREE_BUNDLE_DIR,
-  WORKTREE_CACHE_DIR,
-  WORKTREE_GIT_OVERLAY_DIR,
   escapeRegex,
 } from './config.js';
 import { readEnvFile, readEnvFileMatching } from './env.js';
@@ -117,47 +114,6 @@ const GRANOLA_TOKEN_PATH = path.join(
 const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const GOOGLE_PROACTIVE_REFRESH_MS = 4 * 60 * 60 * 1000;
 let googleRefreshTimer: ReturnType<typeof setInterval> | null = null;
-
-// Worktree file cache: directories to exclude when caching untracked files
-const CACHE_EXCLUDE_DIRS = new Set([
-  'node_modules',
-  '.next',
-  'dist',
-  'build',
-  '__pycache__',
-  '.venv',
-  'venv',
-  'coverage',
-  '.cache',
-  'dbt_packages',
-  'target',
-  'logs',
-  '.tox',
-  '.mypy_cache',
-  '.pytest_cache',
-  '.ruff_cache',
-  '.turbo',
-  '.parcel-cache',
-]);
-const CACHE_MAX_FILE_SIZE = 1_048_576; // 1MB per-file limit
-const CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-// Sensitive files to never cache (exact basename match; .env* handled by prefix check)
-const CACHE_EXCLUDE_FILES = new Set([
-  'credentials.json',
-  'service-account.json',
-  '.secret',
-  '.secrets',
-]);
-// Sensitive file extensions to never cache
-const CACHE_EXCLUDE_EXTENSIONS = new Set([
-  '.key',
-  '.pem',
-  '.p12',
-  '.pfx',
-  '.jks',
-  '.keystore',
-  '.p8',
-]);
 
 // In-memory cache to avoid redundant disk reads / duplicate refresh calls
 let granolaTokenCache: { token: string; expiresAt: number } | null = null;
@@ -807,7 +763,6 @@ function execAsync(
 
 /** Per-thread isolated entries populated by prepareThreadWorkspace. */
 const ISOLATED_THREAD_FILES: readonly string[] = ['CLAUDE.md'];
-const ISOLATED_THREAD_DIRS: readonly string[] = ['conversations', 'threads'];
 
 /**
  * Case-insensitive substring patterns for sensitive top-level filenames
@@ -835,197 +790,32 @@ function isSensitiveTopLevelFilename(name: string): boolean {
   return SENSITIVE_TOP_LEVEL_PATTERNS.some((p) => lower.includes(p));
 }
 
-/**
- * Validate that a name is safe to use as a filesystem path component for
- * git worktrees and atomic rename-based promotion. Rejects path-traversal
- * segments, docker-mount-unsafe characters (colons), shell-unsafe chars,
- * and control characters. Called both at worktree creation time and at
- * promotion time so cleanup can't pick up a name prepare would have skipped.
- */
-function isSafeRepoName(name: string): boolean {
-  if (name === '' || name === '.' || name === '..') return false;
-  return /^[A-Za-z0-9._-]+$/.test(name);
-}
 
-/**
- * Container-side mount destination for a group repo's source `.git` dir.
- * Single source of truth shared by prepareThreadWorkspace (which writes the
- * overlay pointer referencing this path) and buildVolumeMounts (which mounts
- * the source .git at this path). If you change the path template, both
- * call sites pick up the change and the overlay stays consistent.
- */
-function containerSourceGitDirPath(repoName: string): string {
-  return `/workspace/.group-git/${repoName}/.git`;
-}
-
-/** Find subdirectories that are git worktrees (contain a `.git` file, not directory). */
-function findGitWorktrees(
+/** Find subdirectories that are git repos (contain a `.git` directory). */
+function findGitRepos(
   dir: string,
-): Array<{ name: string; wtPath: string }> {
-  const results: Array<{ name: string; wtPath: string }> = [];
+): Array<{ name: string; repoPath: string }> {
+  const results: Array<{ name: string; repoPath: string }> = [];
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch (err) {
-    logger.warn(
-      { dir, err },
-      'findGitWorktrees: readdirSync failed, treating as no worktrees',
-    );
+  } catch {
     return results;
   }
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const wtPath = path.join(dir, entry.name);
+    const repoPath = path.join(dir, entry.name);
     try {
-      if (fs.statSync(path.join(wtPath, '.git')).isFile()) {
-        results.push({ name: entry.name, wtPath });
+      if (fs.statSync(path.join(repoPath, '.git')).isDirectory()) {
+        results.push({ name: entry.name, repoPath });
       }
-    } catch (err) {
-      // .git doesn't exist → not a worktree (expected, silent).
-      // Any other errno → log so transient FS issues leave a trace.
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') {
-        logger.warn(
-          { wtPath, code, err },
-          'findGitWorktrees: stat .git failed with unexpected error, skipping',
-        );
-      }
+    } catch {
+      // .git doesn't exist — not a repo
     }
   }
   return results;
 }
 
-/**
- * Promote agent-created top-level git repos (new clones) from a per-thread
- * scratch dir to a persistent destination dir via atomic rename.
- * Shared between cleanupThreadWorkspace and cleanupOrphanWorktrees.
- * First-writer-wins on name collision (EEXIST/ENOTEMPTY).
- */
-async function promoteAgentCreatedRepos(
-  scratchDir: string,
-  dstDir: string,
-  groupFolder: string,
-  threadId: string | undefined,
-): Promise<void> {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(scratchDir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (ISOLATED_THREAD_FILES.includes(entry.name)) continue;
-    if (ISOLATED_THREAD_DIRS.includes(entry.name)) continue;
-
-    if (!isSafeRepoName(entry.name)) {
-      logger.warn(
-        { group: groupFolder, threadId, repo: entry.name },
-        'Skipping promotion: unsafe name',
-      );
-      continue;
-    }
-
-    const srcEntry = path.join(scratchDir, entry.name);
-
-    // lstatSync (not statSync) so an agent-controlled `.git` symlink
-    // can't escape the scratch sandbox by resolving to another repo's
-    // real .git dir during promotion.
-    try {
-      if (!fs.lstatSync(path.join(srcEntry, '.git')).isDirectory()) continue;
-    } catch {
-      continue;
-    }
-
-    // Half-clone detection: HEAD must resolve to a commit. Distinguish
-    // spawn-failure (git missing, timeout) from exit-non-zero (unborn
-    // ref — the expected skip case).
-    try {
-      await execAsync('git rev-parse --verify HEAD^{commit}', {
-        cwd: srcEntry,
-      });
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      const signal = (err as NodeJS.ErrnoException & { signal?: string })
-        .signal;
-      if (code === 'ENOENT') {
-        logger.error(
-          { group: groupFolder, threadId },
-          'Promotion aborted: `git` binary not found in PATH',
-        );
-        return;
-      }
-      if (signal === 'SIGTERM' || code === 'ETIMEDOUT') {
-        logger.error(
-          { group: groupFolder, threadId, repo: entry.name },
-          'Promotion check timed out — skipping',
-        );
-        continue;
-      }
-      logger.warn(
-        { group: groupFolder, threadId, repo: entry.name },
-        'Skipping promotion: git repo is not in a settled state',
-      );
-      continue;
-    }
-
-    // Rescue uncommitted work as a local commit so the rename carries
-    // the agent's in-session edits along. No remote push.
-    try {
-      const status = await execAsync('git status --porcelain', {
-        cwd: srcEntry,
-      });
-      if (status) {
-        await execAsync('git add -A', { cwd: srcEntry });
-        await execAsync(
-          'git -c user.email=agent@nanoclaw.local -c user.name=agent commit --no-verify -m "rescue: auto-save agent edits before clone promotion"',
-          { cwd: srcEntry },
-        );
-        logger.info(
-          { group: groupFolder, threadId, repo: entry.name },
-          'Rescued uncommitted work as local commit before promotion',
-        );
-      }
-    } catch (err) {
-      logger.warn(
-        { group: groupFolder, threadId, repo: entry.name, err },
-        'Rescue commit failed — promotion will proceed without in-session edits',
-      );
-    }
-
-    // Atomic publish via rename(2).
-    const dstEntry = path.join(dstDir, entry.name);
-    try {
-      fs.renameSync(srcEntry, dstEntry);
-      logger.info(
-        { group: groupFolder, threadId, repo: entry.name },
-        'Promoted agent-created repo to host group folder',
-      );
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'EEXIST' || code === 'ENOTEMPTY') {
-        // Prior session (or concurrent-group scratch) beat us. Under
-        // withGroupMutex, concurrent promotions in the same group are
-        // impossible, so this is always the cross-session case.
-        logger.warn(
-          { group: groupFolder, threadId, repo: entry.name },
-          'Promotion collision: destination exists (prior-session writer won)',
-        );
-      } else if (code === 'EXDEV') {
-        logger.error(
-          { group: groupFolder, threadId, repo: entry.name },
-          'Promotion failed: scratch and group folder are on different filesystems',
-        );
-      } else {
-        logger.error(
-          { group: groupFolder, threadId, repo: entry.name, err },
-          'Promotion failed',
-        );
-      }
-    }
-  }
-}
 
 /**
  * Merge non-repo scratch entries back to the persistent destination after
@@ -1068,535 +858,10 @@ function mergeBackNonRepoEntries(scratchDir: string, dstDir: string): void {
 }
 
 /**
- * Rescue uncommitted or unpushed work from a worktree before it's removed.
- * Creates a rescue branch and pushes it to origin so no work is lost.
- * Best-effort — failures are logged but never prevent cleanup.
- */
-async function rescueWorktreeChanges(
-  wtPath: string,
-  groupFolder: string,
-  threadId?: string,
-): Promise<void> {
-  const repoName = path.basename(wtPath);
-  try {
-    // Check for uncommitted changes
-    const status = await execAsync('git status --porcelain', { cwd: wtPath });
-
-    if (status) {
-      // Stage and commit everything
-      await execAsync('git add -A', { cwd: wtPath });
-      await execAsync(
-        'git commit -m "rescue: auto-save uncommitted work before worktree cleanup"',
-        { cwd: wtPath },
-      );
-    }
-
-    // Check if current HEAD has commits not on any remote branch.
-    // For repos without a remote, compare against nothing (all commits are unpushed).
-    const remoteOutput = await execAsync('git remote', { cwd: wtPath });
-    const unpushed = remoteOutput
-      ? await execAsync('git log --oneline HEAD --not --remotes', {
-          cwd: wtPath,
-        })
-      : await execAsync('git log --oneline -1 HEAD', { cwd: wtPath });
-    if (!unpushed) return;
-
-    // Save a local git bundle as the reliable fallback.
-    // Wrapped in its own try/catch so a bundle failure (disk full, permissions)
-    // never prevents the remote push from being attempted.
-    try {
-      await saveRescueBundle(
-        wtPath,
-        groupFolder,
-        repoName,
-        threadId,
-        !!remoteOutput,
-      );
-    } catch (bundleErr) {
-      logger.warn(
-        { group: groupFolder, threadId, repo: repoName, err: bundleErr },
-        'Local rescue bundle failed — falling through to remote push',
-      );
-    }
-
-    // Attempt remote push (best-effort — local bundle is the safety net)
-    if (remoteOutput) {
-      const timestamp = new Date()
-        .toISOString()
-        .replace(/[:.]/g, '-')
-        .slice(0, 19);
-      const { safeFolderName, safeThreadId } = sanitizeRescueName(
-        groupFolder,
-        threadId,
-      );
-      const threadSuffix = safeThreadId ? `/${safeThreadId}` : '';
-      const branchName = `rescue/${safeFolderName}${threadSuffix}/${timestamp}`;
-
-      try {
-        await execAsync(`git push origin HEAD:refs/heads/${branchName}`, {
-          cwd: wtPath,
-        });
-        logger.info(
-          { group: groupFolder, threadId, repo: repoName, branch: branchName },
-          'Rescued unpushed worktree changes to remote branch',
-        );
-      } catch (pushErr) {
-        logger.warn(
-          { group: groupFolder, threadId, repo: repoName, err: pushErr },
-          'Remote rescue push failed — local bundle preserved',
-        );
-      }
-    }
-  } catch (err) {
-    logger.warn(
-      { group: groupFolder, threadId, repo: repoName, err },
-      'Failed to rescue worktree changes (work may be lost)',
-    );
-  }
-}
-
-/**
- * Save a git bundle containing all commits not on any remote branch.
- * Bundles are self-contained files that can restore the full commit graph
- * without network access — the local counterpart to rescue branch pushes.
- */
-/** Resolve the bundle file path and sanitized names for a rescue bundle. */
-function resolveRescueBundlePath(
-  groupFolder: string,
-  repoName: string,
-  threadId?: string,
-): {
-  bundlePath: string;
-  safeFolderName: string;
-  safeThreadId: string | undefined;
-} {
-  const { safeFolderName, safeThreadId } = sanitizeRescueName(
-    groupFolder,
-    threadId,
-  );
-  const threadSuffix = safeThreadId ? `-${safeThreadId}` : '';
-  const bundlePath = path.join(
-    WORKTREE_BUNDLE_DIR,
-    groupFolder,
-    repoName,
-    `rescue${threadSuffix}.bundle`,
-  );
-  return { bundlePath, safeFolderName, safeThreadId };
-}
-
-async function saveRescueBundle(
-  wtPath: string,
-  groupFolder: string,
-  repoName: string,
-  threadId?: string,
-  hasRemote?: boolean,
-): Promise<void> {
-  const { bundlePath } = resolveRescueBundlePath(
-    groupFolder,
-    repoName,
-    threadId,
-  );
-  fs.mkdirSync(path.dirname(bundlePath), { recursive: true });
-
-  const revList = hasRemote ? 'HEAD --not --remotes' : 'HEAD';
-  await execAsync(`git bundle create "${bundlePath}" ${revList}`, {
-    cwd: wtPath,
-  });
-
-  logger.info(
-    { group: groupFolder, threadId, repo: repoName, bundlePath },
-    'Saved local rescue bundle',
-  );
-}
-
-/**
- * Restore a local rescue bundle into a repo so it can be used as a worktree ref.
- * Returns the ref name to use for worktree creation, or null if no bundle exists.
- */
-async function restoreRescueBundle(
-  srcPath: string,
-  groupFolder: string,
-  repoName: string,
-  threadId?: string,
-): Promise<string | null> {
-  const { bundlePath, safeFolderName, safeThreadId } = resolveRescueBundlePath(
-    groupFolder,
-    repoName,
-    threadId,
-  );
-
-  if (!fs.existsSync(bundlePath)) return null;
-
-  try {
-    await execAsync(`git bundle verify "${bundlePath}"`, { cwd: srcPath });
-
-    // Fetch into a local ref so the commit is available for worktree creation.
-    // Uses sanitized names — raw groupFolder/threadId may contain chars invalid in git refs.
-    const refName = `refs/rescue-bundle/${safeFolderName}/${safeThreadId || 'main'}`;
-    await execAsync(`git fetch "${bundlePath}" HEAD:"${refName}"`, {
-      cwd: srcPath,
-    });
-
-    logger.info(
-      { group: groupFolder, threadId, repo: repoName, ref: refName },
-      'Restored worktree from local rescue bundle',
-    );
-    return refName;
-  } catch (err) {
-    logger.warn(
-      { group: groupFolder, threadId, repo: repoName, err },
-      'Failed to restore rescue bundle',
-    );
-    // Remove corrupt bundle so it doesn't block future attempts
-    try {
-      fs.unlinkSync(bundlePath);
-    } catch {
-      /* ignore */
-    }
-    return null;
-  }
-}
-
-/** Remove a consumed rescue bundle after successful worktree creation. */
-function cleanupRescueBundle(
-  groupFolder: string,
-  repoName: string,
-  threadId?: string,
-): void {
-  const { bundlePath } = resolveRescueBundlePath(
-    groupFolder,
-    repoName,
-    threadId,
-  );
-  try {
-    fs.unlinkSync(bundlePath);
-  } catch {
-    /* ignore */
-  }
-}
-
-/** Sanitize a group folder name for use in rescue branch paths. */
-function sanitizeRescueName(groupFolder: string, threadId?: string) {
-  const safeFolderName = groupFolder.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const safeThreadId = threadId
-    ? threadId.slice(0, 12).replace(/[^a-zA-Z0-9_-]/g, '_')
-    : undefined;
-  return { safeFolderName, safeThreadId };
-}
-
-/**
- * Find the most recent rescue branch for a given group/thread in a repo.
- * Rescue branches are named: rescue/{safeFolderName}/{safeThreadId}/{timestamp}
- * Returns the full remote ref (e.g. origin/rescue/...) or null if none found.
- * Best-effort — returns null on any error.
- * @internal Exported for testing.
- */
-export async function findLatestRescueBranch(
-  repoDir: string,
-  groupFolder: string,
-  threadId: string,
-): Promise<string | null> {
-  try {
-    const { safeFolderName, safeThreadId } = sanitizeRescueName(
-      groupFolder,
-      threadId,
-    );
-    const pattern = `origin/rescue/${safeFolderName}/${safeThreadId}/*`;
-
-    const output = await execAsync(`git branch -r --list "${pattern}"`, {
-      cwd: repoDir,
-    });
-    if (!output || !output.trim()) return null;
-
-    const branches = output
-      .trim()
-      .split('\n')
-      .map((b) => b.trim())
-      .filter(Boolean);
-    if (branches.length === 0) return null;
-
-    // Timestamps are ISO-formatted in branch names — lexicographic sort works
-    branches.sort();
-    return branches[branches.length - 1];
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Delete all rescue branches for a given group/thread in a repo.
- * Best-effort — logs warnings but never throws.
- * @internal Exported for testing.
- */
-export async function deleteRescueBranches(
-  repoDir: string,
-  groupFolder: string,
-  threadId: string,
-): Promise<void> {
-  try {
-    const { safeFolderName, safeThreadId } = sanitizeRescueName(
-      groupFolder,
-      threadId,
-    );
-    const pattern = `origin/rescue/${safeFolderName}/${safeThreadId}/*`;
-
-    const output = await execAsync(`git branch -r --list "${pattern}"`, {
-      cwd: repoDir,
-    });
-    if (!output || !output.trim()) return;
-
-    const branches = output
-      .trim()
-      .split('\n')
-      .map((b) => b.trim().replace(/^origin\//, ''))
-      .filter(Boolean);
-    if (branches.length === 0) return;
-
-    // Delete all rescue branches in one push
-    const refspecs = branches.map((b) => `":refs/heads/${b}"`).join(' ');
-    await execAsync(`git push origin ${refspecs}`, { cwd: repoDir });
-
-    logger.info(
-      {
-        group: groupFolder,
-        threadId,
-        repo: path.basename(repoDir),
-        count: branches.length,
-      },
-      'Cleaned up rescue branches after restoration',
-    );
-  } catch (err) {
-    logger.warn(
-      { group: groupFolder, threadId, repo: path.basename(repoDir), err },
-      'Failed to clean up rescue branches (harmless)',
-    );
-  }
-}
-
-/** Remove a git worktree with fallback to rm + prune. Best-effort, never throws. */
-async function removeWorktree(repoDir: string, wtPath: string): Promise<void> {
-  try {
-    // `--force --force` (two flags) is required to remove worktrees created
-    // with `--lock` in prepareThreadWorkspace. Single `--force` fails with
-    // "cannot remove a locked working tree, lock reason: <reason>" and git
-    // itself suggests `-f -f`. The lock protects against cross-thread prune
-    // (see comment block in prepareThreadWorkspace for the full rationale).
-    await execAsync(`git worktree remove --force --force "${wtPath}"`, {
-      cwd: repoDir,
-    });
-  } catch {
-    try {
-      fs.rmSync(wtPath, { recursive: true, force: true });
-    } catch {
-      /* ignore */
-    }
-    try {
-      await execAsync('git worktree prune', { cwd: repoDir });
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-/**
- * Cache untracked files (including gitignored) from a worktree before removal.
- * Uses the external sidecar pattern — files are stored outside git at
- * data/worktree-cache/{groupFolder}/{repoName}/ and restored into new worktrees.
- * Best-effort — never throws, never blocks cleanup.
- */
-async function cacheWorktreeUntrackedFiles(
-  wtPath: string,
-  groupFolder: string,
-): Promise<void> {
-  const repoName = path.basename(wtPath);
-  const cacheDir = path.join(WORKTREE_CACHE_DIR, groupFolder, repoName);
-  // Write to a temp dir, then atomically rename into place. Prevents concurrent
-  // cleanups from interleaving writes into a mixed-state cache.
-  const tmpDir = `${cacheDir}.tmp.${process.pid}`;
-
-  try {
-    // List all untracked files including gitignored (omitting --exclude-standard
-    // means no excludes are applied, so everything not in the index is listed).
-    // -z for null-delimited output (safe for filenames with spaces/special chars).
-    const output = await execAsync('git ls-files --others -z', {
-      cwd: wtPath,
-      maxBuffer: 10 * 1024 * 1024,
-    });
-    if (!output) return;
-
-    const files = output.split('\0').filter(Boolean);
-    let cached = 0;
-
-    for (const relPath of files) {
-      // Skip files in excluded directories (match any path component)
-      const parts = relPath.split('/');
-      if (parts.some((p) => CACHE_EXCLUDE_DIRS.has(p))) continue;
-
-      // Skip sensitive files by name or extension
-      const fileName = parts[parts.length - 1];
-      if (fileName === '.env' || fileName.startsWith('.env.')) continue;
-      if (CACHE_EXCLUDE_FILES.has(fileName)) continue;
-      const ext = path.extname(fileName).toLowerCase();
-      if (CACHE_EXCLUDE_EXTENSIONS.has(ext)) continue;
-
-      const srcFile = path.join(wtPath, relPath);
-
-      // lstatSync does not follow symlinks — isFile() returns false for symlinks,
-      // preventing sensitive symlink targets from being cached
-      try {
-        const stat = fs.lstatSync(srcFile);
-        if (!stat.isFile() || stat.size > CACHE_MAX_FILE_SIZE) continue;
-      } catch {
-        continue; // file vanished or unreadable
-      }
-
-      const dstFile = path.join(tmpDir, relPath);
-      try {
-        fs.mkdirSync(path.dirname(dstFile), { recursive: true });
-        fs.copyFileSync(srcFile, dstFile);
-        cached++;
-      } catch {
-        // skip individual file errors
-      }
-    }
-
-    if (cached > 0) {
-      // Atomic swap: remove old cache, rename tmp into place
-      try {
-        fs.rmSync(cacheDir, { recursive: true, force: true });
-      } catch {
-        /* may not exist */
-      }
-      fs.renameSync(tmpDir, cacheDir);
-      logger.info(
-        { group: groupFolder, repo: repoName, cached },
-        'Cached untracked files from worktree',
-      );
-    }
-  } catch (err) {
-    logger.warn(
-      { group: groupFolder, repo: repoName, err },
-      'Failed to cache worktree untracked files',
-    );
-  } finally {
-    // Clean up tmp dir if it still exists (wasn't renamed into place)
-    try {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-/**
- * Restore cached untracked files into a freshly created worktree.
- * Skips files that already exist (git-checked-out version wins).
- * Synchronous to match existing prepareThreadWorkspace patterns. Best-effort.
- */
-function restoreWorktreeCachedFiles(wtPath: string, groupFolder: string): void {
-  const repoName = path.basename(wtPath);
-  const cacheDir = path.join(WORKTREE_CACHE_DIR, groupFolder, repoName);
-
-  if (!fs.existsSync(cacheDir)) return;
-
-  try {
-    let restored = 0;
-
-    function walkAndCopy(srcDir: string, relBase: string): void {
-      for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
-        const srcPath = path.join(srcDir, entry.name);
-        const relPath = relBase ? `${relBase}/${entry.name}` : entry.name;
-
-        if (entry.isDirectory()) {
-          walkAndCopy(srcPath, relPath);
-        } else if (entry.isFile()) {
-          const dstPath = path.join(wtPath, relPath);
-          // Only restore if the file doesn't already exist in the worktree
-          if (!fs.existsSync(dstPath)) {
-            try {
-              fs.mkdirSync(path.dirname(dstPath), { recursive: true });
-              fs.copyFileSync(srcPath, dstPath);
-              restored++;
-            } catch {
-              // skip individual file errors
-            }
-          }
-        }
-      }
-    }
-
-    walkAndCopy(cacheDir, '');
-
-    if (restored > 0) {
-      logger.info(
-        { group: groupFolder, repo: repoName, restored },
-        'Restored cached untracked files to worktree',
-      );
-    }
-  } catch (err) {
-    logger.warn(
-      { group: groupFolder, repo: repoName, err },
-      'Failed to restore cached files to worktree',
-    );
-  }
-}
-
-/**
- * Evict stale cached files older than CACHE_MAX_AGE_MS.
- * Removes empty directories after eviction. Best-effort.
- */
-function evictStaleCacheFiles(): void {
-  if (!fs.existsSync(WORKTREE_CACHE_DIR)) return;
-
-  const cutoff = Date.now() - CACHE_MAX_AGE_MS;
-  let evicted = 0;
-
-  function walkAndEvict(dir: string): void {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walkAndEvict(fullPath);
-        // Remove empty directories
-        try {
-          fs.rmdirSync(fullPath);
-        } catch {
-          /* not empty */
-        }
-      } else if (entry.isFile()) {
-        try {
-          const stat = fs.statSync(fullPath);
-          if (stat.mtimeMs < cutoff) {
-            fs.unlinkSync(fullPath);
-            evicted++;
-          }
-        } catch {
-          // skip
-        }
-      }
-    }
-  }
-
-  walkAndEvict(WORKTREE_CACHE_DIR);
-
-  if (evicted > 0) {
-    logger.info({ evicted }, 'Evicted stale worktree cache files');
-  }
-}
-
-// Cache repos that have had gc.auto disabled (avoids redundant git config writes)
-const gcDisabledRepos = new Set<string>();
-
-/**
- * Prepare a per-thread scratch workspace. Returns the worktree base path,
- * mounted as /workspace/group. MUST run inside withGroupMutex — git locks
- * .git/worktrees/ and cleanup depends on a stable scratch state.
+ * Prepare a per-thread scratch workspace. Returns the scratch dir path,
+ * mounted as /workspace/group. Non-repo files are copied from the group folder;
+ * git repos are skipped (agents access them via bind-mounted worktrees).
+ * Also creates data/worktrees/<group>/<threadId>/ for worktree bind mounts.
  */
 export async function prepareThreadWorkspace(
   groupFolder: string,
@@ -1604,311 +869,142 @@ export async function prepareThreadWorkspace(
 ): Promise<string> {
   assertValidThreadId(threadId);
   const groupDir = resolveGroupFolderPath(groupFolder);
-  const worktreeBase = resolveWorktreePath(groupFolder, threadId);
+  const scratchDir = resolveWorktreePath(groupFolder, threadId);
 
-  fs.mkdirSync(worktreeBase, { recursive: true });
+  fs.mkdirSync(scratchDir, { recursive: true });
 
-  const createdWorktrees: Array<{ repoDir: string; wtPath: string }> = [];
+  // Also create the worktrees directory (bind mount target for lazy worktrees)
+  const worktreesDir = path.join(WORKTREES_DIR, groupFolder, threadId);
+  fs.mkdirSync(worktreesDir, { recursive: true });
 
+  // Copy every top-level non-repo entry so the agent can see host-side state
+  // (.context/ for /team-* workflows, .claude/, logs/, plan.md, etc.).
+  // Git repos are skipped — agents access them via per-thread worktrees
+  // created lazily by the IPC handler. Sensitive filenames are excluded to
+  // preserve the credential boundary.
+  let entries: fs.Dirent[];
   try {
-    const entries = fs.readdirSync(groupDir, { withFileTypes: true });
-    const gitRepos: Array<{ srcPath: string; wtPath: string }> = [];
-
-    // Copy every top-level group-folder entry into scratch so the agent
-    // can see host-side state (.context/ for /team-* workflows, .claude/,
-    // logs/, plan.md, screenshots). Git repos go through `git worktree`
-    // instead (per-thread working tree sharing the host .git). Sensitive
-    // filenames are excluded to preserve the credential boundary — they
-    // never enter the scratch dir so threaded agents can't read them.
-    for (const entry of entries) {
-      const srcPath = path.join(groupDir, entry.name);
-      const dstPath = path.join(worktreeBase, entry.name);
-
-      if (entry.isDirectory()) {
-        const gitDir = path.join(srcPath, '.git');
-        if (fs.existsSync(gitDir)) {
-          if (!isSafeRepoName(entry.name)) {
-            logger.warn(
-              { group: groupFolder, threadId, repo: entry.name },
-              'Skipping repo with unsafe name during prepare',
-            );
-            continue;
-          }
-          gitRepos.push({ srcPath, wtPath: dstPath });
-        } else {
-          // dereference: false preserves internal symlinks instead of
-          // following them (causes EINVAL on circular refs).
-          try {
-            fs.cpSync(srcPath, dstPath, {
-              recursive: true,
-              dereference: false,
-            });
-          } catch (err) {
-            logger.warn(
-              { group: groupFolder, threadId, dir: entry.name, err },
-              'Failed to copy host dir into scratch — agent will not see it this session',
-            );
-          }
-        }
-      } else if (entry.isFile()) {
-        if (isSensitiveTopLevelFilename(entry.name)) {
-          logger.warn(
-            { group: groupFolder, threadId, file: entry.name },
-            'Skipping sensitive top-level file (credential boundary)',
-          );
-          continue;
-        }
-        try {
-          fs.copyFileSync(srcPath, dstPath);
-        } catch (err) {
-          logger.warn(
-            { group: groupFolder, threadId, file: entry.name, err },
-            'Failed to copy host file into scratch — agent will not see it this session',
-          );
-        }
-      }
-    }
-
-    // Overlay dir is the same for every repo in this thread — create once
-    // so the parallel worktree-add loop below can just writeFileSync into it.
-    const overlayDir = path.join(
-      WORKTREE_GIT_OVERLAY_DIR,
-      groupFolder,
-      threadId,
-    );
-    fs.mkdirSync(overlayDir, { recursive: true });
-
-    // Create git worktrees in parallel (independent repos, safe within mutex)
-    await Promise.all(
-      gitRepos.map(async ({ srcPath, wtPath }) => {
-        if (!gcDisabledRepos.has(srcPath)) {
-          await execAsync('git config gc.auto 0', { cwd: srcPath });
-          gcDisabledRepos.add(srcPath);
-        }
-        // Fetch latest from remote so worktree isn't based on stale local HEAD
-        try {
-          await execAsync('git fetch origin', { cwd: srcPath });
-        } catch {
-          // Offline or no remote — fall through to local HEAD
-        }
-        // Use remote default branch if available, otherwise local HEAD
-        let ref = 'HEAD';
-        try {
-          ref = await execAsync('git symbolic-ref refs/remotes/origin/HEAD', {
-            cwd: srcPath,
-          }); // e.g. refs/remotes/origin/main
-        } catch {
-          // origin/HEAD not set — use local HEAD
-        }
-
-        // Check for rescue branches from previous thread runs.
-        // If found, use the most recent as the worktree base to restore
-        // previously-rescued work automatically.
-        let restoredFromRescue = false;
-        const rescueRef = await findLatestRescueBranch(
-          srcPath,
-          groupFolder,
-          threadId,
-        );
-        if (rescueRef) {
-          ref = rescueRef;
-          restoredFromRescue = true;
-          logger.info(
-            {
-              group: groupFolder,
-              threadId,
-              repo: path.basename(srcPath),
-              ref: rescueRef,
-            },
-            'Restoring worktree from rescue branch',
-          );
-        }
-
-        // If no remote rescue branch, check for a local rescue bundle.
-        // Bundles are saved when the remote push fails — they capture tracked
-        // file edits that would otherwise be lost between sessions.
-        let restoredFromBundle = false;
-        if (!restoredFromRescue) {
-          const bundleRef = await restoreRescueBundle(
-            srcPath,
-            groupFolder,
-            path.basename(srcPath),
-            threadId,
-          );
-          if (bundleRef) {
-            ref = bundleRef;
-            restoredFromBundle = true;
-          }
-        }
-
-        // Three hardening flags:
-        //   -c worktree.useRelativePaths=false — force absolute gitdirs so
-        //     buildVolumeMounts' pointer parser (strict absolute-path check)
-        //     doesn't silently drop mounts on git ≥2.48 when the user has
-        //     worktree.useRelativePaths=true set.
-        //   --lock --reason — prevent `git worktree prune` in sibling
-        //     containers from removing this worktree's metadata when its
-        //     scratch path isn't visible in their mount namespace.
-        //   --detach — per-thread HEAD (unchanged from pre-hardening).
-        const worktreeAddCmd = `git -c worktree.useRelativePaths=false worktree add --detach --lock --reason "nanoclaw-thread-${threadId}" "${wtPath}" "${ref}"`;
-        try {
-          await execAsync(worktreeAddCmd, { cwd: srcPath });
-        } catch (addErr) {
-          // Stale worktree — prune, clean up directory, and retry once.
-          // Git says "already registered" when the .git/worktrees entry exists,
-          // "already exists" when the directory itself is left over, and
-          // "missing but locked" when a prior --lock'd worktree's scratch was
-          // removed without going through `worktree remove -f -f`.
-          const msg = addErr instanceof Error ? addErr.message : String(addErr);
-          if (
-            msg.includes('already registered') ||
-            msg.includes('already exists') ||
-            msg.includes('missing but locked')
-          ) {
-            logger.warn(
-              { repo: path.basename(srcPath), wtPath },
-              'Stale worktree detected, pruning and retrying',
-            );
-            await execAsync('git worktree prune', { cwd: srcPath });
-            // Clean up leftover directory if it exists
-            try {
-              fs.rmSync(wtPath, { recursive: true, force: true });
-            } catch {
-              /* ignore */
-            }
-            await execAsync(worktreeAddCmd, { cwd: srcPath });
-          } else {
-            throw addErr;
-          }
-        }
-
-        // Write the container-visible `.git` pointer file to an overlay
-        // directory outside the scratch. buildVolumeMounts bind-mounts this
-        // file over <wtPath>/.git inside the container (file-over-file,
-        // container namespace only), so container git sees a path that
-        // resolves to the ro source .git mount while the host keeps reading
-        // the original host-absolute pointer for rescueWorktreeChanges.
-        // Stored outside the scratch so `git add -A` in rescue doesn't
-        // stage it.
-        const repoName = path.basename(srcPath);
-        const wtName = path.basename(wtPath);
-        const containerPointer = `gitdir: ${containerSourceGitDirPath(
-          repoName,
-        )}/worktrees/${wtName}\n`;
-        fs.writeFileSync(path.join(overlayDir, repoName), containerPointer);
-
-        createdWorktrees.push({ repoDir: srcPath, wtPath });
-
-        // Clean up used rescue branches after successful worktree creation
-        if (restoredFromRescue) {
-          deleteRescueBranches(srcPath, groupFolder, threadId).catch(() => {});
-        }
-        if (restoredFromBundle) {
-          cleanupRescueBundle(groupFolder, path.basename(srcPath), threadId);
-        }
-      }),
-    );
-
-    // Restore cached untracked files into freshly created worktrees
-    for (const { wtPath } of createdWorktrees) {
-      restoreWorktreeCachedFiles(wtPath, groupFolder);
-    }
-  } catch (err) {
-    // Rollback: clean up any created worktrees
-    await Promise.all(
-      createdWorktrees.map(({ repoDir, wtPath }) =>
-        removeWorktree(repoDir, wtPath),
-      ),
-    );
-    try {
-      fs.rmSync(worktreeBase, { recursive: true, force: true });
-    } catch {
-      /* ignore */
-    }
-    throw err;
+    entries = fs.readdirSync(groupDir, { withFileTypes: true });
+  } catch {
+    return scratchDir;
   }
 
-  return worktreeBase;
+  for (const entry of entries) {
+    const srcPath = path.join(groupDir, entry.name);
+    const dstPath = path.join(scratchDir, entry.name);
+
+    if (entry.isDirectory()) {
+      if (fs.existsSync(path.join(srcPath, '.git'))) {
+        // Skip git repos — managed separately via worktrees
+        continue;
+      }
+      try {
+        fs.cpSync(srcPath, dstPath, { recursive: true, dereference: false });
+      } catch (err) {
+        logger.warn(
+          { group: groupFolder, threadId, dir: entry.name, err },
+          'Failed to copy host dir into scratch',
+        );
+      }
+    } else if (entry.isFile()) {
+      if (isSensitiveTopLevelFilename(entry.name)) {
+        continue;
+      }
+      try {
+        fs.copyFileSync(srcPath, dstPath);
+      } catch (err) {
+        logger.warn(
+          { group: groupFolder, threadId, file: entry.name, err },
+          'Failed to copy host file into scratch',
+        );
+      }
+    }
+  }
+
+  return scratchDir;
 }
 
 /**
- * Clean up a per-thread worktree workspace: merge CLAUDE.md back, rescue
- * and remove git worktrees, promote agent-created clones via atomic
- * rename, merge non-git scratch entries back to host, then rmSync.
+ * Clean up a per-thread scratch workspace: auto-commit dirty worktrees,
+ * merge CLAUDE.md back to group folder, merge non-repo scratch entries back,
+ * and remove the per-thread scratch dir. Worktree directories are preserved.
  */
 export async function cleanupThreadWorkspace(
   groupFolder: string,
   threadId: string,
 ): Promise<void> {
   const groupDir = resolveGroupFolderPath(groupFolder);
-  const worktreeBase = resolveWorktreePath(groupFolder, threadId);
+  const scratchDir = resolveWorktreePath(groupFolder, threadId);
 
-  if (!fs.existsSync(worktreeBase)) return;
+  if (!fs.existsSync(scratchDir)) return;
 
-  // Merge CLAUDE.md changes back (last-write-wins for the entire file)
-  const wtClaudeMd = path.join(worktreeBase, 'CLAUDE.md');
-  const mainClaudeMd = path.join(groupDir, 'CLAUDE.md');
-  if (fs.existsSync(wtClaudeMd)) {
-    try {
-      const wtContent = fs.readFileSync(wtClaudeMd, 'utf-8');
-      const mainContent = fs.existsSync(mainClaudeMd)
-        ? fs.readFileSync(mainClaudeMd, 'utf-8')
-        : '';
-      // Only overwrite if worktree version has new content
-      if (wtContent !== mainContent && wtContent.length >= mainContent.length) {
-        fs.writeFileSync(mainClaudeMd, wtContent);
+  // MF-10: Hold group mutex during cleanup to prevent races with concurrent
+  // create_worktree or prepareThreadWorkspace calls on the same group
+  await withGroupMutex(groupFolder, async () => {
+    // Auto-commit dirty worktrees in data/worktrees/<group>/<threadId>/
+    const worktreesDir = path.join(WORKTREES_DIR, groupFolder, threadId);
+    if (fs.existsSync(worktreesDir)) {
+      for (const { repoPath } of findGitRepos(worktreesDir)) {
+        try {
+          // Remove stale index.lock before attempting commit
+          const lockFile = path.join(repoPath, '.git', 'index.lock');
+          try {
+            fs.unlinkSync(lockFile);
+          } catch {
+            // lock file doesn't exist — fine
+          }
+
+          const status = await execAsync('git status --porcelain', {
+            cwd: repoPath,
+          });
+          if (status) {
+            await execAsync('git add -A', { cwd: repoPath });
+            await execAsync(
+              'git -c user.email=agent@nanoclaw.local -c user.name=agent commit --no-verify -m "auto-save: session exit"',
+              { cwd: repoPath },
+            );
+            logger.info(
+              { group: groupFolder, threadId, repo: path.basename(repoPath) },
+              'Auto-committed dirty worktree on session exit',
+            );
+          }
+        } catch (err) {
+          logger.warn(
+            { group: groupFolder, threadId, repo: path.basename(repoPath), err },
+            'Failed to auto-commit worktree on session exit',
+          );
+        }
       }
-    } catch {
-      // best-effort merge
     }
-  }
 
-  // Cache untracked files, rescue unpushed work, then remove git worktrees
-  try {
-    const gitWorktrees = findGitWorktrees(worktreeBase);
+    // Merge CLAUDE.md changes back (length-based last-write-wins)
+    const scratchClaudeMd = path.join(scratchDir, 'CLAUDE.md');
+    const mainClaudeMd = path.join(groupDir, 'CLAUDE.md');
+    if (fs.existsSync(scratchClaudeMd)) {
+      try {
+        const scratchContent = fs.readFileSync(scratchClaudeMd, 'utf-8');
+        const mainContent = fs.existsSync(mainClaudeMd)
+          ? fs.readFileSync(mainClaudeMd, 'utf-8')
+          : '';
+        if (
+          scratchContent !== mainContent &&
+          scratchContent.length >= mainContent.length
+        ) {
+          fs.writeFileSync(mainClaudeMd, scratchContent);
+        }
+      } catch {
+        // best-effort
+      }
+    }
 
-    // Cache + rescue phase: cache first (rescue's git add stages files, leaving nothing to cache after)
-    await Promise.all(
-      gitWorktrees.map(async ({ wtPath }) => {
-        await cacheWorktreeUntrackedFiles(wtPath, groupFolder);
-        await rescueWorktreeChanges(wtPath, groupFolder, threadId);
-      }),
-    );
-
-    // Removal phase
-    await Promise.all(
-      gitWorktrees.map(({ name, wtPath }) =>
-        removeWorktree(path.join(groupDir, name), wtPath),
-      ),
-    );
-  } catch {
-    // ignore readdir errors
-  }
-
-  // Promote agent-created git clones via atomic rename, then merge every
-  // other non-git scratch entry back to host.
-  await promoteAgentCreatedRepos(worktreeBase, groupDir, groupFolder, threadId);
-  mergeBackNonRepoEntries(worktreeBase, groupDir);
-
-  // Remove worktree directory
-  try {
-    fs.rmSync(worktreeBase, { recursive: true, force: true });
-  } catch {
-    // best-effort
-  }
-
-  // Clean up container-visible `.git` pointer overlays written by
-  // prepareThreadWorkspace (one file per worktree-backed repo). These
-  // live outside the scratch in WORKTREE_GIT_OVERLAY_DIR so rescue
-  // doesn't stage them; cleanup is separate from worktreeBase removal.
-  try {
-    fs.rmSync(path.join(WORKTREE_GIT_OVERLAY_DIR, groupFolder, threadId), {
-      recursive: true,
-      force: true,
-    });
-  } catch {
-    // best-effort — stale overlay files are harmless, next spawn overwrites
-  }
+    // Merge non-repo scratch entries back to host, then remove scratch dir
+    mergeBackNonRepoEntries(scratchDir, groupDir);
+    try {
+      fs.rmSync(scratchDir, { recursive: true, force: true });
+    } catch {
+      // best-effort
+    }
+  });
 }
 
 /** Namespace for additional-mount worktrees (cannot collide with group folder names) */
@@ -1984,60 +1080,7 @@ async function prepareAdditionalMountWorktree(
     }
   }
 
-  // Check for rescue branches from previous sessions.
-  // Need to fetch from the real remote first (local clone only has local refs).
-  let restoredFromRescue = false;
-  let restoredFromBundle = false;
-  if (groupFolder && threadId) {
-    try {
-      await execAsync('git fetch origin', { cwd: clonePath });
-    } catch {
-      // Offline — rescue branches won't be available
-    }
-
-    const rescueRef = await findLatestRescueBranch(
-      clonePath,
-      groupFolder,
-      threadId,
-    );
-    if (rescueRef) {
-      ref = rescueRef;
-      restoredFromRescue = true;
-      logger.info(
-        {
-          group: groupFolder,
-          threadId,
-          repo: containerBasename,
-          ref: rescueRef,
-        },
-        'Restoring additional mount from rescue branch',
-      );
-    }
-
-    // If no remote rescue branch, check for a local rescue bundle
-    if (!restoredFromRescue) {
-      const bundleRef = await restoreRescueBundle(
-        clonePath,
-        groupFolder,
-        containerBasename,
-        threadId,
-      );
-      if (bundleRef) {
-        ref = bundleRef;
-        restoredFromBundle = true;
-      }
-    }
-  }
-
   await execAsync(`git checkout --detach "${ref}"`, { cwd: clonePath });
-
-  // Clean up used rescue branches after successful checkout
-  if (restoredFromRescue && groupFolder && threadId) {
-    deleteRescueBranches(clonePath, groupFolder, threadId).catch(() => {});
-  }
-  if (restoredFromBundle) {
-    cleanupRescueBundle(groupFolder, containerBasename, threadId);
-  }
 
   return clonePath;
 }
@@ -2045,23 +1088,8 @@ async function prepareAdditionalMountWorktree(
 /** Clean up additional-mount clones created for a container session. */
 async function cleanupAdditionalMountWorktrees(
   sessionId: string,
-  mountWorktrees: Array<{ repoDir: string; wtPath: string }>,
-  groupFolder: string,
-  threadId?: string,
 ): Promise<void> {
-  // Rescue unpushed changes from each clone before removal.
-  // Must run inside the per-repo mutex so new prepares queue behind the rescue push.
-  // Independent repos can be rescued in parallel.
-  await Promise.all(
-    mountWorktrees.map(({ repoDir, wtPath }) =>
-      withGroupMutex(repoDir, () =>
-        rescueWorktreeChanges(wtPath, groupFolder, threadId),
-      ),
-    ),
-  );
-
   // Clones are self-contained — just remove the session directory.
-  // No git worktree prune needed (unlike real worktrees).
   const sessionDir = path.join(WORKTREES_DIR, MOUNT_WORKTREES_DIR, sessionId);
   try {
     fs.rmSync(sessionDir, { recursive: true, force: true });
@@ -2071,7 +1099,9 @@ async function cleanupAdditionalMountWorktrees(
 }
 
 /**
- * Startup cleanup: prune orphan worktrees from all groups.
+ * Startup cleanup: prune stale scratch dirs from orphaned thread sessions.
+ * Worktree directories (data/worktrees/<group>/<threadId>/) are preserved
+ * for resume. Only the per-thread scratch dirs (non-repo copies) are removed.
  */
 export async function cleanupOrphanWorktrees(): Promise<void> {
   if (!fs.existsSync(WORKTREES_DIR)) return;
@@ -2082,15 +1112,13 @@ export async function cleanupOrphanWorktrees(): Promise<void> {
     for (const gf of groupFolders) {
       const gfPath = path.join(WORKTREES_DIR, gf);
       if (!fs.statSync(gfPath).isDirectory()) continue;
-
-      // Additional-mount worktrees are handled separately
       if (gf === MOUNT_WORKTREES_DIR) continue;
 
-      // Prune git's internal worktree metadata for each repo in the group
+      // Prune stale worktree metadata from host git repos
       const groupDir = path.join(GROUPS_DIR, gf);
       if (fs.existsSync(groupDir)) {
-        const entries = fs.readdirSync(groupDir, { withFileTypes: true });
-        const pruneOps = entries
+        const pruneOps = fs
+          .readdirSync(groupDir, { withFileTypes: true })
           .filter(
             (e) =>
               e.isDirectory() &&
@@ -2104,31 +1132,14 @@ export async function cleanupOrphanWorktrees(): Promise<void> {
         await Promise.all(pruneOps);
       }
 
-      // Rescue unpushed work from orphan worktrees, then remove them
+      // For each thread dir: merge non-repo scratch back, remove scratch dir.
+      // Worktree dirs are preserved for resume (not removed).
       const threadDirs = fs.readdirSync(gfPath);
       for (const td of threadDirs) {
         const tdPath = path.join(gfPath, td);
         if (!fs.statSync(tdPath).isDirectory()) continue;
 
-        // Cache untracked files, then rescue unpushed work from git worktrees
-        try {
-          const worktrees = findGitWorktrees(tdPath);
-          await Promise.all(
-            worktrees.map(async ({ wtPath }) => {
-              await cacheWorktreeUntrackedFiles(wtPath, gf);
-              await rescueWorktreeChanges(wtPath, gf, td);
-            }),
-          );
-        } catch {
-          /* best-effort cache + rescue */
-        }
-
-        // Recover agent-created clones and non-git content using the
-        // same shared helpers as the happy-path cleanup. Previously the
-        // orphan path used a lossy per-file merge that could produce
-        // chimeric Frankenrepos from interleaved crashed-thread scratches.
         if (fs.existsSync(groupDir)) {
-          await promoteAgentCreatedRepos(tdPath, groupDir, gf, td);
           mergeBackNonRepoEntries(tdPath, groupDir);
         }
 
@@ -2139,48 +1150,17 @@ export async function cleanupOrphanWorktrees(): Promise<void> {
           /* ignore */
         }
       }
-
-      // Remove empty group worktree dir
-      try {
-        fs.rmdirSync(gfPath);
-      } catch {
-        /* not empty or already removed */
-      }
-    }
-
-    // Clean up orphan additional-mount clones (self-contained, just rm)
-    const mountsDir = path.join(WORKTREES_DIR, MOUNT_WORKTREES_DIR);
-    if (fs.existsSync(mountsDir)) {
-      for (const sessionDir of fs.readdirSync(mountsDir)) {
-        const sessionPath = path.join(mountsDir, sessionDir);
-        if (!fs.statSync(sessionPath).isDirectory()) continue;
-        try {
-          fs.rmSync(sessionPath, { recursive: true, force: true });
-          cleaned++;
-        } catch {
-          /* ignore */
-        }
-      }
-
-      try {
-        fs.rmdirSync(mountsDir);
-      } catch {
-        /* not empty */
-      }
     }
   } catch (err) {
     logger.warn({ err }, 'Error during orphan worktree cleanup');
   }
 
   if (cleaned > 0) {
-    logger.info({ cleaned }, 'Cleaned up orphan worktrees');
+    logger.info({ cleaned }, 'Cleaned up orphan scratch dirs');
   }
-
-  // Evict stale cache files at startup (natural GC point)
-  evictStaleCacheFiles();
 }
 
-function buildVolumeMounts(
+export function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
   threadId?: string,
@@ -2311,169 +1291,6 @@ function buildVolumeMounts(
     }
   }
 
-  // Worktree gitdir passthrough. In threaded mode /workspace/group is a
-  // per-thread scratch of `git worktree add --detach` checkouts, whose
-  // `.git` pointer files reference host-absolute paths not otherwise
-  // mounted inside the container — breaking every git command inside
-  // /workspace/group/<repo>. We resolve this with two mounts per worktree:
-  //   (1) source `.git` mounted READ-ONLY at /workspace/.group-git/<repo>/.git
-  //   (2) a container-only overlay of WORKTREE_GIT_OVERLAY_DIR/<...>/<repo>
-  //       (written by prepareThreadWorkspace) placed over the scratch's
-  //       `.git` pointer file, so container git follows a container-local
-  //       gitdir while the host still sees the original host-absolute pointer
-  //       (needed by rescueWorktreeChanges)
-  // ro is load-bearing: a rw `.git` would let an agent plant `.git/hooks/*`
-  // or `.git/config` [core.sshCommand|credential.helper|...] that then run
-  // on the host as UID 1001 the next time prepareThreadWorkspace or rescue
-  // invokes git against that repo — container-to-host RCE. The ro mount
-  // fails agent writes with EROFS, structurally closing the vector.
-  // Defense in depth: realpathSync + containment check against groupDir +
-  // lstatSync symlink reject (matching the invariant at promoteAgentCreatedRepos)
-  // so a poisoned pointer can't escape the group folder via `..` traversal
-  // or symlink indirection.
-  if (worktreePath) {
-    const resolvedGroupDir = fs.realpathSync(groupDir);
-    const seenSourceGitDirs = new Set<string>();
-    let attempted = 0;
-    let overlaysMounted = 0;
-    for (const { name, wtPath } of findGitWorktrees(worktreePath)) {
-      attempted++;
-      try {
-        const pointer = fs
-          .readFileSync(path.join(wtPath, '.git'), 'utf8')
-          .trim();
-        const match = pointer.match(/^gitdir:\s*(.+)$/m);
-        if (!match) {
-          logger.warn(
-            { group: group.folder, threadId, repo: name, wtPath },
-            'buildVolumeMounts: no gitdir line in scratch .git pointer, skipping',
-          );
-          continue;
-        }
-        const worktreeMetaDir = match[1].trim();
-        // prepareThreadWorkspace forces absolute gitdirs via
-        // `-c worktree.useRelativePaths=false`; a relative match here means
-        // a manual pointer edit or a future git bypassing the flag.
-        if (!path.isAbsolute(worktreeMetaDir)) {
-          logger.warn(
-            { group: group.folder, threadId, repo: name, worktreeMetaDir },
-            'buildVolumeMounts: relative gitdir pointer, skipping',
-          );
-          continue;
-        }
-        // Expected shape: <sourceGitDir>/worktrees/<name>
-        const worktreesParent = path.dirname(worktreeMetaDir);
-        const sourceGitDir = path.dirname(worktreesParent);
-        if (path.basename(worktreesParent) !== 'worktrees') continue;
-        if (path.basename(sourceGitDir) !== '.git') continue;
-
-        // realpath collapses `..` segments (`path.dirname` is string-based
-        // and does NOT) so a poisoned pointer can't traverse out of the
-        // group folder and land on e.g. ~/.aws/.git via kernel path walk.
-        let resolvedGitDir: string;
-        try {
-          resolvedGitDir = fs.realpathSync(sourceGitDir);
-        } catch {
-          continue;
-        }
-        // lstat (not stat) so a symlinked `.git` can't redirect us.
-        let lstat: fs.Stats;
-        try {
-          lstat = fs.lstatSync(resolvedGitDir);
-        } catch {
-          continue;
-        }
-        if (!lstat.isDirectory()) continue;
-
-        // Containment: resolved source .git must live under the current
-        // group folder. path.relative yields a non-dotdot, non-absolute
-        // string iff resolvedGitDir is under resolvedGroupDir.
-        const relFromGroup = path.relative(resolvedGroupDir, resolvedGitDir);
-        if (relFromGroup.startsWith('..') || path.isAbsolute(relFromGroup)) {
-          logger.warn(
-            {
-              group: group.folder,
-              threadId,
-              repo: name,
-              resolvedGitDir,
-              resolvedGroupDir,
-            },
-            'buildVolumeMounts: worktree gitdir resolves outside group folder, refusing to mount',
-          );
-          continue;
-        }
-
-        // Derive the repo-dir basename (one level up from `.git`) and
-        // validate via the same predicate used by prepareThreadWorkspace
-        // and promoteAgentCreatedRepos, so a name that couldn't have been
-        // created by prepare can't slip in here either.
-        const repoBasename = path.basename(path.dirname(resolvedGitDir));
-        if (!isSafeRepoName(repoBasename)) {
-          logger.warn(
-            { group: group.folder, threadId, repo: name, repoBasename },
-            'buildVolumeMounts: unsafe repo basename, skipping',
-          );
-          continue;
-        }
-
-        // Mount (1): source `.git` ro at container-local path. Deduped by
-        // resolved host path so a repo with multiple worktrees only gets
-        // one source mount.
-        if (!seenSourceGitDirs.has(resolvedGitDir)) {
-          seenSourceGitDirs.add(resolvedGitDir);
-          mounts.push({
-            hostPath: resolvedGitDir,
-            containerPath: containerSourceGitDirPath(repoBasename),
-            readonly: true,
-          });
-        }
-
-        // Mount (2): file overlay of the container-visible .git pointer
-        // over the scratch .git, container-only. threadId is guaranteed
-        // defined here: worktreePath is only set for threaded spawns, and
-        // the enclosing `if (worktreePath)` implies that.
-        const overlayPointerFile = path.join(
-          WORKTREE_GIT_OVERLAY_DIR,
-          group.folder,
-          threadId!,
-          name,
-        );
-        const overlayContainerPath = path.posix.join(
-          '/workspace/group',
-          path.basename(wtPath),
-          '.git',
-        );
-        if (fs.existsSync(overlayPointerFile)) {
-          mounts.push({
-            hostPath: overlayPointerFile,
-            containerPath: overlayContainerPath,
-            readonly: true,
-          });
-          overlaysMounted++;
-        } else {
-          logger.error(
-            { group: group.folder, threadId, repo: name, overlayPointerFile },
-            'buildVolumeMounts: missing .git.container overlay, container git will fail for this repo',
-          );
-        }
-      } catch (err) {
-        logger.warn(
-          { group: group.folder, threadId, repo: name, wtPath, err },
-          'buildVolumeMounts: failed to parse worktree .git pointer, skipping',
-        );
-      }
-    }
-    // Catastrophic-case signal: if we scanned worktrees but mounted zero
-    // overlays, the container will start with no git for /workspace/group/*.
-    // One ERROR line beats N per-repo warnings buried in the log.
-    if (attempted > 0 && overlaysMounted === 0) {
-      logger.error(
-        { group: group.folder, threadId, attempted },
-        'buildVolumeMounts: all worktree gitdir pointers failed to mount; container git operations will fail inside /workspace/group/*',
-      );
-    }
-  }
-
   // Mount tone profiles into all containers (read-only).
   // This is independent of globalContext — even isolated groups need tone access
   // for the get_tone_profile MCP tool to work.
@@ -2497,6 +1314,93 @@ function buildVolumeMounts(
       containerPath: '/workspace/thread',
       readonly: false,
     });
+  }
+
+  // Lazy worktree mounts for threaded non-main channels.
+  // (1) Mount the per-thread worktree directory at /workspace/worktrees so
+  //     the agent can access and create worktrees via IPC.
+  // (2) Mount each canonical repo's .git directory read-only at its
+  //     host-absolute path so git commands inside the container resolve
+  //     the .git pointer files that worktrees write.
+  if (threadId && !isMain) {
+    const worktreeDir = path.join(WORKTREES_DIR, group.folder, threadId);
+    fs.mkdirSync(worktreeDir, { recursive: true });
+    mounts.push({
+      hostPath: worktreeDir,
+      containerPath: '/workspace/worktrees',
+      readonly: false,
+    });
+
+    // Scan group folder for canonical repos and mount their .git dirs read-only.
+    // This allows git commands in worktrees (which contain a `.git` file pointing
+    // to the canonical .git/worktrees/<name>) to work inside the container without
+    // giving the agent write access to .git/hooks or .git/config.
+    try {
+      for (const entry of fs.readdirSync(groupDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const repoPath = path.join(groupDir, entry.name);
+        const gitDir = path.join(repoPath, '.git');
+        if (!fs.existsSync(gitDir)) continue;
+        try {
+          if (!fs.statSync(gitDir).isDirectory()) continue;
+        } catch {
+          continue;
+        }
+        // Mount at the host-absolute path so worktree `.git` file pointers resolve
+        mounts.push({
+          hostPath: gitDir,
+          containerPath: gitDir,
+          readonly: true,
+        });
+      }
+    } catch {
+      // best-effort — missing read permission means no .git mounts applied
+    }
+
+    // Also scan existing worktrees to find canonical .git dirs for repos
+    // cloned mid-session (their worktree .git files point back to the canonical).
+    try {
+      if (fs.existsSync(worktreeDir)) {
+        for (const entry of fs.readdirSync(worktreeDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          const wtRepoPath = path.join(worktreeDir, entry.name);
+          const wtGitFile = path.join(wtRepoPath, '.git');
+          if (!fs.existsSync(wtGitFile)) continue;
+          try {
+            if (!fs.statSync(wtGitFile).isFile()) continue;
+            const gitFileContent = fs.readFileSync(wtGitFile, 'utf-8').trim();
+            // Format: "gitdir: <absolute-path-to-.git/worktrees/<name>>"
+            const match = gitFileContent.match(/^gitdir:\s*(.+)$/);
+            if (!match) continue;
+            // Walk up from the worktrees/<name> entry to find the canonical .git
+            const worktreesEntry = path.resolve(match[1].trim());
+            // canonical .git is two levels up: .git/worktrees/<name> -> .git
+            const canonicalGit = path.dirname(path.dirname(worktreesEntry));
+            if (!fs.existsSync(canonicalGit)) continue;
+            try {
+              if (!fs.statSync(canonicalGit).isDirectory()) continue;
+            } catch {
+              continue;
+            }
+            // MF-4: Validate canonicalGit is under GROUPS_DIR to prevent path traversal
+            // via crafted .git files in the writable worktree area
+            const resolvedCanonicalGit = path.resolve(canonicalGit);
+            if (!resolvedCanonicalGit.startsWith(path.resolve(GROUPS_DIR) + path.sep)) continue;
+            // Skip if already mounted (from the group-folder scan above)
+            if (mounts.some((m) => m.hostPath === resolvedCanonicalGit)) continue;
+            mounts.push({
+              hostPath: resolvedCanonicalGit,
+              containerPath: resolvedCanonicalGit,
+              readonly: true,
+            });
+          } catch {
+            // best-effort
+          }
+        }
+      }
+    } catch {
+      // best-effort
+    }
   }
 
   // Per-group Claude sessions directory (isolated from other groups)
@@ -4040,9 +2944,6 @@ export async function runContainerAgent(
       if (mountWorktrees.length > 0) {
         cleanupAdditionalMountWorktrees(
           mountSessionId!,
-          mountWorktrees,
-          group.folder,
-          input.threadId,
         ).catch((err) =>
           logger.warn({ err }, 'Additional mount worktree cleanup error'),
         );

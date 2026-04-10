@@ -265,6 +265,16 @@ The task will run in that group's context with access to their files and memory.
 
 ---
 
+## Working with Repos
+
+1. Use the `create_worktree` MCP tool to get a working directory for any repo already cloned in this group — returns `/workspace/worktrees/<repo>` with full git access.
+2. NEVER run `git clone` — it is blocked by a hook. Use `create_worktree` for existing repos or `clone_repo` for new ones.
+3. Commit and push regularly — do not lose work.
+4. On thread resume, check `/workspace/worktrees/` for prior work from this session.
+5. Use the `clone_repo` MCP tool for repos not yet cloned in this group.
+
+---
+
 ## NanoClaw Development
 
 For NanoClaw source code changes, use `/remote-control` to start a Claude Code session on the host. This gives full access to edit code, run `npm install`, `npm run build`, `./container/build.sh`, and restart the service — none of which are possible from within a container.
