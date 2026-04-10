@@ -145,8 +145,35 @@ export class SqliteAdapter implements IDatabaseAdapter {
         `UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`,
       );
       this.db.exec(
-        `UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`,
+        `UPDATE chats SET channel = 'telegram', is_group = 0 WHERE jid LIKE 'tg:%'`,
       );
+    } catch {
+      /* columns already exist */
+    }
+
+    try {
+      this.db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN script TEXT`);
+    } catch {
+      /* column already exists */
+    }
+
+    try {
+      this.db.exec(
+        `ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`,
+      );
+      this.db.exec(
+        `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
+      );
+    } catch {
+      /* column already exists */
+    }
+
+    try {
+      this.db.exec(`ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT`);
+      this.db.exec(
+        `ALTER TABLE messages ADD COLUMN reply_to_message_content TEXT`,
+      );
+      this.db.exec(`ALTER TABLE messages ADD COLUMN reply_to_sender_name TEXT`);
     } catch {
       /* columns already exist */
     }
@@ -171,13 +198,21 @@ export class SqliteAdapter implements IDatabaseAdapter {
     } | null;
     if (routerState) {
       if (routerState.last_timestamp) {
-        this.setRouterState('last_timestamp', routerState.last_timestamp);
+        this.db
+          .prepare(
+            'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
+          )
+          .run('last_timestamp', routerState.last_timestamp);
       }
       if (routerState.last_agent_timestamp) {
-        this.setRouterState(
-          'last_agent_timestamp',
-          JSON.stringify(routerState.last_agent_timestamp),
-        );
+        this.db
+          .prepare(
+            'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
+          )
+          .run(
+            'last_agent_timestamp',
+            JSON.stringify(routerState.last_agent_timestamp),
+          );
       }
     }
 
@@ -187,7 +222,11 @@ export class SqliteAdapter implements IDatabaseAdapter {
     > | null;
     if (sessions) {
       for (const [folder, sessionId] of Object.entries(sessions)) {
-        this.setSession(folder, sessionId);
+        this.db
+          .prepare(
+            'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
+          )
+          .run(folder, sessionId);
       }
     }
 
@@ -198,7 +237,11 @@ export class SqliteAdapter implements IDatabaseAdapter {
     if (groups) {
       for (const [jid, group] of Object.entries(groups)) {
         try {
-          this.setRegisteredGroup(jid, group);
+          this.db
+            .prepare(
+              `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(...serializeRegisteredGroup(jid, group));
         } catch (err) {
           logger.warn(
             { jid, folder: group.folder, err },
@@ -286,7 +329,7 @@ export class SqliteAdapter implements IDatabaseAdapter {
   async storeMessage(msg: NewMessage): Promise<void> {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, reply_to_message_id, reply_to_message_content, reply_to_sender_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         msg.id,
@@ -297,6 +340,9 @@ export class SqliteAdapter implements IDatabaseAdapter {
         msg.timestamp,
         msg.is_from_me ? 1 : 0,
         msg.is_bot_message ? 1 : 0,
+        msg.reply_to_message_id ?? null,
+        msg.reply_to_message_content ?? null,
+        msg.reply_to_sender_name ?? null,
       );
   }
 
@@ -330,22 +376,27 @@ export class SqliteAdapter implements IDatabaseAdapter {
     jids: string[],
     lastTimestamp: string,
     botPrefix: string,
+    limit: number = 200,
   ): Promise<{ messages: NewMessage[]; newTimestamp: string }> {
     if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
     const placeholders = jids.map(() => '?').join(',');
     const sql = `
-      SELECT id, chat_jid, sender, sender_name, content, timestamp
-      FROM messages
-      WHERE timestamp > ? AND chat_jid IN (${placeholders})
-        AND is_bot_message = 0 AND content NOT LIKE ?
-        AND content != '' AND content IS NOT NULL
-      ORDER BY timestamp
+      SELECT * FROM (
+        SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
+               reply_to_message_id, reply_to_message_content, reply_to_sender_name
+        FROM messages
+        WHERE timestamp > ? AND chat_jid IN (${placeholders})
+          AND is_bot_message = 0 AND content NOT LIKE ?
+          AND content != '' AND content IS NOT NULL
+        ORDER BY timestamp DESC
+        LIMIT ?
+      ) ORDER BY timestamp
     `;
 
     const rows = this.db
       .prepare(sql)
-      .all(lastTimestamp, ...jids, `${botPrefix}:%`) as NewMessage[];
+      .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as NewMessage[];
 
     let newTimestamp = lastTimestamp;
     for (const row of rows) {
@@ -359,18 +410,36 @@ export class SqliteAdapter implements IDatabaseAdapter {
     chatJid: string,
     sinceTimestamp: string,
     botPrefix: string,
+    limit: number = 200,
   ): Promise<NewMessage[]> {
     const sql = `
-      SELECT id, chat_jid, sender, sender_name, content, timestamp
-      FROM messages
-      WHERE chat_jid = ? AND timestamp > ?
-        AND is_bot_message = 0 AND content NOT LIKE ?
-        AND content != '' AND content IS NOT NULL
-      ORDER BY timestamp
+      SELECT * FROM (
+        SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
+               reply_to_message_id, reply_to_message_content, reply_to_sender_name
+        FROM messages
+        WHERE chat_jid = ? AND timestamp > ?
+          AND is_bot_message = 0 AND content NOT LIKE ?
+          AND content != '' AND content IS NOT NULL
+        ORDER BY timestamp DESC
+        LIMIT ?
+      ) ORDER BY timestamp
     `;
     return this.db
       .prepare(sql)
-      .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+      .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+  }
+
+  async getLastBotMessageTimestamp(
+    chatJid: string,
+    botPrefix: string,
+  ): Promise<string | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT MAX(timestamp) as ts FROM messages
+         WHERE chat_jid = ? AND (is_bot_message = 1 OR content LIKE ?)`,
+      )
+      .get(chatJid, `${botPrefix}:%`) as { ts: string | null } | undefined;
+    return row?.ts ?? undefined;
   }
 
   // -- Tasks --------------------------------------------------------------
@@ -380,14 +449,15 @@ export class SqliteAdapter implements IDatabaseAdapter {
   ): Promise<void> {
     this.db
       .prepare(
-        `INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, next_run, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.id,
         task.group_folder,
         task.chat_jid,
         task.prompt,
+        task.script ?? null,
         task.schedule_type,
         task.schedule_value,
         task.context_mode || 'isolated',
@@ -424,6 +494,10 @@ export class SqliteAdapter implements IDatabaseAdapter {
     if (updates.prompt !== undefined) {
       fields.push('prompt = ?');
       values.push(updates.prompt);
+    }
+    if (updates.script !== undefined) {
+      fields.push('script = ?');
+      values.push(updates.script);
     }
     if (updates.schedule_type !== undefined) {
       fields.push('schedule_type = ?');
@@ -529,6 +603,12 @@ export class SqliteAdapter implements IDatabaseAdapter {
       .run(groupFolder, sessionId);
   }
 
+  async deleteSession(groupFolder: string): Promise<void> {
+    this.db
+      .prepare('DELETE FROM sessions WHERE group_folder = ?')
+      .run(groupFolder);
+  }
+
   async getAllSessions(): Promise<Record<string, string>> {
     const rows = this.db
       .prepare('SELECT group_folder, session_id FROM sessions')
@@ -555,8 +635,8 @@ export class SqliteAdapter implements IDatabaseAdapter {
   async setRegisteredGroup(jid: string, group: RegisteredGroup): Promise<void> {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(...serializeRegisteredGroup(jid, group));
   }

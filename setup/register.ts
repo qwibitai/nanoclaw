@@ -1,12 +1,13 @@
 /**
  * Step: register — Write channel registration config, create group folders.
- * Replaces 06-register-channel.sh
  *
- * Fixes: SQL injection (parameterized queries), sed -i '' (uses fs directly).
+ * Accepts --channel to specify the messaging platform (whatsapp, telegram, slack, discord).
+ * Uses parameterized SQL queries to prevent injection.
  */
 import fs from 'fs';
 import path from 'path';
 
+import { STORE_DIR } from '../src/config.js';
 import { isValidGroupFolder } from '../src/group-folder.js';
 import { logger } from '../src/logger.js';
 import { emitStatus } from './status.js';
@@ -16,7 +17,9 @@ interface RegisterArgs {
   name: string;
   trigger: string;
   folder: string;
+  channel: string;
   requiresTrigger: boolean;
+  isMain: boolean;
   assistantName: string;
 }
 
@@ -26,7 +29,9 @@ function parseArgs(args: string[]): RegisterArgs {
     name: '',
     trigger: '',
     folder: '',
+    channel: 'whatsapp', // backward-compat: pre-refactor installs omit --channel
     requiresTrigger: true,
+    isMain: false,
     assistantName: 'Andy',
   };
 
@@ -44,8 +49,14 @@ function parseArgs(args: string[]): RegisterArgs {
       case '--folder':
         result.folder = args[++i] || '';
         break;
+      case '--channel':
+        result.channel = (args[++i] || '').toLowerCase();
+        break;
       case '--no-trigger-required':
         result.requiresTrigger = false;
+        break;
+      case '--is-main':
+        result.isMain = true;
         break;
       case '--assistant-name':
         result.assistantName = args[++i] || 'Andy';
@@ -80,8 +91,10 @@ export async function run(args: string[]): Promise<void> {
 
   logger.info(parsed, 'Registering channel');
 
-  // Ensure data directory exists
+  // Ensure data and store directories exist (store/ may not exist on
+  // fresh installs that skip WhatsApp auth, which normally creates it)
   fs.mkdirSync(path.join(projectRoot, 'data'), { recursive: true });
+  fs.mkdirSync(STORE_DIR, { recursive: true });
 
   const { initDatabase, setRegisteredGroup, closeDatabase } = await import(
     '../src/db/index.js'
@@ -94,6 +107,7 @@ export async function run(args: string[]): Promise<void> {
       trigger: parsed.trigger,
       added_at: new Date().toISOString(),
       requiresTrigger: parsed.requiresTrigger,
+      isMain: parsed.isMain,
     });
     logger.info('Wrote registration to database');
   } finally {
@@ -105,6 +119,30 @@ export async function run(args: string[]): Promise<void> {
     recursive: true,
   });
 
+  // Create CLAUDE.md in the new group folder from template if it doesn't exist.
+  // The agent runs with CWD=/workspace/group and loads CLAUDE.md from there.
+  // Never overwrite an existing CLAUDE.md — users customize these extensively
+  // (persona, workspace structure, communication rules, family context, etc.)
+  // and a stock template replacement would destroy that work.
+  const groupClaudeMdPath = path.join(
+    projectRoot,
+    'groups',
+    parsed.folder,
+    'CLAUDE.md',
+  );
+  if (!fs.existsSync(groupClaudeMdPath)) {
+    const templatePath = parsed.isMain
+      ? path.join(projectRoot, 'groups', 'main', 'CLAUDE.md')
+      : path.join(projectRoot, 'groups', 'global', 'CLAUDE.md');
+    if (fs.existsSync(templatePath)) {
+      fs.copyFileSync(templatePath, groupClaudeMdPath);
+      logger.info(
+        { file: groupClaudeMdPath, template: templatePath },
+        'Created CLAUDE.md from template',
+      );
+    }
+  }
+
   // Update assistant name in CLAUDE.md files if different from default
   let nameUpdated = false;
   if (parsed.assistantName !== 'Andy') {
@@ -113,10 +151,11 @@ export async function run(args: string[]): Promise<void> {
       'Updating assistant name',
     );
 
-    const mdFiles = [
-      path.join(projectRoot, 'groups', 'global', 'CLAUDE.md'),
-      path.join(projectRoot, 'groups', 'main', 'CLAUDE.md'),
-    ];
+    const groupsDir = path.join(projectRoot, 'groups');
+    const mdFiles = fs
+      .readdirSync(groupsDir)
+      .map((d) => path.join(groupsDir, d, 'CLAUDE.md'))
+      .filter((f) => fs.existsSync(f));
 
     for (const mdFile of mdFiles) {
       if (fs.existsSync(mdFile)) {
@@ -155,6 +194,7 @@ export async function run(args: string[]): Promise<void> {
     JID: parsed.jid,
     NAME: parsed.name,
     FOLDER: parsed.folder,
+    CHANNEL: parsed.channel,
     TRIGGER: parsed.trigger,
     REQUIRES_TRIGGER: parsed.requiresTrigger,
     ASSISTANT_NAME: parsed.assistantName,

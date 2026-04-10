@@ -5,13 +5,17 @@ import {
   createTask,
   deleteTask,
   getAllChats,
+  getAllRegisteredGroups,
+  getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
   updateTask,
 } from './db/index.js';
+import { formatMessages } from './router.js';
 
 beforeEach(async () => {
   await _initTestDatabase();
@@ -137,6 +141,86 @@ describe('storeMessage', () => {
   });
 });
 
+// --- reply context persistence ---
+
+describe('reply context', () => {
+  it('stores and retrieves reply_to fields', async () => {
+    await storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    await storeMessage({
+      id: 'reply-1',
+      chat_jid: 'group@g.us',
+      sender: '123',
+      sender_name: 'Alice',
+      content: 'Yes, on my way!',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      reply_to_message_id: '42',
+      reply_to_message_content: 'Are you coming tonight?',
+      reply_to_sender_name: 'Bob',
+    });
+
+    const messages = await getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].reply_to_message_id).toBe('42');
+    expect(messages[0].reply_to_message_content).toBe(
+      'Are you coming tonight?',
+    );
+    expect(messages[0].reply_to_sender_name).toBe('Bob');
+  });
+
+  it('returns null for messages without reply context', async () => {
+    await storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    await store({
+      id: 'no-reply',
+      chat_jid: 'group@g.us',
+      sender: '123',
+      sender_name: 'Alice',
+      content: 'Just a normal message',
+      timestamp: '2024-01-01T00:00:01.000Z',
+    });
+
+    const messages = await getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].reply_to_message_id).toBeNull();
+    expect(messages[0].reply_to_message_content).toBeNull();
+    expect(messages[0].reply_to_sender_name).toBeNull();
+  });
+
+  it('retrieves reply context via getNewMessages', async () => {
+    await storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    await storeMessage({
+      id: 'reply-2',
+      chat_jid: 'group@g.us',
+      sender: '456',
+      sender_name: 'Carol',
+      content: 'Agreed',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      reply_to_message_id: '99',
+      reply_to_message_content: 'We should meet',
+      reply_to_sender_name: 'Dave',
+    });
+
+    const { messages } = await getNewMessages(
+      ['group@g.us'],
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].reply_to_message_id).toBe('99');
+    expect(messages[0].reply_to_sender_name).toBe('Dave');
+  });
+});
+
 // --- getMessagesSince ---
 
 describe('getMessagesSince', () => {
@@ -203,7 +287,94 @@ describe('getMessagesSince', () => {
     expect(msgs).toHaveLength(3);
   });
 
+  it('recovers cursor from last bot reply when lastAgentTimestamp is missing', async () => {
+    // beforeEach already inserts m3 (bot reply at 00:00:03) and m4 (user at 00:00:04)
+    // Add more old history before the bot reply
+    for (let i = 1; i <= 50; i++) {
+      await store({
+        id: `history-${i}`,
+        chat_jid: 'group@g.us',
+        sender: 'user@s.whatsapp.net',
+        sender_name: 'User',
+        content: `old message ${i}`,
+        timestamp: `2023-06-${String(i).padStart(2, '0')}T12:00:00.000Z`,
+      });
+    }
+
+    // New message after the bot reply (m3 at 00:00:03)
+    await store({
+      id: 'new-1',
+      chat_jid: 'group@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'new message after bot reply',
+      timestamp: '2024-01-02T00:00:00.000Z',
+    });
+
+    // Recover cursor from the last bot message (m3 from beforeEach)
+    const recovered = await getLastBotMessageTimestamp('group@g.us', 'Andy');
+    expect(recovered).toBe('2024-01-01T00:00:03.000Z');
+
+    // Using recovered cursor: only gets messages after the bot reply
+    const msgs = await getMessagesSince('group@g.us', recovered!, 'Andy', 10);
+    // m4 (third, 00:00:04) + new-1 — skips all 50 old messages and m1/m2
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0].content).toBe('third');
+    expect(msgs[1].content).toBe('new message after bot reply');
+  });
+
+  it('caps messages to configured limit even with recovered cursor', async () => {
+    // beforeEach inserts m3 (bot at 00:00:03). Add 30 messages after it.
+    for (let i = 1; i <= 30; i++) {
+      await store({
+        id: `pending-${i}`,
+        chat_jid: 'group@g.us',
+        sender: 'user@s.whatsapp.net',
+        sender_name: 'User',
+        content: `pending message ${i}`,
+        timestamp: `2024-02-${String(i).padStart(2, '0')}T12:00:00.000Z`,
+      });
+    }
+
+    const recovered = await getLastBotMessageTimestamp('group@g.us', 'Andy');
+    expect(recovered).toBe('2024-01-01T00:00:03.000Z');
+
+    // With limit=10, only the 10 most recent are returned
+    const msgs = await getMessagesSince('group@g.us', recovered!, 'Andy', 10);
+    expect(msgs).toHaveLength(10);
+    // Most recent 10: pending-21 through pending-30
+    expect(msgs[0].content).toBe('pending message 21');
+    expect(msgs[9].content).toBe('pending message 30');
+  });
+
+  it('returns last N messages when no bot reply and no cursor exist', async () => {
+    // Use a fresh group with no bot messages
+    await storeChatMetadata('fresh@g.us', '2024-01-01T00:00:00.000Z');
+    for (let i = 1; i <= 20; i++) {
+      await store({
+        id: `fresh-${i}`,
+        chat_jid: 'fresh@g.us',
+        sender: 'user@s.whatsapp.net',
+        sender_name: 'User',
+        content: `message ${i}`,
+        timestamp: `2024-02-${String(i).padStart(2, '0')}T12:00:00.000Z`,
+      });
+    }
+
+    const recovered = await getLastBotMessageTimestamp('fresh@g.us', 'Andy');
+    expect(recovered).toBeUndefined();
+
+    // No cursor → sinceTimestamp = '' but limit caps the result
+    const msgs = await getMessagesSince('fresh@g.us', '', 'Andy', 10);
+    expect(msgs).toHaveLength(10);
+
+    const prompt = formatMessages(msgs, 'Asia/Jerusalem');
+    const messageTagCount = (prompt.match(/<message /g) || []).length;
+    expect(messageTagCount).toBe(10);
+  });
+
   it('filters pre-migration bot messages via content prefix backstop', async () => {
+    // Simulate a message written before migration: has prefix but is_bot_message = 0
     await store({
       id: 'm5',
       chat_jid: 'group@g.us',
@@ -388,5 +559,97 @@ describe('task CRUD', () => {
 
     await deleteTask('task-3');
     expect(await getTaskById('task-3')).toBeUndefined();
+  });
+});
+
+// --- LIMIT behavior ---
+
+describe('message query LIMIT', () => {
+  beforeEach(async () => {
+    await storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    for (let i = 1; i <= 10; i++) {
+      await store({
+        id: `lim-${i}`,
+        chat_jid: 'group@g.us',
+        sender: 'user@s.whatsapp.net',
+        sender_name: 'User',
+        content: `message ${i}`,
+        timestamp: `2024-01-01T00:00:${String(i).padStart(2, '0')}.000Z`,
+      });
+    }
+  });
+
+  it('getNewMessages caps to limit and returns most recent in chronological order', async () => {
+    const { messages, newTimestamp } = await getNewMessages(
+      ['group@g.us'],
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+      3,
+    );
+    expect(messages).toHaveLength(3);
+    expect(messages[0].content).toBe('message 8');
+    expect(messages[2].content).toBe('message 10');
+    // Chronological order preserved
+    expect(messages[1].timestamp > messages[0].timestamp).toBe(true);
+    // newTimestamp reflects latest returned row
+    expect(newTimestamp).toBe('2024-01-01T00:00:10.000Z');
+  });
+
+  it('getMessagesSince caps to limit and returns most recent in chronological order', async () => {
+    const messages = await getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+      3,
+    );
+    expect(messages).toHaveLength(3);
+    expect(messages[0].content).toBe('message 8');
+    expect(messages[2].content).toBe('message 10');
+    expect(messages[1].timestamp > messages[0].timestamp).toBe(true);
+  });
+
+  it('returns all messages when count is under the limit', async () => {
+    const { messages } = await getNewMessages(
+      ['group@g.us'],
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+      50,
+    );
+    expect(messages).toHaveLength(10);
+  });
+});
+
+// --- RegisteredGroup isMain round-trip ---
+
+describe('registered group isMain', () => {
+  it('persists isMain=true through set/get round-trip', async () => {
+    await setRegisteredGroup('main@s.whatsapp.net', {
+      name: 'Main Chat',
+      folder: 'whatsapp_main',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      isMain: true,
+    });
+
+    const groups = await getAllRegisteredGroups();
+    const group = groups['main@s.whatsapp.net'];
+    expect(group).toBeDefined();
+    expect(group.isMain).toBe(true);
+    expect(group.folder).toBe('whatsapp_main');
+  });
+
+  it('omits isMain for non-main groups', async () => {
+    await setRegisteredGroup('group@g.us', {
+      name: 'Family Chat',
+      folder: 'whatsapp_family-chat',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const groups = await getAllRegisteredGroups();
+    const group = groups['group@g.us'];
+    expect(group).toBeDefined();
+    expect(group.isMain).toBeUndefined();
   });
 });

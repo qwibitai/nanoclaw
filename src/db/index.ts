@@ -78,16 +78,25 @@ export function getNewMessages(
   jids: string[],
   lastTimestamp: string,
   botPrefix: string,
+  limit?: number,
 ): Promise<{ messages: NewMessage[]; newTimestamp: string }> {
-  return adapter.getNewMessages(jids, lastTimestamp, botPrefix);
+  return adapter.getNewMessages(jids, lastTimestamp, botPrefix, limit);
 }
 
 export function getMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
   botPrefix: string,
+  limit?: number,
 ): Promise<NewMessage[]> {
-  return adapter.getMessagesSince(chatJid, sinceTimestamp, botPrefix);
+  return adapter.getMessagesSince(chatJid, sinceTimestamp, botPrefix, limit);
+}
+
+export function getLastBotMessageTimestamp(
+  chatJid: string,
+  botPrefix: string,
+): Promise<string | undefined> {
+  return adapter.getLastBotMessageTimestamp(chatJid, botPrefix);
 }
 
 // -- Tasks ----------------------------------------------------------------
@@ -157,6 +166,10 @@ export function setSession(
   sessionId: string,
 ): Promise<void> {
   return adapter.setSession(groupFolder, sessionId);
+}
+
+export function deleteSession(groupFolder: string): Promise<void> {
+  return adapter.deleteSession(groupFolder);
 }
 
 export function getAllSessions(): Promise<Record<string, string>> {

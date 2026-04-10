@@ -21,12 +21,18 @@ export interface RegisteredGroupRow {
   added_at: string;
   container_config: string | null;
   requires_trigger: number | null;
+  is_main: number | null;
 }
 
 export type TaskUpdates = Partial<
   Pick<
     ScheduledTask,
-    'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
+    | 'prompt'
+    | 'script'
+    | 'schedule_type'
+    | 'schedule_value'
+    | 'next_run'
+    | 'status'
   >
 >;
 
@@ -67,12 +73,18 @@ export interface IDatabaseAdapter {
     jids: string[],
     lastTimestamp: string,
     botPrefix: string,
+    limit?: number,
   ): Promise<{ messages: NewMessage[]; newTimestamp: string }>;
   getMessagesSince(
     chatJid: string,
     sinceTimestamp: string,
     botPrefix: string,
+    limit?: number,
   ): Promise<NewMessage[]>;
+  getLastBotMessageTimestamp(
+    chatJid: string,
+    botPrefix: string,
+  ): Promise<string | undefined>;
 
   // Tasks
   createTask(
@@ -98,6 +110,7 @@ export interface IDatabaseAdapter {
   // Sessions
   getSession(groupFolder: string): Promise<string | undefined>;
   setSession(groupFolder: string, sessionId: string): Promise<void>;
+  deleteSession(groupFolder: string): Promise<void>;
   getAllSessions(): Promise<Record<string, string>>;
 
   // Registered groups

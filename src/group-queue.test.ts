@@ -40,7 +40,7 @@ describe('GroupQueue', () => {
     let concurrentCount = 0;
     let maxConcurrent = 0;
 
-    const processMessages = vi.fn(async (groupJid: string) => {
+    const processMessages = vi.fn(async (_groupJid: string) => {
       concurrentCount++;
       maxConcurrent = Math.max(maxConcurrent, concurrentCount);
       // Simulate async work
@@ -69,7 +69,7 @@ describe('GroupQueue', () => {
     let maxActive = 0;
     const completionCallbacks: Array<() => void> = [];
 
-    const processMessages = vi.fn(async (groupJid: string) => {
+    const processMessages = vi.fn(async (_groupJid: string) => {
       activeCount++;
       maxActive = Math.max(maxActive, activeCount);
       await new Promise<void>((resolve) => completionCallbacks.push(resolve));
@@ -104,7 +104,7 @@ describe('GroupQueue', () => {
     const executionOrder: string[] = [];
     let resolveFirst: () => void;
 
-    const processMessages = vi.fn(async (groupJid: string) => {
+    const processMessages = vi.fn(async (_groupJid: string) => {
       if (executionOrder.length === 0) {
         // First call: block until we release it
         await new Promise<void>((resolve) => {
@@ -241,6 +241,41 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(processed).toContain('group3@g.us');
+  });
+
+  // --- Running task dedup (Issue #138) ---
+
+  it('rejects duplicate enqueue of a currently-running task', async () => {
+    let resolveTask: () => void;
+    let taskCallCount = 0;
+
+    const taskFn = vi.fn(async () => {
+      taskCallCount++;
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    // Start the task (runs immediately — slot available)
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(taskCallCount).toBe(1);
+
+    // Scheduler poll re-discovers the same task while it's running —
+    // this must be silently dropped
+    const dupFn = vi.fn(async () => {});
+    queue.enqueueTask('group1@g.us', 'task-1', dupFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Duplicate was NOT queued
+    expect(dupFn).not.toHaveBeenCalled();
+
+    // Complete the original task
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Only one execution total
+    expect(taskCallCount).toBe(1);
   });
 
   // --- Idle preemption ---

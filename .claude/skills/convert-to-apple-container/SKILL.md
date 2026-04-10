@@ -13,11 +13,13 @@ This skill switches NanoClaw's container runtime from Docker to Apple Container 
 - Startup check: `docker info` → `container system status` (with auto-start)
 - Orphan detection: `docker ps --filter` → `container ls --format json`
 - Build script default: `docker` → `container`
+- Dockerfile entrypoint: `.env` shadowing via `mount --bind` inside the container (Apple Container only supports directory mounts, not file mounts like Docker's `/dev/null` overlay)
+- Container runner: main-group containers start as root for `mount --bind`, then drop privileges via `setpriv`
 
 **What stays the same:**
-- Dockerfile (shared by both runtimes)
-- Container runner code (`src/container-runner.ts`)
 - Mount security/allowlist validation
+- All exported interfaces and IPC protocol
+- Non-main container behavior (still uses `--user` flag)
 - All other functionality
 
 ## Prerequisites
@@ -39,45 +41,41 @@ Apple Container requires macOS. It does not work on Linux.
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `convert-to-apple-container` is in `applied_skills`, skip to Phase 3 (Verify). The code changes are already in place.
-
-### Check current runtime
-
 ```bash
 grep "CONTAINER_RUNTIME_BIN" src/container-runtime.ts
 ```
 
-If it already shows `'container'`, the runtime is already Apple Container. Skip to Phase 3.
+If it already shows `'container'`, the runtime is already Apple Container. Skip to Phase 4.
 
 ## Phase 2: Apply Code Changes
 
-Run the skills engine to apply this skill's code package. The package files are in this directory alongside this SKILL.md.
-
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
+### Ensure upstream remote
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-Or call `initSkillsSystem()` from `skills-engine/migrate.ts`.
-
-### Apply the skill
+If `upstream` is missing, add it:
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/convert-to-apple-container
+git remote add upstream https://github.com/qwibitai/nanoclaw.git
 ```
 
-This deterministically:
-- Replaces `src/container-runtime.ts` with the Apple Container implementation
-- Replaces `src/container-runtime.test.ts` with Apple Container-specific tests
-- Updates `container/build.sh` to default to `container` runtime
-- Records the application in `.nanoclaw/state.yaml`
+### Merge the skill branch
 
-If the apply reports merge conflicts, read the intent files:
-- `modify/src/container-runtime.ts.intent.md` — what changed and invariants
-- `modify/container/build.sh.intent.md` — what changed for build script
+```bash
+git fetch upstream skill/apple-container
+git merge upstream/skill/apple-container
+```
+
+This merges in:
+- `src/container-runtime.ts` — Apple Container implementation (replaces Docker)
+- `src/container-runtime.test.ts` — Apple Container-specific tests
+- `src/container-runner.ts` — .env shadow mount fix and privilege dropping
+- `container/Dockerfile` — entrypoint that shadows .env via `mount --bind`
+- `container/build.sh` — default runtime set to `container`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate code changes
 
@@ -88,7 +86,44 @@ npm run build
 
 All tests must pass and build must be clean before proceeding.
 
-## Phase 3: Verify
+## Phase 3: Credential proxy network binding
+
+Apple Container uses a bridge network (bridge100) that only exists while containers are running. The credential proxy must start before any container, so it cannot bind to the bridge IP. It must bind to `0.0.0.0`, which exposes port 3001 on all network interfaces — anyone on your local network could route API requests through the proxy using your credentials.
+
+Use AskUserQuestion to ask the user:
+
+**"The credential proxy needs to bind to all interfaces (0.0.0.0). Is this Mac on a trusted private network?"**
+
+Options:
+1. **Yes, private/home network** — description: "No firewall rule needed."
+2. **No, shared/public network** — description: "Add a macOS firewall rule to block external access to port 3001."
+
+For both options, add `CREDENTIAL_PROXY_HOST=0.0.0.0` to `.env`:
+
+```bash
+grep -q 'CREDENTIAL_PROXY_HOST' .env 2>/dev/null || echo 'CREDENTIAL_PROXY_HOST=0.0.0.0' >> .env
+```
+
+If they chose the public network option, set up and persist the firewall rule:
+
+```bash
+echo "block in on en0 proto tcp to any port 3001" | sudo pfctl -ef -
+```
+
+```bash
+grep -q 'nanoclaw proxy' /etc/pf.conf 2>/dev/null || echo '# nanoclaw proxy — block LAN access to credential proxy
+block in on en0 proto tcp to any port 3001' | sudo tee -a /etc/pf.conf > /dev/null
+```
+
+Verify the rule is working:
+
+```bash
+curl -sf http://$(ipconfig getifaddr en0):3001 && echo "EXPOSED — rule not working" || echo "BLOCKED — rule active"
+```
+
+If the verification shows "EXPOSED", warn the user and retry. If "BLOCKED", confirm success and continue.
+
+## Phase 4: Verify
 
 ### Ensure Apple Container runtime is running
 
@@ -172,4 +207,6 @@ Check directory permissions on the host. The container runs as uid 1000.
 |------|----------------|
 | `src/container-runtime.ts` | Full replacement — Docker → Apple Container API |
 | `src/container-runtime.test.ts` | Full replacement — tests for Apple Container behavior |
+| `src/container-runner.ts` | .env shadow mount removed, main containers start as root with privilege drop |
+| `container/Dockerfile` | Entrypoint: `mount --bind` for .env shadowing, `setpriv` privilege drop |
 | `container/build.sh` | Default runtime: `docker` → `container` |

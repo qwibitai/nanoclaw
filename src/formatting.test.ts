@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
+import {
+  ASSISTANT_NAME,
+  getTriggerPattern,
+  TRIGGER_PATTERN,
+} from './config.js';
 import {
   escapeXml,
   formatMessages,
@@ -58,13 +62,14 @@ describe('escapeXml', () => {
 // --- formatMessages ---
 
 describe('formatMessages', () => {
-  it('formats a single message as XML', () => {
-    const result = formatMessages([makeMsg()]);
-    expect(result).toBe(
-      '<messages>\n' +
-        '<message sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
-        '</messages>',
-    );
+  const TZ = 'UTC';
+
+  it('formats a single message as XML with context header', () => {
+    const result = formatMessages([makeMsg()], TZ);
+    expect(result).toContain('<context timezone="UTC" />');
+    expect(result).toContain('<message sender="Alice"');
+    expect(result).toContain('>hello</message>');
+    expect(result).toContain('Jan 1, 2024');
   });
 
   it('formats multiple messages', () => {
@@ -73,11 +78,16 @@ describe('formatMessages', () => {
         id: '1',
         sender_name: 'Alice',
         content: 'hi',
-        timestamp: 't1',
+        timestamp: '2024-01-01T00:00:00.000Z',
       }),
-      makeMsg({ id: '2', sender_name: 'Bob', content: 'hey', timestamp: 't2' }),
+      makeMsg({
+        id: '2',
+        sender_name: 'Bob',
+        content: 'hey',
+        timestamp: '2024-01-01T01:00:00.000Z',
+      }),
     ];
-    const result = formatMessages(msgs);
+    const result = formatMessages(msgs, TZ);
     expect(result).toContain('sender="Alice"');
     expect(result).toContain('sender="Bob"');
     expect(result).toContain('>hi</message>');
@@ -85,22 +95,91 @@ describe('formatMessages', () => {
   });
 
   it('escapes special characters in sender names', () => {
-    const result = formatMessages([makeMsg({ sender_name: 'A & B <Co>' })]);
+    const result = formatMessages([makeMsg({ sender_name: 'A & B <Co>' })], TZ);
     expect(result).toContain('sender="A &amp; B &lt;Co&gt;"');
   });
 
   it('escapes special characters in content', () => {
-    const result = formatMessages([
-      makeMsg({ content: '<script>alert("xss")</script>' }),
-    ]);
+    const result = formatMessages(
+      [makeMsg({ content: '<script>alert("xss")</script>' })],
+      TZ,
+    );
     expect(result).toContain(
       '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;',
     );
   });
 
   it('handles empty array', () => {
-    const result = formatMessages([]);
-    expect(result).toBe('<messages>\n\n</messages>');
+    const result = formatMessages([], TZ);
+    expect(result).toContain('<context timezone="UTC" />');
+    expect(result).toContain('<messages>\n\n</messages>');
+  });
+
+  it('renders reply context as quoted_message element', () => {
+    const result = formatMessages(
+      [
+        makeMsg({
+          content: 'Yes, on my way!',
+          reply_to_message_id: '42',
+          reply_to_message_content: 'Are you coming tonight?',
+          reply_to_sender_name: 'Bob',
+        }),
+      ],
+      TZ,
+    );
+    expect(result).toContain('reply_to="42"');
+    expect(result).toContain(
+      '<quoted_message from="Bob">Are you coming tonight?</quoted_message>',
+    );
+    expect(result).toContain('Yes, on my way!</message>');
+  });
+
+  it('omits reply attributes when no reply context', () => {
+    const result = formatMessages([makeMsg()], TZ);
+    expect(result).not.toContain('reply_to');
+    expect(result).not.toContain('quoted_message');
+  });
+
+  it('omits quoted_message when content is missing but id is present', () => {
+    const result = formatMessages(
+      [
+        makeMsg({
+          reply_to_message_id: '42',
+          reply_to_sender_name: 'Bob',
+        }),
+      ],
+      TZ,
+    );
+    expect(result).toContain('reply_to="42"');
+    expect(result).not.toContain('quoted_message');
+  });
+
+  it('escapes special characters in reply context', () => {
+    const result = formatMessages(
+      [
+        makeMsg({
+          reply_to_message_id: '1',
+          reply_to_message_content: '<script>alert("xss")</script>',
+          reply_to_sender_name: 'A & B',
+        }),
+      ],
+      TZ,
+    );
+    expect(result).toContain('from="A &amp; B"');
+    expect(result).toContain(
+      '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;',
+    );
+  });
+
+  it('converts timestamps to local time for given timezone', () => {
+    // 2024-01-01T18:30:00Z in America/New_York (EST) = 1:30 PM
+    const result = formatMessages(
+      [makeMsg({ timestamp: '2024-01-01T18:30:00.000Z' })],
+      'America/New_York',
+    );
+    expect(result).toContain('1:30');
+    expect(result).toContain('PM');
+    expect(result).toContain('<context timezone="America/New_York" />');
   });
 });
 
@@ -139,6 +218,28 @@ describe('TRIGGER_PATTERN', () => {
   it('matches with leading whitespace after trim', () => {
     // The actual usage trims before testing: TRIGGER_PATTERN.test(m.content.trim())
     expect(TRIGGER_PATTERN.test(`@${name} hey`.trim())).toBe(true);
+  });
+});
+
+describe('getTriggerPattern', () => {
+  it('uses the configured per-group trigger when provided', () => {
+    const pattern = getTriggerPattern('@Claw');
+
+    expect(pattern.test('@Claw hello')).toBe(true);
+    expect(pattern.test(`@${ASSISTANT_NAME} hello`)).toBe(false);
+  });
+
+  it('falls back to the default trigger when group trigger is missing', () => {
+    const pattern = getTriggerPattern(undefined);
+
+    expect(pattern.test(`@${ASSISTANT_NAME} hello`)).toBe(true);
+  });
+
+  it('treats regex characters in custom triggers literally', () => {
+    const pattern = getTriggerPattern('@C.L.A.U.D.E');
+
+    expect(pattern.test('@C.L.A.U.D.E hello')).toBe(true);
+    expect(pattern.test('@CXLXAUXDXE hello')).toBe(false);
   });
 });
 
@@ -188,7 +289,7 @@ describe('formatOutbound', () => {
 
 describe('trigger gating (requiresTrigger interaction)', () => {
   // Replicates the exact logic from processGroupMessages and startMessageLoop:
-  //   if (!isMainGroup && group.requiresTrigger !== false) { check trigger }
+  //   if (!isMainGroup && group.requiresTrigger !== false) { check group.trigger }
   function shouldRequireTrigger(
     isMainGroup: boolean,
     requiresTrigger: boolean | undefined,
@@ -199,39 +300,51 @@ describe('trigger gating (requiresTrigger interaction)', () => {
   function shouldProcess(
     isMainGroup: boolean,
     requiresTrigger: boolean | undefined,
+    trigger: string | undefined,
     messages: NewMessage[],
   ): boolean {
     if (!shouldRequireTrigger(isMainGroup, requiresTrigger)) return true;
-    return messages.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
+    const triggerPattern = getTriggerPattern(trigger);
+    return messages.some((m) => triggerPattern.test(m.content.trim()));
   }
 
   it('main group always processes (no trigger needed)', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(true, undefined, msgs)).toBe(true);
+    expect(shouldProcess(true, undefined, undefined, msgs)).toBe(true);
   });
 
   it('main group processes even with requiresTrigger=true', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(true, true, msgs)).toBe(true);
+    expect(shouldProcess(true, true, undefined, msgs)).toBe(true);
   });
 
   it('non-main group with requiresTrigger=undefined requires trigger (defaults to true)', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(false, undefined, msgs)).toBe(false);
+    expect(shouldProcess(false, undefined, undefined, msgs)).toBe(false);
   });
 
   it('non-main group with requiresTrigger=true requires trigger', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(false, true, msgs)).toBe(false);
+    expect(shouldProcess(false, true, undefined, msgs)).toBe(false);
   });
 
   it('non-main group with requiresTrigger=true processes when trigger present', () => {
     const msgs = [makeMsg({ content: `@${ASSISTANT_NAME} do something` })];
-    expect(shouldProcess(false, true, msgs)).toBe(true);
+    expect(shouldProcess(false, true, undefined, msgs)).toBe(true);
+  });
+
+  it('non-main group uses its per-group trigger instead of the default trigger', () => {
+    const msgs = [makeMsg({ content: '@Claw do something' })];
+    expect(shouldProcess(false, true, '@Claw', msgs)).toBe(true);
+  });
+
+  it('non-main group does not process when only the default trigger is present for a custom-trigger group', () => {
+    const msgs = [makeMsg({ content: `@${ASSISTANT_NAME} do something` })];
+    expect(shouldProcess(false, true, '@Claw', msgs)).toBe(false);
   });
 
   it('non-main group with requiresTrigger=false always processes (no trigger needed)', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(false, false, msgs)).toBe(true);
+    expect(shouldProcess(false, false, undefined, msgs)).toBe(true);
   });
 });
