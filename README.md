@@ -93,6 +93,78 @@ From the main channel (your self-chat), you can manage groups and tasks:
 @Andy join the Family Chat group
 ```
 
+## Control-Plane Worker
+
+NanoClaw can also run as an automatic polling worker for an external control-plane app. In this mode it:
+
+- bootstraps against `/api/agent/bootstrap`
+- heartbeats periodically
+- polls `/api/agent/tasks`
+- claims assigned `backlog` tasks
+- runs the task through NanoClaw's existing container execution path
+- posts task-scoped updates and marks the task `review` by default when complete
+
+### Required env
+
+Add these to `.env` or export them before starting the worker:
+
+```bash
+CONTROL_PLANE_URL=http://192.168.1.50:3000
+AGENT_KEY=agent_xxx
+```
+
+### Optional worker env
+
+```bash
+CONTROL_PLANE_GROUP_FOLDER=main
+CONTROL_PLANE_POLL_INTERVAL_MS=10000
+CONTROL_PLANE_HEARTBEAT_INTERVAL_MS=30000
+CONTROL_PLANE_CONTEXT_MODE=group
+CONTROL_PLANE_INCLUDE_BACKLOG=false
+CONTROL_PLANE_SUCCESS_STATUS=review
+CONTROL_PLANE_FAILURE_STATUS=blocked
+```
+
+Notes:
+
+- `CONTROL_PLANE_GROUP_FOLDER` chooses which local NanoClaw group runs control-plane tasks. If omitted, NanoClaw uses the main group when one exists, otherwise the only registered group.
+- `CONTROL_PLANE_CONTEXT_MODE=group` reuses the selected group's saved Claude session between tasks. Use `isolated` if every control-plane task should start fresh.
+- `CONTROL_PLANE_FAILURE_STATUS` is optional. If unset, the worker posts a failure message but does not force a task status change on execution failure.
+
+### Start the worker
+
+```bash
+npm run control-plane-worker
+```
+
+### Example: local control plane on your LAN
+
+```bash
+CONTROL_PLANE_URL=http://192.168.1.50:3000 \
+AGENT_KEY=agent_xxx \
+CONTROL_PLANE_GROUP_FOLDER=main \
+npm run control-plane-worker
+```
+
+### Example: deployed Vercel control plane
+
+```bash
+CONTROL_PLANE_URL=https://your-control-plane.vercel.app \
+AGENT_KEY=agent_xxx \
+CONTROL_PLANE_GROUP_FOLDER=main \
+npm run control-plane-worker
+```
+
+### One worker per machine
+
+Typical setups:
+
+- Desktop NanoClaw: `CONTROL_PLANE_GROUP_FOLDER=main`
+- Documents NanoClaw: `CONTROL_PLANE_GROUP_FOLDER=documents`
+- VM/OpenClaw NanoClaw: `CONTROL_PLANE_GROUP_FOLDER=vm` or another dedicated worker group
+
+Each machine should use its own `AGENT_KEY` and its own local group folder so task execution stays isolated and predictable.
+
 ## Customizing
 
 NanoClaw doesn't use configuration files. To make changes, just tell Claude Code what you want:

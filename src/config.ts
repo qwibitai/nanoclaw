@@ -10,6 +10,15 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
   'TZ',
+  'CONTROL_PLANE_URL',
+  'AGENT_KEY',
+  'CONTROL_PLANE_POLL_INTERVAL_MS',
+  'CONTROL_PLANE_HEARTBEAT_INTERVAL_MS',
+  'CONTROL_PLANE_GROUP_FOLDER',
+  'CONTROL_PLANE_CONTEXT_MODE',
+  'CONTROL_PLANE_INCLUDE_BACKLOG',
+  'CONTROL_PLANE_SUCCESS_STATUS',
+  'CONTROL_PLANE_FAILURE_STATUS',
 ]);
 
 export const ASSISTANT_NAME =
@@ -62,6 +71,48 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
+export const CONTROL_PLANE_URL =
+  process.env.CONTROL_PLANE_URL || envConfig.CONTROL_PLANE_URL;
+export const AGENT_KEY = process.env.AGENT_KEY || envConfig.AGENT_KEY;
+export const CONTROL_PLANE_POLL_INTERVAL_MS = Math.max(
+  1000,
+  parseInt(
+    process.env.CONTROL_PLANE_POLL_INTERVAL_MS ||
+      envConfig.CONTROL_PLANE_POLL_INTERVAL_MS ||
+      '10000',
+    10,
+  ) || 10000,
+);
+export const CONTROL_PLANE_HEARTBEAT_INTERVAL_MS = Math.max(
+  1000,
+  parseInt(
+    process.env.CONTROL_PLANE_HEARTBEAT_INTERVAL_MS ||
+      envConfig.CONTROL_PLANE_HEARTBEAT_INTERVAL_MS ||
+      '30000',
+    10,
+  ) || 30000,
+);
+export const CONTROL_PLANE_GROUP_FOLDER =
+  process.env.CONTROL_PLANE_GROUP_FOLDER || envConfig.CONTROL_PLANE_GROUP_FOLDER;
+export const CONTROL_PLANE_CONTEXT_MODE =
+  (process.env.CONTROL_PLANE_CONTEXT_MODE ||
+    envConfig.CONTROL_PLANE_CONTEXT_MODE ||
+    'group') === 'isolated'
+    ? 'isolated'
+    : 'group';
+export const CONTROL_PLANE_INCLUDE_BACKLOG =
+  (
+    process.env.CONTROL_PLANE_INCLUDE_BACKLOG ||
+    envConfig.CONTROL_PLANE_INCLUDE_BACKLOG ||
+    'false'
+  ).toLowerCase() === 'true';
+export const CONTROL_PLANE_SUCCESS_STATUS =
+  process.env.CONTROL_PLANE_SUCCESS_STATUS ||
+  envConfig.CONTROL_PLANE_SUCCESS_STATUS ||
+  'review';
+export const CONTROL_PLANE_FAILURE_STATUS =
+  process.env.CONTROL_PLANE_FAILURE_STATUS ||
+  envConfig.CONTROL_PLANE_FAILURE_STATUS;
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
