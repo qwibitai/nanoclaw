@@ -90,6 +90,15 @@ function createSchema(database: Database.Database): void {
       action_taken TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_processed_at ON processed_items(processed_at);
+
+    CREATE TABLE IF NOT EXISTS approval_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action_type TEXT NOT NULL,
+      action_detail TEXT,
+      outcome TEXT NOT NULL,
+      timestamp TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_approval_type ON approval_log(action_type, timestamp);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -736,6 +745,38 @@ export function cleanupOldProcessedItems(olderThan: string): number {
     .prepare('DELETE FROM processed_items WHERE processed_at < ?')
     .run(olderThan);
   return result.changes;
+}
+
+// --- Approval log (trust graduation) ---
+
+export function logApproval(actionType: string, actionDetail: string, outcome: string): void {
+  db.prepare(
+    'INSERT INTO approval_log (action_type, action_detail, outcome, timestamp) VALUES (?, ?, ?, ?)',
+  ).run(actionType, actionDetail, outcome, new Date().toISOString());
+}
+
+export function getRecentApprovals(actionType: string, limit: number = 5): Array<{outcome: string; timestamp: string}> {
+  return db.prepare(
+    'SELECT outcome, timestamp FROM approval_log WHERE action_type = ? ORDER BY timestamp DESC LIMIT ?',
+  ).all(actionType, limit) as Array<{outcome: string; timestamp: string}>;
+}
+
+export function getGraduationCandidates(): Array<{action_type: string; consecutive_approvals: number}> {
+  return db.prepare(`
+    WITH ranked AS (
+      SELECT action_type, outcome,
+        ROW_NUMBER() OVER (PARTITION BY action_type ORDER BY timestamp DESC) as rn
+      FROM approval_log
+    ),
+    streaks AS (
+      SELECT action_type, COUNT(*) as consecutive_approvals
+      FROM ranked
+      WHERE rn <= 5 AND outcome = 'approved'
+      GROUP BY action_type
+      HAVING COUNT(*) = 5
+    )
+    SELECT * FROM streaks
+  `).all() as Array<{action_type: string; consecutive_approvals: number}>;
 }
 
 // --- JSON migration ---

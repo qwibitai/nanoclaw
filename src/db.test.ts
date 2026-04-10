@@ -19,6 +19,9 @@ import {
   storeChatMetadata,
   storeMessage,
   updateTask,
+  logApproval,
+  getRecentApprovals,
+  getGraduationCandidates,
 } from './db.js';
 import { formatMessages } from './router.js';
 
@@ -709,5 +712,37 @@ describe('processed_items', () => {
     expect(deleted).toBe(1);
     expect(isItemProcessed('email:ancient')).toBe(false);
     expect(isItemProcessed('email:recent')).toBe(true);
+  });
+});
+
+describe('approval_log', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('logs and retrieves approvals', () => {
+    logApproval('reply:meeting', 'reply to meeting request', 'approved');
+    logApproval('reply:meeting', 'reply to pricing email', 'approved');
+    const recent = getRecentApprovals('reply:meeting', 5);
+    expect(recent).toHaveLength(2);
+    expect(recent[0].outcome).toBe('approved');
+  });
+
+  it('identifies graduation candidates with 5 consecutive approvals', () => {
+    for (let i = 0; i < 5; i++) {
+      logApproval('reply:meeting', `meeting reply ${i}`, 'approved');
+    }
+    const candidates = getGraduationCandidates();
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].action_type).toBe('reply:meeting');
+    expect(candidates[0].consecutive_approvals).toBe(5);
+  });
+
+  it('does not graduate if a rejection breaks the streak', () => {
+    for (let i = 0; i < 4; i++) {
+      logApproval('reply:meeting', `meeting reply ${i}`, 'approved');
+    }
+    logApproval('reply:meeting', 'bad reply', 'rejected');
+    const candidates = getGraduationCandidates();
+    expect(candidates).toHaveLength(0);
   });
 });
