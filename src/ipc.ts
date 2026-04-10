@@ -74,7 +74,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
   // while preventing the same group from being processed twice simultaneously.
   const processingGroups = new Set<string>();
 
-  const processGroup = async (sourceGroup: string, isMain: boolean, registeredGroups: ReturnType<typeof deps.registeredGroups>) => {
+  const processGroup = async (
+    sourceGroup: string,
+    isMain: boolean,
+    registeredGroups: ReturnType<typeof deps.registeredGroups>,
+  ) => {
     if (processingGroups.has(sourceGroup)) return;
     processingGroups.add(sourceGroup);
 
@@ -154,10 +158,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
           }
         }
       } catch (err) {
-        logger.error(
-          { err, sourceGroup },
-          'Error reading IPC tasks directory',
-        );
+        logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
       }
     } finally {
       processingGroups.delete(sourceGroup);
@@ -262,6 +263,8 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For reload_service
+    service?: string;
   },
   sourceGroup: string,
   isMain: boolean,

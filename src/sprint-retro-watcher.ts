@@ -40,7 +40,7 @@ interface RetrospectiveData {
     slipped_count: number;
     never_started_count: number;
     ghost_count: number;
-    avg_cycle_time_hours: number;
+    avg_cycle_time_hours: number | null;
   };
 }
 
@@ -98,10 +98,16 @@ async function createRetroMeeting(
       );
       return null;
     }
-    const json = (await res.json()) as { success: boolean; data: { id: string } };
+    const json = (await res.json()) as {
+      success: boolean;
+      data: { id: string };
+    };
     return json.data?.id ?? null;
   } catch (err) {
-    logger.error({ err, sprintId: sprint.id }, 'Error creating retro meeting record');
+    logger.error(
+      { err, sprintId: sprint.id },
+      'Error creating retro meeting record',
+    );
     return null;
   }
 }
@@ -145,9 +151,7 @@ function formatRetroMessage(retro: RetrospectiveData): string {
     return Object.values(gates).some((v) => v === 'FAIL');
   });
 
-  const lines: string[] = [
-    `*Sprint Complete: ${sprint.name}*`,
-  ];
+  const lines: string[] = [`*Sprint Complete: ${sprint.name}*`];
 
   if (sprint.goal) {
     lines.push(`_${sprint.goal}_`);
@@ -159,9 +163,13 @@ function formatRetroMessage(retro: RetrospectiveData): string {
   if (meta.never_started_count > 0) {
     lines.push(`• Blocked/never started: ${meta.never_started_count}`);
   }
-  lines.push(`• Avg cycle time: ${meta.avg_cycle_time_hours.toFixed(1)}h`);
+  if (meta.avg_cycle_time_hours != null) {
+    lines.push(`• Avg cycle time: ${meta.avg_cycle_time_hours.toFixed(1)}h`);
+  }
   if (gateFailures.length > 0) {
-    lines.push(`• Gate failures: ${gateFailures.map((t) => t.title).join(', ')}`);
+    lines.push(
+      `• Gate failures: ${gateFailures.map((t) => t.title).join(', ')}`,
+    );
   }
 
   if (shipped.length > 0) {
@@ -197,7 +205,9 @@ export async function checkForCompletedSprints(
 ): Promise<void> {
   if (isStoppingFn()) return;
 
-  const log = createCorrelationLogger(undefined, { op: 'sprint-retro-watcher' });
+  const log = createCorrelationLogger(undefined, {
+    op: 'sprint-retro-watcher',
+  });
   log.trace('Sprint retro watcher poll cycle start');
 
   const target = findCeoJid(deps);
@@ -229,7 +239,10 @@ export async function checkForCompletedSprints(
   const newlyCompleted = sprints.filter((s) => !processed.has(s.id));
 
   if (newlyCompleted.length === 0) {
-    log.debug({ total: sprints.length }, 'All completed sprints already reported');
+    log.debug(
+      { total: sprints.length },
+      'All completed sprints already reported',
+    );
     return;
   }
 
@@ -245,14 +258,6 @@ export async function checkForCompletedSprints(
     if (!retro) {
       log.warn({ sprintId: sprint.id }, 'Skipping sprint — retro fetch failed');
       continue;
-    }
-
-    const meetingId = await createRetroMeeting(sprint);
-    if (meetingId) {
-      log.info(
-        { sprintId: sprint.id, sprintName: sprint.name, meetingId },
-        'Retro meeting record created',
-      );
     }
 
     const message = formatRetroMessage(retro);

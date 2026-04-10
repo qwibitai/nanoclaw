@@ -411,13 +411,17 @@ async function dispatchTask(
   if (task.repository) {
     worktreePath = createWorktree(process.cwd(), task.id);
     if (worktreePath) {
-      log.info({ taskId: task.id, worktreePath }, 'Worktree created for dispatch');
+      log.info(
+        { taskId: task.id, worktreePath },
+        'Worktree created for dispatch',
+      );
     }
   }
 
   // Inject worktree context into the prompt so the agent knows where to work.
   const prompt = worktreePath
-    ? basePrompt + [
+    ? basePrompt +
+      [
         '',
         '## Isolated Git Worktree',
         '',
@@ -428,12 +432,16 @@ async function dispatchTask(
     : basePrompt;
 
   // --- Phase 1b: Acquire slot (acquiring state) ---
-  let claim: { slotId: number; slotIndex: number; slotJid: string; worktreePath: string | null } | null = null;
+  let claim: {
+    slotId: number;
+    slotIndex: number;
+    slotJid: string;
+    worktreePath: string | null;
+  } | null = null;
 
   if (isWorkerSlot) {
-    const branchId = task.assigned_to && task.assigned_to !== 'hold'
-      ? task.assigned_to
-      : null;
+    const branchId =
+      task.assigned_to && task.assigned_to !== 'hold' ? task.assigned_to : null;
 
     claim = await claimSlot(task.id, branchId, localTaskId, worktreePath);
     if (claim === null) {
@@ -565,6 +573,7 @@ async function dispatchTask(
         const res = await agencyFetch(`/tasks/${task.id}`, {
           method: 'PUT',
           body: JSON.stringify({
+            status: 'done',
             context: mergedContext,
           }),
         });

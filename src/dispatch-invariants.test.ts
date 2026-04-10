@@ -148,7 +148,13 @@ describe('Invariant 1: slot count never exceeds PARALLEL_DISPATCH_WORKERS', () =
     const ids: number[] = [];
     for (let i = 0; i < PARALLEL_DISPATCH_WORKERS; i++) {
       ids.push(
-        insertAcquiringSlot(i, `task-fill-${i}`, null, `local-fill-${i}`, null)!,
+        insertAcquiringSlot(
+          i,
+          `task-fill-${i}`,
+          null,
+          `local-fill-${i}`,
+          null,
+        )!,
       );
     }
 
@@ -156,7 +162,12 @@ describe('Invariant 1: slot count never exceeds PARALLEL_DISPATCH_WORKERS', () =
     freeSlot(ids[2], 'task-fill-2');
 
     // Exactly one new claim should succeed and restore the count to 4
-    const newClaim = claimSlot('task-replacement', null, 'local-replacement', null);
+    const newClaim = claimSlot(
+      'task-replacement',
+      null,
+      'local-replacement',
+      null,
+    );
     expect(newClaim).not.toBeNull();
     expect(getActiveSlots()).toHaveLength(PARALLEL_DISPATCH_WORKERS);
   });
@@ -240,7 +251,13 @@ describe('Invariant 2: SIGKILL worker releases slot within one poll cycle', () =
 describe('Invariant 3: branch collision triggers yield, not deadlock', () => {
   it('prevents a second task with the same branch_id from claiming any slot', () => {
     // Task A claims a slot on branch 'agent/alice'
-    const slotA = insertAcquiringSlot(0, 'ahq-A', 'agent/alice', 'local-A', null);
+    const slotA = insertAcquiringSlot(
+      0,
+      'ahq-A',
+      'agent/alice',
+      'local-A',
+      null,
+    );
     expect(slotA).not.toBeNull();
 
     // Task B with the same branch must be deferred for every slot index
@@ -283,7 +300,13 @@ describe('Invariant 3: branch collision triggers yield, not deadlock', () => {
   });
 
   it('allows two tasks with different branch_ids to hold slots simultaneously', () => {
-    const slotA = insertAcquiringSlot(0, 'ahq-A', 'agent/alice', 'local-A', null);
+    const slotA = insertAcquiringSlot(
+      0,
+      'ahq-A',
+      'agent/alice',
+      'local-A',
+      null,
+    );
     const slotB = insertAcquiringSlot(1, 'ahq-B', 'agent/bob', 'local-B', null);
 
     expect(slotA).not.toBeNull();
@@ -307,7 +330,10 @@ describe('Invariant 4: 3 failed dispatch attempts → task marked blocked with d
     const mockFetch = vi.mocked(agencyFetch);
 
     // Captured PUT payloads to /tasks/task-retry
-    const capturedPuts: Array<{ status?: string; dispatch_blocked_until?: string }> = [];
+    const capturedPuts: Array<{
+      status?: string;
+      dispatch_blocked_until?: string;
+    }> = [];
 
     mockFetch.mockImplementation(async (path: string, opts?: RequestInit) => {
       if (path === '/tasks?status=ready') {
@@ -337,7 +363,9 @@ describe('Invariant 4: 3 failed dispatch attempts → task marked blocked with d
     expect(blockedPut!.dispatch_blocked_until).toBeTruthy();
 
     // dispatch_blocked_until must be a valid future timestamp (24 h window)
-    const blockedUntilMs = new Date(blockedPut!.dispatch_blocked_until!).getTime();
+    const blockedUntilMs = new Date(
+      blockedPut!.dispatch_blocked_until!,
+    ).getTime();
     expect(blockedUntilMs).toBeGreaterThan(Date.now());
     // Sanity: no more than 25 h in the future
     expect(blockedUntilMs).toBeLessThan(Date.now() + 25 * 60 * 60_000);
@@ -457,7 +485,9 @@ describe('Invariant 5: startup reconciliation frees orphaned acquiring rows', ()
   it('re-queues the AHQ task via fetch when recoverStaleSlots is called at startup', async () => {
     // recoverStaleSlots() uses the global fetch() directly (not agencyFetch),
     // so we stub the global rather than the agency-hq-client mock.
-    const fetchStub = vi.fn().mockResolvedValue(mockResponse({ success: true }));
+    const fetchStub = vi
+      .fn()
+      .mockResolvedValue(mockResponse({ success: true }));
     vi.stubGlobal('fetch', fetchStub);
 
     vi.useFakeTimers();

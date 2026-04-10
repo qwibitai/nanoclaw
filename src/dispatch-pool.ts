@@ -102,41 +102,67 @@ async function claimSlotPg(
     throw new Error(`[dispatch-slots] claim failed: ${res.status} ${body}`);
   }
 
-  const json = (await res.json()) as { success: boolean; data: { slot_index: number } };
+  const json = (await res.json()) as {
+    success: boolean;
+    data: { slot_index: number };
+  };
   const slotIndex = json.data.slot_index;
-  return { slotId: slotIndex, slotIndex, slotJid: workerSlotJid(slotIndex), worktreePath };
+  return {
+    slotId: slotIndex,
+    slotIndex,
+    slotJid: workerSlotJid(slotIndex),
+    worktreePath,
+  };
 }
 
 async function markSlotExecutingPg(slotIndex: number): Promise<void> {
-  const res = await fetch(`${AGENCY_HQ_URL}/api/v1/dispatch-slots/${slotIndex}/executing`, {
-    method: 'PUT',
-    signal: AbortSignal.timeout(10_000),
-  });
+  const res = await fetch(
+    `${AGENCY_HQ_URL}/api/v1/dispatch-slots/${slotIndex}/executing`,
+    {
+      method: 'PUT',
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    logger.warn({ slotIndex, status: res.status, body }, '[dispatch-slots] markExecuting failed');
+    logger.warn(
+      { slotIndex, status: res.status, body },
+      '[dispatch-slots] markExecuting failed',
+    );
   }
 }
 
 async function markSlotReleasingPg(slotIndex: number): Promise<void> {
-  const res = await fetch(`${AGENCY_HQ_URL}/api/v1/dispatch-slots/${slotIndex}/releasing`, {
-    method: 'PUT',
-    signal: AbortSignal.timeout(10_000),
-  });
+  const res = await fetch(
+    `${AGENCY_HQ_URL}/api/v1/dispatch-slots/${slotIndex}/releasing`,
+    {
+      method: 'PUT',
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    logger.warn({ slotIndex, status: res.status, body }, '[dispatch-slots] markReleasing failed');
+    logger.warn(
+      { slotIndex, status: res.status, body },
+      '[dispatch-slots] markReleasing failed',
+    );
   }
 }
 
 async function freeSlotPg(slotIndex: number): Promise<void> {
-  const res = await fetch(`${AGENCY_HQ_URL}/api/v1/dispatch-slots/${slotIndex}`, {
-    method: 'DELETE',
-    signal: AbortSignal.timeout(10_000),
-  });
+  const res = await fetch(
+    `${AGENCY_HQ_URL}/api/v1/dispatch-slots/${slotIndex}`,
+    {
+      method: 'DELETE',
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    logger.warn({ slotIndex, status: res.status, body }, '[dispatch-slots] free failed');
+    logger.warn(
+      { slotIndex, status: res.status, body },
+      '[dispatch-slots] free failed',
+    );
   }
 }
 
@@ -186,7 +212,13 @@ export async function claimSlot(
 
   // --- SQLite backend ---
   for (let i = 0; i < PARALLEL_DISPATCH_WORKERS; i++) {
-    const slotId = insertAcquiringSlot(i, ahqTaskId, branchId, localTaskId, worktreePath);
+    const slotId = insertAcquiringSlot(
+      i,
+      ahqTaskId,
+      branchId,
+      localTaskId,
+      worktreePath,
+    );
     if (slotId !== null) {
       logger.info(
         {
@@ -211,7 +243,10 @@ export async function claimSlot(
  * Transition slot from acquiring → executing.
  * Call when the container process has started (onProcess callback).
  */
-export async function markSlotExecuting(slotId: number, ahqTaskId: string): Promise<void> {
+export async function markSlotExecuting(
+  slotId: number,
+  ahqTaskId: string,
+): Promise<void> {
   if (isDispatchSlotsPgEnabled()) {
     await markSlotExecutingPg(slotId); // slotId === slotIndex in PG backend
   } else {
@@ -233,7 +268,10 @@ export async function markSlotExecuting(slotId: number, ahqTaskId: string): Prom
  * Transition slot from executing → releasing.
  * Call when the container has exited (before writing results to Agency HQ).
  */
-export async function markSlotReleasing(slotId: number, ahqTaskId: string): Promise<void> {
+export async function markSlotReleasing(
+  slotId: number,
+  ahqTaskId: string,
+): Promise<void> {
   if (isDispatchSlotsPgEnabled()) {
     await markSlotReleasingPg(slotId);
   } else {
@@ -255,7 +293,10 @@ export async function markSlotReleasing(slotId: number, ahqTaskId: string): Prom
  * Transition slot to free from any active state.
  * Call in finally blocks after results are written (or on any error path).
  */
-export async function freeSlot(slotId: number, ahqTaskId: string): Promise<void> {
+export async function freeSlot(
+  slotId: number,
+  ahqTaskId: string,
+): Promise<void> {
   if (isDispatchSlotsPgEnabled()) {
     await freeSlotPg(slotId);
   } else {
@@ -306,10 +347,7 @@ export async function recoverStaleSlots(): Promise<void> {
 
   if (staleRecords.length === 0) return;
 
-  log.info(
-    { count: staleRecords.length },
-    'Recovering stale dispatch slots',
-  );
+  log.info({ count: staleRecords.length }, 'Recovering stale dispatch slots');
 
   // Clean up any orphaned worktrees from crashed dispatches before re-queuing.
   const orphanedWorktrees = staleRecords.map((r) => r.worktreePath);
@@ -317,7 +355,10 @@ export async function recoverStaleSlots(): Promise<void> {
     try {
       cleanupOrphanedWorktrees(process.cwd(), orphanedWorktrees);
     } catch (err) {
-      log.warn({ err }, 'Failed to clean up orphaned worktrees during recovery');
+      log.warn(
+        { err },
+        'Failed to clean up orphaned worktrees during recovery',
+      );
     }
   }
 
@@ -335,12 +376,15 @@ export async function recoverStaleSlots(): Promise<void> {
 
     // PUT the AHQ task back to ready so it will be dispatched again.
     try {
-      const res = await fetch(`${AGENCY_HQ_URL}/api/v1/tasks/${record.ahqTaskId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'ready' }),
-        signal: AbortSignal.timeout(10_000),
-      });
+      const res = await fetch(
+        `${AGENCY_HQ_URL}/api/v1/tasks/${record.ahqTaskId}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'ready' }),
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
       if (!res.ok) {
         const body = await res.text().catch(() => '');
         log.error(
@@ -381,12 +425,15 @@ async function recoverStaleSlotsFromPg(
 ): Promise<void> {
   let freedTaskIds: string[] = [];
   try {
-    const res = await fetch(`${AGENCY_HQ_URL}/api/v1/dispatch-slots/reconcile`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-      signal: AbortSignal.timeout(15_000),
-    });
+    const res = await fetch(
+      `${AGENCY_HQ_URL}/api/v1/dispatch-slots/reconcile`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       log.error({ status: res.status, body }, 'Dispatch slot reconcile failed');
@@ -404,7 +451,10 @@ async function recoverStaleSlotsFromPg(
 
   if (freedTaskIds.length === 0) return;
 
-  log.info({ count: freedTaskIds.length }, 'Recovering stale PG dispatch slots');
+  log.info(
+    { count: freedTaskIds.length },
+    'Recovering stale PG dispatch slots',
+  );
 
   for (const ahqTaskId of freedTaskIds) {
     log.warn({ ahqTaskId }, 'Freed stale PG slot, re-queuing AHQ task');
@@ -425,7 +475,10 @@ async function recoverStaleSlotsFromPg(
         log.info({ ahqTaskId }, 'AHQ task re-queued after PG slot recovery');
       }
     } catch (err) {
-      log.error({ err, ahqTaskId }, 'Error re-queuing AHQ task after PG slot recovery');
+      log.error(
+        { err, ahqTaskId },
+        'Error re-queuing AHQ task after PG slot recovery',
+      );
     }
   }
 }
@@ -543,7 +596,11 @@ async function drainSlotsPg(
   deadline: number,
   timeoutMs: number,
 ): Promise<void> {
-  interface ActiveSlot { slot_index: number; ahq_task_id: string; status: string }
+  interface ActiveSlot {
+    slot_index: number;
+    ahq_task_id: string;
+    status: string;
+  }
 
   const fetchActive = async (): Promise<ActiveSlot[]> => {
     const res = await fetch(`${AGENCY_HQ_URL}/api/v1/dispatch-slots/active`, {
@@ -557,7 +614,10 @@ async function drainSlotsPg(
   let active = await fetchActive();
   if (active.length === 0) return;
 
-  log.info({ count: active.length, timeoutMs }, 'Drain (PG): waiting for in-flight workers');
+  log.info(
+    { count: active.length, timeoutMs },
+    'Drain (PG): waiting for in-flight workers',
+  );
 
   while (Date.now() < deadline) {
     await new Promise((res) => setTimeout(res, 500));
@@ -572,7 +632,10 @@ async function drainSlotsPg(
   active = await fetchActive();
   if (active.length === 0) return;
 
-  log.warn({ count: active.length, timeoutMs }, 'Drain (PG) timeout: reverting tasks to ready');
+  log.warn(
+    { count: active.length, timeoutMs },
+    'Drain (PG) timeout: reverting tasks to ready',
+  );
 
   for (const slot of active) {
     try {
@@ -583,9 +646,15 @@ async function drainSlotsPg(
         signal: AbortSignal.timeout(5_000),
       });
       await freeSlotPg(slot.slot_index);
-      log.warn({ ahqTaskId: slot.ahq_task_id, slotIndex: slot.slot_index }, 'Drain (PG): task reverted, slot freed');
+      log.warn(
+        { ahqTaskId: slot.ahq_task_id, slotIndex: slot.slot_index },
+        'Drain (PG): task reverted, slot freed',
+      );
     } catch (err) {
-      log.error({ err, ahqTaskId: slot.ahq_task_id }, 'Drain (PG): error reverting task');
+      log.error(
+        { err, ahqTaskId: slot.ahq_task_id },
+        'Drain (PG): error reverting task',
+      );
     }
   }
 }
@@ -604,7 +673,9 @@ async function drainSlotsPg(
 export function flushOnShutdown(): void {
   if (isDispatchSlotsPgEnabled()) {
     // PG slots are durable in PostgreSQL; just log.
-    logger.info('[slot] Shutdown (PG): slots remain in PostgreSQL, will reconcile on next startup');
+    logger.info(
+      '[slot] Shutdown (PG): slots remain in PostgreSQL, will reconcile on next startup',
+    );
     return;
   }
 

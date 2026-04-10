@@ -1,3 +1,5 @@
+import { execSync } from 'child_process';
+
 import { CronExpressionParser } from 'cron-parser';
 import type pino from 'pino';
 
@@ -32,6 +34,8 @@ export interface TaskIpcData {
   trigger?: string;
   requiresTrigger?: boolean;
   containerConfig?: RegisteredGroup['containerConfig'];
+  // For reload_service
+  service?: string;
 }
 
 /**
@@ -350,6 +354,47 @@ export async function handleTaskIpc(
         );
       }
       break;
+
+    case 'reload_service': {
+      // Only main group or ops group may trigger service reloads
+      if (!isMain && sourceGroup !== 'ops') {
+        _log.warn(
+          { sourceGroup },
+          'Unauthorized reload_service attempt blocked',
+        );
+        break;
+      }
+      const service = data.service;
+      if (!service || !/^[a-zA-Z0-9_-]+$/.test(service)) {
+        _log.warn(
+          { service },
+          'Invalid or missing service name in reload_service IPC',
+        );
+        break;
+      }
+      try {
+        const pidOutput = execSync(
+          `systemctl --user show ${service}.service --property MainPID --value`,
+          { encoding: 'utf-8' },
+        ).trim();
+        const pid = parseInt(pidOutput, 10);
+        if (!pid || pid <= 1) {
+          _log.warn(
+            { service, pidOutput },
+            'Service not running or PID unavailable',
+          );
+          break;
+        }
+        process.kill(pid, 'SIGHUP');
+        _log.info(
+          { service, pid, sourceGroup },
+          'SIGHUP sent to service via reload_service IPC',
+        );
+      } catch (err) {
+        _log.error({ err, service }, 'Failed to send SIGHUP to service');
+      }
+      break;
+    }
 
     default:
       _log.warn({ type: data.type }, 'Unknown IPC task type');

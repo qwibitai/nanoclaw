@@ -327,14 +327,11 @@ export class TelegramChannel implements Channel {
         process.env.MUSIC_STORE_URL || 'http://localhost:3022';
 
       try {
-        const resp = await fetch(
-          `${musicStoreUrl}/api/v1/playlists/smart`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(filters),
-          },
-        );
+        const resp = await fetch(`${musicStoreUrl}/api/v1/playlists/smart`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(filters),
+        });
         if (!resp.ok) throw new Error(`Music Store returned ${resp.status}`);
 
         const data = (await resp.json()) as {

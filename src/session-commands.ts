@@ -200,7 +200,12 @@ async function handleClear(
     // Archive transcript from host side (provider-agnostic — no agent-runner needed)
     const sessionId = deps.getSessionId?.(deps.groupFolder);
     if (sessionId && deps.claudeConfigDir && deps.groupDir) {
-      archiveTranscript(sessionId, deps.claudeConfigDir, deps.groupDir, deps.assistantName);
+      archiveTranscript(
+        sessionId,
+        deps.claudeConfigDir,
+        deps.groupDir,
+        deps.assistantName,
+      );
     }
 
     // Delete session from DB and in-memory state

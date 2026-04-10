@@ -152,7 +152,9 @@ describe('Scenario 1: 4 simultaneous dispatches — slot count never exceeds PAR
     expect(active).toHaveLength(PARALLEL_DISPATCH_WORKERS);
 
     // Only 4 tasks were enqueued — the 5th was blocked at the pre-check.
-    expect(deps.queue.enqueueTask).toHaveBeenCalledTimes(PARALLEL_DISPATCH_WORKERS);
+    expect(deps.queue.enqueueTask).toHaveBeenCalledTimes(
+      PARALLEL_DISPATCH_WORKERS,
+    );
   });
 
   it('frees a slot and allows a new dispatch on the next tick, keeping total at 4', async () => {
@@ -421,7 +423,13 @@ describe('Scenario 3: SIGKILL mid-execution — slot released within one poll cy
     expect(getActiveSlots()).toHaveLength(PARALLEL_DISPATCH_WORKERS - 1);
 
     // Confirm the freed slot accepts a new claim immediately.
-    const refill = insertAcquiringSlot(2, 'ahq-refill', null, 'local-refill', null);
+    const refill = insertAcquiringSlot(
+      2,
+      'ahq-refill',
+      null,
+      'local-refill',
+      null,
+    );
     expect(refill).not.toBeNull();
     expect(getActiveSlots()).toHaveLength(PARALLEL_DISPATCH_WORKERS);
   });

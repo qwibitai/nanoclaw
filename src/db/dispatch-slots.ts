@@ -61,7 +61,14 @@ export function insertAcquiringSlot(
          (slot_index, ahq_task_id, branch_id, local_task_id, worktree_path, state, acquired_at)
          VALUES (?, ?, ?, ?, ?, 'acquiring', ?)`,
       )
-      .run(slotIndex, ahqTaskId, branchId, localTaskId, worktreePath, new Date().toISOString());
+      .run(
+        slotIndex,
+        ahqTaskId,
+        branchId,
+        localTaskId,
+        worktreePath,
+        new Date().toISOString(),
+      );
     return result.lastInsertRowid as number;
   } catch {
     // Unique constraint: slot occupied
@@ -242,9 +249,7 @@ export function recoverStaleSlotRecords(): StaleSlotResult[] {
 export function pruneFreedSlots(): number {
   const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60_000).toISOString();
   const result = db
-    .prepare(
-      `DELETE FROM dispatch_slots WHERE state = 'free' AND freed_at < ?`,
-    )
+    .prepare(`DELETE FROM dispatch_slots WHERE state = 'free' AND freed_at < ?`)
     .run(cutoff);
   return result.changes;
 }

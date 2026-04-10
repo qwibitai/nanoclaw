@@ -34,7 +34,10 @@ export function worktreesRoot(repoPath: string): string {
  * is not a git repo or worktree creation fails. Failure is non-fatal — the
  * dispatch proceeds without worktree isolation.
  */
-export function createWorktree(repoPath: string, ahqTaskId: string): string | null {
+export function createWorktree(
+  repoPath: string,
+  ahqTaskId: string,
+): string | null {
   const shortId = ahqTaskId.slice(0, 8);
   const branchName = `dispatch/${shortId}`;
   const root = worktreesRoot(repoPath);
@@ -70,10 +73,9 @@ export function createWorktree(repoPath: string, ahqTaskId: string): string | nu
  */
 export function removeWorktree(repoPath: string, worktreePath: string): void {
   try {
-    execSync(
-      `git -C "${repoPath}" worktree remove --force "${worktreePath}"`,
-      { stdio: 'pipe' },
-    );
+    execSync(`git -C "${repoPath}" worktree remove --force "${worktreePath}"`, {
+      stdio: 'pipe',
+    });
     logger.info({ worktreePath }, '[worktree] removed');
   } catch (removeErr) {
     logger.warn(
@@ -87,7 +89,10 @@ export function removeWorktree(repoPath: string, worktreePath: string): void {
       }
       execSync(`git -C "${repoPath}" worktree prune`, { stdio: 'pipe' });
     } catch (fallbackErr) {
-      logger.warn({ fallbackErr, worktreePath }, '[worktree] manual cleanup also failed');
+      logger.warn(
+        { fallbackErr, worktreePath },
+        '[worktree] manual cleanup also failed',
+      );
     }
   }
 }

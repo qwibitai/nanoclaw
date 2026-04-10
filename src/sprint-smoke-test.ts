@@ -47,9 +47,8 @@ export function evaluateGates(stats: GateStats): GateResult {
   }
 
   if (stats.has_test_rows) {
-    const agents = stats.test_agents.length > 0
-      ? ` (${stats.test_agents.join(', ')})`
-      : '';
+    const agents =
+      stats.test_agents.length > 0 ? ` (${stats.test_agents.join(', ')})` : '';
     fail_reasons.push(`Test rows detected${agents}`);
   }
 

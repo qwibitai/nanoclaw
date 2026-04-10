@@ -126,11 +126,15 @@ describe('validateCommandArgs', () => {
       expect(validateCommandArgs('free', ['-m'])).toBeNull();
       expect(validateCommandArgs('ps', ['aux'])).toBeNull();
       expect(validateCommandArgs('jq', ['.', '/tmp/data.json'])).toBeNull();
+      expect(validateCommandArgs('node', ['--version'])).toBeNull();
       expect(
-        validateCommandArgs('node', ['--version']),
-      ).toBeNull();
-      expect(
-        validateCommandArgs('journalctl', ['--user', '-u', 'agency-hq', '-n', '50']),
+        validateCommandArgs('journalctl', [
+          '--user',
+          '-u',
+          'agency-hq',
+          '-n',
+          '50',
+        ]),
       ).toBeNull();
     });
   });

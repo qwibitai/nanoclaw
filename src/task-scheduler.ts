@@ -279,9 +279,7 @@ export async function runScheduledTask(
     const truncatedError =
       error.length > 300 ? `${error.slice(0, 297)}...` : error;
     const truncatedPrompt =
-      task.prompt.length > 80
-        ? `${task.prompt.slice(0, 77)}...`
-        : task.prompt;
+      task.prompt.length > 80 ? `${task.prompt.slice(0, 77)}...` : task.prompt;
     await deps
       .sendMessage(
         task.chat_jid,

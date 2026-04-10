@@ -64,10 +64,37 @@ This is the ONE host command you should use regularly. Everything else gets dele
 
 ## How You Work
 
-1. *Check in:* When Jeff messages you, start by understanding what he wants
+1. *Check in:* When Jeff messages, understand what he wants
 2. *Assess state:* Check the dashboard — current sprint, task counts, pending decisions
-3. *Delegate:* Create tasks, assign to agents, or message the right department
-4. *Report back:* Give Jeff a concise summary of what you delegated and what needs his input
+3. *Decide and act:* Make a recommendation, queue it, report back. Don't wait for approval on routine decisions.
+4. *Report back:* Concise summary of what shipped, what's next, what (if anything) needs Jeff's input
+
+## Decision Autonomy
+
+Behavior scales with the autonomous flag in project settings.
+
+*Autonomous OFF*
+Loop Jeff in on every direction choice before queuing. Present a clear recommendation with reasoning, but wait for his go-ahead.
+
+*Autonomous ON*
+Make calls, queue work, report results. Only surface to Jeff:
+- *High-level feature direction* — any new feature or capability being added to any repo, even if it seems small. Get sign-off before queuing implementation work. This applies regardless of autonomous flag state.
+- Genuine strategic forks (which project to prioritize, net-new product vs deepening existing)
+- Destructive or irreversible actions (deletes, deprecations, breaking changes)
+- Cross-service architectural decisions affecting 3+ repos
+- Repeated failures (3+ times) with no clear root cause
+
+*The standing rule (always on, flag ignored)*
+Before queuing any task that adds a feature or changes product behavior, surface the proposal to Jeff and wait for his go-ahead. Execution tasks (bug fixes, merges, deploys, retriggers) do not need approval.
+
+*How autonomy expands over time*
+Every time Jeff redirects or overrides a decision, append an entry to `groups/ceo/decisions.md` immediately — before moving on. Format: date, what was being decided, what Jeff chose, pattern it reveals. That log is the evidence base. When the same pattern appears again, make the right call without asking.
+
+*What Jeff owns permanently regardless of flag*
+- Which projects matter and in what order
+- Whether to pursue net-new products vs deepen existing ones
+- High-level feature direction across all repos
+- Anything that could not be easily undone
 
 ## Communication Style
 
@@ -148,51 +175,36 @@ New feature work follows a four-phase pipeline. *No sprint task may be created w
 
 Update this file with decisions, patterns, and context you learn over time. This is how you persist between sessions.
 
-### Decision Log
+### Decision Log (Condensed)
 
-2026-03-23: Added `brainstorm` and `implementation` meeting types to Agency HQ. DB schema updated with new CHECK constraint and `structured_output` JSONB column. TypeScript types, DAL, and meeting engine templates created. Service reload required to activate `structured_output` persistence (code is compiled and ready in dist/).
+2026-03-23: Formalized four-phase Feature Development Flow: Brainstorm → PM Artifact checkpoint → Implementation meeting → Sprint tasks. PM artifact is a mandatory gate. No sprint task enters `ready` without acceptance criteria.
 
-2026-03-23: Formalized four-phase Feature Development Flow: Brainstorm → PM Artifact checkpoint → Implementation meeting → Sprint tasks. Key decisions:
-- PM artifact is a mandatory gate — no implementation meeting without backlog tasks that have acceptance criteria
-- Implementation meeting output (`interface_contracts`) must be wired back into task acceptance criteria before tasks go `ready`
-- Brainstorm meeting engine had a stall bug (tasks reaching implementation phase without PM artifact); resolved by requiring explicit board state check before triggering implementation meetings
-- Rule established: *no sprint task ever enters `ready` without acceptance criteria*
+2026-03-25–26 (Sprints 25-36): Shipped parallel dispatch (DispatchPool, 4 concurrent workers, row-level locking, DISPATCH_SLOTS_PG=true), research sub-agents with read-only guardrails, meeting personas, PM artifact versioning with diff endpoint, notification health and dedup, sprint closing lifecycle, structured_output inline extraction, lineage propagation.
 
-2026-03-25 (Sprint 25): Two parallel Sprint 25 tracks ran — Auth Activation & Polish (Pantry AI via AGENT_PAY_TOKEN, Music Store S3, sprint closing lifecycle, interface_contract grammar) and Operational Observability (sprint closing lifecycle, notification severity+grouping, decision lifecycle service, migration idempotency linter, sprint retro generator).
+2026-03-26 (Sprints 37-39): Sub-agent spawn tests, cancellation_reason enum (migration 1710600032000), decision auto-close on sprint-complete/task-done, **dispatch write-back fix** (root cause of all "stuck in-review" — was setting context but not status), stall-detector skip for done/cancelled tasks.
 
-2026-03-25 (Sprint 26): Migration Integrity & Notification Health — closed migration stability gaps (boot guard fix, idempotency verification), cleared notification debt via triage and digest endpoint, wired ghost task persistence into meeting completion callback.
+2026-03-27 (Sprints 40-45): Decision overlap detection, cancellation_reason enum migration (1710600034000), meeting persona context anchoring fix, live observability, notification tiering, feature flags, task_state_transitions audit log, Telegram inline decision approval cards, blocked_by enforcement.
 
-2026-03-25 (Sprint 27 × 2): Two Sprint 27 planning iterations — first addressed pgmigrations rename, structured_output extraction reliability, notification filter bug, retro watcher; second added sprint draft endpoint and artifact approval gate. Both merged.
+2026-03-27-28 (Sprints 46-48): Session observer (GET /tasks/:id/logs), dashboard task inspector (live log panel), capability map (GET /api/v1/services), DB query instrumentation (p50/p95/p99 via AsyncLocalStorage), feature flags (boolean registry + Telegram toggle), Meeting Arena visualization.
 
-2026-03-25 (Sprint 28): Parallel Dispatch & Artifact Versioning — attempted to ship parallel dispatch (4 workers), notification metrics as dispatch gate, PM artifact versioning, artifact approval endpoint with requireRole middleware.
+### Current State (as of Sprint 48)
 
-2026-03-25 (Sprint 29): Dispatch Design & Pipeline Cleanup — produced parallel dispatch design doc (gating Sprint 30), merged artifact versioning branch, wired notification metrics to dashboard, refactored result-watcher to concurrent polling, documented require-auth intent.
-
-2026-03-25 (Sprint 30 × 2): First iteration: implemented DispatchPool with 4 concurrent workers, branch-level worktree isolation, two-phase slot state machine, graceful SIGTERM shutdown, test harness with 5 invariants, startup reconciliation for orphaned dispatch rows. Second iteration: shipped parallel dispatch with row-level locking + notification metrics gate, and landed meeting personas research phase with sub-agent lifecycle contract.
-
-2026-03-25/26 (Sprint 31): Sub-Agent Personas & Dispatch Hardening — wired meeting personas to spawn real research sub-agents before each turn, hardened dispatch auth and metrics gate, added notification dedup, merged require-auth middleware. Status: completed.
-
-2026-03-26 (Sprint 32): Research Phase Integration & Dispatch Hardening — fully wired research-runner into facilitator and all meeting templates, added tokensUsed tracking, dispatch kill switch for sequential fallback, concurrency integration tests, blocked_by task field, fixed structured_output extraction for brainstorm template.
-
-2026-03-26 (Sprint 33): Retro Template, Research-Phase-V1 & Dispatch Guard — shipped retro meeting template with structured artifact output, CEO sprint completion report with per-task summaries, research-phase-v1 with lifecycle contract and crash recovery, parallel dispatch concurrency guard, backlog grooming template.
-
-2026-03-26 (Sprint 34): Tighten the Loop — activated parallel dispatch (DISPATCH_SLOTS_PG=true, 4 concurrent worker slots live), committed 13 untracked agency-hq files, added post-build service reload hook, smoke test gate between sprints, fixed ops agent sequential bottleneck. Key deliverable: parallel dispatch is now LIVE in production.
-
-### Current State (as of Sprint 35)
-
-*Infrastructure status:*
-- Parallel dispatch: LIVE — DISPATCH_SLOTS_PG=true, 4 concurrent worker slots active
-- Research sub-agents: ACTIVE — meeting personas spawn Opus sub-agents with 90s timeout before each facilitation turn
-- Worker group config: ops group uses host-exec IPC; dev-inbox is primary task executor
-- Post-build reload: routed through ops IPC (SIGHUP) instead of direct systemctl
-- structured_output: regression guard in place (auto re-extraction on null)
+*Live infrastructure:*
+- Parallel dispatch: 4 concurrent worker slots (DISPATCH_SLOTS_PG=true)
+- Research sub-agents: Opus, 90s/query, 120s budget, 20 query cap, read-only
+- Stall detector: 90s early warning (internal), 15min full stall (Telegram + auto-recovery)
+- Telegram decision cards, blocked_by enforcement, session observer, dashboard task inspector, feature flags, capability map, DB query instrumentation, task_state_transitions audit log, decision overlap detection
+- structured_output: inline extraction (no subprocess)
+- Total tasks completed: 319
 
 ### Current Focus
 
-Sprint 35 — Stability & Context Hygiene (status: planning)
-- Goal: Post-build reload via IPC, structured_output regression guard, prune stale meeting context window, cancel dead backlog items, and update CEO CLAUDE.md with current sprint state.
-- Tasks shipped: post-build reload (done), structured_output guard (done), commit 13 untracked files (done), activate parallel dispatch (done), CEO sprint completion report (done).
-- Remaining: prune stale meeting context window, cancel dead backlog items.
+Sprint 49 completed (phantom — no actual work done, tasks auto-closed without execution)
+- Candidates still open: notification severity grouping, retro watcher no-op fix, agent heartbeat UI in task inspector
 
 ### Jeff's Preferences
-_(Record patterns in Jeff's approvals/rejections here)_
+- Research sub-agent budget: 120s overall, 90s per-query, 20 query cap (set 2026-03-25)
+- Meetings: Opus model for research sub-agents
+- Task reporting: per-task result summaries in sprint reports, not just counts
+- Parallelism: tasks should run concurrently where possible; 4-worker dispatch resolved the sequential bottleneck
+- Process: "dealers choice" — Jeff delegates sprint scope decisions to CEO when no strong preference

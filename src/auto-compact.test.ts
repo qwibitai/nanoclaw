@@ -35,7 +35,13 @@ describe('shouldTriggerAutoCompact', () => {
 
   it('returns false when disabled', () => {
     const usage: UsageSnapshot = { inputTokens: 180000, contextWindow: 200000 };
-    expect(shouldTriggerAutoCompact(usage, { enabled: false, threshold: 0.8 }, false)).toBe(false);
+    expect(
+      shouldTriggerAutoCompact(
+        usage,
+        { enabled: false, threshold: 0.8 },
+        false,
+      ),
+    ).toBe(false);
   });
 
   it('returns false when already compacted this session', () => {
@@ -69,19 +75,38 @@ describe('shouldTriggerAutoCompact', () => {
 
   it('respects custom threshold (e.g. 0.5)', () => {
     const usage: UsageSnapshot = { inputTokens: 110000, contextWindow: 200000 };
-    expect(shouldTriggerAutoCompact(usage, { enabled: true, threshold: 0.5 }, false)).toBe(true);
+    expect(
+      shouldTriggerAutoCompact(usage, { enabled: true, threshold: 0.5 }, false),
+    ).toBe(true);
   });
 
   it('respects custom threshold below usage', () => {
     const usage: UsageSnapshot = { inputTokens: 90000, contextWindow: 200000 };
-    expect(shouldTriggerAutoCompact(usage, { enabled: true, threshold: 0.5 }, false)).toBe(false);
+    expect(
+      shouldTriggerAutoCompact(usage, { enabled: true, threshold: 0.5 }, false),
+    ).toBe(false);
   });
 
   it('handles very high threshold (0.99)', () => {
     const usage: UsageSnapshot = { inputTokens: 195000, contextWindow: 200000 };
-    expect(shouldTriggerAutoCompact(usage, { enabled: true, threshold: 0.99 }, false)).toBe(false);
-    const usageHigh: UsageSnapshot = { inputTokens: 199000, contextWindow: 200000 };
-    expect(shouldTriggerAutoCompact(usageHigh, { enabled: true, threshold: 0.99 }, false)).toBe(true);
+    expect(
+      shouldTriggerAutoCompact(
+        usage,
+        { enabled: true, threshold: 0.99 },
+        false,
+      ),
+    ).toBe(false);
+    const usageHigh: UsageSnapshot = {
+      inputTokens: 199000,
+      contextWindow: 200000,
+    };
+    expect(
+      shouldTriggerAutoCompact(
+        usageHigh,
+        { enabled: true, threshold: 0.99 },
+        false,
+      ),
+    ).toBe(true);
   });
 
   it('returns false when context window is negative', () => {
@@ -93,7 +118,8 @@ describe('shouldTriggerAutoCompact', () => {
 describe('AUTO_COMPACT config parsing', () => {
   it('clamps threshold between 0 and 1', () => {
     // Simulating the config.ts parsing logic
-    const parseThreshold = (val: string) => Math.min(1, Math.max(0, parseFloat(val)));
+    const parseThreshold = (val: string) =>
+      Math.min(1, Math.max(0, parseFloat(val)));
 
     expect(parseThreshold('0.8')).toBe(0.8);
     expect(parseThreshold('0')).toBe(0);

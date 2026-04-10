@@ -17,7 +17,11 @@ import {
   lockedWorkerSlots,
   resetDispatchLoopState,
 } from './dispatch-loop.js';
-import { drainSlots, recoverStaleSlots, flushOnShutdown } from './dispatch-pool.js';
+import {
+  drainSlots,
+  recoverStaleSlots,
+  flushOnShutdown,
+} from './dispatch-pool.js';
 import { agencyFetch, type AgencyHqTask } from './agency-hq-client.js';
 import { detectStalledTasks, dispatchTime } from './stall-detector.js';
 import {
@@ -69,7 +73,10 @@ export async function reconcileOrphanedDispatches(): Promise<void> {
     };
     tasks = json.data ?? [];
   } catch (err) {
-    log.error({ err }, 'Orphan reconciliation: failed to fetch tasks from Agency HQ');
+    log.error(
+      { err },
+      'Orphan reconciliation: failed to fetch tasks from Agency HQ',
+    );
     return;
   }
 

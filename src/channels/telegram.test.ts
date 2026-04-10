@@ -302,9 +302,7 @@ describe('TelegramChannel', () => {
 
   describe('/music command', () => {
     function getMusicHandler(bot: any) {
-      const call = bot.command.mock.calls.find(
-        (c: any) => c[0] === 'music',
-      );
+      const call = bot.command.mock.calls.find((c: any) => c[0] === 'music');
       return call?.[1];
     }
 
@@ -319,9 +317,7 @@ describe('TelegramChannel', () => {
       };
 
       await handler(ctx);
-      expect(ctx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('Usage:'),
-      );
+      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Usage:'));
     });
 
     it('parses mood filter and calls Music Store API', async () => {
@@ -329,7 +325,12 @@ describe('TelegramChannel', () => {
         ok: true,
         json: async () => ({
           tracks: [
-            { title: 'Chill Vibes', artist: 'DJ Test', bpm: 100, mood: 'chill' },
+            {
+              title: 'Chill Vibes',
+              artist: 'DJ Test',
+              bpm: 100,
+              mood: 'chill',
+            },
           ],
         }),
       } as Response);
@@ -362,7 +363,9 @@ describe('TelegramChannel', () => {
     it('parses bpm range format (120-140)', async () => {
       const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
         ok: true,
-        json: async () => ({ tracks: [{ title: 'Beat', artist: 'A', bpm: 130 }] }),
+        json: async () => ({
+          tracks: [{ title: 'Beat', artist: 'A', bpm: 130 }],
+        }),
       } as Response);
 
       const ch = new TelegramChannel('token123', makeOpts());
@@ -387,7 +390,9 @@ describe('TelegramChannel', () => {
     it('parses single bpm value', async () => {
       const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
         ok: true,
-        json: async () => ({ tracks: [{ title: 'Beat', artist: 'A', bpm: 130 }] }),
+        json: async () => ({
+          tracks: [{ title: 'Beat', artist: 'A', bpm: 130 }],
+        }),
       } as Response);
 
       const ch = new TelegramChannel('token123', makeOpts());
