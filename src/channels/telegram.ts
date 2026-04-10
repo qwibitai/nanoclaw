@@ -12,6 +12,97 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
+/**
+ * Download a Telegram voice file and transcribe it using OpenAI Whisper API.
+ * Returns the transcribed text, or null on failure.
+ */
+async function transcribeVoice(
+  botToken: string,
+  fileId: string,
+  openaiKey: string,
+): Promise<string | null> {
+  try {
+    // 1. Get file path from Telegram
+    const fileRes = await fetch(
+      `https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`,
+    );
+    const fileData = (await fileRes.json()) as any;
+    if (!fileData.ok || !fileData.result?.file_path) {
+      logger.error({ fileData }, 'Failed to get Telegram file path');
+      return null;
+    }
+    const filePath = fileData.result.file_path;
+
+    // 2. Download the audio file
+    const audioRes = await fetch(
+      `https://api.telegram.org/file/bot${botToken}/${filePath}`,
+    );
+    if (!audioRes.ok) {
+      logger.error({ status: audioRes.status }, 'Failed to download voice file');
+      return null;
+    }
+    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+
+    // 3. Send to OpenAI Whisper API using multipart form data
+    const boundary = '----WhisperBoundary' + Date.now();
+    const fileName = 'voice.ogg';
+
+    // Build multipart body manually
+    const parts: Buffer[] = [];
+
+    // model field
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n`,
+    ));
+
+    // file field
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: audio/ogg\r\n\r\n`,
+    ));
+    parts.push(audioBuffer);
+    parts.push(Buffer.from('\r\n'));
+
+    // closing boundary
+    parts.push(Buffer.from(`--${boundary}--\r\n`));
+
+    const body = Buffer.concat(parts);
+
+    const whisperRes = await fetch(
+      'https://api.openai.com/v1/audio/transcriptions',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiKey}`,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        },
+        body,
+      },
+    );
+
+    if (!whisperRes.ok) {
+      const errText = await whisperRes.text();
+      logger.error(
+        { status: whisperRes.status, body: errText },
+        'Whisper API error',
+      );
+      return null;
+    }
+
+    const result = (await whisperRes.json()) as any;
+    const text = result.text?.trim();
+    if (!text) {
+      logger.warn('Whisper returned empty transcription');
+      return null;
+    }
+
+    logger.info({ length: text.length }, 'Voice message transcribed');
+    return text;
+  } catch (err) {
+    logger.error({ err }, 'Voice transcription failed');
+    return null;
+  }
+}
+
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
@@ -38,6 +129,99 @@ async function sendTelegramMessage(
     // Fallback: send as plain text if Markdown parsing fails
     logger.debug({ err }, 'Markdown send failed, falling back to plain text');
     await api.sendMessage(chatId, text, options);
+  }
+}
+
+// Bot pool for agent teams: send-only Api instances (no polling)
+const poolApis: Api[] = [];
+// Maps "{groupFolder}:{senderName}" → pool Api index for stable assignment
+const senderBotMap = new Map<string, number>();
+let nextPoolIndex = 0;
+
+/**
+ * Initialize send-only Api instances for the bot pool.
+ * Each pool bot can send messages but doesn't poll for updates.
+ */
+export async function initBotPool(tokens: string[]): Promise<void> {
+  for (const token of tokens) {
+    try {
+      const api = new Api(token);
+      const me = await api.getMe();
+      poolApis.push(api);
+      logger.info(
+        { username: me.username, id: me.id, poolSize: poolApis.length },
+        'Pool bot initialized',
+      );
+    } catch (err) {
+      logger.error({ err }, 'Failed to initialize pool bot');
+    }
+  }
+  if (poolApis.length > 0) {
+    logger.info({ count: poolApis.length }, 'Telegram bot pool ready');
+  }
+}
+
+/**
+ * Send a message via a pool bot assigned to the given sender name.
+ * Assigns bots round-robin on first use; subsequent messages from the
+ * same sender in the same group always use the same bot.
+ * On first assignment, renames the bot to match the sender's role.
+ */
+export async function sendPoolMessage(
+  chatId: string,
+  text: string,
+  sender: string,
+  groupFolder: string,
+): Promise<boolean> {
+  if (poolApis.length === 0) {
+    return false;
+  }
+
+  const key = `${groupFolder}:${sender}`;
+  let idx = senderBotMap.get(key);
+  if (idx === undefined) {
+    idx = nextPoolIndex % poolApis.length;
+    nextPoolIndex++;
+    senderBotMap.set(key, idx);
+    // Rename the bot to match the sender's role, then wait for Telegram to propagate
+    try {
+      await poolApis[idx].setMyName(sender);
+      await new Promise((r) => setTimeout(r, 2000));
+      logger.info(
+        { sender, groupFolder, poolIndex: idx },
+        'Assigned and renamed pool bot',
+      );
+    } catch (err) {
+      logger.warn(
+        { sender, err },
+        'Failed to rename pool bot (sending anyway)',
+      );
+    }
+  }
+
+  const api = poolApis[idx];
+  try {
+    const numericId = chatId.replace(/^tg:/, '');
+    const MAX_LENGTH = 4096;
+    if (text.length <= MAX_LENGTH) {
+      await sendTelegramMessage(api, numericId, text);
+    } else {
+      for (let i = 0; i < text.length; i += MAX_LENGTH) {
+        await sendTelegramMessage(
+          api,
+          numericId,
+          text.slice(i, i + MAX_LENGTH),
+        );
+      }
+    }
+    logger.info(
+      { chatId, sender, poolIndex: idx, length: text.length },
+      'Pool message sent',
+    );
+    return true;
+  } catch (err) {
+    logger.error({ chatId, sender, err }, 'Failed to send pool message');
+    return false;
   }
 }
 
@@ -201,8 +385,89 @@ export class TelegramChannel implements Channel {
 
     this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
-    this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
+    // Voice messages: transcribe via Whisper, fall back to placeholder
+    this.bot.on('message:voice', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const envVars = readEnvFile(['OPENAI_API_KEY']);
+      const openaiKey = process.env.OPENAI_API_KEY || envVars.OPENAI_API_KEY;
+      const fileId = ctx.message.voice.file_id;
+
+      if (openaiKey) {
+        const transcription = await transcribeVoice(this.botToken, fileId, openaiKey);
+        if (transcription) {
+          // Deliver transcribed text as a normal message
+          const timestamp = new Date(ctx.message.date * 1000).toISOString();
+          const senderName =
+            ctx.from?.first_name ||
+            ctx.from?.username ||
+            ctx.from?.id.toString() ||
+            'Unknown';
+
+          const isGroup =
+            ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+          this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+          this.opts.onMessage(chatJid, {
+            id: ctx.message.message_id.toString(),
+            chat_jid: chatJid,
+            sender: ctx.from?.id?.toString() || '',
+            sender_name: senderName,
+            content: `[Voice transcription]: ${transcription}`,
+            timestamp,
+            is_from_me: false,
+          });
+
+          logger.info({ chatJid, sender: senderName }, 'Voice message transcribed and stored');
+          return;
+        }
+      }
+
+      // Fall back to placeholder if no API key or transcription failed
+      storeNonText(ctx, '[Voice message]');
+    });
+
+    // Audio files: also transcribe via Whisper
+    this.bot.on('message:audio', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const envVars = readEnvFile(['OPENAI_API_KEY']);
+      const openaiKey = process.env.OPENAI_API_KEY || envVars.OPENAI_API_KEY;
+      const fileId = ctx.message.audio.file_id;
+
+      if (openaiKey) {
+        const transcription = await transcribeVoice(this.botToken, fileId, openaiKey);
+        if (transcription) {
+          const timestamp = new Date(ctx.message.date * 1000).toISOString();
+          const senderName =
+            ctx.from?.first_name ||
+            ctx.from?.username ||
+            ctx.from?.id.toString() ||
+            'Unknown';
+
+          const isGroup =
+            ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+          this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+          this.opts.onMessage(chatJid, {
+            id: ctx.message.message_id.toString(),
+            chat_jid: chatJid,
+            sender: ctx.from?.id?.toString() || '',
+            sender_name: senderName,
+            content: `[Audio transcription]: ${transcription}`,
+            timestamp,
+            is_from_me: false,
+          });
+
+          logger.info({ chatJid, sender: senderName }, 'Audio message transcribed and stored');
+          return;
+        }
+      }
+
+      storeNonText(ctx, '[Audio]');
+    });
     this.bot.on('message:document', (ctx) => {
       const name = ctx.message.document?.file_name || 'file';
       storeNonText(ctx, `[Document: ${name}]`);
