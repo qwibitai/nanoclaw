@@ -85,7 +85,10 @@ interface AppSummary {
   note: string;
 }
 
-const DEFAULT_PORT = parseInt(process.env.NANOCLAW_DASHBOARD_PORT || '4780', 10);
+const DEFAULT_PORT = parseInt(
+  process.env.NANOCLAW_DASHBOARD_PORT || '4780',
+  10,
+);
 const DEFAULT_HOST = process.env.NANOCLAW_DASHBOARD_HOST || '127.0.0.1';
 const HEARTBEAT_STALE_MS = 5000;
 const MAX_LOG_EVENTS = 80;
