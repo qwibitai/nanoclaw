@@ -333,7 +333,9 @@ function createSchema(database: Database.Database): void {
   // 旧スキーマ: registered_groups.folder UNIQUE を解除する
   // thread は parent と同じ folder を共有するため、folder の一意制約は不適切。
   try {
-    const indexes = database.prepare(`PRAGMA index_list('registered_groups')`).all() as Array<{
+    const indexes = database
+      .prepare(`PRAGMA index_list('registered_groups')`)
+      .all() as Array<{
       name: string;
       unique: number;
     }>;
