@@ -267,11 +267,14 @@ The task will run in that group's context with access to their files and memory.
 
 ## Working with Repos
 
-1. Use the `create_worktree` MCP tool to get a working directory for any repo already cloned in this group — returns `/workspace/worktrees/<repo>` with full git access.
-2. NEVER run `git clone` — it is blocked by a hook. Use `create_worktree` for existing repos or `clone_repo` for new ones.
-3. Commit and push regularly — do not lose work.
-4. On thread resume, check `/workspace/worktrees/` for prior work from this session.
-5. Use the `clone_repo` MCP tool for repos not yet cloned in this group.
+1. `create_worktree({ repo: "REPO-NAME" })` — get a working directory at `/workspace/worktrees/<repo>`
+2. Edit files, run tests, iterate
+3. `git_commit({ repo: "REPO-NAME", message: "feat: description" })` — stage + commit
+4. `git_push({ repo: "REPO-NAME" })` — push branch to origin
+5. `open_pr({ repo: "REPO-NAME", title: "...", body: "..." })` — create a GitHub PR
+6. NEVER run `git clone` — it is blocked. Use `create_worktree` for existing repos or `clone_repo` for new ones.
+7. On thread resume, check `/workspace/worktrees/` for prior work from this session.
+8. If you don't commit explicitly, the host auto-commits all dirty worktrees on session exit.
 
 ---
 
