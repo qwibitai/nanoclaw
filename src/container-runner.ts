@@ -229,6 +229,17 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Mount host tmux socket so the agent can spawn tmux sessions on the host
+  // (e.g. for Claude Code or Codex coding sessions)
+  const tmuxSocketDir = `/tmp/tmux-${process.getuid?.() ?? 0}`;
+  if (fs.existsSync(tmuxSocketDir)) {
+    mounts.push({
+      hostPath: tmuxSocketDir,
+      containerPath: tmuxSocketDir,
+      readonly: false,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(

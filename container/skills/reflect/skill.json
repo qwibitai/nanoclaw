@@ -1,0 +1,49 @@
+{
+  "name": "Reflect - Agent Self-Improvement",
+  "emoji": "🪞",
+  "description": "Self-improvement through conversation analysis. Extracts learnings from corrections, success patterns, and session outcomes. Encodes learnings permanently into agent definitions for continuous improvement across all future sessions.",
+  "category": "meta",
+  "author": "Claude Code Toolkit",
+  "version": "2.0.0",
+  "readme": "README.md",
+  "tags": [
+    "reflection",
+    "self-improvement",
+    "learning",
+    "meta",
+    "agent-development",
+    "continuous-improvement"
+  ],
+  "features": [
+    "Signal detection with confidence levels (HIGH/MEDIUM/LOW)",
+    "Automatic category classification (Code Style, Architecture, Process, Domain, Tools)",
+    "Agent file updates with version control",
+    "New skill generation from debugging discoveries",
+    "Metrics tracking and improvement statistics",
+    "Human-in-the-loop approval workflow"
+  ],
+  "repository": "https://github.com/stevengonsalvez/ai-coder-rules",
+  "license": "MIT",
+  "keywords": [
+    "reflect",
+    "self-improvement",
+    "learning",
+    "agent",
+    "corrections",
+    "patterns",
+    "meta-cognition"
+  ],
+  "defaults": {
+    "state_dir": "~/.reflect",
+    "auto_reflect": false,
+    "confidence_threshold": "medium"
+  },
+  "clawdbot": {
+    "triggers": [
+      "reflect",
+      "self-reflect",
+      "review session",
+      "extract learnings"
+    ]
+  }
+}

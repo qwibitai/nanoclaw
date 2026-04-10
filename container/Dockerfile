@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser

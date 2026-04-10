@@ -2,12 +2,18 @@ import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
-import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import {
+  ASSISTANT_NAME,
+  RUNTIME_MODE,
+  SCHEDULER_POLL_INTERVAL,
+  TIMEZONE,
+} from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { runNativeAgent } from './native-runner.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -170,20 +176,24 @@ async function runTask(
   };
 
   try {
-    const output = await runContainerAgent(
+    const taskInput = {
+      prompt: task.prompt,
+      sessionId,
+      groupFolder: task.group_folder,
+      chatJid: task.chat_jid,
+      isMain,
+      isScheduledTask: true,
+      assistantName: ASSISTANT_NAME,
+      script: task.script || undefined,
+    };
+    const onProc = (proc: ChildProcess, name: string) =>
+      deps.onProcess(task.chat_jid, proc, name, task.group_folder);
+    const runAgent =
+      RUNTIME_MODE === 'native' ? runNativeAgent : runContainerAgent;
+    const output = await runAgent(
       group,
-      {
-        prompt: task.prompt,
-        sessionId,
-        groupFolder: task.group_folder,
-        chatJid: task.chat_jid,
-        isMain,
-        isScheduledTask: true,
-        assistantName: ASSISTANT_NAME,
-        script: task.script || undefined,
-      },
-      (proc, containerName) =>
-        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+      taskInput,
+      onProc,
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;

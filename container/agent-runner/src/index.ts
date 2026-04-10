@@ -60,7 +60,14 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
+// Paths are configurable via env vars for native (non-container) execution.
+// In containers these default to the standard /workspace layout.
+const WORKSPACE_GROUP = process.env.NANOCLAW_WORKSPACE_GROUP || '/workspace/group';
+const WORKSPACE_GLOBAL = process.env.NANOCLAW_WORKSPACE_GLOBAL || '/workspace/global';
+const WORKSPACE_EXTRA = process.env.NANOCLAW_WORKSPACE_EXTRA || '/workspace/extra';
+const WORKSPACE_PROJECT = process.env.NANOCLAW_WORKSPACE_PROJECT || '/workspace/project';
+const CLAUDE_HOME = process.env.NANOCLAW_CLAUDE_HOME || '/home/node/.claude';
+const IPC_INPUT_DIR = process.env.NANOCLAW_IPC_INPUT || '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 
@@ -182,7 +189,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const summary = getSessionSummary(sessionId, transcriptPath);
       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
-      const conversationsDir = '/workspace/group/conversations';
+      const conversationsDir = `${WORKSPACE_GROUP}/conversations`;
       fs.mkdirSync(conversationsDir, { recursive: true });
 
       const date = new Date().toISOString().split('T')[0];
@@ -205,6 +212,146 @@ function createPreCompactHook(assistantName?: string): HookCallback {
 
     return {};
   };
+}
+
+/**
+ * Self-reflection hook: scan recent transcript for correction signals.
+ * Runs after each query completes. Detects corrections from humans or build
+ * failures and logs them to self-improving/corrections.md. Promotes repeated
+ * patterns to self-improving/memory.md (HOT tier).
+ */
+async function runSelfReflection(sessionId: string | undefined): Promise<void> {
+  const correctionsPath = `${WORKSPACE_GROUP}/self-improving/corrections.md`;
+  const memoryPath = `${WORKSPACE_GROUP}/self-improving/memory.md`;
+  const dir = `${WORKSPACE_GROUP}/self-improving`;
+
+  // Find the most recent transcript to scan
+  const claudeDir = CLAUDE_HOME;
+  const projectsDir = path.join(claudeDir, 'projects');
+  if (!sessionId || !fs.existsSync(projectsDir)) return;
+
+  // Find transcript file for current session
+  let transcriptPath: string | undefined;
+  try {
+    const walkForSession = (base: string): string | undefined => {
+      for (const entry of fs.readdirSync(base)) {
+        const full = path.join(base, entry);
+        if (fs.statSync(full).isDirectory()) {
+          const found = walkForSession(full);
+          if (found) return found;
+        } else if (entry === `${sessionId}.jsonl`) {
+          return full;
+        }
+      }
+      return undefined;
+    };
+    transcriptPath = walkForSession(projectsDir);
+  } catch {
+    return;
+  }
+
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) return;
+
+  // Read last N lines of transcript (recent messages only)
+  let content: string;
+  try {
+    content = fs.readFileSync(transcriptPath, 'utf-8');
+  } catch {
+    return;
+  }
+
+  const lines = content.split('\n').filter((l) => l.trim());
+  // Only scan the last 20 messages for corrections
+  const recentLines = lines.slice(-20);
+
+  // Correction signal patterns
+  const correctionSignals = [
+    /\bno[,.]?\s+(?:don't|do not|not like that|that's wrong|incorrect)/i,
+    /\bwrong\b/i,
+    /\binstead\b.*\bshould\b/i,
+    /\bshould (?:have |be |use )/i,
+    /\bnever\b.*\bdo that\b/i,
+    /\bstop\b.*\bdoing\b/i,
+    /\bthat's not\b/i,
+    /\bplease don't\b/i,
+    /\bactually[,.]?\s+(?:it|you|the|we|I)/i,
+  ];
+
+  const detectedCorrections: Array<{ text: string; source: string }> = [];
+
+  for (const line of recentLines) {
+    try {
+      const entry = JSON.parse(line);
+      if (entry.type !== 'user' || !entry.message?.content) continue;
+
+      const text =
+        typeof entry.message.content === 'string'
+          ? entry.message.content
+          : entry.message.content
+              .map((c: { text?: string }) => c.text || '')
+              .join('');
+
+      for (const signal of correctionSignals) {
+        if (signal.test(text)) {
+          detectedCorrections.push({ text: text.slice(0, 500), source: 'human' });
+          break;
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  if (detectedCorrections.length === 0) return;
+
+  log(`Self-reflection: detected ${detectedCorrections.length} correction signal(s)`);
+
+  // Write corrections
+  fs.mkdirSync(dir, { recursive: true });
+
+  const now = new Date();
+  const dateStr = now.toISOString().replace('T', ' ').slice(0, 16);
+  let correctionsContent = '';
+
+  if (fs.existsSync(correctionsPath)) {
+    correctionsContent = fs.readFileSync(correctionsPath, 'utf-8');
+  } else {
+    correctionsContent = '# Corrections Log\n\nAutomatically detected correction signals.\n\n';
+  }
+
+  for (const correction of detectedCorrections) {
+    correctionsContent += `\n## ${dateStr} — Detected correction\n`;
+    correctionsContent += `**Signal from:** ${correction.source}\n`;
+    correctionsContent += `**Content:** ${correction.text}\n`;
+    correctionsContent += `**Status:** pending-review\n\n`;
+  }
+
+  fs.writeFileSync(correctionsPath, correctionsContent);
+  log(`Self-reflection: logged ${detectedCorrections.length} correction(s)`);
+
+  // Pattern promotion: count similar corrections. If 3+ pending, promote to memory.
+  const pendingCount = (correctionsContent.match(/\*\*Status:\*\* pending-review/g) || []).length;
+  if (pendingCount >= 3) {
+    let memoryContent = '';
+    if (fs.existsSync(memoryPath)) {
+      memoryContent = fs.readFileSync(memoryPath, 'utf-8');
+    } else {
+      memoryContent = '# Memory (HOT Tier)\n\nPromoted patterns from repeated corrections.\n\n';
+    }
+
+    memoryContent += `\n## ${dateStr} — Promoted pattern (${pendingCount} corrections)\n`;
+    memoryContent += `**Note:** Review self-improving/corrections.md for details. ${pendingCount} pending corrections detected — likely a recurring pattern.\n\n`;
+    fs.writeFileSync(memoryPath, memoryContent);
+
+    // Mark promoted corrections as reviewed
+    correctionsContent = correctionsContent.replace(
+      /\*\*Status:\*\* pending-review/g,
+      '**Status:** promoted',
+    );
+    fs.writeFileSync(correctionsPath, correctionsContent);
+
+    log(`Self-reflection: promoted pattern to memory (${pendingCount} corrections)`);
+  }
 }
 
 function sanitizeFilename(summary: string): string {
@@ -413,7 +560,7 @@ async function runQuery(
   let resultCount = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+  const globalClaudeMdPath = `${WORKSPACE_GLOBAL}/CLAUDE.md`;
   let globalClaudeMd: string | undefined;
   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
@@ -422,7 +569,7 @@ async function runQuery(
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
-  const extraBase = '/workspace/extra';
+  const extraBase = WORKSPACE_EXTRA;
   if (fs.existsSync(extraBase)) {
     for (const entry of fs.readdirSync(extraBase)) {
       const fullPath = path.join(extraBase, entry);
@@ -438,7 +585,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
-      cwd: '/workspace/group',
+      cwd: WORKSPACE_GROUP,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
@@ -703,6 +850,13 @@ async function main(): Promise<void> {
       if (queryResult.closedDuringQuery) {
         log('Close sentinel consumed during query, exiting');
         break;
+      }
+
+      // Self-reflection: scan for correction signals after each query
+      try {
+        await runSelfReflection(sessionId);
+      } catch (err) {
+        log(`Self-reflection error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
       }
 
       // Emit session update so host can track it
