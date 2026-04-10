@@ -125,6 +125,22 @@ function createSchema(database: Database.Database): void {
       interaction_count INTEGER DEFAULT 0,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS session_costs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_type TEXT NOT NULL,
+      group_folder TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      duration_ms INTEGER,
+      estimated_cost_usd REAL
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_costs_date ON session_costs(started_at);
+
+    CREATE TABLE IF NOT EXISTS system_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -885,9 +901,7 @@ export function upsertContactActivity(
   ).run(email, name, now, now);
 }
 
-export function getStaleContacts(
-  olderThanDays: number,
-): Array<{
+export function getStaleContacts(olderThanDays: number): Array<{
   contact_email: string;
   contact_name: string | null;
   last_inbound: string | null;
@@ -928,6 +942,44 @@ export function getFrequentNewContacts(
   `,
     )
     .all(since, minInteractions) as any[];
+}
+
+// --- Session costs ---
+
+export function logSessionCost(sessionType: string, groupFolder: string, durationMs: number, estimatedCostUsd: number): void {
+  db.prepare(
+    'INSERT INTO session_costs (session_type, group_folder, started_at, duration_ms, estimated_cost_usd) VALUES (?, ?, ?, ?, ?)',
+  ).run(sessionType, groupFolder, new Date().toISOString(), durationMs, estimatedCostUsd);
+}
+
+export function getTodaysCost(): number {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const row = db.prepare(
+    'SELECT COALESCE(SUM(estimated_cost_usd), 0) as total FROM session_costs WHERE started_at >= ?',
+  ).get(todayStart.toISOString()) as { total: number };
+  return row.total;
+}
+
+export function getWeeklyCost(): number {
+  const weekStart = new Date(Date.now() - 7 * 86400000);
+  const row = db.prepare(
+    'SELECT COALESCE(SUM(estimated_cost_usd), 0) as total FROM session_costs WHERE started_at >= ?',
+  ).get(weekStart.toISOString()) as { total: number };
+  return row.total;
+}
+
+// --- System state ---
+
+export function getSystemState(key: string): string | undefined {
+  const row = db.prepare('SELECT value FROM system_state WHERE key = ?').get(key) as { value: string } | undefined;
+  return row?.value;
+}
+
+export function setSystemState(key: string, value: string): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO system_state (key, value, updated_at) VALUES (?, ?, ?)',
+  ).run(key, value, new Date().toISOString());
 }
 
 // --- JSON migration ---

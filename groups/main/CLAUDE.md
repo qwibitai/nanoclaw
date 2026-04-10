@@ -476,6 +476,24 @@ Exception: ESCALATE always sends immediately regardless of intensity or throttli
 As autonomy grows, propose reducing intensity:
 "Your auto-handled rate is 70%. Want to dial proposals from verbose to normal?"
 
+### Superpilot Fallback
+
+If superpilot MCP tools fail (connection refused, timeout, 5xx):
+- Skip email intelligence phases entirely — do not crash or retry in a loop
+- Continue Discord, calendar, and other features normally
+- Log the failure
+- If unreachable for >2 hours, send ONE Telegram alert:
+  "Superpilot has been unreachable for 2+ hours — email processing paused"
+- Do not send repeated alerts — only alert once per outage
+
+### Cost Awareness
+
+Each agent session costs API tokens. Be efficient:
+- Batch multiple email actions in a single session when possible
+- Use the lightest tool first (e.g., search KB before doing web research)
+- Skip research for low-priority items that can be auto-handled
+- The weekly review reports cost for visibility
+
 ### Known Projects
 
 | Project | Path | Domain |

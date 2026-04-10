@@ -29,6 +29,11 @@ import {
   upsertContactActivity,
   getStaleContacts,
   getFrequentNewContacts,
+  logSessionCost,
+  getTodaysCost,
+  getWeeklyCost,
+  getSystemState,
+  setSystemState,
 } from './db.js';
 import { formatMessages } from './router.js';
 
@@ -853,5 +858,31 @@ describe('contact_activity', () => {
     upsertContactActivity('carol@example.com', 'Carol', 'inbound');
     const frequent = getFrequentNewContacts(1, 4);
     expect(frequent).toHaveLength(0);
+  });
+});
+
+describe('session_costs', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('logs and sums session costs', () => {
+    logSessionCost('email_trigger', 'main', 30000, 0.50);
+    logSessionCost('scheduled', 'main', 60000, 1.00);
+    const total = getTodaysCost();
+    expect(total).toBe(1.50);
+  });
+});
+
+describe('system_state', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('stores and retrieves state', () => {
+    setSystemState('superpilot_last_ok', '2026-04-10T10:00:00Z');
+    expect(getSystemState('superpilot_last_ok')).toBe('2026-04-10T10:00:00Z');
+  });
+
+  it('returns undefined for missing keys', () => {
+    expect(getSystemState('nonexistent')).toBeUndefined();
   });
 });
