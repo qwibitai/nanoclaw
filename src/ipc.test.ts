@@ -477,7 +477,7 @@ describe('clone_repo IPC handler', () => {
   });
 
   it('test_clone_repo_new', async () => {
-    // Seed an existing repo from TestOrg so org validation passes
+    // Seed an existing repo (verifies clone works alongside existing repos)
     const existingRepoDir = realPath.join(groupsDir, GROUP, 'existing-repo');
     realFs.mkdirSync(existingRepoDir, { recursive: true });
     execSync('git init', { cwd: existingRepoDir });
@@ -543,7 +543,7 @@ describe('clone_repo IPC handler', () => {
     }
   });
 
-  it('test_clone_repo_wrong_org', async () => {
+  it('test_clone_repo_cross_org', async () => {
     // Seed an existing repo from OrgA
     const existingRepoDir = realPath.join(groupsDir, GROUP, 'OrgA-repo');
     realFs.mkdirSync(existingRepoDir, { recursive: true });
@@ -557,26 +557,47 @@ describe('clone_repo IPC handler', () => {
       cwd: existingRepoDir,
     });
 
-    processQueryIpc(
-      {
-        type: 'clone_repo',
-        url: 'https://github.com/OrgB/repo.git',
-        threadId: 'thread-1',
-        requestId: 'r3',
-      },
-      GROUP,
-      false,
-      ipcBaseDir,
-      {},
-      makeDeps({}),
-    );
+    const destDir = realPath.join(groupsDir, GROUP, 'repo');
 
-    const resp = (await waitForResponse(ipcBaseDir, GROUP, 'r3')) as {
-      status: string;
-      error?: string;
+    // Clone from a different org should succeed (no org restriction)
+    cloneOverride.fn = (cmd: string, opts: unknown) => {
+      if (cmd.startsWith('git clone')) {
+        realFs.mkdirSync(destDir, { recursive: true });
+        return '';
+      }
+      return (execSync as Function)(cmd, opts);
     };
-    expect(resp.status).toBe('error');
-    expect(resp.error).toMatch(/org mismatch/i);
+
+    try {
+      processQueryIpc(
+        {
+          type: 'clone_repo',
+          url: 'https://github.com/OrgB/repo.git',
+          threadId: 'thread-1',
+          requestId: 'r3',
+        },
+        GROUP,
+        false,
+        ipcBaseDir,
+        {},
+        makeDeps({}),
+      );
+
+      const resp = (await waitForResponse(ipcBaseDir, GROUP, 'r3')) as {
+        status: string;
+        path?: string;
+        name?: string;
+      };
+      expect(resp.status).toBe('ok');
+      expect(resp.name).toBe('repo');
+    } finally {
+      cloneOverride.fn = null;
+      try {
+        realFs.rmSync(destDir, { recursive: true, force: true });
+      } catch {
+        /* ok */
+      }
+    }
   });
 
   it('test_clone_repo_already_exists', async () => {

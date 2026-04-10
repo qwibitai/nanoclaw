@@ -2165,7 +2165,7 @@ export function processQueryIpc(
         break;
       }
 
-      // Derive org from URL path (github.com/<org>/<repo>)
+      // Derive repo name from URL path (github.com/<org>/<repo>)
       const urlParts = crParsedUrl.pathname
         .replace(/^\//, '')
         .replace(/\.git$/, '')
@@ -2173,11 +2173,10 @@ export function processQueryIpc(
       if (urlParts.length < 2) {
         writeQueryResponse(ipcBaseDir, sourceGroup, crRequestId, {
           status: 'error',
-          error: 'Cannot derive org from URL',
+          error: 'Cannot derive repo name from URL',
         });
         break;
       }
-      const crOrg = urlParts[0].toLowerCase();
       const crRepoName = data.name || urlParts[1];
 
       // Validate repo name (no path traversal)
@@ -2194,44 +2193,6 @@ export function processQueryIpc(
       }
 
       const groupDir = path.join(GROUPS_DIR, sourceGroup);
-
-      // Derive allowed org from existing repos in group folder
-      let allowedOrg: string | null = null;
-      try {
-        for (const entry of fs.readdirSync(groupDir, { withFileTypes: true })) {
-          if (!entry.isDirectory()) continue;
-          const repoPath = path.join(groupDir, entry.name);
-          if (!fs.existsSync(path.join(repoPath, '.git'))) continue;
-          try {
-            const remoteUrl = execFileSync(
-              'git',
-              ['remote', 'get-url', 'origin'],
-              {
-                cwd: repoPath,
-                stdio: 'pipe',
-                encoding: 'utf-8',
-              },
-            ).trim();
-            const remoteMatch = remoteUrl.match(/github\.com[:/]([^/]+)\//);
-            if (remoteMatch) {
-              allowedOrg = remoteMatch[1].toLowerCase();
-              break;
-            }
-          } catch {
-            // no remote — skip
-          }
-        }
-      } catch {
-        // best-effort
-      }
-
-      if (allowedOrg !== null && crOrg !== allowedOrg) {
-        writeQueryResponse(ipcBaseDir, sourceGroup, crRequestId, {
-          status: 'error',
-          error: `Org mismatch: expected ${allowedOrg}, got ${crOrg}`,
-        });
-        break;
-      }
 
       withGroupMutex(sourceGroup, async () => {
         const destDir = path.join(groupDir, crRepoName);
@@ -2456,7 +2417,11 @@ export function processQueryIpc(
       deps
         .sendFile(
           sfChatJid,
-          { hostPath: sfHostPath, filename: sfFile.filename, mimeType: sfFile.mimeType },
+          {
+            hostPath: sfHostPath,
+            filename: sfFile.filename,
+            mimeType: sfFile.mimeType,
+          },
           data.caption,
           undefined,
           data.threadId,
@@ -2484,8 +2449,13 @@ export function processQueryIpc(
         })
         .finally(() => {
           try {
-            fs.rmSync(path.dirname(sfHostPath), { recursive: true, force: true });
-          } catch { /* best effort */ }
+            fs.rmSync(path.dirname(sfHostPath), {
+              recursive: true,
+              force: true,
+            });
+          } catch {
+            /* best effort */
+          }
         });
       break;
     }
