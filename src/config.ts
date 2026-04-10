@@ -11,6 +11,7 @@ const envConfig = readEnvFile([
   'ONECLI_URL',
   'TZ',
   'EMAIL_INTELLIGENCE_ENABLED',
+  'SUPERPILOT_API_URL',
 ]);
 
 export const ASSISTANT_NAME =
@@ -56,6 +57,10 @@ export const ONECLI_URL =
   process.env.ONECLI_URL || envConfig.ONECLI_URL || 'http://localhost:10254';
 export const SUPERPILOT_MCP_URL =
   process.env.SUPERPILOT_MCP_URL || 'http://host.docker.internal:8100';
+export const SUPERPILOT_API_URL =
+  process.env.SUPERPILOT_API_URL ||
+  envConfig.SUPERPILOT_API_URL ||
+  'https://app.inboxsuperpilot.com/api';
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,

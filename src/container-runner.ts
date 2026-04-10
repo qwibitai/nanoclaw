@@ -15,6 +15,7 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   ONECLI_URL,
+  SUPERPILOT_API_URL,
   SUPERPILOT_MCP_URL,
   TIMEZONE,
 } from './config.js';
@@ -257,6 +258,7 @@ async function buildContainerArgs(
   // Superpilot MCP server — only exposed to the main group container
   if (isMain) {
     args.push('-e', `SUPERPILOT_MCP_URL=${SUPERPILOT_MCP_URL}`);
+    args.push('-e', `SUPERPILOT_API_URL=${SUPERPILOT_API_URL}`);
   }
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
