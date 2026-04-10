@@ -351,6 +351,7 @@ When triggered with new emails:
 - Legal documents or contracts
 - Novel situations not covered by rules
 - Confidence below 80%
+- VIP contacts: <!-- populate with actual contacts -->
 
 ### Notification Intensity
 Default: verbose (initial trust-building phase)
@@ -379,3 +380,22 @@ Before storing anything in KB, ask:
 
 Do NOT store: pleasantries, acknowledgments, routine scheduling, googleable facts.
 DO store: decisions, deadlines, commitments, relationship insights, research findings.
+
+### Known Projects
+
+| Project | Path | Domain |
+|---------|------|--------|
+| product-center | ~/dev/product-center | Product KB, market research |
+| attaxion_dev | ~/dev/attaxion_dev | ASM product roadmap |
+| inbox_superpilot | ~/dev/inbox_superpilot | Email AI product |
+| trustclawd | ~/dev/trustclawd | AI assistant product |
+| wxa-jake-ai | ~/dev/wxa-jake-ai | WXA AI chat interface |
+| netflow_core | ~/dev/netflow_core | Network flow analysis |
+| wxa_webcat | ~/dev/wxa_webcat | Website categorization |
+| techrecon | ~/dev/techrecon | Technology reconnaissance |
+| finsight | ~/dev/finsight | Financial intelligence |
+
+When an email mentions a project or person associated with a project, use this registry to:
+- Search the project's docs for context
+- Update project docs with decisions from emails
+- Create GitHub issues in the right repo
