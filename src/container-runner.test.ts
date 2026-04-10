@@ -88,6 +88,9 @@ function createFakeProcess() {
 }
 
 let fakeProc: ReturnType<typeof createFakeProcess>;
+const originalAnthropicAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+const originalAnthropicBaseUrl = process.env.ANTHROPIC_BASE_URL;
+const originalNanoclawModel = process.env.NANOCLAW_MODEL;
 
 // Mock child_process.spawn
 vi.mock('child_process', async () => {
@@ -133,11 +136,27 @@ function emitOutputMarker(
 describe('container-runner timeout behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.clearAllMocks();
     fakeProc = createFakeProcess();
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    if (originalAnthropicAuthToken === undefined) {
+      delete process.env.ANTHROPIC_AUTH_TOKEN;
+    } else {
+      process.env.ANTHROPIC_AUTH_TOKEN = originalAnthropicAuthToken;
+    }
+    if (originalAnthropicBaseUrl === undefined) {
+      delete process.env.ANTHROPIC_BASE_URL;
+    } else {
+      process.env.ANTHROPIC_BASE_URL = originalAnthropicBaseUrl;
+    }
+    if (originalNanoclawModel === undefined) {
+      delete process.env.NANOCLAW_MODEL;
+    } else {
+      process.env.NANOCLAW_MODEL = originalNanoclawModel;
+    }
   });
 
   it('timeout after output resolves as success', async () => {
@@ -225,5 +244,24 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+
+  it('passes host auth env through to the container runtime', async () => {
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-token';
+    process.env.ANTHROPIC_BASE_URL = 'https://openrouter.ai/api/v1/anthropic';
+    process.env.NANOCLAW_MODEL = 'google/gemini-2.5-flash';
+
+    void runContainerAgent(testGroup, testInput, () => {});
+    await Promise.resolve();
+
+    const childProcessModule = await import('child_process');
+    const spawnMock = vi.mocked(childProcessModule.spawn);
+    const dockerArgs = spawnMock.mock.calls[0]?.[1];
+    expect(dockerArgs).toContain('-e');
+    expect(dockerArgs).toContain('ANTHROPIC_AUTH_TOKEN=test-token');
+    expect(dockerArgs).toContain(
+      'ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1/anthropic',
+    );
+    expect(dockerArgs).toContain('NANOCLAW_MODEL=google/gemini-2.5-flash');
   });
 });

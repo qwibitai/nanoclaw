@@ -35,6 +35,8 @@ interface ContainerInput {
   script?: string;
 }
 
+const REQUESTED_MODEL = process.env.NANOCLAW_MODEL;
+
 interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
@@ -438,6 +440,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: REQUESTED_MODEL,
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,

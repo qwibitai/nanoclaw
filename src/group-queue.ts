@@ -27,6 +27,25 @@ interface GroupState {
   retryCount: number;
 }
 
+export interface GroupQueueSnapshot {
+  activeCount: number;
+  waitingGroups: string[];
+  groups: Record<
+    string,
+    {
+      active: boolean;
+      idleWaiting: boolean;
+      isTaskContainer: boolean;
+      runningTaskId: string | null;
+      pendingMessages: boolean;
+      pendingTaskCount: number;
+      containerName: string | null;
+      groupFolder: string | null;
+      retryCount: number;
+    }
+  >;
+}
+
 export class GroupQueue {
   private groups = new Map<string, GroupState>();
   private activeCount = 0;
@@ -57,6 +76,29 @@ export class GroupQueue {
 
   setProcessMessagesFn(fn: (groupJid: string) => Promise<boolean>): void {
     this.processMessagesFn = fn;
+  }
+
+  getSnapshot(): GroupQueueSnapshot {
+    const groups: GroupQueueSnapshot['groups'] = {};
+    for (const [jid, state] of this.groups.entries()) {
+      groups[jid] = {
+        active: state.active,
+        idleWaiting: state.idleWaiting,
+        isTaskContainer: state.isTaskContainer,
+        runningTaskId: state.runningTaskId,
+        pendingMessages: state.pendingMessages,
+        pendingTaskCount: state.pendingTasks.length,
+        containerName: state.containerName,
+        groupFolder: state.groupFolder,
+        retryCount: state.retryCount,
+      };
+    }
+
+    return {
+      activeCount: this.activeCount,
+      waitingGroups: [...this.waitingGroups],
+      groups,
+    };
   }
 
   enqueueMessageCheck(groupJid: string): void {

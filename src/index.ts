@@ -30,6 +30,11 @@ import {
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
 import {
+  initRuntimeDashboardState,
+  markRuntimeDashboardStopped,
+  updateRuntimeDashboardState,
+} from './dashboard-state.js';
+import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -65,9 +70,12 @@ import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { applySupportedEnvAliases } from './env.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
+
+applySupportedEnvAliases();
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
@@ -568,7 +576,21 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+function syncDashboardState(status?: Parameters<
+  typeof updateRuntimeDashboardState
+>[0]['status']): void {
+  updateRuntimeDashboardState({
+    status,
+    channels: channels.map((channel) => ({
+      name: channel.name,
+      connected: channel.isConnected(),
+    })),
+    queue: queue.getSnapshot(),
+  });
+}
+
 async function main(): Promise<void> {
+  initRuntimeDashboardState();
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
@@ -585,8 +607,10 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    syncDashboardState('shutting_down');
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    markRuntimeDashboardStopped('stopped');
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -689,11 +713,16 @@ async function main(): Promise<void> {
     }
     channels.push(channel);
     await channel.connect();
+    syncDashboardState('starting');
   }
   if (channels.length === 0) {
+    markRuntimeDashboardStopped('error');
     logger.fatal('No channels connected');
     process.exit(1);
   }
+
+  syncDashboardState('running');
+  setInterval(() => syncDashboardState('running'), 1000).unref();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -751,6 +780,7 @@ async function main(): Promise<void> {
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
+    markRuntimeDashboardStopped('error');
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
   });
@@ -764,6 +794,7 @@ const isDirectRun =
 
 if (isDirectRun) {
   main().catch((err) => {
+    markRuntimeDashboardStopped('error');
     logger.error({ err }, 'Failed to start NanoClaw');
     process.exit(1);
   });

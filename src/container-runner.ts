@@ -58,6 +58,12 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+const PASSTHROUGH_ENV_VARS = [
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'NANOCLAW_MODEL',
+] as const;
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -278,6 +284,13 @@ async function buildContainerArgs(
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
+  }
+
+  for (const envKey of PASSTHROUGH_ENV_VARS) {
+    const value = process.env[envKey];
+    if (value) {
+      args.push('-e', `${envKey}=${value}`);
+    }
   }
 
   for (const mount of mounts) {

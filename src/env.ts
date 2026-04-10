@@ -41,3 +41,58 @@ export function readEnvFile(keys: string[]): Record<string, string> {
 
   return result;
 }
+
+export function readEnvValue(keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = process.env[key];
+    if (value) return value;
+  }
+
+  const envValues = readEnvFile(keys);
+  for (const key of keys) {
+    const value = envValues[key];
+    if (value) return value;
+  }
+
+  return undefined;
+}
+
+/**
+ * Apply a small set of compatibility aliases from .env into process.env.
+ * This keeps support for custom local key names while still presenting the
+ * standard variable names expected by NanoClaw and the Claude Agent SDK.
+ */
+export function applySupportedEnvAliases(): void {
+  const telegramToken = readEnvValue([
+    'TELEGRAM_BOT_TOKEN',
+    'TELEGRAM_TOKEN',
+    'TELEGRAM-TOKEN',
+  ]);
+  if (telegramToken && !process.env.TELEGRAM_BOT_TOKEN) {
+    process.env.TELEGRAM_BOT_TOKEN = telegramToken;
+  }
+
+  const openRouterApiKey = readEnvValue([
+    'OPEN-REUTER',
+    'OPEN_REUTER',
+    'OPENROUTER_API_KEY',
+  ]);
+  if (openRouterApiKey) {
+    if (!process.env.ANTHROPIC_AUTH_TOKEN) {
+      process.env.ANTHROPIC_AUTH_TOKEN = openRouterApiKey;
+    }
+    if (!process.env.ANTHROPIC_BASE_URL) {
+      process.env.ANTHROPIC_BASE_URL =
+        'https://openrouter.ai/api/v1/anthropic';
+    }
+  }
+
+  const requestedModel = readEnvValue([
+    'MODEL',
+    'OPENROUTER_MODEL',
+    'GEMINI_MODEL',
+  ]);
+  if (requestedModel && !process.env.NANOCLAW_MODEL) {
+    process.env.NANOCLAW_MODEL = requestedModel;
+  }
+}

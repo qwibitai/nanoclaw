@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 const LEVELS = { debug: 20, info: 30, warn: 40, error: 50, fatal: 60 } as const;
 type Level = keyof typeof LEVELS;
 
@@ -12,6 +15,15 @@ const KEY_COLOR = '\x1b[35m';
 const MSG_COLOR = '\x1b[36m';
 const RESET = '\x1b[39m';
 const FULL_RESET = '\x1b[0m';
+const ROLE =
+  process.env.NANOCLAW_PROCESS_ROLE ||
+  (/dashboard\.(ts|js)$/.test(process.argv[1] || '') ? 'dashboard' : 'agent');
+const DASHBOARD_EVENTS_FILE = path.join(
+  process.cwd(),
+  'data',
+  'dashboard',
+  'events.jsonl',
+);
 
 const threshold =
   LEVELS[(process.env.LOG_LEVEL as Level) || 'info'] ?? LEVELS.info;
@@ -40,6 +52,29 @@ function ts(): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}.${String(d.getMilliseconds()).padStart(3, '0')}`;
 }
 
+function appendDashboardEvent(
+  level: Level,
+  msg: string | undefined,
+  data?: Record<string, unknown>,
+): void {
+  try {
+    fs.mkdirSync(path.dirname(DASHBOARD_EVENTS_FILE), { recursive: true });
+    fs.appendFileSync(
+      DASHBOARD_EVENTS_FILE,
+      JSON.stringify({
+        at: new Date().toISOString(),
+        pid: process.pid,
+        level,
+        role: ROLE,
+        msg: msg ?? '',
+        data,
+      }) + '\n',
+    );
+  } catch {
+    // Dashboard logging is best-effort only.
+  }
+}
+
 function log(
   level: Level,
   dataOrMsg: Record<string, unknown> | string,
@@ -49,10 +84,12 @@ function log(
   const tag = `${COLORS[level]}${level.toUpperCase()}${level === 'fatal' ? FULL_RESET : RESET}`;
   const stream = LEVELS[level] >= LEVELS.warn ? process.stderr : process.stdout;
   if (typeof dataOrMsg === 'string') {
+    appendDashboardEvent(level, dataOrMsg);
     stream.write(
       `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${dataOrMsg}${RESET}\n`,
     );
   } else {
+    appendDashboardEvent(level, msg, dataOrMsg);
     stream.write(
       `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${msg}${RESET}${formatData(dataOrMsg)}\n`,
     );

@@ -109,9 +109,16 @@ export async function run(_args: string[]): Promise<void> {
   // 4. Check channel auth (detect configured channels by credentials)
   const envVars = readEnvFile([
     'TELEGRAM_BOT_TOKEN',
+    'TELEGRAM_TOKEN',
+    'TELEGRAM-TOKEN',
     'SLACK_BOT_TOKEN',
     'SLACK_APP_TOKEN',
     'DISCORD_BOT_TOKEN',
+    'OPEN-REUTER',
+    'OPEN_REUTER',
+    'OPENROUTER_API_KEY',
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_AUTH_TOKEN',
   ]);
 
   const channelAuth: Record<string, string> = {};
@@ -123,7 +130,12 @@ export async function run(_args: string[]): Promise<void> {
   }
 
   // Token-based channels: check .env
-  if (process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN) {
+  if (
+    process.env.TELEGRAM_BOT_TOKEN ||
+    envVars.TELEGRAM_BOT_TOKEN ||
+    envVars.TELEGRAM_TOKEN ||
+    envVars['TELEGRAM-TOKEN']
+  ) {
     channelAuth.telegram = 'configured';
   }
   if (
