@@ -111,7 +111,11 @@ describe('_autoRegisterThread (actual auto-registration path)', () => {
     expect(registeredGroups[threadJid]).toBeDefined();
   });
 
-  it('auto-registered child group always has type "thread"', () => {
+  it('auto-registered child group reflects thread_defaults.type (chat)', () => {
+    const parentWithChatType: RegisteredGroup = {
+      ...parent,
+      thread_defaults: { type: 'chat', requiresTrigger: false },
+    };
     const msg: InboundMessage = {
       id: 'msg2',
       chat_jid: threadJid,
@@ -122,9 +126,13 @@ describe('_autoRegisterThread (actual auto-registration path)', () => {
       parent_jid: parentJid,
     };
 
-    _autoRegisterThread(threadJid, msg, parent);
+    _autoRegisterThread(threadJid, msg, parentWithChatType);
 
-    expect(registeredGroups[threadJid].type).toBe('thread');
+    expect(registeredGroups[threadJid].type).toBe('chat');
+    expect(setRegisteredGroup).toHaveBeenCalledWith(
+      threadJid,
+      expect.objectContaining({ type: 'chat' }),
+    );
   });
 
   it('child group inherits folder from parent', () => {

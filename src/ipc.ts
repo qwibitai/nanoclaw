@@ -52,6 +52,7 @@ function validateThreadDefaults(
     return false;
   }
   const td = raw as Record<string, unknown>;
+  const out: ThreadDefaults = {};
   if (Object.prototype.hasOwnProperty.call(td, 'type')) {
     const parsedType = parseIpcThreadDefaultType(td.type);
     if (!parsedType) {
@@ -61,8 +62,35 @@ function validateThreadDefaults(
       );
       return false;
     }
+    out.type = parsedType;
   }
-  return raw as ThreadDefaults;
+  if (Object.prototype.hasOwnProperty.call(td, 'requiresTrigger')) {
+    if (typeof td.requiresTrigger !== 'boolean') {
+      logger.warn(
+        { sourceGroup, requiresTrigger: td.requiresTrigger },
+        'Invalid thread_defaults.requiresTrigger: must be boolean',
+      );
+      return false;
+    }
+    out.requiresTrigger = td.requiresTrigger;
+  }
+  if (Object.prototype.hasOwnProperty.call(td, 'containerConfig')) {
+    if (
+      typeof td.containerConfig !== 'object' ||
+      td.containerConfig === null ||
+      Array.isArray(td.containerConfig)
+    ) {
+      logger.warn(
+        { sourceGroup, containerConfig: td.containerConfig },
+        'Invalid thread_defaults.containerConfig: must be object',
+      );
+      return false;
+    }
+    out.containerConfig = td.containerConfig as NonNullable<
+      ThreadDefaults['containerConfig']
+    >;
+  }
+  return out;
 }
 
 export interface IpcDeps {
@@ -226,7 +254,7 @@ export async function processTaskIpc(
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
     group_type?: string;
-    thread_defaults?: ThreadDefaults;
+    thread_defaults?: unknown;
   },
   sourceGroup: string, // IPC ディレクトリから検証された識別情報
   isPrivileged: boolean, // main または override の特権を持つか
@@ -546,12 +574,33 @@ export async function processTaskIpc(
         logger.warn({ sourceGroup }, 'override type cannot be set via IPC');
         break;
       }
-      if (data.jid && data.group_type) {
-        const newType = parseIpcGroupType(data.group_type);
-        if (!newType) {
+      if (data.jid) {
+        const hasGroupType = Object.prototype.hasOwnProperty.call(
+          data,
+          'group_type',
+        );
+        const newType = hasGroupType ? parseIpcGroupType(data.group_type) : null;
+        if (hasGroupType && !newType) {
           logger.warn(
             { sourceGroup, group_type: data.group_type },
             'Invalid group_type in update_group request',
+          );
+          break;
+        }
+        const hasThreadDefaults = Object.prototype.hasOwnProperty.call(
+          data,
+          'thread_defaults',
+        );
+        const validatedThreadDefaults = hasThreadDefaults
+          ? validateThreadDefaults(data.thread_defaults, sourceGroup)
+          : null;
+        if (validatedThreadDefaults === false) {
+          break;
+        }
+        if (!hasGroupType && !hasThreadDefaults) {
+          logger.warn(
+            { data },
+            'Invalid update_group request - no updatable fields',
           );
           break;
         }
@@ -565,16 +614,24 @@ export async function processTaskIpc(
         }
         deps.registerGroup(data.jid, {
           ...targetGroup,
-          type: newType,
+          ...(newType ? { type: newType } : {}),
+          ...(hasThreadDefaults
+            ? { thread_defaults: validatedThreadDefaults ?? undefined }
+            : {}),
         });
         logger.info(
-          { jid: data.jid, newType, sourceGroup },
-          'Group type updated via IPC',
+          {
+            jid: data.jid,
+            ...(newType ? { newType } : {}),
+            threadDefaultsUpdated: hasThreadDefaults,
+            sourceGroup,
+          },
+          'Group updated via IPC',
         );
       } else {
         logger.warn(
           { data },
-          'Invalid update_group request - missing jid or group_type',
+          'Invalid update_group request - missing jid',
         );
       }
       break;

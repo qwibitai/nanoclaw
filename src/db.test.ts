@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
+  _parseThreadDefaultsJson,
   _initTestDatabase,
   createTask,
   deleteTask,
@@ -535,6 +536,10 @@ describe('registered group type', () => {
 
     const groups = getAllRegisteredGroups();
     expect(groups['dc:nocfg'].thread_defaults).toBeUndefined();
+  });
+
+  it('handles malformed thread_defaults JSON safely', () => {
+    expect(_parseThreadDefaultsJson('{bad-json', 'dc:broken')).toBeUndefined();
   });
 });
 

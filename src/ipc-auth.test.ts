@@ -723,6 +723,28 @@ describe('register_group group_type', () => {
     const allGroups = getAllRegisteredGroups();
     expect(allGroups['override@g.us']).toBeUndefined();
   });
+
+  it('thread_defaults.requiresTrigger が boolean でない場合は拒否される', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'bad-thread-defaults@g.us',
+        name: 'Bad Thread Defaults',
+        folder: 'bad-thread-defaults',
+        trigger: '@Andy',
+        thread_defaults: {
+          type: 'thread',
+          requiresTrigger: 'nope' as unknown as boolean,
+        },
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['bad-thread-defaults@g.us']).toBeUndefined();
+  });
 });
 
 describe('update_group group_type', () => {
@@ -830,5 +852,54 @@ describe('update_group group_type', () => {
     const allGroups = getAllRegisteredGroups();
     expect(allGroups['protected@g.us']).toBeDefined();
     expect(allGroups['protected@g.us'].type).toBe('chat');
+  });
+
+  it('update_group で thread_defaults を更新・クリアできる', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'threadcfg@g.us',
+        name: 'Thread Cfg Group',
+        folder: 'threadcfg-group',
+        trigger: '@Andy',
+        group_type: 'chat',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    await processTaskIpc(
+      {
+        type: 'update_group',
+        jid: 'threadcfg@g.us',
+        thread_defaults: { type: 'chat', requiresTrigger: false },
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    {
+      const allGroups = getAllRegisteredGroups();
+      expect(allGroups['threadcfg@g.us'].thread_defaults).toEqual({
+        type: 'chat',
+        requiresTrigger: false,
+      });
+    }
+
+    await processTaskIpc(
+      {
+        type: 'update_group',
+        jid: 'threadcfg@g.us',
+        thread_defaults: null as unknown as object,
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['threadcfg@g.us'].thread_defaults).toBeUndefined();
   });
 });

@@ -85,7 +85,7 @@
 - 親 channel の `chat_jid` を導出し、親 group を探す
 - 親 group に `thread_defaults` がなければ何もしない
 - 親 group に `thread_defaults` があれば、その内容を使って子 group を登録する
-- 子 group の `type` は `thread`
+- 子 group の `type` は `thread_defaults.type ?? 'thread'`（非特権値のみ）
 - 子 group の `jid` は `dc:{threadId}`
 - 子 group の `folder` は親 group と同じ値を使う
   - `thread` は別 folder を持たない

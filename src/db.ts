@@ -36,6 +36,22 @@ function parseGroupType(
   return 'chat';
 }
 
+export function _parseThreadDefaultsJson(
+  threadDefaults: string | null,
+  jid: string,
+): ThreadDefaults | undefined {
+  if (!threadDefaults) return undefined;
+  try {
+    return JSON.parse(threadDefaults) as ThreadDefaults;
+  } catch (err) {
+    logger.warn(
+      { jid, err },
+      'Invalid thread_defaults JSON in DB; ignoring this value',
+    );
+    return undefined;
+  }
+}
+
 let db: Database.Database;
 
 function createSchema(database: Database.Database): void {
@@ -644,9 +660,7 @@ export function getRegisteredGroup(
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     type: groupType,
-    thread_defaults: row.thread_defaults
-      ? (JSON.parse(row.thread_defaults) as ThreadDefaults)
-      : undefined,
+    thread_defaults: _parseThreadDefaultsJson(row.thread_defaults, row.jid),
   };
 }
 
@@ -714,9 +728,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       type: groupType,
-      thread_defaults: row.thread_defaults
-        ? (JSON.parse(row.thread_defaults) as ThreadDefaults)
-        : undefined,
+      thread_defaults: _parseThreadDefaultsJson(row.thread_defaults, row.jid),
     };
   }
   return result;
