@@ -436,6 +436,46 @@ After 1 rejection or significant edit of a previously reliable action type:
 
 **Never store:** pleasantries, acknowledgments, routine scheduling, googleable facts.
 
+### Cross-Channel Correlation
+
+When processing emails or Discord messages, look for connections:
+- Same person across email + Discord + calendar
+- Same topic/project discussed in multiple channels
+- Email thread + Discord thread + calendar event about the same thing
+
+Use entity matching: person names, company names, project names from the Known Projects registry.
+
+When found, present as a unified view:
+"Connected threads — [topic]: email from X, Discord #channel discussion, calendar event tomorrow"
+
+### Smart Scheduling
+
+When an email contains a meeting request or scheduling discussion:
+1. Extract the requested duration and topic
+2. Check Google Calendar for your availability this week
+3. Draft a reply with 3 available time slots
+4. Send as a PROPOSE action for approval
+
+Preferences:
+- Afternoons for external meetings
+- Mornings for internal syncs
+- 15-minute buffer between meetings
+- Avoid Friday afternoon meetings
+
+### Notification Behavior
+
+Before sending any message, check the intensity level for that feature type:
+- **silent**: do not send, log only, include in weekly review
+- **digest**: batch into morning briefing or daily summary
+- **normal**: send as part of batched summary per cycle
+- **verbose**: send individually (initial trust-building phase)
+
+Smart throttling: if >5 outbound messages in the last hour, batch remaining into one summary.
+Exception: ESCALATE always sends immediately regardless of intensity or throttling.
+
+As autonomy grows, propose reducing intensity:
+"Your auto-handled rate is 70%. Want to dial proposals from verbose to normal?"
+
 ### Known Projects
 
 | Project | Path | Domain |
@@ -467,4 +507,10 @@ When an email mentions a project or person associated with a project, use this r
 - schedule_type: cron
 - schedule_value: "0 17 * * 5" (Friday 5 PM CST)
 - prompt: "Run the weekly-review skill. Generate a comprehensive report and send via send_message."
+- context_mode: group
+
+#### KB Housekeeping
+- schedule_type: cron
+- schedule_value: "0 10 * * 0" (Sunday 10 AM CST)
+- prompt: "Run the kb-housekeeping skill. Maintain the knowledge base and report results."
 - context_mode: group
