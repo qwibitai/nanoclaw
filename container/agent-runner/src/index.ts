@@ -779,28 +779,30 @@ Your cwd is \`/workspace/group\`. Writes there persist to the host group folder.
 
 **Non-repo files:** write directly to \`/workspace/group\` — files appear on the host immediately.
 
-**Working with repos:** use the \`create_worktree\` MCP tool. It provisions a git worktree under \`/workspace/worktrees/<repo>\`. You can read code, run tests, and edit files freely. Git metadata (\`.git\`) is read-only inside the container for security — your edits are auto-saved by the host on session exit.
+**Working with repos:** use the \`create_worktree\` MCP tool to get a working directory, then use \`git_commit\`, \`git_push\`, and \`open_pr\` to ship your work.
 
 \`\`\`
-# Get a working directory for an existing group repo
+# 1. Get a working directory
 create_worktree({ repo: "XZO-BACKEND" })
-# → returns /workspace/worktrees/XZO-BACKEND
+# → /workspace/worktrees/XZO-BACKEND
 
-# Optionally specify a branch to check out
-create_worktree({ repo: "XZO-BACKEND", branch: "feat/my-feature" })
+# 2. Edit files, run tests, iterate
+
+# 3. Commit, push, open PR
+git_commit({ repo: "XZO-BACKEND", message: "feat: add places enrichment" })
+git_push({ repo: "XZO-BACKEND" })
+open_pr({ repo: "XZO-BACKEND", title: "feat: add places enrichment", body: "## Summary\\n..." })
 \`\`\`
 
-**New repos (not yet cloned for the group):** use the \`clone_repo\` MCP tool. It clones the repo into the group. Note: the new repo's git metadata won't be mounted until the next session — you can edit files but git commands in the worktree won't work until then.
+**Resume a prior branch:** \`create_worktree({ repo: "XZO-BACKEND", branch: "feat/my-feature" })\`
 
-\`\`\`
-clone_repo({ url: "https://github.com/org/new-repo.git" })
-\`\`\`
+**New repos (not yet in the group):** \`clone_repo({ url: "https://github.com/org/repo.git" })\` — clones to the group. Note: git operations in the new repo's worktree won't work until the next session (use \`/restart\` to respawn).
 
 **NEVER run \`git clone\` directly** — it is blocked by a hook. Always use \`create_worktree\` or \`clone_repo\`.
 
 **On resume:** check \`/workspace/worktrees/\` for any repos from prior turns in this thread.
 
-**Write boundary:** \`/workspace/group\` and \`/workspace/worktrees\` are writable. Git metadata (\`.git\`) is read-only — the host handles commits on your behalf when the session ends.`;
+**Auto-save:** if you don't commit explicitly, the host auto-commits all dirty worktrees on session exit.`;
 }
 
 function buildAllowedTools(tools: string[] | undefined): string[] {

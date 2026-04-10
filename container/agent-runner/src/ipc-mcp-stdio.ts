@@ -1796,6 +1796,129 @@ NEVER run \`git clone\` directly — it is blocked. Use this tool or \`create_wo
   },
 );
 
+server.tool(
+  'git_commit',
+  'Commit all changes in a worktree. Stages all files with git add -A and commits with the given message. Use after editing files in a worktree.',
+  {
+    repo: z.string().describe('Repo directory name (must match a create_worktree repo)'),
+    message: z.string().describe('Commit message'),
+  },
+  async (args) => {
+    try {
+      const currentThreadId = process.env.NANOCLAW_THREAD_ID || 'default';
+      const requestId = writeQueryFile({
+        type: 'git_commit',
+        repo: args.repo,
+        message: args.message,
+        threadId: currentThreadId,
+      });
+      const response = await waitForResponse(requestId, 30_000) as {
+        status: string;
+        error?: string;
+        sha?: string;
+      };
+
+      if (response.status !== 'ok') {
+        return {
+          content: [{ type: 'text' as const, text: `Commit failed: ${response.error ?? 'unknown error'}` }],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [{ type: 'text' as const, text: `Committed: ${response.sha}` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `git_commit error: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'git_push',
+  'Push the current branch of a worktree to origin. Use after committing changes.',
+  {
+    repo: z.string().describe('Repo directory name (must match a create_worktree repo)'),
+  },
+  async (args) => {
+    try {
+      const currentThreadId = process.env.NANOCLAW_THREAD_ID || 'default';
+      const requestId = writeQueryFile({
+        type: 'git_push',
+        repo: args.repo,
+        threadId: currentThreadId,
+      });
+      const response = await waitForResponse(requestId, 60_000) as {
+        status: string;
+        error?: string;
+        branch?: string;
+      };
+
+      if (response.status !== 'ok') {
+        return {
+          content: [{ type: 'text' as const, text: `Push failed: ${response.error ?? 'unknown error'}` }],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [{ type: 'text' as const, text: `Pushed branch ${response.branch} to origin` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `git_push error: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'open_pr',
+  'Create a GitHub pull request for the current branch of a worktree. Push first with git_push.',
+  {
+    repo: z.string().describe('Repo directory name (must match a create_worktree repo)'),
+    title: z.string().describe('PR title'),
+    body: z.string().optional().describe('PR description body (markdown)'),
+  },
+  async (args) => {
+    try {
+      const currentThreadId = process.env.NANOCLAW_THREAD_ID || 'default';
+      const requestId = writeQueryFile({
+        type: 'open_pr',
+        repo: args.repo,
+        title: args.title,
+        body: args.body,
+        threadId: currentThreadId,
+      });
+      const response = await waitForResponse(requestId, 30_000) as {
+        status: string;
+        error?: string;
+        url?: string;
+      };
+
+      if (response.status !== 'ok') {
+        return {
+          content: [{ type: 'text' as const, text: `PR creation failed: ${response.error ?? 'unknown error'}` }],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [{ type: 'text' as const, text: `PR created: ${response.url}` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `open_pr error: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

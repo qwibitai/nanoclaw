@@ -1263,6 +1263,11 @@ export function processQueryIpc(
     // For clone_repo
     url?: string;
     name?: string;
+    // For git_commit
+    message?: string;
+    // For open_pr
+    title?: string;
+    body?: string;
   },
   sourceGroup: string,
   isMain: boolean,
@@ -2220,6 +2225,175 @@ export function processQueryIpc(
         const message = err instanceof Error ? err.message : String(err);
         logger.error({ sourceGroup, err }, 'clone_repo: mutex error');
         writeQueryResponse(ipcBaseDir, sourceGroup, crRequestId, {
+          status: 'error',
+          error: message,
+        });
+      });
+      break;
+    }
+
+    case 'git_commit': {
+      if (!data.repo || !data.threadId || !data.message) {
+        writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+          status: 'error',
+          error: 'Missing repo, threadId, or message',
+        });
+        break;
+      }
+      const gcRepo = data.repo;
+      const gcThreadId = data.threadId;
+      const gcMessage = data.message;
+      const gcRequestId = data.requestId;
+
+      withGroupMutex(sourceGroup, async () => {
+        const worktreeDir = path.join(WORKTREES_DIR, sourceGroup, gcThreadId, gcRepo);
+        if (!fs.existsSync(worktreeDir) || !fs.existsSync(path.join(worktreeDir, '.git'))) {
+          writeQueryResponse(ipcBaseDir, sourceGroup, gcRequestId, {
+            status: 'error',
+            error: `Worktree not found: ${gcRepo}`,
+          });
+          return;
+        }
+
+        // Remove stale index.lock if present
+        const lockFile = path.join(worktreeDir, '.git', 'index.lock');
+        try { fs.unlinkSync(lockFile); } catch { /* ignore */ }
+
+        try {
+          execFileSync('git', ['add', '-A'], { cwd: worktreeDir, stdio: 'pipe' });
+          execFileSync(
+            'git',
+            ['-c', 'user.email=agent@nanoclaw.local', '-c', 'user.name=agent', 'commit', '--no-verify', '-m', gcMessage],
+            { cwd: worktreeDir, stdio: 'pipe' },
+          );
+          const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+            cwd: worktreeDir,
+            stdio: 'pipe',
+            encoding: 'utf-8',
+          }).trim();
+          writeQueryResponse(ipcBaseDir, sourceGroup, gcRequestId, {
+            status: 'ok',
+            sha,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          writeQueryResponse(ipcBaseDir, sourceGroup, gcRequestId, {
+            status: 'error',
+            error: `git commit failed: ${message}`,
+          });
+        }
+      }).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error({ sourceGroup, err }, 'git_commit: mutex error');
+        writeQueryResponse(ipcBaseDir, sourceGroup, gcRequestId, {
+          status: 'error',
+          error: message,
+        });
+      });
+      break;
+    }
+
+    case 'git_push': {
+      if (!data.repo || !data.threadId) {
+        writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+          status: 'error',
+          error: 'Missing repo or threadId',
+        });
+        break;
+      }
+      const gpRepo = data.repo;
+      const gpThreadId = data.threadId;
+      const gpRequestId = data.requestId;
+
+      withGroupMutex(sourceGroup, async () => {
+        const worktreeDir = path.join(WORKTREES_DIR, sourceGroup, gpThreadId, gpRepo);
+        if (!fs.existsSync(worktreeDir) || !fs.existsSync(path.join(worktreeDir, '.git'))) {
+          writeQueryResponse(ipcBaseDir, sourceGroup, gpRequestId, {
+            status: 'error',
+            error: `Worktree not found: ${gpRepo}`,
+          });
+          return;
+        }
+
+        try {
+          const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+            cwd: worktreeDir,
+            stdio: 'pipe',
+            encoding: 'utf-8',
+          }).trim();
+          execFileSync('git', ['push', '-u', 'origin', branch], {
+            cwd: worktreeDir,
+            stdio: 'pipe',
+            timeout: 60_000,
+          });
+          writeQueryResponse(ipcBaseDir, sourceGroup, gpRequestId, {
+            status: 'ok',
+            branch,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          writeQueryResponse(ipcBaseDir, sourceGroup, gpRequestId, {
+            status: 'error',
+            error: `git push failed: ${message}`,
+          });
+        }
+      }).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error({ sourceGroup, err }, 'git_push: mutex error');
+        writeQueryResponse(ipcBaseDir, sourceGroup, gpRequestId, {
+          status: 'error',
+          error: message,
+        });
+      });
+      break;
+    }
+
+    case 'open_pr': {
+      if (!data.repo || !data.threadId || !data.title) {
+        writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+          status: 'error',
+          error: 'Missing repo, threadId, or title',
+        });
+        break;
+      }
+      const prRepo = data.repo;
+      const prThreadId = data.threadId;
+      const prTitle = data.title;
+      const prBody = data.body || '';
+      const prRequestId = data.requestId;
+
+      withGroupMutex(sourceGroup, async () => {
+        const worktreeDir = path.join(WORKTREES_DIR, sourceGroup, prThreadId, prRepo);
+        if (!fs.existsSync(worktreeDir) || !fs.existsSync(path.join(worktreeDir, '.git'))) {
+          writeQueryResponse(ipcBaseDir, sourceGroup, prRequestId, {
+            status: 'error',
+            error: `Worktree not found: ${prRepo}`,
+          });
+          return;
+        }
+
+        try {
+          const result = execFileSync(
+            'gh',
+            ['pr', 'create', '--title', prTitle, '--body', prBody],
+            { cwd: worktreeDir, stdio: 'pipe', encoding: 'utf-8', timeout: 30_000 },
+          ).trim();
+          // gh pr create returns the PR URL
+          writeQueryResponse(ipcBaseDir, sourceGroup, prRequestId, {
+            status: 'ok',
+            url: result,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          writeQueryResponse(ipcBaseDir, sourceGroup, prRequestId, {
+            status: 'error',
+            error: `gh pr create failed: ${message}`,
+          });
+        }
+      }).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error({ sourceGroup, err }, 'open_pr: mutex error');
+        writeQueryResponse(ipcBaseDir, sourceGroup, prRequestId, {
           status: 'error',
           error: message,
         });
