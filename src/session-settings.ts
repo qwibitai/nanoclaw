@@ -7,6 +7,8 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  AGENT_CLI_BIN,
+  AGENT_RUNNER_BACKEND,
   AUTO_COMPACT_ENABLED,
   AUTO_COMPACT_THRESHOLD,
   CREDENTIAL_PROXY_PORT,
@@ -104,6 +106,10 @@ export function buildSessionEnv(mounts: VolumeMount[]): Record<string, string> {
     env.AUTO_COMPACT_ENABLED = 'true';
     env.AUTO_COMPACT_THRESHOLD = String(AUTO_COMPACT_THRESHOLD);
   }
+
+  // Provider-agnostic backend configuration
+  env.AGENT_RUNNER_BACKEND = AGENT_RUNNER_BACKEND;
+  env.AGENT_CLI_BIN = AGENT_CLI_BIN;
 
   return env;
 }

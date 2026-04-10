@@ -193,7 +193,11 @@ describe('TelegramChannel', () => {
       // Now send reason via message handler
       const msgHandler = getHandler(lastBotInstance, 'message:text');
       const msgCtx = {
-        message: { text: 'Too expensive', date: Date.now() / 1000, message_id: 1 },
+        message: {
+          text: 'Too expensive',
+          date: Date.now() / 1000,
+          message_id: 1,
+        },
         chat: { id: 42, type: 'private' },
         from: { id: 1, first_name: 'Test' },
         reply: vi.fn().mockResolvedValue(undefined),
@@ -206,7 +210,10 @@ describe('TelegramChannel', () => {
         expect.stringContaining('/api/v1/decisions/dec-456'),
         expect.objectContaining({
           method: 'PUT',
-          body: JSON.stringify({ status: 'rejected', rationale: 'Too expensive' }),
+          body: JSON.stringify({
+            status: 'rejected',
+            rationale: 'Too expensive',
+          }),
         }),
       );
       expect(msgCtx.reply).toHaveBeenCalledWith(
@@ -285,7 +292,9 @@ describe('TelegramChannel', () => {
           body: JSON.stringify({ status: 'approved' }),
         }),
       );
-      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Approved'));
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Approved'),
+      );
 
       fetchSpy.mockRestore();
     });

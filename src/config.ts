@@ -81,6 +81,11 @@ export const SOLO_VAULT_PROJECT = process.env.SOLO_VAULT_PROJECT || 'nanoclaw';
 export const SOLO_VAULT_ENV = process.env.SOLO_VAULT_ENV || 'production';
 export const SOLO_VAULT_TTL = 5 * 60 * 1000; // 5 minute cache TTL
 
+// Pantry Manager integration for manual item entry and nudge engine seeding.
+// Set PANTRY_MANAGER_URL to override the default local endpoint.
+export const PANTRY_MANAGER_URL =
+  process.env.PANTRY_MANAGER_URL || 'http://localhost:3052';
+
 // RabbitMQ connection for cron-service subscription.
 // The cron-service at cron.jeffreykeyser.net publishes CronJobTriggered
 // events to the cron.jobs exchange. NanoClaw subscribes to receive triggers.
@@ -123,3 +128,10 @@ export const AUTO_COMPACT_THRESHOLD = Math.min(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Provider-agnostic agent runner configuration.
+// AGENT_RUNNER_BACKEND selects the CLI backend (default: claude).
+// AGENT_CLI_BIN overrides the binary name/path for the selected backend.
+export const AGENT_RUNNER_BACKEND =
+  process.env.AGENT_RUNNER_BACKEND || 'claude';
+export const AGENT_CLI_BIN = process.env.AGENT_CLI_BIN || 'claude';

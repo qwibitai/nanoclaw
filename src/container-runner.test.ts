@@ -6,6 +6,8 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 // Mock config
 vi.mock('./config.js', () => ({
+  AGENT_CLI_BIN: 'claude',
+  AGENT_RUNNER_BACKEND: 'claude',
   AUTO_COMPACT_ENABLED: false,
   AUTO_COMPACT_THRESHOLD: 0.8,
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,

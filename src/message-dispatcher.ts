@@ -1,11 +1,14 @@
 import { createHash } from 'crypto';
+import path from 'path';
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   IDLE_TIMEOUT,
   IPC_POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
+import { resolveGroupFolderPath } from './group-folder.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -102,6 +105,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         delete state.sessions[groupFolder];
       },
       groupFolder: group.folder,
+      getSessionId: (gf) => state.sessions[gf],
+      claudeConfigDir: path.join(DATA_DIR, 'sessions', group.folder, '.claude'),
+      groupDir: resolveGroupFolderPath(group.folder),
+      assistantName: ASSISTANT_NAME,
     },
   });
   if (cmdResult.handled) return cmdResult.success;

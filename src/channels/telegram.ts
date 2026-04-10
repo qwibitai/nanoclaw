@@ -137,9 +137,7 @@ export class TelegramChannel implements Channel {
       try {
         if (subcommand === 'add') {
           if (!rest) {
-            await ctx.reply(
-              'Usage: /pantry add milk, eggs, oat milk',
-            );
+            await ctx.reply('Usage: /pantry add milk, eggs, oat milk');
             return;
           }
 
@@ -174,10 +172,11 @@ export class TelegramChannel implements Channel {
                 body: JSON.stringify({ name: itemName }),
               });
               if (!createResp.ok)
-                throw new Error(
-                  `Create product returned ${createResp.status}`,
-                );
-              product = (await createResp.json()) as { id: number; name: string };
+                throw new Error(`Create product returned ${createResp.status}`);
+              product = (await createResp.json()) as {
+                id: number;
+                name: string;
+              };
               productMap.set(itemName.toLowerCase(), product);
             }
 
@@ -193,9 +192,7 @@ export class TelegramChannel implements Channel {
               }),
             });
             if (!itemResp.ok)
-              throw new Error(
-                `Create pantry item returned ${itemResp.status}`,
-              );
+              throw new Error(`Create pantry item returned ${itemResp.status}`);
             added.push(itemName);
           }
 
@@ -423,12 +420,16 @@ export class TelegramChannel implements Channel {
         if (pendingSpend.expiresAt > Date.now()) {
           const text = ctx.message.text.trim().toLowerCase();
           if (text !== 'skip' && text !== 'nothing' && text !== 'n') {
-            const amountMatch = text.replace(/[$,]/g, '').match(/[\d]+(?:\.\d{1,2})?/);
+            const amountMatch = text
+              .replace(/[$,]/g, '')
+              .match(/[\d]+(?:\.\d{1,2})?/);
             if (amountMatch) {
               const amount = parseFloat(amountMatch[0]);
               try {
-                const pingUrl = process.env.PING_BASE_URL || 'http://localhost:3001';
-                const pingKey = process.env.PING_API_KEY || process.env.X_PING_KEY || '';
+                const pingUrl =
+                  process.env.PING_BASE_URL || 'http://localhost:3001';
+                const pingKey =
+                  process.env.PING_API_KEY || process.env.X_PING_KEY || '';
                 const resp = await fetch(`${pingUrl}/api/v1/expenses`, {
                   method: 'POST',
                   headers: {
@@ -443,12 +444,20 @@ export class TelegramChannel implements Channel {
                     timestamp: pendingSpend.visitEndTime,
                   }),
                 });
-                if (!resp.ok) throw new Error(`Ping expenses returned ${resp.status}`);
-                await ctx.reply(`✅ Logged $${amount.toFixed(2)} at ${pendingSpend.merchantName}`);
-                logger.info({ merchant: pendingSpend.merchantName, amount }, 'Grocery spend logged');
+                if (!resp.ok)
+                  throw new Error(`Ping expenses returned ${resp.status}`);
+                await ctx.reply(
+                  `✅ Logged $${amount.toFixed(2)} at ${pendingSpend.merchantName}`,
+                );
+                logger.info(
+                  { merchant: pendingSpend.merchantName, amount },
+                  'Grocery spend logged',
+                );
               } catch (err) {
                 logger.error({ err }, 'Failed to log grocery spend to Ping');
-                await ctx.reply('❌ Could not log spend — Ping is offline. Try again later.');
+                await ctx.reply(
+                  '❌ Could not log spend — Ping is offline. Try again later.',
+                );
               }
             } else {
               await ctx.reply('Could not parse that amount. Try: 47 or $47.50');
@@ -527,7 +536,7 @@ export class TelegramChannel implements Channel {
         sender_name: senderName,
         content,
         timestamp,
-        is_from_me: false,
+        is_from_me: ctx.chat.type === 'private',
       });
 
       logger.info(
@@ -566,7 +575,7 @@ export class TelegramChannel implements Channel {
         sender_name: senderName,
         content: `${placeholder}${caption}`,
         timestamp,
-        is_from_me: false,
+        is_from_me: ctx.chat.type === 'private',
       });
     };
 

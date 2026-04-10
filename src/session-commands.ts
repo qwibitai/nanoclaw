@@ -1,5 +1,6 @@
 import type { NewMessage } from './types.js';
 import { logger } from './logger.js';
+import { archiveTranscript } from './transcript-archiver.js';
 
 /**
  * Extract a session slash command from a message, stripping the trigger prefix if present.
@@ -52,6 +53,14 @@ export interface SessionCommandDeps {
   deleteInMemorySession: (groupFolder: string) => void;
   /** Group folder name (for /clear DB deletion). */
   groupFolder: string;
+  /** Get the current session ID for the group (for host-side transcript archival). */
+  getSessionId?: (groupFolder: string) => string | undefined;
+  /** Path to the group's .claude config directory (for host-side transcript archival). */
+  claudeConfigDir?: string;
+  /** Path to the group's workspace directory (for host-side transcript archival). */
+  groupDir?: string;
+  /** Assistant name (for transcript archival). */
+  assistantName?: string;
 }
 
 function resultToText(result: string | object | null | undefined): string {
@@ -92,7 +101,7 @@ export async function handleSessionCommand(opts: {
 
   if (!command || !cmdMsg) return { handled: false };
 
-  if (!isSessionCommandAllowed(isMainGroup, cmdMsg.is_from_me === true)) {
+  if (!isSessionCommandAllowed(isMainGroup, !!cmdMsg.is_from_me)) {
     // DENIED: send denial if the sender would normally be allowed to interact,
     // then silently consume the command by advancing the cursor past it.
     // Trade-off: other messages in the same batch are also consumed (cursor is
@@ -188,17 +197,10 @@ async function handleClear(
   await deps.setTyping(true);
 
   try {
-    // Archive the conversation by sending /clear to the agent-runner,
-    // which fires the PreCompact archive hook then exits without running SDK /compact.
-    let hadArchiveError = false;
-    await deps.runAgent('/clear', async (result) => {
-      if (result.status === 'error') hadArchiveError = true;
-    });
-
-    if (hadArchiveError) {
-      await deps.setTyping(false);
-      await deps.sendMessage('/clear failed. The session is unchanged.');
-      return { handled: true, success: false };
+    // Archive transcript from host side (provider-agnostic — no agent-runner needed)
+    const sessionId = deps.getSessionId?.(deps.groupFolder);
+    if (sessionId && deps.claudeConfigDir && deps.groupDir) {
+      archiveTranscript(sessionId, deps.claudeConfigDir, deps.groupDir, deps.assistantName);
     }
 
     // Delete session from DB and in-memory state
