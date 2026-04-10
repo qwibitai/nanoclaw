@@ -532,3 +532,12 @@ When an email mentions a project or person associated with a project, use this r
 - schedule_value: "0 10 * * 0" (Sunday 10 AM CST)
 - prompt: "Run the kb-housekeeping skill. Maintain the knowledge base and report results."
 - context_mode: group
+
+#### Email Poll
+- schedule_type: cron
+- schedule_value: "*/5 * * * *" (every 5 minutes)
+- prompt: "Run the email-poll skill. Check for new triaged emails and process them."
+- script: (see email-poll skill for the pre-check script)
+- context_mode: group
+
+Note: The script pre-checks superpilot for new emails. If none found, the agent doesn't wake — saving API costs. Only wakes when there are emails to process.
