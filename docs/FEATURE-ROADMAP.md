@@ -46,6 +46,36 @@ Features discussed, planned, or prototyped — listed without timelines or prior
 - **Flows data skill** — Query Flows meter data, check data gaps (when Flows provisioned)
 - **Spark broadcast skill** — Draft and queue customer broadcast emails (when Spark provisioned)
 
+## Memory
+
+Agent memory beyond session context — persistent, shared, decaying learnings across conversations.
+
+### Research Completed
+- Generative Agents (Stanford): three-factor scoring (recency × importance × relevance), 0.995^hours decay
+- Ebbinghaus forgetting curve: exponential decay with recall reinforcement (spacing effect)
+- MemGPT/Letta: structural forgetting (FIFO + recursive summarization)
+- LangChain TimeWeighted: configurable half-life decay
+- Mem0: LLM-driven ADD/UPDATE/DELETE/NOOP, graph memory
+- Production consensus: `score = 0.5×similarity + 0.3×recency + 0.2×importance`, 30-day half-life default
+
+### Service Evaluation (next session)
+- **Mem0 vs Supermemory head-to-head** — both $19/mo hosted, need usage analysis per-operator
+- Usage modelling: will per-operator Nexus instances fit within free/starter tiers?
+- Self-hosted viability: Mem0 OSS on Fly.io with Deno, vs Supermemory Enterprise
+- Feature gaps: which has better decay, importance scoring, privacy controls?
+- TypeScript/Deno SDK quality comparison
+- MCP server availability (Mem0 has one, does Supermemory?)
+
+### Architecture Questions
+- **Boundary**: What stays as baked-in image knowledge (ROM) vs what becomes memories?
+  - Current skills/knowledge files could be broken into discrete memories loaded via a "training" process
+  - ROM = instructions (how to behave). Memory = facts (what you've learned)
+  - Training process: on deploy, load knowledge/*.md as seed memories into the memory service
+- **Privacy model**: billing conversations marked private, never enter shared memory
+- **Multi-channel memory**: agent learns something in Discord, recalls it in web-chat
+- **Memory scoping**: operator-wide shared memory vs per-session private memory
+- **Concurrency control**: group queue (NanoClaw pattern) needed before memory at scale
+
 ## Security & Credentials
 
 - **OneCLI proxy for service channels** — Discord/Resend credentials routed through OneCLI Cloud proxy
