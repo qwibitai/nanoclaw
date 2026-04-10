@@ -27,6 +27,7 @@ import {
   SESSION_SWEEP_INTERVAL,
   THREAD_DEBOUNCE_MS,
   THREAD_SESSION_IDLE_HOURS,
+  PLUGIN_UPDATE_NOTIFY_JID,
   TIMEZONE,
   WEB_UI_PORT,
   WEB_UI_SENDER_NAME,
@@ -2776,7 +2777,7 @@ async function main(): Promise<void> {
   // Must be registered BEFORE startSchedulerLoop so the handler exists for the first poll.
   ensurePluginUpdaterTask();
   registerPluginUpdaterHandler({
-    notifyJid: process.env.PLUGIN_UPDATE_NOTIFY_JID || null,
+    notifyJid: PLUGIN_UPDATE_NOTIFY_JID,
     sendMessage: async (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) {

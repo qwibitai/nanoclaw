@@ -350,12 +350,20 @@ export class DiscordChannel implements Channel {
     });
 
     // Handle button clicks and slash commands.
-    const slashChannelIds = (process.env.DISCORD_SLASH_CHANNEL_IDS ?? '')
+    const slashEnv = readEnvFile(['DISCORD_SLASH_CHANNEL_IDS', 'DISCORD_DEPLOY_CHANNEL_ID']);
+    const slashChannelIds = (
+      process.env.DISCORD_SLASH_CHANNEL_IDS ||
+      slashEnv.DISCORD_SLASH_CHANNEL_IDS ||
+      ''
+    )
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
     const deployChannelId =
-      process.env.DISCORD_DEPLOY_CHANNEL_ID || slashChannelIds[0] || '';
+      process.env.DISCORD_DEPLOY_CHANNEL_ID ||
+      slashEnv.DISCORD_DEPLOY_CHANNEL_ID ||
+      slashChannelIds[0] ||
+      '';
     const slashCommandChannelIds = new Set(slashChannelIds);
     this.client.on(Events.InteractionCreate, async (interaction) => {
       const parentId = DiscordChannel.getInteractionParentId(interaction);
