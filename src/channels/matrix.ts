@@ -76,6 +76,7 @@ export class MatrixChannel implements Channel {
   private homeserverUrl: string;
   private accessToken: string;
   private botUserId: string;
+  private botPassword: string | undefined;
   private syncReady = false;
   private cryptoPersistTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -84,11 +85,88 @@ export class MatrixChannel implements Channel {
     accessToken: string,
     botUserId: string,
     opts: MatrixChannelOpts,
+    botPassword?: string,
   ) {
     this.homeserverUrl = homeserverUrl;
     this.accessToken = accessToken;
     this.botUserId = botUserId;
     this.opts = opts;
+    this.botPassword = botPassword;
+  }
+
+  /**
+   * One-time bootstrap of cross-signing keys (master, self-signing,
+   * user-signing). Without these, Element X shows "Encrypted by a device
+   * not verified by its owner" warnings on every k2 message because the
+   * recipient has no way to confirm the sending device belongs to k2.
+   *
+   * Idempotent: skips when `isCrossSigningReady()` returns true. Per the
+   * SDK docs that helper checks both that cross-signing is enabled on
+   * the account *and* that the private keys are reachable on this device
+   * (either cached locally or recoverable from secret storage), so it's
+   * a stricter and more accurate skip condition than the raw
+   * `getCrossSigningStatus().publicKeysOnDevice` flag — the latter only
+   * tests the public side, which would falsely skip if the local private
+   * key cache had been wiped.
+   *
+   * Requires the bot's password (MATRIX_BOT_PASSWORD) for the
+   * User-Interactive Auth flow that authorises uploading the
+   * device-signing keys to the server. If the password is unset, logs a
+   * warning and skips — never fails startup.
+   */
+  private async bootstrapCrossSigningIfNeeded(): Promise<void> {
+    const crypto = this.client?.getCrypto();
+    if (!crypto) return;
+
+    let ready: boolean;
+    try {
+      ready = await crypto.isCrossSigningReady();
+    } catch (err) {
+      logger.warn({ err }, 'Failed to read Matrix cross-signing status');
+      return;
+    }
+
+    if (ready) {
+      const masterKeyId = await crypto
+        .getCrossSigningKeyId()
+        .catch(() => null);
+      logger.info(
+        { masterKeyId },
+        'Matrix cross-signing already initialised',
+      );
+      return;
+    }
+
+    if (!this.botPassword) {
+      logger.warn(
+        'Matrix cross-signing not set up and MATRIX_BOT_PASSWORD is unset — skipping bootstrap. Element X will continue to show "device not verified by its owner" warnings until cross-signing is initialised.',
+      );
+      return;
+    }
+
+    try {
+      await crypto.bootstrapCrossSigning({
+        authUploadDeviceSigningKeys: async (
+          makeRequest: (auth: object) => Promise<unknown>,
+        ) => {
+          await makeRequest({
+            type: 'm.login.password',
+            identifier: { type: 'm.id.user', user: this.botUserId },
+            password: this.botPassword!,
+          });
+        },
+      });
+
+      const masterKeyId = await crypto
+        .getCrossSigningKeyId()
+        .catch(() => null);
+      logger.info({ masterKeyId }, 'Matrix cross-signing bootstrapped');
+    } catch (err) {
+      logger.error(
+        { err },
+        'Failed to bootstrap Matrix cross-signing — Element X will continue to show device verification warnings',
+      );
+    }
   }
 
   async connect(): Promise<void> {
@@ -163,6 +241,15 @@ export class MatrixChannel implements Channel {
 
       // Persist the freshly-initialised (or restored) crypto store to disk
       // so it survives process restarts.
+      await persistCryptoStore(MATRIX_CRYPTO_STORE_PATH);
+
+      // One-time cross-signing bootstrap so Element X stops showing
+      // "Encrypted by a device not verified by its owner" warnings.
+      // Idempotent — skips if already initialised. Runs before sync.
+      await this.bootstrapCrossSigningIfNeeded();
+
+      // Re-persist after bootstrap so newly-created cross-signing keys
+      // survive the next restart.
       await persistCryptoStore(MATRIX_CRYPTO_STORE_PATH);
 
       // Periodically flush crypto state to disk (every 5 minutes).
@@ -498,6 +585,7 @@ registerChannel('matrix', (opts: ChannelOpts) => {
     'MATRIX_HOMESERVER_URL',
     'MATRIX_ACCESS_TOKEN',
     'MATRIX_BOT_USER_ID',
+    'MATRIX_BOT_PASSWORD',
   ]);
   const homeserverUrl =
     process.env.MATRIX_HOMESERVER_URL || envVars.MATRIX_HOMESERVER_URL || '';
@@ -505,6 +593,9 @@ registerChannel('matrix', (opts: ChannelOpts) => {
     process.env.MATRIX_ACCESS_TOKEN || envVars.MATRIX_ACCESS_TOKEN || '';
   const botUserId =
     process.env.MATRIX_BOT_USER_ID || envVars.MATRIX_BOT_USER_ID || '';
+  // Optional — only used to authorise one-time cross-signing bootstrap.
+  const botPassword =
+    process.env.MATRIX_BOT_PASSWORD || envVars.MATRIX_BOT_PASSWORD || undefined;
 
   if (!homeserverUrl || !accessToken || !botUserId) {
     logger.warn(
@@ -513,5 +604,11 @@ registerChannel('matrix', (opts: ChannelOpts) => {
     return null;
   }
 
-  return new MatrixChannel(homeserverUrl, accessToken, botUserId, opts);
+  return new MatrixChannel(
+    homeserverUrl,
+    accessToken,
+    botUserId,
+    opts,
+    botPassword,
+  );
 });
