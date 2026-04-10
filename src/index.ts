@@ -576,9 +576,9 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
-function syncDashboardState(status?: Parameters<
-  typeof updateRuntimeDashboardState
->[0]['status']): void {
+function syncDashboardState(
+  status?: Parameters<typeof updateRuntimeDashboardState>[0]['status'],
+): void {
   updateRuntimeDashboardState({
     status,
     channels: channels.map((channel) => ({

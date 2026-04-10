@@ -3,11 +3,15 @@ process.env.NANOCLAW_PROCESS_ROLE ??= 'dashboard';
 import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import http from 'http';
+import os from 'os';
 import path from 'path';
 
 import './channels/index.js';
 import { ASSISTANT_NAME, DATA_DIR } from './config.js';
-import { DASHBOARD_EVENTS_FILE, DASHBOARD_RUNTIME_FILE } from './dashboard-state.js';
+import {
+  DASHBOARD_EVENTS_FILE,
+  DASHBOARD_RUNTIME_FILE,
+} from './dashboard-state.js';
 import { getRegisteredChannelNames } from './channels/registry.js';
 import {
   getAllChats,
@@ -61,23 +65,49 @@ interface DashboardEvent {
   data?: Record<string, unknown>;
 }
 
+interface SkillSummary {
+  id: string;
+  name: string;
+  description: string;
+  source: 'system' | 'plugin';
+  enabled: boolean;
+  app: string | null;
+  plugin: string | null;
+  manifestPath: string;
+}
+
+interface AppSummary {
+  id: string;
+  name: string;
+  enabled: boolean;
+  skillCount: number;
+  source: 'plugin' | 'system';
+  note: string;
+}
+
 const PORT = parseInt(process.env.NANOCLAW_DASHBOARD_PORT || '4780', 10);
 const HOST = process.env.NANOCLAW_DASHBOARD_HOST || '127.0.0.1';
 const HEARTBEAT_STALE_MS = 5000;
 const MAX_LOG_EVENTS = 80;
 const DASHBOARD_STATE_DIR = path.join(DATA_DIR, 'dashboard');
+const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+const SYSTEM_SKILLS_DIR = path.join(CODEX_HOME, 'skills', '.system');
+const CURATED_PLUGINS_DIR = path.join(
+  CODEX_HOME,
+  'plugins',
+  'cache',
+  'openai-curated',
+);
 
 let managedAgent: ChildProcess | null = null;
 let managedAgentStartedAt: string | null = null;
 let managedAgentCommand: string[] = [];
 let managedAgentStatusMessage: string | null = null;
-let managedAgentLastExit:
-  | {
-      at: string;
-      code: number | null;
-      signal: NodeJS.Signals | null;
-    }
-  | null = null;
+let managedAgentLastExit: {
+  at: string;
+  code: number | null;
+  signal: NodeJS.Signals | null;
+} | null = null;
 let managedAgentOutput: Array<{
   at: string;
   stream: 'stdout' | 'stderr';
@@ -86,8 +116,14 @@ let managedAgentOutput: Array<{
 
 const sseClients = new Set<http.ServerResponse>();
 
-function json(response: http.ServerResponse, statusCode: number, body: unknown): void {
-  response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+function json(
+  response: http.ServerResponse,
+  statusCode: number,
+  body: unknown,
+): void {
+  response.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+  });
   response.end(JSON.stringify(body));
 }
 
@@ -164,7 +200,10 @@ function getAgentCommand(): { command: string; args: string[] } {
     process.platform === 'win32' ? 'tsx.cmd' : 'tsx',
   );
 
-  if ((!distIsFresh || process.env.NANOCLAW_PREFER_TSX === '1') && fs.existsSync(tsxBin)) {
+  if (
+    (!distIsFresh || process.env.NANOCLAW_PREFER_TSX === '1') &&
+    fs.existsSync(tsxBin)
+  ) {
     return { command: tsxBin, args: ['src/index.ts'] };
   }
 
@@ -203,6 +242,135 @@ function isHeartbeatFresh(runtime: DashboardRuntimeState | null): boolean {
   return Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= HEARTBEAT_STALE_MS;
 }
 
+function extractFrontmatterValue(source: string, key: string): string | null {
+  const match = source.match(
+    new RegExp(`^${key}:\\s*["']?(.+?)["']?\\s*$`, 'm'),
+  );
+  return match ? match[1].trim() : null;
+}
+
+function readSkillManifest(manifestPath: string): {
+  name: string | null;
+  description: string | null;
+} {
+  try {
+    const content = fs.readFileSync(manifestPath, 'utf8');
+    return {
+      name: extractFrontmatterValue(content, 'name'),
+      description: extractFrontmatterValue(content, 'description'),
+    };
+  } catch {
+    return { name: null, description: null };
+  }
+}
+
+function listSkillManifestPaths(rootDir: string): string[] {
+  if (!fs.existsSync(rootDir)) return [];
+  const manifests: string[] = [];
+
+  const walk = (dirPath: string): void => {
+    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+      const fullPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+        continue;
+      }
+      if (entry.isFile() && entry.name === 'SKILL.md') {
+        manifests.push(fullPath);
+      }
+    }
+  };
+
+  walk(rootDir);
+  return manifests.sort();
+}
+
+function collectSkillSummaries(): SkillSummary[] {
+  const skills: SkillSummary[] = [];
+
+  for (const manifestPath of listSkillManifestPaths(SYSTEM_SKILLS_DIR)) {
+    const meta = readSkillManifest(manifestPath);
+    const dirName = path.basename(path.dirname(manifestPath));
+    skills.push({
+      id: `system:${dirName}`,
+      name: meta.name || dirName,
+      description: meta.description || 'No description found.',
+      source: 'system',
+      enabled: true,
+      app: null,
+      plugin: null,
+      manifestPath,
+    });
+  }
+
+  if (fs.existsSync(CURATED_PLUGINS_DIR)) {
+    for (const pluginName of fs.readdirSync(CURATED_PLUGINS_DIR)) {
+      const pluginDir = path.join(CURATED_PLUGINS_DIR, pluginName);
+      if (!fs.statSync(pluginDir).isDirectory()) continue;
+
+      const versionDirs = fs
+        .readdirSync(pluginDir)
+        .map((entry) => path.join(pluginDir, entry))
+        .filter((fullPath) => fs.statSync(fullPath).isDirectory())
+        .sort();
+      const latestVersionDir = versionDirs.at(-1);
+      if (!latestVersionDir) continue;
+
+      const skillsDir = path.join(latestVersionDir, 'skills');
+      for (const manifestPath of listSkillManifestPaths(skillsDir)) {
+        const meta = readSkillManifest(manifestPath);
+        const dirName = path.basename(path.dirname(manifestPath));
+        skills.push({
+          id: `plugin:${pluginName}:${dirName}`,
+          name: meta.name || dirName,
+          description: meta.description || 'No description found.',
+          source: 'plugin',
+          enabled: true,
+          app: pluginName,
+          plugin: pluginName,
+          manifestPath,
+        });
+      }
+    }
+  }
+
+  return skills;
+}
+
+function collectAppSummaries(skills: SkillSummary[]): AppSummary[] {
+  const apps: AppSummary[] = [];
+  const pluginGroups = new Map<string, SkillSummary[]>();
+
+  for (const skill of skills) {
+    if (!skill.plugin) continue;
+    const group = pluginGroups.get(skill.plugin) || [];
+    group.push(skill);
+    pluginGroups.set(skill.plugin, group);
+  }
+
+  for (const [plugin, pluginSkills] of [...pluginGroups.entries()].sort()) {
+    apps.push({
+      id: plugin,
+      name: plugin.charAt(0).toUpperCase() + plugin.slice(1),
+      enabled: true,
+      skillCount: pluginSkills.length,
+      source: 'plugin',
+      note: `Provides ${pluginSkills.length} dashboard-visible skill${pluginSkills.length === 1 ? '' : 's'}.`,
+    });
+  }
+
+  apps.push({
+    id: 'codex-system',
+    name: 'Codex System',
+    enabled: true,
+    skillCount: skills.filter((skill) => skill.source === 'system').length,
+    source: 'system',
+    note: 'Built-in local skills installed under ~/.codex/skills/.system.',
+  });
+
+  return apps;
+}
+
 function startAgent(): { ok: boolean; message: string } {
   const runtime = loadRuntimeStatus();
   const blocker = getStartupBlocker();
@@ -212,7 +380,10 @@ function startAgent(): { ok: boolean; message: string } {
     return { ok: false, message: blocker };
   }
   if (managedAgent && managedAgent.exitCode === null) {
-    return { ok: false, message: 'Agent is already running under dashboard control.' };
+    return {
+      ok: false,
+      message: 'Agent is already running under dashboard control.',
+    };
   }
   if (runtime && isHeartbeatFresh(runtime) && runtime.status !== 'stopped') {
     return {
@@ -234,7 +405,8 @@ function startAgent(): { ok: boolean; message: string } {
   managedAgent = child;
   managedAgentStartedAt = new Date().toISOString();
   managedAgentCommand = [command, ...args];
-  managedAgentStatusMessage = 'Agent process spawned. Waiting for runtime heartbeat.';
+  managedAgentStatusMessage =
+    'Agent process spawned. Waiting for runtime heartbeat.';
   managedAgentLastExit = null;
   managedAgentOutput = [];
 
@@ -276,6 +448,8 @@ function buildSnapshot(): Record<string, unknown> {
   const chats = new Map(getAllChats().map((chat) => [chat.jid, chat]));
   const tasks = getAllTasks();
   const taskLogs = getRecentTaskRunLogs(12);
+  const skills = collectSkillSummaries();
+  const apps = collectAppSummaries(skills);
 
   let lastAgentTimestamp: Record<string, string> = {};
   try {
@@ -289,7 +463,12 @@ function buildSnapshot(): Record<string, unknown> {
     const chat = chats.get(jid);
     const queueState = runtime?.queue.groups[jid];
     const cursor = lastAgentTimestamp[jid] || '';
-    const pendingCount = getMessagesSince(jid, cursor, ASSISTANT_NAME, 50).length;
+    const pendingCount = getMessagesSince(
+      jid,
+      cursor,
+      ASSISTANT_NAME,
+      50,
+    ).length;
 
     return {
       jid,
@@ -317,28 +496,25 @@ function buildSnapshot(): Record<string, unknown> {
 
   const fresh = isHeartbeatFresh(runtime);
   const runtimeStatus =
-    runtime && fresh
-      ? runtime.status
-      : runtime
-        ? 'stale'
-        : 'offline';
+    runtime && fresh ? runtime.status : runtime ? 'stale' : 'offline';
 
   const recentEvents = readRecentEvents(MAX_LOG_EVENTS).filter((entry) =>
     runtime?.pid ? entry.pid === runtime.pid : true,
   );
 
-  const recentMessages = groups.flatMap((group) =>
-    getMessagesSince(group.jid, '', ASSISTANT_NAME, 8).map((message) => ({
-      id: `${group.jid}:${message.id}`,
-      chatJid: group.jid,
-      groupName: group.name,
-      senderName: message.sender_name,
-      content: message.content,
-      timestamp: message.timestamp,
-      isFromMe: message.is_from_me === true,
-      isBotMessage: message.is_bot_message === true,
-    })),
-  )
+  const recentMessages = groups
+    .flatMap((group) =>
+      getMessagesSince(group.jid, '', ASSISTANT_NAME, 8).map((message) => ({
+        id: `${group.jid}:${message.id}`,
+        chatJid: group.jid,
+        groupName: group.name,
+        senderName: message.sender_name,
+        content: message.content,
+        timestamp: message.timestamp,
+        isFromMe: message.is_from_me === true,
+        isBotMessage: message.is_bot_message === true,
+      })),
+    )
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
     .slice(0, 20);
 
@@ -376,8 +552,12 @@ function buildSnapshot(): Record<string, unknown> {
       waitingGroups: runtime?.queue.waitingGroups.length ?? 0,
       connectedChannels:
         runtime?.channels.filter((channel) => channel.connected).length ?? 0,
+      skills: skills.length,
+      apps: apps.length,
     },
     groups,
+    skills,
+    apps,
     tasks,
     taskLogs,
     recentMessages,
@@ -728,6 +908,16 @@ const html = `<!DOCTYPE html>
           <div id="tasks" class="cards"></div>
           <div id="task-logs" class="cards" style="margin-top:12px;"></div>
         </div>
+        <div class="panel section">
+          <div class="section-head">
+            <div>
+              <h2>Apps & Skills</h2>
+              <p>Local plugin apps, built-in skills, and what each one enables.</p>
+            </div>
+          </div>
+          <div id="apps" class="cards"></div>
+          <div id="skills" class="cards" style="margin-top:12px;"></div>
+        </div>
       </div>
     </section>
   </div>
@@ -775,6 +965,8 @@ const html = `<!DOCTYPE html>
         ['Tasks', snapshot.summary.tasks],
         ['Active Containers', snapshot.summary.activeContainers],
         ['Connected Channels', snapshot.summary.connectedChannels],
+        ['Skills', snapshot.summary.skills],
+        ['Apps', snapshot.summary.apps],
       ];
       document.getElementById('quick-stats').innerHTML = stats
         .map(([label, value]) => '<div class="stat"><strong>' + escapeHtml(value) + '</strong><span>' + escapeHtml(label) + '</span></div>')
@@ -949,6 +1141,57 @@ const html = `<!DOCTYPE html>
       }).join('');
     }
 
+    function renderAppsAndSkills(snapshot) {
+      const appsRoot = document.getElementById('apps');
+      const skillsRoot = document.getElementById('skills');
+
+      if (!snapshot.apps.length) {
+        appsRoot.innerHTML = '<div class="empty">No plugin apps detected.</div>';
+      } else {
+        appsRoot.innerHTML = snapshot.apps.map((app) => {
+          const changed = highlightIfChanged('app:' + app.id, app);
+          return '<article class="task-card ' + changed + '">' +
+            '<div class="card-top">' +
+              '<div>' +
+                '<div class="card-title">' + escapeHtml(app.name) + '</div>' +
+                '<div class="meta">' + escapeHtml(app.source) + ' app bundle</div>' +
+              '</div>' +
+              '<div class="pill ' + (app.enabled ? 'good' : 'danger') + '">' + escapeHtml(app.enabled ? 'enabled' : 'disabled') + '</div>' +
+            '</div>' +
+            '<div class="mono">' + escapeHtml(app.note) + '</div>' +
+            '<div class="pill-row">' +
+              '<span class="pill">skills: ' + escapeHtml(app.skillCount) + '</span>' +
+              '<span class="pill">' + escapeHtml(app.id) + '</span>' +
+            '</div>' +
+          '</article>';
+        }).join('');
+      }
+
+      if (!snapshot.skills.length) {
+        skillsRoot.innerHTML = '<div class="empty">No skills detected.</div>';
+        return;
+      }
+
+      skillsRoot.innerHTML = snapshot.skills.map((skill) => {
+        const changed = highlightIfChanged('skill:' + skill.id, skill);
+        const appLabel = skill.app ? 'app: ' + skill.app : 'built-in';
+        return '<article class="task-card ' + changed + '">' +
+          '<div class="card-top">' +
+            '<div>' +
+              '<div class="card-title">' + escapeHtml(skill.name) + '</div>' +
+              '<div class="meta">' + escapeHtml(appLabel) + ' • ' + escapeHtml(skill.source) + '</div>' +
+            '</div>' +
+            '<div class="pill ' + (skill.enabled ? 'good' : 'danger') + '">' + escapeHtml(skill.enabled ? 'enabled' : 'disabled') + '</div>' +
+          '</div>' +
+          '<div class="mono">' + escapeHtml(skill.description) + '</div>' +
+          '<div class="pill-row">' +
+            '<span class="pill">' + escapeHtml(skill.plugin || 'system') + '</span>' +
+            '<span class="pill">' + escapeHtml(skill.manifestPath) + '</span>' +
+          '</div>' +
+        '</article>';
+      }).join('');
+    }
+
     function renderEvents(snapshot) {
       const root = document.getElementById('events');
       if (!snapshot.recentEvents.length) {
@@ -996,6 +1239,7 @@ const html = `<!DOCTYPE html>
       renderLauncher(snapshot);
       renderGroups(snapshot);
       renderTasks(snapshot);
+      renderAppsAndSkills(snapshot);
       renderEvents(snapshot);
       renderMessages(snapshot);
     }
@@ -1071,10 +1315,7 @@ initDatabase();
 
 const server = http.createServer(handleRequest);
 server.listen(PORT, HOST, () => {
-  logger.info(
-    { host: HOST, port: PORT },
-    'NanoClaw dashboard listening',
-  );
+  logger.info({ host: HOST, port: PORT }, 'NanoClaw dashboard listening');
   broadcastSnapshot();
 });
 

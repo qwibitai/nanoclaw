@@ -82,8 +82,7 @@ export function applySupportedEnvAliases(): void {
       process.env.ANTHROPIC_AUTH_TOKEN = openRouterApiKey;
     }
     if (!process.env.ANTHROPIC_BASE_URL) {
-      process.env.ANTHROPIC_BASE_URL =
-        'https://openrouter.ai/api/v1/anthropic';
+      process.env.ANTHROPIC_BASE_URL = 'https://openrouter.ai/api/v1/anthropic';
     }
   }
 

@@ -91,4 +91,3 @@ export function markRuntimeDashboardStopped(
 ): void {
   updateRuntimeDashboardState({ status });
 }
-

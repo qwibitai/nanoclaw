@@ -43,9 +43,9 @@ afterEach(() => {
 describe('env aliases', () => {
   it('reads custom hyphenated keys from .env', () => {
     writeTempEnv('TELEGRAM-TOKEN=abc123\n');
-    expect(
-      readEnvValue(['TELEGRAM_BOT_TOKEN', 'TELEGRAM-TOKEN']),
-    ).toBe('abc123');
+    expect(readEnvValue(['TELEGRAM_BOT_TOKEN', 'TELEGRAM-TOKEN'])).toBe(
+      'abc123',
+    );
   });
 
   it('maps Telegram and OpenRouter aliases into supported env vars', () => {
@@ -63,4 +63,3 @@ describe('env aliases', () => {
     );
   });
 });
-

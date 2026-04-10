@@ -226,9 +226,7 @@ class TelegramChannel implements Channel {
       signal?: AbortSignal;
     },
   ): Promise<T> {
-    const url = new URL(
-      `https://api.telegram.org/bot${this.token}/${method}`,
-    );
+    const url = new URL(`https://api.telegram.org/bot${this.token}/${method}`);
     if (options?.query) {
       for (const [key, value] of Object.entries(options.query)) {
         url.searchParams.set(key, value);
@@ -264,4 +262,3 @@ registerChannel('telegram', (opts) => {
   if (!token) return null;
   return new TelegramChannel(opts, token);
 });
-
