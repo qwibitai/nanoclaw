@@ -8,6 +8,7 @@ import {
   OPERATOR_NAME,
   WORKSPACE_DIR,
 } from '../shared/config.ts';
+import { isMemoryEnabled } from '../shared/memory-client.ts';
 import { logger } from '../shared/logger.ts';
 import * as store from '../shared/store-client.ts';
 
@@ -96,6 +97,22 @@ export function buildWorkspace(groupId: string): {
           .join('\n\n---\n\n')
       : 'No knowledge files loaded.';
 
+  const memorySection = isMemoryEnabled()
+    ? `## Your Memory
+
+You have persistent long-term memory powered by Supermemory. This memory is shared
+across ALL channels (web-chat, Discord, email) and ALL sessions. When you recall
+something from memory, it may have been learned on a different channel or in a
+different conversation — not necessarily a "previous session."
+
+When referencing recalled information:
+- Say "from memory" or "I recall" — not "from a previous session"
+- Do not assume which channel the memory came from unless the metadata says so
+- Memories tagged in <nexus-memory> blocks are injected before each message you receive
+- New facts and decisions from your conversations are automatically captured to memory
+`
+    : '';
+
   const claudeMd = `# ${ASSISTANT_NAME}
 
 You are ${ASSISTANT_NAME}, the AI assistant for ${OPERATOR_NAME}.
@@ -103,7 +120,7 @@ You are ${ASSISTANT_NAME}, the AI assistant for ${OPERATOR_NAME}.
 ## Your Operator
 
 ${operatorContext}
-
+${memorySection}
 ## Available Skills
 
 ${skillsSection}

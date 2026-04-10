@@ -45,6 +45,9 @@ export async function runAgent(options: {
               append: options.systemPrompt,
             }
           : undefined,
+        settings: {
+          autoMemoryEnabled: false,
+        },
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         env: Object.fromEntries(

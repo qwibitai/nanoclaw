@@ -24,11 +24,13 @@ Console UI is a separate project: `simt-console-mock` (Deno Fresh 2.0, Deno Depl
 | `src/gateway/event-log.ts` | Activity events (delegates to store) |
 | `src/agent/agent.ts` | Agent SDK `query()` wrapper, additionalDirectories |
 | `src/agent/workspace.ts` | Build CLAUDE.md once per session, reuse on follow-ups |
+| `src/agent/memory.ts` | Memory recall (before query) and capture (after query) |
 | `src/agent/sessions.ts` | Agent SDK session ID persistence (delegates to store) |
 | `src/store/backend.ts` | StoreBackend interface + FilesystemBackend |
 | `src/store/server.ts` | Store HTTP API (sessions, events, JSONL) |
 | `src/shared/config.ts` | All env vars, path constants |
 | `src/shared/store-client.ts` | HTTP client for gateway + agent to talk to store |
+| `src/shared/memory-client.ts` | Supermemory REST API client (recall, capture, search) |
 | `src/shared/onecli.ts` | OneCLI Cloud vault integration |
 | `src/shared/landing.ts` | Shared landing page builder (DRY across processes) |
 | `skills/` | SKILL.md files (baked into Docker image) |
@@ -103,6 +105,20 @@ Operator identity set via Fly secrets: `OPERATOR_SLUG`, `OPERATOR_NAME`, `ANTHRO
 | Ymir (local dev) | localhost | — | `ymir` |
 | Microgrid Foundry | `simt-nexus-mgf` | `microgridfoundry` | `foundry` |
 | Bristol Energy | `simt-nexus-bec` | `bristolenergy` | `bec` |
+
+## Memory (Supermemory)
+
+Persistent agent memory across conversations via Supermemory Pro (hosted, Simtricity Limited org).
+
+**How it works:** Two hooks in the agent poll loop (`src/agent/index.ts`):
+- **Recall** (before `runAgent()`) — calls `profile()` to get user profile + relevant memories, prepends as `<nexus-memory>` XML block to the prompt
+- **Capture** (after `runAgent()`) — sends the user/assistant exchange to `add()` for fact extraction. Fire and forget.
+
+**Container tags** isolate memory per operator. Tag = `SUPERMEMORY_CONTAINER_TAG` env var, defaults to `OPERATOR_SLUG`. Ymir uses `damonrand`, Foundry uses `foundry`.
+
+**Graceful degradation:** If `SUPERMEMORY_API_KEY` is empty, memory is disabled — no errors, agent works normally. All Supermemory calls are wrapped in try/catch.
+
+**Env vars:** `SUPERMEMORY_API_KEY` (scoped API key), `SUPERMEMORY_CONTAINER_TAG` (defaults to operator slug).
 
 ## Architectural Rules
 

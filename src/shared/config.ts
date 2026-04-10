@@ -12,6 +12,8 @@ const envConfig = readEnvFile([
   'OPERATOR_NAME',
   'STORE_PORT',
   'STORE_URL',
+  'SUPERMEMORY_API_KEY',
+  'SUPERMEMORY_CONTAINER_TAG',
 ]);
 
 const PROJECT_ROOT = Deno.cwd();
@@ -83,6 +85,17 @@ export const STORE_URL =
   Deno.env.get('STORE_URL') || envConfig.STORE_URL || 'http://localhost:3002';
 export const STORE_DIR =
   Deno.env.get('STORE_DIR') || resolve(OPERATOR_DATA_DIR, 'store');
+
+// Supermemory — persistent agent memory across conversations.
+// API key from console.supermemory.ai (scoped per operator).
+// Container tag defaults to OPERATOR_SLUG but can be overridden
+// (e.g., Ymir uses 'damonrand' not 'ymir').
+export const SUPERMEMORY_API_KEY =
+  Deno.env.get('SUPERMEMORY_API_KEY') || envConfig.SUPERMEMORY_API_KEY || '';
+export const SUPERMEMORY_CONTAINER_TAG =
+  Deno.env.get('SUPERMEMORY_CONTAINER_TAG') ||
+  envConfig.SUPERMEMORY_CONTAINER_TAG ||
+  OPERATOR_SLUG;
 
 // Process isolation: gateway and agent use separate /tmp namespaces.
 // They must NOT share filesystem state — all data flows through WorkItems.

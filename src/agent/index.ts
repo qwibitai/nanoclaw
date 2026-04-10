@@ -4,6 +4,7 @@ import { logger } from '../shared/logger.ts';
 import { setStoreUrl, saveJsonl, getJsonl } from '../shared/store-client.ts';
 import type { Attachment, WorkItem, WorkResult } from '../shared/types.ts';
 import { runAgent } from './agent.ts';
+import { recallMemories, captureMemory } from './memory.ts';
 import { getSessionId, saveSessionId } from './sessions.ts';
 import { buildWorkspace, cleanupOldWorkspaces } from './workspace.ts';
 
@@ -186,6 +187,12 @@ async function processWork(item: WorkItem): Promise<void> {
     }
   }
 
+  // Memory recall — inject relevant memories before AI processes message
+  const memoryBlock = await recallMemories(prompt);
+  if (memoryBlock) {
+    prompt = `${memoryBlock}\n\n${prompt}`;
+  }
+
   const agentResult = await runAgent({
     prompt,
     cwd,
@@ -209,6 +216,13 @@ async function processWork(item: WorkItem): Promise<void> {
     cwd,
     finalSizeBefore,
   );
+
+  // Memory capture — store exchange for future recall (fire and forget)
+  if (agentResult.status === 'success' && agentResult.result) {
+    captureMemory(item.prompt, agentResult.result, item.channel).catch((err) =>
+      logger.warn({ err }, 'Memory capture failed')
+    );
+  }
 
   const result: WorkResult = {
     id: item.id,
