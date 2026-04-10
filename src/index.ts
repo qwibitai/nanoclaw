@@ -70,6 +70,7 @@ import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { runCodexExec } from './codex-runner.js';
 import { applySupportedEnvAliases } from './env.js';
 
 // Re-export for backwards compatibility during refactor
@@ -658,6 +659,89 @@ async function main(): Promise<void> {
     }
   }
 
+  async function handleCodexCommand(
+    command: string,
+    chatJid: string,
+    msg: NewMessage,
+  ): Promise<void> {
+    const group = registeredGroups[chatJid];
+    if (!group?.isMain) {
+      const channel = findChannel(channels, chatJid);
+      if (channel) {
+        await channel.sendMessage(
+          chatJid,
+          'Codex commands are only enabled from the main NanoClaw group.',
+        );
+      }
+      logger.warn(
+        { chatJid, sender: msg.sender },
+        'Codex command rejected: not main group',
+      );
+      return;
+    }
+
+    const prompt = command.replace(/^\/codex\b/i, '').trim();
+    if (!prompt) {
+      const channel = findChannel(channels, chatJid);
+      if (channel) {
+        await channel.sendMessage(
+          chatJid,
+          'Usage: /codex <coding task>',
+        );
+      }
+      return;
+    }
+
+    const channel = findChannel(channels, chatJid);
+    if (!channel) return;
+
+    await channel.sendMessage(chatJid, 'Starting Codex coding agent…');
+    await channel.setTyping?.(chatJid, true);
+
+    try {
+      const result = await runCodexExec(prompt, process.cwd());
+      await channel.setTyping?.(chatJid, false);
+      if (result.ok) {
+        await channel.sendMessage(chatJid, result.text || 'Codex completed.');
+      } else {
+        await channel.sendMessage(
+          chatJid,
+          `Codex failed: ${result.error || 'unknown error'}`,
+        );
+      }
+    } catch (err) {
+      await channel.setTyping?.(chatJid, false);
+      await channel.sendMessage(
+        chatJid,
+        `Codex failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  function extractCodexPrompt(text: string): string | null {
+    const trimmed = text.trim();
+    if (/^\/codex\b/i.test(trimmed)) {
+      const prompt = trimmed.replace(/^\/codex\b[:\s-]*/i, '').trim();
+      return prompt || null;
+    }
+
+    const naturalLanguagePatterns = [
+      /^use codex (?:to |for )?(.*)$/i,
+      /^spawn codex (?:to |for )?(.*)$/i,
+      /^have codex (?:handle|do|fix|work on|look at|review)\s+(.*)$/i,
+      /^ask codex (?:to )?(.*)$/i,
+      /^codex[:,]?\s*(.*)$/i,
+    ];
+
+    for (const pattern of naturalLanguagePatterns) {
+      const match = trimmed.match(pattern);
+      const prompt = match?.[1]?.trim();
+      if (prompt) return prompt;
+    }
+
+    return null;
+  }
+
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
@@ -666,6 +750,13 @@ async function main(): Promise<void> {
       if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
         handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'Remote control command error'),
+        );
+        return;
+      }
+      const codexPrompt = extractCodexPrompt(trimmed);
+      if (codexPrompt) {
+        handleCodexCommand(`/codex ${codexPrompt}`, chatJid, msg).catch((err) =>
+          logger.error({ err, chatJid }, 'Codex command error'),
         );
         return;
       }

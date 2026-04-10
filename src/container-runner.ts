@@ -62,6 +62,8 @@ const PASSTHROUGH_ENV_VARS = [
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_BASE_URL',
   'NANOCLAW_MODEL',
+  'GITHUB_TOKEN',
+  'GH_TOKEN',
 ] as const;
 
 function buildVolumeMounts(

@@ -69,7 +69,7 @@ interface SkillSummary {
   id: string;
   name: string;
   description: string;
-  source: 'system' | 'plugin';
+  source: 'system' | 'plugin' | 'repo';
   enabled: boolean;
   app: string | null;
   plugin: string | null;
@@ -81,7 +81,7 @@ interface AppSummary {
   name: string;
   enabled: boolean;
   skillCount: number;
-  source: 'plugin' | 'system';
+  source: 'plugin' | 'system' | 'repo';
   note: string;
 }
 
@@ -98,6 +98,7 @@ const CURATED_PLUGINS_DIR = path.join(
   'cache',
   'openai-curated',
 );
+const REPO_SKILLS_DIR = path.join(process.cwd(), '.claude', 'skills');
 
 let managedAgent: ChildProcess | null = null;
 let managedAgentStartedAt: string | null = null;
@@ -303,6 +304,21 @@ function collectSkillSummaries(): SkillSummary[] {
     });
   }
 
+  for (const manifestPath of listSkillManifestPaths(REPO_SKILLS_DIR)) {
+    const meta = readSkillManifest(manifestPath);
+    const dirName = path.basename(path.dirname(manifestPath));
+    skills.push({
+      id: `repo:${dirName}`,
+      name: meta.name || dirName,
+      description: meta.description || 'No description found.',
+      source: 'repo',
+      enabled: true,
+      app: null,
+      plugin: null,
+      manifestPath,
+    });
+  }
+
   if (fs.existsSync(CURATED_PLUGINS_DIR)) {
     for (const pluginName of fs.readdirSync(CURATED_PLUGINS_DIR)) {
       const pluginDir = path.join(CURATED_PLUGINS_DIR, pluginName);
@@ -366,6 +382,15 @@ function collectAppSummaries(skills: SkillSummary[]): AppSummary[] {
     skillCount: skills.filter((skill) => skill.source === 'system').length,
     source: 'system',
     note: 'Built-in local skills installed under ~/.codex/skills/.system.',
+  });
+
+  apps.push({
+    id: 'nanoclaw-repo',
+    name: 'NanoClaw Repo',
+    enabled: true,
+    skillCount: skills.filter((skill) => skill.source === 'repo').length,
+    source: 'repo',
+    note: 'Project-local skills installed under .claude/skills.',
   });
 
   return apps;
