@@ -50,6 +50,7 @@ import {
   logTokenUsage,
   storeChatMetadata,
   storeMessage,
+  storeOutboundMessage,
   storeReaction,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
@@ -301,6 +302,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
         await channel.sendMessage(chatJid, text);
+        storeOutboundMessage(chatJid, text, ASSISTANT_NAME);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -816,13 +818,17 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (text) {
+        await channel.sendMessage(jid, text);
+        storeOutboundMessage(jid, text, ASSISTANT_NAME);
+      }
     },
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      storeOutboundMessage(jid, text, ASSISTANT_NAME);
       return channel.sendMessage(jid, text);
     },
     sendMessageWithId: async (jid, text) => {

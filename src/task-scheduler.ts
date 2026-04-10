@@ -1,4 +1,4 @@
-import { ChildProcess, execFile } from 'child_process';
+import { ChildProcess, execFile, execFileSync } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 import os from 'os';
@@ -112,8 +112,12 @@ export async function runGateScript(
     'tokens.json',
   );
 
-  // Rewrite container paths to host paths in the inline script
+  // Rewrite container paths to host paths in the inline script.
+  // Order matters: /workspace/project must come before /workspace/group
+  // and /workspace/global to avoid partial matches.
+  const projectRoot = process.cwd();
   let rewritten = script
+    .replaceAll('/workspace/project', projectRoot)
     .replaceAll('/workspace/group', groupDir)
     .replaceAll('/workspace/global', globalDir)
     .replaceAll(
@@ -429,6 +433,18 @@ let schedulerRunning = false;
  * offending task so the operator can see it in the daily digest.
  */
 export function lintScheduledTasks(): void {
+  // Verify `node` is reachable — gate scripts call it via `node -e` or
+  // `node --input-type=module`.  If nvm/PATH isn't configured in the
+  // service environment, every gate script will silently fail.
+  try {
+    execFileSync('node', ['--version'], { timeout: 5000 });
+  } catch {
+    logger.error(
+      'Script-gate lint: `node` not found on PATH — all gate scripts will fail. ' +
+        'Add the node bin directory to the service environment (e.g. launchd plist PATH).',
+    );
+  }
+
   const tasks = getAllTasks().filter((t) => t.status === 'active');
   let issueCount = 0;
   for (const t of tasks) {

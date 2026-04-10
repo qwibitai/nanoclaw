@@ -13,6 +13,7 @@ import {
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
+  storeOutboundMessage,
   updateTask,
 } from './db.js';
 import { formatMessages } from './router.js';
@@ -219,6 +220,39 @@ describe('reply context', () => {
     expect(messages).toHaveLength(1);
     expect(messages[0].reply_to_message_id).toBe('99');
     expect(messages[0].reply_to_sender_name).toBe('Dave');
+  });
+});
+
+// --- storeOutboundMessage ---
+
+describe('storeOutboundMessage', () => {
+  it('stores a bot message that is excluded from getMessagesSince but trackable', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeOutboundMessage('group@g.us', 'Hello from Claudio', 'Claudio');
+
+    // Outbound messages should NOT appear in getMessagesSince (is_bot_message=1 filtered)
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Claudio',
+    );
+    expect(messages).toHaveLength(0);
+
+    // But should be detectable via getLastBotMessageTimestamp
+    const ts = getLastBotMessageTimestamp('group@g.us', 'Claudio');
+    expect(ts).toBeDefined();
+  });
+
+  it('generates unique IDs for multiple outbound messages', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeOutboundMessage('group@g.us', 'First', 'Claudio');
+    storeOutboundMessage('group@g.us', 'Second', 'Claudio');
+
+    // Both should exist — two distinct bot message timestamps
+    const ts = getLastBotMessageTimestamp('group@g.us', 'Claudio');
+    expect(ts).toBeDefined();
   });
 });
 

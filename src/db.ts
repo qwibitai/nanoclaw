@@ -381,6 +381,30 @@ export function storeMessageDirect(msg: {
   );
 }
 
+let outboundSeq = 0;
+
+/**
+ * Store an outbound message from Claudio so the rumination task
+ * (and any future analytics) can see what the bot actually said.
+ */
+export function storeOutboundMessage(
+  chatJid: string,
+  content: string,
+  assistantName: string,
+): void {
+  const id = `out-${Date.now()}-${++outboundSeq}`;
+  storeMessageDirect({
+    id,
+    chat_jid: chatJid,
+    sender: 'bot',
+    sender_name: assistantName,
+    content,
+    timestamp: new Date().toISOString(),
+    is_from_me: true,
+    is_bot_message: true,
+  });
+}
+
 export function getNewMessages(
   jids: string[],
   lastTimestamp: string,

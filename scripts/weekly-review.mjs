@@ -267,6 +267,52 @@ function checkTaskHealth() {
       lines.push(`⚠️ Tasks with errors:\n${errored.map(e => `  ${e}`).join('\n')}`);
     }
 
+    // Gate script failures from run logs (last 7 days)
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const gateRunsTable = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='task_run_logs'")
+      .get();
+    if (gateRunsTable) {
+      const gateFailRows = db
+        .prepare(
+          `SELECT trl.task_id, st.group_folder, COUNT(*) as fail_count
+           FROM task_run_logs trl
+           JOIN scheduled_tasks st ON st.id = trl.task_id
+           WHERE trl.run_at >= ?
+             AND st.script IS NOT NULL AND st.script != ''
+             AND trl.error IS NOT NULL
+           GROUP BY trl.task_id
+           ORDER BY fail_count DESC`,
+        )
+        .all(weekAgo);
+
+      if (gateFailRows.length > 0) {
+        const gateLines = gateFailRows.map((r) => {
+          const name = r.group_folder.replace(/^discord_/, '');
+          return `  ${name}/${r.task_id}: ${r.fail_count} failures`;
+        });
+        issues.push(
+          `**Gate script failures (7d):**\n${gateLines.join('\n')}`,
+        );
+      }
+
+      // Also flag gated tasks where every recent run was "Gate: script error"
+      const allGateSkipped = db
+        .prepare(
+          `SELECT id, group_folder, last_result FROM scheduled_tasks
+           WHERE status = 'active'
+             AND script IS NOT NULL AND script != ''
+             AND last_result LIKE 'Gate: script error%'`,
+        )
+        .all();
+      if (allGateSkipped.length > 0) {
+        for (const t of allGateSkipped) {
+          const name = t.group_folder.replace(/^discord_/, '');
+          issues.push(`**Gate stuck:** ${name}/${t.id} — last result: ${t.last_result}`);
+        }
+      }
+    }
+
     // Schedule summary by group
     const byGroup = {};
     for (const t of active) {

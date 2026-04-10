@@ -1,9 +1,13 @@
+import fs from 'fs';
+import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { GROUPS_DIR } from './config.js';
 import { _initTestDatabase, createTask, getTaskById } from './db.js';
 import {
   _resetSchedulerLoopForTests,
   computeNextRun,
+  runGateScript,
   startSchedulerLoop,
 } from './task-scheduler.js';
 
@@ -94,6 +98,50 @@ describe('task scheduler', () => {
     };
 
     expect(computeNextRun(task)).toBeNull();
+  });
+
+  it('runGateScript can execute a node script (node on PATH)', async () => {
+    vi.useRealTimers();
+    const testDir = path.join(GROUPS_DIR, 'discord_test-gate');
+    fs.mkdirSync(testDir, { recursive: true });
+    try {
+      const script =
+        'node -e "console.log(JSON.stringify({ wakeAgent: false }))"';
+      const result = await runGateScript(script, 'discord_test-gate');
+      expect(result).not.toBeNull();
+      expect(result!.wakeAgent).toBe(false);
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('runGateScript returns gate data when wakeAgent is true', async () => {
+    vi.useRealTimers();
+    const testDir = path.join(GROUPS_DIR, 'discord_test-gate');
+    fs.mkdirSync(testDir, { recursive: true });
+    try {
+      const script =
+        'node -e "console.log(JSON.stringify({ wakeAgent: true, data: { foo: 42 } }))"';
+      const result = await runGateScript(script, 'discord_test-gate');
+      expect(result).not.toBeNull();
+      expect(result!.wakeAgent).toBe(true);
+      expect(result!.data).toEqual({ foo: 42 });
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('runGateScript returns null on script error', async () => {
+    vi.useRealTimers();
+    const testDir = path.join(GROUPS_DIR, 'discord_test-gate');
+    fs.mkdirSync(testDir, { recursive: true });
+    try {
+      const script = 'exit 1';
+      const result = await runGateScript(script, 'discord_test-gate');
+      expect(result).toBeNull();
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
   });
 
   it('computeNextRun skips missed intervals without infinite loop', () => {
