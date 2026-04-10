@@ -459,3 +459,174 @@ describe('NANOCLAW_EXTRA_MOUNTS parsing', () => {
     expect(args).toContainEqual('/mnt/share:/share:ro');
   });
 });
+
+describe('MCP skill env var forwarding', () => {
+  const ALL_KEYS = [
+    'TS_API_KEY',
+    'TS_API_CLIENT_ID',
+    'TS_API_CLIENT_SECRET',
+    'TS_API_TAILNET',
+    'HA_URL',
+    'HA_TOKEN',
+    'OLLAMA_URL',
+    'LITELLM_URL',
+    'LITELLM_MASTER_KEY',
+    'UNRAIDCLAW_SERVERS',
+    'UNRAIDCLAW_API_KEY',
+    'UNRAIDCLAW_URL',
+    'PAPERCLIP_URL',
+    'PAPERCLIP_AGENT_JWT_SECRET',
+    'PAPERCLIP_AGENT_ID',
+    'PAPERCLIP_COMPANY_ID',
+  ];
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(spawn).mockClear();
+    vi.mocked(logger.debug).mockClear();
+    for (const key of ALL_KEYS) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    for (const key of ALL_KEYS) {
+      if (saved[key] !== undefined) {
+        process.env[key] = saved[key];
+      } else {
+        delete process.env[key];
+      }
+    }
+  });
+
+  function getSpawnArgs(): string[] {
+    const call = vi.mocked(spawn).mock.calls[0];
+    return call ? (call[1] as string[]) : [];
+  }
+
+  async function runOnce() {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  }
+
+  it('forwards vars that are set in process.env', async () => {
+    process.env.TS_API_KEY = 'tskey-test';
+    process.env.HA_URL = 'http://ha:8123';
+    process.env.HA_TOKEN = 'ha-token-secret';
+    process.env.OLLAMA_URL = 'http://ollama:11434';
+    process.env.UNRAIDCLAW_API_KEY = 'unraid-key';
+    process.env.PAPERCLIP_AGENT_ID = 'agent-1';
+
+    await runOnce();
+
+    const args = getSpawnArgs();
+    expect(args).toContain('TS_API_KEY=tskey-test');
+    expect(args).toContain('HA_URL=http://ha:8123');
+    expect(args).toContain('HA_TOKEN=ha-token-secret');
+    expect(args).toContain('OLLAMA_URL=http://ollama:11434');
+    expect(args).toContain('UNRAIDCLAW_API_KEY=unraid-key');
+    expect(args).toContain('PAPERCLIP_AGENT_ID=agent-1');
+  });
+
+  it('does not forward vars that are unset', async () => {
+    // None of the MCP vars set
+    await runOnce();
+
+    const args = getSpawnArgs();
+    const joined = args.join(' ');
+    for (const key of ALL_KEYS) {
+      expect(joined).not.toContain(`${key}=`);
+    }
+  });
+
+  it('does not forward vars that are empty strings', async () => {
+    process.env.TS_API_KEY = '';
+    process.env.HA_TOKEN = '';
+
+    await runOnce();
+
+    const args = getSpawnArgs();
+    expect(args.join(' ')).not.toContain('TS_API_KEY=');
+    expect(args.join(' ')).not.toContain('HA_TOKEN=');
+  });
+
+  it('forwards only the set subset, leaving unset vars absent', async () => {
+    process.env.LITELLM_URL = 'http://litellm:4000';
+    process.env.LITELLM_MASTER_KEY = 'sk-litellm-test';
+
+    await runOnce();
+
+    const args = getSpawnArgs();
+    expect(args).toContain('LITELLM_URL=http://litellm:4000');
+    expect(args).toContain('LITELLM_MASTER_KEY=sk-litellm-test');
+    // Other vars should not be present
+    expect(args.join(' ')).not.toContain('TS_API_KEY=');
+    expect(args.join(' ')).not.toContain('HA_URL=');
+    expect(args.join(' ')).not.toContain('PAPERCLIP_URL=');
+  });
+
+  it('still forwards the existing 4 baseline vars (TZ, ANTHROPIC_BASE_URL, auth placeholder)', async () => {
+    process.env.TS_API_KEY = 'tskey-test';
+
+    await runOnce();
+
+    const args = getSpawnArgs();
+    const joined = args.join(' ');
+    // Baseline vars from buildContainerArgs
+    expect(joined).toContain('TZ=');
+    expect(joined).toContain('ANTHROPIC_BASE_URL=http://');
+    // detectAuthMode mock returns 'api-key' → ANTHROPIC_API_KEY=placeholder
+    expect(args).toContain('ANTHROPIC_API_KEY=placeholder');
+    // And the new MCP forwarding
+    expect(args).toContain('TS_API_KEY=tskey-test');
+  });
+
+  it('redacts secret values in container-runner debug logs', async () => {
+    process.env.TS_API_KEY = 'tskey-supersecret';
+    process.env.HA_TOKEN = 'ha-token-supersecret';
+    process.env.LITELLM_MASTER_KEY = 'sk-litellm-supersecret';
+    process.env.UNRAIDCLAW_API_KEY = 'unraid-supersecret';
+    process.env.PAPERCLIP_AGENT_JWT_SECRET = 'jwt-supersecret';
+    process.env.TS_API_CLIENT_SECRET = 'client-supersecret';
+    // Non-secret URL — should NOT be redacted
+    process.env.HA_URL = 'http://ha:8123';
+
+    await runOnce();
+
+    // Inspect the args object passed to logger.debug
+    const debugCalls = vi.mocked(logger.debug).mock.calls;
+    const containerCfgCall = debugCalls.find(
+      (c) => c[1] === 'Container mount configuration',
+    );
+    expect(containerCfgCall).toBeDefined();
+    const loggedArgs = (containerCfgCall![0] as { containerArgs: string })
+      .containerArgs;
+
+    // Secret values must be masked
+    expect(loggedArgs).not.toContain('tskey-supersecret');
+    expect(loggedArgs).not.toContain('ha-token-supersecret');
+    expect(loggedArgs).not.toContain('sk-litellm-supersecret');
+    expect(loggedArgs).not.toContain('unraid-supersecret');
+    expect(loggedArgs).not.toContain('jwt-supersecret');
+    expect(loggedArgs).not.toContain('client-supersecret');
+    // Redacted markers should be present
+    expect(loggedArgs).toContain('TS_API_KEY=<redacted>');
+    expect(loggedArgs).toContain('HA_TOKEN=<redacted>');
+    // Non-secret URL value must still appear (useful for debugging)
+    expect(loggedArgs).toContain('HA_URL=http://ha:8123');
+  });
+});
