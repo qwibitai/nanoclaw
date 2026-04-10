@@ -280,6 +280,11 @@ async function buildContainerArgs(
     args.push('-e', 'HOME=/home/node');
   }
 
+  // Pass through LCM configuration from host environment
+  if (process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW) {
+    args.push('-e', `CLAUDE_CODE_AUTO_COMPACT_WINDOW=${process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW}`);
+  }
+
   for (const mount of mounts) {
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
