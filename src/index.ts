@@ -132,7 +132,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     );
     groupDir = resolveGroupFolderPath(group.folder);
     if (group.parent_folder !== undefined) {
-      registeredGroup = { ...group, parent_folder: group.folder };
+      registeredGroup = { ...group, parent_folder: undefined };
     }
   }
 
