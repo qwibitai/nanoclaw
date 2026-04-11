@@ -461,6 +461,7 @@ function startSpawnedThreadsCleanupTimer(): void {
       logger.warn({ err: error }, 'Failed to clean up spawned_threads');
     }
   }, SPAWNED_THREADS_CLEANUP_INTERVAL_MS);
+  spawnedThreadsCleanupTimer.unref();
 }
 
 export function initDatabase(): void {
