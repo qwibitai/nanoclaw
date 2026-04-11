@@ -13,6 +13,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  MOUNT_TMUX_SOCKET,
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
@@ -228,6 +229,31 @@ function buildVolumeMounts(
     containerPath: '/app/src',
     readonly: false,
   });
+
+  // Mount host tmux socket — opt-in only (MOUNT_TMUX_SOCKET=true).
+  // When enabled, agents can spawn and attach to tmux sessions on the host,
+  // which is useful for Claude Code / Codex coding sessions.
+  //
+  // Security: the tmux socket grants the ability to send keystrokes to any
+  // existing session owned by this user, including sessions in other groups.
+  // Only enable on trusted single-user deployments. See docs/NATIVE-MODE.md.
+  if (MOUNT_TMUX_SOCKET) {
+    // Prefer $TMUX_TMPDIR (set by macOS launchd) before the Linux default
+    const tmuxTmpDir =
+      process.env.TMUX_TMPDIR || `/tmp/tmux-${process.getuid?.() ?? 0}`;
+    if (fs.existsSync(tmuxTmpDir)) {
+      mounts.push({
+        hostPath: tmuxTmpDir,
+        containerPath: tmuxTmpDir,
+        readonly: false,
+      });
+    } else {
+      logger.warn(
+        { tmuxTmpDir },
+        'MOUNT_TMUX_SOCKET is set but tmux socket directory not found — tmux will not be available in containers',
+      );
+    }
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {

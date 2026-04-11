@@ -12,6 +12,7 @@ import {
   MAX_MESSAGES_PER_PROMPT,
   ONECLI_URL,
   POLL_INTERVAL,
+  RUNTIME_MODE,
   TIMEZONE,
 } from './config.js';
 import './channels/index.js';
@@ -25,6 +26,7 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { runNativeAgent, ensureNativeRunnerReady } from './native-runner.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -81,7 +83,7 @@ const queue = new GroupQueue();
 const onecli = new OneCLI({ url: ONECLI_URL });
 
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
-  if (group.isMain) return;
+  if (group.isMain || RUNTIME_MODE === 'native') return;
   const identifier = group.folder.toLowerCase().replace(/_/g, '-');
   onecli.ensureAgent({ name: group.name, identifier }).then(
     (res) => {
@@ -383,20 +385,20 @@ async function runAgent(
     : undefined;
 
   try {
-    const output = await runContainerAgent(
-      group,
-      {
-        prompt,
-        sessionId,
-        groupFolder: group.folder,
-        chatJid,
-        isMain,
-        assistantName: ASSISTANT_NAME,
-      },
-      (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
-      wrappedOnOutput,
-    );
+    const agentInput = {
+      prompt,
+      sessionId,
+      groupFolder: group.folder,
+      chatJid,
+      isMain,
+      assistantName: ASSISTANT_NAME,
+    };
+    const onProc = (proc: import('child_process').ChildProcess, name: string) =>
+      queue.registerProcess(chatJid, proc, name, group.folder);
+    const output =
+      RUNTIME_MODE === 'native'
+        ? await runNativeAgent(group, agentInput, onProc, wrappedOnOutput)
+        : await runContainerAgent(group, agentInput, onProc, wrappedOnOutput);
 
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
@@ -564,12 +566,19 @@ function recoverPendingMessages(): void {
 }
 
 function ensureContainerSystemRunning(): void {
+  if (RUNTIME_MODE === 'native') {
+    logger.info('Running in native mode — skipping container runtime checks');
+    return;
+  }
   ensureContainerRuntimeRunning();
   cleanupOrphans();
 }
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
+  if (RUNTIME_MODE === 'native') {
+    await ensureNativeRunnerReady();
+  }
   initDatabase();
   logger.info('Database initialized');
   loadState();
