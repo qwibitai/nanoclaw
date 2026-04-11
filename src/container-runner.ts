@@ -65,6 +65,12 @@ export interface ContainerOutput {
   };
   /** Number of turns in this SDK query (for diagnostics). */
   numTurns?: number;
+  /**
+   * Short human-readable label for in-flight work (e.g. "Reading Gmail
+   * thread"). Emitted when a tool_use block is detected. Host edits the
+   * in-place "⏳ working" message with this. Always paired with result=null.
+   */
+  progressLabel?: string;
 }
 
 interface VolumeMount {

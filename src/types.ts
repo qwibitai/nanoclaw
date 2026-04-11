@@ -84,6 +84,18 @@ export interface TaskRunLog {
 
 // --- Channel abstraction ---
 
+/**
+ * Opaque handle to an in-flight progress message. Returned by
+ * `Channel.sendProgress`. Callers use it to update or remove the message
+ * as work advances. Non-supporting channels may return a no-op handle.
+ */
+export interface ProgressHandle {
+  /** Replace the message's text in place (edit-in-place on Telegram). */
+  update(text: string): Promise<void>;
+  /** Delete the message, or if the channel doesn't support deletion, no-op. */
+  clear(): Promise<void>;
+}
+
 export interface Channel {
   name: string;
   connect(): Promise<void>;
@@ -95,6 +107,13 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  /**
+   * Optional: send a progress message that can be updated in place as
+   * work advances. Channels that support edit-in-place (Telegram,
+   * Discord) should implement this. Others can omit it — callers will
+   * fall back to sendMessage.
+   */
+  sendProgress?(jid: string, text: string): Promise<ProgressHandle>;
 }
 
 // Callback type that channels use to deliver inbound messages

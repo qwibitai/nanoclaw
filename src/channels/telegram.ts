@@ -13,6 +13,7 @@ import {
   Channel,
   OnChatMetadata,
   OnInboundMessage,
+  ProgressHandle,
   RegisteredGroup,
 } from '../types.js';
 
@@ -425,6 +426,64 @@ export class TelegramChannel implements Channel {
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
     }
+  }
+
+  /**
+   * Send a progress message that can be updated in place. Returns a handle
+   * whose `update()` edits the Telegram message text via editMessageText,
+   * and `clear()` deletes it. All errors are swallowed to debug logs so a
+   * failing progress update never blocks real agent work.
+   */
+  async sendProgress(jid: string, text: string): Promise<ProgressHandle> {
+    const noop: ProgressHandle = {
+      update: async () => {},
+      clear: async () => {},
+    };
+    if (!this.bot) return noop;
+    const numericId = jid.replace(/^tg:/, '');
+    let sentMessageId: number | undefined;
+    try {
+      const sent = await this.bot.api.sendMessage(numericId, text);
+      sentMessageId = sent.message_id;
+      logger.debug(
+        { jid, messageId: sentMessageId },
+        'Telegram progress message sent',
+      );
+    } catch (err) {
+      logger.debug({ jid, err }, 'Failed to send Telegram progress message');
+      return noop;
+    }
+
+    // Telegram edits fail with "message is not modified" if the text is
+    // unchanged. Track the last-applied text to skip redundant edits.
+    let lastText = text;
+    const api = this.bot.api;
+
+    return {
+      update: async (newText: string) => {
+        if (!sentMessageId || newText === lastText) return;
+        try {
+          await api.editMessageText(numericId, sentMessageId, newText);
+          lastText = newText;
+        } catch (err) {
+          logger.debug(
+            { jid, messageId: sentMessageId, err },
+            'Failed to edit Telegram progress message',
+          );
+        }
+      },
+      clear: async () => {
+        if (!sentMessageId) return;
+        try {
+          await api.deleteMessage(numericId, sentMessageId);
+        } catch (err) {
+          logger.debug(
+            { jid, messageId: sentMessageId, err },
+            'Failed to delete Telegram progress message',
+          );
+        }
+      },
+    };
   }
 }
 
