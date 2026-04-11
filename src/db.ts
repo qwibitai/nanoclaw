@@ -46,7 +46,7 @@ export function _sanitizeContainerConfig(
 ): ContainerConfig | undefined {
   if (raw == null) return undefined;
   if (typeof raw !== 'object' || Array.isArray(raw)) {
-    logger.warn({ jid, field }, 'Invalid containerConfig in DB; ignoring');
+    logger.warn({ jid, field }, 'Invalid containerConfig; ignoring');
     return undefined;
   }
   const src = raw as Record<string, unknown>;
@@ -61,7 +61,7 @@ export function _sanitizeContainerConfig(
     } else {
       logger.warn(
         { jid, field, timeout: src.timeout },
-        'Invalid containerConfig.timeout in DB; ignoring',
+        'Invalid containerConfig.timeout; ignoring',
       );
     }
   }
@@ -97,13 +97,13 @@ export function _sanitizeContainerConfig(
       } else if (src.additionalMounts.length > 0) {
         logger.warn(
           { jid, field },
-          'Invalid containerConfig.additionalMounts in DB; ignoring',
+          'Invalid containerConfig.additionalMounts; ignoring',
         );
       }
     } else {
       logger.warn(
         { jid, field },
-        'Invalid containerConfig.additionalMounts in DB; ignoring',
+        'Invalid containerConfig.additionalMounts; ignoring',
       );
     }
   }
