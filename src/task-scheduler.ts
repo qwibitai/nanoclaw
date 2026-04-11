@@ -71,7 +71,6 @@ export interface SchedulerDependencies {
     groupJid: string,
     proc: ChildProcess,
     containerName: string,
-    groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
@@ -110,13 +109,11 @@ async function runTask(
   );
 
   const groups = deps.registeredGroups();
-  const group = Object.values(groups).find(
-    (g) => g.folder === task.group_folder,
-  );
+  const group = groups[task.chat_jid];
 
   if (!group) {
     logger.error(
-      { taskId: task.id, groupFolder: task.group_folder },
+      { taskId: task.id, chatJid: task.chat_jid },
       'Group not found for task',
     );
     logTaskRun({
@@ -125,7 +122,7 @@ async function runTask(
       duration_ms: Date.now() - startTime,
       status: 'error',
       result: null,
-      error: `Group not found: ${task.group_folder}`,
+      error: `Group not found: ${task.chat_jid}`,
     });
     return;
   }
@@ -135,10 +132,11 @@ async function runTask(
   const isPrivileged = groupType === 'main' || groupType === 'override';
   const tasks = getAllTasks();
   writeTasksSnapshot(
-    task.group_folder,
+    task.chat_jid,
     isPrivileged,
     tasks.map((t) => ({
       id: t.id,
+      groupJid: t.chat_jid,
       groupFolder: t.group_folder,
       prompt: t.prompt,
       schedule_type: t.schedule_type,
@@ -152,9 +150,10 @@ async function runTask(
   let error: string | null = null;
 
   // グループコンテキストモードの場合、グループの現在のセッションを使用します
+  // session キーは group_jid（Phase 3 で group_folder から変更）
   const sessions = deps.getSessions();
   const sessionId =
-    task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+    task.context_mode === 'group' ? sessions[task.chat_jid] : undefined;
 
   // タスクが結果を出力した後、速やかにコンテナを閉じます。
   // タスクはシングルターン（1往復）であり、クエリループがタイムアウトするまで
@@ -183,7 +182,7 @@ async function runTask(
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) =>
-        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+        deps.onProcess(task.chat_jid, proc, containerName),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;

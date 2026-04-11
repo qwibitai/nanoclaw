@@ -78,7 +78,7 @@ describe('schedule_task authorization', () => {
         schedule_value: '2025-06-01T00:00:00',
         targetJid: 'other@g.us',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -98,7 +98,7 @@ describe('schedule_task authorization', () => {
         schedule_value: '2025-06-01T00:00:00',
         targetJid: 'other@g.us',
       },
-      'other-group',
+      'other@g.us',
       false,
       deps,
     );
@@ -117,7 +117,7 @@ describe('schedule_task authorization', () => {
         schedule_value: '2025-06-01T00:00:00',
         targetJid: 'main@g.us',
       },
-      'other-group',
+      'other@g.us',
       false,
       deps,
     );
@@ -135,7 +135,7 @@ describe('schedule_task authorization', () => {
         schedule_value: '2025-06-01T00:00:00',
         targetJid: 'unknown@g.us',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -178,7 +178,7 @@ describe('pause_task authorization', () => {
   it('main group can pause any task', async () => {
     await processTaskIpc(
       { type: 'pause_task', taskId: 'task-other' },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -188,7 +188,7 @@ describe('pause_task authorization', () => {
   it('non-main group can pause its own task', async () => {
     await processTaskIpc(
       { type: 'pause_task', taskId: 'task-other' },
-      'other-group',
+      'other@g.us',
       false,
       deps,
     );
@@ -198,7 +198,7 @@ describe('pause_task authorization', () => {
   it('non-main group cannot pause another groups task', async () => {
     await processTaskIpc(
       { type: 'pause_task', taskId: 'task-main' },
-      'other-group',
+      'other@g.us',
       false,
       deps,
     );
@@ -227,7 +227,7 @@ describe('resume_task authorization', () => {
   it('main group can resume any task', async () => {
     await processTaskIpc(
       { type: 'resume_task', taskId: 'task-paused' },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -237,7 +237,7 @@ describe('resume_task authorization', () => {
   it('non-main group can resume its own task', async () => {
     await processTaskIpc(
       { type: 'resume_task', taskId: 'task-paused' },
-      'other-group',
+      'other@g.us',
       false,
       deps,
     );
@@ -247,7 +247,7 @@ describe('resume_task authorization', () => {
   it('non-main group cannot resume another groups task', async () => {
     await processTaskIpc(
       { type: 'resume_task', taskId: 'task-paused' },
-      'third-group',
+      'third@g.us',
       false,
       deps,
     );
@@ -274,7 +274,7 @@ describe('cancel_task authorization', () => {
 
     await processTaskIpc(
       { type: 'cancel_task', taskId: 'task-to-cancel' },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -297,7 +297,7 @@ describe('cancel_task authorization', () => {
 
     await processTaskIpc(
       { type: 'cancel_task', taskId: 'task-own' },
-      'other-group',
+      'other@g.us',
       false,
       deps,
     );
@@ -320,7 +320,7 @@ describe('cancel_task authorization', () => {
 
     await processTaskIpc(
       { type: 'cancel_task', taskId: 'task-foreign' },
-      'other-group',
+      'other@g.us',
       false,
       deps,
     );
@@ -340,7 +340,7 @@ describe('register_group authorization', () => {
         folder: 'new-group',
         trigger: '@Andy',
       },
-      'other-group',
+      'other@g.us',
       false,
       deps,
     );
@@ -358,7 +358,7 @@ describe('register_group authorization', () => {
         folder: '../../outside',
         trigger: '@Andy',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -372,67 +372,108 @@ describe('register_group authorization', () => {
 describe('refresh_groups authorization', () => {
   it('non-main group cannot trigger refresh', async () => {
     // This should be silently blocked (no crash, no effect)
-    await processTaskIpc(
-      { type: 'refresh_groups' },
-      'other-group',
-      false,
-      deps,
-    );
+    await processTaskIpc({ type: 'refresh_groups' }, 'other@g.us', false, deps);
     // If we got here without error, the auth gate worked
   });
 });
 
 // --- IPC message authorization ---
 // Tests the authorization pattern from startIpcWatcher (ipc.ts).
-// The logic: isMain || (targetGroup && targetGroup.folder === sourceGroup)
+// The logic: isPrivileged || targetChatJid === sourceChatJid
 
 describe('IPC message authorization', () => {
+  function isValidMessagePayload(data: unknown): data is {
+    type: 'message';
+    chatJid: string;
+    text: string;
+  } {
+    if (!data || typeof data !== 'object') return false;
+    const payload = data as {
+      type?: unknown;
+      chatJid?: unknown;
+      text?: unknown;
+    };
+    return (
+      payload.type === 'message' &&
+      typeof payload.chatJid === 'string' &&
+      typeof payload.text === 'string' &&
+      payload.chatJid.length > 0 &&
+      payload.text.length > 0
+    );
+  }
+
   // Replicate the exact check from the IPC watcher
   function isMessageAuthorized(
-    sourceGroup: string,
-    isMain: boolean,
+    sourceChatJid: string,
+    isPrivileged: boolean,
     targetChatJid: string,
-    registeredGroups: Record<string, RegisteredGroup>,
   ): boolean {
-    const targetGroup = registeredGroups[targetChatJid];
-    return isMain || (!!targetGroup && targetGroup.folder === sourceGroup);
+    return isPrivileged || targetChatJid === sourceChatJid;
   }
 
   it('main group can send to any group', () => {
-    expect(
-      isMessageAuthorized('whatsapp_main', true, 'other@g.us', groups),
-    ).toBe(true);
-    expect(
-      isMessageAuthorized('whatsapp_main', true, 'third@g.us', groups),
-    ).toBe(true);
+    expect(isMessageAuthorized('main@g.us', true, 'other@g.us')).toBe(true);
+    expect(isMessageAuthorized('main@g.us', true, 'third@g.us')).toBe(true);
   });
 
   it('non-main group can send to its own chat', () => {
-    expect(
-      isMessageAuthorized('other-group', false, 'other@g.us', groups),
-    ).toBe(true);
+    expect(isMessageAuthorized('other@g.us', false, 'other@g.us')).toBe(true);
   });
 
   it('non-main group cannot send to another groups chat', () => {
-    expect(isMessageAuthorized('other-group', false, 'main@g.us', groups)).toBe(
-      false,
-    );
-    expect(
-      isMessageAuthorized('other-group', false, 'third@g.us', groups),
-    ).toBe(false);
+    expect(isMessageAuthorized('other@g.us', false, 'main@g.us')).toBe(false);
+    expect(isMessageAuthorized('other@g.us', false, 'third@g.us')).toBe(false);
   });
 
   it('non-main group cannot send to unregistered JID', () => {
-    expect(
-      isMessageAuthorized('other-group', false, 'unknown@g.us', groups),
-    ).toBe(false);
+    expect(isMessageAuthorized('other@g.us', false, 'unknown@g.us')).toBe(
+      false,
+    );
   });
 
   it('main group can send to unregistered JID', () => {
     // Main is always authorized regardless of target
+    expect(isMessageAuthorized('main@g.us', true, 'unknown@g.us')).toBe(true);
+  });
+
+  it('rejects message payload when chatJid is not a string', () => {
     expect(
-      isMessageAuthorized('whatsapp_main', true, 'unknown@g.us', groups),
-    ).toBe(true);
+      isValidMessagePayload({
+        type: 'message',
+        chatJid: 123,
+        text: 'hello',
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects message payload when text is not a string', () => {
+    expect(
+      isValidMessagePayload({
+        type: 'message',
+        chatJid: 'other@g.us',
+        text: { value: 'hello' },
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects message payload when chatJid is an empty string', () => {
+    expect(
+      isValidMessagePayload({
+        type: 'message',
+        chatJid: '',
+        text: 'hello',
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects message payload when text is an empty string', () => {
+    expect(
+      isValidMessagePayload({
+        type: 'message',
+        chatJid: 'other@g.us',
+        text: '',
+      }),
+    ).toBe(false);
   });
 });
 
@@ -448,7 +489,7 @@ describe('schedule_task schedule types', () => {
         schedule_value: '0 9 * * *', // every day at 9am
         targetJid: 'other@g.us',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -472,7 +513,7 @@ describe('schedule_task schedule types', () => {
         schedule_value: 'not a cron',
         targetJid: 'other@g.us',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -491,7 +532,7 @@ describe('schedule_task schedule types', () => {
         schedule_value: '3600000', // 1 hour
         targetJid: 'other@g.us',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -514,7 +555,7 @@ describe('schedule_task schedule types', () => {
         schedule_value: 'abc',
         targetJid: 'other@g.us',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -531,7 +572,7 @@ describe('schedule_task schedule types', () => {
         schedule_value: '0',
         targetJid: 'other@g.us',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -548,7 +589,7 @@ describe('schedule_task schedule types', () => {
         schedule_value: 'not-a-date',
         targetJid: 'other@g.us',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -570,7 +611,7 @@ describe('schedule_task context_mode', () => {
         context_mode: 'group',
         targetJid: 'other@g.us',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -589,7 +630,7 @@ describe('schedule_task context_mode', () => {
         context_mode: 'isolated',
         targetJid: 'other@g.us',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -608,7 +649,7 @@ describe('schedule_task context_mode', () => {
         context_mode: 'bogus' as any,
         targetJid: 'other@g.us',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -626,7 +667,7 @@ describe('schedule_task context_mode', () => {
         schedule_value: '2025-06-01T00:00:00',
         targetJid: 'other@g.us',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -648,7 +689,7 @@ describe('register_group success', () => {
         folder: 'new-group',
         trigger: '@Andy',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -669,7 +710,7 @@ describe('register_group success', () => {
         name: 'Partial',
         // missing folder and trigger
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -692,7 +733,7 @@ describe('register_group group_type', () => {
         trigger: '@Andy',
         group_type: 'chat',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -714,7 +755,7 @@ describe('register_group group_type', () => {
         trigger: '@Andy',
         group_type: 'override',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -722,6 +763,75 @@ describe('register_group group_type', () => {
     // override は IPC 経由で設定できないため登録されていないことを確認
     const allGroups = getAllRegisteredGroups();
     expect(allGroups['override@g.us']).toBeUndefined();
+  });
+
+  it('thread_defaults.requiresTrigger が boolean でない場合は拒否される', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'bad-thread-defaults@g.us',
+        name: 'Bad Thread Defaults',
+        folder: 'bad-thread-defaults',
+        trigger: '@Andy',
+        thread_defaults: {
+          type: 'thread',
+          requiresTrigger: 'nope' as unknown as boolean,
+        },
+      },
+      'main@g.us',
+      true,
+      deps,
+    );
+
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['bad-thread-defaults@g.us']).toBeUndefined();
+  });
+
+  it('thread_defaults.containerConfig.timeout が不正な場合は拒否される', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'bad-thread-cc@g.us',
+        name: 'Bad Thread CC',
+        folder: 'bad-thread-cc',
+        trigger: '@Andy',
+        thread_defaults: {
+          type: 'thread',
+          containerConfig: {
+            timeout: 'abc' as unknown as number,
+          },
+        },
+      },
+      'main@g.us',
+      true,
+      deps,
+    );
+
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['bad-thread-cc@g.us']).toBeUndefined();
+  });
+
+  it('register_group の containerConfig はサニタイズされる', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'sanitize-cc@g.us',
+        name: 'Sanitized CC',
+        folder: 'sanitized-cc',
+        trigger: '@Andy',
+        containerConfig: {
+          timeout: 'abc' as unknown as number,
+          additionalMounts: 'oops' as unknown as [],
+        },
+      },
+      'main@g.us',
+      true,
+      deps,
+    );
+
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['sanitize-cc@g.us']).toBeDefined();
+    expect(allGroups['sanitize-cc@g.us'].containerConfig).toEqual({});
   });
 });
 
@@ -737,7 +847,7 @@ describe('update_group group_type', () => {
         trigger: '@Andy',
         group_type: 'chat',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -753,7 +863,7 @@ describe('update_group group_type', () => {
         jid: 'target@g.us',
         group_type: 'main',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -775,7 +885,7 @@ describe('update_group group_type', () => {
         trigger: '@Andy',
         group_type: 'chat',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -787,7 +897,7 @@ describe('update_group group_type', () => {
         jid: 'noraise@g.us',
         group_type: 'override',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -809,7 +919,7 @@ describe('update_group group_type', () => {
         trigger: '@Andy',
         group_type: 'chat',
       },
-      'whatsapp_main',
+      'main@g.us',
       true,
       deps,
     );
@@ -821,7 +931,7 @@ describe('update_group group_type', () => {
         jid: 'protected@g.us',
         group_type: 'main',
       },
-      'other-group',
+      'other@g.us',
       false,
       deps,
     );
@@ -830,5 +940,54 @@ describe('update_group group_type', () => {
     const allGroups = getAllRegisteredGroups();
     expect(allGroups['protected@g.us']).toBeDefined();
     expect(allGroups['protected@g.us'].type).toBe('chat');
+  });
+
+  it('update_group で thread_defaults を更新・クリアできる', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'threadcfg@g.us',
+        name: 'Thread Cfg Group',
+        folder: 'threadcfg-group',
+        trigger: '@Andy',
+        group_type: 'chat',
+      },
+      'main@g.us',
+      true,
+      deps,
+    );
+
+    await processTaskIpc(
+      {
+        type: 'update_group',
+        jid: 'threadcfg@g.us',
+        thread_defaults: { type: 'chat', requiresTrigger: false },
+      },
+      'main@g.us',
+      true,
+      deps,
+    );
+
+    {
+      const allGroups = getAllRegisteredGroups();
+      expect(allGroups['threadcfg@g.us'].thread_defaults).toEqual({
+        type: 'chat',
+        requiresTrigger: false,
+      });
+    }
+
+    await processTaskIpc(
+      {
+        type: 'update_group',
+        jid: 'threadcfg@g.us',
+        thread_defaults: null as unknown as object,
+      },
+      'main@g.us',
+      true,
+      deps,
+    );
+
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['threadcfg@g.us'].thread_defaults).toBeUndefined();
   });
 });

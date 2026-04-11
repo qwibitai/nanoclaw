@@ -88,6 +88,7 @@ vi.mock('child_process', async () => {
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
+import { spawn } from 'child_process';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -113,6 +114,7 @@ function emitOutputMarker(
 
 describe('container-runner timeout behavior', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
   });
@@ -206,5 +208,64 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+
+  it('uses folder-shared session namespace for thread groups', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        chatJid: 'dc:thread-1',
+        groupType: 'thread',
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnCalls = vi.mocked(spawn).mock.calls;
+    const args = spawnCalls[spawnCalls.length - 1][1] as string[];
+    const joined = args.join(' ');
+    expect(joined).toContain(
+      '/tmp/nanoclaw-test-data/sessions/folder-test-group/.claude:/home/node/.claude',
+    );
+  });
+
+  it('uses chatJid-isolated session namespace for main groups', async () => {
+    const resultPromise = runContainerAgent(
+      {
+        ...testGroup,
+        type: 'main',
+      },
+      {
+        ...testInput,
+        chatJid: 'main@g.us',
+        groupType: 'main',
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnCalls = vi.mocked(spawn).mock.calls;
+    const args = spawnCalls[spawnCalls.length - 1][1] as string[];
+    const joined = args.join(' ');
+    expect(joined).toContain(
+      '/tmp/nanoclaw-test-data/sessions/jid-main%40g.us/.claude:/home/node/.claude',
+    );
   });
 });

@@ -78,3 +78,22 @@ VRC-AI-Bot の型体系は NanoClaw のエージェント分離の発展形 — 
 ### 方針転換の経緯
 
 現ブランチで `PlaceType` / `ActorRole` の型定義を VRC-AI-Bot から移植したが、検討の結果これらは不要と判断。NanoClaw の既存グループモデルの拡張で、VRC-AI-Bot が型の組み合わせでやっていたことを単一の `GroupType` プロパティとコンテナの物理的分離で表現できる。
+
+## thread の考え方
+
+NanoClaw における `thread` は、VRC-AI-Bot の `public_thread` / `private_thread` / `forum_post_thread` のような **Discord 上の場所の分類** をそのまま移植したものではない。
+
+- `chat`: 永続的な会話窓口
+- `thread`: 親 group から派生する、作業や委任のための会話単位
+
+つまり `thread` は **UI 上の Discord thread というより、NanoClaw の権限・ライフサイクルモデルにおける派生 group** を表す。
+
+Discord thread はその派生 group を表現する自然な UI として使えるが、重要なのは PlaceType の細分化ではなく、以下の 3 点。
+
+- 親 group とは別 JID / 別 session を持つこと
+- 親から必要最小限の設定だけを継承できること
+- `chat` より短命で、タスク単位の作業場所として扱えること
+
+`folder` まで分けると管理コストが急増して収拾がつかなくなるため、`thread` の分離はまず **JID と Claude session** に限定する。将来的に設定を変えたくなった場合は、**各 group ごと** に Claude の設定を切り替えられるようにする。
+
+このため、VRC-AI-Bot の `Scope` や `ChatBehavior` を戻すのではなく、Discord adapter 側で thread を検知し、`thread_defaults` と group 自動登録で NanoClaw のモデルに落とし込むのが正しい寄せ方になる。

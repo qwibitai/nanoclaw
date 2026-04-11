@@ -59,7 +59,12 @@ import {
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { hasPrivilege, resolveGroupType } from './group-type.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import {
+  Channel,
+  InboundMessage,
+  NewMessage,
+  RegisteredGroup,
+} from './types.js';
 import { logger } from './logger.js';
 
 // リファクタリング中の後方互換性のために再エクスポート
@@ -121,6 +126,46 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 }
 
 /**
+ * thread message を受信したとき、parent group の thread_defaults に基づいて
+ * 子 group を自動登録する。
+ */
+function autoRegisterThread(
+  chatJid: string,
+  msg: InboundMessage,
+  parent: RegisteredGroup,
+): void {
+  const td = parent.thread_defaults!;
+  const requestedType = td.type;
+  const childType =
+    requestedType === 'chat' || requestedType === 'thread'
+      ? requestedType
+      : 'thread';
+  if (requestedType && childType !== requestedType) {
+    logger.warn(
+      { chatJid, requestedType },
+      'Invalid or privileged thread_defaults.type detected at runtime; falling back to thread',
+    );
+  }
+  const threadName = msg.sender_name
+    ? `Thread (from ${msg.sender_name})`
+    : 'Thread';
+  const childGroup: RegisteredGroup = {
+    name: threadName,
+    folder: parent.folder,
+    trigger: parent.trigger,
+    added_at: new Date().toISOString(),
+    containerConfig: td.containerConfig ?? parent.containerConfig,
+    requiresTrigger: td.requiresTrigger ?? parent.requiresTrigger,
+    type: childType,
+  };
+  registerGroup(chatJid, childGroup);
+  logger.info(
+    { chatJid, parentFolder: parent.folder, type: childGroup.type },
+    'Thread group auto-registered',
+  );
+}
+
+/**
  * エージェントが利用可能なグループのリストを取得します。
  * 直近のアクティビティ順にグループを返します。
  */
@@ -144,6 +189,9 @@ export function _setRegisteredGroups(
 ): void {
   registeredGroups = groups;
 }
+
+/** @internal - テスト用にエクスポート */
+export const _autoRegisterThread = autoRegisterThread;
 
 /**
  * グループのすべての保留中メッセージを処理します。
@@ -274,15 +322,16 @@ async function runAgent(
 ): Promise<'success' | 'error'> {
   const groupType = resolveGroupType(group);
   const isPrivileged = groupType === 'main' || groupType === 'override';
-  const sessionId = sessions[group.folder];
+  const sessionId = sessions[chatJid];
 
   // コンテナが読み取るためのタスクスナップショットを更新（グループでフィルタリング）
   const tasks = getAllTasks();
   writeTasksSnapshot(
-    group.folder,
+    chatJid,
     isPrivileged,
     tasks.map((t) => ({
       id: t.id,
+      groupJid: t.chat_jid,
       groupFolder: t.group_folder,
       prompt: t.prompt,
       schedule_type: t.schedule_type,
@@ -294,14 +343,14 @@ async function runAgent(
 
   // 利用可能なグループのスナップショットを更新（特権グループのみが全グループを表示可能）
   const availableGroups = getAvailableGroups();
-  writeGroupsSnapshot(group.folder, isPrivileged, availableGroups);
+  writeGroupsSnapshot(chatJid, isPrivileged, availableGroups);
 
   // ストリームされた結果からセッション ID を追跡するために onOutput をラップ
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          sessions[chatJid] = output.newSessionId;
+          setSession(chatJid, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -319,13 +368,13 @@ async function runAgent(
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
+        queue.registerProcess(chatJid, proc, containerName),
       wrappedOnOutput,
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      sessions[chatJid] = output.newSessionId;
+      setSession(chatJid, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -535,7 +584,7 @@ async function main(): Promise<void> {
 
   // チャネルコールバック（すべてのチャネルで共有）
   const channelOpts = {
-    onMessage: (chatJid: string, msg: NewMessage) => {
+    onMessage: (chatJid: string, msg: InboundMessage) => {
       // リモートコントロールコマンド — 保存前にインターセプト
       const trimmed = msg.content.trim();
       if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
@@ -543,6 +592,22 @@ async function main(): Promise<void> {
           logger.error({ err, chatJid }, 'Remote control command error'),
         );
         return;
+      }
+
+      // thread 自動登録 — まだ未登録で parent_jid がある場合のみ試みる
+      if (!registeredGroups[chatJid] && msg.parent_jid) {
+        const parent = registeredGroups[msg.parent_jid];
+        if (parent?.thread_defaults) {
+          autoRegisterThread(chatJid, msg, parent);
+          if (!registeredGroups[chatJid]) {
+            // registerGroup() が内部で早期 return した場合は未登録のままなので保存しない
+            return;
+          }
+          // 登録成功時のみ以降の storeMessage / allowlist 処理を通常通り実行する
+        } else {
+          // parent が thread_defaults を持たない — discord.ts がすでにフィルタしているが念のため
+          return;
+        }
       }
 
       // 送信者許可リストのドロップモード: 保存前に拒否された送信者からのメッセージを破棄
@@ -599,8 +664,8 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    onProcess: (groupJid, proc, containerName) =>
+      queue.registerProcess(groupJid, proc, containerName),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
@@ -627,7 +692,7 @@ async function main(): Promise<void> {
       );
     },
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag) => writeGroupsSnapshot(gf, im, ag),
+    writeGroupsSnapshot: (gj, im, ag) => writeGroupsSnapshot(gj, im, ag),
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

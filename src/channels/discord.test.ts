@@ -44,6 +44,16 @@ vi.mock('discord.js', () => {
     DirectMessages: 8,
   };
 
+  const ChannelType = {
+    GuildText: 0,
+    DM: 1,
+    GroupDM: 3,
+    GuildAnnouncement: 5,
+    PublicThread: 11,
+    PrivateThread: 12,
+    GuildForum: 15,
+  };
+
   class MockClient {
     eventHandlers = new Map<string, Handler[]>();
     user: any = { id: '999888777', tag: 'Andy#1234' };
@@ -92,11 +102,16 @@ vi.mock('discord.js', () => {
   // Mock TextChannel type
   class TextChannel {}
 
+  // Mock ThreadChannel type
+  class ThreadChannel {}
+
   return {
     Client: MockClient,
     Events,
     GatewayIntentBits,
+    ChannelType,
     TextChannel,
+    ThreadChannel,
   };
 });
 
@@ -137,15 +152,36 @@ function createMessage(overrides: {
   attachments?: Map<string, any>;
   reference?: { messageId?: string };
   mentionsBotId?: boolean;
+  isThread?: boolean;
+  parentId?: string;
+  parentName?: string;
+  channelType?: number;
 }) {
   const channelId = overrides.channelId ?? '1234567890123456';
   const authorId = overrides.authorId ?? '55512345';
   const botId = '999888777'; // matches mock client user id
+  const isThreadChannel = overrides.isThread ?? false;
 
   const mentionsMap = new Map();
   if (overrides.mentionsBotId) {
     mentionsMap.set(botId, { id: botId });
   }
+
+  const channel = {
+    name: overrides.channelName ?? 'general',
+    type: overrides.channelType ?? 0,
+    isThread: () => isThreadChannel,
+    parentId: overrides.parentId ?? null,
+    parent: overrides.parentName
+      ? { name: overrides.parentName, type: 0 }
+      : null,
+    messages: {
+      fetch: vi.fn().mockResolvedValue({
+        author: { username: 'Bob', displayName: 'Bob' },
+        member: { displayName: 'Bob' },
+      }),
+    },
+  };
 
   return {
     channelId,
@@ -162,15 +198,7 @@ function createMessage(overrides: {
       ? { displayName: overrides.memberDisplayName }
       : null,
     guild: overrides.guildName ? { name: overrides.guildName } : null,
-    channel: {
-      name: overrides.channelName ?? 'general',
-      messages: {
-        fetch: vi.fn().mockResolvedValue({
-          author: { username: 'Bob', displayName: 'Bob' },
-          member: { displayName: 'Bob' },
-        }),
-      },
-    },
+    channel,
     mentions: {
       users: mentionsMap,
     },
@@ -369,6 +397,7 @@ describe('DiscordChannel', () => {
         content: 'Hello',
         guildName: undefined,
         authorDisplayName: 'Alice',
+        channelType: 1,
       });
       await triggerMessage(msg);
 
@@ -378,6 +407,10 @@ describe('DiscordChannel', () => {
         'Alice',
         'discord',
         false,
+      );
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({ place_type: 'chat_channel' }),
       );
     });
 
@@ -775,6 +808,152 @@ describe('DiscordChannel', () => {
     it('has name "discord"', () => {
       const channel = new DiscordChannel('test-token', createTestOpts());
       expect(channel.name).toBe('discord');
+    });
+  });
+
+  // --- Thread detection ---
+
+  describe('thread detection', () => {
+    it('sets is_thread=true and place_type=public_thread for thread messages', async () => {
+      const threadId = '9999000000000001';
+      const parentId = '1234567890123456';
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          [`dc:${threadId}`]: {
+            name: 'Thread',
+            folder: 'test-server',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+          },
+        })),
+      });
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        channelId: threadId,
+        content: 'Hello from thread',
+        guildName: 'Test Server',
+        channelName: 'my-thread',
+        isThread: true,
+        parentId,
+        parentName: 'general',
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        `dc:${threadId}`,
+        expect.objectContaining({
+          is_thread: true,
+          place_type: 'public_thread',
+          parent_jid: `dc:${parentId}`,
+        }),
+      );
+    });
+
+    it('includes parent name in chatName for thread messages', async () => {
+      const threadId = '9999000000000002';
+      const parentId = '1234567890123456';
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          [`dc:${threadId}`]: {
+            name: 'Thread',
+            folder: 'test-server',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+          },
+        })),
+      });
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        channelId: threadId,
+        content: 'Thread message',
+        guildName: 'My Guild',
+        channelName: 'task-thread',
+        isThread: true,
+        parentId,
+        parentName: 'general',
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onChatMetadata).toHaveBeenCalledWith(
+        `dc:${threadId}`,
+        expect.any(String),
+        'My Guild #general > task-thread',
+        'discord',
+        true,
+      );
+    });
+
+    it('allows thread message through when parent has thread_defaults', async () => {
+      const threadId = '9999000000000003';
+      const parentId = '1234567890123456';
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          [`dc:${parentId}`]: {
+            name: 'Parent Channel',
+            folder: 'test-server',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            thread_defaults: { type: 'thread' as const },
+          },
+        })),
+      });
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        channelId: threadId,
+        content: 'First message in new thread',
+        guildName: 'Test Server',
+        channelName: 'new-thread',
+        isThread: true,
+        parentId,
+        parentName: 'general',
+      });
+      await triggerMessage(msg);
+
+      // Should deliver even though thread itself is not registered yet
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        `dc:${threadId}`,
+        expect.objectContaining({
+          is_thread: true,
+          parent_jid: `dc:${parentId}`,
+        }),
+      );
+    });
+
+    it('drops thread message when parent has no thread_defaults', async () => {
+      const threadId = '9999000000000004';
+      const parentId = '1234567890123456';
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          [`dc:${parentId}`]: {
+            name: 'Parent Channel',
+            folder: 'test-server',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            // no thread_defaults
+          },
+        })),
+      });
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        channelId: threadId,
+        content: 'Thread message nobody asked for',
+        guildName: 'Test Server',
+        channelName: 'random-thread',
+        isThread: true,
+        parentId,
+        parentName: 'general',
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onMessage).not.toHaveBeenCalled();
     });
   });
 });

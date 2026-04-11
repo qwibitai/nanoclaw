@@ -133,39 +133,47 @@ container-runner.ts: buildVolumeMounts()
 
 ## GroupType との関係
 
-`GroupType` は **権限の「レベル」** を決め、`agent` は **権限の「種類」** を決める。
+`GroupType` は **権限の「レベル」** を決め、将来の共有設定は **通常 group と thread 群で何を有効にするか** を決める。
 
 ```
 GroupType (垂直方向: 何ができるか)
   override ──── サンドボックスなし、フル権限
   main ──────── Bash、ファイル操作、cron
   chat ──────── 返信のみ（デフォルト）
-  thread ────── 制限付きタスク実行
+  thread ────── 派生した作業単位
 
-agent (水平方向: 何にアクセスできるか)
+shared config (水平方向: 何を有効にするか)
   メール専用 ── Gmail MCP のみ
   RSS 専用 ─── Fetch MCP のみ
   汎用 ──────── 全ツール
 ```
 
-GroupType が `chat` でも `agent` で MCP を付与すれば、「返信しかしないがメール操作はできる」エージェントが作れる。
+GroupType が `chat` でも、将来の共有設定で MCP を付与すれば、「返信しかしないがメール操作はできる」group が作れる。
 
 ## thread_defaults との統合
 
-親チャネルの `thread_defaults` に `agent` を含めれば、スレッド作成時に自動で同じツール制限が適用される。
+親チャネルの `thread_defaults` に将来の thread 用共有設定を含めれば、スレッド作成時に自動で同じ設定を適用できる。
+
+ここでの `thread_defaults` は、Discord の thread をそのまま設定対象にするための機能ではなく、親 group から派生する NanoClaw の `thread` group に最小限の設定を受け渡すためのもの。
+
+設計上の優先順位は次の通り。
+
+- まず `thread` を独立した group / session として扱う
+- その上で thread 群で共有する設定を継承する
+- VRC-AI-Bot のような `PlaceType` や `Scope` の復活は前提にしない
 
 ```ts
 {
   name: "discord-email",
   type: "chat",
-  agent: {
+  shared_config: {
     mcpServers: { gmail: { ... } },
     allowedTools: ["mcp__gmail__*"],
   },
   thread_defaults: {
     type: "thread",
-    agent: {
-      // 親の agent を継承（明示的にオーバーライド可能）
+    shared_config: {
+      // thread 群で共有する設定を継承
       inherit: true
     }
   }
@@ -174,30 +182,30 @@ GroupType が `chat` でも `agent` で MCP を付与すれば、「返信しか
 
 ## セキュリティ考慮
 
-- `agent.mcpServers` で指定される MCP コマンドは、コンテナ内で実行される（ホストではない）
+- 将来の共有設定で指定される MCP コマンドは、コンテナ内で実行される（ホストではない）
 - 認証情報は引き続き credential-proxy 経由で注入 — MCP サーバーが直接シークレットを持つことはない
 - `allowedTools` は Claude Code の既存のパーミッションシステムに委譲
 - `type: 'chat'` のグループが `agent` で Bash を許可しても、GroupType のサンドボックスポリシーが優先される（将来の実装で強制）
 
 ## 実装に必要なもの
 
-1. **`AgentConfig` 型定義** を `types.ts` に追加
-2. **`container-runner.ts` の settings.json 生成** を agent 対応に拡張
-3. **`container-runner.ts` の skills 同期** を agent.skills で選択的に
-4. **IPC の `register_group` / `update_group` で agent を設定** できるように
-5. **thread_defaults の agent 継承ロジック**
+1. **通常 group 用 / thread 用共有設定の型定義** を `types.ts` に追加
+2. **`container-runner.ts` の settings.json 生成** を共有設定対応に拡張
+3. **`container-runner.ts` の skills 同期** を共有設定ベースで選択的に
+4. **IPC の `register_group` / `update_group` で共有設定を保存** できるように
+5. **thread_defaults の設定継承ロジック**
 
 ## 設定方法: DB + IPC 拡張
 
-`agent` 設定は `containerConfig` と同じパターンで、DB に JSON として保存する。
+通常 group 用 / thread 用共有設定は `containerConfig` と同じパターンで、DB に JSON として保存する。
 
 ### DB スキーマ変更
 
 ```sql
-ALTER TABLE registered_groups ADD COLUMN agent_config TEXT;
+ALTER TABLE registered_groups ADD COLUMN shared_config TEXT;
 ```
 
-`agent_config` には `AgentConfig` の JSON を格納する。NULL の場合は `type` のデフォルト設定を使用（`chat` / `thread` は `allowedTools: ["Read"]`、`main` / `override` は全許可。詳細は [group-type-spec.md](group-type-spec.md#type-ごとのデフォルト-allowedtools) を参照）。
+`shared_config` には共有設定 JSON を格納する。NULL の場合は `type` のデフォルト設定を使用（`chat` / `thread` は `allowedTools: ["Read"]`、`main` / `override` は全許可。詳細は [group-type-spec.md](group-type-spec.md#type-ごとのデフォルト-allowedtools) を参照）。
 
 ### 保存される JSON の例
 
@@ -213,6 +221,8 @@ ALTER TABLE registered_groups ADD COLUMN agent_config TEXT;
   "skills": []
 }
 ```
+
+`thread` のために別 `folder` や独立したパーミッション階層を持たせる必要はない。必要なのは別 JID、別 Claude session、そして将来 thread 群で共有する設定を差し替えられる拡張ポイント。
 
 ### IPC での設定
 

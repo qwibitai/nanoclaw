@@ -16,7 +16,11 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
-import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
+import {
+  encodeIpcNamespaceKey,
+  resolveGroupFolderPath,
+  resolveGroupIpcPathByJid,
+} from './group-folder.js';
 import { logger } from './logger.js';
 import {
   CONTAINER_HOST_GATEWAY,
@@ -58,9 +62,23 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+function resolveSessionNamespace(
+  group: RegisteredGroup,
+  groupType: GroupType,
+  chatJid: string,
+): string {
+  // main / override は共有せず、chatJid ごとに分離する
+  if (groupType === 'main' || groupType === 'override') {
+    return `jid-${encodeIpcNamespaceKey(chatJid)}`;
+  }
+  // chat / thread は同一 folder 内で共有する
+  return `folder-${group.folder}`;
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   groupType: GroupType,
+  chatJid: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -117,14 +135,12 @@ function buildVolumeMounts(
     }
   }
 
-  // グループごとの Claude セッションディレクトリ（他のグループから隔離）
-  // グループ間のセッションアクセスを防ぐため、各グループは独自の .claude/ を持ちます
-  const groupSessionsDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    '.claude',
-  );
+  // Claude セッションディレクトリの分離ポリシー:
+  // - main/override: chatJid ごとに分離
+  // - chat/thread: folder 単位で共有
+  const sessionNamespace = resolveSessionNamespace(group, groupType, chatJid);
+  const groupSessionsRoot = path.join(DATA_DIR, 'sessions', sessionNamespace);
+  const groupSessionsDir = path.join(groupSessionsRoot, '.claude');
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   const defaultSettingsEnv: Record<string, string> = {
@@ -214,7 +230,7 @@ function buildVolumeMounts(
 
   // グループごとの IPC ネームスペース: 各グループは独自の IPC ディレクトリを持ちます
   // これにより、IPC を介したグループを跨ぐ権限昇格を防ぎます
-  const groupIpcDir = resolveGroupIpcPath(group.folder);
+  const groupIpcDir = resolveGroupIpcPathByJid(chatJid);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
@@ -231,12 +247,7 @@ function buildVolumeMounts(
     'agent-runner',
     'src',
   );
-  const groupAgentRunnerDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    'agent-runner-src',
-  );
+  const groupAgentRunnerDir = path.join(groupSessionsRoot, 'agent-runner-src');
   if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
@@ -319,7 +330,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.groupType);
+  const mounts = buildVolumeMounts(group, input.groupType, input.chatJid);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
@@ -683,10 +694,11 @@ export async function runContainerAgent(
 }
 
 export function writeTasksSnapshot(
-  groupFolder: string,
+  groupJid: string,
   isPrivileged: boolean,
   tasks: Array<{
     id: string;
+    groupJid: string;
     groupFolder: string;
     prompt: string;
     schedule_type: string;
@@ -696,13 +708,13 @@ export function writeTasksSnapshot(
   }>,
 ): void {
   // フィルタリングされたタスクをグループの IPC ディレクトリに書き込む
-  const groupIpcDir = resolveGroupIpcPath(groupFolder);
+  const groupIpcDir = resolveGroupIpcPathByJid(groupJid);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
   // 特権グループ（main/override）はすべてのタスクを表示でき、非特権グループは自身のタスクのみを表示できる
   const filteredTasks = isPrivileged
     ? tasks
-    : tasks.filter((t) => t.groupFolder === groupFolder);
+    : tasks.filter((t) => t.groupJid === groupJid);
 
   const tasksFile = path.join(groupIpcDir, 'current_tasks.json');
   fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));
@@ -721,11 +733,11 @@ export interface AvailableGroup {
  * 非特権グループにはこのファイルは空リストとして書き込まれます。
  */
 export function writeGroupsSnapshot(
-  groupFolder: string,
+  groupJid: string,
   isPrivileged: boolean,
   groups: AvailableGroup[],
 ): void {
-  const groupIpcDir = resolveGroupIpcPath(groupFolder);
+  const groupIpcDir = resolveGroupIpcPathByJid(groupJid);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
   // 特権グループ（main/override）はすべてのグループを表示でき、他は何も表示できない（グループをアクティブ化できないため）
