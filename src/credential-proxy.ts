@@ -100,6 +100,7 @@ function updateEnvToken(token: string): void {
 export function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
+  options?: { label?: string; oauthTokenOverride?: string; credentialsPath?: string },
 ): Promise<Server> {
   const secrets = readEnvFile([
     'ANTHROPIC_API_KEY',
@@ -110,7 +111,8 @@ export function startCredentialProxy(
 
   const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
   let oauthToken =
-    secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
+    options?.oauthTokenOverride || secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
+  const proxyLabel = options?.label || 'default';
 
   const upstreamUrl = new URL(
     secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
@@ -122,14 +124,19 @@ export function startCredentialProxy(
 
   // --- Auto-refresh (OAuth only) ---
   if (authMode === 'oauth') {
-    const creds = readCredentials();
+    // If credentialsPath is provided, read from that file; otherwise default credential store
+    const creds = readCredentials(options?.credentialsPath);
     if (creds) {
-      // Use credential store token if fresher
+      // Use credential store token if fresher (or if no token set yet)
       if (creds.accessToken && creds.accessToken !== oauthToken) {
         oauthToken = creds.accessToken;
-        logger.info('Using fresher token from credential store');
+        logger.info({ label: proxyLabel }, 'Using token from credential store');
       }
-      scheduleRefresh(creds.expiresAt, creds.refreshToken);
+      if (creds.refreshToken) {
+        scheduleRefresh(creds.expiresAt, creds.refreshToken);
+      } else {
+        logger.warn({ label: proxyLabel }, 'No refresh token available, auto-refresh disabled');
+      }
     }
   }
 
@@ -161,13 +168,13 @@ export function startCredentialProxy(
       const expiresIn = (data.expires_in as number) || 3600;
       const expiresAt = Date.now() + expiresIn * 1000;
 
-      // Persist
+      // Persist to the same credentials file this proxy reads from
       writeCredentials({
         accessToken: oauthToken,
         refreshToken: newRefresh,
         expiresAt,
         scopes: [],
-      });
+      }, options?.credentialsPath);
       updateEnvToken(oauthToken);
 
       logger.info('OAuth token refreshed successfully');
@@ -254,7 +261,7 @@ export function startCredentialProxy(
     } as typeof server.close;
 
     server.listen(port, host, () => {
-      logger.info({ port, host, authMode }, 'Credential proxy started');
+      logger.info({ port, host, authMode, label: proxyLabel }, 'Credential proxy started');
       resolve(server);
     });
 

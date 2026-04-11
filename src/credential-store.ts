@@ -50,7 +50,21 @@ function linuxCredentialPath(): string {
 }
 
 /** Read raw JSON string from the platform credential store. */
-function readRawJson(): string | null {
+function readRawJson(credentialsPath?: string): string | null {
+  // If an explicit credentials file is provided, use it directly
+  if (credentialsPath) {
+    if (!existsSync(credentialsPath)) {
+      logger.warn({ path: credentialsPath }, 'Credential file not found');
+      return null;
+    }
+    try {
+      return readFileSync(credentialsPath, 'utf-8');
+    } catch (err) {
+      logger.warn({ err, path: credentialsPath }, 'Failed to read credential file');
+      return null;
+    }
+  }
+
   if (platform() === 'darwin') {
     try {
       const raw = execSync(
@@ -79,8 +93,8 @@ function readRawJson(): string | null {
 }
 
 /** Read OAuth credentials from the platform credential store. */
-export function readCredentials(): OAuthCredentials | null {
-  const raw = readRawJson();
+export function readCredentials(credentialsPath?: string): OAuthCredentials | null {
+  const raw = readRawJson(credentialsPath);
   if (!raw) return null;
 
   const creds = parseCredentialJson(raw);
@@ -93,10 +107,10 @@ export function readCredentials(): OAuthCredentials | null {
 }
 
 /** Write updated OAuth credentials back to the platform credential store. Preserves non-OAuth fields (e.g. mcpOAuth). */
-export function writeCredentials(creds: OAuthCredentials): void {
+export function writeCredentials(creds: OAuthCredentials, credentialsPath?: string): void {
   // Read existing data to preserve other fields
   let existing: Record<string, unknown> = {};
-  const raw = readRawJson();
+  const raw = readRawJson(credentialsPath);
   if (raw) {
     try {
       existing = JSON.parse(raw);
@@ -124,6 +138,13 @@ export function writeCredentials(creds: OAuthCredentials): void {
 
   const json = JSON.stringify(existing);
 
+  // If explicit credentials file path, always write to file (not keychain)
+  if (credentialsPath) {
+    mkdirSync(join(credentialsPath, '..'), { recursive: true });
+    writeFileSync(credentialsPath, json, { mode: 0o600 });
+    return;
+  }
+
   if (platform() === 'darwin') {
     try {
       execSync(`security delete-generic-password -s "${KEYCHAIN_SERVICE}"`, {
@@ -137,7 +158,7 @@ export function writeCredentials(creds: OAuthCredentials): void {
     );
   } else {
     // Linux
-    const credPath = linuxCredentialPath();
+    const credPath = credentialsPath || linuxCredentialPath();
     mkdirSync(join(credPath, '..'), { recursive: true });
     writeFileSync(credPath, json, { mode: 0o600 });
   }
