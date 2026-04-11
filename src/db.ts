@@ -123,9 +123,7 @@ function createSchema(database: Database.Database): void {
 
   // Add effort column to sessions (sticky effort override per session)
   try {
-    database.exec(
-      `ALTER TABLE sessions ADD COLUMN effort TEXT DEFAULT NULL`,
-    );
+    database.exec(`ALTER TABLE sessions ADD COLUMN effort TEXT DEFAULT NULL`);
   } catch {
     // Column already exists — ignore
   }
@@ -423,7 +421,10 @@ function createSchema(database: Database.Database): void {
   try {
     database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
     database.exec(`ALTER TABLE chats ADD COLUMN is_group INTEGER DEFAULT 0`);
-    // Backfill from JID patterns
+    // Backfill from JID patterns. The 'whatsapp' channel itself is no longer
+    // registered, but pre-existing chats rows from before WhatsApp removal
+    // still need a value in the new column for the migration to be coherent;
+    // the rows are orphaned (no live channel handler) but harmless.
     database.exec(
       `UPDATE chats SET channel = 'whatsapp', is_group = 1 WHERE jid LIKE '%@g.us'`,
     );
@@ -944,9 +945,7 @@ export function findAllInFlightThreads(): Array<{
 
 /** Clear all processing flags (safety reset on startup). */
 export function clearAllProcessingFlags(): void {
-  db.prepare(
-    'UPDATE sessions SET processing = 0 WHERE processing = 1',
-  ).run();
+  db.prepare('UPDATE sessions SET processing = 0 WHERE processing = 1').run();
 }
 
 // --- Thread origin accessors (Discord thread → session mapping) ---
@@ -1379,9 +1378,9 @@ export function getSessionV2(
 
 /** Get a session row by session_key, including chat_jid. */
 export function getSessionV2ByKey(key: string): SessionV2Full | undefined {
-  return db
-    .prepare('SELECT * FROM sessions WHERE session_key = ?')
-    .get(key) as SessionV2Full | undefined;
+  return db.prepare('SELECT * FROM sessions WHERE session_key = ?').get(key) as
+    | SessionV2Full
+    | undefined;
 }
 
 export function setSessionV2(
@@ -1403,9 +1402,10 @@ export function setSessionV2(
 /** Throttled last_activity update — caller is responsible for throttling. */
 export function touchSessionActivity(key: string): void {
   const now = new Date().toISOString();
-  db.prepare(
-    'UPDATE sessions SET last_activity = ? WHERE session_key = ?',
-  ).run(now, key);
+  db.prepare('UPDATE sessions SET last_activity = ? WHERE session_key = ?').run(
+    now,
+    key,
+  );
 }
 
 export function deleteSessionV2(key: string): void {
