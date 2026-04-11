@@ -354,6 +354,12 @@ async function runAgent(
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
 
+  // Accumulate real per-query cost reported by the SDK's result messages.
+  // One container run can issue multiple queries (the keep-alive loop);
+  // every result message brings its own total_cost_usd, so we sum them.
+  let realCostUsd = 0;
+  let sawRealCost = false;
+
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
   writeTasksSnapshot(
@@ -380,16 +386,18 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  // Wrap onOutput to track session ID from streamed results
-  const wrappedOnOutput = onOutput
-    ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
-        }
-        await onOutput(output);
-      }
-    : undefined;
+  // Wrap onOutput to track session ID and accumulate real cost from streamed results
+  const wrappedOnOutput = async (output: ContainerOutput) => {
+    if (output.newSessionId) {
+      sessions[group.folder] = output.newSessionId;
+      setSession(group.folder, output.newSessionId);
+    }
+    if (typeof output.totalCostUsd === 'number') {
+      realCostUsd += output.totalCostUsd;
+      sawRealCost = true;
+    }
+    if (onOutput) await onOutput(output);
+  };
 
   try {
     const output = await runContainerAgent(
@@ -438,37 +446,40 @@ async function runAgent(
         'Container agent error',
       );
       const durationMs = Date.now() - startMs;
-      const estimatedCost = (durationMs / 10_000) * 0.01;
       logSessionCost({
         session_type: 'message',
         group_folder: group.folder,
         started_at: startedAt,
         duration_ms: durationMs,
-        estimated_cost_usd: estimatedCost,
+        estimated_cost_usd: sawRealCost
+          ? realCostUsd
+          : (durationMs / 10_000) * 0.01,
       });
       return 'error';
     }
 
     const durationMs = Date.now() - startMs;
-    const estimatedCost = (durationMs / 10_000) * 0.01;
     logSessionCost({
       session_type: 'message',
       group_folder: group.folder,
       started_at: startedAt,
       duration_ms: durationMs,
-      estimated_cost_usd: estimatedCost,
+      estimated_cost_usd: sawRealCost
+        ? realCostUsd
+        : (durationMs / 10_000) * 0.01,
     });
     return 'success';
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
     const durationMs = Date.now() - startMs;
-    const estimatedCost = (durationMs / 10_000) * 0.01;
     logSessionCost({
       session_type: 'message',
       group_folder: group.folder,
       started_at: startedAt,
       duration_ms: durationMs,
-      estimated_cost_usd: estimatedCost,
+      estimated_cost_usd: sawRealCost
+        ? realCostUsd
+        : (durationMs / 10_000) * 0.01,
     });
     return 'error';
   }

@@ -167,6 +167,9 @@ async function runTask(
 
   let result: string | null = null;
   let error: string | null = null;
+  // Real API cost accumulated across SDK result messages (USD).
+  let realCostUsd = 0;
+  let sawRealCost = false;
 
   // For group context mode, use the group's current session
   const sessions = deps.getSessions();
@@ -203,6 +206,10 @@ async function runTask(
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
+        if (typeof streamedOutput.totalCostUsd === 'number') {
+          realCostUsd += streamedOutput.totalCostUsd;
+          sawRealCost = true;
+        }
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting)
@@ -254,7 +261,9 @@ async function runTask(
     group_folder: task.group_folder,
     started_at: new Date(startTime).toISOString(),
     duration_ms: durationMs,
-    estimated_cost_usd: (durationMs / 10_000) * 0.01,
+    estimated_cost_usd: sawRealCost
+      ? realCostUsd
+      : (durationMs / 10_000) * 0.01,
   });
 
   const nextRun = computeNextRun(task);

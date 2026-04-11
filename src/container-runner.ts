@@ -54,6 +54,17 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** Real API cost reported by the SDK's result message (USD). */
+  totalCostUsd?: number;
+  /** Token usage reported by the SDK's result message. */
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+  /** Number of turns in this SDK query (for diagnostics). */
+  numTurns?: number;
 }
 
 interface VolumeMount {
@@ -626,6 +637,33 @@ export async function runContainerAgent(
       logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
 
       if (code !== 0) {
+        // If we already streamed a successful agent result, a non-zero exit is
+        // almost always a post-response cleanup failure (OOM reaper, runtime
+        // kill, SDK teardown crash). The user already received the response,
+        // so surfacing a "trigger failed" error to them would be wrong.
+        // Log the anomaly but resolve as success.
+        if (hadStreamingOutput) {
+          logger.warn(
+            {
+              group: group.name,
+              containerName,
+              code,
+              duration,
+              stderrTail: stderr.slice(-400),
+              logFile,
+            },
+            'Container exited non-zero after streaming output (treated as post-response cleanup, not an agent failure)',
+          );
+          outputChain.then(() => {
+            resolve({
+              status: 'success',
+              result: null,
+              newSessionId,
+            });
+          });
+          return;
+        }
+
         logger.error(
           {
             group: group.name,

@@ -40,6 +40,17 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** Real API cost reported by the SDK's result message (USD). */
+  totalCostUsd?: number;
+  /** Token usage reported by the SDK's result message. */
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+  /** Number of turns in this SDK query (for diagnostics). */
+  numTurns?: number;
 }
 
 interface SessionEntry {
@@ -531,13 +542,21 @@ async function runQuery(
       resultCount++;
       const textResult =
         'result' in message ? (message as { result?: string }).result : null;
+      const resultMsg = message as {
+        total_cost_usd?: number;
+        usage?: ContainerOutput['usage'];
+        num_turns?: number;
+      };
       log(
-        `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
+        `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''} cost=${resultMsg.total_cost_usd ?? 'n/a'} turns=${resultMsg.num_turns ?? 'n/a'}`,
       );
       writeOutput({
         status: 'success',
         result: textResult || null,
         newSessionId,
+        totalCostUsd: resultMsg.total_cost_usd,
+        usage: resultMsg.usage,
+        numTurns: resultMsg.num_turns,
       });
     }
   }
