@@ -985,6 +985,35 @@ const SDK_ENV_DENYLIST: ReadonlySet<string> = new Set([
   'BRAINTRUST_API_KEY',
 ]);
 
+// HTTP MCP servers that authenticate via a static Bearer header sourced from a
+// container secret. The host fetches/refreshes the secret before each spawn and
+// passes it via containerInput.secrets; we read it here and inject it into the
+// MCP server config as an explicit Authorization header.
+//
+// Why explicit headers (not OneCLI proxy injection): the proxy doesn't reliably
+// inject auth on MCP/SSE transports — for sunday.omniapp.co it falls into
+// tunnel mode, and for granola.ai/braintrust.dev the SDK falls back to its own
+// OAuth flow on 401 (which can never complete inside a container, surfacing
+// as a "needs to be refreshed" prompt to the user).
+//
+// Why skip-on-missing (not register-with-empty): registering a server with no
+// Authorization header would 401 on first request and trigger the same SDK
+// OAuth fallback we're trying to prevent. Better to expose no tool than a
+// broken one. The host already logs a WARN when secret refresh failed.
+//
+// Excludes: Exa (query-param auth, not Bearer headers); stdio servers
+// (gitnexus, ollama, nanoclaw — different transport entirely).
+const HEADER_AUTH_MCP_SERVERS: ReadonlyArray<{
+  tool: string; // tools[] gate name
+  name: string; // servers[name] key + log identifier
+  url: string;
+  secretKey: string; // containerInput.secrets[secretKey]
+}> = [
+  { tool: 'granola',    name: 'granola',    url: 'https://mcp.granola.ai/mcp',           secretKey: 'GRANOLA_ACCESS_TOKEN' },
+  { tool: 'braintrust', name: 'braintrust', url: 'https://api.braintrust.dev/mcp',       secretKey: 'BRAINTRUST_API_KEY'   },
+  { tool: 'omni',       name: 'omni',       url: 'https://sunday.omniapp.co/mcp/https',  secretKey: 'OMNI_API_KEY'         },
+];
+
 function buildMcpServers(
   containerInput: ContainerInput,
   mcpServerPath: string,
@@ -1019,74 +1048,24 @@ function buildMcpServers(
     if (exaKey) websetsUrl.searchParams.set('exaApiKey', exaKey);
     servers['exa-websets'] = { type: 'http', url: websetsUrl.toString() };
   }
-  if (isToolEnabled(tools, 'granola')) {
-    // Pass the OAuth token directly via the headers config — the OneCLI proxy
-    // doesn't reliably inject auth on MCP/SSE transports, and the Claude Code
-    // SDK falls back to its own OAuth flow on 401 (which can never complete
-    // inside a container, leaving the user with a "Granola auth needs to be
-    // refreshed" prompt). Token is refreshed by the host before each spawn.
-    //
-    // If the token is missing or empty, skip registering the server entirely:
-    // registering with no Authorization header would 401 on first request and
-    // trigger the SDK's OAuth fallback — the exact failure mode this whole
-    // path exists to prevent. The host already logs a WARN when the refresh
-    // failed; here we just decline to expose a broken tool.
-    const granolaToken = containerInput.secrets?.GRANOLA_ACCESS_TOKEN;
-    if (typeof granolaToken === 'string' && granolaToken.length > 0) {
-      servers.granola = {
+  // See HEADER_AUTH_MCP_SERVERS docstring above for the rationale on
+  // explicit-headers vs proxy injection and skip-on-missing semantics.
+  for (const cfg of HEADER_AUTH_MCP_SERVERS) {
+    if (!isToolEnabled(tools, cfg.tool)) continue;
+    const key = containerInput.secrets?.[cfg.secretKey];
+    if (typeof key === 'string' && key.length > 0) {
+      servers[cfg.name] = {
         type: 'http',
-        url: 'https://mcp.granola.ai/mcp',
+        url: cfg.url,
         headers: {
           Accept: 'application/json, text/event-stream',
-          Authorization: `Bearer ${granolaToken}`,
+          Authorization: `Bearer ${key}`,
         },
       };
     } else {
       log(
-        'Granola enabled but no access token in secrets — skipping MCP server registration',
+        `${cfg.tool} enabled but no ${cfg.secretKey} in secrets — skipping MCP server registration`,
       );
-    }
-  }
-  if (isToolEnabled(tools, 'braintrust')) {
-    // Pass the API key directly via headers — same reasoning as granola and
-    // omni: the OneCLI proxy doesn't reliably inject auth on MCP/SSE
-    // transports. Skip server registration entirely if the key is missing,
-    // otherwise the SDK 401s and triggers its OAuth fallback (which can't
-    // complete inside a container).
-    const btKey = containerInput.secrets?.BRAINTRUST_API_KEY;
-    if (typeof btKey === 'string' && btKey.length > 0) {
-      servers.braintrust = {
-        type: 'http',
-        url: 'https://api.braintrust.dev/mcp',
-        headers: {
-          Accept: 'application/json, text/event-stream',
-          Authorization: `Bearer ${btKey}`,
-        },
-      };
-    } else {
-      log(
-        'Braintrust enabled but no BRAINTRUST_API_KEY in secrets — skipping MCP server registration',
-      );
-    }
-  }
-  if (isToolEnabled(tools, 'omni')) {
-    // Pass the API key directly via headers — same reasoning as granola and
-    // braintrust: the OneCLI proxy can't reliably inject auth on MCP/SSE
-    // transports for sunday.omniapp.co (it falls into tunnel mode), so the
-    // SDK would 401 and trigger its OAuth fallback. OMNI_API_KEY stays in
-    // sdkEnv (NOT denylisted) because curl-based skills also need it.
-    const omniKey = containerInput.secrets?.OMNI_API_KEY;
-    if (typeof omniKey === 'string' && omniKey.length > 0) {
-      servers.omni = {
-        type: 'http',
-        url: 'https://sunday.omniapp.co/mcp/https',
-        headers: {
-          Accept: 'application/json, text/event-stream',
-          Authorization: `Bearer ${omniKey}`,
-        },
-      };
-    } else {
-      log('Omni enabled but no OMNI_API_KEY in secrets — skipping MCP server registration');
     }
   }
   // Google Workspace: no MCP server — agent uses gws CLI via Bash.
