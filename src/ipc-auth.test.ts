@@ -8,7 +8,12 @@ import {
   getTaskById,
   setRegisteredGroup,
 } from './db.js';
-import { processTaskIpc, IpcDeps, decideMessageAction } from './ipc.js';
+import {
+  processTaskIpc,
+  IpcDeps,
+  decideMessageAction,
+  todayDate,
+} from './ipc.js';
 import { RegisteredGroup } from './types.js';
 
 // Set up registered groups used across tests
@@ -731,24 +736,82 @@ describe('register_group success', () => {
 });
 
 describe('decideMessageAction', () => {
-  it('edits when upsert + label exists', () => {
+  const TODAY = '2026-04-10';
+  const YESTERDAY = '2026-04-09';
+
+  it('edits when upsert + label exists (same day)', () => {
     expect(
-      decideMessageAction({ upsert: true, label: 'card' }, { card: 'msg-123' }),
+      decideMessageAction(
+        { upsert: true, label: 'card', pin: true },
+        { card: { id: 'msg-123', date: TODAY } },
+        TODAY,
+      ),
     ).toEqual({ action: 'edit', id: 'msg-123' });
   });
   it('creates when upsert true but label unknown', () => {
-    expect(decideMessageAction({ upsert: true, label: 'card' }, {})).toEqual({
+    expect(
+      decideMessageAction({ upsert: true, label: 'card' }, {}, TODAY),
+    ).toEqual({
       action: 'create',
     });
   });
   it('creates when upsert is false even if label exists', () => {
-    expect(decideMessageAction({ label: 'card' }, { card: 'msg-123' })).toEqual(
-      { action: 'create' },
-    );
+    expect(
+      decideMessageAction(
+        { label: 'card' },
+        { card: { id: 'msg-123', date: TODAY } },
+        TODAY,
+      ),
+    ).toEqual({ action: 'create' });
   });
   it('creates when no label', () => {
-    expect(decideMessageAction({ upsert: true }, { card: 'x' })).toEqual({
+    expect(
+      decideMessageAction(
+        { upsert: true },
+        { card: { id: 'x', date: TODAY } },
+        TODAY,
+      ),
+    ).toEqual({
       action: 'create',
     });
+  });
+  it('rotates when pin + date is stale', () => {
+    expect(
+      decideMessageAction(
+        { upsert: true, label: 'card', pin: true },
+        { card: { id: 'msg-123', date: YESTERDAY } },
+        TODAY,
+      ),
+    ).toEqual({ action: 'rotate', oldId: 'msg-123' });
+  });
+  it('edits when date stale but NOT pinned', () => {
+    expect(
+      decideMessageAction(
+        { upsert: true, label: 'card' },
+        { card: { id: 'msg-123', date: YESTERDAY } },
+        TODAY,
+      ),
+    ).toEqual({ action: 'edit', id: 'msg-123' });
+  });
+  it('rotates legacy plain-string label on pin (migrates to dated format)', () => {
+    expect(
+      decideMessageAction(
+        { upsert: true, label: 'card', pin: true },
+        { card: 'msg-123' },
+        TODAY,
+      ),
+    ).toEqual({ action: 'rotate', oldId: 'msg-123' });
+  });
+  it('edits legacy plain-string label without pin', () => {
+    expect(
+      decideMessageAction(
+        { upsert: true, label: 'card' },
+        { card: 'msg-123' },
+        TODAY,
+      ),
+    ).toEqual({ action: 'edit', id: 'msg-123' });
+  });
+  it('todayDate returns YYYY-MM-DD format', () => {
+    expect(todayDate('America/Chicago')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

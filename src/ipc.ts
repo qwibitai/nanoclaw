@@ -3,7 +3,12 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import {
+  DATA_DIR,
+  IPC_POLL_INTERVAL,
+  PET_IDENTITIES,
+  TIMEZONE,
+} from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -30,6 +35,12 @@ export interface IpcDeps {
     messageId: string,
     emoji: string,
   ) => Promise<void>;
+  sendWebhookMessage?: (
+    jid: string,
+    text: string,
+    username: string,
+    avatarURL?: string,
+  ) => Promise<string | undefined>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -60,21 +71,51 @@ const POISONED_MESSAGE_PATTERNS = [
 
 let ipcWatcherRunning = false;
 
+// --- Day-aware label types ---
+// Labels can be plain strings (legacy) or { id, date } for pinned daily rotation.
+type LabelEntry = string | { id: string; date: string };
+type LabelMap = Record<string, LabelEntry>;
+
+function labelId(entry: LabelEntry): string {
+  return typeof entry === 'string' ? entry : entry.id;
+}
+
+function labelDate(entry: LabelEntry): string | undefined {
+  return typeof entry === 'string' ? undefined : entry.date;
+}
+
+export function todayDate(tz: string = TIMEZONE): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: tz });
+}
+
 /**
  * Decide whether a `message` IPC payload should upsert-edit an existing
- * labeled message instead of posting a new one. Pure function for testing.
+ * labeled message, rotate (unpin old + create new), or create fresh.
  *
  * Returns:
- *   { action: 'edit', id }  — label exists and upsert requested
- *   { action: 'create' }    — post a new message (label mapping updates after)
+ *   { action: 'edit', id }       — label exists, same day (or non-pinned)
+ *   { action: 'rotate', oldId }  — pinned label from a different day → unpin old, create new
+ *   { action: 'create' }         — no existing label
  */
 export function decideMessageAction(
-  data: { upsert?: boolean; label?: string },
-  labels: Record<string, string>,
-): { action: 'edit'; id: string } | { action: 'create' } {
+  data: { upsert?: boolean; label?: string; pin?: boolean },
+  labels: LabelMap,
+  today?: string,
+):
+  | { action: 'edit'; id: string }
+  | { action: 'create' }
+  | { action: 'rotate'; oldId: string } {
   if (data.upsert && data.label) {
-    const id = labels[data.label];
-    if (id) return { action: 'edit', id };
+    const entry = labels[data.label];
+    if (entry) {
+      const id = labelId(entry);
+      const date = labelDate(entry);
+      // Rotate: pinned label from a previous day (or legacy undated) → unpin old, create new
+      if (data.pin && date !== (today ?? todayDate())) {
+        return { action: 'rotate', oldId: id };
+      }
+      return { action: 'edit', id };
+    }
   }
   return { action: 'create' };
 }
@@ -83,7 +124,7 @@ function labelFilePath(sourceGroup: string): string {
   return path.join(DATA_DIR, 'sessions', sourceGroup, 'message_labels.json');
 }
 
-function readLabels(sourceGroup: string): Record<string, string> {
+function readLabels(sourceGroup: string): LabelMap {
   try {
     const p = labelFilePath(sourceGroup);
     if (!fs.existsSync(p)) return {};
@@ -93,10 +134,7 @@ function readLabels(sourceGroup: string): Record<string, string> {
   }
 }
 
-function writeLabels(
-  sourceGroup: string,
-  labels: Record<string, string>,
-): void {
+function writeLabels(sourceGroup: string, labels: LabelMap): void {
   const p = labelFilePath(sourceGroup);
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, JSON.stringify(labels, null, 2));
@@ -170,6 +208,29 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   'Unauthorized IPC message attempt blocked',
                 );
               } else if (data.type === 'message' && jid && data.text) {
+                // Pet voice: route through webhook when sender matches a pet
+                const petId =
+                  data.sender && PET_IDENTITIES[data.sender]
+                    ? PET_IDENTITIES[data.sender]
+                    : undefined;
+                if (petId && deps.sendWebhookMessage) {
+                  await deps.sendWebhookMessage(
+                    jid,
+                    data.text,
+                    petId.name,
+                    petId.avatar,
+                  );
+                  logger.info(
+                    { chatJid: jid, sourceGroup, sender: data.sender },
+                    'IPC pet message sent via webhook',
+                  );
+                  try {
+                    fs.unlinkSync(filePath);
+                  } catch {
+                    /* ignore */
+                  }
+                  continue;
+                }
                 // Upsert: if caller passed `upsert: true` with a label that
                 // already exists, edit the existing message instead of
                 // posting a new one. Lets the agent use a single call for
@@ -191,11 +252,40 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   }
                   continue;
                 }
+                if (decision.action === 'rotate') {
+                  // Unpin yesterday's message (keep it in chat history).
+                  // Swallow errors — the old message may have been deleted.
+                  if (deps.unpinMessage) {
+                    try {
+                      await deps.unpinMessage(jid, decision.oldId);
+                    } catch (err) {
+                      logger.warn(
+                        {
+                          chatJid: jid,
+                          messageId: decision.oldId,
+                          err: (err as Error).message,
+                        },
+                        'Failed to unpin rotated message (continuing)',
+                      );
+                    }
+                  }
+                  // Clear stale label so the fall-through creates a fresh one
+                  const rotateLabels = readLabels(sourceGroup);
+                  delete rotateLabels[data.label];
+                  writeLabels(sourceGroup, rotateLabels);
+                  logger.info(
+                    { chatJid: jid, sourceGroup, label: data.label },
+                    'IPC pinned message rotated (new day)',
+                  );
+                  // Fall through to the create path below
+                }
                 if (data.label && deps.sendMessageWithId) {
                   const id = await deps.sendMessageWithId(jid, data.text);
                   if (id) {
                     const labels = readLabels(sourceGroup);
-                    labels[data.label] = id;
+                    labels[data.label] = data.pin
+                      ? { id, date: todayDate() }
+                      : id;
                     writeLabels(sourceGroup, labels);
                     if (data.pin && deps.pinMessage) {
                       await deps.pinMessage(jid, id);
@@ -233,7 +323,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 deps.editMessage
               ) {
                 const labels = readLabels(sourceGroup);
-                const id = labels[data.label];
+                const entry = labels[data.label];
+                const id = entry ? labelId(entry) : undefined;
                 if (id) {
                   await deps.editMessage(jid, id, data.text);
                   logger.info(
@@ -253,7 +344,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 deps.deleteMessage
               ) {
                 const labels = readLabels(sourceGroup);
-                const id = labels[data.label];
+                const entry = labels[data.label];
+                const id = entry ? labelId(entry) : undefined;
                 if (id) {
                   await deps.deleteMessage(jid, id);
                   delete labels[data.label];
@@ -266,8 +358,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 deps.pinMessage
               ) {
                 const labels = readLabels(sourceGroup);
-                const id = labels[data.label];
-                if (id) await deps.pinMessage(jid, id);
+                const entry = labels[data.label];
+                if (entry) await deps.pinMessage(jid, labelId(entry));
               } else if (
                 data.type === 'unpin_message' &&
                 jid &&
@@ -275,8 +367,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 deps.unpinMessage
               ) {
                 const labels = readLabels(sourceGroup);
-                const id = labels[data.label];
-                if (id) await deps.unpinMessage(jid, id);
+                const entry = labels[data.label];
+                if (entry) await deps.unpinMessage(jid, labelId(entry));
               } else if (
                 data.type === 'add_reaction' &&
                 jid &&
@@ -286,7 +378,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 let id: string | undefined = data.messageId;
                 if (!id && data.label) {
                   const labels = readLabels(sourceGroup);
-                  id = labels[data.label];
+                  const entry = labels[data.label];
+                  if (entry) id = labelId(entry);
                 }
                 if (id) await deps.addReaction(jid, id, data.emoji);
               } else if (
@@ -298,7 +391,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 let id: string | undefined = data.messageId;
                 if (!id && data.label) {
                   const labels = readLabels(sourceGroup);
-                  id = labels[data.label];
+                  const entry = labels[data.label];
+                  if (entry) id = labelId(entry);
                 }
                 if (id) await deps.removeReaction(jid, id, data.emoji);
               }

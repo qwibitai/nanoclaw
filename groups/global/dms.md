@@ -16,12 +16,11 @@ Each per-person CLAUDE.md hardcodes the Discord user ID and display name. Trust 
 
 When the user sends a 5-letter guess in a DM:
 
-1. Read `Wordle Today` tab from the Portillo Games sheet (ID in `/workspace/global/sheets.md`) to get today's answer + date.
-2. Read `Wordle State` tab (`date | player | guess_num | guess | grid | solved`) — filter to today's date + this player.
-3. Validate guess against `/workspace/global/scripts/wordle_wordlist.txt` (977 words). If not a real word, reply with the rejection and do NOT consume a guess.
-4. Score with `node /workspace/global/scripts/score-guess.mjs <guess> <answer>` → returns the emoji grid.
-5. Append a row to `Wordle State`. If solved or guess_num=6, also append to `Wordle Submissions` per the family-fun flow.
-6. Reply to the user with the grid + guess count. Solved → congrats. Out of guesses → reveal answer.
+1. Run `node /workspace/global/scripts/score-guess.mjs <player> <guess>` — it handles everything: reads the answer from the sheet, validates against the wordlist, scores, and appends the row.
+2. Use the JSON output to compose your reply. Key fields: `status`, `grid`, `solved`, `guess_num`, `budget`, `history`, `word` (only present on budget-exhausted reveal).
+3. If solved or guess_num equals budget, also append to `Wordle Submissions` per the family-fun flow.
+
+**NEVER read the Wordle Today tab directly.** The answer must stay hidden from you so you cannot accidentally leak it. The script is the only thing that touches the answer.
 
 Timestamps: `YYYY-MM-DD HH:MM:SS` America/Chicago. See `/workspace/global/date_time_convention.md`.
 
