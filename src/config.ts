@@ -10,6 +10,8 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
   'TZ',
+  'RUNTIME_MODE',
+  'MOUNT_TMUX_SOCKET',
 ]);
 
 export const ASSISTANT_NAME =
@@ -40,6 +42,37 @@ export const SENDER_ALLOWLIST_PATH = path.join(
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+
+export type RuntimeMode = 'container' | 'native';
+
+/**
+ * Runtime mode controls whether agents run inside Docker containers (default)
+ * or as direct child processes on the host.
+ *
+ * Set RUNTIME_MODE=native in .env to bypass Docker and enable host-level
+ * integrations (tmux, Playwright, macOS APIs, Ollama on localhost).
+ * See docs/NATIVE-MODE.md for setup and security trade-offs.
+ */
+export const RUNTIME_MODE: RuntimeMode =
+  (process.env.RUNTIME_MODE || envConfig.RUNTIME_MODE || 'container') ===
+  'native'
+    ? 'native'
+    : 'container';
+
+/**
+ * When true, mounts the host tmux socket directory into containers so
+ * agents can create and attach to tmux sessions on the host.
+ *
+ * Only used in container mode. Security: any container with the tmux socket
+ * can send keystrokes to other sessions owned by this user. Opt-in only.
+ * Set MOUNT_TMUX_SOCKET=true in .env to enable.
+ */
+export const MOUNT_TMUX_SOCKET =
+  (
+    process.env.MOUNT_TMUX_SOCKET ||
+    envConfig.MOUNT_TMUX_SOCKET ||
+    ''
+  ).toLowerCase() === 'true';
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
