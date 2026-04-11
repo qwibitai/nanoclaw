@@ -28,6 +28,7 @@ import {
 import { readEnvFile, readEnvFileMatching } from './env.js';
 import { registerSecrets } from './secret-scrubber.js';
 import {
+  assertValidGroupFolder,
   assertValidThreadId,
   resolveGroupFolderPath,
   resolveGroupIpcInputPath,
@@ -263,8 +264,11 @@ async function getGranolaAccessToken(): Promise<string | null> {
       expiresAt: newExpiresAt - 5 * 60 * 1000,
     };
 
-    // Update OneCLI vault so the proxy injects the fresh token
-    updateOneCLIGranolaSecret(newAccessToken);
+    // Belt-and-suspenders: keep the OneCLI vault in sync as a fallback. The
+    // primary auth path is explicit MCP headers passed at container spawn,
+    // but we still update the vault so any out-of-band caller works. Awaited
+    // so callers (proactive refresh, container spawn) don't race the PATCH.
+    await updateOneCLIGranolaSecret(newAccessToken);
 
     logger.info('Granola OAuth token refreshed successfully');
     return newAccessToken;
@@ -281,6 +285,10 @@ async function getGranolaAccessToken(): Promise<string | null> {
  */
 export function startGranolaTokenRefresh(): void {
   if (granolaRefreshTimer) return; // already running
+  // One-time cleanup of zombie mcpOAuth entries from prior failed in-container
+  // OAuth flows. Safe under the explicit-header path which doesn't depend on
+  // these entries and won't recreate them.
+  cleanupStaleGranolaCredentials();
   const doRefresh = async () => {
     const token = await getGranolaAccessToken();
     if (token) {
@@ -297,34 +305,180 @@ export function startGranolaTokenRefresh(): void {
   );
 }
 
-/** Update the Granola secret in OneCLI vault after a token refresh. */
-function updateOneCLIGranolaSecret(newToken: string): void {
-  // Find the Granola secret by name and update its value
-  fetch(`${ONECLI_URL}/api/secrets`, { signal: AbortSignal.timeout(5000) })
-    .then((r) => r.json() as Promise<Array<{ id: string; name: string }>>)
-    .then((secrets) => {
-      const granola = secrets.find((s) => s.name === 'Granola');
-      if (!granola) return;
-      return fetch(`${ONECLI_URL}/api/secrets/${granola.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: newToken }),
-        signal: AbortSignal.timeout(5000),
-      });
-    })
-    .then(() => logger.debug('OneCLI Granola secret updated'))
-    .catch((err) =>
-      logger.debug(
-        { err: String(err) },
-        'OneCLI Granola secret update skipped',
-      ),
-    );
+/**
+ * Update the Granola secret in OneCLI vault after a token refresh.
+ * Belt-and-suspenders fallback — the primary auth path passes the token via
+ * explicit MCP headers in agent-runner. We previously had a silent race here
+ * (fire-and-forget PATCH, debug-only error logging) that left the vault stale
+ * and emitted a user-facing OAuth re-auth prompt for scheduled tasks.
+ */
+async function updateOneCLIGranolaSecret(newToken: string): Promise<void> {
+  try {
+    const listResp = await fetch(`${ONECLI_URL}/api/secrets`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!listResp.ok) {
+      logger.warn(
+        { status: listResp.status },
+        'OneCLI Granola sync: list secrets failed',
+      );
+      return;
+    }
+    const secrets = (await listResp.json()) as Array<{
+      id: string;
+      name: string;
+    }>;
+    const granola = secrets.find((s) => s.name === 'Granola');
+    if (!granola) {
+      logger.debug('OneCLI Granola sync: no Granola secret in vault');
+      return;
+    }
+    const patchResp = await fetch(`${ONECLI_URL}/api/secrets/${granola.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: newToken }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!patchResp.ok) {
+      const body = await patchResp.text().catch(() => '');
+      logger.warn(
+        { status: patchResp.status, body },
+        'OneCLI Granola sync: PATCH failed',
+      );
+      return;
+    }
+    logger.debug('OneCLI Granola sync: success');
+  } catch (err) {
+    logger.warn({ err: String(err) }, 'OneCLI Granola sync: exception');
+  }
 }
 
 export function stopGranolaTokenRefresh(): void {
   if (granolaRefreshTimer) {
     clearInterval(granolaRefreshTimer);
     granolaRefreshTimer = null;
+  }
+}
+
+/**
+ * Remove stale `granola|*` entries from Claude Code's mcpOAuth state in
+ * `.credentials.json` files. NanoClaw owns Granola token state in
+ * `~/.claude/.granola-tokens.json` and passes it to containers via explicit
+ * MCP headers (see agent-runner buildMcpServers). Any leftover Claude Code
+ * mcpOAuth entry — typically left by an aborted in-container OAuth flow —
+ * causes the SDK to attempt OAuth fallback on every container spawn, which
+ * can never complete (no callback URL works inside a container) and surfaces
+ * a "Granola auth needs to be refreshed" prompt to the user.
+ *
+ * Runs once at startup. Safe to delete because the explicit-header path
+ * doesn't depend on these entries and won't recreate them.
+ */
+function cleanupStaleGranolaCredentials(): void {
+  const candidates: string[] = [
+    path.join(os.homedir(), '.claude', '.credentials.json'),
+  ];
+
+  // Walk per-group and per-thread session credential files. These are mounted
+  // into containers as /home/node/.claude/.credentials.json, so they are what
+  // the SDK actually reads. Apply containment checks (CLAUDE.md path-input
+  // rule) and skip symlinks defensively even though data/sessions/ is not
+  // attacker-controlled today.
+  const sessionsRoot = path.join(DATA_DIR, 'sessions');
+  try {
+    if (fs.existsSync(sessionsRoot)) {
+      for (const groupName of fs.readdirSync(sessionsRoot)) {
+        try {
+          assertValidGroupFolder(groupName);
+        } catch {
+          continue;
+        }
+        const groupDir = path.join(sessionsRoot, groupName);
+        try {
+          if (fs.lstatSync(groupDir).isSymbolicLink()) continue;
+        } catch {
+          continue;
+        }
+        const groupCreds = path.join(groupDir, '.claude', '.credentials.json');
+        if (fs.existsSync(groupCreds)) candidates.push(groupCreds);
+        const threadsDir = path.join(groupDir, 'threads');
+        if (!fs.existsSync(threadsDir)) continue;
+        for (const threadId of fs.readdirSync(threadsDir)) {
+          try {
+            assertValidThreadId(threadId);
+          } catch {
+            continue;
+          }
+          const threadDir = path.join(threadsDir, threadId);
+          try {
+            if (fs.lstatSync(threadDir).isSymbolicLink()) continue;
+          } catch {
+            continue;
+          }
+          const threadCreds = path.join(
+            threadDir,
+            '.claude',
+            '.credentials.json',
+          );
+          if (fs.existsSync(threadCreds)) candidates.push(threadCreds);
+        }
+      }
+    }
+  } catch (err) {
+    logger.debug(
+      { err: String(err) },
+      'cleanupStaleGranolaCredentials: session walk failed',
+    );
+  }
+
+  let cleaned = 0;
+  for (const filePath of candidates) {
+    try {
+      // Defensive: never overwrite a symlinked target. The host
+      // ~/.claude/.credentials.json is shared with Claude Code on the host.
+      if (fs.lstatSync(filePath).isSymbolicLink()) continue;
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      // Cheap pre-check: avoid parsing files that obviously have no granola
+      // entries. The JSON dump is normalized so the literal `"granola|` will
+      // appear if and only if a `granola|*` mcpOAuth key exists.
+      if (!raw.includes('"granola|')) continue;
+      const data = JSON.parse(raw) as Record<string, unknown>;
+      const mcpOAuth = data.mcpOAuth as Record<string, unknown> | undefined;
+      if (!mcpOAuth) continue;
+      const granolaKeys = Object.keys(mcpOAuth).filter((k) =>
+        k.startsWith('granola|'),
+      );
+      if (granolaKeys.length === 0) continue;
+      for (const k of granolaKeys) delete mcpOAuth[k];
+      // Atomic write via tmp + rename. Critical because the host
+      // ~/.claude/.credentials.json is shared with the user's host Claude Code
+      // process; a crash mid-write would nuke ALL of the user's MCP OAuth
+      // state, not just Granola. POSIX rename(2) is atomic on the same fs.
+      const stat = fs.statSync(filePath);
+      const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+      fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), {
+        mode: stat.mode & 0o777,
+      });
+      try {
+        fs.renameSync(tmpPath, filePath);
+      } catch (renameErr) {
+        try {
+          fs.unlinkSync(tmpPath);
+        } catch {
+          // tmp file may already be gone
+        }
+        throw renameErr;
+      }
+      cleaned++;
+    } catch {
+      // Best-effort cleanup — skip unreadable / locked files silently.
+    }
+  }
+
+  if (cleaned > 0) {
+    logger.info(
+      { count: cleaned, scanned: candidates.length },
+      'Cleaned stale Granola entries from Claude Code mcpOAuth state',
+    );
   }
 }
 
@@ -2597,12 +2751,15 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  // Ensure Granola OAuth token is fresh in OneCLI vault before container launch.
-  // The proxy injects the token — we no longer pass it via input.secrets.
+  // Refresh Granola OAuth token before container launch and capture it for
+  // explicit-header injection. The OneCLI proxy can't reliably inject auth on
+  // MCP/SSE transports — relying on it caused the SDK to fall back to its own
+  // OAuth flow on 401, which can't complete inside a container.
   const tools = group.containerConfig?.tools;
+  let granolaAccessToken: string | null = null;
   if (isToolEnabled(tools, 'granola')) {
-    const token = await getGranolaAccessToken();
-    if (!token) {
+    granolaAccessToken = await getGranolaAccessToken();
+    if (!granolaAccessToken) {
       logger.warn(
         { group: group.name },
         'Granola enabled but no valid token — Granola tools will be unavailable',
@@ -2810,8 +2967,13 @@ export async function runContainerAgent(
     let stderrTruncated = false;
 
     // Pass non-HTTP secrets via stdin (dbt login, gcloud paths, Render PG/Redis).
-    // HTTP API credentials are injected by the OneCLI proxy at request time.
+    // HTTP API credentials are injected by the OneCLI proxy at request time,
+    // except where the SDK's MCP transport bypasses the proxy (Granola, Braintrust)
+    // and the token must be passed directly via explicit headers.
     input.secrets = readSecrets(group.folder, tools);
+    if (granolaAccessToken) {
+      input.secrets.GRANOLA_ACCESS_TOKEN = granolaAccessToken;
+    }
     // Register secret values so outbound messages get scrubbed
     registerSecrets(input.secrets);
     // Pass tools restriction so agent-runner can gate MCP servers

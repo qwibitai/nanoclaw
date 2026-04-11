@@ -771,6 +771,7 @@ function isToolEnabled(tools: string[] | undefined, name: string): boolean {
  */
 function buildCapabilityManifest(
   tools: string[] | undefined,
+  secrets: Record<string, string> | undefined,
 ): string | undefined {
   if (tools && tools.length === 0) return undefined;
 
@@ -859,7 +860,14 @@ function buildCapabilityManifest(
   }
 
   // Meetings
-  if (isToolEnabled(tools, 'granola')) {
+  // Gate on token presence: if granola is enabled but the token is missing,
+  // buildMcpServers will skip registering the server, so claiming the
+  // capability would be a hallucination.
+  if (
+    isToolEnabled(tools, 'granola') &&
+    typeof secrets?.GRANOLA_ACCESS_TOKEN === 'string' &&
+    secrets.GRANOLA_ACCESS_TOKEN.length > 0
+  ) {
     capabilities.push(
       '- **Granola** — meeting transcripts and notes via MCP tools.',
     );
@@ -946,6 +954,13 @@ type StdioServer = { command: string; args: string[]; env?: Record<string, strin
 type HttpServer = { type: 'http'; url: string; headers?: Record<string, string> };
 type McpServer = StdioServer | HttpServer;
 
+// Secrets that are consumed only by buildMcpServers as MCP HTTP headers must
+// be denylisted from sdkEnv so they're not visible to Bash tool subprocesses
+// the SDK spawns. GRANOLA_ACCESS_TOKEN is a rotating 6h JWT with full
+// meeting-content access. (EXA_API_KEY and BRAINTRUST_API_KEY have the same
+// property today and should be denylisted in a follow-up hardening pass.)
+const SDK_ENV_DENYLIST: ReadonlySet<string> = new Set(['GRANOLA_ACCESS_TOKEN']);
+
 function buildMcpServers(
   containerInput: ContainerInput,
   mcpServerPath: string,
@@ -981,12 +996,32 @@ function buildMcpServers(
     servers['exa-websets'] = { type: 'http', url: websetsUrl.toString() };
   }
   if (isToolEnabled(tools, 'granola')) {
-    // Auth header is injected by the OneCLI HTTPS proxy at request time.
-    // No explicit token needed — the proxy matches mcp.granola.ai and injects Bearer credentials.
-    servers.granola = {
-      type: 'http',
-      url: 'https://mcp.granola.ai/mcp',
-    };
+    // Pass the OAuth token directly via the headers config — the OneCLI proxy
+    // doesn't reliably inject auth on MCP/SSE transports, and the Claude Code
+    // SDK falls back to its own OAuth flow on 401 (which can never complete
+    // inside a container, leaving the user with a "Granola auth needs to be
+    // refreshed" prompt). Token is refreshed by the host before each spawn.
+    //
+    // If the token is missing or empty, skip registering the server entirely:
+    // registering with no Authorization header would 401 on first request and
+    // trigger the SDK's OAuth fallback — the exact failure mode this whole
+    // path exists to prevent. The host already logs a WARN when the refresh
+    // failed; here we just decline to expose a broken tool.
+    const granolaToken = containerInput.secrets?.GRANOLA_ACCESS_TOKEN;
+    if (typeof granolaToken === 'string' && granolaToken.length > 0) {
+      servers.granola = {
+        type: 'http',
+        url: 'https://mcp.granola.ai/mcp',
+        headers: {
+          Accept: 'application/json, text/event-stream',
+          Authorization: `Bearer ${granolaToken}`,
+        },
+      };
+    } else {
+      log(
+        'Granola enabled but no access token in secrets — skipping MCP server registration',
+      );
+    }
   }
   if (isToolEnabled(tools, 'braintrust')) {
     // Proxy doesn't reliably inject auth for MCP/SSE endpoints,
@@ -1523,10 +1558,17 @@ async function main(): Promise<void> {
     process.env.NANOCLAW_THREAD_ID = containerInput.threadId;
   }
 
-  // Build SDK env: merge secrets into process.env for the SDK only.
-  // Secrets never touch process.env itself, so Bash subprocesses can't see them.
+  // Build SDK env: merge secrets into a separate object passed to the SDK as
+  // `query({options:{env: sdkEnv}})`. The SDK uses this for Bash tool
+  // subprocesses, so anything in sdkEnv is reachable via `printenv` from any
+  // Bash command an agent runs. Secrets that are ONLY consumed by
+  // buildMcpServers as MCP HTTP headers (read directly from
+  // `containerInput.secrets`) must be excluded from sdkEnv to keep them out
+  // of subprocess env. GRANOLA_ACCESS_TOKEN is a rotating 6h JWT with full
+  // meeting-content access — explicitly denylisted.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
+    if (SDK_ENV_DENYLIST.has(key)) continue;
     sdkEnv[key] = value;
   }
 
@@ -1603,7 +1645,10 @@ async function main(): Promise<void> {
   // Runtime capability manifest — tells the agent what tools/services are actually
   // available in this session, derived from containerInput.tools.  Placed last so it
   // takes precedence over any contradictory static CLAUDE.md claims.
-  const capabilityManifest = buildCapabilityManifest(containerInput.tools);
+  const capabilityManifest = buildCapabilityManifest(
+    containerInput.tools,
+    containerInput.secrets,
+  );
 
   // Document /workspace/group vs /workspace/thread persistence semantics
   // so the agent knows where to write thread-local state.
