@@ -56,6 +56,39 @@ export interface ContainerInput {
   mountAllowlist?: import('./types.js').MountAllowlist | null;
 }
 
+export type ContainerState = 'active' | 'idle' | 'stopped';
+
+export interface ContainerStateEvent {
+  type: 'state';
+  state: ContainerState;
+  newSessionId?: string;
+  reason?:
+    | 'query_started'
+    | 'awaiting_input'
+    | 'exit'
+    | 'error_exit'
+    | 'timeout'
+    | 'idle_timeout';
+  exitCode?: number;
+}
+
+export interface ContainerResultEvent {
+  type: 'result';
+  result: string | null;
+  newSessionId?: string;
+}
+
+export interface ContainerErrorEvent {
+  type: 'error';
+  error: string;
+  newSessionId?: string;
+}
+
+export type ContainerEvent =
+  | ContainerStateEvent
+  | ContainerResultEvent
+  | ContainerErrorEvent;
+
 export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
@@ -335,7 +368,7 @@ export async function runContainerAgent(
   input: ContainerInput,
   rc: RuntimeConfig,
   onProcess: (boxName: string, containerName: string) => void,
-  onOutput?: (output: ContainerOutput) => Promise<void>,
+  onOutput?: (event: ContainerEvent) => Promise<void>,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -423,7 +456,7 @@ export async function runContainerAgent(
   let parseBuffer = '';
   let newSessionId: string | undefined;
   let outputChain = Promise.resolve();
-  let hadStreamingOutput = false;
+  let lastLifecycleState: ContainerState | null = null;
   let stdout = '';
   let stderr = '';
   let stdoutTruncated = false;
@@ -493,15 +526,16 @@ export async function runContainerAgent(
             parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
 
             try {
-              const parsed: ContainerOutput = JSON.parse(jsonStr);
+              const parsed: ContainerEvent = JSON.parse(jsonStr);
               if (parsed.newSessionId) {
                 newSessionId = parsed.newSessionId;
               }
-              hadStreamingOutput = true;
+              if (parsed.type === 'state') {
+                lastLifecycleState = parsed.state;
+              }
               // Activity detected — reset the hard timeout
               resetTimeout();
-              // Call onOutput for all markers (including null results)
-              // so idle timers start even for "silent" query completions.
+              // Call onOutput for all structured stream events.
               outputChain = outputChain.then(() => onOutput(parsed));
             } catch (err) {
               logger.warn(
@@ -566,6 +600,18 @@ export async function runContainerAgent(
   const code = execResult.exitCode;
 
   if (timedOut) {
+    if (onOutput) {
+      outputChain = outputChain.then(() =>
+        onOutput({
+          type: 'state',
+          state: 'stopped',
+          newSessionId,
+          reason: lastLifecycleState === 'idle' ? 'idle_timeout' : 'timeout',
+          exitCode: code,
+        }),
+      );
+    }
+
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const timeoutLog = path.join(logsDir, `container-${ts}.log`);
     fs.writeFileSync(
@@ -577,17 +623,15 @@ export async function runContainerAgent(
         `Box: ${containerName}`,
         `Duration: ${duration}ms`,
         `Exit Code: ${code}`,
-        `Had Streaming Output: ${hadStreamingOutput}`,
+        `Last Lifecycle State: ${lastLifecycleState ?? 'none'}`,
       ].join('\n'),
     );
 
-    // Timeout after output = idle cleanup, not failure.
-    // The agent already sent its response; this is just the
-    // container being reaped after the idle period expired.
-    if (hadStreamingOutput) {
+    // Timeout after an explicit idle signal = idle cleanup, not failure.
+    if (lastLifecycleState === 'idle') {
       logger.info(
         { group: group.name, containerName, duration, code },
-        'Box timed out after output (idle cleanup)',
+        'Box timed out after idle (idle cleanup)',
       );
       await outputChain;
       return { status: 'success', result: null, newSessionId };
@@ -595,7 +639,7 @@ export async function runContainerAgent(
 
     logger.error(
       { group: group.name, containerName, duration, code },
-      'Box timed out with no output',
+      'Box timed out before reaching idle',
     );
     return {
       status: 'error',
@@ -672,7 +716,20 @@ export async function runContainerAgent(
   fs.writeFileSync(logFile, logLines.join('\n'));
   logger.debug({ logFile, verbose: isVerbose }, 'Box log written');
 
+  if (onOutput) {
+    outputChain = outputChain.then(() =>
+      onOutput({
+        type: 'state',
+        state: 'stopped',
+        newSessionId,
+        reason: code === 0 ? 'exit' : 'error_exit',
+        exitCode: code,
+      }),
+    );
+  }
+
   if (code !== 0) {
+    await outputChain;
     logger.error(
       {
         group: group.name,
@@ -704,34 +761,58 @@ export async function runContainerAgent(
 
   // Legacy mode: parse the last output marker pair from accumulated stdout
   try {
-    // Extract JSON between sentinel markers for robust parsing
-    const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
-    const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
-
-    let jsonLine: string;
-    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-      jsonLine = stdout
+    const events: ContainerEvent[] = [];
+    let searchIdx = 0;
+    while (true) {
+      const startIdx = stdout.indexOf(OUTPUT_START_MARKER, searchIdx);
+      if (startIdx === -1) break;
+      const endIdx = stdout.indexOf(OUTPUT_END_MARKER, startIdx);
+      if (endIdx === -1) break;
+      const jsonLine = stdout
         .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
         .trim();
-    } else {
-      // Fallback: last non-empty line (backwards compatibility)
-      const lines = stdout.trim().split('\n');
-      jsonLine = lines[lines.length - 1];
+      searchIdx = endIdx + OUTPUT_END_MARKER.length;
+
+      if (!jsonLine) continue;
+
+      const event = JSON.parse(jsonLine) as ContainerEvent;
+      events.push(event);
+      if (event.newSessionId) {
+        newSessionId = event.newSessionId;
+      }
     }
 
-    const output: ContainerOutput = JSON.parse(jsonLine);
+    const lastError = [...events]
+      .reverse()
+      .find((event): event is ContainerErrorEvent => event.type === 'error');
+    if (lastError) {
+      return {
+        status: 'error',
+        result: null,
+        newSessionId,
+        error: lastError.error,
+      };
+    }
+
+    const lastResult = [...events]
+      .reverse()
+      .find((event): event is ContainerResultEvent => event.type === 'result');
 
     logger.info(
       {
         group: group.name,
         duration,
-        status: output.status,
-        hasResult: !!output.result,
+        status: 'success',
+        hasResult: !!lastResult?.result,
       },
       'Box completed',
     );
 
-    return output;
+    return {
+      status: 'success',
+      result: lastResult?.result ?? null,
+      newSessionId,
+    };
   } catch (err) {
     logger.error(
       {

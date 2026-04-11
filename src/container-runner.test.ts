@@ -144,7 +144,11 @@ vi.mock('./box-runtime.js', () => ({
   spawnBox: (...args: any[]) => mockSpawnBox(...args),
 }));
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import {
+  runContainerAgent,
+  type ContainerEvent,
+  type ContainerOutput,
+} from './container-runner.js';
 import type { RuntimeConfig } from './runtime-config.js';
 import type { RegisteredGroup } from './types.js';
 
@@ -182,7 +186,7 @@ const testInput = {
 
 function emitOutputToExec(
   exec: ReturnType<typeof createMockExecution>,
-  output: ContainerOutput,
+  output: ContainerEvent,
 ) {
   const json = JSON.stringify(output);
   exec.pushStdout(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
@@ -202,7 +206,7 @@ describe('container-runner with BoxLite', () => {
     vi.useRealTimers();
   });
 
-  it('timeout after output resolves as success', async () => {
+  it('timeout after idle resolves as success', async () => {
     const onOutput = vi.fn(async () => {});
     const resultPromise = runContainerAgent(
       testGroup,
@@ -218,14 +222,22 @@ describe('container-runner with BoxLite', () => {
     // that a single advanceTimersByTimeAsync may not achieve.
     for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
 
-    // Emit output with a result
     emitOutputToExec(mockExec, {
-      status: 'success',
+      type: 'state',
+      state: 'active',
+    });
+    emitOutputToExec(mockExec, {
+      type: 'result',
       result: 'Here is my response',
       newSessionId: 'session-123',
     });
+    emitOutputToExec(mockExec, {
+      type: 'state',
+      state: 'idle',
+      newSessionId: 'session-123',
+    });
 
-    // Settle output processing (sets hadStreamingOutput=true, resets timeout)
+    // Settle output processing (resets timeout and records explicit idle)
     for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
 
     // Fire the hard timeout. resetTimeout() rescheduled the timer,
@@ -243,7 +255,24 @@ describe('container-runner with BoxLite', () => {
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-123');
     expect(onOutput).toHaveBeenCalledWith(
-      expect.objectContaining({ result: 'Here is my response' }),
+      expect.objectContaining({ type: 'state', state: 'active' }),
+    );
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'result',
+        result: 'Here is my response',
+      }),
+    );
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'state', state: 'idle' }),
+    );
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'state',
+        state: 'stopped',
+        reason: 'idle_timeout',
+        exitCode: 137,
+      }),
     );
   });
 
@@ -272,7 +301,14 @@ describe('container-runner with BoxLite', () => {
     const result = await resultPromise;
     expect(result.status).toBe('error');
     expect(result.error).toContain('timed out');
-    expect(onOutput).not.toHaveBeenCalled();
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'state',
+        state: 'stopped',
+        reason: 'timeout',
+        exitCode: 137,
+      }),
+    );
   });
 
   it('normal exit after output resolves as success', async () => {
@@ -289,7 +325,7 @@ describe('container-runner with BoxLite', () => {
 
     // Emit output
     emitOutputToExec(mockExec, {
-      status: 'success',
+      type: 'result',
       result: 'Done',
       newSessionId: 'session-456',
     });
@@ -306,5 +342,57 @@ describe('container-runner with BoxLite', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'state',
+        state: 'stopped',
+        reason: 'exit',
+        exitCode: 0,
+      }),
+    );
+  });
+
+  it('timeout after active output without idle stays an error', async () => {
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      testRuntimeConfig,
+      () => {},
+      onOutput,
+    );
+
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
+
+    emitOutputToExec(mockExec, {
+      type: 'state',
+      state: 'active',
+    });
+    emitOutputToExec(mockExec, {
+      type: 'result',
+      result: 'Partial output',
+    });
+
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
+
+    await vi.advanceTimersByTimeAsync(1830000 + 1000);
+
+    mockExec.closeStdout();
+    mockExec.closeStderr();
+    mockExec.resolveWait(137);
+
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('timed out');
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'state',
+        state: 'stopped',
+        reason: 'timeout',
+        exitCode: 137,
+      }),
+    );
   });
 });

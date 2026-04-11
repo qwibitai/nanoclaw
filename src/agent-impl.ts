@@ -44,7 +44,7 @@ import type {
 import { logger } from './logger.js';
 
 import {
-  ContainerOutput,
+  ContainerEvent,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
@@ -821,7 +821,22 @@ export class AgentImpl
       prompt,
       chatJid,
       async (result) => {
-        if (result.result) {
+        if (result.type === 'state') {
+          this.emit('run.state', {
+            agentId: this.id,
+            jid: chatJid,
+            name: group.name,
+            folder: group.folder,
+            state: result.state,
+            timestamp: new Date().toISOString(),
+            reason: result.reason,
+            exitCode: result.exitCode,
+          });
+          if (result.state === 'idle') this.queue.notifyIdle(chatJid);
+          return;
+        }
+
+        if (result.type === 'result' && result.result) {
           const raw =
             typeof result.result === 'string'
               ? result.result
@@ -842,8 +857,7 @@ export class AgentImpl
           }
           resetIdleTimer();
         }
-        if (result.status === 'success') this.queue.notifyIdle(chatJid);
-        if (result.status === 'error') hadError = true;
+        if (result.type === 'error') hadError = true;
       },
     );
 
@@ -874,7 +888,7 @@ export class AgentImpl
     group: InternalRegisteredGroup,
     prompt: string,
     chatJid: string,
-    onOutput?: (output: ContainerOutput) => Promise<void>,
+    onOutput?: (output: ContainerEvent) => Promise<void>,
   ): Promise<'success' | 'error'> {
     const isMain = group.isMain === true;
     const sessionId = this.sessions[group.folder];
@@ -891,7 +905,7 @@ export class AgentImpl
     );
 
     const wrappedOnOutput = onOutput
-      ? async (output: ContainerOutput) => {
+      ? async (output: ContainerEvent) => {
           if (output.newSessionId) {
             this.sessions[group.folder] = output.newSessionId;
             this.db.setSession(group.folder, output.newSessionId);
@@ -1146,6 +1160,7 @@ export class AgentImpl
 
   private startSubsystems(): void {
     this.schedulerHandle = startSchedulerLoop({
+      agentId: this.id,
       assistantName: this.config.assistantName,
       schedulerPollInterval: this.runtimeConfig.schedulerPollInterval,
       timezone: this.runtimeConfig.timezone,
@@ -1163,6 +1178,25 @@ export class AgentImpl
         this.queue.registerBox(groupJid, boxName, groupFolder),
       sendMessage: async (jid, rawText) => {
         await this.sendOutboundMessage(jid, rawText);
+      },
+      onStateChange: ({
+        jid,
+        groupFolder,
+        state,
+        reason,
+        exitCode,
+      }) => {
+        const group = this._registeredGroups[jid];
+        this.emit('run.state', {
+          agentId: this.id,
+          jid,
+          name: group?.name || groupFolder,
+          folder: groupFolder,
+          state,
+          timestamp: new Date().toISOString(),
+          reason,
+          exitCode,
+        });
       },
     });
 

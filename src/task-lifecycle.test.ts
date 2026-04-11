@@ -94,8 +94,12 @@ describe('task lifecycle integration', () => {
     vi.mocked(runContainerAgent).mockImplementation(
       async (_group, _input, _runtimeConfig, _onProcess, onOutput) => {
         await onOutput?.({
-          status: 'success',
+          type: 'result',
           result: 'Lifecycle integration result',
+        });
+        await onOutput?.({
+          type: 'state',
+          state: 'idle',
         });
         return {
           status: 'success',
@@ -142,6 +146,7 @@ describe('task lifecycle integration', () => {
 
     const schedulerHandle = startSchedulerLoop({
       db,
+      agentId: agent.id,
       assistantName: 'Andy',
       schedulerPollInterval: 60000,
       timezone: 'UTC',

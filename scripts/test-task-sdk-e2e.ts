@@ -5,11 +5,27 @@ import os from 'os';
 import path from 'path';
 
 import { createAgentLite } from '../src/api/sdk.js';
+import type { RunStateEvent } from '../src/api/events.js';
 
 const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlite-task-e2e-'));
 const anthropicToken =
   process.env.ANTHROPIC_AUTH_TOKEN ?? process.env.ANTHROPIC_API_KEY;
 const anthropicBaseUrl = process.env.ANTHROPIC_BASE_URL;
+
+function buildAgentOptions() {
+  if (!anthropicToken) {
+    return { name: 'Andy' as const };
+  }
+
+  return {
+    name: 'Andy' as const,
+    credentials: async () => ({
+      ANTHROPIC_AUTH_TOKEN: anthropicToken,
+      ANTHROPIC_API_KEY: anthropicToken,
+      ...(anthropicBaseUrl ? { ANTHROPIC_BASE_URL: anthropicBaseUrl } : {}),
+    }),
+  };
+}
 
 async function main(): Promise<void> {
   console.log('=== AgentLite Task SDK E2E ===');
@@ -17,21 +33,12 @@ async function main(): Promise<void> {
   console.log(
     `Image: ${process.env.BOX_IMAGE || 'ghcr.io/boxlite-ai/agentlite-agent:latest'}`,
   );
-  if (!anthropicToken) {
-    throw new Error(
-      'Missing ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY for container credentials',
-    );
-  }
+  console.log(
+    `Credential source: ${anthropicToken ? 'explicit env token' : 'runtime default / OneCLI gateway'}`,
+  );
 
   let platform = await createAgentLite({ workdir, timezone: 'UTC' });
-  let agent = platform.getOrCreateAgent('main', {
-    name: 'Andy',
-    credentials: async () => ({
-      ANTHROPIC_AUTH_TOKEN: anthropicToken,
-      ANTHROPIC_API_KEY: anthropicToken,
-      ...(anthropicBaseUrl ? { ANTHROPIC_BASE_URL: anthropicBaseUrl } : {}),
-    }),
-  });
+  let agent = platform.getOrCreateAgent('main', buildAgentOptions());
 
   try {
     await agent.start();
@@ -62,13 +69,13 @@ async function main(): Promise<void> {
 
     await platform.stop();
     platform = await createAgentLite({ workdir, timezone: 'UTC' });
-    agent = platform.getOrCreateAgent('main', {
-      name: 'Andy',
-      credentials: async () => ({
-        ANTHROPIC_AUTH_TOKEN: anthropicToken,
-        ANTHROPIC_API_KEY: anthropicToken,
-        ...(anthropicBaseUrl ? { ANTHROPIC_BASE_URL: anthropicBaseUrl } : {}),
-      }),
+    agent = platform.getOrCreateAgent('main', buildAgentOptions());
+    const restartedRunStates: RunStateEvent[] = [];
+    agent.on('run.state', (evt) => {
+      restartedRunStates.push(evt);
+      console.log(
+        `[run.state] agent=${evt.agentId} jid=${evt.jid} state=${evt.state}${evt.reason ? ` reason=${evt.reason}` : ''}${evt.exitCode !== undefined ? ` exit=${evt.exitCode}` : ''}`,
+      );
     });
     await agent.start();
 
@@ -93,6 +100,27 @@ async function main(): Promise<void> {
         }
         if (!current.lastRun) {
           throw new Error('Expected lastRun to be set');
+        }
+        const lifecycle = restartedRunStates.filter(
+          (evt) => evt.jid === 'team@test',
+        );
+        const lifecycleStates = lifecycle.map((evt) => evt.state);
+        console.log(
+          `Lifecycle states: ${lifecycleStates.join(', ') || '(none)'}`,
+        );
+        if (
+          !['active', 'idle', 'stopped'].every((state) =>
+            lifecycleStates.includes(state as RunStateEvent['state']),
+          )
+        ) {
+          throw new Error(
+            `Expected run.state lifecycle to include active, idle, stopped. Got: ${lifecycleStates.join(', ') || '(none)'}`,
+          );
+        }
+        if (!lifecycle.every((evt) => evt.agentId === agent.id)) {
+          throw new Error(
+            `Expected all run.state events to use agentId=${agent.id}`,
+          );
         }
 
         console.log('PASS: Task SDK E2E completed successfully');
