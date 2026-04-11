@@ -38,11 +38,12 @@ function parseGroupType(
 }
 
 const JID_PREFIX_RE = /^[a-z]{2,}:/;
+const WHATSAPP_JID_RE = /^[^@\s]+@(g\.us|s\.whatsapp\.net)$/;
 
 export function _shouldMigrateSessionKey(key: string): boolean {
   if (JID_PREFIX_RE.test(key)) return true;
-  if (key.includes('@')) return true;
-  return !isValidGroupFolder(key);
+  if (WHATSAPP_JID_RE.test(key)) return true;
+  return false;
 }
 
 export function _sanitizeContainerConfig(

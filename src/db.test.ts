@@ -630,4 +630,9 @@ describe('_shouldMigrateSessionKey', () => {
     expect(_shouldMigrateSessionKey('discord_main')).toBe(false);
     expect(_shouldMigrateSessionKey('my-group_folder')).toBe(false);
   });
+
+  it('rejects non-JID garbled keys', () => {
+    expect(_shouldMigrateSessionKey('!!!invalid!!!')).toBe(false);
+    expect(_shouldMigrateSessionKey('user@invalid-domain')).toBe(false);
+  });
 });
