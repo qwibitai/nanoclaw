@@ -298,6 +298,20 @@ interface PendingModelConfirmation {
 const pendingModelConfirmations = new Map<string, PendingModelConfirmation>();
 
 /**
+ * A deferred effort-switch confirmation, parallel to PendingModelConfirmation.
+ * Verified via the container's applyFlagSettings() acknowledgment: the container
+ * resolves the promise and includes effortApplied/effortFailed in the next
+ * ContainerOutput, which tryConfirmEffortSwitch checks before sending ✅ or ❌.
+ */
+interface PendingEffortConfirmation {
+  message: string;
+  chatJid: string;
+  threadId?: string;
+}
+
+const pendingEffortConfirmations = new Map<string, PendingEffortConfirmation>();
+
+/**
  * Try to confirm a deferred model switch for a session.
  * - If no pending entry: returns immediately.
  * - If pending and modelsUsedThisTurn includes the requested family: sends
@@ -361,6 +375,60 @@ async function tryConfirmModelSwitch(
     logger.warn(
       { chatJid: pending.chatJid, err },
       'Failed to send model-switch failure notice',
+    );
+  }
+}
+
+/**
+ * Try to confirm a deferred effort switch for a session.
+ * The container resolves applyFlagSettings() and includes the result in
+ * ContainerOutput.effortApplied / .effortFailed.  This mirrors
+ * tryConfirmModelSwitch but uses the container's own acknowledgment
+ * rather than SDK result metadata.
+ */
+async function tryConfirmEffortSwitch(
+  sessionKey: string,
+  result: { effortApplied?: string; effortFailed?: boolean },
+  channel: {
+    sendMessage: (
+      jid: string,
+      text: string,
+      threadId?: string,
+    ) => Promise<unknown>;
+  },
+): Promise<void> {
+  const pending = pendingEffortConfirmations.get(sessionKey);
+  if (!pending) return;
+  if (!result.effortApplied && !result.effortFailed) return;
+
+  pendingEffortConfirmations.delete(sessionKey);
+
+  if (result.effortFailed) {
+    try {
+      await channel.sendMessage(
+        pending.chatJid,
+        `❌ Effort switch did not take effect — applyFlagSettings rejected.`,
+        pending.threadId,
+      );
+    } catch (err) {
+      logger.warn(
+        { chatJid: pending.chatJid, err },
+        'Failed to send effort switch failure notice',
+      );
+    }
+    return;
+  }
+
+  try {
+    await channel.sendMessage(
+      pending.chatJid,
+      `✅ ${pending.message}.`,
+      pending.threadId,
+    );
+  } catch (err) {
+    logger.warn(
+      { chatJid: pending.chatJid, err },
+      'Failed to send effort switch confirmation',
     );
   }
 }
@@ -1283,10 +1351,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         logger.debug({ chatJid, err }, 'Failed to add thinking reaction'),
       );
   }
-  // Build host-side model/effort switch confirmation parts. Effort switches
-  // are sent eagerly (no way to verify them from result messages), but model
-  // switches are deferred until the agent's first result message confirms
-  // the SDK actually honoured the switch — see tryConfirmModelSwitch.
+  // Build host-side model/effort switch confirmation parts. Both are
+  // deferred until the agent's first result message confirms the SDK
+  // processed a turn — see tryConfirmModelSwitch / tryConfirmEffortSwitch.
   {
     let modelPart: string | undefined;
     if (overrideResult && !overrideResult.reset) {
@@ -1320,15 +1387,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         threadId: effectiveThreadId,
       });
     } else if (effortPart) {
-      // Effort-only switch — send eagerly (no verification needed/available).
-      channel
-        .sendMessage(chatJid, `✅ ${effortPart}.`, effectiveThreadId)
-        .catch((err: unknown) =>
-          logger.warn(
-            { chatJid, err },
-            'Failed to send effort switch confirmation',
-          ),
-        );
+      // Defer until the container confirms applyFlagSettings() succeeded —
+      // eager confirmation was unreliable because it fired before the IPC
+      // even reached the container.
+      pendingEffortConfirmations.set(sessionKey, {
+        message: effortPart,
+        chatJid,
+        threadId: effectiveThreadId,
+      });
     }
   }
 
@@ -1404,15 +1470,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           },
           'onOutput callback invoked',
         );
-        // Confirm/refute any deferred model-switch as soon as we have ground
-        // truth. Sent BEFORE the agent's text so the user sees ✅ first.
-        if (result.modelsUsedThisTurn && result.modelsUsedThisTurn.length > 0) {
-          await tryConfirmModelSwitch(
-            sessionKey,
-            result.modelsUsedThisTurn,
-            channel,
-          );
-        }
+        // Confirm/refute any deferred model or effort switch. Both functions
+        // guard internally so safe to call unconditionally. Sent BEFORE the
+        // agent's text so the user sees ✅ first.
+        await tryConfirmModelSwitch(
+          sessionKey,
+          result.modelsUsedThisTurn,
+          channel,
+        );
+        await tryConfirmEffortSwitch(sessionKey, result, channel);
         if (result.result) {
           const raw =
             typeof result.result === 'string'
@@ -1556,6 +1622,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       logger.warn(
         { sessionKey, family: leftover.family },
         'Model switch could not be verified before runAgent completed — confirmation suppressed',
+      );
+    }
+    const effortLeftover = pendingEffortConfirmations.get(sessionKey);
+    if (effortLeftover) {
+      pendingEffortConfirmations.delete(sessionKey);
+      logger.warn(
+        { sessionKey },
+        'Effort switch could not be verified before runAgent completed — confirmation suppressed',
       );
     }
   }
@@ -2105,10 +2179,10 @@ async function startMessageLoop(): Promise<void> {
                 });
               }
 
-              // Build model/effort confirmation. Effort is sent eagerly (no
-              // way to verify it from result messages), but model is deferred
-              // until the running container's next result confirms the SDK
-              // honoured the switch — see tryConfirmModelSwitch in onOutput.
+              // Build model/effort confirmation. Both are deferred until the
+              // running container's next result confirms the SDK processed a
+              // turn — see tryConfirmModelSwitch / tryConfirmEffortSwitch in
+              // onOutput.
               let modelPart: string | undefined;
               if (pipeModelOverride) {
                 if (pipeModelOverride.reset) {
@@ -2153,15 +2227,13 @@ async function startMessageLoop(): Promise<void> {
                   threadId: incomingThreadId,
                 });
               } else if (effortPart) {
-                // Effort-only switch — send eagerly.
-                channel
-                  .sendMessage(chatJid, `✅ ${effortPart}.`, incomingThreadId)
-                  .catch((err: unknown) =>
-                    logger.warn(
-                      { chatJid, err },
-                      'Failed to send effort switch confirmation',
-                    ),
-                  );
+                // Defer until the container confirms applyFlagSettings()
+                // succeeded — eager confirmation was unreliable.
+                pendingEffortConfirmations.set(sessionKey, {
+                  message: effortPart,
+                  chatJid,
+                  threadId: incomingThreadId,
+                });
               }
 
               // Strip flags from the piped text so the agent sees clean prompt

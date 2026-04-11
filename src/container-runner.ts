@@ -650,6 +650,15 @@ export interface ContainerOutput {
    * confirmation to the user.
    */
   modelsUsedThisTurn?: string[];
+  /**
+   * Effort level the container confirmed was applied (applyFlagSettings
+   * resolved). Set on the first result after an effort switch IPC or
+   * initial invocation with effort. The host uses this to verify a `-e`
+   * switch before sending the "✅ Effort ..." confirmation.
+   */
+  effortApplied?: string;
+  /** True if applyFlagSettings rejected — the effort switch did not take. */
+  effortFailed?: boolean;
 }
 
 export interface ProgressEvent {
