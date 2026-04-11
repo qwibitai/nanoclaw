@@ -26,11 +26,24 @@ import {
   ThreadDefaults,
 } from './types.js';
 
+const VALID_CHANNEL_MODES = new Set<
+  NonNullable<RegisteredGroup['channel_mode']>
+>(['chat', 'url_watch', 'admin_control']);
+
 function parseIpcGroupType(value: unknown): GroupType | null {
   if (typeof value === 'string' && VALID_GROUP_TYPES.has(value)) {
     return value as GroupType;
   }
   return null;
+}
+
+function parseIpcChannelMode(
+  value: unknown,
+): RegisteredGroup['channel_mode'] | undefined {
+  if (typeof value === 'string' && VALID_CHANNEL_MODES.has(value as NonNullable<RegisteredGroup['channel_mode']>)) {
+    return value as RegisteredGroup['channel_mode'];
+  }
+  return undefined;
 }
 
 const VALID_THREAD_DEFAULT_TYPES: ReadonlySet<string> = new Set([
@@ -613,16 +626,7 @@ export async function processTaskIpc(
               'container_config',
             )
           : undefined;
-        const VALID_CHANNEL_MODES = new Set([
-          'chat',
-          'url_watch',
-          'admin_control',
-        ]);
-        const channelMode =
-          data.channel_mode != null &&
-          VALID_CHANNEL_MODES.has(data.channel_mode)
-            ? (data.channel_mode as RegisteredGroup['channel_mode'])
-            : undefined;
+        const channelMode = parseIpcChannelMode(data.channel_mode);
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
