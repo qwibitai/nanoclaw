@@ -30,6 +30,9 @@ function resolvePlaceType(channel: Message['channel']): PlaceType {
     }
     return 'public_thread';
   }
+  if (channel.type === ChannelType.DM || channel.type === ChannelType.GroupDM) {
+    return 'chat_channel';
+  }
   if (channel.type === ChannelType.GuildAnnouncement)
     return 'guild_announcement';
   return 'guild_text';

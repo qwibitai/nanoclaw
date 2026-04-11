@@ -46,6 +46,8 @@ vi.mock('discord.js', () => {
 
   const ChannelType = {
     GuildText: 0,
+    DM: 1,
+    GroupDM: 3,
     GuildAnnouncement: 5,
     PublicThread: 11,
     PrivateThread: 12,
@@ -153,6 +155,7 @@ function createMessage(overrides: {
   isThread?: boolean;
   parentId?: string;
   parentName?: string;
+  channelType?: number;
 }) {
   const channelId = overrides.channelId ?? '1234567890123456';
   const authorId = overrides.authorId ?? '55512345';
@@ -166,7 +169,7 @@ function createMessage(overrides: {
 
   const channel = {
     name: overrides.channelName ?? 'general',
-    type: 0, // GuildText
+    type: overrides.channelType ?? 0,
     isThread: () => isThreadChannel,
     parentId: overrides.parentId ?? null,
     parent: overrides.parentName
@@ -394,6 +397,7 @@ describe('DiscordChannel', () => {
         content: 'Hello',
         guildName: undefined,
         authorDisplayName: 'Alice',
+        channelType: 1,
       });
       await triggerMessage(msg);
 
@@ -403,6 +407,10 @@ describe('DiscordChannel', () => {
         'Alice',
         'discord',
         false,
+      );
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({ place_type: 'chat_channel' }),
       );
     });
 
