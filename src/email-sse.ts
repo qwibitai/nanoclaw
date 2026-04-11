@@ -160,7 +160,8 @@ function handleTriagedEmails(data: string): void {
     const emails = parsed.emails;
     if (!emails || emails.length === 0) return;
 
-    // Write IPC trigger file — same format as the email_trigger handler expects
+    // Write IPC trigger file to whatsapp_main (main group) — the email_trigger
+    // handler dispatches to the configured notification channel (Telegram).
     const ipcDir = path.join(DATA_DIR, 'ipc', 'whatsapp_main', 'tasks');
     fs.mkdirSync(ipcDir, { recursive: true });
 
