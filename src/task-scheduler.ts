@@ -71,7 +71,6 @@ export interface SchedulerDependencies {
     groupJid: string,
     proc: ChildProcess,
     containerName: string,
-    groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
@@ -133,10 +132,11 @@ async function runTask(
   const isPrivileged = groupType === 'main' || groupType === 'override';
   const tasks = getAllTasks();
   writeTasksSnapshot(
-    task.group_folder,
+    task.chat_jid,
     isPrivileged,
     tasks.map((t) => ({
       id: t.id,
+      groupJid: t.chat_jid,
       groupFolder: t.group_folder,
       prompt: t.prompt,
       schedule_type: t.schedule_type,
@@ -182,7 +182,7 @@ async function runTask(
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) =>
-        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+        deps.onProcess(task.chat_jid, proc, containerName),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;

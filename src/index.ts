@@ -327,10 +327,11 @@ async function runAgent(
   // コンテナが読み取るためのタスクスナップショットを更新（グループでフィルタリング）
   const tasks = getAllTasks();
   writeTasksSnapshot(
-    group.folder,
+    chatJid,
     isPrivileged,
     tasks.map((t) => ({
       id: t.id,
+      groupJid: t.chat_jid,
       groupFolder: t.group_folder,
       prompt: t.prompt,
       schedule_type: t.schedule_type,
@@ -342,7 +343,7 @@ async function runAgent(
 
   // 利用可能なグループのスナップショットを更新（特権グループのみが全グループを表示可能）
   const availableGroups = getAvailableGroups();
-  writeGroupsSnapshot(group.folder, isPrivileged, availableGroups);
+  writeGroupsSnapshot(chatJid, isPrivileged, availableGroups);
 
   // ストリームされた結果からセッション ID を追跡するために onOutput をラップ
   const wrappedOnOutput = onOutput
@@ -367,7 +368,7 @@ async function runAgent(
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
+        queue.registerProcess(chatJid, proc, containerName),
       wrappedOnOutput,
     );
 
@@ -659,8 +660,8 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    onProcess: (groupJid, proc, containerName) =>
+      queue.registerProcess(groupJid, proc, containerName),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
@@ -687,7 +688,7 @@ async function main(): Promise<void> {
       );
     },
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag) => writeGroupsSnapshot(gf, im, ag),
+    writeGroupsSnapshot: (gj, im, ag) => writeGroupsSnapshot(gj, im, ag),
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
