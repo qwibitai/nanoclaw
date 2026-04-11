@@ -22,7 +22,55 @@ import {
   HookCallback,
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
+import Anthropic from '@anthropic-ai/sdk';
 import { fileURLToPath } from 'url';
+
+/**
+ * Classify an error thrown during query() iteration and return a
+ * user-facing message. Errors from the Claude Agent SDK's transport
+ * layer propagate as @anthropic-ai/sdk error instances, which we can
+ * discriminate by class. Everything else falls through to a generic
+ * message so unexpected errors never leak stack traces to chat.
+ *
+ * Note: there is no APIStatusError class in @anthropic-ai/sdk. The
+ * actual base class is Anthropic.APIError, which carries a .status
+ * field we check for 529 (Overloaded, Anthropic-specific) and 5xx.
+ */
+function classifyApiError(err: unknown): string {
+  if (err instanceof Anthropic.RateLimitError) {
+    return 'Anthropic rate limit reached. Please try again in a moment.';
+  }
+  if (err instanceof Anthropic.AuthenticationError) {
+    return 'Anthropic API key is invalid or missing.';
+  }
+  if (err instanceof Anthropic.PermissionDeniedError) {
+    return 'Anthropic API access denied.';
+  }
+  if (err instanceof Anthropic.NotFoundError) {
+    return 'Anthropic model not found.';
+  }
+  if (err instanceof Anthropic.APIConnectionTimeoutError) {
+    return 'Could not reach Anthropic. Check your network connection.';
+  }
+  if (err instanceof Anthropic.APIConnectionError) {
+    return 'Could not reach Anthropic. Check your network connection.';
+  }
+  if (err instanceof Anthropic.APIError) {
+    if (err.status === 529) {
+      return 'Anthropic is currently overloaded. Please try again shortly.';
+    }
+    if (
+      err.status === 500 ||
+      err.status === 502 ||
+      err.status === 503 ||
+      err.status === 504
+    ) {
+      return 'Anthropic is experiencing server issues. Please try again shortly.';
+    }
+    return `Anthropic API error (HTTP ${err.status}).`;
+  }
+  return 'An unexpected error occurred.';
+}
 
 interface ContainerInput {
   prompt: string;
@@ -40,6 +88,8 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** Friendly user-facing message for error statuses (no stack trace, no PII). */
+  userMessage?: string;
 }
 
 interface SessionEntry {
@@ -435,106 +485,127 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
-  for await (const message of query({
-    prompt: stream,
-    options: {
-      cwd: '/workspace/group',
-      additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
-      resume: sessionId,
-      resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? {
-            type: 'preset' as const,
-            preset: 'claude_code' as const,
-            append: globalClaudeMd,
-          }
-        : undefined,
-      allowedTools: [
-        'Bash',
-        'Read',
-        'Write',
-        'Edit',
-        'Glob',
-        'Grep',
-        'WebSearch',
-        'WebFetch',
-        'Task',
-        'TaskOutput',
-        'TaskStop',
-        'TeamCreate',
-        'TeamDelete',
-        'SendMessage',
-        'TodoWrite',
-        'ToolSearch',
-        'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*',
-      ],
-      env: sdkEnv,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+  try {
+    for await (const message of query({
+      prompt: stream,
+      options: {
+        cwd: '/workspace/group',
+        additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+        resume: sessionId,
+        resumeSessionAt: resumeAt,
+        systemPrompt: globalClaudeMd
+          ? {
+              type: 'preset' as const,
+              preset: 'claude_code' as const,
+              append: globalClaudeMd,
+            }
+          : undefined,
+        allowedTools: [
+          'Bash',
+          'Read',
+          'Write',
+          'Edit',
+          'Glob',
+          'Grep',
+          'WebSearch',
+          'WebFetch',
+          'Task',
+          'TaskOutput',
+          'TaskStop',
+          'TeamCreate',
+          'TeamDelete',
+          'SendMessage',
+          'TodoWrite',
+          'ToolSearch',
+          'Skill',
+          'NotebookEdit',
+          'mcp__nanoclaw__*',
+        ],
+        env: sdkEnv,
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        settingSources: ['project', 'user'],
+        mcpServers: {
+          nanoclaw: {
+            command: 'node',
+            args: [mcpServerPath],
+            env: {
+              NANOCLAW_CHAT_JID: containerInput.chatJid,
+              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+              NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            },
           },
         },
+        hooks: {
+          PreCompact: [
+            { hooks: [createPreCompactHook(containerInput.assistantName)] },
+          ],
+        },
       },
-      hooks: {
-        PreCompact: [
-          { hooks: [createPreCompactHook(containerInput.assistantName)] },
-        ],
-      },
-    },
-  })) {
-    messageCount++;
-    const msgType =
-      message.type === 'system'
-        ? `system/${(message as { subtype?: string }).subtype}`
-        : message.type;
-    log(`[msg #${messageCount}] type=${msgType}`);
+    })) {
+      messageCount++;
+      const msgType =
+        message.type === 'system'
+          ? `system/${(message as { subtype?: string }).subtype}`
+          : message.type;
+      log(`[msg #${messageCount}] type=${msgType}`);
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
-    }
+      if (message.type === 'assistant' && 'uuid' in message) {
+        lastAssistantUuid = (message as { uuid: string }).uuid;
+      }
 
-    if (message.type === 'system' && message.subtype === 'init') {
-      newSessionId = message.session_id;
-      log(`Session initialized: ${newSessionId}`);
-    }
+      if (message.type === 'system' && message.subtype === 'init') {
+        newSessionId = message.session_id;
+        log(`Session initialized: ${newSessionId}`);
+      }
 
-    if (
-      message.type === 'system' &&
-      (message as { subtype?: string }).subtype === 'task_notification'
-    ) {
-      const tn = message as {
-        task_id: string;
-        status: string;
-        summary: string;
-      };
-      log(
-        `Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`,
-      );
-    }
+      if (
+        message.type === 'system' &&
+        (message as { subtype?: string }).subtype === 'task_notification'
+      ) {
+        const tn = message as {
+          task_id: string;
+          status: string;
+          summary: string;
+        };
+        log(
+          `Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`,
+        );
+      }
 
-    if (message.type === 'result') {
-      resultCount++;
-      const textResult =
-        'result' in message ? (message as { result?: string }).result : null;
-      log(
-        `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
-      );
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId,
-      });
+      if (message.type === 'result') {
+        resultCount++;
+        const textResult =
+          'result' in message ? (message as { result?: string }).result : null;
+        log(
+          `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
+        );
+        writeOutput({
+          status: 'success',
+          result: textResult || null,
+          newSessionId,
+        });
+      }
     }
+  } catch (err) {
+    ipcPolling = false;
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const userMessage = classifyApiError(err);
+    log(`Agent error: ${errorMessage}`);
+    writeOutput({
+      status: 'error',
+      result: null,
+      newSessionId,
+      error: errorMessage,
+      userMessage,
+    });
+    // Re-throw a sentinel so the outer main() catch knows the error has
+    // already been reported to the user and doesn't write a second,
+    // unclassified error output.
+    const reported = new Error(errorMessage);
+    (reported as Error & { __nanoclawReported?: boolean }).__nanoclawReported =
+      true;
+    throw reported;
   }
 
   ipcPolling = false;
@@ -722,13 +793,23 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    log(`Agent error: ${errorMessage}`);
-    writeOutput({
-      status: 'error',
-      result: null,
-      newSessionId: sessionId,
-      error: errorMessage,
-    });
+    // If runQuery's inner catch already classified and reported this
+    // error to the host (with userMessage), don't overwrite it with an
+    // unclassified second error output — just log and exit.
+    const alreadyReported =
+      err instanceof Error &&
+      (err as Error & { __nanoclawReported?: boolean }).__nanoclawReported ===
+        true;
+    if (!alreadyReported) {
+      log(`Agent error: ${errorMessage}`);
+      writeOutput({
+        status: 'error',
+        result: null,
+        newSessionId: sessionId,
+        error: errorMessage,
+        userMessage: classifyApiError(err),
+      });
+    }
     process.exit(1);
   }
 }
