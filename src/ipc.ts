@@ -40,7 +40,12 @@ function parseIpcGroupType(value: unknown): GroupType | null {
 function parseIpcChannelMode(
   value: unknown,
 ): RegisteredGroup['channel_mode'] | undefined {
-  if (typeof value === 'string' && VALID_CHANNEL_MODES.has(value as NonNullable<RegisteredGroup['channel_mode']>)) {
+  if (
+    typeof value === 'string' &&
+    VALID_CHANNEL_MODES.has(
+      value as NonNullable<RegisteredGroup['channel_mode']>,
+    )
+  ) {
     return value as RegisteredGroup['channel_mode'];
   }
   return undefined;
