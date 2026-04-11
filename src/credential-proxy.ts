@@ -100,7 +100,11 @@ function updateEnvToken(token: string): void {
 export function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
-  options?: { label?: string; oauthTokenOverride?: string; credentialsPath?: string },
+  options?: {
+    label?: string;
+    oauthTokenOverride?: string;
+    credentialsPath?: string;
+  },
 ): Promise<Server> {
   const secrets = readEnvFile([
     'ANTHROPIC_API_KEY',
@@ -111,7 +115,9 @@ export function startCredentialProxy(
 
   const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
   let oauthToken =
-    options?.oauthTokenOverride || secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
+    options?.oauthTokenOverride ||
+    secrets.CLAUDE_CODE_OAUTH_TOKEN ||
+    secrets.ANTHROPIC_AUTH_TOKEN;
   const proxyLabel = options?.label || 'default';
 
   const upstreamUrl = new URL(
@@ -135,7 +141,10 @@ export function startCredentialProxy(
       if (creds.refreshToken) {
         scheduleRefresh(creds.expiresAt, creds.refreshToken);
       } else {
-        logger.warn({ label: proxyLabel }, 'No refresh token available, auto-refresh disabled');
+        logger.warn(
+          { label: proxyLabel },
+          'No refresh token available, auto-refresh disabled',
+        );
       }
     }
   }
@@ -169,12 +178,15 @@ export function startCredentialProxy(
       const expiresAt = Date.now() + expiresIn * 1000;
 
       // Persist to the same credentials file this proxy reads from
-      writeCredentials({
-        accessToken: oauthToken,
-        refreshToken: newRefresh,
-        expiresAt,
-        scopes: [],
-      }, options?.credentialsPath);
+      writeCredentials(
+        {
+          accessToken: oauthToken,
+          refreshToken: newRefresh,
+          expiresAt,
+          scopes: [],
+        },
+        options?.credentialsPath,
+      );
       updateEnvToken(oauthToken);
 
       logger.info('OAuth token refreshed successfully');
@@ -261,7 +273,10 @@ export function startCredentialProxy(
     } as typeof server.close;
 
     server.listen(port, host, () => {
-      logger.info({ port, host, authMode, label: proxyLabel }, 'Credential proxy started');
+      logger.info(
+        { port, host, authMode, label: proxyLabel },
+        'Credential proxy started',
+      );
       resolve(server);
     });
 

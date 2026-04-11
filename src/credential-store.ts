@@ -60,7 +60,10 @@ function readRawJson(credentialsPath?: string): string | null {
     try {
       return readFileSync(credentialsPath, 'utf-8');
     } catch (err) {
-      logger.warn({ err, path: credentialsPath }, 'Failed to read credential file');
+      logger.warn(
+        { err, path: credentialsPath },
+        'Failed to read credential file',
+      );
       return null;
     }
   }
@@ -93,7 +96,9 @@ function readRawJson(credentialsPath?: string): string | null {
 }
 
 /** Read OAuth credentials from the platform credential store. */
-export function readCredentials(credentialsPath?: string): OAuthCredentials | null {
+export function readCredentials(
+  credentialsPath?: string,
+): OAuthCredentials | null {
   const raw = readRawJson(credentialsPath);
   if (!raw) return null;
 
@@ -107,7 +112,10 @@ export function readCredentials(credentialsPath?: string): OAuthCredentials | nu
 }
 
 /** Write updated OAuth credentials back to the platform credential store. Preserves non-OAuth fields (e.g. mcpOAuth). */
-export function writeCredentials(creds: OAuthCredentials, credentialsPath?: string): void {
+export function writeCredentials(
+  creds: OAuthCredentials,
+  credentialsPath?: string,
+): void {
   // Read existing data to preserve other fields
   let existing: Record<string, unknown> = {};
   const raw = readRawJson(credentialsPath);

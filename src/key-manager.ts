@@ -6,11 +6,11 @@
  * Config: ~/nanoclaw/config/keys.json  (operator-managed)
  * State:  ~/nanoclaw/data/active-key.json  (runtime, auto-managed)
  */
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 
-import { logger } from "./logger.js";
+import { logger } from './logger.js';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -41,12 +41,12 @@ export interface ResolvedKey {
 // ── Defaults ───────────────────────────────────────────────────────
 
 const HOME = process.env.HOME || os.homedir();
-const DEFAULT_KEYS_PATH = path.join(HOME, "nanoclaw", "config", "keys.json");
+const DEFAULT_KEYS_PATH = path.join(HOME, 'nanoclaw', 'config', 'keys.json');
 const DEFAULT_ACTIVE_KEY_PATH = path.join(
   HOME,
-  "nanoclaw",
-  "data",
-  "active-key.json",
+  'nanoclaw',
+  'data',
+  'active-key.json',
 );
 
 // ── Keys config ────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ export function readKeysConfig(
     // Permission check is advisory; continue regardless
   }
 
-  const raw = fs.readFileSync(configPath, "utf-8");
+  const raw = fs.readFileSync(configPath, 'utf-8');
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -89,10 +89,10 @@ export function readKeysConfig(
 
   // Validate structure
   if (
-    typeof parsed !== "object" ||
+    typeof parsed !== 'object' ||
     parsed === null ||
-    !("keys" in parsed) ||
-    typeof (parsed as Record<string, unknown>).keys !== "object" ||
+    !('keys' in parsed) ||
+    typeof (parsed as Record<string, unknown>).keys !== 'object' ||
     (parsed as Record<string, unknown>).keys === null
   ) {
     throw new Error(
@@ -108,20 +108,16 @@ export function readKeysConfig(
   }
 
   for (const [id, entry] of entries) {
-    if (!entry.token || typeof entry.token !== "string") {
-      throw new Error(
-        `[key-manager] Key "${id}" has missing or empty token`,
-      );
+    if (!entry.token || typeof entry.token !== 'string') {
+      throw new Error(`[key-manager] Key "${id}" has missing or empty token`);
     }
-    if (!entry.proxy_port || typeof entry.proxy_port !== "number") {
+    if (!entry.proxy_port || typeof entry.proxy_port !== 'number') {
       throw new Error(
         `[key-manager] Key "${id}" has missing or invalid proxy_port`,
       );
     }
-    if (!entry.label || typeof entry.label !== "string") {
-      throw new Error(
-        `[key-manager] Key "${id}" has missing or empty label`,
-      );
+    if (!entry.label || typeof entry.label !== 'string') {
+      throw new Error(`[key-manager] Key "${id}" has missing or empty label`);
     }
   }
 
@@ -142,17 +138,17 @@ export function readActiveKey(
   }
 
   try {
-    const raw = fs.readFileSync(dataPath, "utf-8");
+    const raw = fs.readFileSync(dataPath, 'utf-8');
     const parsed = JSON.parse(raw) as unknown;
 
     if (
-      typeof parsed !== "object" ||
+      typeof parsed !== 'object' ||
       parsed === null ||
-      typeof (parsed as Record<string, unknown>).active !== "string"
+      typeof (parsed as Record<string, unknown>).active !== 'string'
     ) {
       logger.warn(
         { path: dataPath },
-        "Active key state file has invalid format, ignoring",
+        'Active key state file has invalid format, ignoring',
       );
       return null;
     }
@@ -161,7 +157,7 @@ export function readActiveKey(
   } catch (err) {
     logger.warn(
       { err, path: dataPath },
-      "Failed to read active key state, ignoring",
+      'Failed to read active key state, ignoring',
     );
     return null;
   }
@@ -187,14 +183,11 @@ export function writeActiveKey(
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  const tmpPath = dataPath + ".tmp";
-  fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2) + "\n", "utf-8");
+  const tmpPath = dataPath + '.tmp';
+  fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2) + '\n', 'utf-8');
   fs.renameSync(tmpPath, dataPath);
 
-  logger.info(
-    { label, switchedBy },
-    "Active key switched",
-  );
+  logger.info({ label, switchedBy }, 'Active key switched');
 }
 
 // ── Resolution ─────────────────────────────────────────────────────
@@ -210,7 +203,7 @@ export function resolveActiveToken(
   const entries = Object.entries(keysConfig.keys);
 
   if (entries.length === 0) {
-    throw new Error("[key-manager] KeysConfig has no keys");
+    throw new Error('[key-manager] KeysConfig has no keys');
   }
 
   // Try to find the active key
@@ -225,8 +218,11 @@ export function resolveActiveToken(
       };
     }
     logger.warn(
-      { requested: activeKey.active, available: entries.map(([, e]) => e.label) },
-      "Active key not found in config, falling back to first key",
+      {
+        requested: activeKey.active,
+        available: entries.map(([, e]) => e.label),
+      },
+      'Active key not found in config, falling back to first key',
     );
   }
 
