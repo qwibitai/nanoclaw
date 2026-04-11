@@ -199,7 +199,7 @@ async function spawnThreadForUrl(
   group: RegisteredGroup,
   channel: Channel,
 ): Promise<boolean> {
-  const urls = msg.content.match(new RegExp(URL_RE.source, 'gi'));
+  const urls = msg.content.match(URL_RE_GLOBAL);
   if (!urls || urls.length === 0) return false;
   const url = urls[0];
 
@@ -265,6 +265,7 @@ async function spawnThreadForUrl(
 }
 
 const URL_RE = /https?:\/\/[^\s<>"']+/i;
+const URL_RE_GLOBAL = new RegExp(URL_RE.source, `g${URL_RE.flags}`);
 
 function stringContainsUrl(value: string): boolean {
   return URL_RE.test(value);
