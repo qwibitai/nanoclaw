@@ -2966,6 +2966,44 @@ export async function runContainerAgent(
     let newSessionId: string | undefined;
     let outputChain = Promise.resolve();
 
+    // Race outputChain against a bounded deadline so a stuck onOutput consumer
+    // (e.g. a hung channel.sendMessage) can't deadlock the group queue. If the
+    // chain hasn't drained within OUTPUT_CHAIN_SETTLE_DEADLINE_MS after we
+    // decide to resolve, we fall through and resolve anyway. The orphaned
+    // downstream work continues in the background, but the group's next
+    // message becomes processable instead of wedging forever.
+    const OUTPUT_CHAIN_SETTLE_DEADLINE_MS = 10_000;
+    const settleOutputChain = (): Promise<void> =>
+      new Promise<void>((res) => {
+        let settled = false;
+        const fallback = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          logger.warn(
+            { group: group.name, containerName },
+            'Output chain did not settle within deadline, force-unblocking queue',
+          );
+          res();
+        }, OUTPUT_CHAIN_SETTLE_DEADLINE_MS);
+        outputChain
+          .then(() => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(fallback);
+            res();
+          })
+          .catch((err) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(fallback);
+            logger.error(
+              { group: group.name, err },
+              'Output chain rejected, force-unblocking queue',
+            );
+            res();
+          });
+      });
+
     container.stdout.on('data', (data) => {
       const chunk = data.toString();
 
@@ -3003,6 +3041,13 @@ export async function runContainerAgent(
               newSessionId = parsed.newSessionId;
             }
             hadStreamingOutput = true;
+            // Track whether a user turn is mid-flight. `idle: true` on the
+            // session-update marker means "query ended, waiting for next IPC
+            // input". Any other output means the agent is actively producing
+            // a response to a pending input. Used by the timeout branch to
+            // distinguish a safe idle-reap from a mid-turn kill the user
+            // needs to know about.
+            turnInFlight = parsed.idle !== true;
             // Activity detected — reset the hard timeout
             resetTimeout();
             // Call onOutput for all markers (including null results)
@@ -3017,7 +3062,14 @@ export async function runContainerAgent(
         }
       }
 
-      // Stream-parse for progress markers (does NOT reset timeout or count toward output size)
+      // Stream-parse for progress markers. These do NOT count toward the
+      // stdout size budget (they're observability, not user-facing output),
+      // but they DO reset the inactivity watchdog. Progress events fire on
+      // every SDK stream message: every assistant text chunk, every
+      // tool_use, every thinking block, every system event. If they're
+      // flowing, the SDK is alive and the agent is working, even if the
+      // current turn hasn't emitted a final result yet. Not resetting the
+      // watchdog here was the bug that killed long legitimate turns.
       if (onProgress) {
         progressBuffer += chunk;
         let pIdx: number;
@@ -3031,7 +3083,9 @@ export async function runContainerAgent(
             pEnd + PROGRESS_END_MARKER.length,
           );
           try {
-            onProgress(JSON.parse(json));
+            const parsed = JSON.parse(json);
+            resetTimeout();
+            onProgress(parsed);
           } catch {
             // skip malformed progress events
           }
@@ -3063,6 +3117,13 @@ export async function runContainerAgent(
 
     let timedOut = false;
     let hadStreamingOutput = false;
+    // True while a user-initiated query is actively being processed. The
+    // container spawns with the initial prompt already queued, so the first
+    // turn is in-flight from the moment the container starts. Flipped to
+    // false when the agent emits an `idle: true` session-update marker
+    // (meaning "query ended, waiting for next IPC input"); flipped back to
+    // true on any subsequent non-idle output (meaning a new turn started).
+    let turnInFlight = true;
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
     // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
     // graceful _close sentinel has time to trigger before the hard kill fires.
@@ -3117,52 +3178,71 @@ export async function runContainerAgent(
             `Duration: ${duration}ms`,
             `Exit Code: ${code}`,
             `Had Streaming Output: ${hadStreamingOutput}`,
+            `Turn In Flight: ${turnInFlight}`,
             ``,
             `=== Stderr${stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
             stderr,
           ].join('\n'),
         );
 
-        // Timeout after output = idle cleanup, not failure.
-        // The agent already sent its response; this is just the
-        // container being reaped after the idle period expired.
-        if (hadStreamingOutput) {
-          logger.info(
+        // Three distinct cases:
+        //
+        //   1. `!hadStreamingOutput`: container never spoke at all. Something
+        //      is badly broken (spawn failure, agent crashed before first
+        //      output, stuck MCP init). Report as a hard error.
+        //
+        //   2. `hadStreamingOutput && !turnInFlight`: idle reap. Agent
+        //      completed its last turn (we saw an `idle: true` marker) and
+        //      was sitting between turns when the watchdog fired. The host's
+        //      normal closeStdin path didn't finish cleanly but the user
+        //      already got their last response. Safe to resolve as success.
+        //
+        //   3. `hadStreamingOutput && turnInFlight`: mid-turn kill. The SDK
+        //      was processing a user input when it stopped emitting events
+        //      (true freeze: no output markers, no progress markers, no SDK
+        //      debug log lines for 30+ min). The user is owed a visible
+        //      error so they know their last message didn't complete.
+        if (!hadStreamingOutput) {
+          logger.error(
             { group: group.name, containerName, duration, code },
-            'Container timed out after output (idle cleanup)',
+            'Container timed out with no output',
           );
-          outputChain
-            .then(() => {
-              resolve({
-                status: 'success',
-                result: null,
-                newSessionId,
-              });
-            })
-            .catch((err) => {
-              logger.error(
-                { group: group.name, err },
-                'Output chain rejected during idle cleanup',
-              );
-              resolve({
-                status: 'error',
-                result: null,
-                error: 'Output callback error during idle cleanup',
-              });
-            });
+          resolve({
+            status: 'error',
+            result: null,
+            error: `Container timed out after ${configTimeout}ms`,
+          });
           return;
         }
 
-        logger.error(
-          { group: group.name, containerName, duration, code },
-          'Container timed out with no output',
-        );
+        if (turnInFlight) {
+          logger.error(
+            { group: group.name, containerName, duration, code },
+            'Container killed mid-turn by inactivity watchdog',
+          );
+          settleOutputChain().then(() =>
+            resolve({
+              status: 'error',
+              result: null,
+              newSessionId,
+              error:
+                'Agent stopped responding mid-turn and was reaped after the inactivity watchdog fired. Your last message did not complete. Please retry.',
+            }),
+          );
+          return;
+        }
 
-        resolve({
-          status: 'error',
-          result: null,
-          error: `Container timed out after ${configTimeout}ms`,
-        });
+        logger.info(
+          { group: group.name, containerName, duration, code },
+          'Container timed out between turns (idle cleanup)',
+        );
+        settleOutputChain().then(() =>
+          resolve({
+            status: 'success',
+            result: null,
+            newSessionId,
+          }),
+        );
         return;
       }
 
@@ -3255,31 +3335,22 @@ export async function runContainerAgent(
         return;
       }
 
-      // Streaming mode: wait for output chain to settle, return completion marker
+      // Streaming mode: wait for output chain to settle (bounded), then
+      // resolve the completion marker. The bounded settle guarantees the
+      // group queue unblocks even if a downstream consumer (e.g. a hung
+      // channel.sendMessage) never completes.
       if (onOutput) {
-        outputChain
-          .then(() => {
-            logger.info(
-              { group: group.name, duration, newSessionId },
-              'Container completed (streaming mode)',
-            );
-            resolve({
-              status: 'success',
-              result: null,
-              newSessionId,
-            });
-          })
-          .catch((err) => {
-            logger.error(
-              { group: group.name, err },
-              'Output chain rejected during container completion',
-            );
-            resolve({
-              status: 'error',
-              result: null,
-              error: 'Output callback error during container completion',
-            });
+        settleOutputChain().then(() => {
+          logger.info(
+            { group: group.name, duration, newSessionId },
+            'Container completed (streaming mode)',
+          );
+          resolve({
+            status: 'success',
+            result: null,
+            newSessionId,
           });
+        });
         return;
       }
 

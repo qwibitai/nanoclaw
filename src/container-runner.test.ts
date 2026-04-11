@@ -8,6 +8,8 @@ import * as os from 'os';
 // Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const PROGRESS_START_MARKER = '---NANOCLAW_PROGRESS_START---';
+const PROGRESS_END_MARKER = '---NANOCLAW_PROGRESS_END---';
 
 // Mock config
 vi.mock('./config.js', () => ({
@@ -138,6 +140,24 @@ function emitOutputMarker(
 ) {
   const json = JSON.stringify(output);
   proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
+}
+
+let progressSeqCounter = 0;
+function emitProgressMarker(
+  proc: ReturnType<typeof createFakeProcess>,
+  eventType: string,
+  data: Record<string, string | undefined> = {},
+) {
+  progressSeqCounter++;
+  const payload = JSON.stringify({
+    eventType,
+    data,
+    seq: progressSeqCounter,
+    ts: Date.now(),
+  });
+  proc.stdout.push(
+    `${PROGRESS_START_MARKER}\n${payload}\n${PROGRESS_END_MARKER}\n`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -688,7 +708,7 @@ describe('container-runner timeout behavior', () => {
     vi.useRealTimers();
   });
 
-  it('timeout after output resolves as success', async () => {
+  it('timeout between turns (after idle marker) resolves as success', async () => {
     const onOutput = vi.fn(async () => {});
     const resultPromise = runContainerAgent(
       testGroup,
@@ -697,11 +717,20 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
-    // Emit output with a result
+    // Emit a real turn result (the user-visible response)
     emitOutputMarker(fakeProc, {
       status: 'success',
       result: 'Here is my response',
       newSessionId: 'session-123',
+    });
+
+    // Emit the session-update idle marker: "query done, waiting for next
+    // IPC input". This is what the host uses to detect a safe idle-reap.
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: null,
+      newSessionId: 'session-123',
+      idle: true,
     });
 
     // Let output processing settle
@@ -722,6 +751,41 @@ describe('container-runner timeout behavior', () => {
     expect(onOutput).toHaveBeenCalledWith(
       expect.objectContaining({ result: 'Here is my response' }),
     );
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ idle: true }),
+    );
+  });
+
+  it('timeout mid-turn (no idle marker) resolves as error', async () => {
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    // Emit a real turn result but NO idle marker, simulating the agent
+    // producing intermediate output then freezing mid-turn without ever
+    // completing (the bug that silently killed illysium on 2026-04-11).
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Partial work',
+      newSessionId: 'session-mid',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Fire the hard timeout
+    await vi.advanceTimersByTimeAsync(1830000);
+
+    fakeProc.emit('close', 137);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('error');
+    expect(result.newSessionId).toBe('session-mid');
+    expect(result.error).toContain('mid-turn');
   });
 
   it('timeout with no output resolves as error', async () => {
@@ -745,6 +809,58 @@ describe('container-runner timeout behavior', () => {
     expect(result.status).toBe('error');
     expect(result.error).toContain('timed out');
     expect(onOutput).not.toHaveBeenCalled();
+  });
+
+  it('progress markers reset the inactivity watchdog', async () => {
+    const onProgress = vi.fn();
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+      onProgress,
+    );
+
+    // Drive the "long legitimate turn" scenario: progress markers flow
+    // every 10 minutes for a full hour (the agent is thinking, calling
+    // tools, spawning subagents, far past the 30.5 min raw watchdog).
+    // No OUTPUT marker ever fires because the turn hasn't completed yet.
+    for (let i = 0; i < 6; i++) {
+      await vi.advanceTimersByTimeAsync(600_000); // 10 minutes
+      emitProgressMarker(fakeProc, 'tool_use', {
+        name: 'Bash',
+        input: '{"command":"snow sql ..."}',
+      });
+      await vi.advanceTimersByTimeAsync(10);
+    }
+
+    // Sixty minutes have passed, watchdog has NOT fired. The container
+    // is still running and producing progress. Now the turn finally
+    // completes and emits its result + idle marker.
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Done after long work',
+      newSessionId: 'session-long',
+    });
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: null,
+      newSessionId: 'session-long',
+      idle: true,
+    });
+    await vi.advanceTimersByTimeAsync(10);
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+    expect(result.newSessionId).toBe('session-long');
+    expect(onProgress).toHaveBeenCalledTimes(6);
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ result: 'Done after long work' }),
+    );
   });
 
   it('normal exit after output resolves as success', async () => {
