@@ -805,44 +805,52 @@ function buildCapabilityManifest(
     );
   }
   if (isToolEnabled(tools, 'dbt')) {
-    capabilities.push('- **dbt** — `dbt` CLI with profiles in `~/.dbt/profiles.yml`.');
+    capabilities.push(
+      '- **dbt** — `dbt` CLI authenticated via `~/.dbt/profiles.yml`. Common: `dbt run --profile <name> --project-dir <path>`, `dbt test --profile <name> --project-dir <path>`, `dbt compile -s <model> --profile <name> --project-dir <path>`. List available profiles with `cat ~/.dbt/profiles.yml`.',
+    );
   }
 
   // Cloud
   if (isToolEnabled(tools, 'aws')) {
-    capabilities.push('- **AWS** — `aws` CLI with configured credentials.');
+    capabilities.push(
+      '- **AWS** — `aws` CLI authenticated via `~/.aws/credentials` (already mounted). Common: `aws sts get-caller-identity` to verify auth, `aws s3 ls`, `aws ec2 describe-instances --query \'Reservations[].Instances[].[InstanceId,State.Name]\' --output table`. Multi-account: pass `--profile <name>` (see `aws configure list-profiles`).',
+    );
   }
   if (isToolEnabled(tools, 'gcloud')) {
-    capabilities.push('- **Google Cloud** — `gcloud` CLI with configured credentials.');
+    capabilities.push(
+      '- **Google Cloud** — `gcloud` CLI authenticated via service-account key in `~/.gcloud-keys/`. Common: `gcloud auth list`, `gcloud config list`, `gcloud projects list`, `gcloud secrets versions access latest --secret=<name>`, `gcloud run services list`. Run `gcloud auth activate-service-account --key-file=<path>` if no active account.',
+    );
   }
 
   // VCS / code review
   if (isToolEnabled(tools, 'github')) {
     capabilities.push(
-      '- **GitHub** — `gh` CLI and `git push` with configured credentials.',
+      '- **GitHub** — `gh` CLI authenticated via `GITHUB_TOKEN` env var; `git push` works directly with the credential helper. Common: `gh repo view`, `gh pr list`, `gh pr view <num>`, `gh pr create --title "..." --body "..."`, `gh issue list`, `gh workflow run <workflow>`, `gh api /repos/<owner>/<repo>/...`.',
     );
   }
 
   // PaaS / infra
   if (isToolEnabled(tools, 'render')) {
     capabilities.push(
-      '- **Render** — `render` CLI with configured credentials. Scoped PG/Redis connection strings available as env vars.',
+      '- **Render** — `render` CLI authenticated via `RENDER_API_KEY` env var. Common: `render services -o json` (list services), `render env -o json --service-id srv-XXXX` (list service env vars — service IDs look like `srv-...`), `render deploys list -o json --service-id srv-XXXX`, `render logs --service-id srv-XXXX`, `render psql --service-id <pg-id>`. Scoped PG/Redis connection strings also available as env vars (e.g. `RENDER_PG_URL_*`, `RENDER_REDIS_URL_*`).',
     );
   }
   if (isToolEnabled(tools, 'railway')) {
     capabilities.push(
-      '- **Railway** — `railway` CLI with configured credentials.',
+      '- **Railway** — `railway` CLI authenticated via `RAILWAY_API_TOKEN` env var. Common: `railway whoami` (verify auth), `railway list` (list projects), `railway environment` (list environments), `railway variables` (env vars for linked service), `railway logs`, `railway run -- <command>` (run with project env).',
     );
   }
 
   // Observability / analytics
   if (isToolEnabled(tools, 'braintrust')) {
     capabilities.push(
-      '- **Braintrust** — evals and experiments via Braintrust API.',
+      '- **Braintrust** — evals and experiments via `mcp__braintrust__*` MCP tools.',
     );
   }
   if (isToolEnabled(tools, 'omni')) {
-    capabilities.push('- **Omni** — dashboards and queries via Omni API.');
+    capabilities.push(
+      '- **Omni** — `mcp__omni__*` MCP tools for dashboards and queries. For raw API access, `OMNI_BASE_URL` and `OMNI_API_KEY` are in env: `curl -H "Authorization: Bearer $OMNI_API_KEY" "$OMNI_BASE_URL/api/..."`.',
+    );
   }
 
   // Browser automation
@@ -875,7 +883,15 @@ function buildCapabilityManifest(
 
   if (capabilities.length === 0) return undefined;
 
-  return `## Runtime Capabilities\n\nThe following tools and services are configured for this session. If a tool fails at runtime (auth error, missing credential, network issue), surface the error rather than retrying blindly.\n\n${capabilities.join('\n')}`;
+  return `## Runtime Capabilities
+
+The following tools and services are configured for this session.
+
+**Tool-selection rule:** Always try the CLI / MCP / tool listed below FIRST when interacting with any of these services — your credentials are already injected. Use \`agent-browser\` ONLY when (a) no CLI/API exists for what you need, or (b) the CLI returned an explicit auth or capability error you cannot work around. Do NOT navigate to a web dashboard as a first resort — your CLIs are already authenticated and faster than a browser session.
+
+If a tool fails at runtime (auth error, missing credential, network issue), surface the error rather than retrying blindly or silently switching strategies.
+
+${capabilities.join('\n')}`;
 }
 
 /**
