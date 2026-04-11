@@ -117,18 +117,27 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 
   const workspaceFolder = group.parent_folder ?? group.folder;
   let groupDir: string;
+  let registeredGroup = group;
   try {
     groupDir = resolveGroupFolderPath(workspaceFolder);
   } catch (err) {
     logger.warn(
-      { jid, folder: workspaceFolder, err },
-      'Rejecting group registration with invalid workspace folder',
+      {
+        jid,
+        folder: workspaceFolder,
+        fallbackFolder: group.folder,
+        err,
+      },
+      'Invalid workspace folder in group registration; falling back to group folder',
     );
-    return;
+    groupDir = resolveGroupFolderPath(group.folder);
+    if (group.parent_folder !== undefined) {
+      registeredGroup = { ...group, parent_folder: group.folder };
+    }
   }
 
-  registeredGroups[jid] = group;
-  setRegisteredGroup(jid, group);
+  registeredGroups[jid] = registeredGroup;
+  setRegisteredGroup(jid, registeredGroup);
 
   // container-runner の workspace マウント先に合わせて logs/ を作成
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
