@@ -1179,13 +1179,7 @@ export class AgentImpl
       sendMessage: async (jid, rawText) => {
         await this.sendOutboundMessage(jid, rawText);
       },
-      onStateChange: ({
-        jid,
-        groupFolder,
-        state,
-        reason,
-        exitCode,
-      }) => {
+      onStateChange: ({ jid, groupFolder, state, reason, exitCode }) => {
         const group = this._registeredGroups[jid];
         this.emit('run.state', {
           agentId: this.id,
