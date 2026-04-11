@@ -20,6 +20,8 @@ const SYNC_KEYS = [
   'LITELLM_URL',
   'LITELLM_MASTER_KEY',
   'OLLAMA_URL',
+  'VIKUNJA_URL',
+  'VIKUNJA_TOKEN',
 ];
 
 /**
