@@ -788,6 +788,22 @@ async function main(): Promise<void> {
           return;
         }
 
+        // Email triggers are single-shot: agent replies, we're done. Close
+        // the container shortly after the first result so it exits cleanly
+        // via the _close sentinel instead of hanging for the 30-min idle
+        // window (during which external OOM reapers can SIGKILL it and
+        // produce confusing code-137 exits).
+        const EMAIL_TRIGGER_CLOSE_DELAY_MS = 10_000;
+        let closeScheduled = false;
+        const scheduleClose = () => {
+          if (closeScheduled) return;
+          closeScheduled = true;
+          setTimeout(() => {
+            logger.debug({ chatJid, taskId }, 'Closing email-trigger container after result');
+            queue.closeStdin(chatJid);
+          }, EMAIL_TRIGGER_CLOSE_DELAY_MS);
+        };
+
         const result = await runAgent(
           group,
           prompt,
@@ -796,6 +812,7 @@ async function main(): Promise<void> {
             if (output.result) {
               const clean = formatOutbound(output.result);
               if (clean) await onResult(clean);
+              scheduleClose();
             }
           },
         );

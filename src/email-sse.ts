@@ -157,8 +157,33 @@ function scheduleReconnect(): void {
 function handleTriagedEmails(data: string): void {
   try {
     const parsed = JSON.parse(data);
-    const emails = parsed.emails;
-    if (!emails || emails.length === 0) return;
+    const rawEmails = parsed.emails;
+    if (!rawEmails || rawEmails.length === 0) return;
+
+    // Drop test-fixture triggers at the edge. Dev harnesses and QA scripts
+    // fire thread_ids like `test-approval-v2`, `test-approval-verify`, etc.
+    // that aren't real Gmail threads — processing them wakes the agent for
+    // work it can't complete and produces misleading Telegram output.
+    const emails = rawEmails.filter(
+      (e: { thread_id?: string }) =>
+        !!e.thread_id && !/^test-approval[-_]/i.test(e.thread_id),
+    );
+    if (emails.length === 0) {
+      logger.info(
+        { skipped: rawEmails.length },
+        'Skipped SSE trigger — all emails matched test-fixture pattern',
+      );
+      return;
+    }
+    if (emails.length < rawEmails.length) {
+      logger.info(
+        {
+          dropped: rawEmails.length - emails.length,
+          kept: emails.length,
+        },
+        'Filtered test-fixture emails from SSE trigger',
+      );
+    }
 
     // Write IPC trigger file to whatsapp_main (main group) — the email_trigger
     // handler dispatches to the configured notification channel (Telegram).

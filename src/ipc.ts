@@ -520,7 +520,9 @@ export async function processTaskIpc(
       const agentJid = telegramJid || mainJid;
 
       if (!agentJid) {
-        logger.warn('No Telegram or main group registered, cannot process email trigger');
+        logger.warn(
+          'No Telegram or main group registered, cannot process email trigger',
+        );
         break;
       }
 
