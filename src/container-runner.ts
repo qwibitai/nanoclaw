@@ -4,6 +4,7 @@
  */
 import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -183,6 +184,19 @@ function buildVolumeMounts(
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+
+  // Google Calendar MCP credentials (optional; mounted only if present).
+  // Users follow .claude/skills/add-calendar/SKILL.md to create the
+  // OAuth keys file and run the auth flow, which populates this directory.
+  // Mounting is read-write because the MCP server refreshes OAuth tokens.
+  const gcalDir = path.join(os.homedir(), '.config', 'google-calendar-mcp');
+  if (fs.existsSync(gcalDir)) {
+    mounts.push({
+      hostPath: gcalDir,
+      containerPath: '/home/node/.config/google-calendar-mcp',
+      readonly: false,
+    });
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
