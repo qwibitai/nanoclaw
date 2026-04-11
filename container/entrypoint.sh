@@ -40,6 +40,19 @@ if [ -n "$GH_TOKEN" ]; then
     echo "$GH_TOKEN" | gh auth login --with-token 2>/dev/null || true
   fi
 fi
+
+# Render CLI v2 requires an active workspace for service-level commands.
+# When the host passes RENDER_WORKSPACE_ID in secrets (set per-scope via
+# RENDER_WORKSPACE_ID_<SCOPE> in .env, normalized in readSecrets), pre-set
+# it here so the agent doesn't have to learn the `render workspace set` flow.
+RENDER_WS=$(node -e 'try{const d=JSON.parse(require("fs").readFileSync("/tmp/input.json","utf8"));if(d.secrets?.RENDER_WORKSPACE_ID)process.stdout.write(d.secrets.RENDER_WORKSPACE_ID)}catch{}' 2>/dev/null)
+RENDER_KEY=$(node -e 'try{const d=JSON.parse(require("fs").readFileSync("/tmp/input.json","utf8"));if(d.secrets?.RENDER_API_KEY)process.stdout.write(d.secrets.RENDER_API_KEY)}catch{}' 2>/dev/null)
+if [ -n "$RENDER_WS" ] && [ -n "$RENDER_KEY" ]; then
+  RENDER_API_KEY="$RENDER_KEY" /usr/local/bin/render workspace set "$RENDER_WS" --confirm >/dev/null 2>&1 \
+    && echo "[entrypoint] render workspace pre-configured: $RENDER_WS" >&2 \
+    || echo "[entrypoint] render workspace set failed (workspace=$RENDER_WS)" >&2
+fi
+
 # gws (Google Workspace CLI) needs a writable config dir for API discovery cache.
 # /home/node/.config/ may be owned by root from calendar MCP setup in Dockerfile.
 export GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/.gws

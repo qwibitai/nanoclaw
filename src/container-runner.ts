@@ -2437,6 +2437,9 @@ function readSecrets(
   // Render CLI reads RENDER_API_KEY from env (checks before making HTTP calls,
   // so the OneCLI proxy can't inject it). Scoped: 'render:illysium' reads
   // RENDER_API_KEY_ILLYSIUM and normalizes to RENDER_API_KEY after readEnvFile.
+  // Also reads RENDER_WORKSPACE_ID_<scope> if set, so the entrypoint can
+  // pre-configure the active workspace via `render workspace set` (the v2 CLI
+  // requires an active workspace before service-level commands work).
   const { scopes: renderScopes, isScoped: renderScoped } = extractToolScopes(
     tools,
     'render',
@@ -2444,6 +2447,9 @@ function readSecrets(
   const renderTokenKey = renderScoped
     ? `RENDER_API_KEY_${renderScopes[0].toUpperCase()}`
     : `RENDER_API_KEY_${scope}`;
+  const renderWorkspaceKey = renderScoped
+    ? `RENDER_WORKSPACE_ID_${renderScopes[0].toUpperCase()}`
+    : `RENDER_WORKSPACE_ID_${scope}`;
 
   // dbt Cloud CLI login credentials + API key for run-log queries
   const dbtScopedEmail = `DBT_CLOUD_EMAIL_${scope}`;
@@ -2474,7 +2480,9 @@ function readSecrets(
     ...(isToolEnabled(tools, 'braintrust') ? ['BRAINTRUST_API_KEY'] : []),
     // Railway CLI reads RAILWAY_API_TOKEN from env directly.
     ...(isToolEnabled(tools, 'railway') ? ['RAILWAY_API_TOKEN'] : []),
-    ...(isToolEnabled(tools, 'render') ? [renderTokenKey] : []),
+    ...(isToolEnabled(tools, 'render')
+      ? [renderTokenKey, renderWorkspaceKey]
+      : []),
     // Browser auth credentials for Playwright login automation.
     // Scoped: 'browser-auth:illyse' reads BROWSER_AUTH_{URL,EMAIL,PASSWORD}_ILLYSE.
     // Unscoped: 'browser-auth' reads BROWSER_AUTH_{URL,EMAIL,PASSWORD}.
@@ -2511,6 +2519,15 @@ function readSecrets(
   if (renderTokenKey !== 'RENDER_API_KEY' && secrets[renderTokenKey]) {
     secrets.RENDER_API_KEY = secrets[renderTokenKey];
     delete secrets[renderTokenKey];
+  }
+  // Normalize scoped Render workspace ID — the entrypoint reads
+  // RENDER_WORKSPACE_ID and runs `render workspace set` if present.
+  if (
+    renderWorkspaceKey !== 'RENDER_WORKSPACE_ID' &&
+    secrets[renderWorkspaceKey]
+  ) {
+    secrets.RENDER_WORKSPACE_ID = secrets[renderWorkspaceKey];
+    delete secrets[renderWorkspaceKey];
   }
 
   // GitHub org restriction: when tools includes 'github-orgs:OrgName', pass

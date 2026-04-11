@@ -832,7 +832,7 @@ function buildCapabilityManifest(
   // PaaS / infra
   if (isToolEnabled(tools, 'render')) {
     capabilities.push(
-      '- **Render** — `render` CLI v2.x authenticated via `RENDER_API_KEY` env var. **Workspace setup is required** before service-level commands work: run `render workspaces -o json` to list workspaces, then `render workspace set <id> --confirm` to set the active one (persists to `~/.render/cli.yaml` for the lifetime of the container). After setup: `render services -o json`, `render env -o json --service-id srv-XXXX`, `render deploys list -o json --service-id srv-XXXX`, `render logs --service-id srv-XXXX`, `render psql --service-id <pg-id>`. Scoped PG/Redis connection strings are also available as env vars (e.g. `RENDER_PG_URL_*`, `RENDER_REDIS_URL_*`).',
+      '- **Render** — `render` CLI v2.x authenticated via `RENDER_API_KEY` env var. The active workspace is pre-configured by the entrypoint when `RENDER_WORKSPACE_ID_<scope>` is set in `.env` (cli.yaml at `~/.render/`); to switch workspaces ad-hoc use `render workspaces -o json` then `render workspace set <id> --confirm`. Common: `render services -o json`, `render env -o json --service-id srv-XXXX`, `render deploys list -o json --service-id srv-XXXX`, `render logs --service-id srv-XXXX`, `render psql --service-id <pg-id>`. Scoped PG/Redis connection strings are also available as env vars (e.g. `RENDER_PG_URL_*`, `RENDER_REDIS_URL_*`).',
     );
   }
   if (isToolEnabled(tools, 'railway')) {
