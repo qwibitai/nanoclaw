@@ -34,6 +34,8 @@ groups/global/*
 
 # Claude Code local settings (per-machine)
 .claude/settings.local.json
+# Claude Code session transcripts — per-machine, never committed
+.claude/projects/
 
 # Skills system (local per-installation state)
 .nanoclaw/
