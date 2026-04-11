@@ -180,8 +180,8 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
     if (!state.active) return;
 
-    const inputDir = path.join(resolveGroupIpcPathByJid(groupJid), 'input');
     try {
+      const inputDir = path.join(resolveGroupIpcPathByJid(groupJid), 'input');
       fs.mkdirSync(inputDir, { recursive: true });
       fs.writeFileSync(path.join(inputDir, '_close'), '');
     } catch {
