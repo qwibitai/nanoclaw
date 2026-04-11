@@ -358,9 +358,7 @@ function createSchema(database: Database.Database): void {
 
   // channel_mode カラムが存在しない場合は追加
   try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN channel_mode TEXT`,
-    );
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN channel_mode TEXT`);
   } catch {
     /* カラムはすでに存在します */
   }
@@ -849,19 +847,14 @@ function sanitizeParentFolder(
 ): string | undefined {
   if (!parentFolder) return undefined;
   if (!isValidGroupFolder(parentFolder)) {
-    logger.warn(
-      { jid, parentFolder },
-      'Invalid parent_folder in DB; ignoring',
-    );
+    logger.warn({ jid, parentFolder }, 'Invalid parent_folder in DB; ignoring');
     return undefined;
   }
   return parentFolder;
 }
 
 /** channel_mode を DB 値から検証する */
-function parseChannelMode(
-  raw: string | null,
-): RegisteredGroup['channel_mode'] {
+function parseChannelMode(raw: string | null): RegisteredGroup['channel_mode'] {
   if (raw === 'chat' || raw === 'url_watch' || raw === 'admin_control') {
     return raw;
   }

@@ -613,9 +613,14 @@ export async function processTaskIpc(
               'container_config',
             )
           : undefined;
-        const VALID_CHANNEL_MODES = new Set(['chat', 'url_watch', 'admin_control']);
+        const VALID_CHANNEL_MODES = new Set([
+          'chat',
+          'url_watch',
+          'admin_control',
+        ]);
         const channelMode =
-          data.channel_mode != null && VALID_CHANNEL_MODES.has(data.channel_mode)
+          data.channel_mode != null &&
+          VALID_CHANNEL_MODES.has(data.channel_mode)
             ? (data.channel_mode as RegisteredGroup['channel_mode'])
             : undefined;
         deps.registerGroup(data.jid, {
