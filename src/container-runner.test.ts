@@ -268,4 +268,34 @@ describe('container-runner timeout behavior', () => {
       '/tmp/nanoclaw-test-data/sessions/jid-main%40g.us/.claude:/home/node/.claude',
     );
   });
+
+  it('falls back to group.folder when parent_folder is invalid', async () => {
+    const resultPromise = runContainerAgent(
+      {
+        ...testGroup,
+        parent_folder: '../invalid-folder',
+      },
+      {
+        ...testInput,
+        chatJid: 'dc:thread-1',
+        groupType: 'thread',
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnCalls = vi.mocked(spawn).mock.calls;
+    const args = spawnCalls[spawnCalls.length - 1][1] as string[];
+    const joined = args.join(' ');
+    expect(joined).toContain('/tmp/nanoclaw-test-groups/test-group:/workspace/group');
+    expect(joined).not.toContain('../invalid-folder');
+  });
 });

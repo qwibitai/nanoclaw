@@ -39,6 +39,8 @@ function parseGroupType(
 
 const JID_PREFIX_RE = /^[a-z]{2,}:/;
 const WHATSAPP_JID_RE = /^[^@\s]+@(g\.us|s\.whatsapp\.net)$/;
+const SPAWNED_THREAD_RETENTION_DAYS = 30;
+const PENDING_SPAWN_THREAD_JID = '__pending__';
 
 export function _shouldMigrateSessionKey(key: string): boolean {
   if (JID_PREFIX_RE.test(key)) return true;
@@ -271,6 +273,8 @@ function createSchema(database: Database.Database): void {
       trigger_value     TEXT NOT NULL,
       created_at        TEXT NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS idx_spawned_threads_created_at
+      ON spawned_threads(created_at);
   `);
 
   // sessions テーブルのスキーマを group_folder → group_jid に移行。
@@ -400,11 +404,13 @@ function createSchema(database: Database.Database): void {
           );
           INSERT INTO registered_groups (
             jid, name, folder, trigger_pattern, added_at, container_config,
-            requires_trigger, is_main, group_type, thread_defaults
+            requires_trigger, is_main, group_type, thread_defaults,
+            parent_folder, channel_mode
           )
           SELECT
             jid, name, folder, trigger_pattern, added_at, container_config,
-            requires_trigger, is_main, group_type, thread_defaults
+            requires_trigger, is_main, group_type, thread_defaults,
+            parent_folder, channel_mode
           FROM registered_groups_old;
           DROP TABLE registered_groups_old;
         `);
@@ -449,6 +455,7 @@ export function initDatabase(): void {
 
   // JSON ファイルが存在する場合はマイグレーションを実行
   migrateJsonState();
+  cleanupSpawnedThreads();
 }
 
 /** @internal - テスト用のみ。新規のインメモリデータベースを作成します。 */
@@ -1015,6 +1022,48 @@ export function hasSpawnedThread(sourceMessageId: string): boolean {
 }
 
 /**
+ * source_message_id に対するスポーン処理を予約する。
+ * true: この呼び出しが予約を獲得した（作成処理を続行してよい）
+ * false: 既に他の処理が予約済み/作成済み
+ */
+export function reserveSpawnedThread(
+  sourceMessageId: string,
+  triggerKind: string,
+  triggerValue: string,
+): boolean {
+  return recordSpawnedThread(
+    sourceMessageId,
+    PENDING_SPAWN_THREAD_JID,
+    triggerKind,
+    triggerValue,
+  );
+}
+
+/**
+ * 予約済みスポーンレコードを確定し、実際の thread JID を保存する。
+ */
+export function finalizeSpawnedThread(
+  sourceMessageId: string,
+  threadJid: string,
+): void {
+  db.prepare(
+    `UPDATE spawned_threads
+     SET thread_jid = ?
+     WHERE source_message_id = ?`,
+  ).run(threadJid, sourceMessageId);
+}
+
+/**
+ * 失敗したスポーン予約を解放する。
+ */
+export function releaseSpawnedThreadReservation(sourceMessageId: string): void {
+  db.prepare(
+    `DELETE FROM spawned_threads
+     WHERE source_message_id = ? AND thread_jid = ?`,
+  ).run(sourceMessageId, PENDING_SPAWN_THREAD_JID);
+}
+
+/**
  * スポーン済みスレッドを記録する。
  */
 export function recordSpawnedThread(
@@ -1022,17 +1071,41 @@ export function recordSpawnedThread(
   threadJid: string,
   triggerKind: string,
   triggerValue: string,
-): void {
-  db.prepare(
-    `INSERT OR IGNORE INTO spawned_threads (source_message_id, thread_jid, trigger_kind, trigger_value, created_at)
+  createdAt: string = new Date().toISOString(),
+): boolean {
+  const result = db
+    .prepare(
+      `INSERT OR IGNORE INTO spawned_threads (source_message_id, thread_jid, trigger_kind, trigger_value, created_at)
      VALUES (?, ?, ?, ?, ?)`,
-  ).run(
-    sourceMessageId,
-    threadJid,
-    triggerKind,
-    triggerValue,
-    new Date().toISOString(),
-  );
+    )
+    .run(
+      sourceMessageId,
+      threadJid,
+      triggerKind,
+      triggerValue,
+      createdAt,
+    );
+  return result.changes === 1;
+}
+
+/**
+ * 古い spawned_threads レコードを GC する。
+ */
+export function cleanupSpawnedThreads(
+  now: Date = new Date(),
+  retentionDays: number = SPAWNED_THREAD_RETENTION_DAYS,
+): number {
+  const cutoff = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+  const result = db
+    .prepare(`DELETE FROM spawned_threads WHERE created_at < ?`)
+    .run(cutoff.toISOString());
+  if (result.changes > 0) {
+    logger.info(
+      { deletedRows: result.changes, retentionDays },
+      'Cleaned up stale spawned_threads rows',
+    );
+  }
+  return result.changes;
 }
 
 // --- JSON マイグレーション ---
