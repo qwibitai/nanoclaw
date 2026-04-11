@@ -205,7 +205,7 @@ async function spawnThreadForUrl(
 
   // 重複スポーン防止: まず source_message_id を予約してから非同期 createThread を実行する
   const reserved = reserveSpawnedThread(msg.id, 'url', url);
-  if (!reserved) return true;
+  if (!reserved) return false;
 
   let threadName: string;
   try {
