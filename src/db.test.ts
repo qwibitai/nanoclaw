@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
   _parseContainerConfigJson,
+  _shouldMigrateSessionKey,
   _parseThreadDefaultsJson,
   _sanitizeThreadDefaults,
   _initTestDatabase,
@@ -612,5 +613,21 @@ describe('session accessors', () => {
     setSession('dc:thread', 'thread-sess');
     expect(getSession('dc:parent')).toBe('parent-sess');
     expect(getSession('dc:thread')).toBe('thread-sess');
+  });
+});
+
+describe('_shouldMigrateSessionKey', () => {
+  it('accepts protocol-prefixed keys', () => {
+    expect(_shouldMigrateSessionKey('dc:123456')).toBe(true);
+  });
+
+  it('accepts WhatsApp JID-style keys', () => {
+    expect(_shouldMigrateSessionKey('123456@g.us')).toBe(true);
+    expect(_shouldMigrateSessionKey('123456@s.whatsapp.net')).toBe(true);
+  });
+
+  it('rejects legacy folder keys', () => {
+    expect(_shouldMigrateSessionKey('discord_main')).toBe(false);
+    expect(_shouldMigrateSessionKey('my-group_folder')).toBe(false);
   });
 });

@@ -810,6 +810,29 @@ describe('register_group group_type', () => {
     const allGroups = getAllRegisteredGroups();
     expect(allGroups['bad-thread-cc@g.us']).toBeUndefined();
   });
+
+  it('register_group の containerConfig はサニタイズされる', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'sanitize-cc@g.us',
+        name: 'Sanitized CC',
+        folder: 'sanitized-cc',
+        trigger: '@Andy',
+        containerConfig: {
+          timeout: 'abc' as unknown as number,
+          additionalMounts: 'oops' as unknown as [],
+        },
+      },
+      'main@g.us',
+      true,
+      deps,
+    );
+
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['sanitize-cc@g.us']).toBeDefined();
+    expect(allGroups['sanitize-cc@g.us'].containerConfig).toEqual({});
+  });
 });
 
 describe('update_group group_type', () => {

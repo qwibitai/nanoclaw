@@ -601,12 +601,23 @@ export async function processTaskIpc(
         if (validatedThreadDefaults === false) {
           break;
         }
+        const hasContainerConfig = Object.prototype.hasOwnProperty.call(
+          data,
+          'containerConfig',
+        );
+        const sanitizedContainerConfig = hasContainerConfig
+          ? _sanitizeContainerConfig(
+              data.containerConfig,
+              data.jid,
+              'container_config',
+            )
+          : undefined;
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
           trigger: data.trigger,
           added_at: new Date().toISOString(),
-          containerConfig: data.containerConfig,
+          containerConfig: sanitizedContainerConfig,
           requiresTrigger: data.requiresTrigger,
           type: groupType,
           thread_defaults: validatedThreadDefaults ?? undefined,

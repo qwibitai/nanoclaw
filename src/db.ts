@@ -37,6 +37,14 @@ function parseGroupType(
   return 'chat';
 }
 
+const JID_PREFIX_RE = /^[a-z]{2,}:/;
+
+export function _shouldMigrateSessionKey(key: string): boolean {
+  if (JID_PREFIX_RE.test(key)) return true;
+  if (key.includes('@')) return true;
+  return !isValidGroupFolder(key);
+}
+
 export function _sanitizeContainerConfig(
   raw: unknown,
   jid: string,
@@ -958,16 +966,15 @@ function migrateJsonState(): void {
   }
 
   // sessions.json のマイグレーション
-  // sessions テーブルのキーは group_jid（例: dc:123、tg:456）。
-  // 旧形式はフォルダ名がキーだったため、JID 形式のエントリのみ移行する。
-  const JID_PREFIX_RE = /^[a-z]{2,}:/;
+  // sessions テーブルのキーは group_jid（例: dc:123、tg:456、xxx@g.us）。
+  // 旧形式の folder キーは移行対象から除外する。
   const sessions = migrateFile('sessions.json') as Record<
     string,
     string
   > | null;
   if (sessions) {
     for (const [key, sessionId] of Object.entries(sessions)) {
-      if (JID_PREFIX_RE.test(key)) {
+      if (_shouldMigrateSessionKey(key)) {
         setSession(key, sessionId);
       }
     }
