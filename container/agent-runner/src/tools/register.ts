@@ -9,6 +9,7 @@ import { botStatus, readLogs, readFile, listIssues } from './observe.js';
 import { searchLogs, inspectConfig } from './diagnose.js';
 import { editFile, dockerCommand, createIssue, runCommand } from './act.js';
 import { readOwnConversations } from './self.js';
+import { switchKey, keyStatus } from './keys.js';
 import { readNotices, acknowledgeNotice, postNotice } from '../service-bot/notices.js';
 import {
   watcherCheck,
@@ -430,6 +431,23 @@ export function registerServiceBotTools(
     },
     async ({ channel, lines, search, hours }) =>
       text(await readOwnConversations(sshExec, { channel, lines, search, hours })),
+  );
+
+
+  // ─── Key Management ──────────────────────────────────────
+
+  server.tool(
+    'switch_key',
+    'Switch the active subscription key for X. Operator-only. Takes effect on the next container spawn.',
+    { label: z.string().describe('Key label to switch to (e.g., "alpha", "beta")') },
+    async ({ label }) => text(await switchKey(label, sshExec)),
+  );
+
+  server.tool(
+    'key_status',
+    'Show active subscription key, all available keys, and per-key usage. No tokens are displayed.',
+    {},
+    async () => text(await keyStatus(sshExec)),
   );
 
   // --- Notice Board ---------------------------------------------------

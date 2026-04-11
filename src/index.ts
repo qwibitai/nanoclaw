@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -548,16 +549,56 @@ async function main(): Promise<void> {
   loadState();
   restoreRemoteControl();
 
-  // Start credential proxy (containers route API calls through this)
-  const proxyServer = await startCredentialProxy(
-    CREDENTIAL_PROXY_PORT,
-    PROXY_BIND_HOST,
-  );
+  // Start credential proxies (containers route API calls through these)
+  // If keys.json exists, start one proxy per key; otherwise single default proxy
+  const proxyServers: import('http').Server[] = [];
+  const keysJsonPath = path.join(process.cwd(), 'config', 'keys.json');
+  let keysConfig: {
+    keys: Record<string, { label: string; token: string; proxy_port: number }>;
+  } | null = null;
+  try {
+    const raw = fs.readFileSync(keysJsonPath, 'utf-8');
+    keysConfig = JSON.parse(raw);
+  } catch {
+    // keys.json not found — fall back to single proxy
+  }
+
+  if (
+    keysConfig &&
+    keysConfig.keys &&
+    Object.keys(keysConfig.keys).length > 0
+  ) {
+    for (const [label, keyDef] of Object.entries(keysConfig.keys)) {
+      const credentialsPath = path.join(
+        os.homedir(),
+        '.claude',
+        '.credentials-' + label + '.json',
+      );
+      const server = await startCredentialProxy(
+        keyDef.proxy_port,
+        PROXY_BIND_HOST,
+        { label, credentialsPath },
+      );
+      proxyServers.push(server);
+    }
+    logger.info(
+      { keyCount: proxyServers.length },
+      'Multi-key credential proxies started',
+    );
+  } else {
+    const server = await startCredentialProxy(
+      CREDENTIAL_PROXY_PORT,
+      PROXY_BIND_HOST,
+    );
+    proxyServers.push(server);
+  }
+  // For backward compat, keep a reference to the first proxy
+  const proxyServer = proxyServers[0];
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
-    proxyServer.close();
+    for (const ps of proxyServers) ps.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);

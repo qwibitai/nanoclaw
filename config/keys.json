@@ -1,0 +1,18 @@
+{
+  "keys": {
+    "alpha": {
+      "label": "alpha",
+      "description": "Max sub \u2014 primary account",
+      "token": "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",
+      "proxy_port": 3003,
+      "added_at": "2026-04-09T21:28:25Z"
+    },
+    "beta": {
+      "label": "beta",
+      "description": "Max sub \u2014 secondary account",
+      "token": "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",
+      "proxy_port": 3004,
+      "added_at": "2026-04-09T21:28:25Z"
+    }
+  }
+}

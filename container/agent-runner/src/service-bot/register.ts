@@ -8,10 +8,12 @@ import { createGitHubClient } from './github.js';
 import { botStatus, readLogs, readFile, listIssues } from './observe.js';
 import { searchLogs, inspectConfig } from './diagnose.js';
 import { editFile, dockerCommand, createIssue, runCommand } from './act.js';
+import { runEvalStage, scoreEval, evalVerdictReport } from './eval.js';
 import { initRegistry, refreshConfigs } from './config.js';
 import { chubSearch, chubGet, chubExec } from './chub.js';
 import { readOwnConversations } from './self.js';
 import { transcribeAudio } from './audio.js';
+import { switchKey, keyStatus } from './keys.js';
 
 
 function text(t: string) {
@@ -154,6 +156,42 @@ export async function registerServiceBotTools(
       text(await runCommand(bot, command, sshExec, { timeout })),
   );
 
+  // ─── Eval Orchestrator ──────────────────────────────────
+
+  server.tool(
+    'run_eval_stage',
+    'Run a trust evaluation stage (1-4) on a managed bot. SSHs to the bot host, runs the eval harness, and returns the stage results JSON.',
+    {
+      stage: z.number().min(1).max(4).describe('Eval stage number (1-4)'),
+      bot_name: z.string().optional().default('mbot').describe('Bot identifier (default: "mbot")'),
+    },
+    async ({ stage, bot_name }) =>
+      text(await runEvalStage(stage, sshExec, bot_name)),
+  );
+
+  server.tool(
+    'score_eval',
+    'Score eval results for a specific stage or all stages. When "all", produces a verdict.json with the aggregate pass/fail decision.',
+    {
+      stage: z.union([z.number().min(1).max(4), z.literal('all')]).describe('Stage number (1-4) or "all" for aggregate verdict'),
+      bot_name: z.string().optional().default('mbot').describe('Bot identifier (default: "mbot")'),
+    },
+    async ({ stage, bot_name }) =>
+      text(await scoreEval(stage, sshExec, bot_name)),
+  );
+
+  server.tool(
+    'eval_verdict_report',
+    'Read the eval verdict.json and create a GitHub issue with the full trust evaluation report. Run score_eval with stage="all" first.',
+    {
+      bot_name: z.string().optional().default('mbot').describe('Bot identifier (default: "mbot")'),
+    },
+    async ({ bot_name }) => {
+      if (!github) return text('Error: GITHUB_TOKEN not configured.');
+      return text(await evalVerdictReport(bot_name, sshExec, github));
+    },
+  );
+
   // ─── Context Hub (chub) ──────────────────────────────────
 
   server.tool(
@@ -210,6 +248,24 @@ export async function registerServiceBotTools(
     },
     async ({ channel, lines, search, hours }) =>
       text(await readOwnConversations(sshExec, { channel, lines, search, hours })),
+  );
+
+  // ─── Key Management ──────────────────────────────────────
+
+  server.tool(
+    'switch_key',
+    'Switch the active subscription key for X. Operator-only. Takes effect on the next container spawn.',
+    {
+      label: z.string().describe('Key label to switch to (e.g., "alpha", "beta")'),
+    },
+    async ({ label }) => text(await switchKey(label, sshExec)),
+  );
+
+  server.tool(
+    'key_status',
+    'Show active subscription key, all available keys, and per-key usage. No tokens are displayed.',
+    {},
+    async () => text(await keyStatus(sshExec)),
   );
 
   // ─── Registry Management ──────────────────────────────────

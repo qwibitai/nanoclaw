@@ -28,6 +28,11 @@ import {
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import {
+  readKeysConfig,
+  readActiveKey,
+  resolveActiveToken,
+} from './key-manager.js';
 // [DISABLED 2026-04-09] import { createTask } from './db.js';
 // [DISABLED 2026-04-09] import { CROSS_CHANNEL_DIGEST_PROMPT } from './watcher-registration.js';
 
@@ -342,9 +347,29 @@ function buildContainerArgs(
   args.push('-e', `TZ=${TIMEZONE}`);
 
   // Route API traffic through the credential proxy (containers never see real secrets)
+  // Multi-key: resolve active subscription key to determine proxy port
+  let effectiveProxyPort = CREDENTIAL_PROXY_PORT;
+  try {
+    const keysConfig = readKeysConfig();
+    if (keysConfig) {
+      const activeKey = readActiveKey();
+      const resolved = resolveActiveToken(keysConfig, activeKey);
+      effectiveProxyPort = resolved.proxyPort;
+      args.push('-e', 'TELEMETRY_KEY_LABEL=' + resolved.label);
+      logger.info(
+        { keyLabel: resolved.label, proxyPort: resolved.proxyPort },
+        'Multi-key mode: using subscription key',
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      { error: err instanceof Error ? err.message : String(err) },
+      'Failed to resolve multi-key config, falling back to default proxy port',
+    );
+  }
   args.push(
     '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${effectiveProxyPort}`,
   );
 
   // Mirror the host's auth method with a placeholder value.
