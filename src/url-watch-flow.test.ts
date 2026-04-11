@@ -2,11 +2,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, InboundMessage, RegisteredGroup } from './types.js';
 
-const storeMessageMock = vi.fn();
-const setRegisteredGroupMock = vi.fn();
-const reserveSpawnedThreadMock = vi.fn(() => true);
-const finalizeSpawnedThreadMock = vi.fn();
-const releaseSpawnedThreadReservationMock = vi.fn();
+const {
+  storeMessageMock,
+  setRegisteredGroupMock,
+  reserveSpawnedThreadMock,
+  finalizeSpawnedThreadMock,
+  releaseSpawnedThreadReservationMock,
+} = vi.hoisted(() => ({
+  storeMessageMock: vi.fn(),
+  setRegisteredGroupMock: vi.fn(),
+  reserveSpawnedThreadMock: vi.fn(() => true),
+  finalizeSpawnedThreadMock: vi.fn(),
+  releaseSpawnedThreadReservationMock: vi.fn(),
+}));
 
 vi.mock('./logger.js', () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
