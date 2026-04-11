@@ -159,8 +159,8 @@ export class GroupQueue {
     if (!state.active || state.isTaskContainer) return false;
     state.idleWaiting = false; // エージェントが作業を受け取ろうとしているため、アイドル状態ではなくなる
 
-    const inputDir = path.join(resolveGroupIpcPathByJid(groupJid), 'input');
     try {
+      const inputDir = path.join(resolveGroupIpcPathByJid(groupJid), 'input');
       fs.mkdirSync(inputDir, { recursive: true });
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
       const filepath = path.join(inputDir, filename);
