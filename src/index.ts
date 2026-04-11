@@ -105,6 +105,16 @@ function saveState(): void {
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
+  try {
+    resolveGroupFolderPath(group.folder);
+  } catch (err) {
+    logger.warn(
+      { jid, folder: group.folder, err },
+      'Rejecting group registration with invalid group folder',
+    );
+    return;
+  }
+
   const workspaceFolder = group.parent_folder ?? group.folder;
   let groupDir: string;
   try {
@@ -112,7 +122,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   } catch (err) {
     logger.warn(
       { jid, folder: workspaceFolder, err },
-      'Rejecting group registration with invalid folder',
+      'Rejecting group registration with invalid workspace folder',
     );
     return;
   }
