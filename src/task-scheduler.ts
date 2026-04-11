@@ -12,6 +12,7 @@ import {
   getAllTasks,
   getDueTasks,
   getTaskById,
+  logSessionCost,
   logTaskRun,
   updateTask,
   updateTaskAfterRun,
@@ -229,6 +230,14 @@ async function runTask(
     status: error ? 'error' : 'success',
     result,
     error,
+  });
+
+  logSessionCost({
+    session_type: 'task',
+    group_folder: task.group_folder,
+    started_at: new Date(startTime).toISOString(),
+    duration_ms: durationMs,
+    estimated_cost_usd: (durationMs / 10_000) * 0.01,
   });
 
   const nextRun = computeNextRun(task);

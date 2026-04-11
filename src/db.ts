@@ -946,32 +946,35 @@ export function getFrequentNewContacts(
 
 // --- Session costs ---
 
-export function logSessionCost(
-  sessionType: string,
-  groupFolder: string,
-  durationMs: number,
-  estimatedCostUsd: number,
-): void {
+export function logSessionCost(entry: {
+  session_type: string;
+  group_folder: string;
+  started_at: string;
+  duration_ms: number;
+  estimated_cost_usd: number;
+}): void {
   db.prepare(
-    'INSERT INTO session_costs (session_type, group_folder, started_at, duration_ms, estimated_cost_usd) VALUES (?, ?, ?, ?, ?)',
+    `INSERT INTO session_costs (session_type, group_folder, started_at, duration_ms, estimated_cost_usd)
+     VALUES (?, ?, ?, ?, ?)`,
   ).run(
-    sessionType,
-    groupFolder,
-    new Date().toISOString(),
-    durationMs,
-    estimatedCostUsd,
+    entry.session_type,
+    entry.group_folder,
+    entry.started_at,
+    entry.duration_ms,
+    entry.estimated_cost_usd,
   );
 }
 
 export function getTodaysCost(): number {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  const today = new Date().toISOString().slice(0, 10);
   const row = db
     .prepare(
-      'SELECT COALESCE(SUM(estimated_cost_usd), 0) as total FROM session_costs WHERE started_at >= ?',
+      `SELECT COALESCE(SUM(estimated_cost_usd), 0) as total
+       FROM session_costs
+       WHERE started_at >= ?`,
     )
-    .get(todayStart.toISOString()) as { total: number };
-  return row.total;
+    .get(`${today}T00:00:00`) as { total: number } | undefined;
+  return row?.total ?? 0;
 }
 
 export function getWeeklyCost(): number {

@@ -40,6 +40,7 @@ import {
   getNewMessages,
   getRouterState,
   initDatabase,
+  logSessionCost,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -342,6 +343,8 @@ async function runAgent(
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
+  const startedAt = new Date().toISOString();
+  const startMs = Date.now();
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
 
@@ -428,12 +431,39 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
+      const durationMs = Date.now() - startMs;
+      const estimatedCost = (durationMs / 10_000) * 0.01;
+      logSessionCost({
+        session_type: 'message',
+        group_folder: group.folder,
+        started_at: startedAt,
+        duration_ms: durationMs,
+        estimated_cost_usd: estimatedCost,
+      });
       return 'error';
     }
 
+    const durationMs = Date.now() - startMs;
+    const estimatedCost = (durationMs / 10_000) * 0.01;
+    logSessionCost({
+      session_type: 'message',
+      group_folder: group.folder,
+      started_at: startedAt,
+      duration_ms: durationMs,
+      estimated_cost_usd: estimatedCost,
+    });
     return 'success';
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
+    const durationMs = Date.now() - startMs;
+    const estimatedCost = (durationMs / 10_000) * 0.01;
+    logSessionCost({
+      session_type: 'message',
+      group_folder: group.folder,
+      started_at: startedAt,
+      duration_ms: durationMs,
+      estimated_cost_usd: estimatedCost,
+    });
     return 'error';
   }
 }
@@ -739,11 +769,16 @@ async function main(): Promise<void> {
           return;
         }
 
-        const result = await runAgent(group, prompt, chatJid, async (output) => {
-          if (output.result) {
-            await onResult(output.result);
-          }
-        });
+        const result = await runAgent(
+          group,
+          prompt,
+          chatJid,
+          async (output) => {
+            if (output.result) {
+              await onResult(output.result);
+            }
+          },
+        );
 
         if (result === 'error') {
           const telegramJid = Object.keys(registeredGroups).find((jid) =>
