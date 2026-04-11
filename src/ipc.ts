@@ -212,8 +212,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
-                const targetJid = data.chatJid as string;
+              if (
+                data.type === 'message' &&
+                typeof data.chatJid === 'string' &&
+                typeof data.text === 'string' &&
+                data.chatJid.length > 0 &&
+                data.text.length > 0
+              ) {
+                const targetJid = data.chatJid;
                 // 認可: 非特権グループは自身の chatJid にのみ送信可能
                 if (isPrivileged || targetJid === sourceChatJid) {
                   await deps.sendMessage(targetJid, data.text);
