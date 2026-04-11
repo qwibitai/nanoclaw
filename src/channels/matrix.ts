@@ -41,6 +41,60 @@ const MATRIX_DEVICE_ID_PATH = path.join(MATRIX_DATA_DIR, 'matrix-device-id');
  */
 const MATRIX_CRYPTO_DB_PREFIX = 'matrix-crypto-nanoclaw';
 
+/** Retry config for the initial-sync wait in connect(). */
+const INITIAL_SYNC_MAX_ATTEMPTS = 10;
+const INITIAL_SYNC_BASE_DELAY_MS = 5_000;
+const INITIAL_SYNC_MAX_DELAY_MS = 5 * 60 * 1000;
+
+/**
+ * Retry an async operation with exponential backoff.
+ *
+ * Doubles the delay after each failed attempt, capped at maxDelayMs.
+ * Calls onRetry (if provided) before each wait so callers can log.
+ * Throws the last error after maxAttempts consecutive failures.
+ *
+ * Exported for unit testing.
+ */
+export async function retryWithBackoff<T>(
+  operation: () => Promise<T>,
+  options: {
+    maxAttempts: number;
+    baseDelayMs: number;
+    maxDelayMs: number;
+    onRetry?: (attempt: number, delayMs: number, err: unknown) => void;
+    onGiveUp?: (attempt: number, err: unknown) => void;
+  },
+): Promise<T> {
+  let attempt = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    attempt++;
+    try {
+      return await operation();
+    } catch (err) {
+      if (attempt >= options.maxAttempts) {
+        options.onGiveUp?.(attempt, err);
+        throw err;
+      }
+      const delayMs = Math.min(
+        options.baseDelayMs * 2 ** (attempt - 1),
+        options.maxDelayMs,
+      );
+      options.onRetry?.(attempt, delayMs, err);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
+/**
+ * Sync states that imply the initial sync has already completed.
+ * PREPARED is the initial-sync success state, but matrix-js-sdk
+ * immediately transitions through Syncing (for the next poll) and
+ * can move to Catchup after reconnects — so any of these three
+ * observed on the running client means we've passed initial sync.
+ */
+const POST_INITIAL_SYNC_STATES = new Set(['PREPARED', 'SYNCING', 'CATCHUP']);
+
 export interface MatrixChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
@@ -324,51 +378,120 @@ export class MatrixChannel implements Channel {
       },
     );
 
-    // Start the client and wait for initial sync
-    return new Promise<void>((resolve, reject) => {
-      this.client!.on(sdk.ClientEvent.Sync, (state: string) => {
-        if (state === 'PREPARED') {
-          this.syncReady = true;
+    // Start the client ONCE. The matrix-js-sdk internally polls /sync
+    // and emits ClientEvent.Sync with state transitions. We never call
+    // stopClient() or startClient() again during the retry loop — that
+    // would tear down and recreate the OlmMachine, which breaks E2EE
+    // (the old WASM worker fires callbacks after being freed).
+    this.client!.startClient({ initialSyncLimit: 10 });
+
+    // Wait for initial sync with exponential backoff. Each attempt
+    // attaches a fresh one-shot listener. If a PREPARED fires during
+    // a backoff wait (between attempts, while we have no listener),
+    // the next attempt detects it via getSyncState() — PREPARED/SYNCING/
+    // CATCHUP all indicate the SDK has passed the initial-sync gate.
+    await retryWithBackoff(() => this.waitForInitialSyncOnce(), {
+      maxAttempts: INITIAL_SYNC_MAX_ATTEMPTS,
+      baseDelayMs: INITIAL_SYNC_BASE_DELAY_MS,
+      maxDelayMs: INITIAL_SYNC_MAX_DELAY_MS,
+      onRetry: (attempt, delayMs, err) => {
+        logger.warn(
+          {
+            attempt,
+            maxAttempts: INITIAL_SYNC_MAX_ATTEMPTS,
+            nextDelayMs: delayMs,
+            err,
+          },
+          'Matrix initial sync failed, retrying with backoff',
+        );
+      },
+      onGiveUp: (attempt, err) => {
+        logger.error(
+          { attempt, err },
+          'Matrix initial sync exhausted all retry attempts',
+        );
+      },
+    });
+
+    // Post-PREPARED work: runs exactly once after the retry loop resolves.
+    logger.info(
+      { userId: this.botUserId, homeserver: this.homeserverUrl },
+      'Matrix client connected',
+    );
+    console.log(`\n  Matrix bot: ${this.botUserId}`);
+    console.log(`  Rooms will auto-register on first message\n`);
+
+    // Join any rooms with pending invites from before startup
+    const pendingInvites = this.client!.getRooms().filter(
+      (room) => room.getMyMembership() === 'invite',
+    );
+    for (const room of pendingInvites) {
+      this.client!.joinRoom(room.roomId)
+        .then(() => {
           logger.info(
-            { userId: this.botUserId, homeserver: this.homeserverUrl },
-            'Matrix client connected',
+            { roomId: room.roomId, roomName: room.name },
+            'Matrix pending invite accepted on startup',
           );
-          console.log(`\n  Matrix bot: ${this.botUserId}`);
-          console.log(`  Rooms will auto-register on first message\n`);
-
-          // Join any rooms with pending invites from before startup
-          const pendingInvites = this.client!.getRooms().filter(
-            (room) => room.getMyMembership() === 'invite',
+        })
+        .catch((err) => {
+          logger.error(
+            { roomId: room.roomId, err },
+            'Failed to accept pending Matrix invite on startup',
           );
-          for (const room of pendingInvites) {
-            this.client!.joinRoom(room.roomId)
-              .then(() => {
-                logger.info(
-                  { roomId: room.roomId, roomName: room.name },
-                  'Matrix pending invite accepted on startup',
-                );
-              })
-              .catch((err) => {
-                logger.error(
-                  { roomId: room.roomId, err },
-                  'Failed to accept pending Matrix invite on startup',
-                );
-              });
-          }
-          if (pendingInvites.length > 0) {
-            logger.info(
-              { count: pendingInvites.length },
-              'Processing pending Matrix invites',
-            );
-          }
+        });
+    }
+    if (pendingInvites.length > 0) {
+      logger.info(
+        { count: pendingInvites.length },
+        'Processing pending Matrix invites',
+      );
+    }
+  }
 
+  /**
+   * One retry attempt of the initial-sync wait. Resolves if the client
+   * has (or reaches) a post-initial-sync state (PREPARED/SYNCING/CATCHUP).
+   * Rejects if the client emits ERROR. Ignores RECONNECTING / STOPPED /
+   * other intermediate states — the SDK's own internal retry will keep
+   * driving the sync state forward, and we'll either eventually see
+   * success or ERROR.
+   *
+   * CRITICAL: this method never calls startClient() or stopClient().
+   * The client is created and started exactly once in connect(). This
+   * method only attaches a listener and waits.
+   */
+  private waitForInitialSyncOnce(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      // Short-circuit if a previous attempt already saw PREPARED.
+      if (this.syncReady) {
+        resolve();
+        return;
+      }
+
+      // Short-circuit if the SDK has already reached a post-initial-sync
+      // state (e.g. PREPARED fired during a backoff wait from the previous
+      // attempt, while no listener was attached).
+      const currentState = this.client!.getSyncState();
+      if (currentState && POST_INITIAL_SYNC_STATES.has(currentState)) {
+        this.syncReady = true;
+        resolve();
+        return;
+      }
+
+      const onSync = (state: string) => {
+        if (POST_INITIAL_SYNC_STATES.has(state)) {
+          this.client!.off(sdk.ClientEvent.Sync, onSync);
+          this.syncReady = true;
           resolve();
         } else if (state === 'ERROR') {
-          reject(new Error('Matrix sync failed'));
+          this.client!.off(sdk.ClientEvent.Sync, onSync);
+          reject(new Error('Matrix sync state ERROR during initial sync'));
         }
-      });
-
-      this.client!.startClient({ initialSyncLimit: 10 });
+        // RECONNECTING, STOPPED, null: ignore — keep waiting for the
+        // next transition. The SDK's own internal retry will drive us
+        // toward PREPARED or ERROR.
+      };
+      this.client!.on(sdk.ClientEvent.Sync, onSync);
     });
   }
 

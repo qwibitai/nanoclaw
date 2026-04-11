@@ -709,6 +709,14 @@ async function main(): Promise<void> {
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
   // Factories return null when credentials are missing, so unconfigured channels are skipped.
+  //
+  // Channel connect() failures must not prevent NanoClaw from starting —
+  // a transiently-unreachable homeserver (e.g. Matrix) shouldn't crash
+  // the process. Log the error and continue with the remaining channels.
+  // We do NOT retry connect() from here: retrying would re-enter the
+  // channel's connect() which may recreate WASM crypto state
+  // (e.g. the Matrix OlmMachine). Each channel is responsible for its
+  // own internal startup resilience via its own retry loop.
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
     const channel = factory(channelOpts);
@@ -719,8 +727,15 @@ async function main(): Promise<void> {
       );
       continue;
     }
-    channels.push(channel);
-    await channel.connect();
+    try {
+      await channel.connect();
+      channels.push(channel);
+    } catch (err) {
+      logger.error(
+        { channel: channelName, err },
+        'Channel failed to connect at startup — continuing without it',
+      );
+    }
   }
   if (channels.length === 0) {
     logger.fatal('No channels connected');
