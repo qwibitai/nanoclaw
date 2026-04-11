@@ -446,6 +446,23 @@ function createSchema(database: Database.Database): void {
   }
 }
 
+const SPAWNED_THREADS_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+let spawnedThreadsCleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+function startSpawnedThreadsCleanupTimer(): void {
+  if (spawnedThreadsCleanupTimer) {
+    return;
+  }
+
+  spawnedThreadsCleanupTimer = setInterval(() => {
+    try {
+      cleanupSpawnedThreads();
+    } catch (error) {
+      logger.warn('Failed to clean up spawned_threads', error);
+    }
+  }, SPAWNED_THREADS_CLEANUP_INTERVAL_MS);
+}
+
 export function initDatabase(): void {
   const dbPath = path.join(STORE_DIR, 'messages.db');
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -456,10 +473,16 @@ export function initDatabase(): void {
   // JSON ファイルが存在する場合はマイグレーションを実行
   migrateJsonState();
   cleanupSpawnedThreads();
+  startSpawnedThreadsCleanupTimer();
 }
 
 /** @internal - テスト用のみ。新規のインメモリデータベースを作成します。 */
 export function _initTestDatabase(): void {
+  if (spawnedThreadsCleanupTimer) {
+    clearInterval(spawnedThreadsCleanupTimer);
+    spawnedThreadsCleanupTimer = null;
+  }
+
   db = new Database(':memory:');
   createSchema(db);
 }
