@@ -877,6 +877,8 @@ The following tools and services are configured for this session.
 
 If a tool fails at runtime (auth error, missing credential, network issue), surface the error rather than retrying blindly or silently switching strategies.
 
+**Never request credentials in chat.** If a service needs a credential you don't have (API key, OAuth token, session cookie, dashboard login, service-account JSON), DO NOT ask the user to paste it into the conversation — credentials leak in chat history and the container can't persist them across sessions anyway. Instead: (1) name the exact secret that's missing (env var name, vault entry, or config file), (2) ask the user to configure it **on the host** — add it to NanoClaw's \`.env\` for CLI tokens and non-HTTP secrets, or the OneCLI vault for HTTP API credentials, (3) tell them to restart the container via \`/restart\` once the secret is in place. This applies to browser login pages too: if \`agent-browser\` hits a login screen for a service whose API you could be using with a proper credential, stop and report the missing credential — do not ask for username/password.
+
 ${capabilities.join('\n')}`;
 }
 
