@@ -28,6 +28,18 @@ function ensureWithinBase(baseDir: string, resolvedPath: string): void {
   }
 }
 
+function assertValidIpcNamespaceKey(key: string): void {
+  if (!key) {
+    throw new Error('IPC namespace key must not be empty');
+  }
+  if (key !== key.trim()) {
+    throw new Error('IPC namespace key must not include surrounding spaces');
+  }
+  if (key.includes('\0')) {
+    throw new Error('IPC namespace key must not include NUL bytes');
+  }
+}
+
 export function resolveGroupFolderPath(folder: string): string {
   assertValidGroupFolder(folder);
   const groupPath = path.resolve(GROUPS_DIR, folder);
@@ -39,6 +51,41 @@ export function resolveGroupIpcPath(folder: string): string {
   assertValidGroupFolder(folder);
   const ipcBaseDir = path.resolve(DATA_DIR, 'ipc');
   const ipcPath = path.resolve(ipcBaseDir, folder);
+  ensureWithinBase(ipcBaseDir, ipcPath);
+  return ipcPath;
+}
+
+/**
+ * IPC ネームスペース用に chat JID をエンコードします。
+ * 例: dc:123 -> dc%3A123
+ */
+export function encodeIpcNamespaceKey(groupJid: string): string {
+  assertValidIpcNamespaceKey(groupJid);
+  return encodeURIComponent(groupJid);
+}
+
+/**
+ * IPC ネームスペース名を chat JID にデコードします。
+ * 無効な値は null を返します。
+ */
+export function decodeIpcNamespaceKey(namespace: string): string | null {
+  if (!namespace || namespace !== namespace.trim()) return null;
+  try {
+    const decoded = decodeURIComponent(namespace);
+    assertValidIpcNamespaceKey(decoded);
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * chat JID 単位の IPC ディレクトリを安全に解決します。
+ */
+export function resolveGroupIpcPathByJid(groupJid: string): string {
+  const namespace = encodeIpcNamespaceKey(groupJid);
+  const ipcBaseDir = path.resolve(DATA_DIR, 'ipc');
+  const ipcPath = path.resolve(ipcBaseDir, namespace);
   ensureWithinBase(ipcBaseDir, ipcPath);
   return ipcPath;
 }
