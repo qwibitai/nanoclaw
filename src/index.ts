@@ -259,7 +259,10 @@ function stringContainsUrl(value: string): boolean {
   return /\bhttps?:\/\/[^\s<>"']+/i.test(value);
 }
 
-function messageContainsUrl(value: unknown, seen = new Set<unknown>()): boolean {
+function messageContainsUrl(
+  value: unknown,
+  seen = new Set<unknown>(),
+): boolean {
   if (typeof value === 'string') {
     return stringContainsUrl(value);
   }
