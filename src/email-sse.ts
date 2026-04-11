@@ -171,12 +171,14 @@ function handleTriagedEmails(data: string): void {
         (e: {
           thread_id: string;
           account: string;
+          subject?: string;
+          sender?: string;
           classified_at?: string;
         }) => ({
           thread_id: e.thread_id,
           account: e.account || 'unknown',
-          subject: '',
-          sender: '',
+          subject: e.subject || '',
+          sender: e.sender || '',
         }),
       ),
       triggered_at: new Date().toISOString(),
