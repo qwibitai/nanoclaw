@@ -363,36 +363,24 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
-  hasMountedCredentials: boolean = false,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Auth strategy: credentials file (direct) vs proxy (placeholder).
-  // If the mounted .claude/ has .credentials.json with a valid OAuth token,
-  // let the CLI use it directly — no proxy needed. This avoids the failure
-  // mode where CLAUDE_CODE_OAUTH_TOKEN=placeholder overrides the credentials
-  // file and the CLI tries to exchange "placeholder" with claude.ai (401).
-  // Proxy mode is fallback for API key auth or when no credentials file exists.
-  if (hasMountedCredentials) {
-    // Direct auth: CLI reads .credentials.json, handles refresh internally.
-    // Don't set ANTHROPIC_BASE_URL or CLAUDE_CODE_OAUTH_TOKEN — let CLI
-    // talk to Anthropic directly with the real token.
-    logger.info({ containerName }, 'Using mounted credentials (direct auth)');
+  // SECURITY: All containers MUST route through the credential proxy.
+  // No direct-auth bypass — containers never see real credentials.
+  // The proxy injects API keys / OAuth tokens on the host side.
+  args.push(
+    '-e',
+    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+  );
+  const authMode = detectAuthMode();
+  if (authMode === 'api-key') {
+    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
-    // Proxy auth: route through credential proxy with placeholder token.
-    args.push(
-      '-e',
-      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-    );
-    const authMode = detectAuthMode();
-    if (authMode === 'api-key') {
-      args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
-    } else {
-      args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
-    }
+    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
   // Runtime-specific args for host gateway resolution
@@ -436,20 +424,31 @@ export async function runContainerAgent(
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
 
-  // Check if the mounted .claude/ has credentials for direct auth
+  // SECURITY: Remove any .credentials.json from the group's .claude/ before
+  // mounting. Containers must use the credential proxy, never direct auth.
+  // The file could exist from a prior direct-auth session or manual scp.
   const groupClaudeDir = path.join(
     DATA_DIR,
     'sessions',
     group.folder,
     '.claude',
   );
-  const hasMountedCreds = fs.existsSync(
-    path.join(groupClaudeDir, '.credentials.json'),
-  );
+  const staleCredsPath = path.join(groupClaudeDir, '.credentials.json');
+  try {
+    if (fs.existsSync(staleCredsPath)) {
+      logger.warn(
+        { group: group.name, path: staleCredsPath },
+        'Removing .credentials.json from group .claude/ — containers must use proxy',
+      );
+      fs.unlinkSync(staleCredsPath);
+    }
+  } catch (err) {
+    // ENOENT is fine — another concurrent launch may have already removed it
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
   const containerArgs = buildContainerArgs(
     mounts,
     containerName,
-    hasMountedCreds,
   );
 
   logger.debug(

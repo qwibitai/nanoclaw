@@ -74,6 +74,7 @@ Single-file CEO dashboard. Server-rendered HTML, dark theme, auto-refresh 10s. S
 - **Passive monitoring**: Staff group conversations evaluated after each exchange — surfaces approval needs, blockers, risks, wins for CEO.
 - **Mechanical acks**: Valid Telegram messages get instant receive confirmation before container spawn. Denied senders get rejection messages.
 - **Escalation alerts**: Staff containers write escalation files + IPC to atlas_main. CEO gets Telegram alert. File watcher as backup path.
+- **SSRF protection**: Mission URLs validated against allowlist; private/loopback IPs blocked. Exact agent ID matching prevents tier-bypass via prefix collision. Atomic approve/reject with status pre-check.
 
 ## Group Architecture
 
