@@ -40,6 +40,10 @@ function parseIpcGroupType(value: unknown): GroupType | null {
 function parseIpcChannelMode(
   value: unknown,
 ): RegisteredGroup['channel_mode'] | undefined {
+  if (value == null) {
+    return undefined;
+  }
+
   if (
     typeof value === 'string' &&
     VALID_CHANNEL_MODES.has(
@@ -48,6 +52,11 @@ function parseIpcChannelMode(
   ) {
     return value as RegisteredGroup['channel_mode'];
   }
+
+  logger.warn(
+    { channel_mode: value, valid_channel_modes: [...VALID_CHANNEL_MODES] },
+    'Ignoring invalid IPC channel_mode',
+  );
   return undefined;
 }
 
