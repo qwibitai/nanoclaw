@@ -1008,17 +1008,47 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
 
 // --- スポーン済みスレッド・アクセッサー ---
 
+const PENDING_SPAWN_THREAD_TTL_SECONDS = 10 * 60;
+
 /**
  * 指定されたソースメッセージ ID からスレッドがスポーン済みかどうかを返す。
  * 重複スポーン防止に使用する。
+ *
+ * pending 行は短い TTL で扱い、プロセスクラッシュ等で解放されなかった
+ * 古い予約は存在しないものとして扱う。
  */
 export function hasSpawnedThread(sourceMessageId: string): boolean {
   const row = db
     .prepare(
-      'SELECT source_message_id FROM spawned_threads WHERE source_message_id = ?',
+      `SELECT source_message_id
+         FROM spawned_threads
+        WHERE source_message_id = ?
+          AND (
+            thread_jid != ?
+            OR created_at >= datetime('now', ?)
+          )`,
     )
-    .get(sourceMessageId);
+    .get(
+      sourceMessageId,
+      PENDING_SPAWN_THREAD_JID,
+      `-${PENDING_SPAWN_THREAD_TTL_SECONDS} seconds`,
+    );
   return row !== undefined;
+}
+
+function deleteExpiredPendingSpawnedThreadReservation(
+  sourceMessageId: string,
+): void {
+  db.prepare(
+    `DELETE FROM spawned_threads
+      WHERE source_message_id = ?
+        AND thread_jid = ?
+        AND created_at < datetime('now', ?)`,
+  ).run(
+    sourceMessageId,
+    PENDING_SPAWN_THREAD_JID,
+    `-${PENDING_SPAWN_THREAD_TTL_SECONDS} seconds`,
+  );
 }
 
 /**
@@ -1031,12 +1061,15 @@ export function reserveSpawnedThread(
   triggerKind: string,
   triggerValue: string,
 ): boolean {
-  return recordSpawnedThread(
-    sourceMessageId,
-    PENDING_SPAWN_THREAD_JID,
-    triggerKind,
-    triggerValue,
-  );
+  return db.transaction(() => {
+    deleteExpiredPendingSpawnedThreadReservation(sourceMessageId);
+    return recordSpawnedThread(
+      sourceMessageId,
+      PENDING_SPAWN_THREAD_JID,
+      triggerKind,
+      triggerValue,
+    );
+  })();
 }
 
 /**
