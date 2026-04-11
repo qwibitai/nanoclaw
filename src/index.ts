@@ -788,20 +788,30 @@ async function main(): Promise<void> {
           return;
         }
 
-        // System-injected acknowledgment: email triggers routinely take
-        // 30-90s while the agent reads threads and drafts replies. Sending
-        // a short "⏳ Working..." message IMMEDIATELY — before the container
-        // even spawns — gives the user instant confirmation that their
-        // trigger was received, instead of waiting in silence for the first
-        // agent result. Keeps UX honest when agent-side ack lags.
+        // System-injected progress message: email triggers routinely take
+        // 30-90s while the agent reads threads and drafts replies. Send a
+        // single in-place-editable "⏳ Working..." message IMMEDIATELY,
+        // then update it as the agent invokes tools (Reading Gmail thread →
+        // Generating reply → ...). This gives the user instant confirmation
+        // AND live visibility into what's happening, without spamming chat.
+        // Channels that don't support edit-in-place fall back to
+        // append-only via sendMessage.
         const ackChannel = findChannel(channels, chatJid);
+        let progressHandle: { update: (t: string) => Promise<void>; clear: () => Promise<void> } | null = null;
         if (ackChannel) {
           try {
             await ackChannel.setTyping?.(chatJid, true);
-            await ackChannel.sendMessage(
-              chatJid,
-              '⏳ New email(s) — processing now…',
-            );
+            if (ackChannel.sendProgress) {
+              progressHandle = await ackChannel.sendProgress(
+                chatJid,
+                '⏳ New email(s) — processing now…',
+              );
+            } else {
+              await ackChannel.sendMessage(
+                chatJid,
+                '⏳ New email(s) — processing now…',
+              );
+            }
           } catch (err) {
             logger.debug(
               { chatJid, err },
@@ -834,13 +844,31 @@ async function main(): Promise<void> {
           prompt,
           chatJid,
           async (output) => {
+            // Live tool-call narration: edit the in-place ack message with
+            // whatever the agent is currently doing.
+            if (output.progressLabel && progressHandle) {
+              await progressHandle.update(`⏳ ${output.progressLabel}…`);
+            }
             if (output.result) {
+              // Real result arrived — clear the progress message before
+              // sending, so the chat ends with a single clean answer.
+              if (progressHandle) {
+                await progressHandle.clear();
+                progressHandle = null;
+              }
               const clean = formatOutbound(output.result);
               if (clean) await onResult(clean);
               scheduleClose();
             }
           },
         );
+
+        // If we errored out before any result landed, still clean up the
+        // progress message so the user isn't left staring at "⏳ …".
+        if (progressHandle) {
+          await progressHandle.clear();
+          progressHandle = null;
+        }
 
         if (result === 'error') {
           const telegramJid = Object.keys(registeredGroups).find((jid) =>

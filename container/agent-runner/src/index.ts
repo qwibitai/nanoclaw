@@ -51,6 +51,13 @@ interface ContainerOutput {
   };
   /** Number of turns in this SDK query (for diagnostics). */
   numTurns?: number;
+  /**
+   * Short human-readable label for in-flight work (e.g. "Reading Gmail
+   * thread", "Searching knowledge base"). Emitted when the agent starts
+   * a tool call. Host uses this to update the in-place "⏳ working" message.
+   * Never carries a final result — always paired with result=null.
+   */
+  progressLabel?: string;
 }
 
 interface SessionEntry {
@@ -136,6 +143,46 @@ function writeOutput(output: ContainerOutput): void {
 
 function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
+}
+
+/**
+ * Human-friendly one-liner for a tool name, used in live progress updates.
+ * Avoids leaking raw SDK names like `mcp__superpilot__get_triaged_emails`.
+ */
+function formatToolLabel(toolName: string): string {
+  // Strip MCP prefixes: mcp__server__toolname → toolname
+  const stripped = toolName.replace(/^mcp__[^_]+__/, '');
+  // snake_case/camelCase → Title Case
+  const words = stripped
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  const pretty = words
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+  // Heuristic verbs for common tools — "Read" is clearer than "Read Email".
+  const map: Record<string, string> = {
+    Read: 'Reading file',
+    Write: 'Writing file',
+    Edit: 'Editing file',
+    Bash: 'Running command',
+    Glob: 'Searching files',
+    Grep: 'Searching code',
+    'Task Create': 'Creating task',
+    'Task List': 'Listing tasks',
+    'Search Emails': 'Searching Gmail',
+    'Read Email': 'Reading email',
+    'Send Email': 'Drafting email',
+    'Get Triaged Emails': 'Fetching triaged emails',
+    'Get Thread Summary': 'Summarizing thread',
+    'Generate Reply': 'Generating reply',
+    'Search Kb': 'Searching KB',
+    'Upload To Kb': 'Saving to KB',
+    'Get Awaiting Reply': 'Fetching awaiting replies',
+    'Send Message': 'Sending message',
+  };
+  return map[pretty] || pretty;
 }
 
 function getSessionSummary(
@@ -517,6 +564,33 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+
+      // Extract any tool_use blocks from this assistant message and emit
+      // a short progress label so the host can update its in-place status
+      // line. Tool calls are where latency lives — surfacing the current
+      // tool makes the spinner feel alive instead of stalled.
+      try {
+        const asstMsg = message as {
+          message?: { content?: Array<{ type?: string; name?: string }> };
+        };
+        const blocks = asstMsg.message?.content || [];
+        const toolNames = blocks
+          .filter((b) => b?.type === 'tool_use' && typeof b.name === 'string')
+          .map((b) => b.name as string);
+        if (toolNames.length > 0) {
+          const label = toolNames.map(formatToolLabel).join(' · ');
+          writeOutput({
+            status: 'success',
+            result: null,
+            newSessionId,
+            progressLabel: label,
+          });
+        }
+      } catch (err) {
+        log(
+          `Failed to extract tool_use for progress: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
