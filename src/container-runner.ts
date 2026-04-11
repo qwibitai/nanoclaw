@@ -18,6 +18,7 @@ import {
 } from './config.js';
 import {
   encodeIpcNamespaceKey,
+  isValidGroupFolder,
   resolveGroupFolderPath,
   resolveGroupIpcPathByJid,
 } from './group-folder.js';
@@ -82,7 +83,16 @@ function buildVolumeMounts(
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
-  const groupDir = resolveGroupFolderPath(group.folder);
+  // parent_folder が設定されている場合（thread グループ）は親の workspace を使う
+  let workspaceFolder = group.parent_folder ?? group.folder;
+  if (group.parent_folder && !isValidGroupFolder(group.parent_folder)) {
+    logger.warn(
+      { folder: group.folder, parentFolder: group.parent_folder },
+      'Invalid parent_folder detected; falling back to group.folder for workspace mount',
+    );
+    workspaceFolder = group.folder;
+  }
+  const groupDir = resolveGroupFolderPath(workspaceFolder);
   const isPrivileged = groupType === 'main' || groupType === 'override';
 
   if (isPrivileged) {

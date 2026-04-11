@@ -27,6 +27,7 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  finalizeSpawnedThread,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -36,6 +37,8 @@ import {
   getRegisteredGroup,
   getRouterState,
   initDatabase,
+  releaseSpawnedThreadReservation,
+  reserveSpawnedThread,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -102,21 +105,41 @@ function saveState(): void {
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
-  let groupDir: string;
   try {
-    groupDir = resolveGroupFolderPath(group.folder);
+    resolveGroupFolderPath(group.folder);
   } catch (err) {
     logger.warn(
       { jid, folder: group.folder, err },
-      'Rejecting group registration with invalid folder',
+      'Rejecting group registration with invalid group folder',
     );
     return;
   }
 
-  registeredGroups[jid] = group;
-  setRegisteredGroup(jid, group);
+  const workspaceFolder = group.parent_folder ?? group.folder;
+  let groupDir: string;
+  let registeredGroup = group;
+  try {
+    groupDir = resolveGroupFolderPath(workspaceFolder);
+  } catch (err) {
+    logger.warn(
+      {
+        jid,
+        folder: workspaceFolder,
+        fallbackFolder: group.folder,
+        err,
+      },
+      'Invalid workspace folder in group registration; falling back to group folder',
+    );
+    groupDir = resolveGroupFolderPath(group.folder);
+    if (group.parent_folder !== undefined) {
+      registeredGroup = { ...group, parent_folder: undefined };
+    }
+  }
 
-  // グループフォルダを作成
+  registeredGroups[jid] = registeredGroup;
+  setRegisteredGroup(jid, registeredGroup);
+
+  // container-runner の workspace マウント先に合わせて logs/ を作成
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
   logger.info(
@@ -152,6 +175,7 @@ function autoRegisterThread(
   const childGroup: RegisteredGroup = {
     name: threadName,
     folder: parent.folder,
+    parent_folder: parent.folder,
     trigger: parent.trigger,
     added_at: new Date().toISOString(),
     containerConfig: td.containerConfig ?? parent.containerConfig,
@@ -163,6 +187,145 @@ function autoRegisterThread(
     { chatJid, parentFolder: parent.folder, type: childGroup.type },
     'Thread group auto-registered',
   );
+}
+
+/**
+ * URL を含むメッセージを受信したとき、Discord スレッドを自動作成してエージェントに要約させる。
+ * channel_mode = 'url_watch' のチャンネル専用。
+ */
+async function spawnThreadForUrl(
+  chatJid: string,
+  msg: InboundMessage,
+  group: RegisteredGroup,
+  channel: Channel,
+): Promise<boolean> {
+  const urls = msg.content.match(/https?:\/\/[^\s<>"]+/gi);
+  if (!urls || urls.length === 0) return false;
+  const url = urls[0];
+
+  // 重複スポーン防止: まず source_message_id を予約してから非同期 createThread を実行する
+  const reserved = reserveSpawnedThread(msg.id, 'url', url);
+  if (!reserved) return false;
+
+  let threadName: string;
+  try {
+    const parsed = new URL(url);
+    threadName = `${parsed.hostname}${parsed.pathname}`.slice(0, 80);
+  } catch {
+    threadName = url.slice(0, 80);
+  }
+
+  let threadJid: string | null;
+  try {
+    threadJid = await channel.createThread!(chatJid, threadName);
+  } catch (err) {
+    releaseSpawnedThreadReservation(msg.id);
+    logger.error({ err, chatJid, url }, 'Failed to create thread for URL');
+    return false;
+  }
+  if (!threadJid) {
+    releaseSpawnedThreadReservation(msg.id);
+    logger.warn({ chatJid, url }, 'Failed to create thread for URL');
+    return false;
+  }
+
+  finalizeSpawnedThread(msg.id, threadJid);
+
+  const childGroup: RegisteredGroup = {
+    name: threadName,
+    folder: group.folder,
+    parent_folder: group.folder,
+    trigger: group.trigger,
+    added_at: new Date().toISOString(),
+    containerConfig: group.containerConfig,
+    requiresTrigger: false,
+    type: 'thread',
+  };
+  registerGroup(threadJid, childGroup);
+
+  const syntheticMsg: InboundMessage = {
+    id: `${msg.id}_url`,
+    chat_jid: threadJid,
+    sender: msg.sender,
+    sender_name: msg.sender_name,
+    content: url,
+    timestamp: msg.timestamp,
+    is_from_me: false,
+    is_thread: true,
+    parent_jid: chatJid,
+  };
+  storeMessage(syntheticMsg);
+  queue.enqueueMessageCheck(threadJid);
+
+  logger.info(
+    { chatJid, threadJid, url, folder: group.folder },
+    'URL thread spawned',
+  );
+  return true;
+}
+
+function stringContainsUrl(value: string): boolean {
+  return /\bhttps?:\/\/[^\s<>"']+/i.test(value);
+}
+
+function messageContainsUrl(
+  value: unknown,
+  seen = new Set<unknown>(),
+): boolean {
+  if (typeof value === 'string') {
+    return stringContainsUrl(value);
+  }
+
+  if (value == null || typeof value !== 'object') {
+    return false;
+  }
+
+  if (seen.has(value)) {
+    return false;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.some((item) => messageContainsUrl(item, seen));
+  }
+
+  return Object.values(value).some((item) => messageContainsUrl(item, seen));
+}
+
+function maybeHandleUrlWatchMessage(
+  chatJid: string,
+  msg: InboundMessage,
+  availableChannels: Channel[] = channels,
+): boolean {
+  const group = registeredGroups[chatJid];
+  if (
+    group?.channel_mode !== 'url_watch' ||
+    msg.is_thread === true ||
+    Boolean(msg.parent_jid)
+  ) {
+    return false;
+  }
+
+  const ch = findChannel(availableChannels, chatJid);
+  if (!ch?.createThread) {
+    storeMessage(msg);
+    return true;
+  }
+
+  if (!messageContainsUrl(msg)) {
+    storeMessage(msg);
+    return true;
+  }
+
+  spawnThreadForUrl(chatJid, msg, group, ch)
+    .then((handled) => {
+      if (!handled) storeMessage(msg);
+    })
+    .catch((err) => {
+      logger.error({ err, chatJid }, 'URL thread spawn failed');
+      storeMessage(msg);
+    });
+  return true;
 }
 
 /**
@@ -189,6 +352,11 @@ export function _setRegisteredGroups(
 ): void {
   registeredGroups = groups;
 }
+
+/** @internal - テスト用にエクスポート */
+export const _spawnThreadForUrl = spawnThreadForUrl;
+/** @internal - テスト用にエクスポート */
+export const _maybeHandleUrlWatchMessage = maybeHandleUrlWatchMessage;
 
 /** @internal - テスト用にエクスポート */
 export const _autoRegisterThread = autoRegisterThread;
@@ -626,6 +794,10 @@ async function main(): Promise<void> {
           return;
         }
       }
+
+      // url_watch チャンネル: URL が投稿されたらスレッドを自動作成してエージェントに処理させる
+      if (maybeHandleUrlWatchMessage(chatJid, msg)) return;
+
       storeMessage(msg);
     },
     onChatMetadata: (

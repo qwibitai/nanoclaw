@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import {
+  cleanupSpawnedThreads,
+  finalizeSpawnedThread,
   _parseContainerConfigJson,
   _shouldMigrateSessionKey,
   _parseThreadDefaultsJson,
@@ -15,6 +17,10 @@ import {
   getNewMessages,
   getSession,
   getTaskById,
+  hasSpawnedThread,
+  recordSpawnedThread,
+  releaseSpawnedThreadReservation,
+  reserveSpawnedThread,
   setRegisteredGroup,
   setSession,
   storeChatMetadata,
@@ -541,6 +547,22 @@ describe('registered group type', () => {
     expect(groups['dc:nocfg'].thread_defaults).toBeUndefined();
   });
 
+  it('persists parent_folder and channel_mode through set/get round-trip', () => {
+    setRegisteredGroup('dc:urlwatch', {
+      name: 'URL Watch Parent',
+      folder: 'discord_urlwatch',
+      parent_folder: 'discord_parent',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      channel_mode: 'url_watch',
+      type: 'chat',
+    });
+
+    const groups = getAllRegisteredGroups();
+    expect(groups['dc:urlwatch'].parent_folder).toBe('discord_parent');
+    expect(groups['dc:urlwatch'].channel_mode).toBe('url_watch');
+  });
+
   it('handles malformed thread_defaults JSON safely', () => {
     expect(_parseThreadDefaultsJson('{bad-json', 'dc:broken')).toBeUndefined();
   });
@@ -634,5 +656,113 @@ describe('_shouldMigrateSessionKey', () => {
   it('rejects non-JID garbled keys', () => {
     expect(_shouldMigrateSessionKey('!!!invalid!!!')).toBe(false);
     expect(_shouldMigrateSessionKey('user@invalid-domain')).toBe(false);
+  });
+});
+
+describe('spawned thread accessors', () => {
+  it('hasSpawnedThread returns false for unknown source_message_id', () => {
+    expect(hasSpawnedThread('missing-id')).toBe(false);
+  });
+
+  it('hasSpawnedThread returns true after recordSpawnedThread', () => {
+    const inserted = recordSpawnedThread(
+      'msg-1',
+      'dc:thread1',
+      'url',
+      'https://example.com',
+    );
+    expect(inserted).toBe(true);
+    expect(hasSpawnedThread('msg-1')).toBe(true);
+  });
+
+  it('recordSpawnedThread ignores duplicate source_message_id without error', () => {
+    const first = recordSpawnedThread(
+      'msg-dup',
+      'dc:thread1',
+      'url',
+      'https://example.com/1',
+    );
+    const second = recordSpawnedThread(
+      'msg-dup',
+      'dc:thread2',
+      'url',
+      'https://example.com/2',
+    );
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(hasSpawnedThread('msg-dup')).toBe(true);
+  });
+
+  it('allows re-reserving a pending row after the reservation is released', () => {
+    const reserved = reserveSpawnedThread(
+      'msg-pending-expired',
+      'url',
+      'https://example.com/pending-expired',
+    );
+    expect(reserved).toBe(true);
+
+    const reservedWhilePending = reserveSpawnedThread(
+      'msg-pending-expired',
+      'url',
+      'https://example.com/pending-expired',
+    );
+    expect(reservedWhilePending).toBe(false);
+
+    releaseSpawnedThreadReservation('msg-pending-expired');
+
+    const reservedAgain = reserveSpawnedThread(
+      'msg-pending-expired',
+      'url',
+      'https://example.com/pending-expired',
+    );
+    expect(reservedAgain).toBe(true);
+  });
+
+  it('reserve/finalize/release flow keeps dedupe atomic for pending rows', () => {
+    const reserved = reserveSpawnedThread(
+      'msg-pending',
+      'url',
+      'https://example',
+    );
+    const reservedAgain = reserveSpawnedThread(
+      'msg-pending',
+      'url',
+      'https://example',
+    );
+    expect(reserved).toBe(true);
+    expect(reservedAgain).toBe(false);
+
+    finalizeSpawnedThread('msg-pending', 'dc:thread-final');
+    expect(hasSpawnedThread('msg-pending')).toBe(true);
+
+    releaseSpawnedThreadReservation('msg-pending');
+    expect(hasSpawnedThread('msg-pending')).toBe(true);
+  });
+});
+
+describe('cleanupSpawnedThreads', () => {
+  it('deletes only rows older than retention window', () => {
+    const now = new Date('2026-01-31T00:00:00.000Z');
+    const old = new Date(
+      now.getTime() - 31 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const fresh = new Date(
+      now.getTime() - 10 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    recordSpawnedThread('old-msg', 'dc:old', 'url', 'https://old.example', old);
+    recordSpawnedThread(
+      'fresh-msg',
+      'dc:fresh',
+      'url',
+      'https://fresh.example',
+      fresh,
+    );
+
+    const deleted = cleanupSpawnedThreads(now, 30);
+    expect(deleted).toBe(1);
+    expect(hasSpawnedThread('old-msg')).toBe(false);
+    expect(hasSpawnedThread('fresh-msg')).toBe(true);
   });
 });

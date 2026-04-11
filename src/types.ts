@@ -63,6 +63,7 @@ export interface ThreadDefaults {
 export interface RegisteredGroup {
   name: string;
   folder: string;
+  parent_folder?: string; // thread グループが親グループのフォルダを参照する
   trigger: string;
   added_at: string;
   containerConfig?: ContainerConfig;
@@ -134,6 +135,8 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // オプション: プラットフォームからグループ/チャット名を同期する。
   syncGroups?(force: boolean): Promise<void>;
+  // オプション: 親チャンネルにスレッドを作成し、新スレッドの JID を返す。
+  createThread?(parentJid: string, name: string): Promise<string | null>;
 }
 
 // チャネルが受信メッセージを配信するために使用するコールバック型。

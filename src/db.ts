@@ -39,6 +39,8 @@ function parseGroupType(
 
 const JID_PREFIX_RE = /^[a-z]{2,}:/;
 const WHATSAPP_JID_RE = /^[^@\s]+@(g\.us|s\.whatsapp\.net)$/;
+const SPAWNED_THREAD_RETENTION_DAYS = 30;
+const PENDING_SPAWN_THREAD_JID = '__pending__';
 
 export function _shouldMigrateSessionKey(key: string): boolean {
   if (JID_PREFIX_RE.test(key)) return true;
@@ -263,6 +265,16 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS spawned_threads (
+      source_message_id TEXT PRIMARY KEY,
+      thread_jid        TEXT NOT NULL,
+      trigger_kind      TEXT NOT NULL,
+      trigger_value     TEXT NOT NULL,
+      created_at        TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_spawned_threads_created_at
+      ON spawned_threads(created_at);
   `);
 
   // sessions テーブルのスキーマを group_folder → group_jid に移行。
@@ -339,6 +351,22 @@ function createSchema(database: Database.Database): void {
     /* カラムはすでに存在します */
   }
 
+  // parent_folder カラムが存在しない場合は追加
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN parent_folder TEXT`,
+    );
+  } catch {
+    /* カラムはすでに存在します */
+  }
+
+  // channel_mode カラムが存在しない場合は追加
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN channel_mode TEXT`);
+  } catch {
+    /* カラムはすでに存在します */
+  }
+
   // 旧スキーマ: registered_groups.folder UNIQUE を解除する
   // thread は parent と同じ folder を共有するため、folder の一意制約は不適切。
   try {
@@ -370,15 +398,19 @@ function createSchema(database: Database.Database): void {
             requires_trigger INTEGER DEFAULT 1,
             is_main INTEGER DEFAULT 0,
             group_type TEXT DEFAULT 'chat',
-            thread_defaults TEXT
+            thread_defaults TEXT,
+            parent_folder TEXT,
+            channel_mode TEXT
           );
           INSERT INTO registered_groups (
             jid, name, folder, trigger_pattern, added_at, container_config,
-            requires_trigger, is_main, group_type, thread_defaults
+            requires_trigger, is_main, group_type, thread_defaults,
+            parent_folder, channel_mode
           )
           SELECT
             jid, name, folder, trigger_pattern, added_at, container_config,
-            requires_trigger, is_main, group_type, thread_defaults
+            requires_trigger, is_main, group_type, thread_defaults,
+            parent_folder, channel_mode
           FROM registered_groups_old;
           DROP TABLE registered_groups_old;
         `);
@@ -414,6 +446,24 @@ function createSchema(database: Database.Database): void {
   }
 }
 
+const SPAWNED_THREADS_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+let spawnedThreadsCleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+function startSpawnedThreadsCleanupTimer(): void {
+  if (spawnedThreadsCleanupTimer) {
+    return;
+  }
+
+  spawnedThreadsCleanupTimer = setInterval(() => {
+    try {
+      cleanupSpawnedThreads();
+    } catch (error) {
+      logger.warn({ err: error }, 'Failed to clean up spawned_threads');
+    }
+  }, SPAWNED_THREADS_CLEANUP_INTERVAL_MS);
+  spawnedThreadsCleanupTimer.unref();
+}
+
 export function initDatabase(): void {
   const dbPath = path.join(STORE_DIR, 'messages.db');
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -423,10 +473,17 @@ export function initDatabase(): void {
 
   // JSON ファイルが存在する場合はマイグレーションを実行
   migrateJsonState();
+  cleanupSpawnedThreads();
+  startSpawnedThreadsCleanupTimer();
 }
 
 /** @internal - テスト用のみ。新規のインメモリデータベースを作成します。 */
 export function _initTestDatabase(): void {
+  if (spawnedThreadsCleanupTimer) {
+    clearInterval(spawnedThreadsCleanupTimer);
+    spawnedThreadsCleanupTimer = null;
+  }
+
   db = new Database(':memory:');
   createSchema(db);
 }
@@ -814,6 +871,27 @@ export function getAllSessions(): Record<string, string> {
 
 // --- 登録済みグループ・アクセッサー ---
 
+/** DB から取得した parent_folder を検証してサニタイズする */
+function sanitizeParentFolder(
+  parentFolder: string | null,
+  jid: string,
+): string | undefined {
+  if (!parentFolder) return undefined;
+  if (!isValidGroupFolder(parentFolder)) {
+    logger.warn({ jid, parentFolder }, 'Invalid parent_folder in DB; ignoring');
+    return undefined;
+  }
+  return parentFolder;
+}
+
+/** channel_mode を DB 値から検証する */
+function parseChannelMode(raw: string | null): RegisteredGroup['channel_mode'] {
+  if (raw === 'chat' || raw === 'url_watch' || raw === 'admin_control') {
+    return raw;
+  }
+  return undefined;
+}
+
 export function getRegisteredGroup(
   jid: string,
 ): (RegisteredGroup & { jid: string }) | undefined {
@@ -831,6 +909,8 @@ export function getRegisteredGroup(
         is_main: number | null;
         group_type: string | null;
         thread_defaults: string | null;
+        parent_folder: string | null;
+        channel_mode: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -846,6 +926,7 @@ export function getRegisteredGroup(
     jid: row.jid,
     name: row.name,
     folder: row.folder,
+    parent_folder: sanitizeParentFolder(row.parent_folder, row.jid),
     trigger: row.trigger_pattern,
     added_at: row.added_at,
     containerConfig: _parseContainerConfigJson(row.container_config, row.jid),
@@ -853,6 +934,7 @@ export function getRegisteredGroup(
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     type: groupType,
     thread_defaults: _parseThreadDefaultsJson(row.thread_defaults, row.jid),
+    channel_mode: parseChannelMode(row.channel_mode),
   };
 }
 
@@ -869,9 +951,15 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     );
   }
   const groupType = VALID_GROUP_TYPES.has(rawType) ? rawType : 'chat';
+  // parent_folder の検証: null か有効なフォルダ名のみ許可
+  const parentFolder =
+    group.parent_folder && isValidGroupFolder(group.parent_folder)
+      ? group.parent_folder
+      : null;
+  const channelMode = parseChannelMode(group.channel_mode ?? null);
   db.prepare(
-    `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, group_type, thread_defaults)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, group_type, thread_defaults, parent_folder, channel_mode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(jid) DO UPDATE SET
        name = excluded.name,
        folder = excluded.folder,
@@ -881,7 +969,9 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
        requires_trigger = excluded.requires_trigger,
        is_main = excluded.is_main,
        group_type = excluded.group_type,
-       thread_defaults = excluded.thread_defaults`,
+       thread_defaults = excluded.thread_defaults,
+       parent_folder = excluded.parent_folder,
+       channel_mode = excluded.channel_mode`,
   ).run(
     jid,
     group.name,
@@ -893,6 +983,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     groupType === 'main' || groupType === 'override' ? 1 : 0,
     groupType,
     group.thread_defaults ? JSON.stringify(group.thread_defaults) : null,
+    parentFolder,
+    channelMode ?? null,
   );
 }
 
@@ -908,6 +1000,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     is_main: number | null;
     group_type: string | null;
     thread_defaults: string | null;
+    parent_folder: string | null;
+    channel_mode: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -922,6 +1016,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     result[row.jid] = {
       name: row.name,
       folder: row.folder,
+      parent_folder: sanitizeParentFolder(row.parent_folder, row.jid),
       trigger: row.trigger_pattern,
       added_at: row.added_at,
       containerConfig: _parseContainerConfigJson(row.container_config, row.jid),
@@ -929,9 +1024,139 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       type: groupType,
       thread_defaults: _parseThreadDefaultsJson(row.thread_defaults, row.jid),
+      channel_mode: parseChannelMode(row.channel_mode),
     };
   }
   return result;
+}
+
+// --- スポーン済みスレッド・アクセッサー ---
+
+const PENDING_SPAWN_THREAD_TTL_SECONDS = 10 * 60;
+
+/**
+ * 指定されたソースメッセージ ID からスレッドがスポーン済みかどうかを返す。
+ * 重複スポーン防止に使用する。
+ *
+ * pending 行は短い TTL で扱い、プロセスクラッシュ等で解放されなかった
+ * 古い予約は存在しないものとして扱う。
+ */
+export function hasSpawnedThread(sourceMessageId: string): boolean {
+  const row = db
+    .prepare(
+      `SELECT source_message_id
+         FROM spawned_threads
+        WHERE source_message_id = ?
+          AND (
+            thread_jid != ?
+            OR julianday(created_at) >= julianday('now', ?)
+          )`,
+    )
+    .get(
+      sourceMessageId,
+      PENDING_SPAWN_THREAD_JID,
+      `-${PENDING_SPAWN_THREAD_TTL_SECONDS} seconds`,
+    );
+  return row !== undefined;
+}
+
+function deleteExpiredPendingSpawnedThreadReservation(
+  sourceMessageId: string,
+): void {
+  db.prepare(
+    `DELETE FROM spawned_threads
+      WHERE source_message_id = ?
+        AND thread_jid = ?
+        AND julianday(created_at) < julianday('now', ?)`,
+  ).run(
+    sourceMessageId,
+    PENDING_SPAWN_THREAD_JID,
+    `-${PENDING_SPAWN_THREAD_TTL_SECONDS} seconds`,
+  );
+}
+
+/**
+ * source_message_id に対するスポーン処理を予約する。
+ * true: この呼び出しが予約を獲得した（作成処理を続行してよい）
+ * false: 既に他の処理が予約済み/作成済み
+ */
+export function reserveSpawnedThread(
+  sourceMessageId: string,
+  triggerKind: string,
+  triggerValue: string,
+): boolean {
+  return db.transaction(() => {
+    deleteExpiredPendingSpawnedThreadReservation(sourceMessageId);
+    return recordSpawnedThread(
+      sourceMessageId,
+      PENDING_SPAWN_THREAD_JID,
+      triggerKind,
+      triggerValue,
+    );
+  })();
+}
+
+/**
+ * 予約済みスポーンレコードを確定し、実際の thread JID を保存する。
+ */
+export function finalizeSpawnedThread(
+  sourceMessageId: string,
+  threadJid: string,
+): void {
+  db.prepare(
+    `UPDATE spawned_threads
+     SET thread_jid = ?
+     WHERE source_message_id = ?`,
+  ).run(threadJid, sourceMessageId);
+}
+
+/**
+ * 失敗したスポーン予約を解放する。
+ */
+export function releaseSpawnedThreadReservation(sourceMessageId: string): void {
+  db.prepare(
+    `DELETE FROM spawned_threads
+     WHERE source_message_id = ? AND thread_jid = ?`,
+  ).run(sourceMessageId, PENDING_SPAWN_THREAD_JID);
+}
+
+/**
+ * スポーン済みスレッドを記録する。
+ */
+export function recordSpawnedThread(
+  sourceMessageId: string,
+  threadJid: string,
+  triggerKind: string,
+  triggerValue: string,
+  createdAt: string = new Date().toISOString(),
+): boolean {
+  const result = db
+    .prepare(
+      `INSERT OR IGNORE INTO spawned_threads (source_message_id, thread_jid, trigger_kind, trigger_value, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(sourceMessageId, threadJid, triggerKind, triggerValue, createdAt);
+  return result.changes === 1;
+}
+
+/**
+ * 古い spawned_threads レコードを GC する。
+ */
+export function cleanupSpawnedThreads(
+  now: Date = new Date(),
+  retentionDays: number = SPAWNED_THREAD_RETENTION_DAYS,
+): number {
+  const cutoff = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+  const result = db
+    .prepare(`DELETE FROM spawned_threads WHERE created_at < ?`)
+    .run(cutoff.toISOString());
+  if (result.changes > 0) {
+    logger.info(
+      { deletedRows: result.changes, retentionDays },
+      'Cleaned up stale spawned_threads rows',
+    );
+  }
+  return result.changes;
 }
 
 // --- JSON マイグレーション ---

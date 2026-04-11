@@ -25,6 +25,9 @@ vi.mock('./db.js', () => ({
   storeChatMetadata: vi.fn(),
   getMessagesSince: vi.fn(() => []),
   getNewMessages: vi.fn(() => ({ messages: [], newTimestamp: '' })),
+  finalizeSpawnedThread: vi.fn(),
+  releaseSpawnedThreadReservation: vi.fn(),
+  reserveSpawnedThread: vi.fn(() => true),
 }));
 
 vi.mock('./group-folder.js', () => ({
