@@ -6,7 +6,11 @@ import { CronExpressionParser } from 'cron-parser';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
-import { isValidGroupFolder } from './group-folder.js';
+import {
+  decodeIpcNamespaceKey,
+  encodeIpcNamespaceKey,
+  isValidGroupFolder,
+} from './group-folder.js';
 import { hasPrivilege, VALID_GROUP_TYPES } from './group-type.js';
 import { logger } from './logger.js';
 import {
@@ -44,11 +48,11 @@ function parseIpcThreadDefaultType(
  */
 function validateThreadDefaults(
   raw: unknown,
-  sourceGroup: string,
+  sourceChatJid: string,
 ): ThreadDefaults | null | false {
   if (raw == null) return null;
   if (typeof raw !== 'object' || Array.isArray(raw)) {
-    logger.warn({ sourceGroup }, 'Invalid thread_defaults: not an object');
+    logger.warn({ sourceChatJid }, 'Invalid thread_defaults: not an object');
     return false;
   }
   const td = raw as Record<string, unknown>;
@@ -57,7 +61,7 @@ function validateThreadDefaults(
     const parsedType = parseIpcThreadDefaultType(td.type);
     if (!parsedType) {
       logger.warn(
-        { sourceGroup, type: td.type },
+        { sourceChatJid, type: td.type },
         'Invalid or privileged thread_defaults.type in IPC request',
       );
       return false;
@@ -67,7 +71,7 @@ function validateThreadDefaults(
   if (Object.prototype.hasOwnProperty.call(td, 'requiresTrigger')) {
     if (typeof td.requiresTrigger !== 'boolean') {
       logger.warn(
-        { sourceGroup, requiresTrigger: td.requiresTrigger },
+        { sourceChatJid, requiresTrigger: td.requiresTrigger },
         'Invalid thread_defaults.requiresTrigger: must be boolean',
       );
       return false;
@@ -81,7 +85,7 @@ function validateThreadDefaults(
       Array.isArray(td.containerConfig)
     ) {
       logger.warn(
-        { sourceGroup, containerConfig: td.containerConfig },
+        { sourceChatJid, containerConfig: td.containerConfig },
         'Invalid thread_defaults.containerConfig: must be object',
       );
       return false;
@@ -100,7 +104,7 @@ export interface IpcDeps {
   syncGroups: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
-    groupFolder: string,
+    groupJid: string,
     isPrivileged: boolean,
     availableGroups: AvailableGroup[],
   ) => void;
@@ -119,10 +123,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
   fs.mkdirSync(ipcBaseDir, { recursive: true });
 
   const processIpcFiles = async () => {
-    // すべてのグループの IPC ディレクトリをスキャン（ディレクトリ名で識別）
-    let groupFolders: string[];
+    // すべての IPC ネームスペースをスキャン（ディレクトリ名は chatJid のエンコード値）
+    let namespaceDirs: string[];
     try {
-      groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
+      namespaceDirs = fs.readdirSync(ipcBaseDir).filter((f) => {
         const stat = fs.statSync(path.join(ipcBaseDir, f));
         return stat.isDirectory() && f !== 'errors';
       });
@@ -134,16 +138,34 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
     const registeredGroups = deps.registeredGroups();
 
-    // 登録済みグループから folder→hasPrivilege のルックアップを構築
-    const folderPrivilege = new Map<string, boolean>();
-    for (const group of Object.values(registeredGroups)) {
-      if (hasPrivilege(group)) folderPrivilege.set(group.folder, true);
-    }
+    for (const namespaceDir of namespaceDirs) {
+      const sourceChatJid = decodeIpcNamespaceKey(namespaceDir);
+      if (!sourceChatJid) {
+        logger.warn({ namespaceDir }, 'Invalid IPC namespace directory');
+        continue;
+      }
 
-    for (const sourceGroup of groupFolders) {
-      const isPrivileged = folderPrivilege.get(sourceGroup) === true;
-      const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
-      const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
+      // 非正規化（未エンコード等）のディレクトリ名は受け付けない
+      if (encodeIpcNamespaceKey(sourceChatJid) !== namespaceDir) {
+        logger.warn(
+          { namespaceDir, sourceChatJid },
+          'Ignoring non-canonical IPC namespace directory',
+        );
+        continue;
+      }
+
+      const sourceGroup = registeredGroups[sourceChatJid];
+      if (!sourceGroup) {
+        logger.warn(
+          { sourceChatJid },
+          'Ignoring IPC namespace for unregistered group',
+        );
+        continue;
+      }
+
+      const isPrivileged = hasPrivilege(sourceGroup);
+      const messagesDir = path.join(ipcBaseDir, namespaceDir, 'messages');
+      const tasksDir = path.join(ipcBaseDir, namespaceDir, 'tasks');
 
       // このグループの IPC ディレクトリからメッセージを処理
       try {
@@ -156,20 +178,17 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
-                // 認可: このグループが対象の chatJid に送信可能か確認
-                const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isPrivileged ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                const targetJid = data.chatJid as string;
+                // 認可: 非特権グループは自身の chatJid にのみ送信可能
+                if (isPrivileged || targetJid === sourceChatJid) {
+                  await deps.sendMessage(targetJid, data.text);
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
+                    { chatJid: targetJid, sourceChatJid },
                     'IPC message sent',
                   );
                 } else {
                   logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
+                    { chatJid: targetJid, sourceChatJid },
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
@@ -177,21 +196,21 @@ export function startIpcWatcher(deps: IpcDeps): void {
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
-                { file, sourceGroup, err },
+                { file, sourceChatJid, err },
                 'Error processing IPC message',
               );
               const errorDir = path.join(ipcBaseDir, 'errors');
               fs.mkdirSync(errorDir, { recursive: true });
               fs.renameSync(
                 filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
+                path.join(errorDir, `${namespaceDir}-${file}`),
               );
             }
           }
         }
       } catch (err) {
         logger.error(
-          { err, sourceGroup },
+          { err, sourceChatJid },
           'Error reading IPC messages directory',
         );
       }
@@ -207,24 +226,27 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               // 認可のため送信元グループの識別情報を processTaskIpc に渡す
-              await processTaskIpc(data, sourceGroup, isPrivileged, deps);
+              await processTaskIpc(data, sourceChatJid, isPrivileged, deps);
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
-                { file, sourceGroup, err },
+                { file, sourceChatJid, err },
                 'Error processing IPC task',
               );
               const errorDir = path.join(ipcBaseDir, 'errors');
               fs.mkdirSync(errorDir, { recursive: true });
               fs.renameSync(
                 filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
+                path.join(errorDir, `${namespaceDir}-${file}`),
               );
             }
           }
         }
       } catch (err) {
-        logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+        logger.error(
+          { err, sourceChatJid },
+          'Error reading IPC tasks directory',
+        );
       }
     }
 
@@ -256,7 +278,7 @@ export async function processTaskIpc(
     group_type?: string;
     thread_defaults?: unknown;
   },
-  sourceGroup: string, // IPC ディレクトリから検証された識別情報
+  sourceChatJid: string, // IPC ディレクトリから検証された識別情報（chat JID）
   isPrivileged: boolean, // main または override の特権を持つか
   deps: IpcDeps,
 ): Promise<void> {
@@ -282,16 +304,16 @@ export async function processTaskIpc(
           break;
         }
 
-        const targetFolder = targetGroupEntry.folder;
-
         // 認可: 特権以外（chat/thread）のグループは自分自身に対してのみスケジュール可能
-        if (!isPrivileged && targetFolder !== sourceGroup) {
+        if (!isPrivileged && targetJid !== sourceChatJid) {
           logger.warn(
-            { sourceGroup, targetFolder },
+            { sourceChatJid, targetJid },
             'Unauthorized schedule_task attempt blocked',
           );
           break;
         }
+
+        const targetFolder = targetGroupEntry.folder;
 
         const scheduleType = data.schedule_type as 'cron' | 'interval' | 'once';
 
@@ -351,7 +373,7 @@ export async function processTaskIpc(
           created_at: new Date().toISOString(),
         });
         logger.info(
-          { taskId, sourceGroup, targetFolder, contextMode },
+          { taskId, sourceChatJid, targetFolder, contextMode },
           'Task created via IPC',
         );
       }
@@ -360,15 +382,15 @@ export async function processTaskIpc(
     case 'pause_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isPrivileged || task.group_folder === sourceGroup)) {
+        if (task && (isPrivileged || task.chat_jid === sourceChatJid)) {
           updateTask(data.taskId, { status: 'paused' });
           logger.info(
-            { taskId: data.taskId, sourceGroup },
+            { taskId: data.taskId, sourceChatJid },
             'Task paused via IPC',
           );
         } else {
           logger.warn(
-            { taskId: data.taskId, sourceGroup },
+            { taskId: data.taskId, sourceChatJid },
             'Unauthorized task pause attempt',
           );
         }
@@ -378,15 +400,15 @@ export async function processTaskIpc(
     case 'resume_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isPrivileged || task.group_folder === sourceGroup)) {
+        if (task && (isPrivileged || task.chat_jid === sourceChatJid)) {
           updateTask(data.taskId, { status: 'active' });
           logger.info(
-            { taskId: data.taskId, sourceGroup },
+            { taskId: data.taskId, sourceChatJid },
             'Task resumed via IPC',
           );
         } else {
           logger.warn(
-            { taskId: data.taskId, sourceGroup },
+            { taskId: data.taskId, sourceChatJid },
             'Unauthorized task resume attempt',
           );
         }
@@ -396,15 +418,15 @@ export async function processTaskIpc(
     case 'cancel_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isPrivileged || task.group_folder === sourceGroup)) {
+        if (task && (isPrivileged || task.chat_jid === sourceChatJid)) {
           deleteTask(data.taskId);
           logger.info(
-            { taskId: data.taskId, sourceGroup },
+            { taskId: data.taskId, sourceChatJid },
             'Task cancelled via IPC',
           );
         } else {
           logger.warn(
-            { taskId: data.taskId, sourceGroup },
+            { taskId: data.taskId, sourceChatJid },
             'Unauthorized task cancel attempt',
           );
         }
@@ -416,14 +438,14 @@ export async function processTaskIpc(
         const task = getTaskById(data.taskId);
         if (!task) {
           logger.warn(
-            { taskId: data.taskId, sourceGroup },
+            { taskId: data.taskId, sourceChatJid },
             'Task not found for update',
           );
           break;
         }
-        if (!isPrivileged && task.group_folder !== sourceGroup) {
+        if (!isPrivileged && task.chat_jid !== sourceChatJid) {
           logger.warn(
-            { taskId: data.taskId, sourceGroup },
+            { taskId: data.taskId, sourceChatJid },
             'Unauthorized task update attempt',
           );
           break;
@@ -469,7 +491,7 @@ export async function processTaskIpc(
 
         updateTask(data.taskId, updates);
         logger.info(
-          { taskId: data.taskId, sourceGroup, updates },
+          { taskId: data.taskId, sourceChatJid, updates },
           'Task updated via IPC',
         );
       }
@@ -479,16 +501,16 @@ export async function processTaskIpc(
       // 特権グループ（main/override）のみがリフレッシュを要求可能
       if (isPrivileged) {
         logger.info(
-          { sourceGroup },
+          { sourceChatJid },
           'Group metadata refresh requested via IPC',
         );
         await deps.syncGroups(true);
         // 更新されたスナップショットを即座に書き出し
         const availableGroups = deps.getAvailableGroups();
-        deps.writeGroupsSnapshot(sourceGroup, isPrivileged, availableGroups);
+        deps.writeGroupsSnapshot(sourceChatJid, isPrivileged, availableGroups);
       } else {
         logger.warn(
-          { sourceGroup },
+          { sourceChatJid },
           'Unauthorized refresh_groups attempt blocked',
         );
       }
@@ -498,7 +520,7 @@ export async function processTaskIpc(
       // main または override グループのみが新しいグループを登録可能
       if (!isPrivileged) {
         logger.warn(
-          { sourceGroup },
+          { sourceChatJid },
           'Unauthorized register_group attempt blocked',
         );
         break;
@@ -506,14 +528,14 @@ export async function processTaskIpc(
       if (data.jid && data.name && data.folder && data.trigger) {
         if (!isValidGroupFolder(data.folder)) {
           logger.warn(
-            { sourceGroup, folder: data.folder },
+            { sourceChatJid, folder: data.folder },
             'Invalid register_group request - unsafe folder name',
           );
           break;
         }
         // 多層防御: エージェントは IPC 経由で override を設定できない
         if (data.group_type === 'override') {
-          logger.warn({ sourceGroup }, 'override type cannot be set via IPC');
+          logger.warn({ sourceChatJid }, 'override type cannot be set via IPC');
           break;
         }
         const hasGroupType = Object.prototype.hasOwnProperty.call(
@@ -525,7 +547,7 @@ export async function processTaskIpc(
           : null;
         if (hasGroupType && !parsedGroupType) {
           logger.warn(
-            { sourceGroup, group_type: data.group_type },
+            { sourceChatJid, group_type: data.group_type },
             'Invalid group_type in register_group request',
           );
           break;
@@ -533,7 +555,7 @@ export async function processTaskIpc(
         const groupType = parsedGroupType ?? 'chat';
         const validatedThreadDefaults = validateThreadDefaults(
           data.thread_defaults,
-          sourceGroup,
+          sourceChatJid,
         );
         if (validatedThreadDefaults === false) {
           break;
@@ -549,7 +571,12 @@ export async function processTaskIpc(
           thread_defaults: validatedThreadDefaults ?? undefined,
         });
         logger.info(
-          { jid: data.jid, folder: data.folder, groupType, sourceGroup },
+          {
+            jid: data.jid,
+            folder: data.folder,
+            groupType,
+            sourceChatJid,
+          },
           'Group registered via IPC',
         );
       } else {
@@ -564,14 +591,14 @@ export async function processTaskIpc(
       // メイン/override グループのみが既存グループの設定を変更可能
       if (!isPrivileged) {
         logger.warn(
-          { sourceGroup },
+          { sourceChatJid },
           'Unauthorized update_group attempt blocked',
         );
         break;
       }
       // override への変更は IPC 経由で不可
       if (data.group_type === 'override') {
-        logger.warn({ sourceGroup }, 'override type cannot be set via IPC');
+        logger.warn({ sourceChatJid }, 'override type cannot be set via IPC');
         break;
       }
       if (data.jid) {
@@ -584,7 +611,7 @@ export async function processTaskIpc(
           : null;
         if (hasGroupType && !newType) {
           logger.warn(
-            { sourceGroup, group_type: data.group_type },
+            { sourceChatJid, group_type: data.group_type },
             'Invalid group_type in update_group request',
           );
           break;
@@ -594,7 +621,7 @@ export async function processTaskIpc(
           'thread_defaults',
         );
         const validatedThreadDefaults = hasThreadDefaults
-          ? validateThreadDefaults(data.thread_defaults, sourceGroup)
+          ? validateThreadDefaults(data.thread_defaults, sourceChatJid)
           : null;
         if (validatedThreadDefaults === false) {
           break;
@@ -609,7 +636,7 @@ export async function processTaskIpc(
         const targetGroup = registeredGroups[data.jid];
         if (!targetGroup) {
           logger.warn(
-            { sourceGroup, jid: data.jid },
+            { sourceChatJid, jid: data.jid },
             'update_group: target group not found',
           );
           break;
@@ -626,7 +653,7 @@ export async function processTaskIpc(
             jid: data.jid,
             ...(newType ? { newType } : {}),
             threadDefaultsUpdated: hasThreadDefaults,
-            sourceGroup,
+            sourceChatJid,
           },
           'Group updated via IPC',
         );
