@@ -50,6 +50,13 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /**
+   * Friendly user-facing message for error statuses. Set by the agent-runner's
+   * classifyApiError() for Anthropic SDK errors; contains no stack trace or
+   * PII. The orchestrator forwards this verbatim to the chat channel when
+   * status === 'error'.
+   */
+  userMessage?: string;
 }
 
 interface VolumeMount {
