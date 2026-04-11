@@ -1025,7 +1025,7 @@ export function hasSpawnedThread(sourceMessageId: string): boolean {
         WHERE source_message_id = ?
           AND (
             thread_jid != ?
-            OR created_at >= datetime('now', ?)
+            OR julianday(created_at) >= julianday('now', ?)
           )`,
     )
     .get(
@@ -1043,7 +1043,7 @@ function deleteExpiredPendingSpawnedThreadReservation(
     `DELETE FROM spawned_threads
       WHERE source_message_id = ?
         AND thread_jid = ?
-        AND created_at < datetime('now', ?)`,
+        AND julianday(created_at) < julianday('now', ?)`,
   ).run(
     sourceMessageId,
     PENDING_SPAWN_THREAD_JID,
