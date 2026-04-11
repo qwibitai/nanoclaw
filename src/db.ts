@@ -458,7 +458,7 @@ function startSpawnedThreadsCleanupTimer(): void {
     try {
       cleanupSpawnedThreads();
     } catch (error) {
-      logger.warn('Failed to clean up spawned_threads', error);
+      logger.warn({ err: error }, 'Failed to clean up spawned_threads');
     }
   }, SPAWNED_THREADS_CLEANUP_INTERVAL_MS);
 }
