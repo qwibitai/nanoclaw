@@ -312,7 +312,14 @@ export class DiscordChannel implements Channel {
     try {
       const channelId = parentJid.replace(/^dc:/, '');
       const channel = await this.client.channels.fetch(channelId);
-      if (!channel || !('threads' in channel)) return null;
+      if (!channel) return null;
+      if (channel.type !== ChannelType.GuildText) {
+        logger.warn(
+          { parentJid, channelId, channelType: channel.type },
+          'Discord channel does not support thread creation',
+        );
+        return null;
+      }
       const thread = await (channel as TextChannel).threads.create({
         name: name.slice(0, 100),
         autoArchiveDuration: 60,
