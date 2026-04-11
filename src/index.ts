@@ -788,6 +788,28 @@ async function main(): Promise<void> {
           return;
         }
 
+        // System-injected acknowledgment: email triggers routinely take
+        // 30-90s while the agent reads threads and drafts replies. Sending
+        // a short "⏳ Working..." message IMMEDIATELY — before the container
+        // even spawns — gives the user instant confirmation that their
+        // trigger was received, instead of waiting in silence for the first
+        // agent result. Keeps UX honest when agent-side ack lags.
+        const ackChannel = findChannel(channels, chatJid);
+        if (ackChannel) {
+          try {
+            await ackChannel.setTyping?.(chatJid, true);
+            await ackChannel.sendMessage(
+              chatJid,
+              '⏳ New email(s) — processing now…',
+            );
+          } catch (err) {
+            logger.debug(
+              { chatJid, err },
+              'Failed to send email-trigger acknowledgment',
+            );
+          }
+        }
+
         // Email triggers are single-shot: agent replies, we're done. Close
         // the container shortly after the first result so it exits cleanly
         // via the _close sentinel instead of hanging for the 30-min idle
@@ -799,7 +821,10 @@ async function main(): Promise<void> {
           if (closeScheduled) return;
           closeScheduled = true;
           setTimeout(() => {
-            logger.debug({ chatJid, taskId }, 'Closing email-trigger container after result');
+            logger.debug(
+              { chatJid, taskId },
+              'Closing email-trigger container after result',
+            );
             queue.closeStdin(chatJid);
           }, EMAIL_TRIGGER_CLOSE_DELAY_MS);
         };
