@@ -264,7 +264,10 @@ async function buildContainerArgs(
       args.push('-e', `DISCORD_BOT_TOKEN=${process.env.DISCORD_BOT_TOKEN}`);
     }
     if (process.env.NANOCLAW_SERVICE_TOKEN) {
-      args.push('-e', `NANOCLAW_SERVICE_TOKEN=${process.env.NANOCLAW_SERVICE_TOKEN}`);
+      args.push(
+        '-e',
+        `NANOCLAW_SERVICE_TOKEN=${process.env.NANOCLAW_SERVICE_TOKEN}`,
+      );
     }
   }
 
