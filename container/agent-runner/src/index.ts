@@ -1048,17 +1048,26 @@ function buildMcpServers(
     }
   }
   if (isToolEnabled(tools, 'braintrust')) {
-    // Proxy doesn't reliably inject auth for MCP/SSE endpoints,
-    // so pass the API key directly in the header config.
+    // Pass the API key directly via headers — same reasoning as granola and
+    // omni: the OneCLI proxy doesn't reliably inject auth on MCP/SSE
+    // transports. Skip server registration entirely if the key is missing,
+    // otherwise the SDK 401s and triggers its OAuth fallback (which can't
+    // complete inside a container).
     const btKey = containerInput.secrets?.BRAINTRUST_API_KEY;
-    servers.braintrust = {
-      type: 'http',
-      url: 'https://api.braintrust.dev/mcp',
-      headers: {
-        'Accept': 'application/json, text/event-stream',
-        ...(btKey ? { 'Authorization': `Bearer ${btKey}` } : {}),
-      },
-    };
+    if (typeof btKey === 'string' && btKey.length > 0) {
+      servers.braintrust = {
+        type: 'http',
+        url: 'https://api.braintrust.dev/mcp',
+        headers: {
+          Accept: 'application/json, text/event-stream',
+          Authorization: `Bearer ${btKey}`,
+        },
+      };
+    } else {
+      log(
+        'Braintrust enabled but no BRAINTRUST_API_KEY in secrets — skipping MCP server registration',
+      );
+    }
   }
   if (isToolEnabled(tools, 'omni')) {
     // Pass the API key directly via headers — same reasoning as granola and

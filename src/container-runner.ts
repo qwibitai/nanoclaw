@@ -2472,8 +2472,10 @@ function readSecrets(
     // Exa API key — MCP auth is via query param, not HTTP header,
     // so the OneCLI proxy can't inject it. Pass via secrets instead.
     ...(isToolEnabled(tools, 'exa') ? ['EXA_API_KEY'] : []),
-    // Omni skills plugin uses env vars in curl commands (REST API).
-    // The MCP server auth is handled by the proxy, but the skills need these.
+    // Omni: OMNI_API_KEY flows two ways — the MCP server config in
+    // agent-runner picks it up for an explicit Bearer header (proxy can't
+    // reliably MITM sunday.omniapp.co), and curl-based skills read it
+    // directly from env. OMNI_BASE_URL is purely for the curl skills.
     ...(isToolEnabled(tools, 'omni') ? ['OMNI_BASE_URL', 'OMNI_API_KEY'] : []),
     // Braintrust API key — proxy doesn't reliably inject auth for MCP/SSE
     // endpoints, so pass directly via secrets for the header config.
