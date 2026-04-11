@@ -694,30 +694,29 @@ describe('spawned thread accessors', () => {
     expect(hasSpawnedThread('msg-dup')).toBe(true);
   });
 
-  it('allows re-reserving a pending row after the pending TTL expires', () => {
-    vi.useFakeTimers();
+  it('allows re-reserving a pending row after the reservation is released', () => {
+    const reserved = reserveSpawnedThread(
+      'msg-pending-expired',
+      'url',
+      'https://example.com/pending-expired',
+    );
+    expect(reserved).toBe(true);
 
-    try {
-      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    const reservedWhilePending = reserveSpawnedThread(
+      'msg-pending-expired',
+      'url',
+      'https://example.com/pending-expired',
+    );
+    expect(reservedWhilePending).toBe(false);
 
-      const reserved = reserveSpawnedThread(
-        'msg-pending-expired',
-        'url',
-        'https://example.com/pending-expired',
-      );
-      expect(reserved).toBe(true);
+    releaseSpawnedThreadReservation('msg-pending-expired');
 
-      vi.setSystemTime(new Date('2030-01-01T00:00:00.000Z'));
-
-      const reservedAgain = reserveSpawnedThread(
-        'msg-pending-expired',
-        'url',
-        'https://example.com/pending-expired',
-      );
-      expect(reservedAgain).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+    const reservedAgain = reserveSpawnedThread(
+      'msg-pending-expired',
+      'url',
+      'https://example.com/pending-expired',
+    );
+    expect(reservedAgain).toBe(true);
   });
 
   it('reserve/finalize/release flow keeps dedupe atomic for pending rows', () => {
