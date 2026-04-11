@@ -77,6 +77,13 @@ DEPENDENCIES_FILE = DATA_DIR / "dependencies.json"
 TELEMETRY_URL = os.environ.get("TELEMETRY_API_URL", "http://100.99.148.99:3100")
 BOT_ID = os.environ.get("TELEMETRY_BOT_ID", "bfb9ea7c-79f5-4fd8-8fa7-f8350c62480b")
 
+# Quota check (multi-subscription key monitoring)
+QUOTA_CHECK_ENABLED = os.environ.get("QUOTA_CHECK_ENABLED", "true").lower() == "true"
+QUOTA_WARNING_THRESHOLD = int(os.environ.get("QUOTA_WARNING_THRESHOLD", "80"))
+KEYS_FILE = NANOCLAW_DIR / "config" / "keys.json"
+ACTIVE_KEY_FILE = NANOCLAW_DIR / "data" / "active-key.json"
+QUOTA_STATE_FILE = DATA_DIR / "quota-warnings.json"
+
 log = logging.getLogger("x-watchd")
 
 # ---------------------------------------------------------------------------
@@ -502,6 +509,124 @@ def update_cross_channel_context():
         log.warning(f"Cross-channel update failed: {e}")
 
 
+
+# ---------------------------------------------------------------------------
+# Quota check (multi-subscription key monitoring)
+# ---------------------------------------------------------------------------
+
+def run_quota_check(dry_run: bool = False):
+    """Check per-key token usage and recommend key switch if threshold exceeded.
+
+    Fully deterministic -- no LLM calls. Reads keys.json to detect multi-key
+    mode, queries telemetry API for budget usage, and writes recommendation
+    events to the JSONL event bus if usage exceeds threshold.
+    """
+    if not QUOTA_CHECK_ENABLED:
+        log.debug("Quota check disabled via QUOTA_CHECK_ENABLED")
+        return
+
+    if not KEYS_FILE.exists():
+        log.debug("keys.json not found, single-key mode -- skipping quota check")
+        return
+
+    # Load keys config
+    try:
+        keys_data = json.loads(KEYS_FILE.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        log.warning(f"Failed to read keys.json: {e}")
+        return
+
+    if not isinstance(keys_data, list) or len(keys_data) < 2:
+        log.debug("Less than 2 keys configured -- skipping quota check")
+        return
+
+    # Load active key
+    active_label = None
+    if ACTIVE_KEY_FILE.exists():
+        try:
+            active_data = json.loads(ACTIVE_KEY_FILE.read_text())
+            active_label = active_data.get("label") or active_data.get("name")
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Load rate-limit state (last warning timestamp per key)
+    quota_state = {}
+    if QUOTA_STATE_FILE.exists():
+        try:
+            quota_state = json.loads(QUOTA_STATE_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+
+    # Query budget endpoint
+    try:
+        req = Request(
+            f"{TELEMETRY_URL}/api/bots/{BOT_ID}/budget",
+            headers={"Content-Type": "application/json"},
+        )
+        resp = urlopen(req, timeout=10)
+        budget = json.loads(resp.read())
+    except Exception as e:
+        log.debug(f"Quota check: budget API query failed (non-critical): {e}")
+        return
+
+    pct = budget.get("pct")
+    if pct is None:
+        log.debug("Quota check: budget response missing pct field")
+        return
+
+    log.info(f"Quota check: budget usage {pct}% (threshold: {QUOTA_WARNING_THRESHOLD}%)")
+
+    if pct <= QUOTA_WARNING_THRESHOLD:
+        return
+
+    # Determine which key to suggest switching to
+    key_labels = [k.get("label") or k.get("name", f"key-{i}") for i, k in enumerate(keys_data)]
+    current_key = active_label or key_labels[0]
+
+    # Find next key that is not the current one
+    other_keys = [k for k in key_labels if k != current_key]
+    suggest = other_keys[0] if other_keys else None
+    if not suggest:
+        log.debug("Quota check: no alternative key to suggest")
+        return
+
+    # Rate limit: max 1 recommendation per key per hour
+    last_warning_ts = quota_state.get(current_key)
+    if last_warning_ts:
+        try:
+            last_dt = datetime.fromisoformat(last_warning_ts.replace("Z", "+00:00"))
+            elapsed = (now - last_dt).total_seconds()
+            if elapsed < 3600:
+                log.debug(f"Quota check: rate-limited for key {current_key} ({int(3600 - elapsed)}s remaining)")
+                return
+        except (ValueError, TypeError):
+            pass
+
+    # Write recommendation event
+    event = {
+        "type": "quota.warning",
+        "key": current_key,
+        "pct": pct,
+        "suggest_switch_to": suggest,
+        "timestamp": now_iso,
+    }
+    write_event(event)
+    log.info(f"Quota warning: key '{current_key}' at {pct}%, suggesting switch to '{suggest}'")
+
+    # Update rate-limit state
+    quota_state[current_key] = now_iso
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        tmp = QUOTA_STATE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(quota_state, indent=2))
+        tmp.rename(QUOTA_STATE_FILE)
+    except OSError as e:
+        log.warning(f"Failed to save quota state: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Main health check cycle
 # ---------------------------------------------------------------------------
@@ -593,6 +718,12 @@ def run_health_check(dry_run: bool = False, verbose: bool = False) -> dict:
         channel = route_alert(alert)
         if channel:
             send_slack(channel, msg, dry_run=dry_run)
+
+    # Quota check (multi-subscription key monitoring)
+    try:
+        run_quota_check(dry_run=dry_run)
+    except Exception as e:
+        log.error(f"Quota check failed: {e}", exc_info=verbose)
 
     # Emit telemetry heartbeat
     send_telemetry_event("watchd.health_check", {
