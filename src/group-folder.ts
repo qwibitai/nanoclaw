@@ -38,6 +38,12 @@ function assertValidIpcNamespaceKey(key: string): void {
   if (key.includes('\0')) {
     throw new Error('IPC namespace key must not include NUL bytes');
   }
+  if (key === '.' || key === '..') {
+    throw new Error('IPC namespace key must not be a dot path segment');
+  }
+  if (key.toLowerCase() === 'errors') {
+    throw new Error('IPC namespace key must not use reserved namespace');
+  }
 }
 
 export function resolveGroupFolderPath(folder: string): string {

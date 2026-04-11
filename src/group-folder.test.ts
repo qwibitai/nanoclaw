@@ -65,5 +65,9 @@ describe('group folder validation', () => {
 
   it('throws for invalid chat JID IPC namespace keys', () => {
     expect(() => encodeIpcNamespaceKey('')).toThrow();
+    expect(() => encodeIpcNamespaceKey('.')).toThrow();
+    expect(() => encodeIpcNamespaceKey('..')).toThrow();
+    expect(() => encodeIpcNamespaceKey('errors')).toThrow();
+    expect(() => resolveGroupIpcPathByJid('.')).toThrow();
   });
 });
