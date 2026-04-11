@@ -199,7 +199,7 @@ async function spawnThreadForUrl(
   group: RegisteredGroup,
   channel: Channel,
 ): Promise<boolean> {
-  const urls = msg.content.match(/https?:\/\/[^\s<>"]+/g);
+  const urls = msg.content.match(/https?:\/\/[^\s<>"]+/gi);
   if (!urls || urls.length === 0) return false;
   const url = urls[0];
 
