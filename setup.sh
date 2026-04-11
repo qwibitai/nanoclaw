@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# setup.sh — Bootstrap script for NanoClaw
+# setup.sh — Bootstrap script for Argus
 # Handles Node.js/npm setup, then hands off to the Node.js setup modules.
 # This is the only bash script in the setup flow.
 

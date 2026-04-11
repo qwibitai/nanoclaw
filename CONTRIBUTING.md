@@ -4,8 +4,8 @@
 
 1. **Check for existing work.** Search open PRs and issues before starting:
    ```bash
-   gh pr list --repo qwibitai/nanoclaw --search "<your feature>"
-   gh issue list --repo qwibitai/nanoclaw --search "<your feature>"
+   gh pr list --repo qwibitai/argus --search "<your feature>"
+   gh issue list --repo qwibitai/argus --search "<your feature>"
    ```
    If a related PR or issue exists, build on it rather than duplicating effort.
 
@@ -21,7 +21,7 @@
 
 ## Skills
 
-NanoClaw uses [Claude Code skills](https://code.claude.com/docs/en/skills) — markdown files with optional supporting files that teach Claude how to do something. There are four types of skills in NanoClaw, each serving a different purpose.
+Argus uses [Claude Code skills](https://code.claude.com/docs/en/skills) — markdown files with optional supporting files that teach Claude how to do something. There are four types of skills in Argus, each serving a different purpose.
 
 ### Why skills?
 
@@ -31,7 +31,7 @@ Every user should have clean and minimal code that does exactly what they need. 
 
 #### 1. Feature skills (branch-based)
 
-Add capabilities to NanoClaw by merging a git branch. The SKILL.md contains setup instructions; the actual code lives on a `skill/*` branch.
+Add capabilities to Argus by merging a git branch. The SKILL.md contains setup instructions; the actual code lives on a `skill/*` branch.
 
 **Location:** `.claude/skills/` on `main` (instructions only), code on `skill/*` branch
 
@@ -43,7 +43,7 @@ Add capabilities to NanoClaw by merging a git branch. The SKILL.md contains setu
 3. Claude walks through interactive setup (env vars, bot creation, etc.)
 
 **Contributing a feature skill:**
-1. Fork `qwibitai/nanoclaw` and branch from `main`
+1. Fork `qwibitai/argus` and branch from `main`
 2. Make the code changes (new files, modified source, updated `package.json`, etc.)
 3. Add a SKILL.md in `.claude/skills/<name>/` with setup instructions — step 1 should be merging the branch
 4. Open a PR. We'll create the `skill/<name>` branch from your work
@@ -56,7 +56,7 @@ Standalone tools that ship code files alongside the SKILL.md. The SKILL.md tells
 
 **Location:** `.claude/skills/<name>/` with supporting files
 
-**Examples:** `/claw` (Python CLI in `scripts/claw`)
+**Examples:** `/argus` (Python CLI in `scripts/argus`)
 
 **Key difference from feature skills:** No branch merge needed. The code is self-contained in the skill directory and gets copied into place during installation.
 
@@ -71,7 +71,7 @@ Workflows and guides with no code changes. The SKILL.md is the entire skill — 
 
 **Location:** `.claude/skills/` on `main`
 
-**Examples:** `/setup`, `/debug`, `/customize`, `/update-nanoclaw`, `/update-skills`
+**Examples:** `/setup`, `/debug`, `/customize`, `/update-argus`, `/update-skills`
 
 **Guidelines:**
 - Pure instructions — no code files, no branch merges

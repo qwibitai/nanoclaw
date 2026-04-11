@@ -50,7 +50,7 @@ Confirm which tool families are available to you:
 - **Core:** Bash, Read, Write, Edit, Glob, Grep
 - **Web:** WebSearch, WebFetch
 - **Orchestration:** Task, TaskOutput, TaskStop, TeamCreate, TeamDelete, SendMessage
-- **MCP:** mcp__nanoclaw__* (send_message, schedule_task, list_tasks, pause_task, resume_task, cancel_task, update_task, register_group)
+- **MCP:** mcp__argus__* (send_message, schedule_task, list_tasks, pause_task, resume_task, cancel_task, update_task, register_group)
 
 ### 4. Container utilities
 
@@ -65,7 +65,7 @@ claude --version 2>/dev/null
 Use the MCP tool to list tasks:
 
 ```
-Call mcp__nanoclaw__list_tasks to get scheduled tasks.
+Call mcp__argus__list_tasks to get scheduled tasks.
 ```
 
 If no tasks exist, report "No scheduled tasks."
@@ -75,7 +75,7 @@ If no tasks exist, report "No scheduled tasks."
 Present as a clean, readable message:
 
 ```
-🔍 *NanoClaw Status*
+🔍 *Argus Status*
 
 *Session:*
 • Channel: main

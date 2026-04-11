@@ -68,7 +68,7 @@ git remote -v
 If `whatsapp` is missing, add it:
 
 ```bash
-git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
+git remote add whatsapp https://github.com/qwibitai/argus-whatsapp.git
 ```
 
 ### Merge the skill branch
@@ -94,24 +94,24 @@ npm run build
 
 ### Ensure launchd PATH includes Homebrew
 
-The NanoClaw launchd service runs with a restricted PATH. `whisper-cli` and `ffmpeg` are in `/opt/homebrew/bin/` (Apple Silicon) or `/usr/local/bin/` (Intel), which may not be in the plist's PATH.
+The Argus launchd service runs with a restricted PATH. `whisper-cli` and `ffmpeg` are in `/opt/homebrew/bin/` (Apple Silicon) or `/usr/local/bin/` (Intel), which may not be in the plist's PATH.
 
 Check the current PATH:
 ```bash
-grep -A1 'PATH' ~/Library/LaunchAgents/com.nanoclaw.plist
+grep -A1 'PATH' ~/Library/LaunchAgents/com.argus.plist
 ```
 
 If `/opt/homebrew/bin` is missing, add it to the `<string>` value inside the `PATH` key in the plist. Then reload:
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl unload ~/Library/LaunchAgents/com.argus.plist
+launchctl load ~/Library/LaunchAgents/com.argus.plist
 ```
 
 ### Build and restart
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.argus
 ```
 
 ### Test
@@ -121,7 +121,7 @@ Send a voice note in any registered group. The agent should receive it as `[Voic
 ### Check logs
 
 ```bash
-tail -f logs/nanoclaw.log | grep -i -E "voice|transcri|whisper"
+tail -f logs/argus.log | grep -i -E "voice|transcri|whisper"
 ```
 
 Look for:

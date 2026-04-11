@@ -1,6 +1,6 @@
 ---
 name: add-pdf-reader
-description: Add PDF reading to NanoClaw agents. Extracts text from PDFs via pdftotext CLI. Handles WhatsApp attachments, URLs, and local files.
+description: Add PDF reading to Argus agents. Extracts text from PDFs via pdftotext CLI. Handles WhatsApp attachments, URLs, and local files.
 ---
 
 # Add PDF Reader
@@ -23,7 +23,7 @@ git remote -v
 If `whatsapp` is missing, add it:
 
 ```bash
-git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
+git remote add whatsapp https://github.com/qwibitai/argus-whatsapp.git
 ```
 
 ### Merge the skill branch
@@ -62,8 +62,8 @@ npx vitest run src/channels/whatsapp.test.ts
 ### Restart service
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.argus  # macOS
+# Linux: systemctl --user restart argus
 ```
 
 ## Phase 3: Verify
@@ -82,7 +82,7 @@ Ask the agent to read a PDF from a URL. It should use `pdf-reader fetch <url>`.
 ### Check logs if needed
 
 ```bash
-tail -f logs/nanoclaw.log | grep -i pdf
+tail -f logs/argus.log | grep -i pdf
 ```
 
 Look for:

@@ -102,14 +102,14 @@ export async function startRemoteControl(
   }
 
   // Redirect stdout/stderr to files so the process has no pipes to the parent.
-  // This prevents SIGPIPE when NanoClaw restarts.
+  // This prevents SIGPIPE when Argus restarts.
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const stdoutFd = fs.openSync(STDOUT_FILE, 'w');
   const stderrFd = fs.openSync(STDERR_FILE, 'w');
 
   let proc;
   try {
-    proc = spawn('claude', ['remote-control', '--name', 'NanoClaw Remote'], {
+    proc = spawn('claude', ['remote-control', '--name', 'Argus Remote'], {
       cwd,
       stdio: ['pipe', stdoutFd, stderrFd],
       detached: true,

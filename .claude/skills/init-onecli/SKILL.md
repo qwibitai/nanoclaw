@@ -1,11 +1,11 @@
 ---
 name: init-onecli
-description: Install and initialize OneCLI Agent Vault. Migrates existing .env credentials to the vault. Use after /update-nanoclaw brings in OneCLI as a breaking change, or for first-time OneCLI setup.
+description: Install and initialize OneCLI Agent Vault. Migrates existing .env credentials to the vault. Use after /update-argus brings in OneCLI as a breaking change, or for first-time OneCLI setup.
 ---
 
 # Initialize OneCLI Agent Vault
 
-This skill installs OneCLI, configures the Agent Vault gateway, and migrates any existing `.env` credentials into it. Run this after `/update-nanoclaw` introduces OneCLI as a breaking change, or any time OneCLI needs to be set up from scratch.
+This skill installs OneCLI, configures the Agent Vault gateway, and migrates any existing `.env` credentials into it. Run this after `/update-argus` introduces OneCLI as a breaking change, or any time OneCLI needs to be set up from scratch.
 
 **Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. pasting a token).
 
@@ -50,7 +50,7 @@ If they cancel, stop.
 grep "@onecli-sh/sdk" package.json
 ```
 
-If `@onecli-sh/sdk` is NOT in package.json, the codebase hasn't been updated to use OneCLI yet. Tell the user to run `/update-nanoclaw` first to get the OneCLI integration, then retry `/init-onecli`. Stop here.
+If `@onecli-sh/sdk` is NOT in package.json, the codebase hasn't been updated to use OneCLI yet. Tell the user to run `/update-argus` first to get the OneCLI integration, then retry `/init-onecli`. Stop here.
 
 ## Phase 2: Install OneCLI
 
@@ -153,7 +153,7 @@ Tell the user: "Migrated your Anthropic credentials from `.env` to the OneCLI Ag
 
 After handling Anthropic credentials (whether migrated or freshly registered), scan `.env` again for remaining credential variables that containers use for outbound API calls.
 
-**Important:** Only migrate credentials that containers use via outbound HTTPS. Channel tokens (`TELEGRAM_BOT_TOKEN`, `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `DISCORD_BOT_TOKEN`) are used by the NanoClaw host process to connect to messaging platforms — they must stay in `.env`.
+**Important:** Only migrate credentials that containers use via outbound HTTPS. Channel tokens (`TELEGRAM_BOT_TOKEN`, `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `DISCORD_BOT_TOKEN`) are used by the Argus host process to connect to messaging platforms — they must stay in `.env`.
 
 Known container-facing credentials:
 
@@ -237,16 +237,16 @@ npm run build
 If build fails, diagnose and fix. Common issue: `@onecli-sh/sdk` not installed — run `npm install` first.
 
 Restart the service:
-- macOS (launchd): `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
-- Linux (systemd): `systemctl --user restart nanoclaw`
-- WSL/manual: stop and re-run `bash start-nanoclaw.sh`
+- macOS (launchd): `launchctl kickstart -k gui/$(id -u)/com.argus`
+- Linux (systemd): `systemctl --user restart argus`
+- WSL/manual: stop and re-run `bash start-argus.sh`
 
 ## Phase 5: Verify
 
 Check logs for successful OneCLI integration:
 
 ```bash
-tail -30 logs/nanoclaw.log | grep -i "onecli\|gateway"
+tail -30 logs/argus.log | grep -i "onecli\|gateway"
 ```
 
 Expected: `OneCLI gateway config applied` messages when containers start.

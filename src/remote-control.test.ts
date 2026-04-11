@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock config before importing the module under test
 vi.mock('./config.js', () => ({
-  DATA_DIR: '/tmp/nanoclaw-rc-test',
+  DATA_DIR: '/tmp/argus-rc-test',
 }));
 
 // Mock child_process
@@ -97,7 +97,7 @@ describe('remote-control', () => {
       });
       expect(spawnMock).toHaveBeenCalledWith(
         'claude',
-        ['remote-control', '--name', 'NanoClaw Remote'],
+        ['remote-control', '--name', 'Argus Remote'],
         expect.objectContaining({ cwd: '/project', detached: true }),
       );
       expect(proc.unref).toHaveBeenCalled();

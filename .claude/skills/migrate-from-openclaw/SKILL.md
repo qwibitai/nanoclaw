@@ -1,13 +1,13 @@
 ---
 name: migrate-from-openclaw
-description: Migrate from OpenClaw to NanoClaw. Detects existing OpenClaw installation, extracts identity, channel credentials, scheduled tasks, and other config, then guides interactive migration. Triggers on "migrate from openclaw", "openclaw migration", "import from openclaw".
+description: Migrate from OpenClaw to Argus. Detects existing OpenClaw installation, extracts identity, channel credentials, scheduled tasks, and other config, then guides interactive migration. Triggers on "migrate from openclaw", "openclaw migration", "import from openclaw".
 ---
 
 # Migrate from OpenClaw
 
-Guide the user through migrating their OpenClaw installation to NanoClaw. This is a conversation, not a batch job. Read OpenClaw state, discuss it with the user, make judgment calls together about what to bring over and how.
+Guide the user through migrating their OpenClaw installation to Argus. This is a conversation, not a batch job. Read OpenClaw state, discuss it with the user, make judgment calls together about what to bring over and how.
 
-**Principle:** Never silently copy data. Read it, explain it, discuss where it belongs in NanoClaw's architecture, show proposed changes before applying. Credentials must be masked when displayed (first 4 + `...` + last 4 characters). Make judgment calls about what's core vs. reference material.
+**Principle:** Never silently copy data. Read it, explain it, discuss where it belongs in Argus's architecture, show proposed changes before applying. Credentials must be masked when displayed (first 4 + `...` + last 4 characters). Make judgment calls about what's core vs. reference material.
 
 **UX:** Use `AskUserQuestion` for multiple-choice only. Use plain text for free-form input. Don't dump raw data — summarize and explain conversationally.
 
@@ -52,7 +52,7 @@ Parse the status block. Key fields: STATUS, STATE_DIR, CHANNELS, WORKSPACE_FILES
 - "I found your OpenClaw installation at `<STATE_DIR>`."
 - Identity: name from IDENTITY.md (if found)
 - Workspace files: which of SOUL.md, USER.md, MEMORY.md, IDENTITY.md exist
-- Channels: list each, note which NanoClaw supports (whatsapp, telegram, slack, discord) and which it doesn't
+- Channels: list each, note which Argus supports (whatsapp, telegram, slack, discord) and which it doesn't
 - Daily memory files: count (if any)
 - Skills: count and names (from workspace, shared, personal, project locations)
 - Cron jobs: count and names
@@ -61,10 +61,10 @@ Parse the status block. Key fields: STATUS, STATE_DIR, CHANNELS, WORKSPACE_FILES
 
 Then explain the key architectural differences. Don't dump a table — paraphrase conversationally:
 
-- **Container isolation:** NanoClaw runs each agent in an isolated Linux container (Docker or Apple Container). OpenClaw runs everything in one process. This means stronger isolation but also means each group is its own sandbox.
-- **Group-based memory:** In OpenClaw, all groups under one agent share the same SOUL.md, MEMORY.md, and IDENTITY.md. In NanoClaw, each group has its own filesystem and CLAUDE.md. Shared state goes in `groups/global/CLAUDE.md` (mounted read-only into all non-main containers).
-- **Channel skills:** In OpenClaw, channels are configured in `openclaw.json`. In NanoClaw, channels are installed as code via skills (`/add-telegram`, `/add-whatsapp`, etc.) and configured through `.env` variables.
-- **Simpler config:** NanoClaw has no config file — behavior is in the code and `CLAUDE.md` files. Credentials live in `.env` or the OneCLI vault.
+- **Container isolation:** Argus runs each agent in an isolated Linux container (Docker or Apple Container). OpenClaw runs everything in one process. This means stronger isolation but also means each group is its own sandbox.
+- **Group-based memory:** In OpenClaw, all groups under one agent share the same SOUL.md, MEMORY.md, and IDENTITY.md. In Argus, each group has its own filesystem and CLAUDE.md. Shared state goes in `groups/global/CLAUDE.md` (mounted read-only into all non-main containers).
+- **Channel skills:** In OpenClaw, channels are configured in `openclaw.json`. In Argus, channels are installed as code via skills (`/add-telegram`, `/add-whatsapp`, etc.) and configured through `.env` variables.
+- **Simpler config:** Argus has no config file — behavior is in the code and `CLAUDE.md` files. Credentials live in `.env` or the OneCLI vault.
 
 AskUserQuestion: "Ready to start migrating? I'll go through each area one at a time."
 1. **Yes, let's go** — proceed to Phase 1
@@ -79,11 +79,11 @@ If GROUP_COUNT > 0 or AGENT_COUNT > 1, this is a critical conversation. Even wit
 
 **OpenClaw model:** All groups routed to the same agent share one workspace — the same SOUL.md, MEMORY.md, IDENTITY.md, and tools. When you talk to the bot in your family chat or your work chat, it's the same agent with the same personality and memory. Only the session (conversation history) is separate per group.
 
-**NanoClaw model:** Each group is a completely separate agent running in its own Linux container. Separate filesystem, separate memory, separate CLAUDE.md. The bot in your family chat and your work chat are different agents that don't know about each other — unless you explicitly share state via `groups/global/CLAUDE.md`, which is mounted read-only into all non-main containers.
+**Argus model:** Each group is a completely separate agent running in its own Linux container. Separate filesystem, separate memory, separate CLAUDE.md. The bot in your family chat and your work chat are different agents that don't know about each other — unless you explicitly share state via `groups/global/CLAUDE.md`, which is mounted read-only into all non-main containers.
 
 Explain this conversationally. If the user only has one group, it's simple — just note the difference and move on. If they have multiple groups, discuss:
 
-AskUserQuestion: "In OpenClaw, your groups shared the same personality and memory. In NanoClaw, each group is a fully separate agent. How would you like to handle this?"
+AskUserQuestion: "In OpenClaw, your groups shared the same personality and memory. In Argus, each group is a fully separate agent. How would you like to handle this?"
 
 1. **Shared personality (recommended if your groups had the same bot)** — "I'll put the shared personality, identity, and user context in `groups/global/CLAUDE.md`. Every group sees it. Each group can add its own customizations on top."
 2. **Fully separate** — "Each group gets its own independent personality and memory. Complete isolation between groups."
@@ -95,18 +95,18 @@ Remember this choice — it determines where identity and memory files go in the
 
 Before registering groups, confirm the assistant name — it's used for trigger patterns and CLAUDE.md templates.
 
-IDENTITY_NAME from discovery gives the OpenClaw name. Ask the user: "Your OpenClaw assistant was named `<IDENTITY_NAME>`. Want to keep this name in NanoClaw?" If they want a different name, ask what it should be. If IDENTITY_NAME was empty, ask them to choose a name (default: "Andy").
+IDENTITY_NAME from discovery gives the OpenClaw name. Ask the user: "Your OpenClaw assistant was named `<IDENTITY_NAME>`. Want to keep this name in Argus?" If they want a different name, ask what it should be. If IDENTITY_NAME was empty, ask them to choose a name (default: "Andy").
 
 The register step's `--assistant-name` flag writes `ASSISTANT_NAME` to `.env` and updates CLAUDE.md templates automatically — no manual `.env` write needed.
 
 ### Registering groups
 
-The discovery script provides detected groups in the GROUPS field (format: `channel:id(name)=>nanoclaw_jid`). These are extracted from OpenClaw's session store and channel config.
+The discovery script provides detected groups in the GROUPS field (format: `channel:id(name)=>argus_jid`). These are extracted from OpenClaw's session store and channel config.
 
 For each group the user wants to bring over, pre-register it:
 
 ```bash
-npx tsx setup/index.ts --step register -- --jid "<nanoclaw_jid>" --name "<group_name>" --folder "<channel>_<slug>" --trigger "@<confirmed_name>" --channel <channel> --assistant-name "<confirmed_name>"
+npx tsx setup/index.ts --step register -- --jid "<argus_jid>" --name "<group_name>" --folder "<channel>_<slug>" --trigger "@<confirmed_name>" --channel <channel> --assistant-name "<confirmed_name>"
 ```
 
 Only pass `--assistant-name` on the first registration (it updates all CLAUDE.md templates globally).
@@ -117,15 +117,15 @@ For the first/primary group, add `--is-main --no-trigger-required`. Other groups
 
 **Important:** Registration requires the database to exist. If the environment step hasn't been run yet, run it first: `npx tsx setup/index.ts --step environment`. Registration also creates the group folder under `groups/` and copies the CLAUDE.md template.
 
-Register groups from all channels — including channels NanoClaw doesn't yet support (signal, matrix, etc.). The registration stores the JID and metadata in the database, ready for when that channel is added later. Groups won't receive messages until their channel code is installed, but the registration, group folder, and CLAUDE.md will be ready.
+Register groups from all channels — including channels Argus doesn't yet support (signal, matrix, etc.). The registration stores the JID and metadata in the database, ready for when that channel is added later. Groups won't receive messages until their channel code is installed, but the registration, group folder, and CLAUDE.md will be ready.
 
 ## Phase 2: Settings from Config
 
-Before identity/memory, extract settings from `openclaw.json` that map directly to NanoClaw setup. Read the config file with the Read tool (`<STATE_DIR>/openclaw.json` or `clawdbot.json`).
+Before identity/memory, extract settings from `openclaw.json` that map directly to Argus setup. Read the config file with the Read tool (`<STATE_DIR>/openclaw.json` or `clawdbot.json`).
 
 ### Timezone
 
-Check `agents.defaults.userTimezone` in the config. If present and it's a valid IANA timezone (e.g. `America/New_York`, `Asia/Jerusalem`), write it to `.env` as `TZ=<timezone>`. NanoClaw's setup step 2a reads `TZ` from `.env` (`src/config.ts:84-97`) and will skip the autodetection prompt.
+Check `agents.defaults.userTimezone` in the config. If present and it's a valid IANA timezone (e.g. `America/New_York`, `Asia/Jerusalem`), write it to `.env` as `TZ=<timezone>`. Argus's setup step 2a reads `TZ` from `.env` (`src/config.ts:84-97`) and will skip the autodetection prompt.
 
 ### Anthropic Credentials
 
@@ -153,7 +153,7 @@ Also check:
 1. `<STATE_DIR>/.env` — for `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
 2. Config `models.providers` — for Anthropic provider entries with `apiKey`
 
-If found, offer to save to `.env`. This pre-fills the NanoClaw setup credential step (step 4) so the user doesn't need to re-enter it. Use the same masking approach — show first 4 + last 4 characters, write the full value directly.
+If found, offer to save to `.env`. This pre-fills the Argus setup credential step (step 4) so the user doesn't need to re-enter it. Use the same masking approach — show first 4 + last 4 characters, write the full value directly.
 
 **Important:** If the credential uses `keyRef`/`tokenRef` with `source:"exec"` or `source:"file"`, explain that it can't be auto-extracted and the user will need to enter it during setup. For `type: "oauth"` credentials with an expiry in the past, warn the user the token may need to be refreshed during setup.
 
@@ -165,7 +165,7 @@ Read the channel configs for access control settings. OpenClaw stores these per-
 - `channels.<channel>.groupPolicy` — `"open"`, `"allowlist"`, `"disabled"`
 - `channels.<channel>.groupAllowFrom` — array of allowed group member IDs
 
-NanoClaw uses `~/.config/nanoclaw/sender-allowlist.json` with this format:
+Argus uses `~/.config/argus/sender-allowlist.json` with this format:
 ```json
 {
   "default": { "allow": "*", "mode": "trigger" },
@@ -184,7 +184,7 @@ Fields:
 - `mode`: `"trigger"` (messages stored but trigger blocked for non-allowed senders) or `"drop"` (messages silently discarded before storage)
 - `logDenied`: optional boolean (default `true`), logs denied messages
 
-If OpenClaw had allowlists configured, show the user what was set and offer to create the NanoClaw equivalent. Map:
+If OpenClaw had allowlists configured, show the user what was set and offer to create the Argus equivalent. Map:
 - `dmPolicy:"allowlist"` + `allowFrom` → per-chat entry with `"allow"` array, `"mode": "trigger"`
 - `groupPolicy:"allowlist"` + `groupAllowFrom` → per-group entry with `"allow"` array, `"mode": "trigger"`
 - `dmPolicy:"open"` → `"allow": "*"`
@@ -192,14 +192,14 @@ If OpenClaw had allowlists configured, show the user what was set and offer to c
 
 Create the directory and file:
 ```bash
-mkdir -p ~/.config/nanoclaw
+mkdir -p ~/.config/argus
 ```
 
 Then write the JSON file. If no allowlists were configured, skip this.
 
 ### Container Timeout
 
-Check `agents.defaults.timeoutSeconds` in the config. This is maximum total agent runtime (wall-clock). NanoClaw's equivalent is `CONTAINER_TIMEOUT` (env var, default 30 min), also configurable per-group via `containerConfig.timeout`. Note: NanoClaw also has a separate `IDLE_TIMEOUT` (max time without output) which resets on activity — OpenClaw has no equivalent.
+Check `agents.defaults.timeoutSeconds` in the config. This is maximum total agent runtime (wall-clock). Argus's equivalent is `CONTAINER_TIMEOUT` (env var, default 30 min), also configurable per-group via `containerConfig.timeout`. Note: Argus also has a separate `IDLE_TIMEOUT` (max time without output) which resets on activity — OpenClaw has no equivalent.
 
 If the OpenClaw value differs significantly from 30 minutes, note it for the user. They can set `CONTAINER_TIMEOUT=<ms>` in `.env` after setup.
 
@@ -291,9 +291,9 @@ After all skills are copied, a container rebuild is needed — note this for pos
 
 If CONFIG_PLUGIN_COUNT > 0 in discovery, OpenClaw had installed plugins/skills with API keys (e.g. `plugins.entries.brave`, `skills.entries.openai-whisper-api`). These are functional tools the agent had access to.
 
-For each detected plugin, present the name to the user and discuss whether to set it up in NanoClaw. Read the OpenClaw config section to understand what it is, then:
+For each detected plugin, present the name to the user and discuss whether to set it up in Argus. Read the OpenClaw config section to understand what it is, then:
 
-1. **If NanoClaw has a matching skill** — check the available NanoClaw skills list for an equivalent (e.g. `/add-voice-transcription` for whisper). If found, save the API key to `.env` and invoke that skill.
+1. **If Argus has a matching skill** — check the available Argus skills list for an equivalent (e.g. `/add-voice-transcription` for whisper). If found, save the API key to `.env` and invoke that skill.
 
 2. **If the OpenClaw plugin was an MCP server** — read its config to find the exact package name and command. Install the same MCP server (e.g. `npx -y <exact-package-from-config>`). Don't search for or guess at MCP packages — only install what was explicitly configured.
 
@@ -308,18 +308,18 @@ For API keys, read the config value directly (don't display raw keys) and write 
 ### Other files (TOOLS.md, HEARTBEAT.md, BOOTSTRAP.md, AGENTS.md)
 
 If these exist, briefly mention them and explain:
-- TOOLS.md: NanoClaw agents have their own tool discovery; this doesn't transfer
-- HEARTBEAT.md: NanoClaw uses scheduled tasks instead
-- BOOTSTRAP.md: NanoClaw uses CLAUDE.md and container skills instead
+- TOOLS.md: Argus agents have their own tool discovery; this doesn't transfer
+- HEARTBEAT.md: Argus uses scheduled tasks instead
+- BOOTSTRAP.md: Argus uses CLAUDE.md and container skills instead
 - AGENTS.md: Already covered in the Phase 1 groups discussion
 
 ## Phase 4: Channel Credentials
 
-For each channel found in the discovery results, handle it based on NanoClaw support:
+For each channel found in the discovery results, handle it based on Argus support:
 
 ### Supported channels (whatsapp, telegram, slack, discord)
 
-Run the credential extraction script with `--write-env .env` so it writes credentials directly to NanoClaw's `.env` file. The script never emits raw credential values to stdout — only masked versions.
+Run the credential extraction script with `--write-env .env` so it writes credentials directly to Argus's `.env` file. The script never emits raw credential values to stdout — only masked versions.
 
 First, run without `--write-env` to preview:
 
@@ -342,7 +342,7 @@ If using the credential:
 npx tsx ${CLAUDE_SKILL_DIR}/scripts/extract-channel-credentials.ts --state-dir <STATE_DIR> --channel <name> --write-env .env
 ```
 
-The script writes the credential directly to `.env` using the correct NanoClaw variable name (e.g. `TELEGRAM_BOT_TOKEN`). Check the status block for `WRITTEN_TO` and `WRITTEN_COUNT` to confirm.
+The script writes the credential directly to `.env` using the correct Argus variable name (e.g. `TELEGRAM_BOT_TOKEN`). Check the status block for `WRITTEN_TO` and `WRITTEN_COUNT` to confirm.
 
 **Credential destination note:** Credentials are saved to `.env` for now. During `/setup`, the credential step will either keep them in `.env` (Apple Container) or migrate them to the OneCLI vault (Docker). The user doesn't need to worry about this now.
 
@@ -354,7 +354,7 @@ For Slack: there are two credentials (bot token + app token). The script handles
 
 ### Unsupported channels (signal, matrix, irc, msteams, feishu, etc.)
 
-Explain briefly: "NanoClaw doesn't have a `<channel>` integration yet, but channels are added over time via skills. Any groups from this channel were already registered in Phase 1 — they'll activate when the channel is added."
+Explain briefly: "Argus doesn't have a `<channel>` integration yet, but channels are added over time via skills. Any groups from this channel were already registered in Phase 1 — they'll activate when the channel is added."
 
 If there are credentials (tokens, keys) for the unsupported channel, offer to save them to `.env` with a descriptive variable name (e.g. `SIGNAL_ACCOUNT`, `MATRIX_ACCESS_TOKEN`) so they're available when the channel is eventually supported.
 
@@ -364,7 +364,7 @@ Don't invoke channel skills here — just prepare `.env` credentials. Channel co
 
 Read `<STATE_DIR>/cron/jobs.json` with the Read tool. If the file doesn't exist or has no jobs, skip this phase.
 
-If jobs exist, read `${CLAUDE_SKILL_DIR}/MIGRATE_CRONS.md` for the full OpenClaw cron format, NanoClaw table schema, field mapping, and SQL insert template. Follow those instructions for each job.
+If jobs exist, read `${CLAUDE_SKILL_DIR}/MIGRATE_CRONS.md` for the full OpenClaw cron format, Argus table schema, field mapping, and SQL insert template. Follow those instructions for each job.
 
 ## Phase 6: Webhooks, MCP, and Other Config
 
@@ -374,7 +374,7 @@ Read relevant sections from `<STATE_DIR>/openclaw.json` directly with the Read t
 
 If MCP_SERVERS was non-empty in discovery, these can be ported. Claude Code supports MCP servers natively. Read the OpenClaw config's `mcp.servers` section to get each server's details (`command`, `args`, `env`, `url`).
 
-MCP servers in NanoClaw are registered in the agent-runner source code. Before editing, grep for `mcpServers` in `container/agent-runner/src/` to find the current location — it's expected to be in `index.ts` in the `query()` options, but may have moved. For each OpenClaw MCP server the user wants to bring over:
+MCP servers in Argus are registered in the agent-runner source code. Before editing, grep for `mcpServers` in `container/agent-runner/src/` to find the current location — it's expected to be in `index.ts` in the `query()` options, but may have moved. For each OpenClaw MCP server the user wants to bring over:
 
 1. Read its config: command, args, env, url
 2. **stdio servers** (have `command`): Add an entry to the `mcpServers` object in `container/agent-runner/src/index.ts`. The command runs inside the container, so it needs to be available there (Node.js/npx-based servers work; custom binaries would need to be added to the Dockerfile).
@@ -389,18 +389,18 @@ Show the user each server and ask which to bring over. For servers that need cus
 
 If the config has webhook sections (in `cron.webhook`, `cron.failureDestination`, or channel-specific webhooks):
 - Explain what they were used for
-- These don't map directly but NanoClaw can be customized to support them
+- These don't map directly but Argus can be customized to support them
 - Discuss the use case with the user and propose a solution if it's important to them
 - For simple webhook notifications: a task script with `curl` often suffices
 
 ### Other Config
 
 Scan the config for notable sections and briefly mention anything that doesn't carry over:
-- **Exec approvals / command allowlist:** NanoClaw uses container isolation instead — the agent runs with `--dangerously-skip-permissions` inside a sandboxed container
-- **Human delay:** Not applicable in NanoClaw's container model
+- **Exec approvals / command allowlist:** Argus uses container isolation instead — the agent runs with `--dangerously-skip-permissions` inside a sandboxed container
+- **Human delay:** Not applicable in Argus's container model
 - **Compaction:** Handled by Claude Code SDK automatically
-- **TTS:** Not built into NanoClaw
-- **Model configuration:** NanoClaw uses whatever Anthropic model the credential provides access to
+- **TTS:** Not built into Argus
+- **Model configuration:** Argus uses whatever Anthropic model the credential provides access to
 
 Don't belabor these — just mention and move on.
 
@@ -415,7 +415,7 @@ Print a comprehensive summary:
 - Groups → registered in database, folders created with CLAUDE.md templates
 - Timezone → `.env` TZ
 - Anthropic credential → `.env` (for setup to pick up)
-- Sender allowlists → `~/.config/nanoclaw/sender-allowlist.json`
+- Sender allowlists → `~/.config/argus/sender-allowlist.json`
 - Personality → CLAUDE.md (core) + `soul.md` (extended), placed per Phase 1 decision (global or per-group)
 - User context → `user-context.md`
 - Memories → `memories.md` + daily memory files (copied to `daily-memories/` or consolidated)
@@ -436,7 +436,7 @@ Print a comprehensive summary:
 **Discussed and deferred:**
 - List any customizations agreed on but not yet implemented
 
-Remind: "Run `/setup` next to complete your NanoClaw installation. Channel credentials are already prepared in `.env`. When setup asks which channels to enable, select the ones we configured."
+Remind: "Run `/setup` next to complete your Argus installation. Channel credentials are already prepared in `.env`. When setup asks which channels to enable, select the ones we configured."
 
 ## Troubleshooting
 
@@ -444,4 +444,4 @@ Remind: "Run `/setup` next to complete your NanoClaw installation. Channel crede
 
 **Credential not found:** If a channel credential resolves to empty, it may use `source:"exec"` or `source:"file"` SecretRef. These can't be auto-extracted. Ask the user to provide the value directly.
 
-**Multi-agent complexity:** If the user had many agents with different configs, focus on the primary/default agent first. Additional agents can be set up as separate NanoClaw groups later.
+**Multi-agent complexity:** If the user had many agents with different configs, focus on the primary/default agent first. Additional agents can be set up as separate Argus groups later.

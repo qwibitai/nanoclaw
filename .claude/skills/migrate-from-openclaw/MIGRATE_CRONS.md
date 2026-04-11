@@ -1,4 +1,4 @@
-# Migrating OpenClaw Cron Jobs to NanoClaw Scheduled Tasks
+# Migrating OpenClaw Cron Jobs to Argus Scheduled Tasks
 
 This file is referenced by SKILL.md Phase 5 when cron jobs are detected.
 
@@ -20,7 +20,7 @@ The jobs file is `{ version: 1, jobs: CronJob[] }`. Each job has:
 - `failureAlert`: `{ after?: number, channel?, to?, cooldownMs? }` | `false`
 - `state`: runtime state (nextRunAtMs, lastRunStatus, consecutiveErrors, etc.)
 
-## NanoClaw `scheduled_tasks` Table
+## Argus `scheduled_tasks` Table
 
 Source: `src/db.ts`
 
@@ -50,11 +50,11 @@ Source: `src/db.ts`
 
 ## What Doesn't Map
 
-- `delivery.mode:"webhook"` — NanoClaw has no webhook delivery. Discuss with the user: this could be implemented as a task `script` that runs `curl` to hit the webhook endpoint.
-- `failureAlert` — NanoClaw has no failure alert system. Note this to the user.
-- `wakeMode` — NanoClaw tasks always wake the agent immediately.
-- `payload.model`, `payload.thinking`, `payload.timeoutSeconds` — NanoClaw doesn't support per-task model/thinking config. These are handled by the SDK.
-- `deleteAfterRun` — NanoClaw `"once"` tasks are marked `"completed"` after running, not deleted.
+- `delivery.mode:"webhook"` — Argus has no webhook delivery. Discuss with the user: this could be implemented as a task `script` that runs `curl` to hit the webhook endpoint.
+- `failureAlert` — Argus has no failure alert system. Note this to the user.
+- `wakeMode` — Argus tasks always wake the agent immediately.
+- `payload.model`, `payload.thinking`, `payload.timeoutSeconds` — Argus doesn't support per-task model/thinking config. These are handled by the SDK.
+- `deleteAfterRun` — Argus `"once"` tasks are marked `"completed"` after running, not deleted.
 
 ## For Each Enabled Job
 

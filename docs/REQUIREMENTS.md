@@ -1,4 +1,4 @@
-# NanoClaw Requirements
+# Argus Requirements
 
 Original requirements and design decisions from the project creator.
 
@@ -8,7 +8,7 @@ Original requirements and design decisions from the project creator.
 
 This is a lightweight, secure alternative to OpenClaw (formerly ClawBot). That project became a monstrosity - 4-5 different processes running different gateways, endless configuration files, endless integrations. It's a security nightmare where agents don't run in isolated processes; there's all kinds of leaky workarounds trying to prevent them from accessing parts of the system they shouldn't. It's impossible for anyone to realistically understand the whole codebase. When you run it you're kind of just yoloing it.
 
-NanoClaw gives you the core functionality without that mess.
+Argus gives you the core functionality without that mess.
 
 ---
 
@@ -50,7 +50,7 @@ Skills we'd like to see contributed:
 - `/add-signal` - Add Signal as a channel
 - `/add-matrix` - Add Matrix integration
 
-> **Note:** Telegram, Slack, Discord, Gmail, and Apple Container skills already exist. See the [skills documentation](https://docs.nanoclaw.dev/integrations/skills-system) for the full list.
+> **Note:** Telegram, Slack, Discord, Gmail, and Apple Container skills already exist. See the [skills documentation](https://docs.argus.dev/integrations/skills-system) for the full list.
 
 ---
 
@@ -134,7 +134,7 @@ A personal Claude assistant accessible via messaging, with minimal custom code.
 
 ### Scheduler
 - Built-in scheduler runs on the host, spawns containers for task execution
-- Custom `nanoclaw` MCP server (inside container) provides scheduling tools
+- Custom `argus` MCP server (inside container) provides scheduling tools
 - Tools: `schedule_task`, `list_tasks`, `pause_task`, `resume_task`, `cancel_task`, `send_message`
 - Tasks stored in SQLite with run history
 - Scheduler loop checks for due tasks every minute
@@ -163,7 +163,7 @@ A personal Claude assistant accessible via messaging, with minimal custom code.
 ### Skills
 - `/setup` - Install dependencies, configure channels, start services
 - `/customize` - General-purpose skill for adding capabilities
-- `/update-nanoclaw` - Pull upstream changes, merge with customizations
+- `/update-argus` - Pull upstream changes, merge with customizations
 
 ### Deployment
 - Runs on macOS (launchd), Linux (systemd), or Windows (WSL2)
@@ -184,4 +184,4 @@ These are the creator's settings, stored here for reference:
 
 ## Project Name
 
-**NanoClaw** - A reference to Clawdbot (now OpenClaw).
+**Argus** - A reference to Clawdbot (now OpenClaw).

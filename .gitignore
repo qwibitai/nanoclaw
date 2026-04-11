@@ -33,6 +33,6 @@ groups/global/*
 .vscode/
 
 # Skills system (local per-installation state)
-.nanoclaw/
+.argus/
 
 agents-sdk-docs

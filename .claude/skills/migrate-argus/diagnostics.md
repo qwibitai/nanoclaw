@@ -9,7 +9,7 @@ uname -m
 node -p "process.versions.node.split('.')[0]"
 ```
 
-Write `/tmp/nanoclaw-diagnostics.json`. No paths, usernames, hostnames, or IP addresses.
+Write `/tmp/argus-diagnostics.json`. No paths, usernames, hostnames, or IP addresses.
 
 ```json
 {
@@ -18,7 +18,7 @@ Write `/tmp/nanoclaw-diagnostics.json`. No paths, usernames, hostnames, or IP ad
   "distinct_id": "<uuid>",
   "properties": {
     "success": true,
-    "nanoclaw_version": "1.2.43",
+    "argus_version": "1.2.43",
     "os_platform": "darwin",
     "arch": "arm64",
     "node_major_version": 22,
@@ -38,15 +38,15 @@ Show the entire JSON to the user and ask via AskUserQuestion: **Yes** / **No** /
 
 **Yes**:
 ```bash
-curl -s -X POST https://us.i.posthog.com/capture/ -H 'Content-Type: application/json' -d @/tmp/nanoclaw-diagnostics.json
-rm /tmp/nanoclaw-diagnostics.json
+curl -s -X POST https://us.i.posthog.com/capture/ -H 'Content-Type: application/json' -d @/tmp/argus-diagnostics.json
+rm /tmp/argus-diagnostics.json
 ```
 
-**No**: `rm /tmp/nanoclaw-diagnostics.json`
+**No**: `rm /tmp/argus-diagnostics.json`
 
 **Never ask again**:
 1. Replace contents of `.claude/skills/setup/diagnostics.md` with `# Diagnostics — opted out`
-2. Replace contents of `.claude/skills/update-nanoclaw/diagnostics.md` with `# Diagnostics — opted out`
-3. Replace contents of `.claude/skills/migrate-nanoclaw/diagnostics.md` with `# Diagnostics — opted out`
+2. Replace contents of `.claude/skills/update-argus/diagnostics.md` with `# Diagnostics — opted out`
+3. Replace contents of `.claude/skills/migrate-argus/diagnostics.md` with `# Diagnostics — opted out`
 4. Remove the diagnostics sections from each corresponding SKILL.md
-5. `rm /tmp/nanoclaw-diagnostics.json`
+5. `rm /tmp/argus-diagnostics.json`

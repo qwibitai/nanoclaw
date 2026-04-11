@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-claw — NanoClaw CLI
-Run a NanoClaw agent container from the command line.
+argus — Argus CLI
+Run a Argus agent container from the command line.
 
 Usage:
-  claw "What is 2+2?"
-  claw -g <channel_name> "Review this code"
-  claw -g "<channel name with spaces>" "What's the latest issue?"
-  claw -j "<chatJid>" "Hello"
-  claw -g <channel_name> -s <session-id> "Continue"
-  claw --list-groups
-  echo "prompt text" | claw --pipe -g <channel_name>
-  cat prompt.txt | claw --pipe
+  argus "What is 2+2?"
+  argus -g <channel_name> "Review this code"
+  argus -g "<channel name with spaces>" "What's the latest issue?"
+  argus -j "<chatJid>" "Hello"
+  argus -g <channel_name> -s <session-id> "Continue"
+  argus --list-groups
+  echo "prompt text" | argus --pipe -g <channel_name>
+  cat prompt.txt | argus --pipe
 """
 
 from __future__ import annotations
@@ -36,27 +36,27 @@ def dbg(*args):
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
-def _find_nanoclaw_dir() -> Path:
-    """Locate the NanoClaw installation directory.
+def _find_argus_dir() -> Path:
+    """Locate the Argus installation directory.
 
     Resolution order:
-    1. NANOCLAW_DIR env var
-    2. The directory containing this script (if it looks like a NanoClaw install)
-    3. ~/src/nanoclaw (legacy default)
+    1. ARGUS_DIR env var
+    2. The directory containing this script (if it looks like a Argus install)
+    3. ~/src/argus (legacy default)
     """
-    if env := os.environ.get("NANOCLAW_DIR"):
+    if env := os.environ.get("ARGUS_DIR"):
         return Path(env).expanduser()
-    # If this script lives inside the NanoClaw tree (e.g. scripts/claw), walk up
+    # If this script lives inside the Argus tree (e.g. scripts/argus), walk up
     here = Path(__file__).resolve()
     for parent in [here.parent, here.parent.parent]:
         if (parent / "store" / "messages.db").exists() or (parent / ".env").exists():
             return parent
-    return Path.home() / "src" / "nanoclaw"
+    return Path.home() / "src" / "argus"
 
-NANOCLAW_DIR = _find_nanoclaw_dir()
-DB_PATH      = NANOCLAW_DIR / "store" / "messages.db"
-ENV_FILE     = NANOCLAW_DIR / ".env"
-IMAGE        = "nanoclaw-agent:latest"
+ARGUS_DIR = _find_argus_dir()
+DB_PATH      = ARGUS_DIR / "store" / "messages.db"
+ENV_FILE     = ARGUS_DIR / ".env"
+IMAGE        = "argus-agent:latest"
 
 SECRET_KEYS = [
     "CLAUDE_CODE_OAUTH_TOKEN",
@@ -123,8 +123,8 @@ def find_group(groups: list[dict], query: str) -> dict | None:
 
 def build_mounts(folder: str, is_main: bool) -> list[tuple[str, str, bool]]:
     """Return list of (host_path, container_path, readonly) tuples."""
-    groups_dir  = NANOCLAW_DIR / "groups"
-    data_dir    = NANOCLAW_DIR / "data"
+    groups_dir  = ARGUS_DIR / "groups"
+    data_dir    = ARGUS_DIR / "data"
     sessions_dir = data_dir / "sessions" / folder
     ipc_dir     = data_dir / "ipc" / folder
 
@@ -136,14 +136,14 @@ def build_mounts(folder: str, is_main: bool) -> list[tuple[str, str, bool]]:
         (ipc_dir / sub).mkdir(parents=True, exist_ok=True)
 
     agent_runner_src = sessions_dir / "agent-runner-src"
-    project_agent_runner = NANOCLAW_DIR / "container" / "agent-runner" / "src"
+    project_agent_runner = ARGUS_DIR / "container" / "agent-runner" / "src"
     if not agent_runner_src.exists() and project_agent_runner.exists():
         import shutil
         shutil.copytree(project_agent_runner, agent_runner_src)
 
     mounts: list[tuple[str, str, bool]] = []
     if is_main:
-        mounts.append((str(NANOCLAW_DIR), "/workspace/project", True))
+        mounts.append((str(ARGUS_DIR), "/workspace/project", True))
     mounts.append((str(group_dir),           "/workspace/group",    False))
     mounts.append((str(sessions_dir / ".claude"), "/home/node/.claude", False))
     mounts.append((str(ipc_dir),             "/workspace/ipc",      False))
@@ -274,8 +274,8 @@ def run_container(runtime: str, image: str, payload: dict,
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="claw",
-        description="Run a NanoClaw agent from the command line.",
+        prog="argus",
+        description="Run a Argus agent from the command line.",
     )
     parser.add_argument("prompt", nargs="?", help="Prompt to send")
     parser.add_argument("-g", "--group", help="Group name or folder (fuzzy match)")

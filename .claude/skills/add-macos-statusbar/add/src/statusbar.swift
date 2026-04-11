@@ -5,9 +5,9 @@ class StatusBarController: NSObject {
     private var isRunning = false
     private var timer: Timer?
 
-    private let plistPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.nanoclaw.plist"
+    private let plistPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.argus.plist"
 
-    /// Derive the NanoClaw project root from the binary location.
+    /// Derive the Argus project root from the binary location.
     /// The binary is compiled to {project}/dist/statusbar, so the parent of
     /// the parent directory is the project root.
     private static let projectRoot: String = {
@@ -34,20 +34,20 @@ class StatusBarController: NSObject {
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            if let image = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: "NanoClaw") {
+            if let image = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: "Argus") {
                 image.isTemplate = true
                 button.image = image
             } else {
                 button.title = "⚡"
             }
-            button.toolTip = "NanoClaw"
+            button.toolTip = "Argus"
         }
     }
 
     private func checkRunning() -> Bool {
         let task = Process()
         task.launchPath = "/bin/launchctl"
-        task.arguments = ["list", "com.nanoclaw"]
+        task.arguments = ["list", "com.argus"]
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = Pipe()
@@ -68,7 +68,7 @@ class StatusBarController: NSObject {
         let dot = "● "
         let dotColor: NSColor = isRunning ? .systemGreen : .systemRed
         let attr = NSMutableAttributedString(string: dot, attributes: [.foregroundColor: dotColor])
-        let label = isRunning ? "NanoClaw is running" : "NanoClaw is stopped"
+        let label = isRunning ? "Argus is running" : "Argus is stopped"
         attr.append(NSAttributedString(string: label, attributes: [.foregroundColor: NSColor.labelColor]))
         statusItem.attributedTitle = attr
         statusItem.isEnabled = false
@@ -111,12 +111,12 @@ class StatusBarController: NSObject {
 
     @objc private func restartService() {
         let uid = getuid()
-        run("/bin/launchctl", ["kickstart", "-k", "gui/\(uid)/com.nanoclaw"])
+        run("/bin/launchctl", ["kickstart", "-k", "gui/\(uid)/com.argus"])
         refresh(after: 3)
     }
 
     @objc private func viewLogs() {
-        let logPath = "\(StatusBarController.projectRoot)/logs/nanoclaw.log"
+        let logPath = "\(StatusBarController.projectRoot)/logs/argus.log"
         NSWorkspace.shared.open(URL(fileURLWithPath: logPath))
     }
 

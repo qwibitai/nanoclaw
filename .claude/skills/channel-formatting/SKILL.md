@@ -37,11 +37,11 @@ If `already applied`, skip to Phase 3 (Verify).
 git remote -v
 ```
 
-If an `upstream` remote pointing to `https://github.com/qwibitai/nanoclaw.git` is missing,
+If an `upstream` remote pointing to `https://github.com/qwibitai/argus.git` is missing,
 add it:
 
 ```bash
-git remote add upstream https://github.com/qwibitai/nanoclaw.git
+git remote add upstream https://github.com/qwibitai/argus.git
 ```
 
 ### Merge the skill branch
@@ -87,8 +87,8 @@ All 73 tests should pass and the build should be clean before continuing.
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw   # macOS
-# Linux: systemctl --user restart nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.argus   # macOS
+# Linux: systemctl --user restart argus
 ```
 
 ### Spot-check formatting
@@ -104,7 +104,7 @@ asterisks.
 ### Check logs if needed
 
 ```bash
-tail -f logs/nanoclaw.log
+tail -f logs/argus.log
 ```
 
 ## Signal Skill Integration

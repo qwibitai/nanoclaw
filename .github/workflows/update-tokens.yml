@@ -8,7 +8,7 @@ on:
 
 jobs:
   update-tokens:
-    if: github.repository == 'qwibitai/nanoclaw'
+    if: github.repository == 'qwibitai/argus'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/create-github-app-token@v1
@@ -28,7 +28,7 @@ jobs:
       - uses: ./repo-tokens
         id: tokens
         with:
-          include: 'src/**/*.ts container/agent-runner/src/**/*.ts container/Dockerfile container/build.sh launchd/com.nanoclaw.plist CLAUDE.md'
+          include: 'src/**/*.ts container/agent-runner/src/**/*.ts container/Dockerfile container/build.sh launchd/com.argus.plist CLAUDE.md'
           exclude: 'src/**/*.test.ts'
           badge-path: 'repo-tokens/badge.svg'
 

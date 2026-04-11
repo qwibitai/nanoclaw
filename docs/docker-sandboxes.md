@@ -1,17 +1,17 @@
-# Running NanoClaw in Docker Sandboxes (Manual Setup)
+# Running Argus in Docker Sandboxes (Manual Setup)
 
-This guide walks through setting up NanoClaw inside a [Docker Sandbox](https://docs.docker.com/ai/sandboxes/) from scratch — no install script, no pre-built fork. You'll clone the upstream repo, apply the necessary patches, and have agents running in full hypervisor-level isolation.
+This guide walks through setting up Argus inside a [Docker Sandbox](https://docs.docker.com/ai/sandboxes/) from scratch — no install script, no pre-built fork. You'll clone the upstream repo, apply the necessary patches, and have agents running in full hypervisor-level isolation.
 
 ## Architecture
 
 ```
 Host (macOS / Windows WSL)
 └── Docker Sandbox (micro VM with isolated kernel)
-    ├── NanoClaw process (Node.js)
+    ├── Argus process (Node.js)
     │   ├── Channel adapters (WhatsApp, Telegram, etc.)
     │   └── Container spawner → nested Docker daemon
     └── Docker-in-Docker
-        └── nanoclaw-agent containers
+        └── argus-agent containers
             └── Claude Agent SDK
 ```
 
@@ -39,16 +39,16 @@ On your host machine:
 
 ```bash
 # Create a workspace directory
-mkdir -p ~/nanoclaw-workspace
+mkdir -p ~/argus-workspace
 
 # Create a shell sandbox with the workspace mounted
-docker sandbox create shell ~/nanoclaw-workspace
+docker sandbox create shell ~/argus-workspace
 ```
 
 If you're using WhatsApp, configure proxy bypass so WhatsApp's Noise protocol isn't MITM-inspected:
 
 ```bash
-docker sandbox network proxy shell-nanoclaw-workspace \
+docker sandbox network proxy shell-argus-workspace \
   --bypass-host web.whatsapp.com \
   --bypass-host "*.whatsapp.com" \
   --bypass-host "*.whatsapp.net"
@@ -58,7 +58,7 @@ Telegram does not need proxy bypass.
 
 Enter the sandbox:
 ```bash
-docker sandbox run shell-nanoclaw-workspace
+docker sandbox run shell-argus-workspace
 ```
 
 ## Step 2: Install Prerequisites
@@ -70,21 +70,21 @@ sudo apt-get update && sudo apt-get install -y build-essential python3
 npm config set strict-ssl false
 ```
 
-## Step 3: Clone and Install NanoClaw
+## Step 3: Clone and Install Argus
 
-NanoClaw must live inside the workspace directory — Docker-in-Docker can only bind-mount from the shared workspace path.
+Argus must live inside the workspace directory — Docker-in-Docker can only bind-mount from the shared workspace path.
 
 ```bash
 # Clone to home first (virtiofs can corrupt git pack files during clone)
 cd ~
-git clone https://github.com/qwibitai/nanoclaw.git
+git clone https://github.com/qwibitai/argus.git
 
 # Replace with YOUR workspace path (the host path you passed to `docker sandbox create`)
-WORKSPACE=/Users/you/nanoclaw-workspace
+WORKSPACE=/Users/you/argus-workspace
 
 # Move into workspace so DinD mounts work
-mv nanoclaw "$WORKSPACE/nanoclaw"
-cd "$WORKSPACE/nanoclaw"
+mv argus "$WORKSPACE/argus"
+cd "$WORKSPACE/argus"
 
 # Install dependencies
 npm install
@@ -93,7 +93,7 @@ npm install https-proxy-agent
 
 ## Step 4: Apply Proxy and Sandbox Patches
 
-NanoClaw needs several patches to work inside a Docker Sandbox. These handle proxy routing, CA certificates, and Docker-in-Docker mount restrictions.
+Argus needs several patches to work inside a Docker Sandbox. These handle proxy routing, CA certificates, and Docker-in-Docker mount restrictions.
 
 ### 4a. Dockerfile — proxy args for container image build
 
@@ -160,7 +160,7 @@ if (caCertSrc) {
 
 ### 4d. Container runtime — prevent self-termination
 
-In `src/container-runtime.ts`, the `cleanupOrphans()` function matches containers by the `nanoclaw-` prefix. Inside a sandbox, the sandbox container itself may match (e.g., `nanoclaw-docker-sandbox`). Filter out the current hostname:
+In `src/container-runtime.ts`, the `cleanupOrphans()` function matches containers by the `argus-` prefix. Inside a sandbox, the sandbox container itself may match (e.g., `argus-docker-sandbox`). Filter out the current hostname:
 
 ```typescript
 // In cleanupOrphans(), filter out os.hostname() from the list of containers to stop
@@ -203,7 +203,7 @@ npm run build
 # Configure .env
 cat > .env << EOF
 TELEGRAM_BOT_TOKEN=<your-token-from-botfather>
-ASSISTANT_NAME=nanoclaw
+ASSISTANT_NAME=argus
 ANTHROPIC_API_KEY=proxy-managed
 EOF
 mkdir -p data/env && cp .env data/env/env
@@ -212,10 +212,10 @@ mkdir -p data/env && cp .env data/env/env
 npx tsx setup/index.ts --step register \
   --jid "tg:<your-chat-id>" \
   --name "My Chat" \
-  --trigger "@nanoclaw" \
+  --trigger "@argus" \
   --folder "telegram_main" \
   --channel telegram \
-  --assistant-name "nanoclaw" \
+  --assistant-name "argus" \
   --is-main \
   --no-trigger-required
 ```
@@ -242,7 +242,7 @@ npm run build
 
 # Configure .env
 cat > .env << EOF
-ASSISTANT_NAME=nanoclaw
+ASSISTANT_NAME=argus
 ANTHROPIC_API_KEY=proxy-managed
 EOF
 mkdir -p data/env && cp .env data/env/env
@@ -259,10 +259,10 @@ npx tsx src/whatsapp-auth.ts --pairing-code --phone <phone-number-no-plus>
 npx tsx setup/index.ts --step register \
   --jid "<phone>@s.whatsapp.net" \
   --name "My Chat" \
-  --trigger "@nanoclaw" \
+  --trigger "@argus" \
   --folder "whatsapp_main" \
   --channel whatsapp \
-  --assistant-name "nanoclaw" \
+  --assistant-name "argus" \
   --is-main \
   --no-trigger-required
 ```
@@ -316,12 +316,12 @@ npm config set strict-ssl false
 docker build \
   --build-arg http_proxy=$http_proxy \
   --build-arg https_proxy=$https_proxy \
-  -t nanoclaw-agent:latest container/
+  -t argus-agent:latest container/
 ```
 
 ### Agent containers fail with "path not shared"
 All bind-mounted paths must be under the workspace directory. Check:
-- Is NanoClaw cloned into the workspace? (not `/home/agent/`)
+- Is Argus cloned into the workspace? (not `/home/agent/`)
 - Is the CA cert copied to the project root?
 - Has the empty `.env` shadow file been created?
 
@@ -347,13 +347,13 @@ docker sandbox network proxy <sandbox-name> \
 ### Git clone fails with "inflate: data stream error"
 Clone to a non-workspace path first, then move:
 ```bash
-cd ~ && git clone https://github.com/qwibitai/nanoclaw.git && mv nanoclaw /path/to/workspace/nanoclaw
+cd ~ && git clone https://github.com/qwibitai/argus.git && mv argus /path/to/workspace/argus
 ```
 
 ### WhatsApp QR code doesn't display
 Run the auth command interactively inside the sandbox (not piped through `docker sandbox exec`):
 ```bash
-docker sandbox run shell-nanoclaw-workspace
+docker sandbox run shell-argus-workspace
 # Then inside:
 npx tsx src/whatsapp-auth.ts
 ```

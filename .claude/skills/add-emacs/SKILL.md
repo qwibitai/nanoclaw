@@ -1,21 +1,21 @@
 ---
 name: add-emacs
-description: Add Emacs as a channel. Opens an interactive chat buffer and org-mode integration so you can talk to NanoClaw from within Emacs (Doom, Spacemacs, or vanilla). Uses a local HTTP bridge — no bot token or external service needed.
+description: Add Emacs as a channel. Opens an interactive chat buffer and org-mode integration so you can talk to Argus from within Emacs (Doom, Spacemacs, or vanilla). Uses a local HTTP bridge — no bot token or external service needed.
 ---
 
 # Add Emacs Channel
 
-This skill adds Emacs support to NanoClaw, then walks through interactive setup.
+This skill adds Emacs support to Argus, then walks through interactive setup.
 Works with Doom Emacs, Spacemacs, and vanilla Emacs 27.1+.
 
 ## What you can do with this
 
 - **Ask while coding** — open the chat buffer (`C-c n c` / `SPC N c`), ask about a function or error without leaving Emacs
-- **Code review** — select a region and send it with `nanoclaw-org-send`; the response appears as a child heading inline in your org file
+- **Code review** — select a region and send it with `argus-org-send`; the response appears as a child heading inline in your org file
 - **Meeting notes** — send an org agenda entry; get a summary or action item list back as a child node
 - **Draft writing** — send org prose; receive revisions or continuations in place
 - **Research capture** — ask a question directly in your org notes; the answer lands exactly where you need it
-- **Schedule tasks** — ask Andy to set a reminder or create a scheduled NanoClaw task (e.g. "remind me tomorrow to review the PR")
+- **Schedule tasks** — ask Andy to set a reminder or create a scheduled Argus task (e.g. "remind me tomorrow to review the PR")
 
 ## Phase 1: Pre-flight
 
@@ -37,11 +37,11 @@ If it exists, skip to Phase 3 (Setup). The code changes are already in place.
 git remote -v
 ```
 
-If an `upstream` remote pointing to `https://github.com/qwibitai/nanoclaw.git` is missing,
+If an `upstream` remote pointing to `https://github.com/qwibitai/argus.git` is missing,
 add it:
 
 ```bash
-git remote add upstream https://github.com/qwibitai/nanoclaw.git
+git remote add upstream https://github.com/qwibitai/argus.git
 ```
 
 ### Merge the skill branch
@@ -65,7 +65,7 @@ For any other conflict, read the conflicted file and reconcile both sides manual
 This adds:
 - `src/channels/emacs.ts` — `EmacsBridgeChannel` HTTP server (port 8766)
 - `src/channels/emacs.test.ts` — unit tests
-- `emacs/nanoclaw.el` — Emacs Lisp package (`nanoclaw-chat`, `nanoclaw-org-send`)
+- `emacs/argus.el` — Emacs Lisp package (`argus-chat`, `argus-org-send`)
 - `import './emacs.js'` appended to `src/channels/index.ts`
 
 If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
@@ -98,7 +98,7 @@ mkdir -p data/env && cp .env data/env/env
 
 ### Configure Emacs
 
-The `nanoclaw.el` package requires only Emacs 27.1+ built-in libraries (`url`, `json`, `org`) — no package manager setup needed.
+The `argus.el` package requires only Emacs 27.1+ built-in libraries (`url`, `json`, `org`) — no package manager setup needed.
 
 AskUserQuestion: Which Emacs distribution are you using?
 - **Doom Emacs** - config.el with map! keybindings
@@ -108,13 +108,13 @@ AskUserQuestion: Which Emacs distribution are you using?
 **Doom Emacs** — add to `~/.config/doom/config.el` (or `~/.doom.d/config.el`):
 
 ```elisp
-;; NanoClaw — personal AI assistant channel
-(load (expand-file-name "~/src/nanoclaw/emacs/nanoclaw.el"))
+;; Argus — personal AI assistant channel
+(load (expand-file-name "~/src/argus/emacs/argus.el"))
 
 (map! :leader
-      :prefix ("N" . "NanoClaw")
-      :desc "Chat buffer"  "c" #'nanoclaw-chat
-      :desc "Send org"     "o" #'nanoclaw-org-send)
+      :prefix ("N" . "Argus")
+      :desc "Chat buffer"  "c" #'argus-chat
+      :desc "Send org"     "o" #'argus-org-send)
 ```
 
 Then reload: `M-x doom/reload`
@@ -122,11 +122,11 @@ Then reload: `M-x doom/reload`
 **Spacemacs** — add to `dotspacemacs/user-config` in `~/.spacemacs`:
 
 ```elisp
-;; NanoClaw — personal AI assistant channel
-(load-file "~/src/nanoclaw/emacs/nanoclaw.el")
+;; Argus — personal AI assistant channel
+(load-file "~/src/argus/emacs/argus.el")
 
-(spacemacs/set-leader-keys "aNc" #'nanoclaw-chat)
-(spacemacs/set-leader-keys "aNo" #'nanoclaw-org-send)
+(spacemacs/set-leader-keys "aNc" #'argus-chat)
+(spacemacs/set-leader-keys "aNo" #'argus-org-send)
 ```
 
 Then reload: `M-x dotspacemacs/sync-configuration-layers` or restart Emacs.
@@ -134,11 +134,11 @@ Then reload: `M-x dotspacemacs/sync-configuration-layers` or restart Emacs.
 **Vanilla Emacs** — add to `~/.emacs.d/init.el` (or `~/.emacs`):
 
 ```elisp
-;; NanoClaw — personal AI assistant channel
-(load-file "~/src/nanoclaw/emacs/nanoclaw.el")
+;; Argus — personal AI assistant channel
+(load-file "~/src/argus/emacs/argus.el")
 
-(global-set-key (kbd "C-c n c") #'nanoclaw-chat)
-(global-set-key (kbd "C-c n o") #'nanoclaw-org-send)
+(global-set-key (kbd "C-c n c") #'argus-chat)
+(global-set-key (kbd "C-c n o") #'argus-org-send)
 ```
 
 Then reload: `M-x eval-buffer` or restart Emacs.
@@ -146,21 +146,21 @@ Then reload: `M-x eval-buffer` or restart Emacs.
 If `EMACS_AUTH_TOKEN` was set, also add (any distribution):
 
 ```elisp
-(setq nanoclaw-auth-token "<your-token>")
+(setq argus-auth-token "<your-token>")
 ```
 
 If `EMACS_CHANNEL_PORT` was changed from the default, also add:
 
 ```elisp
-(setq nanoclaw-port <your-port>)
+(setq argus-port <your-port>)
 ```
 
-### Restart NanoClaw
+### Restart Argus
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.argus  # macOS
+# Linux: systemctl --user restart argus
 ```
 
 ## Phase 4: Verify
@@ -192,7 +192,7 @@ Tell the user:
 ### Check logs if needed
 
 ```bash
-tail -f logs/nanoclaw.log
+tail -f logs/argus.log
 ```
 
 Look for `Emacs channel listening` at startup and `Emacs message received` when a message is sent.
@@ -205,7 +205,7 @@ Look for `Emacs channel listening` at startup and `Emacs message received` when 
 Error: listen EADDRINUSE: address already in use :::8766
 ```
 
-Either a stale NanoClaw process is running, or 8766 is taken by another app.
+Either a stale Argus process is running, or 8766 is taken by another app.
 
 Find and kill the stale process:
 
@@ -213,36 +213,36 @@ Find and kill the stale process:
 lsof -ti :8766 | xargs kill -9
 ```
 
-Or change the port in `.env` (`EMACS_CHANNEL_PORT=8767`) and update `nanoclaw-port` in Emacs config.
+Or change the port in `.env` (`EMACS_CHANNEL_PORT=8767`) and update `argus-port` in Emacs config.
 
 ### No response from agent
 
 Check:
-1. NanoClaw is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
+1. Argus is running: `launchctl list | grep argus` (macOS) or `systemctl --user status argus` (Linux)
 2. Emacs group is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid = 'emacs:default'"`
-3. Logs show activity: `tail -50 logs/nanoclaw.log`
+3. Logs show activity: `tail -50 logs/argus.log`
 
-If the group is not registered, it will be created automatically on the next NanoClaw restart.
+If the group is not registered, it will be created automatically on the next Argus restart.
 
 ### Auth token mismatch (401 Unauthorized)
 
 Verify the token in Emacs matches `.env`:
 
 ```elisp
-;; M-x describe-variable RET nanoclaw-auth-token RET
+;; M-x describe-variable RET argus-auth-token RET
 ```
 
 Must exactly match `EMACS_AUTH_TOKEN` in `.env`.
 
-### nanoclaw.el not loading
+### argus.el not loading
 
 Check the path is correct:
 
 ```bash
-ls ~/src/nanoclaw/emacs/nanoclaw.el
+ls ~/src/argus/emacs/argus.el
 ```
 
-If NanoClaw is cloned elsewhere, update the `load`/`load-file` path in your Emacs config.
+If Argus is cloned elsewhere, update the `load`/`load-file` path in your Emacs config.
 
 ## After Setup
 
@@ -250,15 +250,15 @@ If running `npm run dev` while the service is active:
 
 ```bash
 # macOS:
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl unload ~/Library/LaunchAgents/com.argus.plist
 npm run dev
 # When done testing:
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl load ~/Library/LaunchAgents/com.argus.plist
 
 # Linux:
-# systemctl --user stop nanoclaw
+# systemctl --user stop argus
 # npm run dev
-# systemctl --user start nanoclaw
+# systemctl --user start argus
 ```
 
 ## Agent Formatting
@@ -281,9 +281,9 @@ and render incorrectly.
 
 To remove the Emacs channel:
 
-1. Delete `src/channels/emacs.ts`, `src/channels/emacs.test.ts`, and `emacs/nanoclaw.el`
+1. Delete `src/channels/emacs.ts`, `src/channels/emacs.test.ts`, and `emacs/argus.el`
 2. Remove `import './emacs.js'` from `src/channels/index.ts`
-3. Remove the NanoClaw block from your Emacs config file
+3. Remove the Argus block from your Emacs config file
 4. Remove Emacs registration from SQLite: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid = 'emacs:default'"`
 5. Remove `EMACS_CHANNEL_PORT` and `EMACS_AUTH_TOKEN` from `.env` if set
-6. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+6. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.argus` (macOS) or `npm run build && systemctl --user restart argus` (Linux)

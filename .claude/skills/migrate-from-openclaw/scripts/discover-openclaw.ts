@@ -378,7 +378,7 @@ function extractIdentityName(stateDir: string, workspaceDir: string | null): str
 
   try {
     const content = fs.readFileSync(identityPath, 'utf-8');
-    // IDENTITY.md uses key:value format, e.g. "name: Claw"
+    // IDENTITY.md uses key:value format, e.g. "name: Argus"
     const match = content.match(/^name:\s*(.+)/im);
     return match ? match[1].trim() : '';
   } catch {
@@ -418,11 +418,11 @@ interface GroupInfo {
 }
 
 /**
- * Map OpenClaw session key channel:kind:id to NanoClaw JID format.
+ * Map OpenClaw session key channel:kind:id to Argus JID format.
  * OpenClaw keys: "whatsapp:group:120...@g.us", "telegram:group:-10012345"
- * NanoClaw JIDs: "120...@g.us", "tg:-10012345", "dc:12345", "slack:C12345"
+ * Argus JIDs: "120...@g.us", "tg:-10012345", "dc:12345", "slack:C12345"
  */
-function toNanoClawJid(channel: string, id: string): string {
+function toArgusJid(channel: string, id: string): string {
   switch (channel) {
     case 'whatsapp':
       return id; // Already in JID format (120...@g.us)
@@ -672,11 +672,11 @@ function main(): void {
     .map((c) => c.name)
     .join(',');
 
-  // Format groups as "channel:id(name)" — also include NanoClaw JID mapping
+  // Format groups as "channel:id(name)" — also include Argus JID mapping
   const groupList = groups
     .map(
       (g) =>
-        `${g.channel}:${g.id}(${g.name})=>${toNanoClawJid(g.channel, g.id)}`,
+        `${g.channel}:${g.id}(${g.name})=>${toArgusJid(g.channel, g.id)}`,
     )
     .join('|');
 

@@ -1,13 +1,13 @@
 ---
 name: x-integration
-description: X (Twitter) integration for NanoClaw. Post tweets, like, reply, retweet, and quote. Use for setup, testing, or troubleshooting X functionality. Triggers on "setup x", "x integration", "twitter", "post tweet", "tweet".
+description: X (Twitter) integration for Argus. Post tweets, like, reply, retweet, and quote. Use for setup, testing, or troubleshooting X functionality. Triggers on "setup x", "x integration", "twitter", "post tweet", "tweet".
 ---
 
 # X (Twitter) Integration
 
 Browser automation for X interactions via WhatsApp.
 
-> **Compatibility:** NanoClaw v1.0.0. Directory structure may change in future versions.
+> **Compatibility:** Argus v1.0.0. Directory structure may change in future versions.
 
 ## Features
 
@@ -23,7 +23,7 @@ Browser automation for X interactions via WhatsApp.
 
 Before using this skill, ensure:
 
-1. **NanoClaw is installed and running** - WhatsApp connected, service active
+1. **Argus is installed and running** - WhatsApp connected, service active
 2. **Dependencies installed**:
    ```bash
    npm ls playwright dotenv-cli || npm install playwright dotenv-cli
@@ -49,9 +49,9 @@ npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
 
 # 3. Rebuild host and restart service
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
-# Verify: launchctl list | grep nanoclaw (macOS) or systemctl --user status nanoclaw (Linux)
+launchctl kickstart -k gui/$(id -u)/com.argus  # macOS
+# Linux: systemctl --user restart argus
+# Verify: launchctl list | grep argus (macOS) or systemctl --user status argus (Linux)
 ```
 
 ## Configuration
@@ -105,7 +105,7 @@ Paths relative to project root:
 |------|---------|-----|
 | `data/x-browser-profile/` | Chrome profile with X session | Ignored |
 | `data/x-auth.json` | Auth state marker | Ignored |
-| `logs/nanoclaw.log` | Service logs (contains X operation logs) | Ignored |
+| `logs/argus.log` | Service logs (contains X operation logs) | Ignored |
 
 ## Architecture
 
@@ -154,7 +154,7 @@ Paths relative to project root:
 
 ### Integration Points
 
-To integrate this skill into NanoClaw, make the following modifications:
+To integrate this skill into Argus, make the following modifications:
 
 ---
 
@@ -272,14 +272,14 @@ cat data/x-auth.json  # Should show {"authenticated": true, ...}
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.argus  # macOS
+# Linux: systemctl --user restart argus
 ```
 
 **Verify success:**
 ```bash
-launchctl list | grep nanoclaw  # macOS — should show PID and exit code 0 or -
-# Linux: systemctl --user status nanoclaw
+launchctl list | grep argus  # macOS — should show PID and exit code 0 or -
+# Linux: systemctl --user status argus
 ```
 
 ## Usage via WhatsApp
@@ -345,8 +345,8 @@ echo '{"content":"Test"}' | npx tsx .claude/skills/x-integration/scripts/post.ts
 
 ```bash
 npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.argus  # macOS
+# Linux: systemctl --user restart argus
 ```
 
 ### Browser Lock Files
@@ -363,10 +363,10 @@ rm -f data/x-browser-profile/SingletonCookie
 
 ```bash
 # Host logs (relative to project root)
-grep -i "x_post\|x_like\|x_reply\|handleXIpc" logs/nanoclaw.log | tail -20
+grep -i "x_post\|x_like\|x_reply\|handleXIpc" logs/argus.log | tail -20
 
 # Script errors
-grep -i "error\|failed" logs/nanoclaw.log | tail -20
+grep -i "error\|failed" logs/argus.log | tail -20
 ```
 
 ### Script Timeout
@@ -406,7 +406,7 @@ If MCP tools not found in container:
 ./container/build.sh 2>&1 | grep -i skill
 
 # Check container has the file
-docker run nanoclaw-agent ls -la /app/src/skills/
+docker run argus-agent ls -la /app/src/skills/
 ```
 
 ## Security

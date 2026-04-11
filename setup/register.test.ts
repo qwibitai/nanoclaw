@@ -310,7 +310,7 @@ describe('CLAUDE.md template copy', () => {
   }
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-register-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'argus-register-test-'));
     groupsDir = path.join(tmpDir, 'groups');
     fs.mkdirSync(path.join(groupsDir, 'main'), { recursive: true });
     fs.mkdirSync(path.join(groupsDir, 'global'), { recursive: true });

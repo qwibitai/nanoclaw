@@ -1,5 +1,5 @@
 /**
- * NanoClaw Agent Runner
+ * Argus Agent Runner
  * Runs inside a container, receives config via stdin, outputs result to stdout
  *
  * Input protocol:
@@ -468,14 +468,14 @@ async function runQuery(
         'ToolSearch',
         'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*',
+        'mcp__argus__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
       mcpServers: {
-        nanoclaw: {
+        argus: {
           command: 'node',
           args: [mcpServerPath],
           env: {

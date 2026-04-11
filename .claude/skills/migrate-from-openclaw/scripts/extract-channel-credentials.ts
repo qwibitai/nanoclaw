@@ -1,6 +1,6 @@
 /**
  * Extract a channel credential from an OpenClaw configuration and write it
- * directly to the NanoClaw .env file.
+ * directly to the Argus .env file.
  *
  * Usage: npx tsx .claude/skills/migrate-from-openclaw/scripts/extract-channel-credentials.ts \
  *          --channel telegram --state-dir ~/.openclaw --write-env .env
@@ -172,7 +172,7 @@ function resolveSecretInput(
 interface ChannelCredentialSpec {
   // Fields to look for in the channel config
   fields: string[];
-  // Corresponding NanoClaw env var names
+  // Corresponding Argus env var names
   envVars: string[];
 }
 
@@ -293,7 +293,7 @@ function main(): void {
 
   // WhatsApp special case: no token, auth-state based.
   // OpenClaw stores Baileys auth at <stateDir>/credentials/whatsapp/<accountId>/
-  // using useMultiFileAuthState (same as NanoClaw). The files are directly compatible.
+  // using useMultiFileAuthState (same as Argus). The files are directly compatible.
   if (channel === 'whatsapp') {
     const authPaths = [
       path.join(stateDir, 'credentials', 'whatsapp', 'default'),
@@ -341,7 +341,7 @@ function main(): void {
     emitStatus({
       CHANNEL: channel,
       HAS_CREDENTIAL: false,
-      NOTE: `Channel "${channel}" is not supported by NanoClaw. Supported: telegram, discord, slack, whatsapp.`,
+      NOTE: `Channel "${channel}" is not supported by Argus. Supported: telegram, discord, slack, whatsapp.`,
     });
     return;
   }
