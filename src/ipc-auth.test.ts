@@ -726,6 +726,30 @@ describe('register_group group_type', () => {
     const allGroups = getAllRegisteredGroups();
     expect(allGroups['bad-thread-defaults@g.us']).toBeUndefined();
   });
+
+  it('thread_defaults.containerConfig.timeout が不正な場合は拒否される', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'bad-thread-cc@g.us',
+        name: 'Bad Thread CC',
+        folder: 'bad-thread-cc',
+        trigger: '@Andy',
+        thread_defaults: {
+          type: 'thread',
+          containerConfig: {
+            timeout: 'abc' as unknown as number,
+          },
+        },
+      },
+      'main@g.us',
+      true,
+      deps,
+    );
+
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['bad-thread-cc@g.us']).toBeUndefined();
+  });
 });
 
 describe('update_group group_type', () => {

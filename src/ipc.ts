@@ -5,7 +5,13 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  _sanitizeContainerConfig,
+  createTask,
+  deleteTask,
+  getTaskById,
+  updateTask,
+} from './db.js';
 import {
   decodeIpcNamespaceKey,
   encodeIpcNamespaceKey,
@@ -79,20 +85,49 @@ function validateThreadDefaults(
     out.requiresTrigger = td.requiresTrigger;
   }
   if (Object.prototype.hasOwnProperty.call(td, 'containerConfig')) {
-    if (
-      typeof td.containerConfig !== 'object' ||
-      td.containerConfig === null ||
-      Array.isArray(td.containerConfig)
-    ) {
+    const ccRaw = td.containerConfig as Record<string, unknown> | null;
+    if (typeof ccRaw !== 'object' || ccRaw === null || Array.isArray(ccRaw)) {
       logger.warn(
         { sourceChatJid, containerConfig: td.containerConfig },
         'Invalid thread_defaults.containerConfig: must be object',
       );
       return false;
     }
-    out.containerConfig = td.containerConfig as NonNullable<
-      ThreadDefaults['containerConfig']
-    >;
+    if (
+      Object.prototype.hasOwnProperty.call(ccRaw, 'timeout') &&
+      (typeof ccRaw.timeout !== 'number' ||
+        !Number.isFinite(ccRaw.timeout) ||
+        ccRaw.timeout <= 0)
+    ) {
+      logger.warn(
+        { sourceChatJid, timeout: ccRaw.timeout },
+        'Invalid thread_defaults.containerConfig.timeout: must be finite positive number',
+      );
+      return false;
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(ccRaw, 'additionalMounts') &&
+      !Array.isArray(ccRaw.additionalMounts)
+    ) {
+      logger.warn(
+        { sourceChatJid, additionalMounts: ccRaw.additionalMounts },
+        'Invalid thread_defaults.containerConfig.additionalMounts: must be array',
+      );
+      return false;
+    }
+    const sanitized = _sanitizeContainerConfig(
+      ccRaw,
+      sourceChatJid,
+      'thread_defaults.containerConfig',
+    );
+    if (!sanitized) {
+      logger.warn(
+        { sourceChatJid },
+        'Invalid thread_defaults.containerConfig in IPC request',
+      );
+      return false;
+    }
+    out.containerConfig = sanitized;
   }
   return out;
 }
