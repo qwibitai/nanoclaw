@@ -446,10 +446,7 @@ export async function runContainerAgent(
     // ENOENT is fine — another concurrent launch may have already removed it
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
-  const containerArgs = buildContainerArgs(
-    mounts,
-    containerName,
-  );
+  const containerArgs = buildContainerArgs(mounts, containerName);
 
   logger.debug(
     {
