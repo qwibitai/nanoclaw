@@ -255,6 +255,31 @@ async function spawnThreadForUrl(
   return true;
 }
 
+function stringContainsUrl(value: string): boolean {
+  return /\bhttps?:\/\/[^\s<>"']+/i.test(value);
+}
+
+function messageContainsUrl(value: unknown, seen = new Set<unknown>()): boolean {
+  if (typeof value === 'string') {
+    return stringContainsUrl(value);
+  }
+
+  if (value == null || typeof value !== 'object') {
+    return false;
+  }
+
+  if (seen.has(value)) {
+    return false;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.some((item) => messageContainsUrl(item, seen));
+  }
+
+  return Object.values(value).some((item) => messageContainsUrl(item, seen));
+}
+
 function maybeHandleUrlWatchMessage(
   chatJid: string,
   msg: InboundMessage,
@@ -271,6 +296,11 @@ function maybeHandleUrlWatchMessage(
 
   const ch = findChannel(availableChannels, chatJid);
   if (!ch?.createThread) {
+    storeMessage(msg);
+    return true;
+  }
+
+  if (!messageContainsUrl(msg)) {
     storeMessage(msg);
     return true;
   }
