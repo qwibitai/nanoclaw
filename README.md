@@ -169,19 +169,23 @@ We don't want configuration sprawl. Every user should customize NanoClaw so that
 
 **Can I use third-party or open-source models?**
 
-Yes. NanoClaw supports any Claude API-compatible model endpoint. Set these environment variables in your `.env` file:
+Yes. NanoClaw supports any Claude API-compatible model endpoint. Run `/use-custom-model` for a guided setup, or manually set these environment variables in your `.env` file:
 
 ```bash
 ANTHROPIC_BASE_URL=https://your-api-endpoint.com
 ANTHROPIC_AUTH_TOKEN=your-token-here
+ANTHROPIC_MODEL=model-name
 ```
 
 This allows you to use:
 - Local models via [Ollama](https://ollama.ai) with an API proxy
 - Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
+- Commercial providers like [Moonshot AI (Kimi K2.5)](https://moonshot.cn)
 - Custom model deployments with Anthropic-compatible APIs
 
-Note: The model must support the Anthropic API format for best compatibility.
+The `/use-custom-model` skill handles the full setup: collecting provider details, configuring `.env`, setting up [OneCLI](https://github.com/onecli/onecli) credentials, and verifying the connection. See [docs/kimi-k2-integration.md](docs/kimi-k2-integration.md) for a detailed technical walkthrough.
+
+Note: The model must support the Anthropic API format (messages endpoint, streaming, tool use) for best compatibility.
 
 **How do I debug issues?**
 
