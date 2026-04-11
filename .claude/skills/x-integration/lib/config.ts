@@ -5,7 +5,7 @@
  * Override via environment variables or modify defaults here.
  */
 
-import path from 'path';
+import path from "path";
 
 // Project root - can be overridden for different deployments
 const PROJECT_ROOT = process.env.NANOCLAW_ROOT || process.cwd();
@@ -17,13 +17,14 @@ export const config = {
   // Chrome executable path
   // Default: standard macOS Chrome location
   // Override: CHROME_PATH environment variable
-  chromePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  chromePath:
+    process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 
   // Browser profile directory for persistent login sessions
-  browserDataDir: path.join(PROJECT_ROOT, 'data', 'x-browser-profile'),
+  browserDataDir: path.join(PROJECT_ROOT, "data", "x-browser-profile"),
 
   // Auth state marker file
-  authPath: path.join(PROJECT_ROOT, 'data', 'x-auth.json'),
+  authPath: path.join(PROJECT_ROOT, "data", "x-auth.json"),
 
   // Browser viewport settings
   viewport: {
@@ -48,15 +49,14 @@ export const config = {
 
   // Chrome launch arguments
   chromeArgs: [
-    '--disable-blink-features=AutomationControlled',
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-sync',
+    "--disable-blink-features=AutomationControlled",
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-sync",
   ],
 
   // Args to ignore when launching Chrome
-  chromeIgnoreDefaultArgs: ['--enable-automation'],
+  chromeIgnoreDefaultArgs: ["--enable-automation"],
 };
-

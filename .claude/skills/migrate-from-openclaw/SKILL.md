@@ -67,6 +67,7 @@ Then explain the key architectural differences. Don't dump a table — paraphras
 - **Simpler config:** NanoClaw has no config file — behavior is in the code and `CLAUDE.md` files. Credentials live in `.env` or the OneCLI vault.
 
 AskUserQuestion: "Ready to start migrating? I'll go through each area one at a time."
+
 1. **Yes, let's go** — proceed to Phase 1
 2. **Tell me more** — explain more about any area they ask about
 3. **Skip migration** — exit
@@ -136,20 +137,22 @@ Check for Anthropic API keys or tokens in OpenClaw's auth system. OpenClaw store
   "version": 1,
   "profiles": {
     "anthropic:default": {
-      "type": "api_key",       // or "token" or "oauth"
+      "type": "api_key", // or "token" or "oauth"
       "provider": "anthropic",
-      "key": "sk-ant-..."      // for api_key type
+      "key": "sk-ant-..." // for api_key type
     }
   }
 }
 ```
 
 Profile IDs follow `provider:identifier` format. Look for any profile where `provider` is `"anthropic"`. The credential field depends on the `type`:
+
 - `type: "api_key"` → `key` field (or `keyRef` for SecretRef)
 - `type: "token"` → `token` field (or `tokenRef` for SecretRef)
 - `type: "oauth"` → `access` field (OAuth access token, may need refresh)
 
 Also check:
+
 1. `<STATE_DIR>/.env` — for `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
 2. Config `models.providers` — for Anthropic provider entries with `apiKey`
 
@@ -160,12 +163,14 @@ If found, offer to save to `.env`. This pre-fills the NanoClaw setup credential 
 ### Sender Allowlists
 
 Read the channel configs for access control settings. OpenClaw stores these per-channel:
+
 - `channels.<channel>.allowFrom` — array of allowed sender IDs (E.164 for WhatsApp, numeric IDs for Telegram)
 - `channels.<channel>.dmPolicy` — `"open"`, `"allowlist"`, `"disabled"`
 - `channels.<channel>.groupPolicy` — `"open"`, `"allowlist"`, `"disabled"`
 - `channels.<channel>.groupAllowFrom` — array of allowed group member IDs
 
 NanoClaw uses `~/.config/nanoclaw/sender-allowlist.json` with this format:
+
 ```json
 {
   "default": { "allow": "*", "mode": "trigger" },
@@ -180,17 +185,20 @@ NanoClaw uses `~/.config/nanoclaw/sender-allowlist.json` with this format:
 ```
 
 Fields:
+
 - `allow`: `"*"` (all senders) or `string[]` (specific sender IDs)
 - `mode`: `"trigger"` (messages stored but trigger blocked for non-allowed senders) or `"drop"` (messages silently discarded before storage)
 - `logDenied`: optional boolean (default `true`), logs denied messages
 
 If OpenClaw had allowlists configured, show the user what was set and offer to create the NanoClaw equivalent. Map:
+
 - `dmPolicy:"allowlist"` + `allowFrom` → per-chat entry with `"allow"` array, `"mode": "trigger"`
 - `groupPolicy:"allowlist"` + `groupAllowFrom` → per-group entry with `"allow"` array, `"mode": "trigger"`
 - `dmPolicy:"open"` → `"allow": "*"`
 - `dmPolicy:"disabled"` → per-chat entry with `"allow": []`, `"mode": "drop"` (or don't register that chat)
 
 Create the directory and file:
+
 ```bash
 mkdir -p ~/.config/nanoclaw
 ```
@@ -208,6 +216,7 @@ If the OpenClaw value differs significantly from 30 minutes, note it for the use
 This phase is fully conversational — read files directly and discuss with the user. No script needed.
 
 **Where files go depends on the Phase 1 (groups) decision:**
+
 - **Shared personality:** Core identity goes in `groups/global/CLAUDE.md` (seen by all groups). Group-specific customizations go in each group's own CLAUDE.md.
 - **Fully separate:** Everything goes in `groups/main/` (or each group's own folder).
 - **Just main group:** Everything goes in `groups/main/`.
@@ -234,6 +243,7 @@ CLAUDE.md is always loaded into the agent's context — it's the agent's continu
 - **In a separate soul file:** Detailed personality backstory, extended guidelines, creative writing style, philosophical grounding — things the agent can reference when relevant but don't need to consume context tokens on every turn.
 
 **File placement depends on Phase 1 choice:**
+
 - Shared personality → edit `groups/global/CLAUDE.md` for the core traits, create `groups/global/soul.md` for the extended content. All groups will see both.
 - Separate / main only → edit `groups/main/CLAUDE.md`, create `groups/main/soul.md`.
 
@@ -308,6 +318,7 @@ For API keys, read the config value directly (don't display raw keys) and write 
 ### Other files (TOOLS.md, HEARTBEAT.md, BOOTSTRAP.md, AGENTS.md)
 
 If these exist, briefly mention them and explain:
+
 - TOOLS.md: NanoClaw agents have their own tool discovery; this doesn't transfer
 - HEARTBEAT.md: NanoClaw uses scheduled tasks instead
 - BOOTSTRAP.md: NanoClaw uses CLAUDE.md and container skills instead
@@ -332,6 +343,7 @@ Parse the status block. Key fields: HAS_CREDENTIAL, CREDENTIAL_MASKED, NANOCLAW_
 **If HAS_CREDENTIAL=false but the user expects a credential:** The extraction script may not recognize the config structure. Fall back to reading the channel section of `openclaw.json` directly with the Read tool and look for any field that contains a token or key value. Ask the user to confirm.
 
 If HAS_CREDENTIAL=true: Show the masked credential (`CREDENTIAL_MASKED`). AskUserQuestion:
+
 1. **Use this credential** — run again with `--write-env .env` to save it
 2. **Enter a new one** — ask in plain text, write to `.env` manually
 3. **Skip this channel** — don't configure
@@ -388,6 +400,7 @@ Show the user each server and ask which to bring over. For servers that need cus
 ### Webhooks and Endpoints
 
 If the config has webhook sections (in `cron.webhook`, `cron.failureDestination`, or channel-specific webhooks):
+
 - Explain what they were used for
 - These don't map directly but NanoClaw can be customized to support them
 - Discuss the use case with the user and propose a solution if it's important to them
@@ -396,6 +409,7 @@ If the config has webhook sections (in `cron.webhook`, `cron.failureDestination`
 ### Other Config
 
 Scan the config for notable sections and briefly mention anything that doesn't carry over:
+
 - **Exec approvals / command allowlist:** NanoClaw uses container isolation instead — the agent runs with `--dangerously-skip-permissions` inside a sandboxed container
 - **Human delay:** Not applicable in NanoClaw's container model
 - **Compaction:** Handled by Claude Code SDK automatically
@@ -411,6 +425,7 @@ Don't belabor these — just mention and move on.
 Print a comprehensive summary:
 
 **Migrated:**
+
 - Assistant name → `.env` ASSISTANT_NAME + CLAUDE.md templates updated
 - Groups → registered in database, folders created with CLAUDE.md templates
 - Timezone → `.env` TZ
@@ -425,15 +440,18 @@ Print a comprehensive summary:
 - MCP servers → registered in agent-runner
 
 **Noted for later:**
+
 - Channel code installation (happens during `/setup`)
 - Task creation (if deferred due to no registered group yet)
 - Container rebuild needed (if skills or MCP servers were added): `./container/build.sh`
 
 **Not applicable:**
+
 - Unsupported channels (list them — groups registered for future)
 - OpenClaw-specific features (exec approvals, human delay, TTS, model config, session reset policies, etc.)
 
 **Discussed and deferred:**
+
 - List any customizations agreed on but not yet implemented
 
 Remind: "Run `/setup` next to complete your NanoClaw installation. Channel credentials are already prepared in `.env`. When setup asks which channels to enable, select the ones we configured."

@@ -35,6 +35,7 @@ Write `/tmp/nanoclaw-diagnostics.json`. No paths, usernames, hostnames, or IP ad
 Show the entire JSON to the user and ask via AskUserQuestion: **Yes** / **No** / **Never ask again**
 
 **Yes**:
+
 ```bash
 curl -s -X POST https://us.i.posthog.com/capture/ -H 'Content-Type: application/json' -d @/tmp/nanoclaw-diagnostics.json
 rm /tmp/nanoclaw-diagnostics.json
@@ -43,6 +44,7 @@ rm /tmp/nanoclaw-diagnostics.json
 **No**: `rm /tmp/nanoclaw-diagnostics.json`
 
 **Never ask again**:
+
 1. Replace contents of `.claude/skills/setup/diagnostics.md` with `# Diagnostics — opted out`
 2. Replace contents of `.claude/skills/update-nanoclaw/diagnostics.md` with `# Diagnostics — opted out`
 3. Remove the `## 9. Diagnostics` section from `.claude/skills/setup/SKILL.md` and the `## Diagnostics` section from `.claude/skills/update-nanoclaw/SKILL.md`

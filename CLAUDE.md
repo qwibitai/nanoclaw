@@ -8,18 +8,18 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `src/index.ts` | Orchestrator: state, message loop, agent invocation |
-| `src/channels/registry.ts` | Channel registry (self-registration at startup) |
-| `src/ipc.ts` | IPC watcher and task processing |
-| `src/router.ts` | Message formatting and outbound routing |
-| `src/config.ts` | Trigger pattern, paths, intervals |
-| `src/container-runner.ts` | Spawns agent containers with mounts |
-| `src/task-scheduler.ts` | Runs scheduled tasks |
-| `src/db.ts` | SQLite operations |
-| `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
-| `container/skills/` | Skills loaded inside agent containers (browser, status, formatting) |
+| File                       | Purpose                                                             |
+| -------------------------- | ------------------------------------------------------------------- |
+| `src/index.ts`             | Orchestrator: state, message loop, agent invocation                 |
+| `src/channels/registry.ts` | Channel registry (self-registration at startup)                     |
+| `src/ipc.ts`               | IPC watcher and task processing                                     |
+| `src/router.ts`            | Message formatting and outbound routing                             |
+| `src/config.ts`            | Trigger pattern, paths, intervals                                   |
+| `src/container-runner.ts`  | Spawns agent containers with mounts                                 |
+| `src/task-scheduler.ts`    | Runs scheduled tasks                                                |
+| `src/db.ts`                | SQLite operations                                                   |
+| `groups/{name}/CLAUDE.md`  | Per-group memory (isolated)                                         |
+| `container/skills/`        | Skills loaded inside agent containers (browser, status, formatting) |
 
 ## Secrets / Credentials / Proxy (OneCLI)
 
@@ -34,15 +34,15 @@ Four types of skills exist in NanoClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) f
 - **Operational skills** — instruction-only workflows, always on `main` (e.g. `/setup`, `/debug`)
 - **Container skills** — loaded inside agent containers at runtime (`container/skills/`)
 
-| Skill | When to Use |
-|-------|-------------|
-| `/setup` | First-time installation, authentication, service configuration |
-| `/customize` | Adding channels, integrations, changing behavior |
-| `/debug` | Container issues, logs, troubleshooting |
-| `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
-| `/init-onecli` | Install OneCLI Agent Vault and migrate `.env` credentials to it |
-| `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
-| `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+| Skill               | When to Use                                                       |
+| ------------------- | ----------------------------------------------------------------- |
+| `/setup`            | First-time installation, authentication, service configuration    |
+| `/customize`        | Adding channels, integrations, changing behavior                  |
+| `/debug`            | Container issues, logs, troubleshooting                           |
+| `/update-nanoclaw`  | Bring upstream NanoClaw updates into a customized install         |
+| `/init-onecli`      | Install OneCLI Agent Vault and migrate `.env` credentials to it   |
+| `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch     |
+| `/get-qodo-rules`   | Load org- and repo-level coding rules from Qodo before code tasks |
 
 ## Contributing
 
@@ -53,12 +53,13 @@ Before creating a PR, adding a skill, or preparing any contribution, you MUST re
 Run commands directly—don't tell the user to run them.
 
 ```bash
-npm run dev          # Run with hot reload
-npm run build        # Compile TypeScript
+pnpm run dev          # Run with hot reload
+pnpm run build        # Compile TypeScript
 ./container/build.sh # Rebuild agent container
 ```
 
 Service management:
+
 ```bash
 # macOS (launchd)
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist

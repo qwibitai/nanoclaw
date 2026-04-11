@@ -29,6 +29,7 @@ The sandbox provides a MITM proxy at `host.docker.internal:3128` that handles ne
 - For **WhatsApp**: a phone with WhatsApp installed
 
 Verify sandbox support:
+
 ```bash
 docker sandbox version
 ```
@@ -57,6 +58,7 @@ docker sandbox network proxy shell-nanoclaw-workspace \
 Telegram does not need proxy bypass.
 
 Enter the sandbox:
+
 ```bash
 docker sandbox run shell-nanoclaw-workspace
 ```
@@ -138,8 +140,8 @@ Three changes to `src/container-runner.ts`:
 
 ```typescript
 // Create an empty file to shadow .env (Docker Sandbox rejects /dev/null mounts)
-const emptyEnvPath = path.join(DATA_DIR, 'empty-env');
-if (!fs.existsSync(emptyEnvPath)) fs.writeFileSync(emptyEnvPath, '');
+const emptyEnvPath = path.join(DATA_DIR, "empty-env");
+if (!fs.existsSync(emptyEnvPath)) fs.writeFileSync(emptyEnvPath, "");
 // Use emptyEnvPath instead of '/dev/null' in the mount
 ```
 
@@ -150,9 +152,9 @@ if (!fs.existsSync(emptyEnvPath)) fs.writeFileSync(emptyEnvPath, '');
 ```typescript
 const caCertSrc = process.env.NODE_EXTRA_CA_CERTS || process.env.SSL_CERT_FILE;
 if (caCertSrc) {
-  const certDir = path.join(DATA_DIR, 'ca-cert');
+  const certDir = path.join(DATA_DIR, "ca-cert");
   fs.mkdirSync(certDir, { recursive: true });
-  fs.copyFileSync(caCertSrc, path.join(certDir, 'proxy-ca.crt'));
+  fs.copyFileSync(caCertSrc, path.join(certDir, "proxy-ca.crt"));
   // Mount: certDir -> /workspace/ca-cert (read-only)
   // Set NODE_EXTRA_CA_CERTS=/workspace/ca-cert/proxy-ca.crt in the container
 }
@@ -171,7 +173,7 @@ In `src/container-runtime.ts`, the `cleanupOrphans()` function matches container
 In `src/credential-proxy.ts`, upstream API requests need to go through the sandbox proxy. Add `HttpsProxyAgent` to outbound requests:
 
 ```typescript
-import { HttpsProxyAgent } from 'https-proxy-agent';
+import { HttpsProxyAgent } from "https-proxy-agent";
 
 const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy;
 const upstreamAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
@@ -221,6 +223,7 @@ npx tsx setup/index.ts --step register \
 ```
 
 **To find your chat ID:** Send any message to your bot, then:
+
 ```bash
 curl -s --proxy $HTTPS_PROXY "https://api.telegram.org/bot<TOKEN>/getUpdates" | python3 -m json.tool
 ```
@@ -296,6 +299,7 @@ Agent container → DinD bridge → Sandbox VM → host.docker.internal:3128 →
 ### Shared paths for DinD mounts
 
 Only the workspace directory is available for Docker-in-Docker bind mounts. Paths outside the workspace fail with "path not shared":
+
 - `/dev/null` → replace with an empty file in the project dir
 - `/usr/local/share/ca-certificates/` → copy cert to project dir
 - `/home/agent/` → clone to workspace instead
@@ -307,11 +311,13 @@ The workspace is mounted via virtiofs. Git's pack file handling can corrupt over
 ## Troubleshooting
 
 ### npm install fails with SELF_SIGNED_CERT_IN_CHAIN
+
 ```bash
 npm config set strict-ssl false
 ```
 
 ### Container build fails with proxy errors
+
 ```bash
 docker build \
   --build-arg http_proxy=$http_proxy \
@@ -320,19 +326,25 @@ docker build \
 ```
 
 ### Agent containers fail with "path not shared"
+
 All bind-mounted paths must be under the workspace directory. Check:
+
 - Is NanoClaw cloned into the workspace? (not `/home/agent/`)
 - Is the CA cert copied to the project root?
 - Has the empty `.env` shadow file been created?
 
 ### Agent containers can't reach Anthropic API
+
 Verify proxy env vars are forwarded to agent containers. Check container logs for `HTTP_PROXY=http://host.docker.internal:3128`.
 
 ### WhatsApp error 405
+
 The version fetch is returning a stale version. Make sure the proxy-aware `fetchWaVersionViaProxy` patch is applied — it fetches `sw.js` through `HttpsProxyAgent` and parses `client_revision`.
 
 ### WhatsApp "Connection failed" immediately
+
 Proxy bypass not configured. From the **host**, run:
+
 ```bash
 docker sandbox network proxy <sandbox-name> \
   --bypass-host web.whatsapp.com \
@@ -341,17 +353,22 @@ docker sandbox network proxy <sandbox-name> \
 ```
 
 ### Telegram bot doesn't receive messages
+
 1. Check the grammy proxy patch is applied (look for `HttpsProxyAgent` in `src/channels/telegram.ts`)
 2. Check Group Privacy is disabled in @BotFather if using in groups
 
 ### Git clone fails with "inflate: data stream error"
+
 Clone to a non-workspace path first, then move:
+
 ```bash
 cd ~ && git clone https://github.com/qwibitai/nanoclaw.git && mv nanoclaw /path/to/workspace/nanoclaw
 ```
 
 ### WhatsApp QR code doesn't display
+
 Run the auth command interactively inside the sandbox (not piped through `docker sandbox exec`):
+
 ```bash
 docker sandbox run shell-nanoclaw-workspace
 # Then inside:

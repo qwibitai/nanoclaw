@@ -10,6 +10,7 @@ When responding to Slack channels, use Slack's mrkdwn syntax instead of standard
 ## How to detect Slack context
 
 Check your group folder name or workspace path:
+
 - Folder starts with `slack_` (e.g., `slack_engineering`, `slack_general`)
 - Or check `/workspace/group/` path for `slack_` prefix
 
@@ -17,13 +18,13 @@ Check your group folder name or workspace path:
 
 ### Text styles
 
-| Style | Syntax | Example |
-|-------|--------|---------|
-| Bold | `*text*` | *bold text* |
-| Italic | `_text_` | _italic text_ |
-| Strikethrough | `~text~` | ~strikethrough~ |
-| Code (inline) | `` `code` `` | `inline code` |
-| Code block | ` ```code``` ` | Multi-line code |
+| Style         | Syntax         | Example         |
+| ------------- | -------------- | --------------- |
+| Bold          | `*text*`       | _bold text_     |
+| Italic        | `_text_`       | _italic text_   |
+| Strikethrough | `~text~`       | ~strikethrough~ |
+| Code (inline) | `` `code` ``   | `inline code`   |
+| Code block    | ` ```code``` ` | Multi-line code |
 
 ### Links and mentions
 

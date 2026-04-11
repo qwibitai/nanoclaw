@@ -1,0 +1,5 @@
+packages:
+  - "container/agent-runner"
+
+minimumReleaseAge: 10080
+sharedWorkspaceLockfile: false

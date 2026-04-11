@@ -1,9 +1,9 @@
-import { spawn } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { spawn } from "child_process";
+import fs from "fs";
+import path from "path";
 
-import { DATA_DIR } from './config.js';
-import { logger } from './logger.js';
+import { DATA_DIR } from "./config.js";
+import { logger } from "./logger.js";
 
 interface RemoteControlSession {
   pid: number;
@@ -18,9 +18,9 @@ let activeSession: RemoteControlSession | null = null;
 const URL_REGEX = /https:\/\/claude\.ai\/code\S+/;
 const URL_TIMEOUT_MS = 30_000;
 const URL_POLL_MS = 200;
-const STATE_FILE = path.join(DATA_DIR, 'remote-control.json');
-const STDOUT_FILE = path.join(DATA_DIR, 'remote-control.stdout');
-const STDERR_FILE = path.join(DATA_DIR, 'remote-control.stderr');
+const STATE_FILE = path.join(DATA_DIR, "remote-control.json");
+const STDOUT_FILE = path.join(DATA_DIR, "remote-control.stdout");
+const STDERR_FILE = path.join(DATA_DIR, "remote-control.stderr");
 
 function saveState(session: RemoteControlSession): void {
   fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
@@ -51,7 +51,7 @@ function isProcessAlive(pid: number): boolean {
 export function restoreRemoteControl(): void {
   let data: string;
   try {
-    data = fs.readFileSync(STATE_FILE, 'utf-8');
+    data = fs.readFileSync(STATE_FILE, "utf-8");
   } catch {
     return;
   }
@@ -62,7 +62,7 @@ export function restoreRemoteControl(): void {
       activeSession = session;
       logger.info(
         { pid: session.pid, url: session.url },
-        'Restored Remote Control session from previous run',
+        "Restored Remote Control session from previous run",
       );
     } else {
       clearState();
@@ -104,14 +104,14 @@ export async function startRemoteControl(
   // Redirect stdout/stderr to files so the process has no pipes to the parent.
   // This prevents SIGPIPE when NanoClaw restarts.
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  const stdoutFd = fs.openSync(STDOUT_FILE, 'w');
-  const stderrFd = fs.openSync(STDERR_FILE, 'w');
+  const stdoutFd = fs.openSync(STDOUT_FILE, "w");
+  const stderrFd = fs.openSync(STDERR_FILE, "w");
 
   let proc;
   try {
-    proc = spawn('claude', ['remote-control', '--name', 'NanoClaw Remote'], {
+    proc = spawn("claude", ["remote-control", "--name", "NanoClaw Remote"], {
       cwd,
-      stdio: ['pipe', stdoutFd, stderrFd],
+      stdio: ["pipe", stdoutFd, stderrFd],
       detached: true,
     });
   } catch (err: any) {
@@ -122,7 +122,7 @@ export async function startRemoteControl(
 
   // Auto-accept the "Enable Remote Control?" prompt
   if (proc.stdin) {
-    proc.stdin.write('y\n');
+    proc.stdin.write("y\n");
     proc.stdin.end();
   }
 
@@ -135,7 +135,7 @@ export async function startRemoteControl(
 
   const pid = proc.pid;
   if (!pid) {
-    return { ok: false, error: 'Failed to get process PID' };
+    return { ok: false, error: "Failed to get process PID" };
   }
 
   // Poll the stdout file for the URL
@@ -145,14 +145,14 @@ export async function startRemoteControl(
     const poll = () => {
       // Check if process died
       if (!isProcessAlive(pid)) {
-        resolve({ ok: false, error: 'Process exited before producing URL' });
+        resolve({ ok: false, error: "Process exited before producing URL" });
         return;
       }
 
       // Check for URL in stdout file
-      let content = '';
+      let content = "";
       try {
-        content = fs.readFileSync(STDOUT_FILE, 'utf-8');
+        content = fs.readFileSync(STDOUT_FILE, "utf-8");
       } catch {
         // File might not have content yet
       }
@@ -169,10 +169,7 @@ export async function startRemoteControl(
         activeSession = session;
         saveState(session);
 
-        logger.info(
-          { url: match[0], pid, sender, chatJid },
-          'Remote Control session started',
-        );
+        logger.info({ url: match[0], pid, sender, chatJid }, "Remote Control session started");
         resolve({ ok: true, url: match[0] });
         return;
       }
@@ -180,17 +177,17 @@ export async function startRemoteControl(
       // Timeout check
       if (Date.now() - startTime >= URL_TIMEOUT_MS) {
         try {
-          process.kill(-pid, 'SIGTERM');
+          process.kill(-pid, "SIGTERM");
         } catch {
           try {
-            process.kill(pid, 'SIGTERM');
+            process.kill(pid, "SIGTERM");
           } catch {
             // already dead
           }
         }
         resolve({
           ok: false,
-          error: 'Timed out waiting for Remote Control URL',
+          error: "Timed out waiting for Remote Control URL",
         });
         return;
       }
@@ -208,17 +205,17 @@ export function stopRemoteControl():
     }
   | { ok: false; error: string } {
   if (!activeSession) {
-    return { ok: false, error: 'No active Remote Control session' };
+    return { ok: false, error: "No active Remote Control session" };
   }
 
   const { pid } = activeSession;
   try {
-    process.kill(pid, 'SIGTERM');
+    process.kill(pid, "SIGTERM");
   } catch {
     // already dead
   }
   activeSession = null;
   clearState();
-  logger.info({ pid }, 'Remote Control session stopped');
+  logger.info({ pid }, "Remote Control session stopped");
   return { ok: true };
 }

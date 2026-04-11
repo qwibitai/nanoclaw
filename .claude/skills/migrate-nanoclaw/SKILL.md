@@ -59,6 +59,7 @@ Check for existing guide: `.nanoclaw-migrations/guide.md` or `.nanoclaw-migratio
 ### Tier 1: Lightweight — suggest `/update-nanoclaw` instead
 
 Conditions (any of):
+
 - Very few upstream changes (< ~5 commits) AND few user changes (< ~3 changed files)
 - User recently updated/migrated (merge-base is close to upstream HEAD)
 
@@ -67,12 +68,14 @@ Tell the user the scope is small and suggest `/update-nanoclaw` might be simpler
 ### Tier 2: Standard
 
 Conditions:
+
 - Moderate total diff (3-15 changed files, no large number of new files)
 - Manageable scope that fits in a single guide file
 
 ### Tier 3: Complex
 
 Conditions (any of):
+
 - Many new files added (indicates many skills applied) — discount files that come purely from skill merges when assessing complexity; a fork with 3 skills and no other changes is simpler than it looks by file count alone
 - Deep source changes to core files (`src/index.ts`, `src/container-runner.ts`, etc.) beyond what skills introduced
 - Lots of insertions/deletions in user-authored code (not skill-merged code)
@@ -83,10 +86,12 @@ Use the full process: multiple sub-agents in parallel, directory-based guide, mi
 **Now combine the scope assessment with initial user input in one interaction.** Present the scope summary (how many commits, files, which tier) and ask (AskUserQuestion):
 
 For Tier 1:
+
 - **Use /update-nanoclaw** — simpler merge-based approach
 - **Proceed with full migration** — continue
 
 For Tier 2/3 (with or without existing guide):
+
 - If guide exists and is current: **Skip to upgrade** / **Update guide** (add new changes) / **Re-extract from scratch**
 - If guide exists but is stale: **Update guide** (recommended) / **Re-extract from scratch** / **Skip to upgrade anyway**
 - If no guide: **Yes, let me describe my customizations first** / **Just figure it out** / **A bit of both**
@@ -120,6 +125,7 @@ Spawn a haiku sub-agent (Agent tool, model: haiku) for initial exploration:
 > Report: (a) list of applied skills with their merge commit hashes, (b) list of all changed files, (c) any custom skill directories that don't match upstream branches.
 
 From the sub-agent results, identify:
+
 - **Which files came purely from skill merges** — these will be reapplied by re-merging skill branches in Phase 2
 - **Everything else** — all remaining changes are customizations to analyze (whether they're on skill-touched files or not)
 
@@ -146,6 +152,7 @@ Then spawn sub-agents to analyze all non-skill changes. For Tier 2, one or two a
 Each sub-agent task:
 
 > Read these diffs and the current file contents. For each change:
+>
 > 1. `git diff $BASE..HEAD -- <file>` (or `git diff <skill-merge-hash>..HEAD -- <file>` for skill-modified files)
 > 2. Read the full current file for context
 > 3. Summarize: what changed, what the likely intent is
@@ -153,6 +160,7 @@ Each sub-agent task:
 > 5. For non-standard changes, extract the key code, imports, API calls, and configurations verbatim.
 
 **Inter-skill conflicts:** If multiple skills are applied, spawn an additional sub-agent to check for interactions between them. Look for:
+
 - Duplicate declarations (same variable/constant defined by two skill branches)
 - Conflicting approaches (one skill throws on missing env var, another provides a fallback)
 - Shared files modified by multiple skills
@@ -185,6 +193,7 @@ Present the plan to the user for review before proceeding to the guide.
 **Storage:** `.nanoclaw-migrations/guide.md` for Tier 2. `.nanoclaw-migrations/` directory with `index.md` and section files for Tier 3.
 
 **Verification:** After writing the guide, read it back and verify:
+
 - Every referenced file path exists in the current codebase
 - Code snippets match what's actually in the files
 - No customizations from the analysis were accidentally omitted
@@ -255,12 +264,14 @@ without seeing the original diff.>
 ```
 
 **Judging detail level:** For each customization, assess whether a fresh Claude session could reproduce it from intent alone:
+
 - **Standard changes** (config values, simple logic, well-known patterns): describe the intent and the target. Example: "Change `POLL_INTERVAL` in `src/config.ts` from 2000 to 1000."
 - **Non-standard changes** (specific API usage, custom integrations, unusual patterns, library-specific configurations): include the actual code snippets, import paths, API endpoints, configuration objects — everything needed to reproduce it without guessing.
 
 Example entries at different detail levels:
 
 **Standard (brief):**
+
 ```markdown
 ### Custom trigger word
 
@@ -272,7 +283,8 @@ Example entries at different detail levels:
 ```
 
 **Non-standard (detailed):**
-```markdown
+
+````markdown
 ### Spanish translation for outbound messages
 
 **Intent:** All outbound messages are translated to Spanish before sending. Uses the DeepL API via the `deepl-node` package.
@@ -285,25 +297,28 @@ Example entries at different detail levels:
 
 2. In `src/router.ts`, add import at top:
    ```typescript
-   import * as deepl from 'deepl-node';
+   import * as deepl from "deepl-node";
    const translator = new deepl.Translator(process.env.DEEPL_API_KEY!);
    ```
+````
 
 3. In the `formatOutbound` function, before the return statement, add:
    ```typescript
-   const result = await translator.translateText(text, null, 'es');
+   const result = await translator.translateText(text, null, "es");
    text = result.text;
    ```
    Note: the function needs to be made async if it isn't already.
-```
+
+````
 
 After writing, offer to commit for the user:
 ```bash
 git add .nanoclaw-migrations/
 git commit -m "chore: save migration guide"
-```
+````
 
 Ask (AskUserQuestion): "Migration guide saved. Want to upgrade now or later?"
+
 - **Upgrade now** — continue to Phase 2
 - **Later** — stop here
 
@@ -322,6 +337,7 @@ Read the migration guide. If missing, tell the user you need to extract customiz
 > "You've made changes since the migration guide was generated. These changes won't be included in the upgrade."
 
 AskUserQuestion:
+
 - **Update the guide first** — go to step 1.2 to incorporate new changes
 - **Proceed anyway** — user accepts that recent changes will be lost
 - **Abort** — stop
@@ -380,6 +396,7 @@ Work in `.upgrade-worktree/`. Follow each customization section in the migration
 For Tier 3 migrations with a migration plan, follow the plan's ordering and staging. If the plan calls for staged validation (e.g. validate after skills, then validate after source changes), do so.
 
 For each customization:
+
 1. Read the "How to apply" instructions from the guide
 2. Read the target file(s) in the worktree to understand the current upstream version
 3. Apply the changes as described — use the code snippets and specific instructions from the guide
@@ -399,17 +416,20 @@ If build fails, show the error. Fix only issues caused by the migration. If uncl
 ## 2.7 Live test (optional)
 
 Ask (AskUserQuestion):
+
 - **Test live** — stop service, run from worktree against real data, send a test message
 - **Skip** — trust the build, proceed to swap
 
 If testing live:
 
 1. Stop the service (do this directly):
+
    ```bash
    launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist 2>/dev/null || true
    ```
 
 2. Symlink data into the worktree:
+
    ```bash
    ln -s "$PROJECT_ROOT/store" "$WORKTREE/store"
    ln -s "$PROJECT_ROOT/data" "$WORKTREE/data"
@@ -452,6 +472,7 @@ rm -rf /tmp/nanoclaw-migrations-backup
 ```
 
 Update the guide's header hashes to reflect the new state. Offer to commit:
+
 ```bash
 git add .nanoclaw-migrations/
 git commit -m "chore: upgrade to upstream $(git rev-parse --short upstream/$UPSTREAM_BRANCH)"
@@ -464,11 +485,13 @@ Do NOT use `git checkout -B` to create an intermediate branch — this caused is
 Run `npm install && npm run build` in the main tree to confirm.
 
 Restart the service:
+
 ```bash
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 ```
 
 Show summary:
+
 - Previous version (backup tag)
 - New HEAD
 - Customizations reapplied (list from guide)

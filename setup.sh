@@ -10,7 +10,7 @@ LOG_FILE="$PROJECT_ROOT/logs/setup.log"
 
 mkdir -p "$PROJECT_ROOT/logs"
 
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [bootstrap] $*" >> "$LOG_FILE"; }
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [bootstrap] $*" >>"$LOG_FILE"; }
 
 # --- Platform detection ---
 
@@ -18,9 +18,9 @@ detect_platform() {
   local uname_s
   uname_s=$(uname -s)
   case "$uname_s" in
-    Darwin*) PLATFORM="macos" ;;
-    Linux*)  PLATFORM="linux" ;;
-    *)       PLATFORM="unknown" ;;
+  Darwin*) PLATFORM="macos" ;;
+  Linux*) PLATFORM="linux" ;;
+  *) PLATFORM="unknown" ;;
   esac
 
   IS_WSL="false"
@@ -79,18 +79,18 @@ install_deps() {
     log "Running as root, using --unsafe-perm"
   fi
 
-  log "Running npm ci $npm_flags"
-  if npm ci $npm_flags >> "$LOG_FILE" 2>&1; then
+  log "Running pnpm install $npm_flags"
+  if pnpm install $npm_flags >>"$LOG_FILE" 2>&1; then
     DEPS_OK="true"
-    log "npm install succeeded"
+    log "pnpm install succeeded"
   else
-    log "npm install failed"
+    log "pnpm install failed"
     return
   fi
 
   # Verify native module (better-sqlite3)
   log "Verifying native modules"
-  if node -e "require('better-sqlite3')" >> "$LOG_FILE" 2>&1; then
+  if node -e "require('better-sqlite3')" >>"$LOG_FILE" 2>&1; then
     NATIVE_OK="true"
     log "better-sqlite3 loads OK"
   else

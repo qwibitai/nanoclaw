@@ -1,6 +1,6 @@
-import fs from 'fs';
-import path from 'path';
-import { logger } from './logger.js';
+import fs from "fs";
+import path from "path";
+import { logger } from "./logger.js";
 
 /**
  * Parse the .env file and return values for the requested keys.
@@ -9,22 +9,22 @@ import { logger } from './logger.js';
  * so they don't leak to child processes.
  */
 export function readEnvFile(keys: string[]): Record<string, string> {
-  const envFile = path.join(process.cwd(), '.env');
+  const envFile = path.join(process.cwd(), ".env");
   let content: string;
   try {
-    content = fs.readFileSync(envFile, 'utf-8');
+    content = fs.readFileSync(envFile, "utf-8");
   } catch (err) {
-    logger.debug({ err }, '.env file not found, using defaults');
+    logger.debug({ err }, ".env file not found, using defaults");
     return {};
   }
 
   const result: Record<string, string> = {};
   const wanted = new Set(keys);
 
-  for (const line of content.split('\n')) {
+  for (const line of content.split("\n")) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eqIdx = trimmed.indexOf('=');
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
     if (eqIdx === -1) continue;
     const key = trimmed.slice(0, eqIdx).trim();
     if (!wanted.has(key)) continue;

@@ -8,15 +8,13 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "format:fix": "prettier --write \"src/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\"",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
     "prepare": "husky",
     "setup": "tsx setup/index.ts",
     "auth": "tsx src/whatsapp-auth.ts",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -26,20 +24,15 @@
     "cron-parser": "5.5.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.35.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
-    "eslint": "^9.35.0",
-    "eslint-plugin-no-catch-all": "^1.1.0",
-    "globals": "^15.12.0",
+    "@typescript/native-preview": "7.0.0-dev.20260411.1",
     "husky": "^9.1.7",
-    "prettier": "^3.8.1",
-    "tsx": "^4.19.0",
-    "typescript": "^5.7.0",
-    "typescript-eslint": "^8.35.0",
+    "oxfmt": "0.44.0",
+    "oxlint": "1.59.0",
+    "oxlint-tsgolint": "0.20.0",
+    "typescript": "^6.0.2",
     "vitest": "^4.0.18"
   },
-  "engines": {
-    "node": ">=20"
-  }
+  "packageManager": "pnpm@10.33.0"
 }

@@ -3,12 +3,15 @@
 ## Known Issues (2026-02-08)
 
 ### 1. [FIXED] Resume branches from stale tree position
+
 When agent teams spawns subagent CLI processes, they write to the same session JSONL. On subsequent `query()` resumes, the CLI reads the JSONL but may pick a stale branch tip (from before the subagent activity), causing the agent's response to land on a branch the host never receives a `result` for. **Fix**: pass `resumeSessionAt` with the last assistant message UUID to explicitly anchor each resume.
 
 ### 2. IDLE_TIMEOUT == CONTAINER_TIMEOUT (both 30 min)
+
 Both timers fire at the same time, so containers always exit via hard SIGKILL (code 137) instead of graceful `_close` sentinel shutdown. The idle timeout should be shorter (e.g., 5 min) so containers wind down between messages, while container timeout stays at 30 min as a safety net for stuck agents.
 
 ### 3. Cursor advanced before agent succeeds
+
 `processGroupMessages` advances `lastAgentTimestamp` before the agent runs. If the container times out, retries find no messages (cursor already past them). Messages are permanently lost on timeout.
 
 ### 4. Kubernetes image garbage collection deletes nanoclaw-agent image
@@ -18,6 +21,7 @@ Both timers fire at the same time, so containers always exit via hard SIGKILL (c
 **Cause**: If your container runtime has Kubernetes enabled (Rancher Desktop enables it by default), the kubelet runs image garbage collection when disk usage exceeds 85%. NanoClaw containers are ephemeral (run and exit), so `nanoclaw-agent:latest` is never protected by a running container. The kubelet sees it as unused and deletes it — often overnight when no messages are being processed. Other images (docker-compose services) survive because they have long-running containers referencing them.
 
 **Fix**: Disable Kubernetes if you don't need it:
+
 ```bash
 # Rancher Desktop
 rdctl set --kubernetes-enabled=false
@@ -27,12 +31,14 @@ rdctl set --kubernetes-enabled=false
 ```
 
 **Diagnosis**: Check the k3s log for image GC activity:
+
 ```bash
 grep -i "nanoclaw" ~/Library/Logs/rancher-desktop/k3s.log
 # Look for: "Removing image to free bytes" with the nanoclaw-agent image ID
 ```
 
 Check NanoClaw logs for image status:
+
 ```bash
 grep -E "image found|image NOT found|image missing" logs/nanoclaw.log
 ```

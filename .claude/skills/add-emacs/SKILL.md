@@ -63,6 +63,7 @@ git merge --continue
 For any other conflict, read the conflicted file and reconcile both sides manually.
 
 This adds:
+
 - `src/channels/emacs.ts` — `EmacsBridgeChannel` HTTP server (port 8766)
 - `src/channels/emacs.test.ts` — unit tests
 - `emacs/nanoclaw.el` — Emacs Lisp package (`nanoclaw-chat`, `nanoclaw-org-send`)
@@ -101,6 +102,7 @@ mkdir -p data/env && cp .env data/env/env
 The `nanoclaw.el` package requires only Emacs 27.1+ built-in libraries (`url`, `json`, `org`) — no package manager setup needed.
 
 AskUserQuestion: Which Emacs distribution are you using?
+
 - **Doom Emacs** - config.el with map! keybindings
 - **Spacemacs** - dotspacemacs/user-config in ~/.spacemacs
 - **Vanilla Emacs / other** - init.el with global-set-key
@@ -218,6 +220,7 @@ Or change the port in `.env` (`EMACS_CHANNEL_PORT=8767`) and update `nanoclaw-po
 ### No response from agent
 
 Check:
+
 1. NanoClaw is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
 2. Emacs group is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid = 'emacs:default'"`
 3. Logs show activity: `tail -50 logs/nanoclaw.log`
@@ -266,13 +269,13 @@ launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 The Emacs bridge converts markdown → org-mode automatically. Agents should
 output standard markdown — **not** org-mode syntax. The conversion handles:
 
-| Markdown | Org-mode |
-|----------|----------|
-| `**bold**` | `*bold*` |
-| `*italic*` | `/italic/` |
-| `~~text~~` | `+text+` |
-| `` `code` `` | `~code~` |
-| ` ```lang ` | `#+begin_src lang` |
+| Markdown     | Org-mode           |
+| ------------ | ------------------ |
+| `**bold**`   | `*bold*`           |
+| `*italic*`   | `/italic/`         |
+| `~~text~~`   | `+text+`           |
+| `` `code` `` | `~code~`           |
+| ` ```lang `  | `#+begin_src lang` |
 
 If an agent outputs org-mode directly, bold/italic/etc. will be double-converted
 and render incorrectly.

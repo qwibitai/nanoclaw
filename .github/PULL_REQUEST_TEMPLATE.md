@@ -1,4 +1,5 @@
 <!-- contributing-guide: v1 -->
+
 ## Type of Change
 
 - [ ] **Feature skill** - adds a channel or integration (source code changes + SKILL.md)
@@ -9,7 +10,6 @@
 - [ ] **Documentation** - docs, README, or CONTRIBUTING changes only
 
 ## Description
-
 
 ## For Skills
 

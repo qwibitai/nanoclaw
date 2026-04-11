@@ -11,6 +11,7 @@ Also verify the `createTask` function signature in `src/db.ts` — it may be sim
 Source: `<STATE_DIR>/cron/jobs.json` (from `src/cron/types.ts`). If the file format doesn't match what's described below, read the actual file and adapt — OpenClaw may have changed the schema.
 
 The jobs file is `{ version: 1, jobs: CronJob[] }`. Each job has:
+
 - `id`, `name`, `description`, `enabled`, `deleteAfterRun`
 - `schedule`: `{ kind: "cron", expr: string, tz?: string }` | `{ kind: "every", everyMs: number }` | `{ kind: "at", at: string }`
 - `payload`: `{ kind: "agentTurn", message: string, model?, thinking?, timeoutSeconds? }` | `{ kind: "systemEvent", text: string }`
@@ -24,21 +25,21 @@ The jobs file is `{ version: 1, jobs: CronJob[] }`. Each job has:
 
 Source: `src/db.ts`
 
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | TEXT PK | Unique task ID |
-| `group_folder` | TEXT | Target group directory (e.g. `"main"`) |
-| `chat_jid` | TEXT | Target chat JID |
-| `prompt` | TEXT | Task instructions |
-| `script` | TEXT | Optional bash pre-check script |
-| `schedule_type` | TEXT | `"cron"`, `"interval"`, or `"once"` |
-| `schedule_value` | TEXT | Cron expr, ms interval, or ISO timestamp |
-| `context_mode` | TEXT | `"group"` or `"isolated"` (default) |
-| `next_run` | TEXT | ISO timestamp — must be computed at insert time |
-| `last_run` | TEXT | null initially |
-| `last_result` | TEXT | null initially |
-| `status` | TEXT | `"active"`, `"paused"`, or `"completed"` |
-| `created_at` | TEXT | ISO timestamp |
+| Column           | Type    | Notes                                           |
+| ---------------- | ------- | ----------------------------------------------- |
+| `id`             | TEXT PK | Unique task ID                                  |
+| `group_folder`   | TEXT    | Target group directory (e.g. `"main"`)          |
+| `chat_jid`       | TEXT    | Target chat JID                                 |
+| `prompt`         | TEXT    | Task instructions                               |
+| `script`         | TEXT    | Optional bash pre-check script                  |
+| `schedule_type`  | TEXT    | `"cron"`, `"interval"`, or `"once"`             |
+| `schedule_value` | TEXT    | Cron expr, ms interval, or ISO timestamp        |
+| `context_mode`   | TEXT    | `"group"` or `"isolated"` (default)             |
+| `next_run`       | TEXT    | ISO timestamp — must be computed at insert time |
+| `last_run`       | TEXT    | null initially                                  |
+| `last_result`    | TEXT    | null initially                                  |
+| `status`         | TEXT    | `"active"`, `"paused"`, or `"completed"`        |
+| `created_at`     | TEXT    | ISO timestamp                                   |
 
 ## Field Mapping
 
@@ -93,6 +94,7 @@ db.close();
 ```
 
 **Computing `next_run`:**
+
 - `cron` tasks: use `CronExpressionParser.parse(expr, { tz }).next().toISOString()`
 - `interval` tasks: `new Date(Date.now() + ms).toISOString()`
 - `once` tasks: `next_run` equals `schedule_value`

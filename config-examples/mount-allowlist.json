@@ -16,10 +16,6 @@
       "description": "Work documents (read-only)"
     }
   ],
-  "blockedPatterns": [
-    "password",
-    "secret",
-    "token"
-  ],
+  "blockedPatterns": ["password", "secret", "token"],
   "nonMainReadOnly": true
 }

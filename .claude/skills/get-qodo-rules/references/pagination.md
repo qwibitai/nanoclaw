@@ -24,8 +24,8 @@ The API returns rules in pages of 50. All pages must be fetched to ensure no rul
 
 Construct `{API_URL}` from `ENVIRONMENT_NAME` (read from `~/.qodo/config.json`):
 
-| `ENVIRONMENT_NAME` | `{API_URL}` |
-|---|---|
+| `ENVIRONMENT_NAME`   | `{API_URL}`                                      |
+| -------------------- | ------------------------------------------------ |
 | set (e.g. `staging`) | `https://qodo-platform.staging.qodo.ai/rules/v1` |
 
 ## After Fetching

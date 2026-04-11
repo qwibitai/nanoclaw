@@ -55,6 +55,7 @@ git merge upstream/skill/native-credential-proxy || {
 ```
 
 This merges in:
+
 - `src/credential-proxy.ts` and `src/credential-proxy.test.ts` (the proxy implementation)
 - Restored credential proxy usage in `src/index.ts`, `src/container-runner.ts`, `src/container-runtime.ts`, `src/config.ts`
 - Removed `@onecli-sh/sdk` dependency
@@ -69,9 +70,11 @@ If the merge reports conflicts beyond `package-lock.json`, resolve them by readi
 Replace the OneCLI auth reference with the native proxy:
 
 In `groups/main/CLAUDE.md`, replace:
+
 > OneCLI manages credentials (including Anthropic auth) — run `onecli --help`.
 
 with:
+
 > The native credential proxy manages credentials (including Anthropic auth) via `.env` — see `src/credential-proxy.ts`.
 
 ### Validate code changes
@@ -129,6 +132,7 @@ npm run build
 ```
 
 Then restart the service:
+
 - macOS: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
 - Linux: `systemctl --user restart nanoclaw`
 - WSL/manual: stop and re-run `bash start-nanoclaw.sh`

@@ -3,42 +3,42 @@ description: Count codebase tokens with tiktoken and update a README badge
 
 inputs:
   include:
-    description: 'Glob patterns for files to count (space-separated)'
+    description: "Glob patterns for files to count (space-separated)"
     required: true
   exclude:
-    description: 'Glob patterns to exclude (space-separated)'
+    description: "Glob patterns to exclude (space-separated)"
     required: false
-    default: ''
+    default: ""
   context-window:
-    description: 'Context window size for percentage calculation'
+    description: "Context window size for percentage calculation"
     required: false
-    default: '200000'
+    default: "200000"
   readme:
-    description: 'Path to README file'
+    description: "Path to README file"
     required: false
-    default: 'README.md'
+    default: "README.md"
   encoding:
-    description: 'Tiktoken encoding name'
+    description: "Tiktoken encoding name"
     required: false
-    default: 'cl100k_base'
+    default: "cl100k_base"
   marker:
-    description: 'HTML comment marker name'
+    description: "HTML comment marker name"
     required: false
-    default: 'token-count'
+    default: "token-count"
   badge-path:
-    description: 'Path to write SVG badge (empty = no SVG)'
+    description: "Path to write SVG badge (empty = no SVG)"
     required: false
-    default: ''
+    default: ""
 
 outputs:
   tokens:
-    description: 'Total token count'
+    description: "Total token count"
     value: ${{ steps.count.outputs.tokens }}
   percentage:
-    description: 'Percentage of context window'
+    description: "Percentage of context window"
     value: ${{ steps.count.outputs.percentage }}
   badge:
-    description: 'Badge text that was inserted'
+    description: "Badge text that was inserted"
     value: ${{ steps.count.outputs.badge }}
 
 runs:

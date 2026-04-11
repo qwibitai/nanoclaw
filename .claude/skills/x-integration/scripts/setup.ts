@@ -6,16 +6,16 @@
  * Interactive script - opens browser for manual login
  */
 
-import { chromium } from 'playwright';
-import * as readline from 'readline';
-import fs from 'fs';
-import path from 'path';
-import { config, cleanupLockFiles } from '../lib/browser.js';
+import { chromium } from "playwright";
+import * as readline from "readline";
+import fs from "fs";
+import path from "path";
+import { config, cleanupLockFiles } from "../lib/browser.js";
 
 async function setup(): Promise<void> {
-  console.log('=== X (Twitter) Authentication Setup ===\n');
-  console.log('This will open Chrome for you to log in to X.');
-  console.log('Your login session will be saved for automated interactions.\n');
+  console.log("=== X (Twitter) Authentication Setup ===\n");
+  console.log("This will open Chrome for you to log in to X.");
+  console.log("Your login session will be saved for automated interactions.\n");
   console.log(`Chrome path: ${config.chromePath}`);
   console.log(`Profile dir: ${config.browserDataDir}\n`);
 
@@ -25,7 +25,7 @@ async function setup(): Promise<void> {
 
   cleanupLockFiles();
 
-  console.log('Launching browser...\n');
+  console.log("Launching browser...\n");
 
   const context = await chromium.launchPersistentContext(config.browserDataDir, {
     executablePath: config.chromePath,
@@ -35,53 +35,63 @@ async function setup(): Promise<void> {
     ignoreDefaultArgs: config.chromeIgnoreDefaultArgs,
   });
 
-  const page = context.pages()[0] || await context.newPage();
+  const page = context.pages()[0] || (await context.newPage());
 
   // Navigate to login page
-  await page.goto('https://x.com/login');
+  await page.goto("https://x.com/login");
 
-  console.log('Please log in to X in the browser window.');
-  console.log('After you see your home feed, come back here and press Enter.\n');
+  console.log("Please log in to X in the browser window.");
+  console.log("After you see your home feed, come back here and press Enter.\n");
 
   // Wait for user to complete login
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout
+    output: process.stdout,
   });
 
-  await new Promise<void>(resolve => {
-    rl.question('Press Enter when logged in... ', () => {
+  await new Promise<void>((resolve) => {
+    rl.question("Press Enter when logged in... ", () => {
       rl.close();
       resolve();
     });
   });
 
   // Verify login by navigating to home and checking for account button
-  console.log('\nVerifying login status...');
-  await page.goto('https://x.com/home');
+  console.log("\nVerifying login status...");
+  await page.goto("https://x.com/home");
   await page.waitForTimeout(config.timeouts.pageLoad);
 
-  const isLoggedIn = await page.locator('[data-testid="SideNav_AccountSwitcher_Button"]').isVisible().catch(() => false);
+  const isLoggedIn = await page
+    .locator('[data-testid="SideNav_AccountSwitcher_Button"]')
+    .isVisible()
+    .catch(() => false);
 
   if (isLoggedIn) {
     // Save auth marker
-    fs.writeFileSync(config.authPath, JSON.stringify({
-      authenticated: true,
-      timestamp: new Date().toISOString()
-    }, null, 2));
+    fs.writeFileSync(
+      config.authPath,
+      JSON.stringify(
+        {
+          authenticated: true,
+          timestamp: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+    );
 
-    console.log('\n✅ Authentication successful!');
+    console.log("\n✅ Authentication successful!");
     console.log(`Session saved to: ${config.browserDataDir}`);
-    console.log('\nYou can now use X integration features.');
+    console.log("\nYou can now use X integration features.");
   } else {
-    console.log('\n❌ Could not verify login status.');
-    console.log('Please try again and make sure you are logged in to X.');
+    console.log("\n❌ Could not verify login status.");
+    console.log("Please try again and make sure you are logged in to X.");
   }
 
   await context.close();
 }
 
-setup().catch(err => {
-  console.error('Setup failed:', err.message);
+setup().catch((err) => {
+  console.error("Setup failed:", err.message);
   process.exit(1);
 });

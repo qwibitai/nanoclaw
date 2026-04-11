@@ -13,9 +13,9 @@
  *   === END ===
  */
 
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import fs from "fs";
+import os from "os";
+import path from "path";
 
 // ---------------------------------------------------------------------------
 // JSON5-tolerant parser (no dependency)
@@ -23,17 +23,13 @@ import path from 'path';
 
 function parseJson5(text: string): unknown {
   // Strip single-line comments (// ...) that aren't inside strings
-  let cleaned = text.replace(
-    /("(?:[^"\\]|\\.)*")|\/\/[^\n]*/g,
-    (match, str) => (str ? str : ''),
-  );
+  let cleaned = text.replace(/("(?:[^"\\]|\\.)*")|\/\/[^\n]*/g, (match, str) => (str ? str : ""));
   // Strip block comments (/* ... */)
-  cleaned = cleaned.replace(
-    /("(?:[^"\\]|\\.)*")|\/\*[\s\S]*?\*\//g,
-    (match, str) => (str ? str : ''),
+  cleaned = cleaned.replace(/("(?:[^"\\]|\\.)*")|\/\*[\s\S]*?\*\//g, (match, str) =>
+    str ? str : "",
   );
   // Strip trailing commas before } or ]
-  cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+  cleaned = cleaned.replace(/,\s*([}\]])/g, "$1");
   return JSON.parse(cleaned);
 }
 
@@ -42,12 +38,12 @@ function parseJson5(text: string): unknown {
 // ---------------------------------------------------------------------------
 
 function emitStatus(fields: Record<string, string | number | boolean>): void {
-  const lines = ['=== NANOCLAW MIGRATE: DISCOVERY ==='];
+  const lines = ["=== NANOCLAW MIGRATE: DISCOVERY ==="];
   for (const [key, value] of Object.entries(fields)) {
     lines.push(`${key}: ${value}`);
   }
-  lines.push('=== END ===');
-  console.log(lines.join('\n'));
+  lines.push("=== END ===");
+  console.log(lines.join("\n"));
 }
 
 // ---------------------------------------------------------------------------
@@ -57,7 +53,7 @@ function emitStatus(fields: Record<string, string | number | boolean>): void {
 function parseArgs(): { stateDir?: string } {
   const args = process.argv.slice(2);
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--state-dir' && args[i + 1]) {
+    if (args[i] === "--state-dir" && args[i + 1]) {
       return { stateDir: args[i + 1] };
     }
   }
@@ -74,9 +70,7 @@ function resolveStateDir(explicit?: string): string | null {
 
   if (explicit) {
     // Expand ~ prefix
-    const expanded = explicit.startsWith('~')
-      ? path.join(home, explicit.slice(1))
-      : explicit;
+    const expanded = explicit.startsWith("~") ? path.join(home, explicit.slice(1)) : explicit;
     candidates.push(expanded);
   }
 
@@ -84,8 +78,8 @@ function resolveStateDir(explicit?: string): string | null {
     candidates.push(process.env.OPENCLAW_STATE_DIR);
   }
 
-  candidates.push(path.join(home, '.openclaw'));
-  candidates.push(path.join(home, '.clawdbot'));
+  candidates.push(path.join(home, ".openclaw"));
+  candidates.push(path.join(home, ".clawdbot"));
 
   for (const dir of candidates) {
     if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
@@ -99,14 +93,12 @@ function resolveStateDir(explicit?: string): string | null {
 // Config loading
 // ---------------------------------------------------------------------------
 
-function loadConfig(
-  stateDir: string,
-): Record<string, unknown> | null {
-  for (const name of ['openclaw.json', 'clawdbot.json']) {
+function loadConfig(stateDir: string): Record<string, unknown> | null {
+  for (const name of ["openclaw.json", "clawdbot.json"]) {
     const configPath = path.join(stateDir, name);
     if (fs.existsSync(configPath)) {
       try {
-        const raw = fs.readFileSync(configPath, 'utf-8');
+        const raw = fs.readFileSync(configPath, "utf-8");
         return parseJson5(raw) as Record<string, unknown>;
       } catch {
         // Try next name
@@ -125,40 +117,44 @@ interface ChannelInfo {
   hasCreds: boolean;
 }
 
-const SUPPORTED_CHANNELS = new Set([
-  'whatsapp',
-  'telegram',
-  'slack',
-  'discord',
-]);
+const SUPPORTED_CHANNELS = new Set(["whatsapp", "telegram", "slack", "discord"]);
 
 // Fields that indicate a credential is present for each channel
 const CREDENTIAL_FIELDS: Record<string, string[]> = {
-  telegram: ['botToken'],
-  discord: ['token'],
-  slack: ['botToken', 'appToken'],
+  telegram: ["botToken"],
+  discord: ["token"],
+  slack: ["botToken", "appToken"],
   whatsapp: [], // Auth-state based, no token
-  signal: ['account'],
+  signal: ["account"],
   imessage: [],
-  matrix: ['homeserverUrl', 'accessToken'],
-  irc: ['server'],
-  msteams: ['appId'],
-  feishu: ['appId'],
+  matrix: ["homeserverUrl", "accessToken"],
+  irc: ["server"],
+  msteams: ["appId"],
+  feishu: ["appId"],
   googlechat: [],
-  mattermost: ['token', 'url'],
+  mattermost: ["token", "url"],
   zalo: [],
-  bluebubbles: ['url'],
+  bluebubbles: ["url"],
 };
 
 const ALL_KNOWN_CHANNELS = new Set([
-  'whatsapp', 'telegram', 'slack', 'discord', 'signal',
-  'imessage', 'matrix', 'irc', 'msteams', 'feishu',
-  'googlechat', 'mattermost', 'zalo', 'bluebubbles',
+  "whatsapp",
+  "telegram",
+  "slack",
+  "discord",
+  "signal",
+  "imessage",
+  "matrix",
+  "irc",
+  "msteams",
+  "feishu",
+  "googlechat",
+  "mattermost",
+  "zalo",
+  "bluebubbles",
 ]);
 
-function detectChannels(
-  config: Record<string, unknown>,
-): ChannelInfo[] {
+function detectChannels(config: Record<string, unknown>): ChannelInfo[] {
   // Check both config.channels.* (newer) and top-level config.* (older/legacy)
   const channelsSections: Record<string, unknown> = {};
 
@@ -166,7 +162,7 @@ function detectChannels(
   const nested = config.channels as Record<string, unknown> | undefined;
   if (nested) {
     for (const [k, v] of Object.entries(nested)) {
-      if (v && typeof v === 'object') channelsSections[k] = v;
+      if (v && typeof v === "object") channelsSections[k] = v;
     }
   }
 
@@ -174,14 +170,14 @@ function detectChannels(
   for (const key of Object.keys(config)) {
     if (ALL_KNOWN_CHANNELS.has(key) && !channelsSections[key]) {
       const v = config[key];
-      if (v && typeof v === 'object') channelsSections[key] = v;
+      if (v && typeof v === "object") channelsSections[key] = v;
     }
   }
 
   const results: ChannelInfo[] = [];
 
   for (const [name, section] of Object.entries(channelsSections)) {
-    if (!section || typeof section !== 'object') continue;
+    if (!section || typeof section !== "object") continue;
     const ch = section as Record<string, unknown>;
 
     // Check if any credential field is present and non-empty
@@ -190,24 +186,19 @@ function detectChannels(
 
     for (const field of credFields) {
       const val = ch[field];
-      if (val && (typeof val === 'string' || typeof val === 'object')) {
+      if (val && (typeof val === "string" || typeof val === "object")) {
         hasCreds = true;
         break;
       }
     }
 
     // Also check accounts for multi-account setups
-    if (!hasCreds && ch.accounts && typeof ch.accounts === 'object') {
-      for (const acct of Object.values(
-        ch.accounts as Record<string, unknown>,
-      )) {
-        if (!acct || typeof acct !== 'object') continue;
+    if (!hasCreds && ch.accounts && typeof ch.accounts === "object") {
+      for (const acct of Object.values(ch.accounts as Record<string, unknown>)) {
+        if (!acct || typeof acct !== "object") continue;
         const a = acct as Record<string, unknown>;
         for (const field of credFields) {
-          if (
-            a[field] &&
-            (typeof a[field] === 'string' || typeof a[field] === 'object')
-          ) {
+          if (a[field] && (typeof a[field] === "string" || typeof a[field] === "object")) {
             hasCreds = true;
             break;
           }
@@ -217,7 +208,7 @@ function detectChannels(
     }
 
     // WhatsApp: check for auth state directory instead of token
-    if (name === 'whatsapp' && !hasCreds) {
+    if (name === "whatsapp" && !hasCreds) {
       // Will be checked separately via agents directory
       hasCreds = false;
     }
@@ -233,40 +224,53 @@ function detectChannels(
 // ---------------------------------------------------------------------------
 
 const WORKSPACE_FILES = [
-  'SOUL.md',
-  'USER.md',
-  'MEMORY.md',
-  'IDENTITY.md',
-  'TOOLS.md',
-  'HEARTBEAT.md',
-  'BOOTSTRAP.md',
-  'AGENTS.md',
+  "SOUL.md",
+  "USER.md",
+  "MEMORY.md",
+  "IDENTITY.md",
+  "TOOLS.md",
+  "HEARTBEAT.md",
+  "BOOTSTRAP.md",
+  "AGENTS.md",
 ];
 
-function findWorkspace(stateDir: string, config: Record<string, unknown> | null): {
+function findWorkspace(
+  stateDir: string,
+  config: Record<string, unknown> | null,
+): {
   dir: string | null;
   files: string[];
 } {
   // Check config-specified workspace path first (agent.workspace or agents.defaults.workspace)
   const configPaths: string[] = [];
   if (config) {
-    const agentWs = (config.agent as Record<string, unknown> | undefined)?.workspace as string | undefined;
-    if (agentWs) configPaths.push(agentWs.startsWith('~') ? path.join(os.homedir(), agentWs.slice(1)) : agentWs);
-    const defaultsWs = ((config.agents as Record<string, unknown> | undefined)?.defaults as Record<string, unknown> | undefined)?.workspace as string | undefined;
-    if (defaultsWs) configPaths.push(defaultsWs.startsWith('~') ? path.join(os.homedir(), defaultsWs.slice(1)) : defaultsWs);
+    const agentWs = (config.agent as Record<string, unknown> | undefined)?.workspace as
+      | string
+      | undefined;
+    if (agentWs)
+      configPaths.push(
+        agentWs.startsWith("~") ? path.join(os.homedir(), agentWs.slice(1)) : agentWs,
+      );
+    const defaultsWs = (
+      (config.agents as Record<string, unknown> | undefined)?.defaults as
+        | Record<string, unknown>
+        | undefined
+    )?.workspace as string | undefined;
+    if (defaultsWs)
+      configPaths.push(
+        defaultsWs.startsWith("~") ? path.join(os.homedir(), defaultsWs.slice(1)) : defaultsWs,
+      );
   }
 
   // Check config-specified paths, then default locations
   const candidates = [
     ...configPaths,
-    ...['workspace', 'workspace.default'].map((n) => path.join(stateDir, n)),
+    ...["workspace", "workspace.default"].map((n) => path.join(stateDir, n)),
   ];
 
   for (const ws of candidates) {
     if (fs.existsSync(ws) && fs.statSync(ws).isDirectory()) {
-      const found = WORKSPACE_FILES.filter((f) =>
-        fs.existsSync(path.join(ws, f)),
-      );
+      const found = WORKSPACE_FILES.filter((f) => fs.existsSync(path.join(ws, f)));
       if (found.length > 0) {
         return { dir: ws, files: found };
       }
@@ -274,15 +278,13 @@ function findWorkspace(stateDir: string, config: Record<string, unknown> | null)
   }
 
   // Check agent-specific workspaces
-  const agentsDir = path.join(stateDir, 'agents');
+  const agentsDir = path.join(stateDir, "agents");
   if (fs.existsSync(agentsDir)) {
     for (const agentId of fs.readdirSync(agentsDir)) {
-      for (const wsName of ['workspace', 'workspace.default']) {
+      for (const wsName of ["workspace", "workspace.default"]) {
         const ws = path.join(agentsDir, agentId, wsName);
         if (fs.existsSync(ws) && fs.statSync(ws).isDirectory()) {
-          const found = WORKSPACE_FILES.filter((f) =>
-            fs.existsSync(path.join(ws, f)),
-          );
+          const found = WORKSPACE_FILES.filter((f) => fs.existsSync(path.join(ws, f)));
           if (found.length > 0) {
             return { dir: ws, files: found };
           }
@@ -300,15 +302,12 @@ function findWorkspace(stateDir: string, config: Record<string, unknown> | null)
 
 function countDailyMemoryFiles(workspaceDir: string | null): number {
   if (!workspaceDir) return 0;
-  const memoryDir = path.join(workspaceDir, 'memory');
+  const memoryDir = path.join(workspaceDir, "memory");
   if (!fs.existsSync(memoryDir) || !fs.statSync(memoryDir).isDirectory()) {
     return 0;
   }
   try {
-    return fs
-      .readdirSync(memoryDir)
-      .filter((f) => f.endsWith('.md'))
-      .length;
+    return fs.readdirSync(memoryDir).filter((f) => f.endsWith(".md")).length;
   } catch {
     return 0;
   }
@@ -324,10 +323,7 @@ interface SkillInfo {
   path: string;
 }
 
-function detectSkills(
-  stateDir: string,
-  workspaceDir: string | null,
-): SkillInfo[] {
+function detectSkills(stateDir: string, workspaceDir: string | null): SkillInfo[] {
   const skills: SkillInfo[] = [];
   const seen = new Set<string>();
 
@@ -338,7 +334,7 @@ function detectSkills(
         const skillDir = path.join(dir, entry);
         if (!fs.statSync(skillDir).isDirectory()) continue;
         // A directory is a skill if it contains SKILL.md
-        if (fs.existsSync(path.join(skillDir, 'SKILL.md'))) {
+        if (fs.existsSync(path.join(skillDir, "SKILL.md"))) {
           if (seen.has(entry)) continue;
           seen.add(entry);
           skills.push({ name: entry, source, path: skillDir });
@@ -351,17 +347,17 @@ function detectSkills(
 
   // 1. Workspace skills
   if (workspaceDir) {
-    scanDir(path.join(workspaceDir, 'skills'), 'workspace');
+    scanDir(path.join(workspaceDir, "skills"), "workspace");
     // 4. Project-level shared skills
-    scanDir(path.join(workspaceDir, '.agents', 'skills'), 'project');
+    scanDir(path.join(workspaceDir, ".agents", "skills"), "project");
   }
 
   // 2. Managed/shared skills
-  scanDir(path.join(stateDir, 'skills'), 'shared');
+  scanDir(path.join(stateDir, "skills"), "shared");
 
   // 3. Personal cross-project skills
-  const personalSkills = path.join(os.homedir(), '.agents', 'skills');
-  scanDir(personalSkills, 'personal');
+  const personalSkills = path.join(os.homedir(), ".agents", "skills");
+  scanDir(personalSkills, "personal");
 
   return skills;
 }
@@ -371,18 +367,18 @@ function detectSkills(
 // ---------------------------------------------------------------------------
 
 function extractIdentityName(stateDir: string, workspaceDir: string | null): string {
-  if (!workspaceDir) return '';
+  if (!workspaceDir) return "";
 
-  const identityPath = path.join(workspaceDir, 'IDENTITY.md');
-  if (!fs.existsSync(identityPath)) return '';
+  const identityPath = path.join(workspaceDir, "IDENTITY.md");
+  if (!fs.existsSync(identityPath)) return "";
 
   try {
-    const content = fs.readFileSync(identityPath, 'utf-8');
+    const content = fs.readFileSync(identityPath, "utf-8");
     // IDENTITY.md uses key:value format, e.g. "name: Claw"
     const match = content.match(/^name:\s*(.+)/im);
-    return match ? match[1].trim() : '';
+    return match ? match[1].trim() : "";
   } catch {
-    return '';
+    return "";
   }
 }
 
@@ -391,16 +387,14 @@ function extractIdentityName(stateDir: string, workspaceDir: string | null): str
 // ---------------------------------------------------------------------------
 
 function detectAgents(stateDir: string): string[] {
-  const agentsDir = path.join(stateDir, 'agents');
+  const agentsDir = path.join(stateDir, "agents");
   if (!fs.existsSync(agentsDir)) return [];
 
   try {
-    return fs
-      .readdirSync(agentsDir)
-      .filter((f) => {
-        const p = path.join(agentsDir, f);
-        return fs.statSync(p).isDirectory() && !f.startsWith('.');
-      });
+    return fs.readdirSync(agentsDir).filter((f) => {
+      const p = path.join(agentsDir, f);
+      return fs.statSync(p).isDirectory() && !f.startsWith(".");
+    });
   } catch {
     return [];
   }
@@ -414,7 +408,7 @@ interface GroupInfo {
   channel: string;
   id: string; // Platform-specific ID (WhatsApp JID, Telegram chat ID, etc.)
   name: string;
-  source: 'session' | 'config';
+  source: "session" | "config";
 }
 
 /**
@@ -424,13 +418,13 @@ interface GroupInfo {
  */
 function toNanoClawJid(channel: string, id: string): string {
   switch (channel) {
-    case 'whatsapp':
+    case "whatsapp":
       return id; // Already in JID format (120...@g.us)
-    case 'telegram':
+    case "telegram":
       return `tg:${id}`;
-    case 'discord':
+    case "discord":
       return `dc:${id}`;
-    case 'slack':
+    case "slack":
       return `slack:${id}`;
     default:
       return `${channel}:${id}`;
@@ -447,17 +441,11 @@ function detectGroups(
 
   // Source 1: Session store — scan for group session keys
   for (const agentId of agents) {
-    const sessionsPath = path.join(
-      stateDir,
-      'agents',
-      agentId,
-      'sessions',
-      'sessions.json',
-    );
+    const sessionsPath = path.join(stateDir, "agents", agentId, "sessions", "sessions.json");
     if (!fs.existsSync(sessionsPath)) continue;
 
     try {
-      const raw = fs.readFileSync(sessionsPath, 'utf-8');
+      const raw = fs.readFileSync(sessionsPath, "utf-8");
       const data = JSON.parse(raw) as Record<string, unknown>;
 
       // Sessions can be stored as an object with session keys, or as
@@ -476,27 +464,27 @@ function detectGroups(
 
         const [, channel, kind, id] = match;
         // Skip DM sessions for group detection — they're individual chats
-        if (kind === 'dm') continue;
+        if (kind === "dm") continue;
         const dedupKey = `${channel}:${id}`;
         if (seen.has(dedupKey)) continue;
         seen.add(dedupKey);
 
         // Try to extract display name from session entry
-        let name = '';
-        if (value && typeof value === 'object') {
+        let name = "";
+        if (value && typeof value === "object") {
           const entry = value as Record<string, unknown>;
           name =
             (entry.displayName as string) ??
             (entry.label as string) ??
             (entry.subject as string) ??
-            '';
+            "";
         }
 
         groups.push({
           channel,
           id,
           name: name || id,
-          source: 'session',
+          source: "session",
         });
       }
     } catch {
@@ -506,10 +494,9 @@ function detectGroups(
 
   // Source 2: Channel config — groups explicitly configured
   if (config) {
-    const channels =
-      (config.channels as Record<string, unknown> | undefined) ?? {};
+    const channels = (config.channels as Record<string, unknown> | undefined) ?? {};
     for (const [channelName, channelSection] of Object.entries(channels)) {
-      if (!channelSection || typeof channelSection !== 'object') continue;
+      if (!channelSection || typeof channelSection !== "object") continue;
       const ch = channelSection as Record<string, unknown>;
 
       // WhatsApp/Telegram: channels.<channel>.groups.<groupId>
@@ -523,13 +510,13 @@ function detectGroups(
             channel: channelName,
             id: groupId,
             name: groupId,
-            source: 'config',
+            source: "config",
           });
         }
       }
 
       // Discord: channels.discord.guilds.<guildId>
-      if (channelName === 'discord') {
+      if (channelName === "discord") {
         const guilds = ch.guilds as Record<string, unknown> | undefined;
         if (guilds) {
           for (const guildId of Object.keys(guilds)) {
@@ -537,10 +524,10 @@ function detectGroups(
             if (seen.has(dedupKey)) continue;
             seen.add(dedupKey);
             groups.push({
-              channel: 'discord',
+              channel: "discord",
               id: guildId,
               name: guildId,
-              source: 'config',
+              source: "config",
             });
           }
         }
@@ -559,18 +546,18 @@ function countCronJobs(stateDir: string): {
   count: number;
   summaries: string[];
 } {
-  const jobsPath = path.join(stateDir, 'cron', 'jobs.json');
+  const jobsPath = path.join(stateDir, "cron", "jobs.json");
   if (!fs.existsSync(jobsPath)) return { count: 0, summaries: [] };
 
   try {
-    const raw = fs.readFileSync(jobsPath, 'utf-8');
+    const raw = fs.readFileSync(jobsPath, "utf-8");
     const data = JSON.parse(raw) as {
       jobs?: Array<{ name?: string; enabled?: boolean }>;
     };
     const jobs = data.jobs ?? [];
     const summaries = jobs
       .filter((j) => j.enabled !== false)
-      .map((j) => j.name || 'unnamed')
+      .map((j) => j.name || "unnamed")
       .slice(0, 10);
     return { count: jobs.length, summaries };
   } catch {
@@ -584,13 +571,11 @@ function countCronJobs(stateDir: string): {
 
 interface ConfigPlugin {
   name: string;
-  source: 'skills.entries' | 'plugins.entries';
+  source: "skills.entries" | "plugins.entries";
   hasApiKey: boolean;
 }
 
-function detectConfigPlugins(
-  config: Record<string, unknown>,
-): ConfigPlugin[] {
+function detectConfigPlugins(config: Record<string, unknown>): ConfigPlugin[] {
   const results: ConfigPlugin[] = [];
 
   // Check skills.entries (e.g. openai-whisper-api with apiKey)
@@ -598,10 +583,10 @@ function detectConfigPlugins(
   const skillEntries = skills?.entries as Record<string, unknown> | undefined;
   if (skillEntries) {
     for (const [name, entry] of Object.entries(skillEntries)) {
-      if (!entry || typeof entry !== 'object') continue;
+      if (!entry || typeof entry !== "object") continue;
       const e = entry as Record<string, unknown>;
       const hasKey = !!(e.apiKey || e.token || e.key);
-      results.push({ name, source: 'skills.entries', hasApiKey: hasKey });
+      results.push({ name, source: "skills.entries", hasApiKey: hasKey });
     }
   }
 
@@ -610,10 +595,10 @@ function detectConfigPlugins(
   const pluginEntries = plugins?.entries as Record<string, unknown> | undefined;
   if (pluginEntries) {
     for (const [name, entry] of Object.entries(pluginEntries)) {
-      if (!entry || typeof entry !== 'object') continue;
+      if (!entry || typeof entry !== "object") continue;
       // Deep-search for apiKey in nested config
-      const hasKey = JSON.stringify(entry).includes('apiKey');
-      results.push({ name, source: 'plugins.entries', hasApiKey: hasKey });
+      const hasKey = JSON.stringify(entry).includes("apiKey");
+      results.push({ name, source: "plugins.entries", hasApiKey: hasKey });
     }
   }
 
@@ -624,9 +609,7 @@ function detectConfigPlugins(
 // MCP server detection
 // ---------------------------------------------------------------------------
 
-function detectMcpServers(
-  config: Record<string, unknown>,
-): string[] {
+function detectMcpServers(config: Record<string, unknown>): string[] {
   const mcp = config.mcp as Record<string, unknown> | undefined;
   if (!mcp) return [];
   const servers = mcp.servers as Record<string, unknown> | undefined;
@@ -643,19 +626,17 @@ function main(): void {
   const stateDir = resolveStateDir(explicitDir);
 
   if (!stateDir) {
-    emitStatus({ STATUS: 'not_found' });
+    emitStatus({ STATUS: "not_found" });
     return;
   }
 
   const config = loadConfig(stateDir);
   const channels = config ? detectChannels(config) : [];
-  const { dir: workspaceDir, files: workspaceFiles } =
-    findWorkspace(stateDir, config);
+  const { dir: workspaceDir, files: workspaceFiles } = findWorkspace(stateDir, config);
   const identityName = extractIdentityName(stateDir, workspaceDir);
   const agents = detectAgents(stateDir);
   const groups = detectGroups(stateDir, config, agents);
-  const { count: cronCount, summaries: cronSummaries } =
-    countCronJobs(stateDir);
+  const { count: cronCount, summaries: cronSummaries } = countCronJobs(stateDir);
   const mcpServers = config ? detectMcpServers(config) : [];
   const dailyMemoryFiles = countDailyMemoryFiles(workspaceDir);
   const skills = detectSkills(stateDir, workspaceDir);
@@ -663,71 +644,71 @@ function main(): void {
 
   // Format channels as "name(has_creds)" or "name(no_creds)"
   const channelList = channels
-    .map((c) => `${c.name}(${c.hasCreds ? 'has_creds' : 'no_creds'})`)
-    .join(',');
+    .map((c) => `${c.name}(${c.hasCreds ? "has_creds" : "no_creds"})`)
+    .join(",");
 
   // Separate supported vs unsupported
   const unsupported = channels
     .filter((c) => !SUPPORTED_CHANNELS.has(c.name))
     .map((c) => c.name)
-    .join(',');
+    .join(",");
 
   // Format groups as "channel:id(name)" — also include NanoClaw JID mapping
   const groupList = groups
-    .map(
-      (g) =>
-        `${g.channel}:${g.id}(${g.name})=>${toNanoClawJid(g.channel, g.id)}`,
-    )
-    .join('|');
+    .map((g) => `${g.channel}:${g.id}(${g.name})=>${toNanoClawJid(g.channel, g.id)}`)
+    .join("|");
 
   // Format skills as "name(source)" list
-  const skillList = skills
-    .map((s) => `${s.name}(${s.source})`)
-    .join(',');
+  const skillList = skills.map((s) => `${s.name}(${s.source})`).join(",");
 
   // Dump raw top-level config keys so Claude can see what exists
   // beyond what this script specifically detects
-  const configTopKeys = config ? Object.keys(config).sort().join(',') : 'none';
+  const configTopKeys = config ? Object.keys(config).sort().join(",") : "none";
   const configChannelKeys = config?.channels
-    ? Object.keys(config.channels as Record<string, unknown>).sort().join(',')
-    : 'none';
+    ? Object.keys(config.channels as Record<string, unknown>)
+        .sort()
+        .join(",")
+    : "none";
 
   // List files/dirs at the state dir root for manual inspection
-  let stateDirContents = 'unknown';
+  let stateDirContents = "unknown";
   try {
     stateDirContents = fs
       .readdirSync(stateDir)
-      .filter((f) => !f.startsWith('.'))
+      .filter((f) => !f.startsWith("."))
       .sort()
-      .join(',');
+      .join(",");
   } catch {
     // ignore
   }
 
   emitStatus({
-    STATUS: 'found',
+    STATUS: "found",
     STATE_DIR: stateDir,
     CONFIG_FOUND: config !== null,
     CONFIG_TOP_KEYS: configTopKeys,
     CONFIG_CHANNEL_KEYS: configChannelKeys,
     STATE_DIR_CONTENTS: stateDirContents,
-    CHANNELS: channelList || 'none',
-    UNSUPPORTED_CHANNELS: unsupported || 'none',
-    WORKSPACE_DIR: workspaceDir || 'not_found',
-    WORKSPACE_FILES: workspaceFiles.join(',') || 'none',
-    IDENTITY_NAME: identityName || 'unknown',
+    CHANNELS: channelList || "none",
+    UNSUPPORTED_CHANNELS: unsupported || "none",
+    WORKSPACE_DIR: workspaceDir || "not_found",
+    WORKSPACE_FILES: workspaceFiles.join(",") || "none",
+    IDENTITY_NAME: identityName || "unknown",
     AGENT_COUNT: agents.length,
-    AGENT_IDS: agents.join(',') || 'none',
-    GROUPS: groupList || 'none',
+    AGENT_IDS: agents.join(",") || "none",
+    GROUPS: groupList || "none",
     GROUP_COUNT: groups.length,
     DAILY_MEMORY_FILES: dailyMemoryFiles,
     SKILL_COUNT: skills.length,
-    SKILLS: skillList || 'none',
-    CONFIG_PLUGINS: configPlugins.map((p) => `${p.name}(${p.source}${p.hasApiKey ? ',has_key' : ''})`).join(',') || 'none',
+    SKILLS: skillList || "none",
+    CONFIG_PLUGINS:
+      configPlugins
+        .map((p) => `${p.name}(${p.source}${p.hasApiKey ? ",has_key" : ""})`)
+        .join(",") || "none",
     CONFIG_PLUGIN_COUNT: configPlugins.length,
     CRON_JOBS: cronCount,
-    CRON_SUMMARIES: cronSummaries.join('|') || 'none',
-    MCP_SERVERS: mcpServers.join(',') || 'none',
+    CRON_SUMMARIES: cronSummaries.join("|") || "none",
+    MCP_SERVERS: mcpServers.join(",") || "none",
   });
 }
 

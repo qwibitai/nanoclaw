@@ -9,13 +9,13 @@ This skill wires channel-aware Markdown conversion into the outbound pipeline so
 responses render natively on each platform — no more literal `**asterisks**` in WhatsApp or
 Telegram.
 
-| Channel | Transformation |
-|---------|---------------|
-| WhatsApp | `**bold**` → `*bold*`, `*italic*` → `_italic_`, headings → bold, links → `text (url)` |
-| Telegram | same as WhatsApp, but `[text](url)` links are preserved (Markdown v1 renders them natively) |
-| Slack | same as WhatsApp, but links become `<url\|text>` |
-| Discord | passthrough (Discord already renders Markdown) |
-| Signal | passthrough for `parseTextStyles`; `parseSignalStyles` in `src/text-styles.ts` produces plain text + native `textStyle` ranges for use by the Signal skill |
+| Channel  | Transformation                                                                                                                                             |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WhatsApp | `**bold**` → `*bold*`, `*italic*` → `_italic_`, headings → bold, links → `text (url)`                                                                      |
+| Telegram | same as WhatsApp, but `[text](url)` links are preserved (Markdown v1 renders them natively)                                                                |
+| Slack    | same as WhatsApp, but links become `<url\|text>`                                                                                                           |
+| Discord  | passthrough (Discord already renders Markdown)                                                                                                             |
+| Signal   | passthrough for `parseTextStyles`; `parseSignalStyles` in `src/text-styles.ts` produces plain text + native `textStyle` ranges for use by the Signal skill |
 
 Code blocks (fenced and inline) are always protected — their content is never transformed.
 
@@ -113,7 +113,7 @@ If you have the Signal skill installed, `src/channels/signal.ts` can import
 `parseSignalStyles` from the newly present `src/text-styles.ts`:
 
 ```typescript
-import { parseSignalStyles, SignalTextStyle } from '../text-styles.js';
+import { parseSignalStyles, SignalTextStyle } from "../text-styles.js";
 ```
 
 `parseSignalStyles` returns `{ text: string, textStyle: SignalTextStyle[] }` where

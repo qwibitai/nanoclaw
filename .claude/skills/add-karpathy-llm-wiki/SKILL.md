@@ -24,6 +24,7 @@ If dedicated: ask which channel and chat, then register with `npx tsx setup/inde
 ## Step 3: Design collaboratively
 
 Discuss with the user based on the pattern:
+
 - What's the wiki's domain or topic?
 - What kinds of sources will they add? (URLs, PDFs, images, voice notes, books, transcripts)
 - Do they want the full three-layer architecture or a lighter version?
@@ -61,7 +62,6 @@ curl -sLo sources/filename.pdf "<url>"
 ```
 
 If the document is a webpage, then claude can use fetch or `agent-browser` to open the page and extract full text if available. The container skill and CLAUDE.md should note this so claude gets full content for sources rather than summaries.
-
 
 ## Step 5: Optional lint schedule
 

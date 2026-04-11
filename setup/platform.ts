@@ -1,25 +1,25 @@
 /**
  * Cross-platform detection utilities for NanoClaw setup.
  */
-import { execSync } from 'child_process';
-import fs from 'fs';
-import os from 'os';
+import { execSync } from "child_process";
+import fs from "fs";
+import os from "os";
 
-export type Platform = 'macos' | 'linux' | 'unknown';
-export type ServiceManager = 'launchd' | 'systemd' | 'none';
+export type Platform = "macos" | "linux" | "unknown";
+export type ServiceManager = "launchd" | "systemd" | "none";
 
 export function getPlatform(): Platform {
   const platform = os.platform();
-  if (platform === 'darwin') return 'macos';
-  if (platform === 'linux') return 'linux';
-  return 'unknown';
+  if (platform === "darwin") return "macos";
+  if (platform === "linux") return "linux";
+  return "unknown";
 }
 
 export function isWSL(): boolean {
-  if (os.platform() !== 'linux') return false;
+  if (os.platform() !== "linux") return false;
   try {
-    const release = fs.readFileSync('/proc/version', 'utf-8').toLowerCase();
-    return release.includes('microsoft') || release.includes('wsl');
+    const release = fs.readFileSync("/proc/version", "utf-8").toLowerCase();
+    return release.includes("microsoft") || release.includes("wsl");
   } catch {
     return false;
   }
@@ -31,7 +31,7 @@ export function isRoot(): boolean {
 
 export function isHeadless(): boolean {
   // No display server available
-  if (getPlatform() === 'linux') {
+  if (getPlatform() === "linux") {
     return !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY;
   }
   // macOS is never headless in practice (even SSH sessions can open URLs)
@@ -39,11 +39,11 @@ export function isHeadless(): boolean {
 }
 
 export function hasSystemd(): boolean {
-  if (getPlatform() !== 'linux') return false;
+  if (getPlatform() !== "linux") return false;
   try {
     // Check if systemd is PID 1
-    const init = fs.readFileSync('/proc/1/comm', 'utf-8').trim();
-    return init === 'systemd';
+    const init = fs.readFileSync("/proc/1/comm", "utf-8").trim();
+    return init === "systemd";
   } catch {
     return false;
   }
@@ -56,25 +56,25 @@ export function hasSystemd(): boolean {
 export function openBrowser(url: string): boolean {
   try {
     const platform = getPlatform();
-    if (platform === 'macos') {
-      execSync(`open ${JSON.stringify(url)}`, { stdio: 'ignore' });
+    if (platform === "macos") {
+      execSync(`open ${JSON.stringify(url)}`, { stdio: "ignore" });
       return true;
     }
-    if (platform === 'linux') {
+    if (platform === "linux") {
       // Try xdg-open first, then wslview for WSL
-      if (commandExists('xdg-open')) {
-        execSync(`xdg-open ${JSON.stringify(url)}`, { stdio: 'ignore' });
+      if (commandExists("xdg-open")) {
+        execSync(`xdg-open ${JSON.stringify(url)}`, { stdio: "ignore" });
         return true;
       }
-      if (isWSL() && commandExists('wslview')) {
-        execSync(`wslview ${JSON.stringify(url)}`, { stdio: 'ignore' });
+      if (isWSL() && commandExists("wslview")) {
+        execSync(`wslview ${JSON.stringify(url)}`, { stdio: "ignore" });
         return true;
       }
       // WSL without wslview: try cmd.exe
       if (isWSL()) {
         try {
           execSync(`cmd.exe /c start "" ${JSON.stringify(url)}`, {
-            stdio: 'ignore',
+            stdio: "ignore",
           });
           return true;
         } catch {
@@ -90,17 +90,17 @@ export function openBrowser(url: string): boolean {
 
 export function getServiceManager(): ServiceManager {
   const platform = getPlatform();
-  if (platform === 'macos') return 'launchd';
-  if (platform === 'linux') {
-    if (hasSystemd()) return 'systemd';
-    return 'none';
+  if (platform === "macos") return "launchd";
+  if (platform === "linux") {
+    if (hasSystemd()) return "systemd";
+    return "none";
   }
-  return 'none';
+  return "none";
 }
 
 export function getNodePath(): string {
   try {
-    return execSync('command -v node', { encoding: 'utf-8' }).trim();
+    return execSync("command -v node", { encoding: "utf-8" }).trim();
   } catch {
     return process.execPath;
   }
@@ -108,7 +108,7 @@ export function getNodePath(): string {
 
 export function commandExists(name: string): boolean {
   try {
-    execSync(`command -v ${name}`, { stdio: 'ignore' });
+    execSync(`command -v ${name}`, { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -117,8 +117,8 @@ export function commandExists(name: string): boolean {
 
 export function getNodeVersion(): string | null {
   try {
-    const version = execSync('node --version', { encoding: 'utf-8' }).trim();
-    return version.replace(/^v/, '');
+    const version = execSync("node --version", { encoding: "utf-8" }).trim();
+    return version.replace(/^v/, "");
   } catch {
     return null;
   }
@@ -127,6 +127,6 @@ export function getNodeVersion(): string | null {
 export function getNodeMajorVersion(): number | null {
   const version = getNodeVersion();
   if (!version) return null;
-  const major = parseInt(version.split('.')[0], 10);
+  const major = parseInt(version.split(".")[0], 10);
   return isNaN(major) ? null : major;
 }

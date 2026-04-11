@@ -17,6 +17,7 @@ The wiki becomes a persistent, compounding artifact. Cross-references already ex
 You source material and ask questions; the LLM maintains everything—summarizing, cross-referencing, filing, and organizing. The LLM acts as programmer; Obsidian serves as IDE; the wiki functions as codebase.
 
 **Applications include:**
+
 - Personal: tracking goals, health, self-improvement
 - Research: deep dives over weeks/months
 - Reading: building companion wikis while progressing through books

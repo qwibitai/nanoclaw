@@ -4,7 +4,8 @@
  * Usage: echo '{"tweetUrl":"https://x.com/user/status/123"}' | npx tsx like.ts
  */
 
-import { getBrowserContext, navigateToTweet, runScript, config, ScriptResult } from '../lib/browser.js';
+import type { ScriptResult } from "../lib/browser.js";
+import { getBrowserContext, navigateToTweet, runScript, config } from "../lib/browser.js";
 
 interface LikeInput {
   tweetUrl: string;
@@ -14,7 +15,7 @@ async function likeTweet(input: LikeInput): Promise<ScriptResult> {
   const { tweetUrl } = input;
 
   if (!tweetUrl) {
-    return { success: false, message: 'Please provide a tweet URL' };
+    return { success: false, message: "Please provide a tweet URL" };
   }
 
   let context = null;
@@ -23,7 +24,7 @@ async function likeTweet(input: LikeInput): Promise<ScriptResult> {
     const { page, success, error } = await navigateToTweet(context, tweetUrl);
 
     if (!success) {
-      return { success: false, message: error || 'Navigation failed' };
+      return { success: false, message: error || "Navigation failed" };
     }
 
     const tweet = page.locator('article[data-testid="tweet"]').first();
@@ -33,7 +34,7 @@ async function likeTweet(input: LikeInput): Promise<ScriptResult> {
     // Check if already liked
     const alreadyLiked = await unlikeButton.isVisible().catch(() => false);
     if (alreadyLiked) {
-      return { success: true, message: 'Tweet already liked' };
+      return { success: true, message: "Tweet already liked" };
     }
 
     await likeButton.waitFor({ timeout: config.timeouts.elementWait });
@@ -43,11 +44,10 @@ async function likeTweet(input: LikeInput): Promise<ScriptResult> {
     // Verify
     const nowLiked = await unlikeButton.isVisible().catch(() => false);
     if (nowLiked) {
-      return { success: true, message: 'Like successful' };
+      return { success: true, message: "Like successful" };
     }
 
-    return { success: false, message: 'Like action completed but could not verify success' };
-
+    return { success: false, message: "Like action completed but could not verify success" };
   } finally {
     if (context) await context.close();
   }

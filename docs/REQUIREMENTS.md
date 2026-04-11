@@ -47,6 +47,7 @@ When people contribute, they shouldn't add "Telegram support alongside WhatsApp.
 Skills we'd like to see contributed:
 
 ### Communication Channels
+
 - `/add-signal` - Add Signal as a channel
 - `/add-matrix` - Add Matrix integration
 
@@ -59,6 +60,7 @@ Skills we'd like to see contributed:
 A personal Claude assistant accessible via messaging, with minimal custom code.
 
 **Core components:**
+
 - **Claude Agent SDK** as the core agent
 - **Containers** for isolated agent execution (Linux VMs)
 - **Multi-channel messaging** (WhatsApp, Telegram, Discord, Slack, Gmail) — add exactly the channels you need
@@ -68,6 +70,7 @@ A personal Claude assistant accessible via messaging, with minimal custom code.
 - **Browser automation** via agent-browser
 
 **Implementation approach:**
+
 - Use existing tools (channel libraries, Claude Agent SDK, MCP servers)
 - Minimal glue code
 - File-based systems where possible (CLAUDE.md for memory, folders for groups)
@@ -77,22 +80,26 @@ A personal Claude assistant accessible via messaging, with minimal custom code.
 ## Architecture Decisions
 
 ### Message Routing
+
 - A router listens to connected channels and routes messages based on configuration
 - Only messages from registered groups are processed
 - Trigger: `@Andy` prefix (case insensitive), configurable via `ASSISTANT_NAME` env var
 - Unregistered groups are ignored completely
 
 ### Memory System
+
 - **Per-group memory**: Each group has a folder with its own `CLAUDE.md`
 - **Global memory**: Root `CLAUDE.md` is read by all groups, but only writable from "main" (self-chat)
 - **Files**: Groups can create/read files in their folder and reference them
 - Agent runs in the group's folder, automatically inherits both CLAUDE.md files
 
 ### Session Management
+
 - Each group maintains a conversation session (via Claude Agent SDK)
 - Sessions auto-compact when context gets too long, preserving critical information
 
 ### Container Isolation
+
 - All agents run inside containers (lightweight Linux VMs)
 - Each agent invocation spawns a container with mounted directories
 - Containers provide filesystem isolation - agents can only see mounted paths
@@ -100,6 +107,7 @@ A personal Claude assistant accessible via messaging, with minimal custom code.
 - Browser automation via agent-browser with Chromium in the container
 
 ### Scheduled Tasks
+
 - Users can ask Claude to schedule recurring or one-time tasks from any group
 - Tasks run as full agents in the context of the group that created them
 - Tasks have access to all tools including Bash (safe in container)
@@ -110,12 +118,14 @@ A personal Claude assistant accessible via messaging, with minimal custom code.
 - From other groups: can only manage that group's tasks
 
 ### Group Management
+
 - New groups are added explicitly via the main channel
 - Groups are registered in SQLite (via the main channel or IPC `register_group` command)
 - Each group gets a dedicated folder under `groups/`
 - Groups can have additional directories mounted via `containerConfig`
 
 ### Main Channel Privileges
+
 - Main channel is the admin/control group (typically self-chat)
 - Can write to global memory (`groups/CLAUDE.md`)
 - Can schedule tasks for any group
@@ -127,12 +137,14 @@ A personal Claude assistant accessible via messaging, with minimal custom code.
 ## Integration Points
 
 ### Channels
+
 - WhatsApp (baileys), Telegram (grammy), Discord (discord.js), Slack (@slack/bolt), Gmail (googleapis)
 - Each channel lives in a separate fork repo and is added via skills (e.g., `/add-whatsapp`, `/add-telegram`)
 - Messages stored in SQLite, polled by router
 - Channels self-register at startup — unconfigured channels are skipped with a warning
 
 ### Scheduler
+
 - Built-in scheduler runs on the host, spawns containers for task execution
 - Custom `nanoclaw` MCP server (inside container) provides scheduling tools
 - Tools: `schedule_task`, `list_tasks`, `pause_task`, `resume_task`, `cancel_task`, `send_message`
@@ -141,10 +153,12 @@ A personal Claude assistant accessible via messaging, with minimal custom code.
 - Tasks execute Claude Agent SDK in containerized group context
 
 ### Web Access
+
 - Built-in WebSearch and WebFetch tools
 - Standard Claude Agent SDK capabilities
 
 ### Browser Automation
+
 - agent-browser CLI with Chromium in container
 - Snapshot-based interaction with element references (@e1, @e2, etc.)
 - Screenshots, PDFs, video recording
@@ -155,17 +169,20 @@ A personal Claude assistant accessible via messaging, with minimal custom code.
 ## Setup & Customization
 
 ### Philosophy
+
 - Minimal configuration files
 - Setup and customization done via Claude Code
 - Users clone the repo and run Claude Code to configure
 - Each user gets a custom setup matching their exact needs
 
 ### Skills
+
 - `/setup` - Install dependencies, configure channels, start services
 - `/customize` - General-purpose skill for adding capabilities
 - `/update-nanoclaw` - Pull upstream changes, merge with customizations
 
 ### Deployment
+
 - Runs on macOS (launchd), Linux (systemd), or Windows (WSL2)
 - Single Node.js process handles everything
 

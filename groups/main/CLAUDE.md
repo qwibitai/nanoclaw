@@ -39,6 +39,7 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
 
 When you learn something important:
+
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
@@ -50,6 +51,7 @@ Format messages based on the channel. Check the group folder name prefix:
 ### Slack channels (folder starts with `slack_`)
 
 Use Slack mrkdwn syntax. Run `/slack-formatting` for the full reference. Key rules:
+
 - `*bold*` (single asterisks)
 - `_italic_` (underscores)
 - `<https://url|link text>` for links (NOT `[text](url)`)
@@ -85,13 +87,14 @@ Anthropic credentials must be either an API key from console.anthropic.com (`ANT
 
 Main has read-only access to the project, read-write access to the store (SQLite DB), and read-write access to its group folder:
 
-| Container Path | Host Path | Access |
-|----------------|-----------|--------|
-| `/workspace/project` | Project root | read-only |
-| `/workspace/project/store` | `store/` | read-write |
-| `/workspace/group` | `groups/main/` | read-write |
+| Container Path             | Host Path      | Access     |
+| -------------------------- | -------------- | ---------- |
+| `/workspace/project`       | Project root   | read-only  |
+| `/workspace/project/store` | `store/`       | read-write |
+| `/workspace/group`         | `groups/main/` | read-write |
 
 Key paths inside the container:
+
 - `/workspace/project/store/messages.db` - SQLite database (read-write)
 - `/workspace/project/store/messages.db` (registered_groups table) - Group config
 - `/workspace/project/groups/` - All group folders
@@ -156,6 +159,7 @@ Groups are registered in the SQLite `registered_groups` table:
 ```
 
 Fields:
+
 - **Key**: The chat JID (unique identifier — WhatsApp, Telegram, Slack, Discord, etc.)
 - **name**: Display name for the group
 - **folder**: Channel-prefixed folder name under `groups/` for this group's files and memory
@@ -180,6 +184,7 @@ Fields:
 6. Optionally create an initial `CLAUDE.md` for the group
 
 Folder naming convention — channel prefix with underscore separator:
+
 - WhatsApp "Family Chat" → `whatsapp_family-chat`
 - Telegram "Dev Team" → `telegram_dev-team`
 - Discord "General" → `discord_general`
@@ -239,6 +244,7 @@ If the user wants to set up an allowlist, edit `~/.config/nanoclaw/sender-allowl
 ```
 
 Notes:
+
 - Your own messages (`is_from_me`) explicitly bypass the allowlist in trigger checks. Bot messages are filtered out by the database query before trigger evaluation, so they never reach the allowlist.
 - If the config file doesn't exist or is invalid, all senders are allowed (fail-open)
 - The config file is on the host at `~/.config/nanoclaw/sender-allowlist.json`, not inside the container
@@ -265,6 +271,7 @@ You can read and write to `/workspace/global/CLAUDE.md` for facts that should ap
 ## Scheduling for Other Groups
 
 When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `registered_groups.json`:
+
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.

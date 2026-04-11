@@ -3,7 +3,7 @@ name: Bump version
 on:
   push:
     branches: [main]
-    paths: ['src/**', 'container/**']
+    paths: ["src/**", "container/**"]
 
 jobs:
   bump-version:

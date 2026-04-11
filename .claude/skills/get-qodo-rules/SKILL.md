@@ -78,15 +78,16 @@ See [output format details](references/output-format.md) for the exact format.
 
 ### Step 6: Apply Rules by Severity
 
-| Severity | Enforcement | When Skipped |
-|---|---|---|
-| **ERROR** | Must comply, non-negotiable. Add comment documenting compliance (e.g., `# Following Qodo rule: No Hardcoded Credentials`) | Explain to user and ask for guidance |
-| **WARNING** | Should comply by default | Briefly explain why in response |
-| **RECOMMENDATION** | Consider when appropriate | No action needed |
+| Severity           | Enforcement                                                                                                               | When Skipped                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| **ERROR**          | Must comply, non-negotiable. Add comment documenting compliance (e.g., `# Following Qodo rule: No Hardcoded Credentials`) | Explain to user and ask for guidance |
+| **WARNING**        | Should comply by default                                                                                                  | Briefly explain why in response      |
+| **RECOMMENDATION** | Consider when appropriate                                                                                                 | No action needed                     |
 
 ### Step 7: Report
 
 After code generation, inform the user about rule application:
+
 - **ERROR rules applied**: List which rules were followed
 - **WARNING rules skipped**: Explain why
 - **No rules applicable**: Inform: "No Qodo rules were applicable to this code change"
@@ -99,6 +100,7 @@ After code generation, inform the user about rule application:
 Determines scope from git remote and working directory (see [Step 2](#step-2-verify-working-in-a-git-repository)):
 
 **Scope Hierarchy**:
+
 - **Universal** (`/`) - applies everywhere
 - **Org Level** (`/org/`) - applies to organization
 - **Repo Level** (`/org/repo/`) - applies to repository

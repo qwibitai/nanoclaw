@@ -3,10 +3,12 @@
 ## Before You Start
 
 1. **Check for existing work.** Search open PRs and issues before starting:
+
    ```bash
    gh pr list --repo qwibitai/nanoclaw --search "<your feature>"
    gh issue list --repo qwibitai/nanoclaw --search "<your feature>"
    ```
+
    If a related PR or issue exists, build on it rather than duplicating effort.
 
 2. **Check alignment.** Read the [Philosophy section in README.md](README.md#philosophy). Source code changes should only be things 90%+ of users need. Skills can be more niche, but should still be useful beyond a single person's setup.
@@ -38,11 +40,13 @@ Add capabilities to NanoClaw by merging a git branch. The SKILL.md contains setu
 **Examples:** `/add-telegram`, `/add-slack`, `/add-discord`, `/add-gmail`
 
 **How they work:**
+
 1. User runs `/add-telegram`
 2. Claude follows the SKILL.md: fetches and merges the `skill/telegram` branch
 3. Claude walks through interactive setup (env vars, bot creation, etc.)
 
 **Contributing a feature skill:**
+
 1. Fork `qwibitai/nanoclaw` and branch from `main`
 2. Make the code changes (new files, modified source, updated `package.json`, etc.)
 3. Add a SKILL.md in `.claude/skills/<name>/` with setup instructions — step 1 should be merging the branch
@@ -61,6 +65,7 @@ Standalone tools that ship code files alongside the SKILL.md. The SKILL.md tells
 **Key difference from feature skills:** No branch merge needed. The code is self-contained in the skill directory and gets copied into place during installation.
 
 **Guidelines:**
+
 - Put code in separate files, not inline in the SKILL.md
 - Use `${CLAUDE_SKILL_DIR}` to reference files in the skill directory
 - SKILL.md contains installation instructions, usage docs, and troubleshooting
@@ -74,6 +79,7 @@ Workflows and guides with no code changes. The SKILL.md is the entire skill — 
 **Examples:** `/setup`, `/debug`, `/customize`, `/update-nanoclaw`, `/update-skills`
 
 **Guidelines:**
+
 - Pure instructions — no code files, no branch merges
 - Use `AskUserQuestion` for interactive prompts
 - These stay on `main` and are always available to every user
@@ -89,6 +95,7 @@ Skills that run inside the agent container, not on the host. These teach the con
 **Key difference:** These are NOT invoked by the user on the host. They're loaded by Claude Code inside the container and influence how the agent behaves.
 
 **Guidelines:**
+
 - Follow the same SKILL.md + frontmatter format
 - Use `allowed-tools` frontmatter to scope tool permissions
 - Keep them focused — the agent's context window is shared across all container skills
@@ -107,6 +114,7 @@ Instructions here...
 ```
 
 **Rules:**
+
 - Keep SKILL.md **under 500 lines** — move detail to separate reference files
 - `name`: lowercase, alphanumeric + hyphens, max 64 chars
 - `description`: required — Claude uses this to decide when to invoke the skill
@@ -125,14 +133,14 @@ Test your contribution on a fresh clone before submitting. For skills, run the s
 2. **Test thoroughly.** Run the feature yourself. For skills, test on a fresh clone.
 3. **Check the right box** in the PR template. Labels are auto-applied based on your selection:
 
-| Checkbox | Label |
-|----------|-------|
-| Feature skill | `PR: Skill` + `PR: Feature` |
-| Utility skill | `PR: Skill` |
-| Operational/container skill | `PR: Skill` |
-| Fix | `PR: Fix` |
-| Simplification | `PR: Refactor` |
-| Documentation | `PR: Docs` |
+| Checkbox                    | Label                       |
+| --------------------------- | --------------------------- |
+| Feature skill               | `PR: Skill` + `PR: Feature` |
+| Utility skill               | `PR: Skill`                 |
+| Operational/container skill | `PR: Skill`                 |
+| Fix                         | `PR: Fix`                   |
+| Simplification              | `PR: Refactor`              |
+| Documentation               | `PR: Docs`                  |
 
 ### PR description
 

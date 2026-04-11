@@ -39,6 +39,7 @@ grep "credential-proxy" src/index.ts 2>/dev/null
 If `startCredentialProxy` is imported, the native credential proxy skill is active. Tell the user: "You're currently using the native credential proxy (`.env`-based). This skill will switch you to OneCLI's Agent Vault, which adds per-agent policies and rate limits. Your `.env` credentials will be migrated to the vault."
 
 Use AskUserQuestion:
+
 1. **Continue** — description: "Switch to OneCLI Agent Vault."
 2. **Cancel** — description: "Keep the native credential proxy."
 
@@ -112,11 +113,11 @@ If it's not running, try starting it manually: `onecli start`. If that fails, sh
 
 Read the `.env` file and look for these credential variables:
 
-| .env variable | OneCLI secret type | Host pattern |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | `anthropic` | `api.anthropic.com` |
-| `CLAUDE_CODE_OAUTH_TOKEN` | `anthropic` | `api.anthropic.com` |
-| `ANTHROPIC_AUTH_TOKEN` | `anthropic` | `api.anthropic.com` |
+| .env variable             | OneCLI secret type | Host pattern        |
+| ------------------------- | ------------------ | ------------------- |
+| `ANTHROPIC_API_KEY`       | `anthropic`        | `api.anthropic.com` |
+| `CLAUDE_CODE_OAUTH_TOKEN` | `anthropic`        | `api.anthropic.com` |
+| `ANTHROPIC_AUTH_TOKEN`    | `anthropic`        | `api.anthropic.com` |
 
 Read `.env`:
 
@@ -131,11 +132,13 @@ Parse the file for any of the credential variables listed above.
 For each credential found, migrate it to OneCLI:
 
 **Anthropic API key** (`ANTHROPIC_API_KEY=sk-ant-...`):
+
 ```bash
 onecli secrets create --name Anthropic --type anthropic --value <key> --host-pattern api.anthropic.com
 ```
 
 **Claude OAuth token** (`CLAUDE_CODE_OAUTH_TOKEN=...` or `ANTHROPIC_AUTH_TOKEN=...`):
+
 ```bash
 onecli secrets create --name Anthropic --type anthropic --value <token> --host-pattern api.anthropic.com
 ```
@@ -143,6 +146,7 @@ onecli secrets create --name Anthropic --type anthropic --value <token> --host-p
 After successful migration, remove the credential lines from `.env`. Use the Edit tool to remove only the credential variable lines (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`). Keep all other `.env` entries intact (e.g. `ONECLI_URL`, `TELEGRAM_BOT_TOKEN`, channel tokens).
 
 Verify the secret was registered:
+
 ```bash
 onecli secrets list
 ```
@@ -157,10 +161,10 @@ After handling Anthropic credentials (whether migrated or freshly registered), s
 
 Known container-facing credentials:
 
-| .env variable | Secret name | Host pattern |
-|---|---|---|
-| `OPENAI_API_KEY` | `OpenAI` | `api.openai.com` |
-| `PARALLEL_API_KEY` | `Parallel` | `api.parallel.ai` |
+| .env variable      | Secret name | Host pattern      |
+| ------------------ | ----------- | ----------------- |
+| `OPENAI_API_KEY`   | `OpenAI`    | `api.openai.com`  |
+| `PARALLEL_API_KEY` | `Parallel`  | `api.parallel.ai` |
 
 If any of these are found with non-empty values, present them to the user:
 
@@ -180,6 +184,7 @@ If there are credential variables not in the table above that look container-fac
 After migration, remove the migrated lines from `.env` using the Edit tool. Keep channel tokens and any credentials the user chose not to migrate.
 
 Verify all secrets were registered:
+
 ```bash
 onecli secrets list
 ```
@@ -189,6 +194,7 @@ onecli secrets list
 No migration needed. Proceed to register credentials fresh.
 
 Check if OneCLI already has an Anthropic secret:
+
 ```bash
 onecli secrets list
 ```
@@ -237,6 +243,7 @@ npm run build
 If build fails, diagnose and fix. Common issue: `@onecli-sh/sdk` not installed — run `npm install` first.
 
 Restart the service:
+
 - macOS (launchd): `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
 - Linux (systemd): `systemctl --user restart nanoclaw`
 - WSL/manual: stop and re-run `bash start-nanoclaw.sh`
@@ -254,6 +261,7 @@ Expected: `OneCLI gateway config applied` messages when containers start.
 If the service is running and a channel is configured, tell the user to send a test message to verify the agent responds.
 
 Tell the user:
+
 - OneCLI Agent Vault is now managing credentials
 - Agents never see raw API keys — credentials are injected at the gateway level
 - To manage secrets: `onecli secrets list`, or open ${ONECLI_URL}
