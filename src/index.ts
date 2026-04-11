@@ -599,7 +599,11 @@ async function main(): Promise<void> {
         const parent = registeredGroups[msg.parent_jid];
         if (parent?.thread_defaults) {
           autoRegisterThread(chatJid, msg, parent);
-          // 登録したので以降の storeMessage / allowlist 処理を通常通り実行する
+          if (!registeredGroups[chatJid]) {
+            // registerGroup() が内部で早期 return した場合は未登録のままなので保存しない
+            return;
+          }
+          // 登録成功時のみ以降の storeMessage / allowlist 処理を通常通り実行する
         } else {
           // parent が thread_defaults を持たない — discord.ts がすでにフィルタしているが念のため
           return;
