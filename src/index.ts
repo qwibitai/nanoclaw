@@ -62,6 +62,7 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import { isBudgetExceeded } from './budget.js';
 import { startEmailSSE } from './email-sse.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -343,6 +344,11 @@ async function runAgent(
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
+  if (isBudgetExceeded()) {
+    logger.warn({ group: group.name }, 'Agent blocked by budget ceiling');
+    return 'error';
+  }
+
   const startedAt = new Date().toISOString();
   const startMs = Date.now();
   const isMain = group.isMain === true;

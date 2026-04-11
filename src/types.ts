@@ -77,7 +77,7 @@ export interface TaskRunLog {
   task_id: string;
   run_at: string;
   duration_ms: number;
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'skipped';
   result: string | null;
   error: string | null;
 }

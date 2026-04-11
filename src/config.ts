@@ -13,6 +13,7 @@ const envConfig = readEnvFile([
   'EMAIL_INTELLIGENCE_ENABLED',
   'SUPERPILOT_API_URL',
   'NANOCLAW_SERVICE_TOKEN',
+  'DAILY_BUDGET_USD',
 ]);
 
 export const ASSISTANT_NAME =
@@ -106,6 +107,10 @@ function resolveConfigTimezone(): string {
   return 'UTC';
 }
 export const TIMEZONE = resolveConfigTimezone();
+
+export const DAILY_BUDGET_USD = parseFloat(
+  envConfig.DAILY_BUDGET_USD || process.env.DAILY_BUDGET_USD || '50',
+);
 
 export const EMAIL_INTELLIGENCE_ENABLED =
   (process.env.EMAIL_INTELLIGENCE_ENABLED ??

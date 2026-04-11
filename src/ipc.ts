@@ -511,9 +511,7 @@ export async function processTaskIpc(
       )?.[0];
 
       if (!mainJid) {
-        logger.warn(
-          'No main group registered, cannot process email trigger',
-        );
+        logger.warn('No main group registered, cannot process email trigger');
         break;
       }
 

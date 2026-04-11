@@ -2,6 +2,7 @@ import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
+import { isBudgetExceeded } from './budget.js';
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
   ContainerOutput,
@@ -103,6 +104,22 @@ async function runTask(
     return;
   }
   fs.mkdirSync(groupDir, { recursive: true });
+
+  if (isBudgetExceeded()) {
+    logger.warn({ taskId: task.id }, 'Task blocked by budget ceiling');
+    logTaskRun({
+      task_id: task.id,
+      run_at: new Date().toISOString(),
+      duration_ms: 0,
+      status: 'skipped',
+      result: null,
+      error: 'Daily budget exceeded',
+    });
+    // Still compute next run so task resumes tomorrow
+    const nextRun = computeNextRun(task);
+    updateTaskAfterRun(task.id, nextRun, 'Budget exceeded');
+    return;
+  }
 
   logger.info(
     { taskId: task.id, group: task.group_folder },
