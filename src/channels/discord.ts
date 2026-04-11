@@ -11,6 +11,7 @@ import {
   SlashCommandBuilder,
   TextChannel,
   User,
+  Webhook,
 } from 'discord.js';
 
 import {
@@ -43,6 +44,7 @@ export class DiscordChannel implements Channel {
   private client: Client | null = null;
   private opts: DiscordChannelOpts;
   private botToken: string;
+  private webhookCache = new Map<string, Webhook>();
 
   constructor(botToken: string, opts: DiscordChannelOpts) {
     this.botToken = botToken;
@@ -562,6 +564,54 @@ export class DiscordChannel implements Channel {
         { jid, messageId, emoji, err },
         'Failed to remove Discord reaction',
       );
+    }
+  }
+
+  async sendWebhookMessage(
+    jid: string,
+    text: string,
+    username: string,
+    avatarURL?: string,
+  ): Promise<string | undefined> {
+    if (!this.client?.user) return undefined;
+    try {
+      const channelId = jid.replace(/^dc:/, '');
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel || !('fetchWebhooks' in channel)) return undefined;
+      const textChannel = channel as TextChannel;
+
+      // Lazily create or reuse a shared webhook per channel
+      let webhook = this.webhookCache.get(channelId);
+      if (!webhook) {
+        const existing = await textChannel.fetchWebhooks();
+        webhook = existing.find(
+          (w) =>
+            w.name === 'NanoClaw Pets' && w.owner?.id === this.client!.user!.id,
+        );
+        if (!webhook) {
+          webhook = await textChannel.createWebhook({
+            name: 'NanoClaw Pets',
+          });
+        }
+        this.webhookCache.set(channelId, webhook);
+      }
+
+      const msg = await webhook.send({
+        content: text,
+        username,
+        avatarURL,
+      });
+      logger.info(
+        { jid, username, length: text.length },
+        'Discord webhook message sent',
+      );
+      return typeof msg === 'string' ? undefined : msg.id;
+    } catch (err) {
+      logger.error(
+        { jid, username, err },
+        'Failed to send Discord webhook message',
+      );
+      return undefined;
     }
   }
 

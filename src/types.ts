@@ -111,6 +111,13 @@ export interface Channel {
   addReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
   // Optional: remove a unicode emoji reaction (the bot's own) from a message by ID.
   removeReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
+  // Optional: send a message via webhook with custom identity (name + avatar).
+  sendWebhookMessage?(
+    jid: string,
+    text: string,
+    username: string,
+    avatarURL?: string,
+  ): Promise<string | undefined>;
 }
 
 // Inbound reaction event delivered by a channel.

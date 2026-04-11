@@ -47,7 +47,9 @@ server.tool(
     sender: z
       .string()
       .optional()
-      .describe('Your role/identity name (e.g. "Researcher").'),
+      .describe(
+        'Pet name to speak as (e.g. "Voss", "Nyx", "Zima"). Message appears from the pet via webhook, not Claudio.',
+      ),
     label: z
       .string()
       .optional()

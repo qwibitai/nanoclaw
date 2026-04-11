@@ -114,11 +114,28 @@ vi.mock('discord.js', () => {
       return this._ready;
     }
 
-    channels = {
-      fetch: vi.fn().mockResolvedValue({
-        send: vi.fn().mockResolvedValue(undefined),
-        sendTyping: vi.fn().mockResolvedValue(undefined),
+    mockWebhook = {
+      send: vi.fn().mockResolvedValue({ id: 'webhook-msg-1' }),
+      name: 'NanoClaw Pets',
+      owner: { id: '999888777' },
+    };
+
+    _mockChannel = {
+      send: vi.fn().mockResolvedValue(undefined),
+      sendTyping: vi.fn().mockResolvedValue(undefined),
+      fetchWebhooks: vi.fn().mockResolvedValue({
+        find: vi.fn((fn: any) => {
+          // Simulate Collection.find() — test the predicate against our mock
+          return fn(clientRef.current!.mockWebhook)
+            ? clientRef.current!.mockWebhook
+            : undefined;
+        }),
       }),
+      createWebhook: vi.fn().mockResolvedValue(null), // only called if find returns undefined
+    };
+
+    channels = {
+      fetch: vi.fn().mockResolvedValue(this._mockChannel),
     };
 
     destroy() {
@@ -128,6 +145,7 @@ vi.mock('discord.js', () => {
 
   // Mock TextChannel type
   class TextChannel {}
+  class Webhook {}
 
   return {
     Client: MockClient,
@@ -136,6 +154,7 @@ vi.mock('discord.js', () => {
     Partials,
     SlashCommandBuilder,
     TextChannel,
+    Webhook,
   };
 });
 
@@ -1166,6 +1185,57 @@ describe('DiscordChannel', () => {
     it('has name "discord"', () => {
       const channel = new DiscordChannel('test-token', createTestOpts());
       expect(channel.name).toBe('discord');
+    });
+  });
+
+  // --- Webhook messages ---
+
+  describe('sendWebhookMessage', () => {
+    it('sends via webhook with custom username', async () => {
+      const channel = new DiscordChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      const id = await channel.sendWebhookMessage(
+        'dc:1234567890123456',
+        'test message',
+        'Voss 🌋',
+      );
+
+      expect(currentClient().mockWebhook.send).toHaveBeenCalledWith({
+        content: 'test message',
+        username: 'Voss 🌋',
+        avatarURL: undefined,
+      });
+      expect(id).toBe('webhook-msg-1');
+    });
+
+    it('creates webhook when none exist', async () => {
+      const channel = new DiscordChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      // Override fetchWebhooks to return collection where find() returns undefined
+      const mockCh = currentClient()._mockChannel;
+      const newWebhook = {
+        send: vi.fn().mockResolvedValue({ id: 'new-wh-msg' }),
+        name: 'NanoClaw Pets',
+        owner: { id: '999888777' },
+      };
+      mockCh.fetchWebhooks.mockResolvedValueOnce({
+        find: vi.fn(() => undefined),
+      });
+      mockCh.createWebhook.mockResolvedValueOnce(newWebhook);
+
+      const id = await channel.sendWebhookMessage(
+        'dc:1234567890123456',
+        'hello',
+        'Nyx 🌙',
+      );
+
+      expect(mockCh.createWebhook).toHaveBeenCalledWith({
+        name: 'NanoClaw Pets',
+      });
+      expect(newWebhook.send).toHaveBeenCalled();
+      expect(id).toBe('new-wh-msg');
     });
   });
 });

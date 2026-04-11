@@ -120,3 +120,13 @@ function resolveReactionsMode(): 'all' | 'own' | 'off' {
   return 'own';
 }
 export const DISCORD_REACTIONS_INBOUND = resolveReactionsMode();
+
+// Pet identities for webhook-based pet voices.
+// When an agent sends a message with sender matching a key here,
+// the message is sent via Discord webhook with the pet's display name.
+export const PET_IDENTITIES: Record<string, { name: string; avatar?: string }> =
+  {
+    Voss: { name: 'Voss 🌋' },
+    Nyx: { name: 'Nyx 🌙' },
+    Zima: { name: 'Zima ❄️' },
+  };

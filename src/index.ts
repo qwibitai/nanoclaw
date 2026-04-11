@@ -862,6 +862,14 @@ async function main(): Promise<void> {
       if (channel?.removeReaction)
         await channel.removeReaction(jid, messageId, emoji);
     },
+    sendWebhookMessage: async (jid, text, username, avatarURL) => {
+      const channel = findChannel(channels, jid);
+      if (channel?.sendWebhookMessage) {
+        storeOutboundMessage(jid, text, username);
+        return channel.sendWebhookMessage(jid, text, username, avatarURL);
+      }
+      return undefined;
+    },
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroups: async (force: boolean) => {
