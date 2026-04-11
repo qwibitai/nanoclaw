@@ -1,1 +1,43 @@
+[tasks."service:up"]
+run = "launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist"
+description = "Load nanoclaw launchd service"
 
+[tasks."service:down"]
+run = "launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist"
+description = "Unload nanoclaw launchd service"
+
+[tasks."service:restart"]
+run = "launchctl kickstart -k gui/$(id -u)/com.nanoclaw"
+description = "Restart nanoclaw launchd service"
+
+[tasks."service:logs"]
+run = "tail -f logs/nanoclaw.log"
+description = "Stream nanoclaw service logs"
+
+[tasks."service:errors"]
+run = "tail -f logs/nanoclaw.error.log"
+description = "Stream nanoclaw error logs"
+
+[tasks.build]
+run = "pnpm run build"
+description = "Compile TypeScript"
+
+[tasks.dev]
+run = "pnpm run dev"
+description = "Run with hot reload"
+
+[tasks.test]
+run = "pnpm test"
+description = "Run test suite"
+
+[tasks.lint]
+run = "pnpm run lint"
+description = "Run linter"
+
+[tasks.format]
+run = "pnpm run format"
+description = "Format source files"
+
+[tasks."container:build"]
+run = "./container/build.sh"
+description = "Rebuild agent container image"
