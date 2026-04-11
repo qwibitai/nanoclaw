@@ -23,6 +23,12 @@ export interface AllowedRoot {
   path: string;
   // Whether read-write mounts are allowed under this root
   allowReadWrite: boolean;
+  // If true, this root is automatically mounted into every container at
+  // /workspace/extra/<basename(path)> without requiring per-group
+  // additionalMounts entries. Read-only unless allowReadWrite is true AND
+  // (the group is main OR nonMainReadOnly is false). Per-group
+  // additionalMounts that land on the same containerPath take precedence.
+  autoMount?: boolean;
   // Optional description for documentation
   description?: string;
 }

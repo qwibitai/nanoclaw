@@ -26,7 +26,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
-import { validateAdditionalMounts } from './mount-security.js';
+import { buildAutoMounts, validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 import {
   readKeysConfig,
@@ -287,6 +287,17 @@ function buildVolumeMounts(
     );
     mounts.push(...validatedMounts);
   }
+
+  // Auto-mounts: every allowlist entry marked `autoMount: true` is injected
+  // into every container. Per-group additionalMounts processed above take
+  // precedence, so a group can still override a specific container path.
+  const existingContainerPaths = new Set(mounts.map((m) => m.containerPath));
+  const autoMounts = buildAutoMounts(
+    group.name,
+    isMain,
+    existingContainerPaths,
+  );
+  mounts.push(...autoMounts);
 
   return mounts;
 }

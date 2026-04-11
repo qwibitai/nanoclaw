@@ -24,6 +24,15 @@ let cachedAllowlist: MountAllowlist | null = null;
 let allowlistLoadError: string | null = null;
 
 /**
+ * Reset the in-memory allowlist cache. Intended for tests and hot-reload
+ * scenarios; the long-lived supervisor process should never call this.
+ */
+export function resetAllowlistCache(): void {
+  cachedAllowlist = null;
+  allowlistLoadError = null;
+}
+
+/**
  * Default blocked patterns - paths that should never be mounted
  */
 const DEFAULT_BLOCKED_PATTERNS = [
@@ -382,6 +391,133 @@ export function validateAdditionalMounts(
   }
 
   return validatedMounts;
+}
+
+/**
+ * Build the list of auto-mounts for a group based on the allowlist.
+ *
+ * Any allowlist entry marked `autoMount: true` whose host path exists and
+ * is not already present in `existingContainerPaths` is added as a mount at
+ * `/workspace/extra/<basename(realHostPath)>`.
+ *
+ * Read-only logic matches the per-group mount rules:
+ *   - `allowReadWrite: false` → always read-only
+ *   - `allowReadWrite: true`  → read-write for main, or for non-main when
+ *                               `nonMainReadOnly` is false; read-only
+ *                               otherwise.
+ *
+ * Entries are skipped (with a warning log) if:
+ *   - The host path does not exist.
+ *   - The real path matches a blocked pattern (defense in depth — the
+ *     allowlist shouldn't list blocked paths, but paranoia is cheap).
+ *   - The derived container basename fails `isValidContainerPath`.
+ *   - The target container path is already occupied (usually because the
+ *     group supplied a per-group `additionalMounts` entry for the same path).
+ */
+export function buildAutoMounts(
+  groupName: string,
+  isMain: boolean,
+  existingContainerPaths: Set<string>,
+): Array<{
+  hostPath: string;
+  containerPath: string;
+  readonly: boolean;
+}> {
+  const allowlist = loadMountAllowlist();
+  if (allowlist === null) {
+    return [];
+  }
+
+  const results: Array<{
+    hostPath: string;
+    containerPath: string;
+    readonly: boolean;
+  }> = [];
+
+  for (const root of allowlist.allowedRoots) {
+    if (!root.autoMount) continue;
+
+    const expandedPath = expandPath(root.path);
+    const realPath = getRealPath(expandedPath);
+    if (realPath === null) {
+      logger.warn(
+        {
+          group: groupName,
+          requestedPath: root.path,
+          expandedPath,
+        },
+        'autoMount skipped: host path does not exist',
+      );
+      continue;
+    }
+
+    // Defense in depth: verify the real path is not on the blocked list.
+    const blockedMatch = matchesBlockedPattern(
+      realPath,
+      allowlist.blockedPatterns,
+    );
+    if (blockedMatch !== null) {
+      logger.warn(
+        {
+          group: groupName,
+          requestedPath: root.path,
+          realPath,
+          pattern: blockedMatch,
+        },
+        'autoMount skipped: host path matches blocked pattern',
+      );
+      continue;
+    }
+
+    const basename = path.basename(realPath);
+    if (!isValidContainerPath(basename)) {
+      logger.warn(
+        {
+          group: groupName,
+          requestedPath: root.path,
+          basename,
+        },
+        'autoMount skipped: derived container path is invalid',
+      );
+      continue;
+    }
+
+    const containerPath = `/workspace/extra/${basename}`;
+    if (existingContainerPaths.has(containerPath)) {
+      logger.debug(
+        {
+          group: groupName,
+          containerPath,
+        },
+        'autoMount skipped: containerPath already provided by additionalMounts',
+      );
+      continue;
+    }
+
+    // Determine readonly: RW only if the root allows it AND we're main OR
+    // the allowlist does not force non-main to read-only.
+    const readonly =
+      !root.allowReadWrite || (!isMain && allowlist.nonMainReadOnly);
+
+    results.push({
+      hostPath: realPath,
+      containerPath,
+      readonly,
+    });
+
+    logger.debug(
+      {
+        group: groupName,
+        hostPath: realPath,
+        containerPath,
+        readonly,
+        rootPath: root.path,
+      },
+      'autoMount applied',
+    );
+  }
+
+  return results;
 }
 
 /**
