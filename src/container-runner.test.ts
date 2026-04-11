@@ -295,7 +295,9 @@ describe('container-runner timeout behavior', () => {
     const spawnCalls = vi.mocked(spawn).mock.calls;
     const args = spawnCalls[spawnCalls.length - 1][1] as string[];
     const joined = args.join(' ');
-    expect(joined).toContain('/tmp/nanoclaw-test-groups/test-group:/workspace/group');
+    expect(joined).toContain(
+      '/tmp/nanoclaw-test-groups/test-group:/workspace/group',
+    );
     expect(joined).not.toContain('../invalid-folder');
   });
 });

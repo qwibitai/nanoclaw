@@ -113,10 +113,16 @@ describe('url_watch flow', () => {
     await flushAsyncWork();
 
     expect(createThread).toHaveBeenCalledTimes(1);
-    expect(finalizeSpawnedThreadMock).toHaveBeenCalledWith('msg-1', 'dc:thread-1');
+    expect(finalizeSpawnedThreadMock).toHaveBeenCalledWith(
+      'msg-1',
+      'dc:thread-1',
+    );
     expect(setRegisteredGroupMock).toHaveBeenCalledWith(
       'dc:thread-1',
-      expect.objectContaining({ type: 'thread', parent_folder: 'discord_main' }),
+      expect.objectContaining({
+        type: 'thread',
+        parent_folder: 'discord_main',
+      }),
     );
     expect(storeMessageMock).toHaveBeenCalledTimes(1);
     expect(storeMessageMock).toHaveBeenCalledWith(

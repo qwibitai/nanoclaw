@@ -1078,13 +1078,7 @@ export function recordSpawnedThread(
       `INSERT OR IGNORE INTO spawned_threads (source_message_id, thread_jid, trigger_kind, trigger_value, created_at)
      VALUES (?, ?, ?, ?, ?)`,
     )
-    .run(
-      sourceMessageId,
-      threadJid,
-      triggerKind,
-      triggerValue,
-      createdAt,
-    );
+    .run(sourceMessageId, threadJid, triggerKind, triggerValue, createdAt);
   return result.changes === 1;
 }
 

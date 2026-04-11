@@ -695,7 +695,11 @@ describe('spawned thread accessors', () => {
   });
 
   it('reserve/finalize/release flow keeps dedupe atomic for pending rows', () => {
-    const reserved = reserveSpawnedThread('msg-pending', 'url', 'https://example');
+    const reserved = reserveSpawnedThread(
+      'msg-pending',
+      'url',
+      'https://example',
+    );
     const reservedAgain = reserveSpawnedThread(
       'msg-pending',
       'url',
@@ -715,7 +719,9 @@ describe('spawned thread accessors', () => {
 describe('cleanupSpawnedThreads', () => {
   it('deletes only rows older than retention window', () => {
     const now = new Date('2026-01-31T00:00:00.000Z');
-    const old = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000).toISOString();
+    const old = new Date(
+      now.getTime() - 31 * 24 * 60 * 60 * 1000,
+    ).toISOString();
     const fresh = new Date(
       now.getTime() - 10 * 24 * 60 * 60 * 1000,
     ).toISOString();
