@@ -5,6 +5,7 @@ import { CronExpressionParser } from 'cron-parser';
 
 import {
   DATA_DIR,
+  GROUPS_DIR,
   IPC_POLL_INTERVAL,
   PET_IDENTITIES,
   TIMEZONE,
@@ -140,6 +141,36 @@ function writeLabels(sourceGroup: string, labels: LabelMap): void {
   fs.writeFileSync(p, JSON.stringify(labels, null, 2));
 }
 
+// Per-group pet avatar overrides. Container agents write to
+// `/workspace/group/pet_avatars.json` after evolution to update a pet's
+// display name and/or avatar URL without requiring a NanoClaw restart.
+// Format: { "Voss": { "name": "Voss the Ember-Pawed", "avatar": "https://..." } }
+type PetOverride = { name?: string; avatar?: string };
+function loadPetOverrides(sourceGroup: string): Record<string, PetOverride> {
+  try {
+    const p = path.join(GROUPS_DIR, sourceGroup, 'pet_avatars.json');
+    if (!fs.existsSync(p)) return {};
+    const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function resolvePetIdentity(
+  sender: string | undefined,
+  sourceGroup: string,
+): { name: string; avatar?: string } | undefined {
+  if (!sender) return undefined;
+  const baseline = PET_IDENTITIES[sender];
+  const override = loadPetOverrides(sourceGroup)[sender];
+  if (!baseline && !override) return undefined;
+  return {
+    name: override?.name ?? baseline?.name ?? sender,
+    avatar: override?.avatar ?? baseline?.avatar,
+  };
+}
+
 function isAuthorized(
   chatJid: string,
   sourceGroup: string,
@@ -208,11 +239,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   'Unauthorized IPC message attempt blocked',
                 );
               } else if (data.type === 'message' && jid && data.text) {
-                // Pet voice: route through webhook when sender matches a pet
-                const petId =
-                  data.sender && PET_IDENTITIES[data.sender]
-                    ? PET_IDENTITIES[data.sender]
-                    : undefined;
+                // Pet voice: route through webhook when sender matches a pet.
+                // Per-group pet_avatars.json overrides baseline PET_IDENTITIES
+                // (lets agents update avatars at evolution without a restart).
+                const petId = resolvePetIdentity(data.sender, sourceGroup);
                 if (petId && deps.sendWebhookMessage) {
                   await deps.sendWebhookMessage(
                     jid,

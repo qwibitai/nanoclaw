@@ -126,7 +126,19 @@ export const DISCORD_REACTIONS_INBOUND = resolveReactionsMode();
 // the message is sent via Discord webhook with the pet's display name.
 export const PET_IDENTITIES: Record<string, { name: string; avatar?: string }> =
   {
-    Voss: { name: 'Voss 🌋' },
-    Nyx: { name: 'Nyx 🌙' },
-    Zima: { name: 'Zima ❄️' },
+    Voss: {
+      name: 'Voss 🌋',
+      avatar:
+        'https://cdn.discordapp.com/attachments/1491554631413665872/1492346511525412955/image.png?ex=69daff7e&is=69d9adfe&hm=5f2469c5d3b10088478539899c65f1fb7c7feaff8dfb6493f44bc7d08262430b&',
+    },
+    Nyx: {
+      name: 'Nyx 🌙',
+      avatar:
+        'https://cdn.discordapp.com/attachments/1491554631413665872/1492348804010213426/image.png?ex=69db01a1&is=69d9b021&hm=2e4ed22ac6ebaa2f48588ffc2788bf6e550ab1cd3f2374d64ac306e3bdf310c5&',
+    },
+    Zima: {
+      name: 'Zima ❄️',
+      avatar:
+        'https://cdn.discordapp.com/attachments/1491554631413665872/1492348630244392990/image.png?ex=69db0177&is=69d9aff7&hm=c2f259ceb5b9e1095a5fea3b8bde3c19493627ee53f13f3030532801ec35f8b7&',
+    },
   };

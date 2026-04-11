@@ -105,6 +105,18 @@ Store species description in the Pets row. Avatar can be a single emoji or short
 
 When an evolution happens, post a theatrical 3-message sequence: anticipation → "✨✨✨" → reveal.
 
+**Then immediately request a new avatar.** After the reveal, post a 4th message addressed to the owner with:
+1. The new species name and a vivid 2–4 sentence art prompt suitable for an image generator (square portrait, dark background, painterly digital art, colors/textures matching the species + theme)
+2. Instructions: "Generate this, upload to Discord, then paste the image's CDN URL back here"
+
+When the owner replies with a `https://cdn.discordapp.com/...` URL:
+1. Read `/workspace/group/pet_avatars.json` (create `{}` if missing)
+2. Set `pet_avatars[<PetName>] = { "name": "<PetName> <emoji>", "avatar": "<url>" }` — preserve the display name with its emoji from `src/config.ts` PET_IDENTITIES baseline; only the avatar changes per evolution unless the owner asks to rename
+3. Write the JSON back (pretty-printed)
+4. Confirm with a short pet-voiced message via the new avatar (sanity check that the webhook picked up the override)
+
+NanoClaw reads `pet_avatars.json` on every webhook send, so no restart is needed.
+
 ### Health decay (scales with stage)
 
 Every day at midnight local time (America/Chicago), compute:
