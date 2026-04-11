@@ -9,12 +9,17 @@ import path from 'path';
 import https from 'https';
 import http from 'http';
 
-import { DATA_DIR, EMAIL_INTELLIGENCE_ENABLED, SUPERPILOT_API_URL } from './config.js';
+import {
+  DATA_DIR,
+  EMAIL_INTELLIGENCE_ENABLED,
+  NANOCLAW_SERVICE_TOKEN,
+  SUPERPILOT_API_URL,
+} from './config.js';
 import { logger } from './logger.js';
 
 const SSE_RECONNECT_MIN_MS = 5_000;
 const SSE_RECONNECT_MAX_MS = 300_000; // 5 minutes max backoff
-const NANOCLAW_SERVICE_TOKEN = process.env.NANOCLAW_SERVICE_TOKEN || '';
+// NANOCLAW_SERVICE_TOKEN imported from config.js (reads .env file)
 
 let reconnectMs = SSE_RECONNECT_MIN_MS;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -67,7 +72,7 @@ function connect(): void {
     port: url.port || (isHttps ? 443 : 80),
     path: url.pathname + url.search,
     headers: {
-      'Accept': 'text/event-stream',
+      Accept: 'text/event-stream',
       'x-service-token': NANOCLAW_SERVICE_TOKEN,
       'Cache-Control': 'no-cache',
     },
@@ -161,20 +166,35 @@ function handleTriagedEmails(data: string): void {
 
     const payload = {
       type: 'email_trigger',
-      emails: emails.map((e: { thread_id: string; account: string; classified_at?: string }) => ({
-        thread_id: e.thread_id,
-        account: e.account || 'unknown',
-        subject: '',
-        sender: '',
-      })),
+      emails: emails.map(
+        (e: {
+          thread_id: string;
+          account: string;
+          classified_at?: string;
+        }) => ({
+          thread_id: e.thread_id,
+          account: e.account || 'unknown',
+          subject: '',
+          sender: '',
+        }),
+      ),
       triggered_at: new Date().toISOString(),
       source: 'sse',
     };
 
     const filename = `sse_trigger_${Date.now()}.json`;
-    fs.writeFileSync(path.join(ipcDir, filename), JSON.stringify(payload, null, 2));
-    logger.info({ count: emails.length, filename }, 'SSE email trigger written');
+    fs.writeFileSync(
+      path.join(ipcDir, filename),
+      JSON.stringify(payload, null, 2),
+    );
+    logger.info(
+      { count: emails.length, filename },
+      'SSE email trigger written',
+    );
   } catch (err) {
-    logger.warn({ err: String(err) }, 'Failed to process SSE triaged_emails event');
+    logger.warn(
+      { err: String(err) },
+      'Failed to process SSE triaged_emails event',
+    );
   }
 }
