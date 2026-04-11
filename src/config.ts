@@ -63,9 +63,7 @@ export const SUPERPILOT_API_URL =
   envConfig.SUPERPILOT_API_URL ||
   'https://app.inboxsuperpilot.com/api';
 export const NANOCLAW_SERVICE_TOKEN =
-  process.env.NANOCLAW_SERVICE_TOKEN ||
-  envConfig.NANOCLAW_SERVICE_TOKEN ||
-  '';
+  process.env.NANOCLAW_SERVICE_TOKEN || envConfig.NANOCLAW_SERVICE_TOKEN || '';
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
