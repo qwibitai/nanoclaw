@@ -263,6 +263,14 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS spawned_threads (
+      source_message_id TEXT PRIMARY KEY,
+      thread_jid        TEXT NOT NULL,
+      trigger_kind      TEXT NOT NULL,
+      trigger_value     TEXT NOT NULL,
+      created_at        TEXT NOT NULL
+    );
   `);
 
   // sessions テーブルのスキーマを group_folder → group_jid に移行。
@@ -339,6 +347,24 @@ function createSchema(database: Database.Database): void {
     /* カラムはすでに存在します */
   }
 
+  // parent_folder カラムが存在しない場合は追加
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN parent_folder TEXT`,
+    );
+  } catch {
+    /* カラムはすでに存在します */
+  }
+
+  // channel_mode カラムが存在しない場合は追加
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN channel_mode TEXT`,
+    );
+  } catch {
+    /* カラムはすでに存在します */
+  }
+
   // 旧スキーマ: registered_groups.folder UNIQUE を解除する
   // thread は parent と同じ folder を共有するため、folder の一意制約は不適切。
   try {
@@ -370,7 +396,9 @@ function createSchema(database: Database.Database): void {
             requires_trigger INTEGER DEFAULT 1,
             is_main INTEGER DEFAULT 0,
             group_type TEXT DEFAULT 'chat',
-            thread_defaults TEXT
+            thread_defaults TEXT,
+            parent_folder TEXT,
+            channel_mode TEXT
           );
           INSERT INTO registered_groups (
             jid, name, folder, trigger_pattern, added_at, container_config,
@@ -814,6 +842,32 @@ export function getAllSessions(): Record<string, string> {
 
 // --- 登録済みグループ・アクセッサー ---
 
+/** DB から取得した parent_folder を検証してサニタイズする */
+function sanitizeParentFolder(
+  parentFolder: string | null,
+  jid: string,
+): string | undefined {
+  if (!parentFolder) return undefined;
+  if (!isValidGroupFolder(parentFolder)) {
+    logger.warn(
+      { jid, parentFolder },
+      'Invalid parent_folder in DB; ignoring',
+    );
+    return undefined;
+  }
+  return parentFolder;
+}
+
+/** channel_mode を DB 値から検証する */
+function parseChannelMode(
+  raw: string | null,
+): RegisteredGroup['channel_mode'] {
+  if (raw === 'chat' || raw === 'url_watch' || raw === 'admin_control') {
+    return raw;
+  }
+  return undefined;
+}
+
 export function getRegisteredGroup(
   jid: string,
 ): (RegisteredGroup & { jid: string }) | undefined {
@@ -831,6 +885,8 @@ export function getRegisteredGroup(
         is_main: number | null;
         group_type: string | null;
         thread_defaults: string | null;
+        parent_folder: string | null;
+        channel_mode: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -846,6 +902,7 @@ export function getRegisteredGroup(
     jid: row.jid,
     name: row.name,
     folder: row.folder,
+    parent_folder: sanitizeParentFolder(row.parent_folder, row.jid),
     trigger: row.trigger_pattern,
     added_at: row.added_at,
     containerConfig: _parseContainerConfigJson(row.container_config, row.jid),
@@ -853,6 +910,7 @@ export function getRegisteredGroup(
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     type: groupType,
     thread_defaults: _parseThreadDefaultsJson(row.thread_defaults, row.jid),
+    channel_mode: parseChannelMode(row.channel_mode),
   };
 }
 
@@ -869,9 +927,15 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     );
   }
   const groupType = VALID_GROUP_TYPES.has(rawType) ? rawType : 'chat';
+  // parent_folder の検証: null か有効なフォルダ名のみ許可
+  const parentFolder =
+    group.parent_folder && isValidGroupFolder(group.parent_folder)
+      ? group.parent_folder
+      : null;
+  const channelMode = parseChannelMode(group.channel_mode ?? null);
   db.prepare(
-    `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, group_type, thread_defaults)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, group_type, thread_defaults, parent_folder, channel_mode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(jid) DO UPDATE SET
        name = excluded.name,
        folder = excluded.folder,
@@ -881,7 +945,9 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
        requires_trigger = excluded.requires_trigger,
        is_main = excluded.is_main,
        group_type = excluded.group_type,
-       thread_defaults = excluded.thread_defaults`,
+       thread_defaults = excluded.thread_defaults,
+       parent_folder = excluded.parent_folder,
+       channel_mode = excluded.channel_mode`,
   ).run(
     jid,
     group.name,
@@ -893,6 +959,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     groupType === 'main' || groupType === 'override' ? 1 : 0,
     groupType,
     group.thread_defaults ? JSON.stringify(group.thread_defaults) : null,
+    parentFolder,
+    channelMode ?? null,
   );
 }
 
@@ -908,6 +976,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     is_main: number | null;
     group_type: string | null;
     thread_defaults: string | null;
+    parent_folder: string | null;
+    channel_mode: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -922,6 +992,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     result[row.jid] = {
       name: row.name,
       folder: row.folder,
+      parent_folder: sanitizeParentFolder(row.parent_folder, row.jid),
       trigger: row.trigger_pattern,
       added_at: row.added_at,
       containerConfig: _parseContainerConfigJson(row.container_config, row.jid),
@@ -929,9 +1000,46 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       type: groupType,
       thread_defaults: _parseThreadDefaultsJson(row.thread_defaults, row.jid),
+      channel_mode: parseChannelMode(row.channel_mode),
     };
   }
   return result;
+}
+
+// --- スポーン済みスレッド・アクセッサー ---
+
+/**
+ * 指定されたソースメッセージ ID からスレッドがスポーン済みかどうかを返す。
+ * 重複スポーン防止に使用する。
+ */
+export function hasSpawnedThread(sourceMessageId: string): boolean {
+  const row = db
+    .prepare(
+      'SELECT source_message_id FROM spawned_threads WHERE source_message_id = ?',
+    )
+    .get(sourceMessageId);
+  return row !== undefined;
+}
+
+/**
+ * スポーン済みスレッドを記録する。
+ */
+export function recordSpawnedThread(
+  sourceMessageId: string,
+  threadJid: string,
+  triggerKind: string,
+  triggerValue: string,
+): void {
+  db.prepare(
+    `INSERT OR IGNORE INTO spawned_threads (source_message_id, thread_jid, trigger_kind, trigger_value, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(
+    sourceMessageId,
+    threadJid,
+    triggerKind,
+    triggerValue,
+    new Date().toISOString(),
+  );
 }
 
 // --- JSON マイグレーション ---

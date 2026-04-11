@@ -82,7 +82,9 @@ function buildVolumeMounts(
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
-  const groupDir = resolveGroupFolderPath(group.folder);
+  // parent_folder が設定されている場合（thread グループ）は親の workspace を使う
+  const workspaceFolder = group.parent_folder ?? group.folder;
+  const groupDir = resolveGroupFolderPath(workspaceFolder);
   const isPrivileged = groupType === 'main' || groupType === 'override';
 
   if (isPrivileged) {

@@ -306,6 +306,23 @@ export class DiscordChannel implements Channel {
       logger.debug({ jid, err }, 'Failed to send Discord typing indicator');
     }
   }
+
+  async createThread(parentJid: string, name: string): Promise<string | null> {
+    if (!this.client) return null;
+    try {
+      const channelId = parentJid.replace(/^dc:/, '');
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel || !('threads' in channel)) return null;
+      const thread = await (channel as TextChannel).threads.create({
+        name: name.slice(0, 100),
+        autoArchiveDuration: 60,
+      });
+      return `dc:${thread.id}`;
+    } catch (err) {
+      logger.error({ parentJid, err }, 'Failed to create Discord thread');
+      return null;
+    }
+  }
 }
 
 registerChannel('discord', (opts: ChannelOpts) => {
