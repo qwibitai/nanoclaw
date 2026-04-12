@@ -42,6 +42,7 @@ export interface RegisteredGroup {
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
   model?: string; // Per-group model override (e.g. "claude-opus-4-20250514")
   effort?: string; // Per-group thinking effort ('low' | 'medium' | 'high' | 'max')
+  pendingModelNotice?: string; // One-shot notice injected into next formatted prompt
 }
 
 export interface NewMessage {

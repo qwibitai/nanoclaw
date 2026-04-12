@@ -1,4 +1,4 @@
-import { Channel, NewMessage } from './types.js';
+import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { formatLocalTime, formatCurrentTime } from './timezone.js';
 
 export function escapeXml(s: string): string {
@@ -13,6 +13,7 @@ export function escapeXml(s: string): string {
 export function formatMessages(
   messages: NewMessage[],
   timezone: string,
+  group?: RegisteredGroup,
 ): string {
   const lines = messages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
@@ -26,9 +27,16 @@ export function formatMessages(
     return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}"${replyAttr}>${replySnippet}${escapeXml(m.content)}</message>`;
   });
 
+  // Consume pending model-switch notice (one-shot)
+  let noticeLine = '';
+  if (group?.pendingModelNotice) {
+    noticeLine = `<notice>${escapeXml(group.pendingModelNotice)}</notice>\n`;
+    group.pendingModelNotice = undefined;
+  }
+
   const header = `<context timezone="${escapeXml(timezone)}" current_time="${escapeXml(formatCurrentTime(timezone))}" />\n`;
 
-  return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
+  return `${header}<messages>\n${noticeLine}${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {

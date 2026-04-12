@@ -8,7 +8,7 @@ import {
   formatOutbound,
   stripInternalTags,
 } from './router.js';
-import { NewMessage } from './types.js';
+import { NewMessage, RegisteredGroup } from './types.js';
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
   return {
@@ -178,6 +178,61 @@ describe('formatMessages', () => {
     expect(result).toContain('1:30');
     expect(result).toContain('PM');
     expect(result).toContain('timezone="America/New_York"');
+  });
+  it('includes <notice> when group has pendingModelNotice', () => {
+    const group = {
+      name: 'test',
+      folder: 'test',
+      trigger: '@test',
+      added_at: '2024-01-01',
+      pendingModelNotice: '[model has switched from sonnet to opus]',
+    } as RegisteredGroup;
+    const result = formatMessages([makeMsg()], TZ, group);
+    expect(result).toContain(
+      '<notice>[model has switched from sonnet to opus]</notice>',
+    );
+    expect(result).toContain('<message sender="Alice"');
+  });
+
+  it('clears pendingModelNotice after consumption', () => {
+    const group = {
+      name: 'test',
+      folder: 'test',
+      trigger: '@test',
+      added_at: '2024-01-01',
+      pendingModelNotice: '[model has switched from sonnet to opus]',
+    } as RegisteredGroup;
+    formatMessages([makeMsg()], TZ, group);
+    expect(group.pendingModelNotice).toBeUndefined();
+  });
+
+  it('does not include <notice> on second call', () => {
+    const group = {
+      name: 'test',
+      folder: 'test',
+      trigger: '@test',
+      added_at: '2024-01-01',
+      pendingModelNotice: '[model has switched from sonnet to opus]',
+    } as RegisteredGroup;
+    formatMessages([makeMsg()], TZ, group);
+    const result = formatMessages([makeMsg()], TZ, group);
+    expect(result).not.toContain('<notice>');
+  });
+
+  it('does not include <notice> when no group is passed', () => {
+    const result = formatMessages([makeMsg()], TZ);
+    expect(result).not.toContain('<notice>');
+  });
+
+  it('does not include <notice> when group has no pending notice', () => {
+    const group = {
+      name: 'test',
+      folder: 'test',
+      trigger: '@test',
+      added_at: '2024-01-01',
+    } as RegisteredGroup;
+    const result = formatMessages([makeMsg()], TZ, group);
+    expect(result).not.toContain('<notice>');
   });
 });
 

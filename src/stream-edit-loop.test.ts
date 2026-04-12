@@ -640,9 +640,7 @@ describe('StreamEditLoop', () => {
       loop.update('Analyzing your data...\n<image path="plot.png" />');
       await vi.advanceTimersByTimeAsync(200);
 
-      loop.update(
-        'Analyzing your data...\n<image path="plot.png" />\nDone!',
-      );
+      loop.update('Analyzing your data...\n<image path="plot.png" />\nDone!');
       await vi.advanceTimersByTimeAsync(200);
 
       expect(sent).toEqual([
