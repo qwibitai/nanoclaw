@@ -265,7 +265,7 @@ async function spawnThreadForUrl(
 }
 
 const URL_RE = /https?:\/\/[^\s<>"']+/i;
-const URL_RE_GLOBAL = new RegExp(URL_RE.source, `g${URL_RE.flags}`);
+const URL_RE_GLOBAL = /https?:\/\/[^\s<>"']+/gi;
 
 function stringContainsUrl(value: string): boolean {
   return URL_RE.test(value);
