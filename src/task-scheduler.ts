@@ -135,8 +135,17 @@ async function runTask(
   const gmailRefresh = await refreshGmailTokens();
   if (gmailRefresh.status === 'error') {
     logger.warn(
-      { taskId: task.id, summary: gmailRefresh.summary },
+      {
+        taskId: task.id,
+        group: task.group_folder,
+        summary: gmailRefresh.summary,
+      },
       'Gmail token refresh failed before scheduled task — Gmail-dependent sections may degrade',
+    );
+  } else if (gmailRefresh.status === 'missing') {
+    logger.debug(
+      { taskId: task.id, group: task.group_folder },
+      'Gmail accounts not yet authorized — proceeding with available accounts',
     );
   }
 
