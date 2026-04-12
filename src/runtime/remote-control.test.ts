@@ -244,6 +244,57 @@ describe('remote-control', () => {
         error: 'Failed to start: ENOENT',
       });
     });
+
+    it('returns error when process has no PID (line 138)', async () => {
+      const proc = createMockProcess(0);
+      // pid=0 is falsy, but let's also test undefined
+      (proc as any).pid = undefined;
+      spawnMock.mockReturnValue(proc);
+
+      const result = await startRemoteControl('user1', 'tg:123', '/project');
+      expect(result).toEqual({
+        ok: false,
+        error: 'Failed to get process PID',
+      });
+    });
+
+    it('falls back to process.kill(pid) when process.kill(-pid) throws on timeout (lines 185-186)', async () => {
+      vi.useFakeTimers();
+      const proc = createMockProcess(44444);
+      spawnMock.mockReturnValue(proc);
+      stdoutFileContent = 'no url here';
+
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((
+        target: number,
+        signal?: string | number,
+      ) => {
+        // process.kill(pid, 0) for isProcessAlive check — process is alive
+        if (signal === 0) return true;
+        // process.kill(-pid, 'SIGTERM') — fails (e.g., EPERM for process group)
+        if (target < 0) throw new Error('EPERM');
+        // process.kill(pid, 'SIGTERM') — succeeds (fallback)
+        return true;
+      }) as any);
+
+      const promise = startRemoteControl('user1', 'tg:123', '/project');
+
+      // Advance past URL_TIMEOUT_MS (30s)
+      for (let i = 0; i < 160; i++) {
+        await vi.advanceTimersByTimeAsync(200);
+      }
+
+      const result = await promise;
+      expect(result).toEqual({
+        ok: false,
+        error: 'Timed out waiting for Remote Control URL',
+      });
+
+      // Verify the fallback kill was attempted
+      expect(killSpy).toHaveBeenCalledWith(-44444, 'SIGTERM');
+      expect(killSpy).toHaveBeenCalledWith(44444, 'SIGTERM');
+
+      vi.useRealTimers();
+    });
   });
 
   // --- stopRemoteControl ---

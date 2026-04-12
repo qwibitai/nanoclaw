@@ -79,6 +79,15 @@ vi.mock('grammy', () => ({
 
 import fs from 'fs';
 import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
+import { registerChannel } from './registry.js';
+import { readEnvFile } from '../core/env.js';
+import { logger } from '../core/logger.js';
+
+// Capture the factory at import time (before clearAllMocks runs)
+const telegramFactoryCall = vi
+  .mocked(registerChannel)
+  .mock.calls.find((c) => c[0] === 'telegram');
+const telegramFactory = telegramFactoryCall?.[1];
 
 // --- Test helpers ---
 
@@ -722,6 +731,61 @@ describe('TelegramChannel', () => {
       );
     });
 
+    it('falls back to placeholder when getFile returns no file_path', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      // getFile succeeds but returns no file_path (lines 121-123)
+      currentBot().api.getFile.mockResolvedValueOnce({});
+
+      const ctx = createMediaCtx({
+        caption: 'Uploaded',
+        extra: { photo: [{ file_id: 'no_path_id', width: 800 }] },
+      });
+      await triggerMediaMessage('message:photo', ctx);
+      await flushPromises();
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({ content: '[Photo] Uploaded' }),
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        { fileId: 'no_path_id' },
+        'Telegram getFile returned no file_path',
+      );
+    });
+
+    it('falls back to placeholder when fetch response is not ok', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      // getFile succeeds with a file_path, but fetch returns non-ok (lines 139-144)
+      currentBot().api.getFile.mockResolvedValueOnce({
+        file_path: 'photos/file_0.jpg',
+      });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: false, status: 404 }),
+      );
+
+      const ctx = createMediaCtx({
+        extra: { photo: [{ file_id: 'fetch_fail_id', width: 800 }] },
+      });
+      await triggerMediaMessage('message:photo', ctx);
+      await flushPromises();
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({ content: '[Photo]' }),
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        { fileId: 'fetch_fail_id', status: 404 },
+        'Telegram file download failed',
+      );
+    });
+
     it('falls back to placeholder when download fails', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
@@ -1155,5 +1219,99 @@ describe('TelegramChannel', () => {
       const channel = new TelegramChannel('test-token', createTestOpts());
       expect(channel.name).toBe('telegram');
     });
+  });
+
+  // --- bot.catch error handler (line 393) ---
+
+  describe('bot.catch error handler', () => {
+    it('invokes errorHandler and logs the error message', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const errorHandler = currentBot().errorHandler!;
+      expect(errorHandler).not.toBeNull();
+
+      // Invoke the error handler as grammy would
+      errorHandler({ message: 'Polling error occurred' });
+
+      const { logger: mockLogger } = await import('../core/logger.js');
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        { err: 'Polling error occurred' },
+        'Telegram bot error',
+      );
+    });
+  });
+
+  // --- sendMessage outer catch (line 434) ---
+
+  describe('sendMessage outer catch', () => {
+    it('logs error when both Markdown and plain text sends fail', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      // Reject ALL calls to sendMessage so the outer catch fires
+      const apiError = new Error('Chat not found');
+      currentBot().api.sendMessage.mockRejectedValue(apiError);
+
+      await channel.sendMessage('tg:100200300', 'This will fail');
+
+      const { logger: mockLogger } = await import('../core/logger.js');
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ jid: 'tg:100200300' }),
+        'Failed to send Telegram message',
+      );
+    });
+  });
+});
+
+// --- registerChannel factory (lines 468-475) ---
+
+describe('registerChannel factory', () => {
+  it('registerChannel was called at import time with "telegram" name', () => {
+    expect(telegramFactoryCall).toBeDefined();
+    expect(telegramFactoryCall![0]).toBe('telegram');
+    expect(typeof telegramFactory).toBe('function');
+  });
+
+  it('factory returns null when TELEGRAM_BOT_TOKEN is not set', () => {
+    vi.mocked(readEnvFile).mockReturnValueOnce({});
+
+    const saved = process.env.TELEGRAM_BOT_TOKEN;
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    try {
+      const result = telegramFactory!({
+        onMessage: vi.fn(),
+        onChatMetadata: vi.fn(),
+        registeredGroups: () => ({}),
+      });
+      expect(result).toBeNull();
+      expect(logger.warn).toHaveBeenCalledWith(
+        'Telegram: TELEGRAM_BOT_TOKEN not set',
+      );
+    } finally {
+      if (saved !== undefined) process.env.TELEGRAM_BOT_TOKEN = saved;
+    }
+  });
+
+  it('factory returns a TelegramChannel when token is available', () => {
+    vi.mocked(readEnvFile).mockReturnValueOnce({
+      TELEGRAM_BOT_TOKEN: 'test-token-from-env',
+    });
+
+    const saved = process.env.TELEGRAM_BOT_TOKEN;
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    try {
+      const result = telegramFactory!({
+        onMessage: vi.fn(),
+        onChatMetadata: vi.fn(),
+        registeredGroups: () => ({}),
+      });
+      expect(result).not.toBeNull();
+      expect(result).toBeInstanceOf(TelegramChannel);
+    } finally {
+      if (saved !== undefined) process.env.TELEGRAM_BOT_TOKEN = saved;
+    }
   });
 });

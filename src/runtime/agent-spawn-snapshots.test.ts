@@ -48,7 +48,9 @@ function makeJob(overrides: Partial<JobSnapshotRow> = {}): JobSnapshotRow {
   };
 }
 
-function makeRun(overrides: Partial<JobRunSnapshotRow> = {}): JobRunSnapshotRow {
+function makeRun(
+  overrides: Partial<JobRunSnapshotRow> = {},
+): JobRunSnapshotRow {
   return {
     run_id: 'run-1',
     job_id: 'job-1',

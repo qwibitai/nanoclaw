@@ -92,6 +92,16 @@ describe('loadSenderAllowlist', () => {
     expect(cfg.default.allow).toBe('*');
   });
 
+  it('returns allow-all when readFileSync throws non-ENOENT error', () => {
+    // Cover lines 43-47: non-ENOENT read error branch
+    // Create a directory where a file is expected — reading a dir throws EISDIR
+    const dirPath = path.join(tmpDir, 'is-a-directory.json');
+    fs.mkdirSync(dirPath);
+    const cfg = loadSenderAllowlist(dirPath);
+    expect(cfg.default.allow).toBe('*');
+    expect(cfg.default.mode).toBe('trigger');
+  });
+
   it('rejects non-string allow array items', () => {
     const p = writeConfig({
       default: { allow: [123, null, true], mode: 'trigger' },

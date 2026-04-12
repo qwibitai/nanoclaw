@@ -184,7 +184,8 @@ describe('getHostRuntimeCredentialEnv', () => {
   it('writes CA certificate and returns onecliCaPath when present', async () => {
     mockGetContainerConfig.mockResolvedValue({
       env: { ANTHROPIC_AUTH_TOKEN: 'token' },
-      caCertificate: '-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----',
+      caCertificate:
+        '-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----',
       caCertificateContainerPath: '/etc/ssl/onecli/ca.pem',
     });
 
@@ -331,8 +332,8 @@ describe('prepareHostRuntimeContext', () => {
   });
 
   it('returns globalDir when global directory exists', async () => {
-    mockExistsSync.mockImplementation((p: string) =>
-      p === '/tmp/nanoclaw-test/groups/global',
+    mockExistsSync.mockImplementation(
+      (p: string) => p === '/tmp/nanoclaw-test/groups/global',
     );
 
     const mod = await loadModule({

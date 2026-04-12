@@ -110,7 +110,10 @@ vi.mock('child_process', async () => {
 import { spawnAgent, AgentOutput } from './agent-spawn.js';
 import { getEffectiveModelConfig } from '../core/config.js';
 import { spawn } from 'child_process';
+import fs from 'fs';
 import type { RegisteredGroup } from '../core/types.js';
+import { getPromptProfileService } from './prompt-profile.js';
+import { logger } from '../core/logger.js';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -260,5 +263,46 @@ describe('agent-spawn timeout behavior', () => {
       string
     >;
     expect(env.AGENT_MEMORY_ROOT).toBe('/tmp/nanoclaw-agent-memory');
+  });
+
+  it('continues without custom system prompt when compileSystemPrompt throws (line 70)', async () => {
+    // Make compileSystemPrompt throw
+    vi.mocked(getPromptProfileService).mockReturnValueOnce({
+      compileSystemPrompt: vi.fn(() => {
+        throw new Error('Bad template');
+      }),
+    } as any);
+
+    const resultPromise = spawnAgent(testGroup, testInput, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Emit successful output to complete the promise
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Done despite template error',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ groupFolder: 'test-group' }),
+      'Failed to compile prompt profile; continuing without custom system prompt',
+    );
+  });
+
+  it('returns error when host runner files are missing (line 92)', async () => {
+    // Make existsSync return false for the host runner paths
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const result = await spawnAgent(testGroup, testInput, () => {});
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('missing built agent-runner files');
+
+    // Restore default behavior
+    vi.mocked(fs.existsSync).mockReturnValue(true);
   });
 });

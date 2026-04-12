@@ -115,7 +115,9 @@ describe('registerGroup', () => {
     registerGroup(groups, 'g1@g.us', group, { persist, ensureOneCLIAgent });
 
     // Template path should use 'main' subdirectory
-    expect(mockFs.existsSync).toHaveBeenCalledWith('/mock/groups/main/CLAUDE.md');
+    expect(mockFs.existsSync).toHaveBeenCalledWith(
+      '/mock/groups/main/CLAUDE.md',
+    );
     // Default assistant name is 'Andy', so no replacement occurs
     expect(mockFs.writeFileSync).toHaveBeenCalledWith(
       '/resolved/test-group/CLAUDE.md',
@@ -369,8 +371,18 @@ describe('setGroupThinkingOverride', () => {
 describe('listAvailableGroups', () => {
   it('returns groups with registration status', () => {
     const chats = [
-      { jid: 'g1@g.us', name: 'Group One', last_message_time: '2026-01-01', is_group: true },
-      { jid: 'g2@g.us', name: 'Group Two', last_message_time: '2026-01-02', is_group: 1 },
+      {
+        jid: 'g1@g.us',
+        name: 'Group One',
+        last_message_time: '2026-01-01',
+        is_group: true,
+      },
+      {
+        jid: 'g2@g.us',
+        name: 'Group Two',
+        last_message_time: '2026-01-02',
+        is_group: 1,
+      },
     ];
     const registered: Record<string, RegisteredGroup> = {
       'g1@g.us': makeGroup(),
@@ -379,14 +391,29 @@ describe('listAvailableGroups', () => {
     const result = listAvailableGroups(chats, registered);
 
     expect(result).toEqual([
-      { jid: 'g1@g.us', name: 'Group One', lastActivity: '2026-01-01', isRegistered: true },
-      { jid: 'g2@g.us', name: 'Group Two', lastActivity: '2026-01-02', isRegistered: false },
+      {
+        jid: 'g1@g.us',
+        name: 'Group One',
+        lastActivity: '2026-01-01',
+        isRegistered: true,
+      },
+      {
+        jid: 'g2@g.us',
+        name: 'Group Two',
+        lastActivity: '2026-01-02',
+        isRegistered: false,
+      },
     ]);
   });
 
   it('filters out __group_sync__ sentinel', () => {
     const chats = [
-      { jid: '__group_sync__', name: null, last_message_time: '', is_group: true },
+      {
+        jid: '__group_sync__',
+        name: null,
+        last_message_time: '',
+        is_group: true,
+      },
       { jid: 'g1@g.us', name: 'Real', last_message_time: 't1', is_group: true },
     ];
 
@@ -397,9 +424,24 @@ describe('listAvailableGroups', () => {
 
   it('filters out non-group chats', () => {
     const chats = [
-      { jid: 'solo@s.whatsapp.net', name: 'Solo', last_message_time: 't1', is_group: false },
-      { jid: 'zero@s.whatsapp.net', name: 'Zero', last_message_time: 't2', is_group: 0 },
-      { jid: 'g1@g.us', name: 'Group', last_message_time: 't3', is_group: true },
+      {
+        jid: 'solo@s.whatsapp.net',
+        name: 'Solo',
+        last_message_time: 't1',
+        is_group: false,
+      },
+      {
+        jid: 'zero@s.whatsapp.net',
+        name: 'Zero',
+        last_message_time: 't2',
+        is_group: 0,
+      },
+      {
+        jid: 'g1@g.us',
+        name: 'Group',
+        last_message_time: 't3',
+        is_group: true,
+      },
     ];
 
     const result = listAvailableGroups(chats, {});
@@ -427,8 +469,18 @@ describe('listAvailableGroups', () => {
 
   it('returns empty array when no groups match', () => {
     const chats = [
-      { jid: '__group_sync__', name: null, last_message_time: '', is_group: true },
-      { jid: 'solo@s.whatsapp.net', name: 'Solo', last_message_time: 't1', is_group: false },
+      {
+        jid: '__group_sync__',
+        name: null,
+        last_message_time: '',
+        is_group: true,
+      },
+      {
+        jid: 'solo@s.whatsapp.net',
+        name: 'Solo',
+        last_message_time: 't1',
+        is_group: false,
+      },
     ];
 
     const result = listAvailableGroups(chats, {});

@@ -7,11 +7,12 @@ import {
 } from '../core/config.js';
 import {
   escapeXml,
+  findChannel,
   formatMessages,
   formatOutbound,
   stripInternalTags,
 } from './router.js';
-import { NewMessage } from '../core/types.js';
+import { Channel, NewMessage } from '../core/types.js';
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
   return {
@@ -346,5 +347,40 @@ describe('trigger gating (requiresTrigger interaction)', () => {
   it('non-main group with requiresTrigger=false always processes (no trigger needed)', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
     expect(shouldProcess(false, false, undefined, msgs)).toBe(true);
+  });
+});
+
+// --- findChannel (line 48 coverage) ---
+
+describe('findChannel', () => {
+  function makeFakeChannel(
+    name: string,
+    ownedJids: string[],
+  ): Channel {
+    return {
+      name,
+      connect: async () => {},
+      sendMessage: async () => {},
+      isConnected: () => true,
+      ownsJid: (jid: string) => ownedJids.includes(jid),
+      disconnect: async () => {},
+    };
+  }
+
+  it('returns the channel that owns the given JID', () => {
+    const wa = makeFakeChannel('whatsapp', ['group@g.us', 'dm@s.whatsapp.net']);
+    const tg = makeFakeChannel('telegram', ['chat_123']);
+
+    expect(findChannel([wa, tg], 'group@g.us')).toBe(wa);
+    expect(findChannel([wa, tg], 'chat_123')).toBe(tg);
+  });
+
+  it('returns undefined when no channel owns the JID', () => {
+    const wa = makeFakeChannel('whatsapp', ['group@g.us']);
+    expect(findChannel([wa], 'unknown-jid')).toBeUndefined();
+  });
+
+  it('returns undefined for an empty channels array', () => {
+    expect(findChannel([], 'group@g.us')).toBeUndefined();
   });
 });

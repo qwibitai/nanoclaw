@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { Job, JobRun } from '../core/types.js';
 import { writeSchedulerStateFile } from './scheduler-state-file.js';
@@ -68,5 +68,37 @@ describe('scheduler state file', () => {
     expect(saved.recent_runs).toHaveLength(1);
     expect(saved.recent_runs[0].run_id).toBe('run-1');
     expect(typeof saved.updated_at).toBe('string');
+  });
+
+  it('creates parent directory if it does not exist', () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'nanoclaw-scheduler-'),
+    );
+    const filePath = path.join(tempDir, 'nested', 'dir', 'scheduler-jobs.json');
+
+    writeSchedulerStateFile([], [], filePath);
+
+    const saved = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as {
+      jobs: Job[];
+      recent_runs: JobRun[];
+    };
+    expect(saved.jobs).toHaveLength(0);
+    expect(saved.recent_runs).toHaveLength(0);
+  });
+});
+
+describe('writeSchedulerStateFileSafe', () => {
+  it('does not throw when underlying write fails', async () => {
+    vi.doMock('../core/config.js', () => ({
+      SCHEDULER_JOBS_JSON_PATH: '/proc/nonexistent/state.json',
+    }));
+
+    vi.resetModules();
+    const mod = await import('./scheduler-state-file.js');
+
+    expect(() => mod.writeSchedulerStateFileSafe([], [])).not.toThrow();
+
+    vi.doUnmock('../core/config.js');
+    vi.resetModules();
   });
 });

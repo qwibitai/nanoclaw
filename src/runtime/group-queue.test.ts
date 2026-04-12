@@ -433,6 +433,185 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  // --- Coverage for drainGroup line 230 ---
+
+  it('drainGroup triggers after runForGroup completes', async () => {
+    const executionOrder: string[] = [];
+    let resolveFirst: () => void;
+
+    const processMessages = vi.fn(async (_groupJid: string) => {
+      if (executionOrder.length === 0) {
+        await new Promise<void>((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      executionOrder.push('messages');
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Start first message processing
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Queue a second message while first is active
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // Complete first — drainGroup should trigger second run
+    resolveFirst!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(executionOrder.length).toBeGreaterThanOrEqual(2);
+    expect(executionOrder[1]).toBe('messages');
+  });
+
+  // --- Coverage for drainWaiting with messages (line 337) ---
+
+  it('drainWaiting runs pending messages for waiting groups when slots free up', async () => {
+    const processed: string[] = [];
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async (groupJid: string) => {
+      processed.push(groupJid);
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill both slots
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Queue messages for group3 (goes to waiting)
+    queue.enqueueMessageCheck('group3@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processed).toEqual(['group1@g.us', 'group2@g.us']);
+
+    // Complete group1 — group3 should drain via drainWaiting with messages path
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processed).toContain('group3@g.us');
+  });
+
+  // --- Coverage for drainWaiting with tasks (line 337 task path) ---
+
+  it('drainWaiting runs pending tasks for waiting groups when slots free up', async () => {
+    const processed: string[] = [];
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async (groupJid: string) => {
+      processed.push(groupJid);
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill both slots with messages
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Enqueue a task for group3 — will go to waiting list
+    const taskExecuted = vi.fn();
+    queue.enqueueTask('group3@g.us', 'task-waiting', async () => {
+      taskExecuted();
+    });
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Task should not have run yet
+    expect(taskExecuted).not.toHaveBeenCalled();
+
+    // Complete group1 — group3's task should drain
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(taskExecuted).toHaveBeenCalledTimes(1);
+  });
+
+  // --- Coverage for shutdown with active processes (lines 355-356) ---
+
+  it('shutdown logs active containers and detaches them', async () => {
+    let resolveProcess: () => void;
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Register a process with containerName (like a real container)
+    const mockProcess = { killed: false } as any;
+    queue.registerProcess('group1@g.us', mockProcess, 'container-active', 'team');
+
+    // Shutdown should complete without killing the process
+    await queue.shutdown(5000);
+
+    // The process should still not be killed (detached)
+    expect(mockProcess.killed).toBe(false);
+
+    // After shutdown, new enqueues should be ignored
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- Coverage for runTask error handling ---
+
+  it('runTask handles task function errors without crashing', async () => {
+    const taskFn = vi.fn(async () => {
+      throw new Error('task execution failure');
+    });
+
+    queue.enqueueTask('group1@g.us', 'task-error', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Task should have been called and error should be caught
+    expect(taskFn).toHaveBeenCalledTimes(1);
+
+    // Queue should recover — enqueue another task for the same group
+    const secondTaskFn = vi.fn(async () => {});
+    queue.enqueueTask('group1@g.us', 'task-recover', secondTaskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(secondTaskFn).toHaveBeenCalledTimes(1);
+  });
+
+  // --- Coverage for runForGroup error handling in processMessagesFn ---
+
+  it('schedules retry when processMessagesFn throws', async () => {
+    let callCount = 0;
+
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) throw new Error('processing crash');
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // First call throws
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(1);
+
+    // Retry should occur after BASE_RETRY_MS
+    await vi.advanceTimersByTimeAsync(5010);
+    expect(callCount).toBe(2);
+  });
+
   it('preempts when idle arrives with pending tasks', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;
@@ -480,5 +659,423 @@ describe('GroupQueue', () => {
 
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- Coverage for sendMessage returning false when not active ---
+
+  it('sendMessage returns false when no container is active for the group', () => {
+    const result = queue.sendMessage('group1@g.us', 'hello');
+    expect(result).toBe(false);
+  });
+
+  it('sendMessage returns false when active but no groupFolder registered', async () => {
+    let resolveProcess: () => void;
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Active but no registerProcess called (no groupFolder)
+    const result = queue.sendMessage('group1@g.us', 'hello');
+    expect(result).toBe(false);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- Coverage for closeStdin when not active ---
+
+  it('closeStdin does nothing when no container is active', async () => {
+    const fs = await import('fs');
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    queue.closeStdin('group1@g.us');
+
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && (call[0] as string).endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+  });
+
+  // --- Coverage for enqueueTask when shuttingDown ---
+
+  it('enqueueTask does nothing after shutdown', async () => {
+    const taskFn = vi.fn(async () => {});
+
+    await queue.shutdown(1000);
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(taskFn).not.toHaveBeenCalled();
+  });
+
+  // --- Coverage for drainWaiting skipping group with neither tasks nor messages ---
+
+  it('drainWaiting skips waiting groups with no pending tasks or messages', async () => {
+    const processed: string[] = [];
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async (groupJid: string) => {
+      processed.push(groupJid);
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill both slots
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Enqueue group3 with messages (goes to waiting)
+    queue.enqueueMessageCheck('group3@g.us');
+    // Also enqueue group4 with messages
+    queue.enqueueMessageCheck('group4@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Complete both active groups
+    completionCallbacks[0]();
+    completionCallbacks[1]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Both group3 and group4 should eventually be processed
+    expect(processed).toContain('group3@g.us');
+    expect(processed).toContain('group4@g.us');
+  });
+
+  // --- Coverage for drainGroup when shuttingDown ---
+
+  it('drainGroup does not drain after shutdown', async () => {
+    let resolveProcess: () => void;
+    let callCount = 0;
+
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) {
+        await new Promise<void>((resolve) => {
+          resolveProcess = resolve;
+        });
+      }
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Start first group processing
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Queue a second message while first is active
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // Shutdown while first is still running
+    await queue.shutdown(1000);
+
+    // Complete first — drainGroup should see shuttingDown and skip
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Only the first call should have happened; drain should not fire the second
+    expect(callCount).toBe(1);
+  });
+
+  // --- Coverage for duplicate task already queued ---
+
+  it('rejects duplicate enqueue of an already-queued task', async () => {
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Start processing (takes the active slot)
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Enqueue task while active
+    const taskFn = vi.fn(async () => {});
+    queue.enqueueTask('group1@g.us', 'task-dup', taskFn);
+
+    // Try to enqueue the same task again
+    const dupFn = vi.fn(async () => {});
+    queue.enqueueTask('group1@g.us', 'task-dup', dupFn);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Original task should have run, duplicate should not
+    expect(taskFn).toHaveBeenCalledTimes(1);
+    expect(dupFn).not.toHaveBeenCalled();
+  });
+
+  // --- Coverage for retry timeout not firing after shutdown ---
+
+  it('retry timer does not fire after shutdown', async () => {
+    let callCount = 0;
+
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      return false; // always fail
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // First call happens
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(1);
+
+    // Shutdown before retry fires
+    await queue.shutdown(1000);
+
+    // Advance past retry delay
+    await vi.advanceTimersByTimeAsync(10000);
+
+    // Should not have retried after shutdown
+    expect(callCount).toBe(1);
+  });
+
+  // --- Coverage for enqueueTask at concurrency limit ---
+
+  it('enqueueTask queues task when at concurrency limit', async () => {
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill both slots with messages
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Enqueue a task for a new group at the concurrency limit
+    const taskFn = vi.fn(async () => {});
+    queue.enqueueTask('group3@g.us', 'task-limit', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Task should not have run yet
+    expect(taskFn).not.toHaveBeenCalled();
+
+    // Free a slot
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Now the task should run
+    expect(taskFn).toHaveBeenCalledTimes(1);
+  });
+
+  // --- Coverage for sendMessage success path ---
+
+  it('sendMessage returns true and writes IPC file for active message container', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    const renameSync = vi.mocked(fs.default.renameSync);
+    writeFileSync.mockClear();
+    renameSync.mockClear();
+
+    const result = queue.sendMessage('group1@g.us', 'hello world');
+    expect(result).toBe(true);
+
+    // Should have written a temp file and renamed it
+    expect(writeFileSync).toHaveBeenCalled();
+    expect(renameSync).toHaveBeenCalled();
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- Coverage for sendMessage catch block ---
+
+  it('sendMessage returns false when file write throws', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+
+    const mkdirSync = vi.mocked(fs.default.mkdirSync);
+    mkdirSync.mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+
+    const result = queue.sendMessage('group1@g.us', 'hello');
+    expect(result).toBe(false);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- Coverage for enqueueTask when task is already running (line 96-98) ---
+
+  it('enqueueTask skips when same taskId is already running', async () => {
+    let resolveTask: () => void;
+    const taskFn = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    // Start the task — it will be running (runningTaskId set)
+    queue.enqueueTask('group1@g.us', 'task-dup-running', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Try to enqueue the same taskId while it is still running
+    const dupFn = vi.fn(async () => {});
+    queue.enqueueTask('group1@g.us', 'task-dup-running', dupFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Duplicate should never be called
+    expect(dupFn).not.toHaveBeenCalled();
+    expect(taskFn).toHaveBeenCalledTimes(1);
+
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- Coverage for drainGroup pending messages after task completes (line 306) ---
+
+  it('drainGroup runs pending messages after a task completes', async () => {
+    let resolveTask: () => void;
+    const taskRan = vi.fn();
+    const taskFn = async () => {
+      taskRan();
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    };
+
+    const processed: string[] = [];
+    const processMessages = vi.fn(async (groupJid: string) => {
+      processed.push(groupJid);
+      return true;
+    });
+    queue.setProcessMessagesFn(processMessages);
+
+    // Start a task for group1 (takes the slot)
+    queue.enqueueTask('group1@g.us', 'task-before-msg', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(taskRan).toHaveBeenCalledTimes(1);
+
+    // While the task is running, enqueue a message for the SAME group
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Messages should not have been processed yet (task is active)
+    expect(processed).toHaveLength(0);
+
+    // Complete the task — drainGroup should see pendingMessages and call runForGroup
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processed).toContain('group1@g.us');
+  });
+
+  // --- Coverage for drainWaiting with tasks for waiting group (line 330) ---
+
+  it('drainWaiting picks up pending tasks from waiting groups', async () => {
+    const completionCallbacks: Array<() => void> = [];
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill both slots with messages
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(completionCallbacks).toHaveLength(2);
+
+    // Enqueue a TASK for a new group — goes to waiting since concurrency is full
+    const waitingTaskFn = vi.fn(async () => {});
+    queue.enqueueTask('group3@g.us', 'task-drain-waiting', waitingTaskFn);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(waitingTaskFn).not.toHaveBeenCalled();
+
+    // Complete group1 — drainWaiting should pick up group3's task
+    completionCallbacks[0]!();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(waitingTaskFn).toHaveBeenCalledTimes(1);
+  });
+
+  // --- Coverage for drainWaiting with messages for waiting group (line 337) ---
+
+  it('drainWaiting picks up pending messages from waiting groups', async () => {
+    const completionCallbacks: Array<() => void> = [];
+    const processed: string[] = [];
+    const processMessages = vi.fn(async (groupJid: string) => {
+      processed.push(groupJid);
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill both slots
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(completionCallbacks).toHaveLength(2);
+
+    // Enqueue messages for group3 — goes to waiting
+    queue.enqueueMessageCheck('group3@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(processed).toEqual(['group1@g.us', 'group2@g.us']);
+
+    // Complete group1 — drainWaiting should pick up group3's messages
+    completionCallbacks[0]!();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(processed).toContain('group3@g.us');
   });
 });

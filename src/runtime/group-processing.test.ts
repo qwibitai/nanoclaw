@@ -76,8 +76,7 @@ vi.mock('./agent-spawn.js', () => ({
   writeJobRunsSnapshot: (...args: unknown[]) =>
     mockWriteJobRunsSnapshot(...args),
   writeJobsSnapshot: (...args: unknown[]) => mockWriteJobsSnapshot(...args),
-  writeGroupsSnapshot: (...args: unknown[]) =>
-    mockWriteGroupsSnapshot(...args),
+  writeGroupsSnapshot: (...args: unknown[]) => mockWriteGroupsSnapshot(...args),
 }));
 
 const mockArchiveSessionTranscript = vi.fn();
@@ -111,9 +110,7 @@ const { createGroupProcessor } = await import('./group-processing.js');
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeMessage(
-  overrides: Partial<NewMessage> = {},
-): NewMessage {
+function makeMessage(overrides: Partial<NewMessage> = {}): NewMessage {
   return {
     id: 'msg-1',
     chat_jid: 'group1@g.us',
@@ -152,7 +149,9 @@ function makeChannel(overrides: Partial<Channel> = {}): Channel {
   };
 }
 
-function makeDeps(overrides: Partial<GroupProcessingDeps> = {}): GroupProcessingDeps {
+function makeDeps(
+  overrides: Partial<GroupProcessingDeps> = {},
+): GroupProcessingDeps {
   return {
     channels: [],
     getGroup: vi.fn().mockReturnValue(undefined),
@@ -179,11 +178,13 @@ function makeDeps(overrides: Partial<GroupProcessingDeps> = {}): GroupProcessing
  * Configure a standard "happy path" set of mocks that processes messages
  * through to agent spawn. Returns the deps and channel for further assertions.
  */
-function setupHappyPath(opts: {
-  group?: RegisteredGroup;
-  messages?: NewMessage[];
-  agentOutput?: AgentOutput;
-} = {}) {
+function setupHappyPath(
+  opts: {
+    group?: RegisteredGroup;
+    messages?: NewMessage[];
+    agentOutput?: AgentOutput;
+  } = {},
+) {
   const group = opts.group ?? makeGroup({ isMain: true });
   const channel = makeChannel();
   const messages = opts.messages ?? [makeMessage()];
@@ -286,7 +287,10 @@ describe('createGroupProcessor', () => {
   describe('session command handling', () => {
     it('delegates to handleSessionCommand and returns success when handled', async () => {
       const { deps } = setupHappyPath();
-      mockHandleSessionCommand.mockResolvedValue({ handled: true, success: true });
+      mockHandleSessionCommand.mockResolvedValue({
+        handled: true,
+        success: true,
+      });
 
       const { processGroupMessages } = createGroupProcessor(deps);
       const result = await processGroupMessages('group1@g.us');
@@ -297,7 +301,10 @@ describe('createGroupProcessor', () => {
 
     it('delegates to handleSessionCommand and returns false when handled but failed', async () => {
       const { deps } = setupHappyPath();
-      mockHandleSessionCommand.mockResolvedValue({ handled: true, success: false });
+      mockHandleSessionCommand.mockResolvedValue({
+        handled: true,
+        success: false,
+      });
 
       const { processGroupMessages } = createGroupProcessor(deps);
       const result = await processGroupMessages('group1@g.us');
@@ -324,7 +331,11 @@ describe('createGroupProcessor', () => {
 
   describe('trigger pattern filtering (non-main groups)', () => {
     it('returns true without processing when non-main group has no trigger in messages', async () => {
-      const group = makeGroup({ isMain: false, requiresTrigger: true, trigger: 'Andy' });
+      const group = makeGroup({
+        isMain: false,
+        requiresTrigger: true,
+        trigger: 'Andy',
+      });
       const messages = [makeMessage({ content: 'hello there' })];
       const { deps } = setupHappyPath({ group, messages });
       mockIsTriggerAllowed.mockReturnValue(true);
@@ -337,7 +348,11 @@ describe('createGroupProcessor', () => {
     });
 
     it('processes messages when non-main group has trigger in messages', async () => {
-      const group = makeGroup({ isMain: false, requiresTrigger: true, trigger: 'Andy' });
+      const group = makeGroup({
+        isMain: false,
+        requiresTrigger: true,
+        trigger: 'Andy',
+      });
       const messages = [makeMessage({ content: '@Andy please help' })];
       const { deps } = setupHappyPath({ group, messages });
       mockIsTriggerAllowed.mockReturnValue(true);
@@ -374,7 +389,11 @@ describe('createGroupProcessor', () => {
     });
 
     it('allows trigger from own messages (is_from_me)', async () => {
-      const group = makeGroup({ isMain: false, requiresTrigger: true, trigger: 'Andy' });
+      const group = makeGroup({
+        isMain: false,
+        requiresTrigger: true,
+        trigger: 'Andy',
+      });
       const messages = [
         makeMessage({ content: '@Andy do this', is_from_me: true }),
       ];
@@ -390,7 +409,11 @@ describe('createGroupProcessor', () => {
     });
 
     it('blocks trigger from non-allowlisted sender', async () => {
-      const group = makeGroup({ isMain: false, requiresTrigger: true, trigger: 'Andy' });
+      const group = makeGroup({
+        isMain: false,
+        requiresTrigger: true,
+        trigger: 'Andy',
+      });
       const messages = [
         makeMessage({ content: '@Andy do this', is_from_me: false }),
       ];
@@ -483,9 +506,13 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      const typingCalls = (channel.setTyping as ReturnType<typeof vi.fn>).mock.calls;
+      const typingCalls = (channel.setTyping as ReturnType<typeof vi.fn>).mock
+        .calls;
       expect(typingCalls[0]).toEqual(['group1@g.us', true]);
-      expect(typingCalls[typingCalls.length - 1]).toEqual(['group1@g.us', false]);
+      expect(typingCalls[typingCalls.length - 1]).toEqual([
+        'group1@g.us',
+        false,
+      ]);
     });
 
     it('notifies idle on success status from onOutput callback', async () => {
@@ -556,7 +583,11 @@ describe('createGroupProcessor', () => {
       const { deps } = setupHappyPath({ group, messages });
 
       // Return error with NO result (no output sent to user)
-      const errorOutput: AgentOutput = { status: 'error', result: null, error: 'boom' };
+      const errorOutput: AgentOutput = {
+        status: 'error',
+        result: null,
+        error: 'boom',
+      };
       mockSpawnAgent.mockImplementation(
         async (
           _group: RegisteredGroup,
@@ -569,14 +600,17 @@ describe('createGroupProcessor', () => {
         },
       );
 
-      (deps.getCursor as ReturnType<typeof vi.fn>).mockReturnValue('prev-cursor');
+      (deps.getCursor as ReturnType<typeof vi.fn>).mockReturnValue(
+        'prev-cursor',
+      );
 
       const { processGroupMessages } = createGroupProcessor(deps);
       const result = await processGroupMessages('group1@g.us');
 
       expect(result).toBe(false);
       // cursor should be rolled back to the previous value
-      const setCursorCalls = (deps.setCursor as ReturnType<typeof vi.fn>).mock.calls;
+      const setCursorCalls = (deps.setCursor as ReturnType<typeof vi.fn>).mock
+        .calls;
       const lastSetCursor = setCursorCalls[setCursorCalls.length - 1];
       expect(lastSetCursor).toEqual(['group1@g.us', 'prev-cursor']);
     });
@@ -584,7 +618,11 @@ describe('createGroupProcessor', () => {
     it('does not call memory reflection on error', async () => {
       const { deps } = setupHappyPath();
 
-      const errorOutput: AgentOutput = { status: 'error', result: null, error: 'boom' };
+      const errorOutput: AgentOutput = {
+        status: 'error',
+        result: null,
+        error: 'boom',
+      };
       mockSpawnAgent.mockImplementation(
         async (
           _group: RegisteredGroup,
@@ -624,23 +662,37 @@ describe('createGroupProcessor', () => {
           }
           // Then signal error
           if (onOutput) {
-            await onOutput({ status: 'error', result: null, error: 'late error' });
+            await onOutput({
+              status: 'error',
+              result: null,
+              error: 'late error',
+            });
           }
-          return { status: 'error', result: null, error: 'late error' } as AgentOutput;
+          return {
+            status: 'error',
+            result: null,
+            error: 'late error',
+          } as AgentOutput;
         },
       );
 
-      (deps.getCursor as ReturnType<typeof vi.fn>).mockReturnValue('prev-cursor');
+      (deps.getCursor as ReturnType<typeof vi.fn>).mockReturnValue(
+        'prev-cursor',
+      );
 
       const { processGroupMessages } = createGroupProcessor(deps);
       const result = await processGroupMessages('group1@g.us');
 
       expect(result).toBe(true);
       // Output was sent
-      expect(channel.sendMessage).toHaveBeenCalledWith('group1@g.us', 'Partial response');
+      expect(channel.sendMessage).toHaveBeenCalledWith(
+        'group1@g.us',
+        'Partial response',
+      );
 
       // Cursor should NOT be rolled back: the last setCursor should be the advance, not a rollback
-      const setCursorCalls = (deps.setCursor as ReturnType<typeof vi.fn>).mock.calls;
+      const setCursorCalls = (deps.setCursor as ReturnType<typeof vi.fn>).mock
+        .calls;
       // First call advances cursor to message timestamp; there should be no second rollback call
       expect(setCursorCalls).toHaveLength(1);
       expect(setCursorCalls[0]).toEqual(['group1@g.us', '1700000001']);
@@ -654,7 +706,9 @@ describe('createGroupProcessor', () => {
       const { deps } = setupHappyPath({ group, messages });
 
       mockSpawnAgent.mockRejectedValue(new Error('spawn failed'));
-      (deps.getCursor as ReturnType<typeof vi.fn>).mockReturnValue('prev-cursor');
+      (deps.getCursor as ReturnType<typeof vi.fn>).mockReturnValue(
+        'prev-cursor',
+      );
 
       const { processGroupMessages } = createGroupProcessor(deps);
       const result = await processGroupMessages('group1@g.us');
@@ -675,7 +729,9 @@ describe('createGroupProcessor', () => {
       const { deps } = setupHappyPath({ group, messages });
 
       // Return existing session
-      (deps.getSession as ReturnType<typeof vi.fn>).mockReturnValue('old-session-id');
+      (deps.getSession as ReturnType<typeof vi.fn>).mockReturnValue(
+        'old-session-id',
+      );
 
       const errorOutput: AgentOutput = {
         status: 'error',
@@ -879,7 +935,10 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      expect(deps.setSession).toHaveBeenCalledWith('test-group', 'new-sess-123');
+      expect(deps.setSession).toHaveBeenCalledWith(
+        'test-group',
+        'new-sess-123',
+      );
     });
 
     it('sets session ID from onOutput callback when newSessionId present', async () => {
@@ -907,7 +966,10 @@ describe('createGroupProcessor', () => {
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
-      expect(deps.setSession).toHaveBeenCalledWith('test-group', 'streamed-sess');
+      expect(deps.setSession).toHaveBeenCalledWith(
+        'test-group',
+        'streamed-sess',
+      );
     });
   });
 
@@ -957,7 +1019,10 @@ describe('createGroupProcessor', () => {
       const messages = [makeMessage()];
       const { deps } = setupHappyPath({ group, messages });
 
-      const agentOutput: AgentOutput = { status: 'success', result: 'fast reply' };
+      const agentOutput: AgentOutput = {
+        status: 'success',
+        result: 'fast reply',
+      };
       mockSpawnAgent.mockImplementation(
         async (
           _group: RegisteredGroup,
@@ -1199,11 +1264,14 @@ describe('createGroupProcessor', () => {
      * captures the `deps` object it receives, then returns { handled: true, success: true }.
      * Returns the captured deps for the test to exercise individual closures.
      */
-    async function captureSessionDeps(opts: {
-      group?: RegisteredGroup;
-      messages?: NewMessage[];
-    } = {}) {
-      const group = opts.group ?? makeGroup({ isMain: true, folder: 'grp-folder' });
+    async function captureSessionDeps(
+      opts: {
+        group?: RegisteredGroup;
+        messages?: NewMessage[];
+      } = {},
+    ) {
+      const group =
+        opts.group ?? makeGroup({ isMain: true, folder: 'grp-folder' });
       const channel = makeChannel();
       const messages = opts.messages ?? [makeMessage()];
 
@@ -1218,10 +1286,12 @@ describe('createGroupProcessor', () => {
       mockIsTriggerAllowed.mockReturnValue(true);
 
       let capturedDeps: Record<string, unknown> = {};
-      mockHandleSessionCommand.mockImplementation(async (arg: { deps: Record<string, unknown> }) => {
-        capturedDeps = arg.deps;
-        return { handled: true, success: true };
-      });
+      mockHandleSessionCommand.mockImplementation(
+        async (arg: { deps: Record<string, unknown> }) => {
+          capturedDeps = arg.deps;
+          return { handled: true, success: true };
+        },
+      );
 
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
@@ -1231,16 +1301,23 @@ describe('createGroupProcessor', () => {
 
     it('sendMessage delegates to channel.sendMessage with the chatJid', async () => {
       const { capturedDeps, channel } = await captureSessionDeps();
-      const sendMessage = capturedDeps.sendMessage as (text: string) => Promise<void>;
+      const sendMessage = capturedDeps.sendMessage as (
+        text: string,
+      ) => Promise<void>;
 
       await sendMessage('hello from session cmd');
 
-      expect(channel.sendMessage).toHaveBeenCalledWith('group1@g.us', 'hello from session cmd');
+      expect(channel.sendMessage).toHaveBeenCalledWith(
+        'group1@g.us',
+        'hello from session cmd',
+      );
     });
 
     it('setTyping delegates to channel.setTyping', async () => {
       const { capturedDeps, channel } = await captureSessionDeps();
-      const setTyping = capturedDeps.setTyping as (typing: boolean) => Promise<void>;
+      const setTyping = capturedDeps.setTyping as (
+        typing: boolean,
+      ) => Promise<void>;
 
       await setTyping(true);
 
@@ -1268,7 +1345,9 @@ describe('createGroupProcessor', () => {
 
     it('getDefaultModel returns model from config', async () => {
       const { capturedDeps } = await captureSessionDeps();
-      const getDefaultModel = capturedDeps.getDefaultModel as () => string | undefined;
+      const getDefaultModel = capturedDeps.getDefaultModel as () =>
+        | string
+        | undefined;
 
       expect(getDefaultModel()).toBeUndefined();
     });
@@ -1276,18 +1355,25 @@ describe('createGroupProcessor', () => {
     it('getGroupModelOverride returns the group agentConfig.model', async () => {
       const group = makeGroup({ isMain: true, agentConfig: { model: 'opus' } });
       const { capturedDeps } = await captureSessionDeps({ group });
-      const getGroupModelOverride = capturedDeps.getGroupModelOverride as () => string | undefined;
+      const getGroupModelOverride = capturedDeps.getGroupModelOverride as () =>
+        | string
+        | undefined;
 
       expect(getGroupModelOverride()).toBe('opus');
     });
 
     it('setGroupModelOverride delegates to deps', async () => {
       const { capturedDeps, deps } = await captureSessionDeps();
-      const setGroupModelOverride = capturedDeps.setGroupModelOverride as (v: string | undefined) => void;
+      const setGroupModelOverride = capturedDeps.setGroupModelOverride as (
+        v: string | undefined,
+      ) => void;
 
       setGroupModelOverride('sonnet');
 
-      expect(deps.setGroupModelOverride).toHaveBeenCalledWith('group1@g.us', 'sonnet');
+      expect(deps.setGroupModelOverride).toHaveBeenCalledWith(
+        'group1@g.us',
+        'sonnet',
+      );
     });
 
     it('getGroupThinkingOverride returns the group agentConfig.thinking', async () => {
@@ -1296,14 +1382,16 @@ describe('createGroupProcessor', () => {
         agentConfig: { thinking: { mode: 'enabled' } },
       });
       const { capturedDeps } = await captureSessionDeps({ group });
-      const getGroupThinkingOverride = capturedDeps.getGroupThinkingOverride as () => unknown;
+      const getGroupThinkingOverride =
+        capturedDeps.getGroupThinkingOverride as () => unknown;
 
       expect(getGroupThinkingOverride()).toEqual({ mode: 'enabled' });
     });
 
     it('setGroupThinkingOverride delegates to deps', async () => {
       const { capturedDeps, deps } = await captureSessionDeps();
-      const setGroupThinkingOverride = capturedDeps.setGroupThinkingOverride as (v: unknown) => void;
+      const setGroupThinkingOverride =
+        capturedDeps.setGroupThinkingOverride as (v: unknown) => void;
 
       setGroupThinkingOverride({ mode: 'disabled' });
 
@@ -1315,7 +1403,8 @@ describe('createGroupProcessor', () => {
 
     it('getRuntimeStatusMessage calls diagnostics and formats result', async () => {
       const { capturedDeps } = await captureSessionDeps();
-      const getRuntimeStatusMessage = capturedDeps.getRuntimeStatusMessage as () => Promise<string>;
+      const getRuntimeStatusMessage =
+        capturedDeps.getRuntimeStatusMessage as () => Promise<string>;
 
       mockCollectRuntimeDiagnostics.mockResolvedValue({ ok: true });
       mockFormatRuntimeDiagnosticsMessage.mockReturnValue('all good');
@@ -1323,14 +1412,19 @@ describe('createGroupProcessor', () => {
       const msg = await getRuntimeStatusMessage();
 
       expect(mockCollectRuntimeDiagnostics).toHaveBeenCalled();
-      expect(mockFormatRuntimeDiagnosticsMessage).toHaveBeenCalledWith({ ok: true });
+      expect(mockFormatRuntimeDiagnosticsMessage).toHaveBeenCalledWith({
+        ok: true,
+      });
       expect(msg).toBe('all good');
     });
 
     it('archiveCurrentSession archives when session exists', async () => {
       const { capturedDeps, deps } = await captureSessionDeps();
-      const archiveCurrentSession = capturedDeps.archiveCurrentSession as () => Promise<void>;
-      (deps.getSession as ReturnType<typeof vi.fn>).mockReturnValue('sess-to-archive');
+      const archiveCurrentSession =
+        capturedDeps.archiveCurrentSession as () => Promise<void>;
+      (deps.getSession as ReturnType<typeof vi.fn>).mockReturnValue(
+        'sess-to-archive',
+      );
 
       await archiveCurrentSession();
 
@@ -1346,7 +1440,8 @@ describe('createGroupProcessor', () => {
 
     it('archiveCurrentSession does nothing when no session', async () => {
       const { capturedDeps, deps } = await captureSessionDeps();
-      const archiveCurrentSession = capturedDeps.archiveCurrentSession as () => Promise<void>;
+      const archiveCurrentSession =
+        capturedDeps.archiveCurrentSession as () => Promise<void>;
       (deps.getSession as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
 
       await archiveCurrentSession();
@@ -1356,7 +1451,8 @@ describe('createGroupProcessor', () => {
 
     it('onSessionArchived calls memory reflectAfterTurn with /new', async () => {
       const { capturedDeps } = await captureSessionDeps();
-      const onSessionArchived = capturedDeps.onSessionArchived as () => Promise<void>;
+      const onSessionArchived =
+        capturedDeps.onSessionArchived as () => Promise<void>;
       mockReflectAfterTurn.mockResolvedValue(undefined);
 
       await onSessionArchived();
@@ -1373,7 +1469,8 @@ describe('createGroupProcessor', () => {
 
     it('clearCurrentSession clears session and deletes from DB', async () => {
       const { capturedDeps, deps } = await captureSessionDeps();
-      const clearCurrentSession = capturedDeps.clearCurrentSession as () => void;
+      const clearCurrentSession =
+        capturedDeps.clearCurrentSession as () => void;
 
       clearCurrentSession();
 
@@ -1385,7 +1482,9 @@ describe('createGroupProcessor', () => {
       it('returns true for main group regardless of trigger', async () => {
         const group = makeGroup({ isMain: true });
         const { capturedDeps } = await captureSessionDeps({ group });
-        const canSenderInteract = capturedDeps.canSenderInteract as (msg: NewMessage) => boolean;
+        const canSenderInteract = capturedDeps.canSenderInteract as (
+          msg: NewMessage,
+        ) => boolean;
 
         const msg = makeMessage({ content: 'no trigger' });
         expect(canSenderInteract(msg)).toBe(true);
@@ -1394,25 +1493,39 @@ describe('createGroupProcessor', () => {
       it('returns true for non-main group with requiresTrigger=false', async () => {
         const group = makeGroup({ isMain: false, requiresTrigger: false });
         const { capturedDeps } = await captureSessionDeps({ group });
-        const canSenderInteract = capturedDeps.canSenderInteract as (msg: NewMessage) => boolean;
+        const canSenderInteract = capturedDeps.canSenderInteract as (
+          msg: NewMessage,
+        ) => boolean;
 
         const msg = makeMessage({ content: 'no trigger' });
         expect(canSenderInteract(msg)).toBe(true);
       });
 
       it('returns true for non-main group when trigger present and is_from_me', async () => {
-        const group = makeGroup({ isMain: false, requiresTrigger: true, trigger: 'Andy' });
+        const group = makeGroup({
+          isMain: false,
+          requiresTrigger: true,
+          trigger: 'Andy',
+        });
         const { capturedDeps } = await captureSessionDeps({ group });
-        const canSenderInteract = capturedDeps.canSenderInteract as (msg: NewMessage) => boolean;
+        const canSenderInteract = capturedDeps.canSenderInteract as (
+          msg: NewMessage,
+        ) => boolean;
 
         const msg = makeMessage({ content: '@Andy hello', is_from_me: true });
         expect(canSenderInteract(msg)).toBe(true);
       });
 
       it('returns true for non-main group when trigger present and sender is allowlisted', async () => {
-        const group = makeGroup({ isMain: false, requiresTrigger: true, trigger: 'Andy' });
+        const group = makeGroup({
+          isMain: false,
+          requiresTrigger: true,
+          trigger: 'Andy',
+        });
         const { capturedDeps } = await captureSessionDeps({ group });
-        const canSenderInteract = capturedDeps.canSenderInteract as (msg: NewMessage) => boolean;
+        const canSenderInteract = capturedDeps.canSenderInteract as (
+          msg: NewMessage,
+        ) => boolean;
         mockIsTriggerAllowed.mockReturnValue(true);
 
         const msg = makeMessage({ content: '@Andy hello', is_from_me: false });
@@ -1420,9 +1533,15 @@ describe('createGroupProcessor', () => {
       });
 
       it('returns false for non-main group when trigger present but sender not allowed', async () => {
-        const group = makeGroup({ isMain: false, requiresTrigger: true, trigger: 'Andy' });
+        const group = makeGroup({
+          isMain: false,
+          requiresTrigger: true,
+          trigger: 'Andy',
+        });
         const { capturedDeps } = await captureSessionDeps({ group });
-        const canSenderInteract = capturedDeps.canSenderInteract as (msg: NewMessage) => boolean;
+        const canSenderInteract = capturedDeps.canSenderInteract as (
+          msg: NewMessage,
+        ) => boolean;
         mockIsTriggerAllowed.mockReturnValue(false);
 
         const msg = makeMessage({ content: '@Andy hello', is_from_me: false });
@@ -1430,11 +1549,20 @@ describe('createGroupProcessor', () => {
       });
 
       it('returns false for non-main group when no trigger in message', async () => {
-        const group = makeGroup({ isMain: false, requiresTrigger: true, trigger: 'Andy' });
+        const group = makeGroup({
+          isMain: false,
+          requiresTrigger: true,
+          trigger: 'Andy',
+        });
         const { capturedDeps } = await captureSessionDeps({ group });
-        const canSenderInteract = capturedDeps.canSenderInteract as (msg: NewMessage) => boolean;
+        const canSenderInteract = capturedDeps.canSenderInteract as (
+          msg: NewMessage,
+        ) => boolean;
 
-        const msg = makeMessage({ content: 'just chatting', is_from_me: false });
+        const msg = makeMessage({
+          content: 'just chatting',
+          is_from_me: false,
+        });
         expect(canSenderInteract(msg)).toBe(false);
       });
     });
@@ -1453,7 +1581,9 @@ describe('createGroupProcessor', () => {
       mockGetMessagesSince.mockReturnValue(messages);
       mockGetAllJobs.mockReturnValue([]);
       mockGetRecentJobRuns.mockReturnValue([]);
-      mockWriteMemoryContextSnapshot.mockResolvedValue({ retrievedItemIds: [] });
+      mockWriteMemoryContextSnapshot.mockResolvedValue({
+        retrievedItemIds: [],
+      });
       mockLoadSenderAllowlist.mockReturnValue({});
 
       let capturedRunAgent: (
@@ -1462,16 +1592,21 @@ describe('createGroupProcessor', () => {
         options?: { timeoutMs?: number },
       ) => Promise<'success' | 'error'>;
 
-      mockHandleSessionCommand.mockImplementation(async (arg: { deps: Record<string, unknown> }) => {
-        capturedRunAgent = arg.deps.runAgent as typeof capturedRunAgent;
-        return { handled: true, success: true };
-      });
+      mockHandleSessionCommand.mockImplementation(
+        async (arg: { deps: Record<string, unknown> }) => {
+          capturedRunAgent = arg.deps.runAgent as typeof capturedRunAgent;
+          return { handled: true, success: true };
+        },
+      );
 
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');
 
       // Now invoke the captured runAgent
-      mockSpawnAgent.mockResolvedValue({ status: 'success', result: 'ok' } as AgentOutput);
+      mockSpawnAgent.mockResolvedValue({
+        status: 'success',
+        result: 'ok',
+      } as AgentOutput);
 
       const result = await capturedRunAgent!('test prompt');
       expect(result).toBe('success');
@@ -1595,9 +1730,9 @@ describe('createGroupProcessor', () => {
       await processGroupMessages('group1@g.us');
 
       // setSession should be called exactly once, not twice
-      const setSessionCalls = (deps.setSession as ReturnType<typeof vi.fn>).mock.calls.filter(
-        (call: unknown[]) => call[1] === 'session-42',
-      );
+      const setSessionCalls = (
+        deps.setSession as ReturnType<typeof vi.fn>
+      ).mock.calls.filter((call: unknown[]) => call[1] === 'session-42');
       expect(setSessionCalls).toHaveLength(1);
     });
   });
