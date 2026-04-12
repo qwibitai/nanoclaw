@@ -309,12 +309,59 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  await channel.setTyping?.(chatJid, true);
+  // Send an editable progress message instead of a silent typing indicator.
+  // This keeps the user informed about what the agent is doing and surfaces
+  // hangs early (watchdog escalates at 60s / 120s of silence).
+  let progressHandle: {
+    update: (t: string) => Promise<void>;
+    clear: () => Promise<void>;
+  } | null = null;
+  if (channel.sendProgress) {
+    progressHandle = await channel.sendProgress(chatJid, '⏳ Working…');
+  } else {
+    await channel.setTyping?.(chatJid, true);
+  }
+
   let hadError = false;
   let outputSentToUser = false;
   const responseStartMs = Date.now();
+  let lastActivityMs = Date.now();
+
+  // Watchdog: escalate if the agent produces no output for too long.
+  // 60s → "still working", 120s → "may be stuck". Clears itself on
+  // any agent output or when processing finishes.
+  const WATCHDOG_WARN_MS = 60_000;
+  const WATCHDOG_STUCK_MS = 120_000;
+  let watchdogFired = 0; // 0 = none, 1 = warned, 2 = stuck
+  const watchdogInterval = setInterval(async () => {
+    const silenceMs = Date.now() - lastActivityMs;
+    if (silenceMs >= WATCHDOG_STUCK_MS && watchdogFired < 2) {
+      watchdogFired = 2;
+      const elapsed = Math.round((Date.now() - responseStartMs) / 1000);
+      if (progressHandle) {
+        await progressHandle.update(
+          `⚠️ Agent may be stuck — no activity for ${elapsed}s`,
+        );
+      }
+    } else if (silenceMs >= WATCHDOG_WARN_MS && watchdogFired < 1) {
+      watchdogFired = 1;
+      const elapsed = Math.round((Date.now() - responseStartMs) / 1000);
+      if (progressHandle) {
+        await progressHandle.update(`⏳ Still working… (${elapsed}s)`);
+      }
+    }
+  }, 15_000);
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
+    lastActivityMs = Date.now();
+    watchdogFired = 0; // reset on any activity
+
+    // Live tool-call narration: update the in-place progress message
+    if (result.progressLabel && progressHandle) {
+      const elapsed = Math.round((Date.now() - responseStartMs) / 1000);
+      await progressHandle.update(`⏳ ${result.progressLabel}… (${elapsed}s)`);
+    }
+
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
@@ -325,6 +372,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
+        // Clear progress message before sending the real response
+        if (progressHandle) {
+          await progressHandle.clear();
+          progressHandle = null;
+        }
         // Build transparency footer with stats
         const elapsedSec = Math.round((Date.now() - responseStartMs) / 1000);
         const parts: string[] = [];
@@ -347,6 +399,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
+  clearInterval(watchdogInterval);
+  if (progressHandle) {
+    await progressHandle.clear();
+    progressHandle = null;
+  }
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
