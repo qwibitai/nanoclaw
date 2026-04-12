@@ -100,11 +100,31 @@ def refresh_token(account: str, account_dir: Path) -> tuple[str, str]:
     creds["expiry_date"] = int(time.time() * 1000) + (new.get("expires_in", 3600) * 1000)
     if "scope" in new:
         creds["scope"] = new["scope"]
+    # Google may rotate the refresh_token on certain refreshes; persist the new
+    # one if present, otherwise next refresh fails with invalid_grant.
+    if "refresh_token" in new:
+        creds["refresh_token"] = new["refresh_token"]
 
-    # Atomic write: tmpfile + rename, so a crash mid-write can't corrupt creds
-    tmp = creds_file.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(creds, indent=2))
-    os.replace(tmp, creds_file)
+    # Preserve the original file's mode (OAuth creds should stay 0600). The
+    # tmp file would otherwise inherit the umask-default (typically 0644).
+    try:
+        orig_mode = creds_file.stat().st_mode & 0o777
+    except FileNotFoundError:
+        orig_mode = 0o600
+
+    # Atomic write: tmpfile + rename, so a crash mid-write can't corrupt creds.
+    # PID-suffix the tmp filename so concurrent invocations don't collide.
+    tmp = creds_file.parent / f"{creds_file.name}.tmp.{os.getpid()}"
+    try:
+        tmp.write_text(json.dumps(creds, indent=2))
+        os.chmod(tmp, orig_mode)
+        os.replace(tmp, creds_file)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
     return ("ok", f"{account}: refreshed (now valid for ~60 min)")
 
 
