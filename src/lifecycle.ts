@@ -350,9 +350,11 @@ export async function initApp(): Promise<void> {
   startStallDetector(schedulerDeps).catch((err) =>
     logger.error({ err }, 'Failed to start stall detector'),
   );
-  startSprintRetroWatcherSubsystem(schedulerDeps).catch((err) =>
-    logger.error({ err }, 'Failed to start sprint retro watcher'),
-  );
+  // Sprint retro watcher disabled — redundant with the cron-scheduled task
+  // and causes message leaks when the agent doesn't properly wrap no-op output.
+  // startSprintRetroWatcherSubsystem(schedulerDeps).catch((err) =>
+  //   logger.error({ err }, 'Failed to start sprint retro watcher'),
+  // );
   startUptimeMonitor({
     registeredGroups: () => state.registeredGroups,
     sendMessage: schedulerDeps.sendMessage,
