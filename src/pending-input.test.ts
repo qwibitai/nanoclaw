@@ -88,6 +88,19 @@ describe('classifyPendingInput', () => {
       source: 'user',
       kind: 'workflow_reply',
     });
+    expect(
+      classifyPendingInput(
+        [
+          makeMessage(
+            'filter them by 9 or 10 score, the rest should be marked as processed or just removed',
+          ),
+        ],
+        'Idea Maze',
+      ),
+    ).toEqual({
+      source: 'user',
+      kind: 'workflow_reply',
+    });
   });
 
   it('classifies non-trivial replies to the assistant as workflow replies', () => {

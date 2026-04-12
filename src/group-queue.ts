@@ -244,6 +244,11 @@ export class GroupQueue {
     }
   }
 
+  hasBusyInteractiveContainer(groupJid: string): boolean {
+    const state = this.groups.get(groupJid);
+    return !!state?.active && !state.isTaskContainer && !state.idleWaiting;
+  }
+
   /**
    * Send a follow-up message to an active idle container via IPC file.
    * Returns true if the message was written, false if there is no active

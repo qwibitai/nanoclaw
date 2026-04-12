@@ -38,6 +38,7 @@ import {
   deleteSession,
   getAllTasks,
   getLastBotMessageTimestamp,
+  getLastBotMessage,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -47,10 +48,12 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  storeMessageDirect,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { resolvePendingInput } from './intent-classifier.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   restoreRemoteControl,
@@ -142,6 +145,20 @@ function getOrRecoverCursor(chatJid: string): string {
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
   setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
+}
+
+function storeAssistantMessage(chatJid: string, content: string): void {
+  const timestamp = new Date().toISOString();
+  storeMessageDirect({
+    id: `bot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    chat_jid: chatJid,
+    sender: ASSISTANT_NAME,
+    sender_name: ASSISTANT_NAME,
+    content,
+    timestamp,
+    is_from_me: true,
+    is_bot_message: true,
+  });
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -296,6 +313,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
         await channel.sendMessage(chatJid, text);
+        storeAssistantMessage(chatJid, text);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -559,9 +577,24 @@ async function startMessageLoop(): Promise<void> {
           } else {
             // No idle follow-up window — enqueue for a new run and acknowledge
             // only on the first transition into the queued state.
+            const classifiedInput = await resolvePendingInput(
+              groupMessages,
+              ASSISTANT_NAME,
+              {
+                busyInteractiveContainer:
+                  queue.hasBusyInteractiveContainer(chatJid),
+                lastAssistantMessage: getLastBotMessage(
+                  chatJid,
+                  ASSISTANT_NAME,
+                )?.content,
+              },
+            );
             const enqueueResult = queue.enqueueIncomingInput(
               chatJid,
-              classifyPendingInput(groupMessages, ASSISTANT_NAME),
+              {
+                source: classifiedInput.source,
+                kind: classifiedInput.kind,
+              },
             );
             if (enqueueResult === 'queued') {
               await channel.sendMessage(
