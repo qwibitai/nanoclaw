@@ -264,8 +264,8 @@ async function spawnThreadForUrl(
   return true;
 }
 
-const URL_RE = /\bhttps?:\/\/[^\s<>"']+/i;
-const URL_RE_GLOBAL = /\bhttps?:\/\/[^\s<>"']+/gi;
+const URL_RE = /https?:\/\/[^\s<>"']+/i;
+const URL_RE_GLOBAL = /https?:\/\/[^\s<>"']+/gi;
 
 function stringContainsUrl(value: string): boolean {
   return URL_RE.test(value);

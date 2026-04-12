@@ -195,13 +195,4 @@ describe('url_watch flow', () => {
     expect(storeMessageMock).toHaveBeenCalledWith(msg);
   });
 
-  it('foohttps://example.com は URL として検出しない（単語境界なし）', () => {
-    const createThread = vi.fn(async () => 'dc:thread-1');
-    const msg = makeMsg({ content: 'foohttps://example.com' });
-
-    _maybeHandleUrlWatchMessage(chatJid, msg, [makeChannel(createThread)]);
-
-    expect(createThread).not.toHaveBeenCalled();
-    expect(storeMessageMock).toHaveBeenCalledWith(msg);
-  });
 });
