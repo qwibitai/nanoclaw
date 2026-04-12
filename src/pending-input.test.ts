@@ -69,10 +69,52 @@ describe('classifyPendingInput', () => {
     });
   });
 
+  it('classifies substantive natural-language follow-ups as workflow replies', () => {
+    expect(
+      classifyPendingInput(
+        [makeMessage('Give me your pipeline description, briefly')],
+        'Idea Maze',
+      ),
+    ).toEqual({
+      source: 'user',
+      kind: 'workflow_reply',
+    });
+    expect(
+      classifyPendingInput(
+        [makeMessage('What exactly you ingest from Reddit? List sub-reddits')],
+        'Idea Maze',
+      ),
+    ).toEqual({
+      source: 'user',
+      kind: 'workflow_reply',
+    });
+  });
+
+  it('classifies non-trivial replies to the assistant as workflow replies', () => {
+    expect(
+      classifyPendingInput(
+        [
+          makeMessage('continue with the Reddit part', {
+            reply_to_message_id: 'assistant-2',
+            reply_to_sender_name: 'Idea Maze',
+          }),
+        ],
+        'Idea Maze',
+      ),
+    ).toEqual({
+      source: 'user',
+      kind: 'workflow_reply',
+    });
+  });
+
   it('treats ordinary chat as chat input', () => {
     expect(
       classifyPendingInput([makeMessage('thanks, looks good')], 'Idea Maze'),
     ).toEqual({
+      source: 'user',
+      kind: 'chat',
+    });
+    expect(classifyPendingInput([makeMessage('👍')], 'Idea Maze')).toEqual({
       source: 'user',
       kind: 'chat',
     });

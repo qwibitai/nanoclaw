@@ -27,8 +27,21 @@ const ASSISTANT_REPLY_PATTERNS = [
   /^(?:yes|no|go|do it|all|none|first|second|third|last)$/i,
 ];
 
+const LOW_SIGNAL_CHAT_PATTERNS = [
+  /^(?:ok|okay|kk|k|thanks?|thank you|thx|got it|sounds good|cool|great|nice|perfect|understood|makes sense|sure|fine|alright|roger)(?:[!.,\s]*)$/i,
+  /^(?:👍|👌|🙏|👏|✅|🔥|🙂|😊|😄|😂|❤️|❤)+$/u,
+];
+
+const SUBSTANTIVE_FOLLOW_UP_PATTERNS = [
+  /^(?:what|how|why|which|when|where|who|whom|whose|can|could|would|should|is|are|do|does|did|will|have|has|had|tell|show|list|give|explain|describe|summarize|check|compare|find|look|inspect|continue|expand)\b/i,
+];
+
 function normalizeName(name?: string | null): string {
   return (name ?? '').trim().replace(/^@/, '').toLowerCase();
+}
+
+function isLowSignalChat(text: string): boolean {
+  return LOW_SIGNAL_CHAT_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 function isReplyToAssistant(
@@ -60,6 +73,21 @@ function classifyMessageKind(
     isReplyToAssistant(message, assistantName) &&
     ASSISTANT_REPLY_PATTERNS.some((pattern) => pattern.test(text))
   ) {
+    return 'workflow_reply';
+  }
+
+  if (isLowSignalChat(text)) {
+    return 'chat';
+  }
+
+  if (
+    SUBSTANTIVE_FOLLOW_UP_PATTERNS.some((pattern) => pattern.test(text)) ||
+    text.includes('?')
+  ) {
+    return 'workflow_reply';
+  }
+
+  if (isReplyToAssistant(message, assistantName) && text.split(/\s+/).length >= 2) {
     return 'workflow_reply';
   }
 
