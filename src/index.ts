@@ -199,7 +199,7 @@ async function spawnThreadForUrl(
   group: RegisteredGroup,
   channel: Channel,
 ): Promise<boolean> {
-  const urls = msg.content.match(/https?:\/\/[^\s<>"]+/gi);
+  const urls = msg.content.match(URL_RE_GLOBAL);
   if (!urls || urls.length === 0) return false;
   const url = urls[0];
 
@@ -264,32 +264,11 @@ async function spawnThreadForUrl(
   return true;
 }
 
+const URL_RE = /\bhttps?:\/\/[^\s<>"']+/i;
+const URL_RE_GLOBAL = /\bhttps?:\/\/[^\s<>"']+/gi;
+
 function stringContainsUrl(value: string): boolean {
-  return /\bhttps?:\/\/[^\s<>"']+/i.test(value);
-}
-
-function messageContainsUrl(
-  value: unknown,
-  seen = new Set<unknown>(),
-): boolean {
-  if (typeof value === 'string') {
-    return stringContainsUrl(value);
-  }
-
-  if (value == null || typeof value !== 'object') {
-    return false;
-  }
-
-  if (seen.has(value)) {
-    return false;
-  }
-  seen.add(value);
-
-  if (Array.isArray(value)) {
-    return value.some((item) => messageContainsUrl(item, seen));
-  }
-
-  return Object.values(value).some((item) => messageContainsUrl(item, seen));
+  return URL_RE.test(value);
 }
 
 function maybeHandleUrlWatchMessage(
@@ -312,7 +291,7 @@ function maybeHandleUrlWatchMessage(
     return true;
   }
 
-  if (!messageContainsUrl(msg)) {
+  if (!stringContainsUrl(msg.content)) {
     storeMessage(msg);
     return true;
   }
