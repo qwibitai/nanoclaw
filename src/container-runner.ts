@@ -287,19 +287,37 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // macOS Contacts database (readonly) — enables contact lookup from agents
+  // macOS Contacts database (readonly) — enables contact lookup from agents.
+  // Docker Desktop may not have permission to mount from ~/Library/Application Support.
+  // Export a copy to a Docker-accessible location instead.
   const addressBookDir = path.join(
     homeDir,
     'Library',
     'Application Support',
     'AddressBook',
   );
-  if (fs.existsSync(addressBookDir)) {
-    mounts.push({
-      hostPath: addressBookDir,
-      containerPath: '/workspace/contacts',
-      readonly: true,
-    });
+  const contactsCacheDir = path.join(DATA_DIR, 'contacts-cache');
+  try {
+    if (fs.existsSync(addressBookDir)) {
+      fs.mkdirSync(contactsCacheDir, { recursive: true });
+      // Copy the Sources directory with the .abcddb files
+      const sourcesDir = path.join(addressBookDir, 'Sources');
+      if (fs.existsSync(sourcesDir)) {
+        fs.cpSync(sourcesDir, path.join(contactsCacheDir, 'Sources'), {
+          recursive: true,
+        });
+        mounts.push({
+          hostPath: contactsCacheDir,
+          containerPath: '/workspace/contacts',
+          readonly: true,
+        });
+      }
+    }
+  } catch (err) {
+    logger.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Contacts cache copy failed — search_contacts will be unavailable',
+    );
   }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
