@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createStreamEditLoop } from './stream-edit-loop.js';
+import { extractImages } from './router.js';
 
 describe('StreamEditLoop', () => {
   beforeEach(() => {
@@ -536,6 +537,119 @@ describe('StreamEditLoop', () => {
 
       expect(fn).toHaveBeenCalledTimes(2);
       expect(fn).toHaveBeenNthCalledWith(2, 'works now');
+
+      loop.stop();
+    });
+  });
+
+  describe('image tag stripping integration (issue #30)', () => {
+    // Simulates the sendOrEdit callback pattern from src/index.ts:
+    // extractImages strips <image> tags before streaming, returns false
+    // for image-only text so the loop buffers it without sending.
+
+    function makeImageStrippingSendOrEdit() {
+      const sent: string[] = [];
+      const fn = vi.fn(async (text: string) => {
+        const { cleanText } = extractImages(text);
+        if (!cleanText) return false as const;
+        sent.push(cleanText);
+      });
+      return { fn, sent };
+    }
+
+    it('strips image tags and sends only the text portion', async () => {
+      const { fn, sent } = makeImageStrippingSendOrEdit();
+      const loop = createStreamEditLoop({ throttleMs: 100, sendOrEdit: fn });
+
+      loop.update('Here is your chart: <image path="chart.png" />');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(sent).toEqual(['Here is your chart:']);
+
+      loop.stop();
+    });
+
+    it('returns false for image-only text, preventing a send', async () => {
+      const { fn, sent } = makeImageStrippingSendOrEdit();
+      const loop = createStreamEditLoop({ throttleMs: 100, sendOrEdit: fn });
+
+      loop.update('<image path="chart.png" />');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(fn).toHaveBeenCalledTimes(1);
+      expect(sent).toEqual([]); // nothing actually sent
+
+      loop.stop();
+    });
+
+    it('image-only text does not block subsequent text updates', async () => {
+      const { fn, sent } = makeImageStrippingSendOrEdit();
+      const loop = createStreamEditLoop({ throttleMs: 100, sendOrEdit: fn });
+
+      // First chunk is image-only → return false, buffered
+      loop.update('<image path="chart.png" />');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sent).toEqual([]);
+
+      // Next chunk has real text (accumulated output replaces pending)
+      loop.update('Result: <image path="chart.png" />');
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(sent).toEqual(['Result:']);
+
+      loop.stop();
+    });
+
+    it('flush on image-only text returns without sending', async () => {
+      const { fn, sent } = makeImageStrippingSendOrEdit();
+      const loop = createStreamEditLoop({ throttleMs: 100, sendOrEdit: fn });
+
+      loop.update('<image path="a.png" /><image path="b.png" />');
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Explicit flush — sendOrEdit returns false, text put back, flush returns
+      await loop.flush();
+      expect(sent).toEqual([]);
+
+      // resetForNextQuery clears the stuck text
+      loop.resetForNextQuery();
+
+      // Loop is still usable
+      loop.update('Next query text');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sent).toEqual(['Next query text']);
+
+      loop.stop();
+    });
+
+    it('mixed text and images: only clean text is sent during streaming', async () => {
+      const { sent } = makeImageStrippingSendOrEdit();
+      const loop = createStreamEditLoop({
+        throttleMs: 100,
+        sendOrEdit: async (text: string) => {
+          const { cleanText } = extractImages(text);
+          if (!cleanText) return false as const;
+          sent.push(cleanText);
+        },
+      });
+
+      // Simulate progressive streaming chunks
+      loop.update('Analyzing');
+      await vi.advanceTimersByTimeAsync(0);
+
+      loop.update('Analyzing your data...\n<image path="plot.png" />');
+      await vi.advanceTimersByTimeAsync(200);
+
+      loop.update(
+        'Analyzing your data...\n<image path="plot.png" />\nDone!',
+      );
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(sent).toEqual([
+        'Analyzing',
+        'Analyzing your data...',
+        'Analyzing your data...\n\nDone!',
+      ]);
 
       loop.stop();
     });

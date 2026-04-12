@@ -323,6 +323,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const streamLoop = createStreamEditLoop({
     throttleMs: 500,
     async sendOrEdit(text) {
+      // Strip image tags before streaming — they must never appear in chat as raw text
+      const { cleanText: streamText } = extractImages(text);
+      if (!streamText) return false; // image-only chunk — skip, keep buffered
       // Conversation moved on — stop editing the old message
       if (queue.hasPendingMessages(chatJid)) {
         streamMessageId = null;
@@ -331,24 +334,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
       if (streamMessageId === null) {
         // First send — create the streaming message
-        const msgId = await channel.sendStreamMessage!(chatJid, text);
+        const msgId = await channel.sendStreamMessage!(chatJid, streamText);
         if (!msgId || typeof msgId !== 'number') {
           streamingFailed = true;
           throw new Error('sendStreamMessage failed');
         }
         streamMessageId = msgId;
-        lastSentText = text;
+        lastSentText = streamText;
         // Telegram clears typing indicator on sendMessage — re-enable it
         await channel.setTyping?.(chatJid, true).catch(() => {});
       } else {
         // Subsequent edit
-        if (text.length > 4000) {
+        if (streamText.length > 4000) {
           streamingFailed = true;
           throw new Error('text too long for streaming edit');
         }
         try {
-          await channel.editMessage!(chatJid, streamMessageId, text);
-          lastSentText = text;
+          await channel.editMessage!(chatJid, streamMessageId, streamText);
+          lastSentText = streamText;
         } catch (err) {
           logger.warn(
             { group: group.name, error: err },
@@ -418,6 +421,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
               );
               enqueueOutbox(chatJid, cleanText);
             }
+          } else if (!cleanText) {
+            // No text content in final result — delete the streaming placeholder
+            await channel.deleteMessage?.(chatJid, streamMessageId).catch(
+              () => {},
+            );
           }
           await sendImages(channel, chatJid, images);
           outputSentToUser = true;
@@ -441,6 +449,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           lastSentText = cleanText;
         } else if (cleanText && cleanText === lastSentText) {
           logger.warn({ group: group.name }, 'Duplicate output suppressed');
+        }
+
+        // Non-streaming, image-only response — send images even without cleanText
+        if (streamMessageId === null && !cleanText && images.length > 0) {
+          await sendImages(channel, chatJid, images);
+          outputSentToUser = true;
+          queue.markResponseSent(chatJid);
+          lastSentText = cleanText;
         }
         // Reset streaming state for next IPC query — the onOutput callback
         // persists across multiple queries within the same agent process.

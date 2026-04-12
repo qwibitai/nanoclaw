@@ -39,7 +39,9 @@ function makeOpts(
   };
 }
 
-function makeManager(opts?: Partial<LiveLocationManagerOpts>): LiveLocationManager {
+function makeManager(
+  opts?: Partial<LiveLocationManagerOpts>,
+): LiveLocationManager {
   return new LiveLocationManager(makeOpts(opts));
 }
 
@@ -124,11 +126,13 @@ describe('LiveLocationManager', () => {
       .spyOn(fs, 'statSync')
       .mockReturnValue({ size: 0 } as fs.Stats) as Mock;
     existsSyncSpy = vi.spyOn(fs, 'existsSync').mockReturnValue(false) as Mock;
-    readdirSyncSpy = vi
-      .spyOn(fs, 'readdirSync')
-      .mockReturnValue([]) as Mock;
-    renameSyncSpy = vi.spyOn(fs, 'renameSync').mockReturnValue(undefined) as Mock;
-    unlinkSyncSpy = vi.spyOn(fs, 'unlinkSync').mockReturnValue(undefined) as Mock;
+    readdirSyncSpy = vi.spyOn(fs, 'readdirSync').mockReturnValue([]) as Mock;
+    renameSyncSpy = vi
+      .spyOn(fs, 'renameSync')
+      .mockReturnValue(undefined) as Mock;
+    unlinkSyncSpy = vi
+      .spyOn(fs, 'unlinkSync')
+      .mockReturnValue(undefined) as Mock;
   });
 
   afterEach(() => {
@@ -298,7 +302,15 @@ describe('LiveLocationManager', () => {
       manager.startSession('tg:1', 1, 35, 139, 600);
       appendFileSyncSpy.mockClear();
 
-      const result = manager.updateSession('tg:1', 1, 36, 140, undefined, undefined, 0);
+      const result = manager.updateSession(
+        'tg:1',
+        1,
+        36,
+        140,
+        undefined,
+        undefined,
+        0,
+      );
       expect(result).toBe('stopped');
       expect(appendFileSyncSpy).toHaveBeenCalledOnce();
     });
@@ -454,7 +466,10 @@ describe('LiveLocationManager', () => {
   describe('cleanupOldLogs', () => {
     it('deletes files older than 7 days', () => {
       const oldMtime = Date.now() - 8 * 24 * 60 * 60 * 1000;
-      readdirSyncSpy.mockReturnValue(['old.log', 'old.log.1'] as unknown as fs.Dirent[]);
+      readdirSyncSpy.mockReturnValue([
+        'old.log',
+        'old.log.1',
+      ] as unknown as fs.Dirent[]);
       statSyncSpy.mockReturnValue({ mtimeMs: oldMtime } as fs.Stats);
 
       const manager = makeManager();

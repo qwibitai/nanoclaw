@@ -48,12 +48,8 @@ vi.mock('../live-location.js', () => {
   return {
     LiveLocationManager: MockLiveLocationManager,
     buildLocationPrefix: vi.fn(
-      (
-        label: string,
-        lat: number,
-        lng: number,
-        logPath: string,
-      ) => `${label} lat: ${lat}, long: ${lng}. check \`tail ${logPath}\``,
+      (label: string, lat: number, lng: number, logPath: string) =>
+        `${label} lat: ${lat}, long: ${lng}. check \`tail ${logPath}\``,
     ),
     _setActiveLiveLocationManager: vi.fn(),
     getActiveLiveLocationContext: vi.fn(() => ''),
@@ -172,6 +168,7 @@ vi.mock('grammy', () => ({
       sendPhoto: vi.fn().mockResolvedValue(undefined),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
       editMessageText: vi.fn().mockResolvedValue(undefined),
+      deleteMessage: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: 'photos/file_0.jpg' }),
       setMyCommands: vi.fn().mockResolvedValue(undefined),
       deleteMyCommands: vi.fn().mockResolvedValue(undefined),
@@ -210,11 +207,8 @@ vi.mock('grammy', () => ({
 }));
 
 import fs from 'fs';
-import {
-  setGroupModel,
-  setGroupEffort,
-  updateTask,
-} from '../db.js';
+import { setGroupModel, setGroupEffort, updateTask } from '../db.js';
+import { loadModelAliases } from '../config.js';
 import { getActiveLiveLocationContext } from '../live-location.js';
 import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
 
@@ -1488,7 +1482,8 @@ describe('TelegramChannel', () => {
       );
     });
 
-    it('/model shows alias list', async () => {
+    it('/model with empty aliases shows only Reset button', async () => {
+      vi.mocked(loadModelAliases).mockReturnValueOnce({});
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
@@ -1502,10 +1497,41 @@ describe('TelegramChannel', () => {
 
       await handler(ctx);
 
-      const replyText = ctx.reply.mock.calls[0][0];
-      expect(replyText).toContain('opus');
-      expect(replyText).toContain('sonnet');
-      expect(replyText).toContain('haiku');
+      const replyOpts = ctx.reply.mock.calls[0][1];
+      expect(replyOpts.reply_markup).toBeDefined();
+      const buttons = replyOpts.reply_markup.buttons.flat() as Array<{
+        text: string;
+        callback_data: string;
+      }>;
+      expect(buttons).toHaveLength(1);
+      expect(buttons[0].text).toBe('Reset to default');
+      expect(buttons[0].callback_data).toBe('model:reset');
+    });
+
+    it('/model shows alias list as inline keyboard buttons', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('model')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        message: { text: '/model' },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      const replyOpts = ctx.reply.mock.calls[0][1];
+      expect(replyOpts.reply_markup).toBeDefined();
+      const buttons = replyOpts.reply_markup.buttons.flat() as Array<{
+        text: string;
+        callback_data: string;
+      }>;
+      const labels = buttons.map((b) => b.text);
+      expect(labels.some((l) => l.includes('opus'))).toBe(true);
+      expect(labels.some((l) => l.includes('sonnet'))).toBe(true);
+      expect(labels.some((l) => l.includes('haiku'))).toBe(true);
     });
 
     it('/model <alias> sets model and preserves session', async () => {
@@ -1633,6 +1659,137 @@ describe('TelegramChannel', () => {
       await triggerTextMessage(ctx);
 
       expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
+    describe('model: callback queries', () => {
+      function findModelCallbackHandler() {
+        const bot = currentBot();
+        const entry = bot.callbackQueryHandlers.find(
+          (h: { pattern: RegExp | string }) =>
+            h.pattern instanceof RegExp && h.pattern.source === /^model:/.source,
+        );
+        return entry?.handler;
+      }
+
+      it('registers the model: callback handler', async () => {
+        const channel = new TelegramChannel('test-token', createTestOpts());
+        await channel.connect();
+
+        expect(findModelCallbackHandler()).toBeDefined();
+      });
+
+      it('model:set:<alias> sets the model', async () => {
+        const groups: Record<
+          string,
+          {
+            name: string;
+            folder: string;
+            trigger: string;
+            added_at: string;
+            model?: string;
+          }
+        > = {
+          'tg:100200300': {
+            name: 'Test Group',
+            folder: 'test-group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+          },
+        };
+        const opts = createTestOpts({
+          registeredGroups: vi.fn(() => groups),
+        });
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+
+        const handler = findModelCallbackHandler()!;
+        const ctx = {
+          callbackQuery: { data: 'model:set:opus' },
+          chat: { id: 100200300 },
+          editMessageText: vi.fn(),
+          answerCallbackQuery: vi.fn(),
+        };
+
+        await handler(ctx);
+
+        expect(setGroupModel).toHaveBeenCalledWith(
+          'tg:100200300',
+          'claude-opus-4-20250514',
+        );
+        expect(groups['tg:100200300'].model).toBe('claude-opus-4-20250514');
+        expect(ctx.editMessageText).toHaveBeenCalledWith(
+          expect.stringContaining('claude-opus-4-20250514'),
+          expect.any(Object),
+        );
+        expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+      });
+
+      it('model:reset clears the model', async () => {
+        const groups: Record<
+          string,
+          {
+            name: string;
+            folder: string;
+            trigger: string;
+            added_at: string;
+            model?: string;
+          }
+        > = {
+          'tg:100200300': {
+            name: 'Test Group',
+            folder: 'test-group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            model: 'claude-opus-4-20250514',
+          },
+        };
+        const opts = createTestOpts({
+          registeredGroups: vi.fn(() => groups),
+        });
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+
+        const handler = findModelCallbackHandler()!;
+        const ctx = {
+          callbackQuery: { data: 'model:reset' },
+          chat: { id: 100200300 },
+          editMessageText: vi.fn(),
+          answerCallbackQuery: vi.fn(),
+        };
+
+        await handler(ctx);
+
+        expect(setGroupModel).toHaveBeenCalledWith('tg:100200300', null);
+        expect(groups['tg:100200300'].model).toBeUndefined();
+        expect(ctx.editMessageText).toHaveBeenCalledWith(
+          expect.stringContaining('default'),
+          expect.any(Object),
+        );
+        expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+      });
+
+      it('model: callback for unregistered chat replies error', async () => {
+        const opts = createTestOpts({
+          registeredGroups: vi.fn(() => ({})),
+        });
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+
+        const handler = findModelCallbackHandler()!;
+        const ctx = {
+          callbackQuery: { data: 'model:set:opus' },
+          chat: { id: 999999 },
+          editMessageText: vi.fn(),
+          answerCallbackQuery: vi.fn(),
+        };
+
+        await handler(ctx);
+
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith(
+          'This chat is not registered.',
+        );
+        expect(setGroupModel).not.toHaveBeenCalled();
+      });
     });
   });
 
@@ -2268,15 +2425,53 @@ describe('TelegramChannel', () => {
     });
   });
 
+  // --- deleteMessage ---
+
+  describe('deleteMessage', () => {
+    let channel: TelegramChannel;
+
+    beforeEach(async () => {
+      channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+    });
+
+    it('calls bot.api.deleteMessage with numeric chat ID and message ID', async () => {
+      await channel.deleteMessage!('tg:100200300', 42);
+
+      expect(currentBot().api.deleteMessage).toHaveBeenCalledWith(
+        '100200300',
+        42,
+      );
+    });
+
+    it('strips tg: prefix from JID', async () => {
+      await channel.deleteMessage!('tg:-1001234567', 7);
+
+      expect(currentBot().api.deleteMessage).toHaveBeenCalledWith(
+        '-1001234567',
+        7,
+      );
+    });
+
+    it('does nothing when bot is not initialized', async () => {
+      const uninitChannel = new TelegramChannel('test-token', createTestOpts());
+      // do NOT call connect()
+      await uninitChannel.deleteMessage!('tg:100200300', 1);
+
+      // api.deleteMessage should not be called on an unconnected channel
+      expect(currentBot().api.deleteMessage).not.toHaveBeenCalled();
+    });
+  });
+
   // --- Live location ---
 
   describe('live location', () => {
     it('registers edited_message:location handler on connect', async () => {
       const channel = new TelegramChannel('test-token', createTestOpts());
       await channel.connect();
-      expect(
-        currentBot().filterHandlers.has('edited_message:location'),
-      ).toBe(true);
+      expect(currentBot().filterHandlers.has('edited_message:location')).toBe(
+        true,
+      );
     });
 
     it('start: calls startSession, sends system msg, calls onMessage', async () => {
@@ -2286,11 +2481,16 @@ describe('TelegramChannel', () => {
 
       // Get the LiveLocationManager mock instance created inside connect()
       const { LiveLocationManager } = await import('../live-location.js');
-      const mockInstance = vi.mocked(LiveLocationManager).mock.results[0]?.value;
+      const mockInstance =
+        vi.mocked(LiveLocationManager).mock.results[0]?.value;
 
       const ctx = createMediaCtx({
         extra: {
-          location: { latitude: 35.6762, longitude: 139.6503, live_period: 600 },
+          location: {
+            latitude: 35.6762,
+            longitude: 139.6503,
+            live_period: 600,
+          },
         },
       });
       await triggerMediaMessage('message:location', ctx);
@@ -2325,7 +2525,8 @@ describe('TelegramChannel', () => {
       await channel.connect();
 
       const { LiveLocationManager } = await import('../live-location.js');
-      const mockInstance = vi.mocked(LiveLocationManager).mock.results[0]?.value;
+      const mockInstance =
+        vi.mocked(LiveLocationManager).mock.results[0]?.value;
 
       const ctx = createMediaCtx({
         extra: {
@@ -2388,7 +2589,8 @@ describe('TelegramChannel', () => {
       await channel.connect();
 
       const { LiveLocationManager } = await import('../live-location.js');
-      const mockInstance = vi.mocked(LiveLocationManager).mock.results[0]?.value;
+      const mockInstance =
+        vi.mocked(LiveLocationManager).mock.results[0]?.value;
 
       const ctx = createEditedLocationCtx({
         latitude: 36,
@@ -2415,7 +2617,8 @@ describe('TelegramChannel', () => {
       await channel.connect();
 
       const { LiveLocationManager } = await import('../live-location.js');
-      const mockInstance = vi.mocked(LiveLocationManager).mock.results[0]?.value;
+      const mockInstance =
+        vi.mocked(LiveLocationManager).mock.results[0]?.value;
       mockInstance.updateSession.mockReturnValue('stopped');
 
       const ctx = createEditedLocationCtx({

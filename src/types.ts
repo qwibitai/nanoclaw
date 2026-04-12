@@ -115,6 +115,8 @@ export interface Channel {
   ): Promise<void>;
   // Optional: send a photo by file path or URL.
   sendPhoto?(jid: string, photo: string, caption?: string): Promise<void>;
+  // Optional: delete a message by ID (e.g. to remove a streaming placeholder on image-only responses).
+  deleteMessage?(jid: string, messageId: number): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

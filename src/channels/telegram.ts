@@ -150,7 +150,10 @@ export class TelegramChannel implements Channel {
         void this.sendMessage(chatJid, '📍 Live location sharing timeout.');
       },
       onStopped: (chatJid) => {
-        void this.sendMessage(chatJid, '📍 Live location sharing stopped by user.');
+        void this.sendMessage(
+          chatJid,
+          '📍 Live location sharing stopped by user.',
+        );
       },
     });
     this.liveLocation.initialize();
@@ -190,14 +193,12 @@ export class TelegramChannel implements Channel {
 
       if (args.length === 0) {
         const current = group.model || DEFAULT_MODEL;
-        const aliases = loadModelAliases();
-        const aliasEntries = Object.entries(aliases)
-          .map(([alias, id]) => `  ${alias} → ${id}`)
-          .join('\n');
-        const aliasBlock = aliasEntries ? `\n\nAliases:\n${aliasEntries}` : '';
         ctx.reply(
-          `Model: \`${current}\`${group.model ? '' : ' (default)'}${aliasBlock}`,
-          { parse_mode: 'Markdown' },
+          `Model: \`${current}\`${group.model ? '' : ' (default)'}`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: buildModelKeyboard(group.model),
+          },
         );
         return;
       }
@@ -235,12 +236,9 @@ export class TelegramChannel implements Channel {
       if (args[0] === 'reset') {
         setGroupModel(chatJid, null);
         group.model = undefined;
-        ctx.reply(
-          `Model reset to default (\`${DEFAULT_MODEL}\`).`,
-          {
-            parse_mode: 'Markdown',
-          },
-        );
+        ctx.reply(`Model reset to default (\`${DEFAULT_MODEL}\`).`, {
+          parse_mode: 'Markdown',
+        });
         return;
       }
 
@@ -270,6 +268,21 @@ export class TelegramChannel implements Channel {
         kb.text(label, `${prefix}:${level}`);
       }
       kb.row().text('Reset', `${prefix}:reset`).text('Back', 'effort:back');
+      return kb;
+    };
+
+    const buildModelKeyboard = (currentModel: string | undefined) => {
+      const aliases = loadModelAliases();
+      const kb = new InlineKeyboard();
+      const currentResolved = currentModel || DEFAULT_MODEL;
+      let col = 0;
+      for (const [alias, id] of Object.entries(aliases)) {
+        if (col > 0 && col % 3 === 0) kb.row();
+        const label = id === currentResolved ? `● ${alias}` : alias;
+        kb.text(label, `model:set:${alias}`);
+        col++;
+      }
+      kb.row().text('Reset to default', 'model:reset');
       return kb;
     };
 
@@ -418,6 +431,47 @@ export class TelegramChannel implements Channel {
             },
           );
         }
+        ctx.answerCallbackQuery();
+        return;
+      }
+
+      ctx.answerCallbackQuery();
+    });
+
+    // Handle all model callback queries
+    this.bot.callbackQuery(/^model:/, (ctx) => {
+      const data = ctx.callbackQuery.data;
+      if (!ctx.chat) {
+        ctx.answerCallbackQuery();
+        return;
+      }
+      const chatJid = `tg:${ctx.chat.id}`;
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid];
+
+      if (!group) {
+        ctx.answerCallbackQuery('This chat is not registered.');
+        return;
+      }
+
+      if (data === 'model:reset') {
+        setGroupModel(chatJid, null);
+        group.model = undefined;
+        ctx.editMessageText(`Model reset to default (\`${DEFAULT_MODEL}\`).`, {
+          parse_mode: 'Markdown',
+        });
+        ctx.answerCallbackQuery();
+        return;
+      }
+
+      const match = data.match(/^model:set:(.+)$/);
+      if (match) {
+        const resolved = resolveModelAlias(match[1]);
+        setGroupModel(chatJid, resolved);
+        group.model = resolved;
+        ctx.editMessageText(`Model set to \`${resolved}\`.`, {
+          parse_mode: 'Markdown',
+        });
         ctx.answerCallbackQuery();
         return;
       }
@@ -780,7 +834,11 @@ export class TelegramChannel implements Channel {
         );
 
         // System message → user
-        await this.sendMessage(chatJid, '📍 Live location sharing start.', threadId);
+        await this.sendMessage(
+          chatJid,
+          '📍 Live location sharing start.',
+          threadId,
+        );
 
         // Agent notification
         const agentContent = buildLocationPrefix(
@@ -799,7 +857,13 @@ export class TelegramChannel implements Channel {
           'Unknown';
         const isGroup =
           ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-        this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+        this.opts.onChatMetadata(
+          chatJid,
+          timestamp,
+          undefined,
+          'telegram',
+          isGroup,
+        );
         this.opts.onMessage(chatJid, {
           id: ctx.message.message_id.toString(),
           chat_jid: chatJid,
@@ -1054,6 +1118,12 @@ export class TelegramChannel implements Channel {
         return;
       }
     }
+  }
+
+  async deleteMessage(jid: string, messageId: number): Promise<void> {
+    if (!this.bot) return;
+    const numericId = jid.replace(/^tg:/, '');
+    await this.bot.api.deleteMessage(numericId, messageId);
   }
 }
 
