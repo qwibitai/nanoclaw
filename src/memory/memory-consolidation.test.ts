@@ -13,7 +13,7 @@ const tempRoots: string[] = [];
 
 beforeEach(() => {
   // Keep consolidation tests independent from local .env files.
-  vi.stubEnv('CLAUDE_MODEL', 'claude-3-5-sonnet-latest');
+  vi.stubEnv('ANTHROPIC_MODEL', 'claude-3-5-sonnet-latest');
 });
 
 afterEach(() => {

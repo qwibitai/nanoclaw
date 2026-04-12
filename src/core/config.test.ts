@@ -4,18 +4,12 @@ const ORIGINAL_ENV = { ...process.env };
 
 async function loadConfigWithEnv(env: {
   ANTHROPIC_MODEL?: string;
-  CLAUDE_MODEL?: string;
 }) {
   vi.resetModules();
   if (env.ANTHROPIC_MODEL === undefined) {
     delete process.env.ANTHROPIC_MODEL;
   } else {
     process.env.ANTHROPIC_MODEL = env.ANTHROPIC_MODEL;
-  }
-  if (env.CLAUDE_MODEL === undefined) {
-    delete process.env.CLAUDE_MODEL;
-  } else {
-    process.env.CLAUDE_MODEL = env.CLAUDE_MODEL;
   }
   vi.doMock('./env.js', () => ({
     readEnvFile: () => ({}),
@@ -25,7 +19,6 @@ async function loadConfigWithEnv(env: {
 
 afterEach(() => {
   delete process.env.ANTHROPIC_MODEL;
-  delete process.env.CLAUDE_MODEL;
   for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
     process.env[key] = value;
   }
@@ -42,19 +35,8 @@ describe('model config precedence', () => {
     });
   });
 
-  it('uses CLAUDE_MODEL when only CLAUDE_MODEL is set', async () => {
-    const cfg = await loadConfigWithEnv({ CLAUDE_MODEL: 'sonnet' });
-    expect(cfg.getDefaultModelConfig()).toEqual({
-      model: 'sonnet',
-      source: 'CLAUDE_MODEL',
-    });
-  });
-
-  it('prefers ANTHROPIC_MODEL when both env vars are set', async () => {
-    const cfg = await loadConfigWithEnv({
-      ANTHROPIC_MODEL: 'opus',
-      CLAUDE_MODEL: 'sonnet',
-    });
+  it('uses ANTHROPIC_MODEL when set', async () => {
+    const cfg = await loadConfigWithEnv({ ANTHROPIC_MODEL: 'opus' });
     expect(cfg.getDefaultModelConfig()).toEqual({
       model: 'opus',
       source: 'ANTHROPIC_MODEL',
@@ -62,10 +44,7 @@ describe('model config precedence', () => {
   });
 
   it('prefers group override over env defaults', async () => {
-    const cfg = await loadConfigWithEnv({
-      ANTHROPIC_MODEL: 'sonnet',
-      CLAUDE_MODEL: 'haiku',
-    });
+    const cfg = await loadConfigWithEnv({ ANTHROPIC_MODEL: 'sonnet' });
     expect(cfg.getEffectiveModelConfig('opus')).toEqual({
       model: 'opus',
       source: 'group.agentConfig.model',
@@ -74,7 +53,7 @@ describe('model config precedence', () => {
 
   // --- Coverage for line 541: getDefaultModelConfig returns unset ---
 
-  it('returns unset source when neither ANTHROPIC_MODEL nor CLAUDE_MODEL is set', async () => {
+  it('returns unset source when ANTHROPIC_MODEL is not set', async () => {
     const cfg = await loadConfigWithEnv({});
     const result = cfg.getDefaultModelConfig();
     expect(result).toEqual({ source: 'unset' });
@@ -93,10 +72,10 @@ describe('model config precedence', () => {
   });
 
   it('getEffectiveModelConfig falls back to default when group model is whitespace', async () => {
-    const cfg = await loadConfigWithEnv({ CLAUDE_MODEL: 'sonnet' });
+    const cfg = await loadConfigWithEnv({ ANTHROPIC_MODEL: 'sonnet' });
     expect(cfg.getEffectiveModelConfig('  ')).toEqual({
       model: 'sonnet',
-      source: 'CLAUDE_MODEL',
+      source: 'ANTHROPIC_MODEL',
     });
   });
 
@@ -467,7 +446,6 @@ describe('config env overrides for branch coverage', () => {
       'IDLE_TIMEOUT',
       'MAX_CONCURRENT_CONTAINERS',
       'ANTHROPIC_MODEL',
-      'CLAUDE_MODEL',
     ];
     for (const key of envKeys) {
       delete process.env[key];
@@ -524,7 +502,6 @@ describe('config env overrides for branch coverage', () => {
         MEMORY_MAX_PROCEDURES_PER_GROUP: '750',
         ONECLI_URL: 'http://env-onecli',
         ANTHROPIC_MODEL: 'env-opus',
-        CLAUDE_MODEL: 'env-sonnet',
         MEMORY_SQLITE_PATH: '/tmp/env-memory.db',
       }),
     }));
@@ -545,7 +522,6 @@ describe('config env overrides for branch coverage', () => {
     expect(cfg.MEMORY_DREAMING_CRON).toBe('0 2 * * *');
     expect(cfg.ONECLI_URL).toBe('http://env-onecli');
     expect(cfg.ANTHROPIC_MODEL).toBe('env-opus');
-    expect(cfg.CLAUDE_MODEL).toBe('env-sonnet');
   });
 });
 

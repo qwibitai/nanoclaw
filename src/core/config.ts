@@ -11,7 +11,6 @@ const envConfig = readEnvFile([
   'ONECLI_URL',
   'TZ',
   'ANTHROPIC_MODEL',
-  'CLAUDE_MODEL',
   'MEMORY_SQLITE_PATH',
   'MEMORY_PROVIDER',
   'AGENT_MEMORY_ROOT',
@@ -543,17 +542,13 @@ function normalizeModelValue(value?: string): string | undefined {
 export const ANTHROPIC_MODEL = normalizeModelValue(
   process.env.ANTHROPIC_MODEL || envConfig.ANTHROPIC_MODEL,
 );
-export const CLAUDE_MODEL = normalizeModelValue(
-  process.env.CLAUDE_MODEL || envConfig.CLAUDE_MODEL,
-);
 export const MEMORY_CONSOLIDATION_MODEL =
   process.env.MEMORY_CONSOLIDATION_MODEL ||
   envConfig.MEMORY_CONSOLIDATION_MODEL ||
-  CLAUDE_MODEL ||
   ANTHROPIC_MODEL ||
   '';
 
-export type DefaultModelSource = 'ANTHROPIC_MODEL' | 'CLAUDE_MODEL' | 'unset';
+export type DefaultModelSource = 'ANTHROPIC_MODEL' | 'unset';
 export type EffectiveModelSource =
   | 'group.agentConfig.model'
   | DefaultModelSource;
@@ -564,9 +559,6 @@ export function getDefaultModelConfig(): {
 } {
   if (ANTHROPIC_MODEL) {
     return { model: ANTHROPIC_MODEL, source: 'ANTHROPIC_MODEL' };
-  }
-  if (CLAUDE_MODEL) {
-    return { model: CLAUDE_MODEL, source: 'CLAUDE_MODEL' };
   }
   return { source: 'unset' };
 }

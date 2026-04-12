@@ -103,8 +103,7 @@ async function loadModule(config: {
     ONECLI_URL: config.ONECLI_URL ?? '',
     DATA_DIR: config.DATA_DIR ?? '/tmp/nanoclaw-test/data',
     GROUPS_DIR: config.GROUPS_DIR ?? '/tmp/nanoclaw-test/groups',
-    AGENT_ROOT:
-      config.AGENT_ROOT ?? '/tmp/nanoclaw-test/config',
+    AGENT_ROOT: config.AGENT_ROOT ?? '/tmp/nanoclaw-test/config',
   }));
 
   vi.doMock('../core/env.js', () => ({
@@ -155,13 +154,13 @@ describe('getHostRuntimeCredentialEnv', () => {
   it('returns env from file only when ONECLI_URL is whitespace', async () => {
     const mod = await loadModule({
       ONECLI_URL: '   ',
-      envFromFile: { CLAUDE_MODEL: 'opus' },
+      envFromFile: { ANTHROPIC_MODEL: 'opus' },
     });
 
     const result = await mod.getHostRuntimeCredentialEnv();
 
     expect(result.onecliApplied).toBe(false);
-    expect(result.env).toEqual({ CLAUDE_MODEL: 'opus' });
+    expect(result.env).toEqual({ ANTHROPIC_MODEL: 'opus' });
     expect(mockGetContainerConfig).not.toHaveBeenCalled();
   });
 
@@ -284,7 +283,7 @@ describe('getHostRuntimeCredentialEnv', () => {
       ONECLI_URL: 'http://localhost:10254',
       envFromFile: {
         ANTHROPIC_API_KEY: 'file-key-loses',
-        CLAUDE_MODEL: 'sonnet',
+        ANTHROPIC_MODEL: 'sonnet',
       },
     });
 
@@ -292,7 +291,7 @@ describe('getHostRuntimeCredentialEnv', () => {
 
     expect(result.env.ANTHROPIC_API_KEY).toBe('onecli-key-wins');
     expect(result.env.ANTHROPIC_BASE_URL).toBe('https://onecli.example.com');
-    expect(result.env.CLAUDE_MODEL).toBe('sonnet');
+    expect(result.env.ANTHROPIC_MODEL).toBe('sonnet');
     expect(result.onecliApplied).toBe(true);
   });
 });
@@ -321,7 +320,9 @@ describe('prepareHostRuntimeContext', () => {
 
     expect(ctx.groupDir).toBe('/tmp/nanoclaw-test/groups/test-group');
     expect(ctx.groupIpcDir).toBe('/tmp/nanoclaw-test/data/ipc/test-group');
-    expect(ctx.runnerRoot).toBe('/tmp/nanoclaw-test/config/.runtime/agent-runner');
+    expect(ctx.runnerRoot).toBe(
+      '/tmp/nanoclaw-test/config/.runtime/agent-runner',
+    );
 
     // Verify mkdirSync was called for the group directory
     expect(mockMkdirSync).toHaveBeenCalledWith(

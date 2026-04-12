@@ -195,15 +195,11 @@ function normalizeModelValue(value?: string): string | undefined {
 
 function resolveConfiguredModel(): {
   model?: string;
-  source: 'ANTHROPIC_MODEL' | 'CLAUDE_MODEL' | 'unset';
+  source: 'ANTHROPIC_MODEL' | 'unset';
 } {
   const anthropicModel = normalizeModelValue(process.env.ANTHROPIC_MODEL);
   if (anthropicModel) {
     return { model: anthropicModel, source: 'ANTHROPIC_MODEL' };
-  }
-  const claudeModel = normalizeModelValue(process.env.CLAUDE_MODEL);
-  if (claudeModel) {
-    return { model: claudeModel, source: 'CLAUDE_MODEL' };
   }
   return { source: 'unset' };
 }
@@ -1150,7 +1146,7 @@ async function main(): Promise<void> {
       `Configured model: ${configuredModel.model} (source: ${configuredModel.source})`,
     );
   } else {
-    log('Configured model: CLI default (no ANTHROPIC_MODEL/CLAUDE_MODEL set)');
+    log('Configured model: CLI default (no ANTHROPIC_MODEL set)');
   }
   log(`Configured thinking: ${configuredThinking.description}`);
 

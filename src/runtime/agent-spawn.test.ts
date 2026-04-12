@@ -248,7 +248,6 @@ describe('agent-spawn timeout behavior', () => {
       string
     >;
     expect(env.ANTHROPIC_MODEL).toBe('opus');
-    expect(env.CLAUDE_MODEL).toBe('opus');
   });
 
   it('forwards AGENT_MEMORY_ROOT via env when configured', async () => {

@@ -150,7 +150,6 @@ export async function spawnAgent(
   };
   if (modelConfig.model) {
     env.ANTHROPIC_MODEL = modelConfig.model;
-    env.CLAUDE_MODEL = modelConfig.model;
   }
 
   const runtimeDetails = [

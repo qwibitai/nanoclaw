@@ -346,7 +346,6 @@ export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || 'nanoclaw-agent:la
 export const AGENT_RUNTIME = process.env.AGENT_RUNTIME || 'container'; // strict: host | container
 export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800000', 10); // 30min default
 export const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL;
-export const CLAUDE_MODEL = process.env.CLAUDE_MODEL; // backward-compatible fallback
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(1, parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5);
@@ -388,7 +387,6 @@ Model precedence is:
 
 1. `group.containerConfig.model`
 2. `ANTHROPIC_MODEL`
-3. `CLAUDE_MODEL`
 
 Use `/model` in a group session to switch the live model (`/model`, `/model <alias-or-name>`, `/model default`).
 

@@ -248,7 +248,7 @@ For startup model selection, use:
 ANTHROPIC_MODEL=opus
 ```
 
-`ANTHROPIC_MODEL` is canonical. `CLAUDE_MODEL` is still accepted as a fallback for backward compatibility.
+`ANTHROPIC_MODEL` is the startup model env variable.
 
 To switch an existing group session mid-conversation, use the session command:
 
