@@ -64,6 +64,7 @@ import {
 } from './sender-allowlist.js';
 import { isBudgetExceeded } from './budget.js';
 import { startEmailSSE } from './email-sse.js';
+import { refreshGmailTokens } from './gmail-token-refresh.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -786,6 +787,26 @@ async function main(): Promise<void> {
         if (!group) {
           logger.warn({ chatJid }, 'No group for email trigger');
           return;
+        }
+
+        // Pre-refresh Gmail OAuth tokens before spawning the container.
+        // Tokens have a 1-hour lifetime and routinely expire mid-session,
+        // causing the gmail-mcp inside the container to silently lose its
+        // ability to read email bodies. Refreshing here is fast (<200ms
+        // when nothing needs refresh) and never blocks the spawn — even on
+        // refresh failure we proceed with subject-only classification
+        // rather than dropping the trigger.
+        const refreshResult = await refreshGmailTokens();
+        if (refreshResult.status === 'error') {
+          logger.warn(
+            { chatJid, summary: refreshResult.summary },
+            'Gmail token refresh failed before email trigger — agent may degrade to subject-only',
+          );
+        } else if (refreshResult.status === 'missing') {
+          logger.debug(
+            { chatJid, summary: refreshResult.summary },
+            'Some Gmail accounts not authorized — proceeding with available accounts',
+          );
         }
 
         // System-injected progress message: email triggers routinely take
