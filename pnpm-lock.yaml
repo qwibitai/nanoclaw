@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.54.0
+        version: 0.54.0
       '@onecli-sh/sdk':
         specifier: ^0.2.0
         version: 0.2.0
@@ -50,6 +53,10 @@ importers:
         version: 4.0.18(@types/node@22.19.11)(tsx@4.21.0)
 
 packages:
+
+  '@anthropic-ai/sdk@0.54.0':
+    resolution: {integrity: sha512-xyoCtHJnt/qg5GG6IgK+UJEndz8h8ljzt/caKXmq3LfBF81nC/BW6E4x2rOWCZcvsLyVW+e8U5mtIr6UCE/kJw==, tarball: https://registry.npmjs.org/@anthropic-ai/sdk/-/sdk-0.54.0.tgz}
+    hasBin: true
 
   '@discordjs/builders@1.14.1':
     resolution: {integrity: sha512-gSKkhXLqs96TCzk66VZuHHl8z2bQMJFGwrXC0f33ngK+FLNau4hU1PYny3DNJfNdSH+gVMzE85/d5FQ2BpcNwQ==, tarball: https://registry.npmjs.org/@discordjs/builders/-/builders-1.14.1.tgz}
@@ -1163,6 +1170,8 @@ packages:
         optional: true
 
 snapshots:
+
+  '@anthropic-ai/sdk@0.54.0': {}
 
   '@discordjs/builders@1.14.1':
     dependencies:

@@ -9,6 +9,7 @@ import { createTask, deleteTask, getTaskById, updateTask } from "./db.js";
 import { isValidGroupFolder } from "./group-folder.js";
 import { logger } from "./logger.js";
 import type { RegisteredGroup } from "./types.js";
+import { parseWorkspaceJid } from "./workspace-manager.js";
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -23,6 +24,8 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  /** Called when a workspace container sends a progress message. Optional — only wired when Coordinator is enabled. */
+  onWorkspaceMessage?: (chatJid: string, workspaceName: string, text: string) => Promise<void>;
 }
 
 let ipcWatcherRunning = false;
@@ -73,16 +76,32 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
               if (data.type === "message" && data.chatJid && data.text) {
-                // Authorization: verify this group can send to this chatJid
-                const targetGroup = registeredGroups[data.chatJid];
-                if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
-                  await deps.sendMessage(data.chatJid, data.text);
-                  logger.info({ chatJid: data.chatJid, sourceGroup }, "IPC message sent");
+                // Check if message is from a workspace container (virtual JID)
+                const workspaceParsed = parseWorkspaceJid(data.chatJid);
+                if (workspaceParsed) {
+                  if (deps.onWorkspaceMessage) {
+                    await deps.onWorkspaceMessage(
+                      workspaceParsed.chatJid,
+                      workspaceParsed.name,
+                      data.text,
+                    );
+                    logger.info(
+                      { workspace: workspaceParsed.name, chatJid: workspaceParsed.chatJid },
+                      "Workspace IPC progress routed to coordinator",
+                    );
+                  }
                 } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
-                    "Unauthorized IPC message attempt blocked",
-                  );
+                  // Normal group message — authorization check
+                  const targetGroup = registeredGroups[data.chatJid];
+                  if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
+                    await deps.sendMessage(data.chatJid, data.text);
+                    logger.info({ chatJid: data.chatJid, sourceGroup }, "IPC message sent");
+                  } else {
+                    logger.warn(
+                      { chatJid: data.chatJid, sourceGroup },
+                      "Unauthorized IPC message attempt blocked",
+                    );
+                  }
                 }
               }
               fs.unlinkSync(filePath);

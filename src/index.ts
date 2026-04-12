@@ -52,12 +52,15 @@ import {
 import { startSchedulerLoop } from "./task-scheduler.js";
 import type { Channel, NewMessage, RegisteredGroup } from "./types.js";
 import { logger } from "./logger.js";
+import { Coordinator } from "./coordinator.js";
+import { WorkspaceManager } from "./workspace-manager.js";
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from "./router.js";
 
 let lastTimestamp = "";
 let sessions: Record<string, string> = {};
+let coordinator: Coordinator | null = null;
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
@@ -163,12 +166,67 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
 }
 
 /**
+ * Process messages via the Coordinator (in-process, no container startup).
+ * Used when group.useCoordinator === true.
+ */
+async function coordinatorProcessMessages(chatJid: string): Promise<boolean> {
+  if (!coordinator) return false;
+
+  const group = registeredGroups[chatJid];
+  if (!group) return true;
+
+  const isMainGroup = group.isMain === true;
+  const missedMessages = getMessagesSince(
+    chatJid,
+    getOrRecoverCursor(chatJid),
+    ASSISTANT_NAME,
+    MAX_MESSAGES_PER_PROMPT,
+  );
+
+  if (missedMessages.length === 0) return true;
+
+  if (!isMainGroup && group.requiresTrigger !== false) {
+    const triggerPattern = getTriggerPattern(group.trigger);
+    const allowlistCfg = loadSenderAllowlist();
+    const hasTrigger = missedMessages.some(
+      (m) =>
+        triggerPattern.test(m.content.trim()) &&
+        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+    );
+    if (!hasTrigger) return true;
+  }
+
+  const previousCursor = lastAgentTimestamp[chatJid] || "";
+  lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
+  saveState();
+
+  const prompt = formatMessages(missedMessages, TIMEZONE);
+  logger.info({ group: group.name, messageCount: missedMessages.length }, "Coordinator processing messages");
+
+  try {
+    await coordinator.processMessage(chatJid, prompt);
+  } catch (err) {
+    lastAgentTimestamp[chatJid] = previousCursor;
+    saveState();
+    logger.error({ group: group.name, err }, "Coordinator error, rolled back cursor");
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
+
+  // Route through Coordinator if enabled for this group
+  if (coordinator && group.useCoordinator) {
+    return coordinatorProcessMessages(chatJid);
+  }
 
   const channel = findChannel(channels, chatJid);
   if (!channel) {
@@ -480,6 +538,35 @@ async function main(): Promise<void> {
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(CREDENTIAL_PROXY_PORT, PROXY_BIND_HOST);
 
+  // Initialize Coordinator and WorkspaceManager (after credential proxy is up)
+  const workspaceManager = new WorkspaceManager({
+    queue,
+    getParentGroup: (chatJid) => registeredGroups[chatJid],
+    onWorkspaceMessage: async (chatJid, name, text) => {
+      if (coordinator) {
+        await coordinator.handleWorkspaceProgress(chatJid, name, text);
+      }
+    },
+  });
+
+  coordinator = new Coordinator({
+    workspaceManager,
+    sendMessage: async (chatJid, rawText) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel) {
+        logger.warn({ chatJid }, "Coordinator: no channel for JID");
+        return;
+      }
+      const text = formatOutbound(rawText);
+      if (text) await channel.sendMessage(chatJid, text);
+    },
+    setTyping: async (chatJid, typing) => {
+      const channel = findChannel(channels, chatJid);
+      await channel?.setTyping?.(chatJid, typing);
+    },
+  });
+  logger.info("Coordinator initialized");
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Shutdown signal received");
@@ -625,6 +712,11 @@ async function main(): Promise<void> {
       }));
       for (const group of Object.values(registeredGroups)) {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
+      }
+    },
+    onWorkspaceMessage: async (chatJid, workspaceName, text) => {
+      if (coordinator) {
+        await coordinator.handleWorkspaceProgress(chatJid, workspaceName, text);
       }
     },
   });

@@ -85,3 +85,14 @@ function resolveConfigTimezone(): string {
   return "UTC";
 }
 export const TIMEZONE = resolveConfigTimezone();
+
+// Coordinator settings
+export const COORDINATOR_MODEL = process.env.COORDINATOR_MODEL || "claude-opus-4-6";
+export const COORDINATOR_MAX_HISTORY = Math.max(
+  1,
+  parseInt(process.env.COORDINATOR_MAX_HISTORY || "20", 10) || 20,
+);
+export const COORDINATOR_MAX_TOKENS = Math.max(
+  256,
+  parseInt(process.env.COORDINATOR_MAX_TOKENS || "2048", 10) || 2048,
+);
