@@ -1043,6 +1043,13 @@ export async function prepareThreadWorkspace(
         // Skip git repos — managed separately via worktrees
         continue;
       }
+      if (entry.name === 'threads' || entry.name === 'conversations') {
+        // Skip per-thread data dirs: threads/ is mounted separately at
+        // /workspace/thread for the current thread only; conversations/
+        // is the host-side FTS index. Copying all threads into every
+        // per-thread scratch workspace is a multi-GB, multi-minute bloat.
+        continue;
+      }
       try {
         fs.cpSync(srcPath, dstPath, { recursive: true, dereference: false });
       } catch (err) {

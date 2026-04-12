@@ -804,7 +804,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           chatJid,
           undefined,
           undefined,
-          undefined,
+          threadId,
           undefined,
           onOutput,
         ),
