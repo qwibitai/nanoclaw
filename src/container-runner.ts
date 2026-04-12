@@ -671,6 +671,7 @@ export async function runContainerAgent(
       { group: group.name, containerName, duration, code },
       'Box timed out before reaching idle',
     );
+    await outputChain;
     return {
       status: 'error',
       result: null,
