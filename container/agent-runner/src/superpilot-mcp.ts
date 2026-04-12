@@ -24,7 +24,7 @@ async function apiGet(path: string, params?: Record<string, string>): Promise<an
   }
   const res = await fetch(url.toString(), {
     headers: {
-      Authorization: `Bearer ${SERVICE_TOKEN}`,
+      'X-Service-Token': SERVICE_TOKEN,
       'Content-Type': 'application/json',
     },
   });
@@ -39,7 +39,7 @@ async function apiPost(path: string, body?: any): Promise<any> {
   const res = await fetch(`${API_URL}${path}`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${SERVICE_TOKEN}`,
+      'X-Service-Token': SERVICE_TOKEN,
       'Content-Type': 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -55,7 +55,7 @@ async function apiPut(path: string, body?: any): Promise<any> {
   const res = await fetch(`${API_URL}${path}`, {
     method: 'PUT',
     headers: {
-      Authorization: `Bearer ${SERVICE_TOKEN}`,
+      'X-Service-Token': SERVICE_TOKEN,
       'Content-Type': 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
