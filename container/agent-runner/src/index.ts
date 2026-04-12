@@ -537,20 +537,7 @@ async function runQuery(
         },
         ...Object.fromEntries(
           Object.entries(containerInput.mcpServers ?? {}).map(
-            ([name, cfg]) => {
-              const mcpDir = `/workspace/agent/mcp/${name}`;
-              const [entry, ...rest] = cfg.args ?? [];
-              return [
-                name,
-                {
-                  command: cfg.command,
-                  args: entry
-                    ? [path.join(mcpDir, entry), ...rest]
-                    : undefined,
-                  env: cfg.env,
-                },
-              ];
-            },
+            ([name, cfg]) => [name, cfg],
           ),
         ),
       },
