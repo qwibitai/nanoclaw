@@ -4,7 +4,7 @@ import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./box-runtime.js', () => ({
+vi.mock('../box-runtime.js', () => ({
   setBoxliteHome: vi.fn(),
   ensureRuntimeReady: vi.fn(),
   cleanupOrphans: vi.fn().mockResolvedValue(undefined),
@@ -13,12 +13,9 @@ vi.mock('./box-runtime.js', () => ({
 
 import { AgentImpl } from './agent-impl.js';
 import { createAgentLiteImpl } from './agentlite-impl.js';
-import {
-  getAgentRegistryDbPath,
-  initAgentRegistryDb,
-} from './agent-registry-db.js';
-import type { AgentLite, AgentOptions } from './api/sdk.js';
-import type { MountAllowlist } from './types.js';
+import { getAgentRegistryDbPath, initAgentRegistryDb } from './registry-db.js';
+import type { AgentLite, AgentOptions } from '../api/sdk.js';
+import type { MountAllowlist } from '../types.js';
 
 const allowlist: MountAllowlist = {
   allowedRoots: [{ path: '~/projects', allowReadWrite: true }],

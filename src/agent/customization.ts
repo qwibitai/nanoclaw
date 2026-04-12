@@ -8,8 +8,8 @@
 import fs from 'fs';
 import path from 'path';
 
-import type { McpServerConfig } from './api/options.js';
-import { copyDirRecursive } from './utils.js';
+import type { McpServerConfig } from '../api/options.js';
+import { copyDirRecursive } from '../utils.js';
 
 export interface SyncAgentCustomizationsInput {
   /** Agent-level instructions string. */

@@ -15,25 +15,25 @@ import {
   resolveSerializableAgentSettings,
   serializeMountAllowlist,
   type SerializableAgentSettings,
-} from './agent-config.js';
+} from './config.js';
 import {
   getAgentRegistryDbPath,
   initAgentRegistryDb,
   type AgentRegistryDb,
   type AgentRegistryRecord,
-} from './agent-registry-db.js';
-import { cleanupOrphans } from './box-runtime.js';
-import { buildRuntimeConfig } from './runtime-config.js';
-import type { AgentLiteOptions, AgentOptions } from './api/options.js';
-import type { Agent } from './api/agent.js';
-import type { AgentLite } from './api/sdk.js';
+} from './registry-db.js';
+import { cleanupOrphans } from '../box-runtime.js';
+import { buildRuntimeConfig } from '../runtime-config.js';
+import type { AgentLiteOptions, AgentOptions } from '../api/options.js';
+import type { Agent } from '../api/agent.js';
+import type { AgentLite } from '../api/sdk.js';
 
 interface RuntimeOptionsAwareAgent extends Agent {
   mergeRuntimeOptions(options?: AgentOptions): void;
   readonly config: {
     assistantName: string;
     workDir: string;
-    mountAllowlist: import('./types.js').MountAllowlist | null;
+    mountAllowlist: import('../types.js').MountAllowlist | null;
   };
 }
 
@@ -75,6 +75,7 @@ class AgentLiteImpl implements AgentLite {
     const packageRoot = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
       '..',
+      '..',
     );
     this._runtimeConfig = buildRuntimeConfig(this._options, packageRoot);
   }
@@ -92,7 +93,7 @@ class AgentLiteImpl implements AgentLite {
 
   /** @internal */
   async _init(): Promise<void> {
-    const boxRuntime = await import('./box-runtime.js');
+    const boxRuntime = await import('../box-runtime.js');
     boxRuntime.setBoxliteHome(
       path.join(this._runtimeConfig.workdir, '.boxlite'),
     );

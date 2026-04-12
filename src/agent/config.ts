@@ -5,8 +5,8 @@
 
 import path from 'path';
 
-import type { MountAllowlist } from './types.js';
-import type { AgentOptions, McpServerConfig } from './api/options.js';
+import type { MountAllowlist } from '../types.js';
+import type { AgentOptions, McpServerConfig } from '../api/options.js';
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

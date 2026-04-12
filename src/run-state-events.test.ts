@@ -14,11 +14,11 @@ vi.mock('./container-runner.js', async () => {
   };
 });
 
-import { AgentImpl } from './agent-impl.js';
+import { AgentImpl } from './agent/agent-impl.js';
 import {
   buildAgentConfig,
   resolveSerializableAgentSettings,
-} from './agent-config.js';
+} from './agent/config.js';
 import { _initTestDatabase, AgentDb } from './db.js';
 import { buildRuntimeConfig } from './runtime-config.js';
 import { runContainerAgent } from './container-runner.js';
@@ -95,9 +95,9 @@ describe('run.state event', () => {
     const channel = createMockChannel();
     (
       agent as unknown as {
-        _channels: Map<string, Channel>;
+        channels: Map<string, Channel>;
       }
-    )._channels.set('mock', channel);
+    ).channels.set('mock', channel);
 
     db.storeChatMetadata(
       'mock:run-state',

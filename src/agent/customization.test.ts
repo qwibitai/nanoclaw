@@ -16,9 +16,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildAgentConfig,
   resolveSerializableAgentSettings,
-} from './agent-config.js';
-import { initAgentRegistryDb } from './agent-registry-db.js';
-import { syncAgentCustomizations } from './agent-customization.js';
+} from './config.js';
+import { initAgentRegistryDb } from './registry-db.js';
+import { syncAgentCustomizations } from './customization.js';
 
 let tmpDir: string;
 

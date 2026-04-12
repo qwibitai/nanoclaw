@@ -10,11 +10,11 @@ import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AgentImpl } from './agent-impl.js';
+import { AgentImpl } from './agent/agent-impl.js';
 import {
   buildAgentConfig,
   resolveSerializableAgentSettings,
-} from './agent-config.js';
+} from './agent/config.js';
 import { buildRuntimeConfig } from './runtime-config.js';
 import { _initTestDatabase } from './db.js';
 import type { Channel } from './types.js';
@@ -177,9 +177,9 @@ describe('ChannelDriverFactory with class-based driver', () => {
 
     await agent.addChannel('mock', factory);
 
-    // Access internal _channels to verify ownsJid works
-    const channels = (agent as unknown as { _channels: Map<string, Channel> })
-      ._channels;
+    // Access internal channels to verify ownsJid works
+    const channels = (agent as unknown as { channels: Map<string, Channel> })
+      .channels;
     const ch = channels.get('mock')!;
     expect(ch.ownsJid('mock:123')).toBe(true);
     expect(ch.ownsJid('tg:123')).toBe(false);

@@ -76,6 +76,6 @@ export interface AgentLite {
 export async function createAgentLite(
   options?: AgentLiteOptions,
 ): Promise<AgentLite> {
-  const { createAgentLiteImpl } = await import('../agentlite-impl.js');
+  const { createAgentLiteImpl } = await import('../agent/agentlite-impl.js');
   return createAgentLiteImpl(options);
 }

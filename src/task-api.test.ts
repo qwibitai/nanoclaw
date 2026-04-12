@@ -4,11 +4,11 @@ import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { AgentImpl } from './agent-impl.js';
+import { AgentImpl } from './agent/agent-impl.js';
 import {
   buildAgentConfig,
   resolveSerializableAgentSettings,
-} from './agent-config.js';
+} from './agent/config.js';
 import { _initTestDatabase, AgentDb } from './db.js';
 import { buildRuntimeConfig } from './runtime-config.js';
 import type { RegisteredGroup, ScheduledTask } from './types.js';
