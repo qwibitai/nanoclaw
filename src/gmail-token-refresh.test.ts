@@ -54,11 +54,35 @@ describe('refreshGmailTokens', () => {
     expect(result.status).toBe('error');
   });
 
-  it('times out cleanly after the configured timeout', async () => {
-    // execFile mock just never invokes the callback
+  it('maps execFile timeout (killed=true, signal=SIGTERM) to a timeout error', async () => {
+    // Simulate how Node's execFile reports a timeout: after the configured
+    // timeout elapses, execFile SIGTERMs the child and invokes the callback
+    // with err.killed=true, err.signal='SIGTERM'. The wrapper should detect
+    // that pattern and resolve as a timeout error, not a generic crash.
     (execFile as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      (_cmd: string, _args: string[], _opts: unknown, _cb: Function) => {
-        // never call cb — simulate hang
+      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+        const err = Object.assign(new Error('timeout'), {
+          killed: true,
+          signal: 'SIGTERM',
+        });
+        cb(err, '', '');
+      },
+    );
+    const result = await refreshGmailTokens({ timeoutMs: 50 });
+    expect(result.status).toBe('error');
+    expect(result.summary).toMatch(/timeout|timed out/i);
+  });
+
+  it('also maps SIGTERM with killed=false to a timeout error (older Node)', async () => {
+    // Defensive: some Node versions set signal='SIGTERM' without setting
+    // killed=true on the error. The wrapper's check uses OR, so either
+    // condition maps to the timeout result.
+    (execFile as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+        const err = Object.assign(new Error('timeout'), {
+          signal: 'SIGTERM',
+        });
+        cb(err, '', '');
       },
     );
     const result = await refreshGmailTokens({ timeoutMs: 50 });

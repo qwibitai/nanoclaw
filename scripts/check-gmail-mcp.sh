@@ -47,6 +47,14 @@ docker exec "$CONTAINER" sh -c "
 echo
 
 echo "--- Running gmail-mcp tool list (probe) ---"
+echo "NOTE: this probes a FRESH gmail-mcp instance inside the container, not"
+echo "      the long-running one currently serving the agent. A green probe"
+echo "      here means 'the package + credentials + network are healthy,'"
+echo "      but does NOT guarantee the wedged in-process MCP is fine."
+echo "      If the probe is green but the agent still complains about Gmail"
+echo "      tools being unavailable, send the agent a new message — the next"
+echo "      container spawn will re-register tools with a fresh MCP process."
+echo
 docker exec "$CONTAINER" sh -c '
   echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}" \
     | timeout 10 npx -y @gongrzhe/server-gmail-autoauth-mcp 2>&1 \

@@ -50,25 +50,41 @@ revoke button), the only fix is to re-run the OAuth flow from scratch.
 
 ```bash
 # 1. Make sure the OAuth client config is in place
-ls ~/.gmail-mcp/gcp-oauth.keys.json   # personal
-ls ~/.gmail-mcp-jonathan/gcp-oauth.keys.json   # whoisxml
+ls ~/.gmail-mcp/gcp-oauth.keys.json            # personal  — ACTIVE
+ls ~/.gmail-mcp-jonathan/gcp-oauth.keys.json   # whoisxml  — inert (see note)
+ls ~/.gmail-mcp-attaxion/gcp-oauth.keys.json   # attaxion  — inert (see note)
+ls ~/.gmail-mcp-dev/gcp-oauth.keys.json        # dev       — inert (see note)
 
 # 2. Run the gmail-mcp's auth helper (opens a browser)
 cd ~/.gmail-mcp
 npx -y @gongrzhe/server-gmail-autoauth-mcp auth
 
-# Repeat for each account, copying the keys.json into the right dir first
+# 3. To re-auth any other account, the current package forces you to
+#    temporarily rename your ~/.gmail-mcp to ~/.gmail-mcp.bak, then
+#    symlink the target account's dir as ~/.gmail-mcp, run the auth flow,
+#    restore, and move the new credentials.json into the target account
+#    dir. This is clunky because the upstream package is hard-coded to a
+#    single directory. Example for jonathan:
+#
+#      mv ~/.gmail-mcp ~/.gmail-mcp.personal-bak
+#      cp -R ~/.gmail-mcp-jonathan ~/.gmail-mcp
+#      cd ~/.gmail-mcp && npx -y @gongrzhe/server-gmail-autoauth-mcp auth
+#      cp ~/.gmail-mcp/credentials.json ~/.gmail-mcp-jonathan/credentials.json
+#      rm -rf ~/.gmail-mcp
+#      mv ~/.gmail-mcp.personal-bak ~/.gmail-mcp
 ```
 
 After re-auth, `credentials.json` will be regenerated with a fresh
 refresh_token. Confirm with section 1's refresh script.
 
-> **Note:** The in-container `@gongrzhe/server-gmail-autoauth-mcp` package
-> is hard-coded to a single account directory (`~/.gmail-mcp`), so the
-> jonathan, attaxion, and dev mounts are inert from the agent's perspective.
-> Personal is the only reachable account today. Multi-account would require
+> **Note (IMPORTANT):** The in-container `@gongrzhe/server-gmail-autoauth-mcp`
+> package is hard-coded to a single account directory (`~/.gmail-mcp`), so
+> even though jonathan, attaxion, and dev directories can be authorized on
+> disk, **only personal is reachable from the agent today**. Authorizing the
+> other accounts is forward-compat work — it prepares the credentials but
+> does not yet expose the tools to the agent. Multi-account would require
 > launching one MCP server instance per account with distinct
-> `GMAIL_OAUTH_PATH` / `GMAIL_CREDENTIALS_PATH` env vars.
+> `GMAIL_OAUTH_PATH` / `GMAIL_CREDENTIALS_PATH` env vars (future task).
 
 ## 3. Force-restart the active container (clean slate)
 

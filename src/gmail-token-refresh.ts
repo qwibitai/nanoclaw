@@ -47,32 +47,34 @@ export async function refreshGmailTokens(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return new Promise((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      logger.warn(
-        { scriptPath, timeoutMs },
-        'gmail-token-refresh script timed out',
-      );
-      resolve({
-        status: 'error',
-        summary: `gmail-token-refresh timed out after ${timeoutMs}ms`,
-      });
-    }, timeoutMs);
-
+    // Single source of truth for timeout: execFile's built-in `timeout` option.
+    // When it fires, Node SIGTERMs the child process (preventing a zombie) and
+    // then invokes the callback with err.killed=true, err.signal='SIGTERM'. We
+    // detect that below and map it to a timeout result. Previously we also had
+    // a wrapper setTimeout, which raced with execFile's timer and could cause
+    // a misleading 'script crashed' log when execFile's kill fired first.
     execFile(
       'python3',
       [scriptPath],
       { timeout: timeoutMs },
       (err, stdout, stderr) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-
         const summary = (stdout || stderr || '').trim();
 
         if (err) {
+          const killed = (err as { killed?: boolean }).killed === true;
+          const signal = (err as { signal?: string }).signal;
+          if (killed || signal === 'SIGTERM') {
+            logger.warn(
+              { scriptPath, timeoutMs },
+              'gmail-token-refresh script timed out',
+            );
+            resolve({
+              status: 'error',
+              summary: `gmail-token-refresh timed out after ${timeoutMs}ms`,
+            });
+            return;
+          }
+
           const code = (err as { code?: number }).code;
           if (code === 2) {
             // Expected: at least one account is not yet authorized
