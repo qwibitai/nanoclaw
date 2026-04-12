@@ -27,9 +27,25 @@ Daily at 7:30 AM CST. Scheduled as a cron task: `30 7 * * *`
 ### 4. Discord Overnight
 - Run the Discord digest to summarize overnight activity:
   ```bash
-  python3 /workspace/project/scripts/discord-digest.py --output-only 2>/dev/null || echo "Discord digest unavailable"
+  python3 /workspace/project/scripts/discord-digest.py --output-only
   ```
-- If the script fails or isn't available, skip this section gracefully
+- The `--output-only` flag tells the script to emit the digest on stdout
+  only, WITHOUT posting a Discord DM (so the briefing doesn't accidentally
+  double-send).
+- **Capture both stdout and the exit code.** Do NOT redirect stderr to
+  `/dev/null` — real errors must be surfaced, not swallowed.
+- If the script exits non-zero, its stdout will start with `DIGEST-ERROR:`
+  followed by the actual failure reason (e.g. "DISCORD_BOT_TOKEN
+  environment variable is not set in the container"). In that case:
+  - Report the literal error text in the briefing: "Discord digest failed
+    — {verbatim DIGEST-ERROR message}"
+  - NEVER invent a reason. If the error text says the token is missing,
+    say that. If it says something else, say that. If you cannot read the
+    error text, say "Discord digest failed — reason unknown (check logs)".
+  - This is a Case 4 of the Evidence discipline rules in CLAUDE.md: quote
+    literal evidence, never paraphrase or invent plausible explanations.
+- If the script succeeds, its stdout is a pre-formatted markdown digest
+  that can be embedded directly under the "DISCORD OVERNIGHT" section.
 
 ### 5. Meeting Prep (First Meeting)
 - For the first meeting today with 2+ attendees:

@@ -797,7 +797,10 @@ async function main(): Promise<void> {
         // Channels that don't support edit-in-place fall back to
         // append-only via sendMessage.
         const ackChannel = findChannel(channels, chatJid);
-        let progressHandle: { update: (t: string) => Promise<void>; clear: () => Promise<void> } | null = null;
+        let progressHandle: {
+          update: (t: string) => Promise<void>;
+          clear: () => Promise<void>;
+        } | null = null;
         if (ackChannel) {
           try {
             await ackChannel.setTyping?.(chatJid, true);

@@ -4,6 +4,12 @@
 Run standalone:  python3 scripts/discord-digest.py
 Run via NanoClaw: scheduled task calls this script
 
+Flags:
+  --output-only  Print the digest to stdout only; do NOT send a Discord DM.
+                 Used by the morning-briefing skill so it can preview the
+                 digest and embed it inline without producing a duplicate
+                 DM post every time the briefing runs.
+
 Requires: DISCORD_BOT_TOKEN env var
 """
 
@@ -179,16 +185,34 @@ def send_dm(content):
         api(f"/channels/{DM_CHANNEL_ID}/messages", method="POST", body={"content": chunk})
 
 def main():
-    if not BOT_TOKEN:
-        print("Error: DISCORD_BOT_TOKEN not set", file=sys.stderr)
-        sys.exit(1)
+    output_only = "--output-only" in sys.argv[1:]
 
-    print("Generating Discord digest...")
-    digest = build_digest()
-    print(digest)
-    print("\nSending DM...")
-    send_dm(digest)
-    print("Done!")
+    if not BOT_TOKEN:
+        # Write a clearly-prefixed error to BOTH stdout and stderr so the
+        # briefing skill can surface it as real evidence instead of an
+        # invented guess. The DIGEST-ERROR prefix lets downstream tooling
+        # distinguish real failures from ordinary output.
+        msg = "DIGEST-ERROR: DISCORD_BOT_TOKEN environment variable is not set in the container"
+        print(msg, file=sys.stderr)
+        print(msg)
+        sys.exit(2)
+
+    try:
+        if not output_only:
+            print("Generating Discord digest...", file=sys.stderr)
+        digest = build_digest()
+        # Always emit the digest on stdout so callers (briefing skill) can
+        # capture and embed it.
+        print(digest)
+        if not output_only:
+            print("\nSending DM...", file=sys.stderr)
+            send_dm(digest)
+            print("Done!", file=sys.stderr)
+    except Exception as e:
+        msg = f"DIGEST-ERROR: {type(e).__name__}: {e}"
+        print(msg, file=sys.stderr)
+        print(msg)
+        sys.exit(3)
 
 if __name__ == "__main__":
     main()
