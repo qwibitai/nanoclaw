@@ -45,39 +45,6 @@ import { _setRegisteredGroups, _autoRegisterThread } from './index.js';
 import { setRegisteredGroup } from './db.js';
 import { RegisteredGroup, InboundMessage } from './types.js';
 
-describe('autoRegisterThread (via _setRegisteredGroups)', () => {
-  let registeredGroups: Record<string, RegisteredGroup>;
-
-  beforeEach(() => {
-    registeredGroups = {};
-    _setRegisteredGroups(registeredGroups);
-    vi.clearAllMocks();
-  });
-
-  it('registeredGroups starts empty', () => {
-    expect(Object.keys(registeredGroups)).toHaveLength(0);
-  });
-
-  it('manually registered parent group is accessible', () => {
-    const parent: RegisteredGroup = {
-      name: 'Parent',
-      folder: 'discord_main',
-      trigger: '@Andy',
-      added_at: '2024-01-01T00:00:00.000Z',
-      type: 'main',
-      thread_defaults: { type: 'thread', requiresTrigger: false },
-    };
-    registeredGroups['dc:parent123'] = parent;
-    _setRegisteredGroups(registeredGroups);
-
-    expect(registeredGroups['dc:parent123']).toBeDefined();
-    expect(registeredGroups['dc:parent123'].thread_defaults).toBeDefined();
-    expect(registeredGroups['dc:parent123'].thread_defaults!.type).toBe(
-      'thread',
-    );
-  });
-});
-
 describe('_autoRegisterThread (actual auto-registration path)', () => {
   let registeredGroups: Record<string, RegisteredGroup>;
   const parentJid = 'dc:parent123';

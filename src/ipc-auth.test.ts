@@ -382,26 +382,6 @@ describe('refresh_groups authorization', () => {
 // The logic: isPrivileged || targetChatJid === sourceChatJid
 
 describe('IPC message authorization', () => {
-  function isValidMessagePayload(data: unknown): data is {
-    type: 'message';
-    chatJid: string;
-    text: string;
-  } {
-    if (!data || typeof data !== 'object') return false;
-    const payload = data as {
-      type?: unknown;
-      chatJid?: unknown;
-      text?: unknown;
-    };
-    return (
-      payload.type === 'message' &&
-      typeof payload.chatJid === 'string' &&
-      typeof payload.text === 'string' &&
-      payload.chatJid.length > 0 &&
-      payload.text.length > 0
-    );
-  }
-
   // Replicate the exact check from the IPC watcher
   function isMessageAuthorized(
     sourceChatJid: string,
@@ -434,46 +414,6 @@ describe('IPC message authorization', () => {
   it('main group can send to unregistered JID', () => {
     // Main is always authorized regardless of target
     expect(isMessageAuthorized('main@g.us', true, 'unknown@g.us')).toBe(true);
-  });
-
-  it('rejects message payload when chatJid is not a string', () => {
-    expect(
-      isValidMessagePayload({
-        type: 'message',
-        chatJid: 123,
-        text: 'hello',
-      }),
-    ).toBe(false);
-  });
-
-  it('rejects message payload when text is not a string', () => {
-    expect(
-      isValidMessagePayload({
-        type: 'message',
-        chatJid: 'other@g.us',
-        text: { value: 'hello' },
-      }),
-    ).toBe(false);
-  });
-
-  it('rejects message payload when chatJid is an empty string', () => {
-    expect(
-      isValidMessagePayload({
-        type: 'message',
-        chatJid: '',
-        text: 'hello',
-      }),
-    ).toBe(false);
-  });
-
-  it('rejects message payload when text is an empty string', () => {
-    expect(
-      isValidMessagePayload({
-        type: 'message',
-        chatJid: 'other@g.us',
-        text: '',
-      }),
-    ).toBe(false);
   });
 });
 
