@@ -542,6 +542,7 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
+      maxThinkingTokens: 16384,
       systemPrompt: globalClaudeMd
         ? {
             type: 'preset' as const,

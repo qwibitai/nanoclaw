@@ -41,6 +41,8 @@ export interface RegisteredGroup {
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
   verbose?: boolean; // When true, agent prefixes responses with a brief thinking summary
+  model?: 'sonnet' | 'opus' | 'haiku'; // Override default model for this group
+  maxThinkingTokens?: number; // Override thinking budget (default: 16384)
 }
 
 export interface NewMessage {
