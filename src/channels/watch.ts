@@ -278,15 +278,44 @@ export class WatchChannel implements Channel {
     while (this.notificationQueue.length > NOTIF_QUEUE_MAX)
       this.notificationQueue.shift();
     logger.info(
-      { type, from, previewLen: preview.length, queueSize: this.notificationQueue.length },
+      {
+        type,
+        from,
+        previewLen: preview.length,
+        queueSize: this.notificationQueue.length,
+      },
       'watch: notification queued',
     );
   }
 
-  private handleNotifications(
-    url: URL,
+  private async handleNotifyPost(
+    req: http.IncomingMessage,
     res: http.ServerResponse,
-  ): void {
+  ): Promise<void> {
+    try {
+      const body = await this.readBody(req);
+      const parsed = JSON.parse(body.toString('utf-8')) as {
+        type?: string;
+        from?: string;
+        text?: string;
+      };
+      const type = (parsed.type === 'email' ? 'email' : 'signal') as
+        | 'email'
+        | 'signal';
+      const from = parsed.from || 'System';
+      const text = parsed.text || '';
+      if (!text) {
+        this.sendJson(res, 400, { error: 'missing text field' });
+        return;
+      }
+      this.addNotification(type, from, text);
+      this.sendJson(res, 200, { ok: true });
+    } catch {
+      this.sendJson(res, 400, { error: 'bad request' });
+    }
+  }
+
+  private handleNotifications(url: URL, res: http.ServerResponse): void {
     const since = url.searchParams.get('since') || '1970-01-01T00:00:00.000Z';
     const sinceMs = new Date(since).getTime();
     const items = this.notificationQueue.filter(
@@ -310,6 +339,14 @@ export class WatchChannel implements Channel {
 
     if (!this.checkAuth(req)) {
       this.sendJson(res, 401, { error: 'unauthorized' });
+      return;
+    }
+
+    // Agent-pushed notifications: POST { type, from, text } to buzz the watch.
+    // Called from the container via curl or the agent's tools when something
+    // is worth Scott's attention (email, calendar reminder, task completion).
+    if (req.method === 'POST' && url.pathname === '/api/watch/notify') {
+      await this.handleNotifyPost(req, res);
       return;
     }
 
