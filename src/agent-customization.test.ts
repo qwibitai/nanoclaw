@@ -143,8 +143,16 @@ describe('AgentRegistryDb instructions/skills/mcpServers', () => {
           instructions: 'Be concise.',
           skills: ['/a/skill-a', '/a/skill-b'],
           mcpServers: {
-            weather: { source: '/srv/weather', command: 'node', args: ['index.js'] },
-            local: { source: '/srv/local', command: 'python', args: ['server.py'] },
+            weather: {
+              source: '/srv/weather',
+              command: 'node',
+              args: ['index.js'],
+            },
+            local: {
+              source: '/srv/local',
+              command: 'python',
+              args: ['server.py'],
+            },
           },
         },
         tmpDir,
@@ -156,7 +164,11 @@ describe('AgentRegistryDb instructions/skills/mcpServers', () => {
       expect(loaded.skillsSources).toEqual(['/a/skill-a', '/a/skill-b']);
       expect(loaded.mcpServers).toEqual({
         local: { args: ['server.py'], command: 'python', source: '/srv/local' },
-        weather: { args: ['index.js'], command: 'node', source: '/srv/weather' },
+        weather: {
+          args: ['index.js'],
+          command: 'node',
+          source: '/srv/weather',
+        },
       });
     } finally {
       db.close();

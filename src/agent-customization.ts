@@ -31,8 +31,13 @@ export interface SyncAgentCustomizationsInput {
 export function syncAgentCustomizations(
   input: SyncAgentCustomizationsInput,
 ): void {
-  const { instructions, skillsSources, mcpServers, agentDir, builtinSkillsDir } =
-    input;
+  const {
+    instructions,
+    skillsSources,
+    mcpServers,
+    agentDir,
+    builtinSkillsDir,
+  } = input;
 
   if (instructions) {
     fs.mkdirSync(agentDir, { recursive: true });
@@ -80,8 +85,13 @@ export function syncAgentCustomizations(
     fs.mkdirSync(agentMcpDir, { recursive: true });
 
     for (const [name, cfg] of Object.entries(mcpServers)) {
-      if (!fs.existsSync(cfg.source) || !fs.statSync(cfg.source).isDirectory()) {
-        throw new Error(`MCP server "${name}" source is not a directory: ${cfg.source}`);
+      if (
+        !fs.existsSync(cfg.source) ||
+        !fs.statSync(cfg.source).isDirectory()
+      ) {
+        throw new Error(
+          `MCP server "${name}" source is not a directory: ${cfg.source}`,
+        );
       }
       copyDirRecursive(cfg.source, path.join(agentMcpDir, name));
     }

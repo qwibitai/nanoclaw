@@ -55,7 +55,10 @@ export interface ContainerInput {
   /** Per-agent mount allowlist (resolved). */
   mountAllowlist?: import('./types.js').MountAllowlist | null;
   /** Custom MCP server runtime configs (source dirs already copied into agentDir/mcp/). */
-  mcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }> | null;
+  mcpServers?: Record<
+    string,
+    { command: string; args?: string[]; env?: Record<string, string> }
+  > | null;
 }
 
 export type ContainerState = 'active' | 'idle' | 'stopped';
