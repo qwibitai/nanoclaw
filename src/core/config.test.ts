@@ -2,9 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const ORIGINAL_ENV = { ...process.env };
 
-async function loadConfigWithEnv(env: {
-  ANTHROPIC_MODEL?: string;
-}) {
+async function loadConfigWithEnv(env: { ANTHROPIC_MODEL?: string }) {
   vi.resetModules();
   if (env.ANTHROPIC_MODEL === undefined) {
     delete process.env.ANTHROPIC_MODEL;

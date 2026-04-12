@@ -204,9 +204,14 @@ async function editTelegramMessage(
   }
 
   try {
-    await api.editMessageText(chatId, messageId, escapeTelegramMarkdownV2(text), {
-      parse_mode: 'MarkdownV2',
-    });
+    await api.editMessageText(
+      chatId,
+      messageId,
+      escapeTelegramMarkdownV2(text),
+      {
+        parse_mode: 'MarkdownV2',
+      },
+    );
     return;
   } catch (errV2Escaped) {
     logger.debug(
@@ -1051,7 +1056,10 @@ export class TelegramChannel implements Channel {
         ? parsedThreadId
         : undefined;
       const draftOptions = draftThreadId
-        ? { message_thread_id: draftThreadId, parse_mode: 'MarkdownV2' as const }
+        ? {
+            message_thread_id: draftThreadId,
+            parse_mode: 'MarkdownV2' as const,
+          }
         : { parse_mode: 'MarkdownV2' as const };
       const queue = this.createDraftChunkStream();
       const draftIdOffset = this.nextDraftIdOffset * 256;
@@ -1065,27 +1073,27 @@ export class TelegramChannel implements Channel {
         streamPromise: Promise.resolve(),
       };
       streamState.streamPromise = this.draftStreamApi
-          .streamMessage(
-            parsedChatId,
-            draftIdOffset,
-            queue.iterator,
-            draftOptions,
-            draftOptions,
-          )
-          .then(() => undefined)
-          .catch(async (err) => {
-            logger.warn(
-              { jid, err: this.sanitizeErrorMessage(err) },
-              'Telegram stream send failed; falling back to final message send',
-            );
-            const fallbackText = streamState.rawBuffer.trim();
-            if (fallbackText) {
-              await this.sendMessage(jid, fallbackText, options.threadId);
-            }
-          })
-          .finally(() => {
-            this.activeDraftStreams.delete(key);
-          });
+        .streamMessage(
+          parsedChatId,
+          draftIdOffset,
+          queue.iterator,
+          draftOptions,
+          draftOptions,
+        )
+        .then(() => undefined)
+        .catch(async (err) => {
+          logger.warn(
+            { jid, err: this.sanitizeErrorMessage(err) },
+            'Telegram stream send failed; falling back to final message send',
+          );
+          const fallbackText = streamState.rawBuffer.trim();
+          if (fallbackText) {
+            await this.sendMessage(jid, fallbackText, options.threadId);
+          }
+        })
+        .finally(() => {
+          this.activeDraftStreams.delete(key);
+        });
       this.activeDraftStreams.set(key, streamState);
       state = streamState;
     }

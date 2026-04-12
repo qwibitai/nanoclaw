@@ -242,9 +242,9 @@ describe('syncGroupSkills', () => {
     syncGroupSkills();
 
     // Existing skill should be untouched
-    expect(
-      fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf-8'),
-    ).toBe('# My Skill');
+    expect(fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf-8')).toBe(
+      '# My Skill',
+    );
   });
 });
 

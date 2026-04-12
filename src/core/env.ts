@@ -11,7 +11,8 @@ import { logger } from './logger.js';
  */
 export function readEnvFile(keys: string[]): Record<string, string> {
   const homeDir = process.env.HOME || os.homedir();
-  const rootDir = process.env.AGENT_ROOT?.trim() || path.join(homeDir, 'myclaw');
+  const rootDir =
+    process.env.AGENT_ROOT?.trim() || path.join(homeDir, 'myclaw');
   const candidates = [path.join(rootDir, '.env')];
   let content: string | undefined;
   for (const envFile of candidates) {

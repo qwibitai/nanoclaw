@@ -92,9 +92,7 @@ function buildHostArtifacts(
     errors.push(
       'Host runner build completed but required artifacts are still missing.',
     );
-    fixes.push(
-      `Verify \`${hostRunnerPath}\` and \`${hostMcpPath}\` exist.`,
-    );
+    fixes.push(`Verify \`${hostRunnerPath}\` and \`${hostMcpPath}\` exist.`);
     return { attempted, succeeded: false };
   }
   return { attempted, succeeded: true };
