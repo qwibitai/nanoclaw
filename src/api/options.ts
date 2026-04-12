@@ -32,4 +32,8 @@ export interface AgentOptions {
   mountAllowlist?: MountAllowlist;
   /** Initial channels. Factories are called at agent.start() time and are never persisted. */
   channels?: Record<string, ChannelDriverFactory>;
+  /** Instructions appended to the system prompt for every group in this agent. */
+  instructions?: string;
+  /** Host paths to skill directories (each must contain SKILL.md). Loaded into every group's container. */
+  skills?: string[];
 }
