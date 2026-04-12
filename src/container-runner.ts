@@ -112,6 +112,17 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
     }
   }
 
+  // Persona directory (read-only for all groups)
+  // Contains PERSON.md (core identity) and RELATIONSHIPS.md (relationship dynamics)
+  const personaDir = path.join(projectRoot, "persona");
+  if (fs.existsSync(personaDir)) {
+    mounts.push({
+      hostPath: personaDir,
+      containerPath: "/workspace/persona",
+      readonly: true,
+    });
+  }
+
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(DATA_DIR, "sessions", group.folder, ".claude");
