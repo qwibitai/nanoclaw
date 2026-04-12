@@ -194,4 +194,36 @@ describe('url_watch flow', () => {
     expect(storeMessageMock).toHaveBeenCalledTimes(1);
     expect(storeMessageMock).toHaveBeenCalledWith(msg);
   });
+
+  describe('URL 検出の境界ケース', () => {
+    it('foohttps://example.com は URL として検出しない（単語境界なし）', () => {
+      const createThread = vi.fn(async () => 'dc:thread-1');
+      const msg = makeMsg({ content: 'foohttps://example.com' });
+
+      _maybeHandleUrlWatchMessage(chatJid, msg, [makeChannel(createThread)]);
+
+      expect(createThread).not.toHaveBeenCalled();
+      expect(storeMessageMock).toHaveBeenCalledWith(msg);
+    });
+
+    it('(https://example.com) は URL として検出する（記号の直後は単語境界）', async () => {
+      const createThread = vi.fn(async () => 'dc:thread-1');
+      const msg = makeMsg({ content: '(https://example.com)' });
+
+      _maybeHandleUrlWatchMessage(chatJid, msg, [makeChannel(createThread)]);
+      await flushAsyncWork();
+
+      expect(createThread).toHaveBeenCalledTimes(1);
+    });
+
+    it('テキスト中に埋め込まれた URL を検出する', async () => {
+      const createThread = vi.fn(async () => 'dc:thread-1');
+      const msg = makeMsg({ content: 'check out https://example.com today' });
+
+      _maybeHandleUrlWatchMessage(chatJid, msg, [makeChannel(createThread)]);
+      await flushAsyncWork();
+
+      expect(createThread).toHaveBeenCalledTimes(1);
+    });
+  });
 });
