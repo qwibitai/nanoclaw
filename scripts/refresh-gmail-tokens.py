@@ -85,7 +85,7 @@ def needs_refresh(creds: dict) -> bool:
     return (expiry_ms - now_ms) / 1000 <= REFRESH_THRESHOLD_SECONDS
 
 
-def load_oauth_keys(account_dir: Path) -> dict | None:
+def load_oauth_keys(account_dir: Path) -> "dict | None":
     """Load gcp-oauth.keys.json (client_id + client_secret needed for refresh)."""
     keys_file = account_dir / "gcp-oauth.keys.json"
     if not keys_file.exists():
@@ -139,7 +139,7 @@ def refresh_token(account: str, account_dir: Path) -> tuple[str, str]:
     # retry prevents most spurious "error" outputs without inflating the
     # happy-path latency (retries only fire on actual failures).
     new = None
-    last_err: Exception | None = None
+    last_err: "Exception | None" = None
     for attempt in range(2):
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
