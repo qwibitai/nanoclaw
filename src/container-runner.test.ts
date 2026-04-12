@@ -1015,4 +1015,73 @@ describe('container-runner timeout behavior', () => {
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
   });
+
+  it('test_pipe_ack_progress_event_forwarded_to_onProgress', async () => {
+    const onProgress = vi.fn();
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+      onProgress,
+    );
+
+    emitProgressMarker(fakeProc, 'pipe_ack', { pipeId: 'ts-12345' });
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'pipe_ack',
+        data: { pipeId: 'ts-12345' },
+      }),
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'done',
+      newSessionId: 's1',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it('test_progress_handler_error_logged', async () => {
+    const loggerModule = await import('./logger.js');
+    const debugSpy = vi.mocked(loggerModule.logger.debug);
+    debugSpy.mockClear();
+
+    const onProgress = vi.fn(() => {
+      throw new Error('handler boom');
+    });
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+      onProgress,
+    );
+
+    emitProgressMarker(fakeProc, 'text', { content: 'hello' });
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      'Failed to parse or dispatch progress event',
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'done',
+      newSessionId: 's2',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
 });

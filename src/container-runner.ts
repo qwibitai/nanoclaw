@@ -3111,7 +3111,7 @@ export async function runContainerAgent(
           resetTimeout();
           onProgress?.(parsed);
         } catch (err) {
-          logger.debug({ err }, 'Progress event handler threw');
+          logger.debug({ err }, 'Failed to parse or dispatch progress event');
         }
       }
     });

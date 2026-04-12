@@ -187,6 +187,14 @@ let lastTimestamp = '';
 let sessions = new Map<string, string>(); // V2: composite session keys
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
+type PendingPipe = {
+  pipeId: string;
+  chatJid: string;
+  priorCursor: string;
+  sentAt: number;
+  acked: boolean;
+};
+const pendingPipesBySession = new Map<string, PendingPipe[]>();
 let messageLoopRunning = false;
 /**
  * Set by the SIGTERM/SIGINT handler before rolling back in-flight cursors.
@@ -1619,10 +1627,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           hadError = true;
         }
       },
-      webUI
-        ? (event: ProgressEvent) =>
-            webUI!.broadcast(sessionKey, group.folder, effectiveThreadId, event)
-        : undefined,
+      (event: ProgressEvent) => {
+        if (event.eventType === 'pipe_ack') {
+          const pipeId = event.data?.pipeId;
+          if (typeof pipeId === 'string') {
+            const pending = pendingPipesBySession.get(sessionKey);
+            const hit = pending?.find((p) => p.pipeId === pipeId && !p.acked);
+            if (hit) {
+              hit.acked = true;
+              logger.info(
+                { chatJid: hit.chatJid, pipeId, sessionKey },
+                'pipe_acked',
+              );
+            }
+          }
+        }
+        webUI?.broadcast(sessionKey, group.folder, effectiveThreadId, event);
+      },
     );
   } finally {
     // Always clear typing indicator — even if runAgent throws, the 8s
@@ -1757,6 +1778,54 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   return true;
+}
+
+// Roll back lastAgentTimestamp for any piped messages the container never acked.
+// Sorts stranded pipes ascending, rolls back to earliest.priorCursor (the cursor
+// before the first un-acked pipe), and re-enqueues so the next container re-delivers.
+function rollbackStrandedPipes(sessionKey: string): void {
+  const pending = pendingPipesBySession.get(sessionKey);
+  if (!pending || pending.length === 0) return;
+
+  const stranded = pending.filter((p) => !p.acked);
+  if (stranded.length === 0) {
+    pendingPipesBySession.delete(sessionKey);
+    return;
+  }
+
+  const byChat = new Map<string, PendingPipe[]>();
+  for (const p of stranded) {
+    const list = byChat.get(p.chatJid) ?? [];
+    list.push(p);
+    byChat.set(p.chatJid, list);
+  }
+
+  for (const [chatJid, chatStranded] of byChat) {
+    chatStranded.sort((a, b) => a.pipeId.localeCompare(b.pipeId));
+    const earliest = chatStranded[0];
+    const latestPipeTarget = chatStranded[chatStranded.length - 1].pipeId;
+
+    if (lastAgentTimestamp[chatJid] === latestPipeTarget) {
+      const rolledBackFrom = lastAgentTimestamp[chatJid];
+      lastAgentTimestamp[chatJid] = earliest.priorCursor;
+      logger.warn(
+        {
+          chatJid,
+          pipeId: earliest.pipeId,
+          rolledBackFrom,
+          rolledBackTo: earliest.priorCursor,
+          strandedCount: chatStranded.length,
+          sessionKey,
+        },
+        'pipe_rolled_back',
+      );
+    }
+
+    const parentJid = getParentJid(chatJid);
+    setImmediate(() => queue.enqueueMessageCheck(parentJid, chatJid));
+  }
+
+  pendingPipesBySession.delete(sessionKey);
 }
 
 async function runAgent(
@@ -2033,6 +2102,9 @@ async function runAgent(
     // processing=0, and the startup recovery path finds nothing — stranding
     // any messages whose cursor was already rolled back by the shutdown
     // handler. Verified end-to-end via Test C round 2 (2026-04-12).
+    if (!messageLoopShuttingDown) {
+      rollbackStrandedPipes(sessionKey);
+    }
     if (!messageLoopShuttingDown) {
       clearSessionProcessing(sessionKey);
     }
@@ -2466,6 +2538,13 @@ async function startMessageLoop(): Promise<void> {
             }
           }
 
+          const priorCursor = lastAgentTimestamp[chatJid] || '';
+          const pipeId = messagesToSend[messagesToSend.length - 1].timestamp;
+          const pipeSessionKey = buildSessionKey(
+            group.folder,
+            incomingThreadId,
+          );
+
           if (
             canPipe &&
             queue.sendMessage(
@@ -2473,8 +2552,22 @@ async function startMessageLoop(): Promise<void> {
               incomingThreadId,
               formatted,
               pipeAttachments.length > 0 ? pipeAttachments : undefined,
+              pipeId,
             )
           ) {
+            const pendingList = pendingPipesBySession.get(pipeSessionKey) ?? [];
+            pendingList.push({
+              pipeId,
+              chatJid,
+              priorCursor,
+              sentAt: Date.now(),
+              acked: false,
+            });
+            pendingPipesBySession.set(pipeSessionKey, pendingList);
+            logger.info(
+              { chatJid, pipeId, priorCursor, sessionKey: pipeSessionKey },
+              'pipe_sent',
+            );
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',

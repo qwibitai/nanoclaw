@@ -484,6 +484,88 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  it('test_sendMessage_includes_pipeId_in_payload', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess(
+      'group1@g.us',
+      undefined,
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    queue.sendMessage('group1@g.us', undefined, 'hello', undefined, 'pipe-123');
+
+    const writeCalls = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && !call[0].endsWith('_close'),
+    );
+    expect(writeCalls.length).toBeGreaterThan(0);
+    const writtenPayload = JSON.parse(
+      writeCalls[writeCalls.length - 1][1] as string,
+    );
+    expect(writtenPayload.pipeId).toBe('pipe-123');
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('test_sendMessage_omits_pipeId_when_undefined', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess(
+      'group1@g.us',
+      undefined,
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    queue.sendMessage('group1@g.us', undefined, 'hello');
+
+    const writeCalls = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && !call[0].endsWith('_close'),
+    );
+    expect(writeCalls.length).toBeGreaterThan(0);
+    const writtenPayload = JSON.parse(
+      writeCalls[writeCalls.length - 1][1] as string,
+    );
+    expect(Object.prototype.hasOwnProperty.call(writtenPayload, 'pipeId')).toBe(
+      false,
+    );
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
   it('preempts when idle arrives with pending tasks', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;

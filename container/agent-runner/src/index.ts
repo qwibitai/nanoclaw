@@ -103,6 +103,8 @@ if (!IPC_INPUT_SUBDIR) {
 const IPC_INPUT_DIR = `/workspace/ipc/input/${IPC_INPUT_SUBDIR}`;
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+// 60s: 2x margin over observed 30s Opus thinking turns. Tunable post-deploy (A7).
+const STALL_DETECT_MS = 60000;
 
 // Module-level reference to sdkEnv so IPC handlers can apply model/effort switches.
 // Set once in main() before the query loop starts.
@@ -661,6 +663,7 @@ function shouldClose(): boolean {
 interface IpcMessage {
   text: string;
   attachments?: ContainerAttachment[];
+  pipeId?: string;
 }
 
 function drainIpcInput(): IpcMessage[] {
@@ -679,6 +682,7 @@ function drainIpcInput(): IpcMessage[] {
           messages.push({
             text: data.text,
             attachments: data.attachments,
+            pipeId: typeof data.pipeId === 'string' ? data.pipeId : undefined,
           });
         } else if (data.type === 'model_switch' && data.model) {
           if (data.oneshot && pendingOneshotRevert === undefined) {
@@ -733,7 +737,7 @@ function drainIpcInput(): IpcMessage[] {
  * Wait for a new IPC message or _close sentinel.
  * Returns the combined content (text + optional attachments), or null if _close.
  */
-function waitForIpcMessage(): Promise<{ text: string; attachments?: ContainerAttachment[] } | null> {
+function waitForIpcMessage(): Promise<{ text: string; attachments?: ContainerAttachment[]; pipeIds: string[] } | null> {
   return new Promise((resolve) => {
     const poll = () => {
       if (shouldClose()) {
@@ -745,12 +749,15 @@ function waitForIpcMessage(): Promise<{ text: string; attachments?: ContainerAtt
         const text = messages.map(m => m.text).join('\n');
         // Merge attachments from all drained messages
         const allAttachments: ContainerAttachment[] = [];
+        const pipeIds: string[] = [];
         for (const m of messages) {
           if (m.attachments) allAttachments.push(...m.attachments);
+          if (m.pipeId) pipeIds.push(m.pipeId);
         }
         resolve({
           text,
           attachments: allAttachments.length > 0 ? allAttachments : undefined,
+          pipeIds,
         });
         return;
       }
@@ -1206,6 +1213,7 @@ async function runQuery(
   sessionId: string | undefined,
   ctx: QueryContext,
   resumeAt?: string,
+  initialPipeIds?: string[],
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const { mcpServerPath, containerInput, sdkEnv, buildSystemPrompt, plugins } = ctx;
   // Rebuild system prompt with current model (may differ from startup if IPC switched it)
@@ -1213,6 +1221,18 @@ async function runQuery(
   const systemPromptOption = buildSystemPrompt(currentModel);
   const stream = new MessageStream();
   stream.push(prompt);
+
+  // pendingAcks tracks pipe_ack emissions for pipeIds that arrived with messages
+  const pendingAcks: { pipeId: string; consumed: boolean }[] = [];
+  if (initialPipeIds) {
+    for (const id of initialPipeIds) {
+      pendingAcks.push({ pipeId: id, consumed: false });
+    }
+  }
+  // postResult is true after a Result message; cleared on assistant/system activity
+  let postResult = false;
+  // stallTimer fires if the SDK goes silent after a post-result push
+  let stallTimer: NodeJS.Timeout | null = null;
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -1237,6 +1257,14 @@ async function runQuery(
       const content = buildPromptContent(msg.text, msg.attachments);
       stream.push(content);
       hasPipedSinceLastOutput = true;
+      if (msg.pipeId) pendingAcks.push({ pipeId: msg.pipeId, consumed: false });
+      if (postResult && !stallTimer) {
+        stallTimer = setTimeout(() => {
+          log('WARN: Stall detected — SDK silent for STALL_DETECT_MS after post-result push. Forcing stream.end() for cold restart.');
+          stream.end();
+          stallTimer = null;
+        }, STALL_DETECT_MS);
+      }
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
@@ -1358,6 +1386,8 @@ async function runQuery(
 
     // Emit progress events for real-time web UI streaming
     if (message.type === 'assistant' && 'message' in message) {
+      postResult = false;
+      if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
       const content = (message as { message: { content: Array<{ type: string; text?: string; thinking?: string; name?: string; input?: unknown; id?: string }> } }).message.content;
       if (Array.isArray(content)) {
         // Piped check-in reply: emit text via writeOutput so the host sends
@@ -1389,6 +1419,14 @@ async function runQuery(
           }
         }
 
+        // Emit pipe_ack for all un-consumed pendingAcks on assistant message
+        for (const ack of pendingAcks) {
+          if (!ack.consumed && ack.pipeId) {
+            writeProgress('pipe_ack', { pipeId: ack.pipeId });
+            ack.consumed = true;
+          }
+        }
+
         // Accumulate text for fallback when result.result is null
         const textBlocks = content.filter((b) => b.type === 'text' && b.text);
         if (textBlocks.length > 0) {
@@ -1412,6 +1450,8 @@ async function runQuery(
     }
 
     if (message.type === 'system') {
+      postResult = false;
+      if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
       const subtype = (message as { subtype?: string }).subtype || 'unknown';
       writeProgress('system', {
         subtype,
@@ -1446,6 +1486,7 @@ async function runQuery(
     }
 
     if (message.type === 'result') {
+      postResult = true;
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
@@ -1584,6 +1625,14 @@ async function runQuery(
           effortFailed = true;
         }
       }
+      // Backstop: ack any pipes not yet acked by the assistant-message path
+      // (covers tool-use-only turns where no assistant text block fires).
+      for (const ack of pendingAcks) {
+        if (!ack.consumed && ack.pipeId) {
+          writeProgress('pipe_ack', { pipeId: ack.pipeId });
+          ack.consumed = true;
+        }
+      }
       writeOutput({
         status: 'success',
         result: effectiveResult,
@@ -1611,6 +1660,7 @@ async function runQuery(
 
   ipcPolling = false;
   activeQuery = null;
+  if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
 
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
@@ -1841,12 +1891,14 @@ async function main(): Promise<void> {
   for (const att of allAttachments) {
     log(`  ${att.filename} (${att.mimeType}) exists=${fs.existsSync(att.containerPath)} path=${att.containerPath}`);
   }
+  let initialPipeIds: string[] = [];
   const pending = drainIpcInput();
   if (pending.length > 0) {
     log(`Draining ${pending.length} pending IPC messages into initial prompt`);
     promptText += '\n' + pending.map(m => m.text).join('\n');
     for (const m of pending) {
       if (m.attachments) allAttachments.push(...m.attachments);
+      if (m.pipeId) initialPipeIds.push(m.pipeId);
     }
   }
 
@@ -1999,7 +2051,7 @@ async function main(): Promise<void> {
       let queryResult;
       for (;;) {
         try {
-          queryResult = await runQuery(prompt, sessionId, queryCtx, resumeAt);
+          queryResult = await runQuery(prompt, sessionId, queryCtx, resumeAt, initialPipeIds);
           break;
         } catch (runErr) {
           const runErrMsg = runErr instanceof Error ? runErr.message : String(runErr);
@@ -2057,6 +2109,7 @@ async function main(): Promise<void> {
 
       log(`Got new message (${nextMessage.text.length} chars), starting new query`);
       prompt = buildPromptContent(nextMessage.text, nextMessage.attachments);
+      initialPipeIds = nextMessage.pipeIds;
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

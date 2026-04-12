@@ -352,12 +352,14 @@ export class GroupQueue {
   /**
    * Send a follow-up message to a specific thread's container via IPC file.
    * Returns true if the message was written, false if no active container.
+   * @param pipeId Optional pipe identifier for ack-based cursor tracking.
    */
   sendMessage(
     groupJid: string,
     threadId: string | undefined,
     text: string,
     attachments?: ContainerAttachment[],
+    pipeId?: string,
   ): boolean {
     const resolved = this.resolveIpcSlot(groupJid, threadId);
     if (!resolved) return false;
@@ -366,6 +368,9 @@ export class GroupQueue {
     const payload: Record<string, unknown> = { type: 'message', text };
     if (attachments && attachments.length > 0) {
       payload.attachments = attachments;
+    }
+    if (pipeId !== undefined) {
+      payload.pipeId = pipeId;
     }
     return this.writeIpcFile(resolved.inputDir, payload);
   }
