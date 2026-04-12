@@ -12,10 +12,7 @@ import {
   OUTPUT_END_MARKER,
   OUTPUT_START_MARKER,
 } from './agent-spawn-markers.js';
-import {
-  AgentOutput,
-  RunnerProcessSpec,
-} from './agent-spawn-types.js';
+import { AgentOutput, RunnerProcessSpec } from './agent-spawn-types.js';
 
 function parseLegacyOutput(stdout: string): AgentOutput {
   const startIdx = stdout.indexOf(OUTPUT_START_MARKER);

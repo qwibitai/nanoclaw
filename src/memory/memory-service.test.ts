@@ -403,4 +403,105 @@ describe('MemoryService', () => {
         .length,
     ).toBeGreaterThan(0);
   });
+
+  // --- Adversarial: containsSensitiveMaterial false positive ---
+
+  it('should not treat "tokenizer" as sensitive material when extracting facts', async () => {
+    // Bug: containsSensitiveMaterial uses regex /api[_-]?key|token|password|secret|oauth/i
+    // Due to operator precedence, `token` is a standalone alternative (not part of `api_key_token`).
+    // So "We use a tokenizer for NLP" matches `token` → returns true → facts skipped.
+    // The regex should be /\b(api[_-]?key|token|password|secret|oauth)\b/i or similar
+    // to avoid matching substrings like "tokenizer", "secretary", etc.
+    const service = makeService();
+
+    await service.reflectAfterTurn({
+      groupFolder: 'team',
+      isMain: false,
+      prompt:
+        'I prefer using the tokenizer from HuggingFace for all NLP tasks.',
+      result: 'Noted, I will use the HuggingFace tokenizer.',
+    });
+
+    const context = await service.buildMemoryContext(
+      'tokenizer preference',
+      'team',
+      false,
+    );
+    // The preference fact about tokenizer should be extracted, not skipped
+    expect(context.facts.some((fact) => fact.kind === 'preference')).toBe(true);
+  });
+
+  it('should not treat "secretary" as sensitive material when extracting facts', async () => {
+    // Same regex bug: "secret" matches inside "secretary"
+    const service = makeService();
+
+    await service.reflectAfterTurn({
+      groupFolder: 'team',
+      isMain: false,
+      prompt: 'I prefer sending reports to the secretary before meetings.',
+      result: 'Got it, will send reports to the secretary.',
+    });
+
+    const context = await service.buildMemoryContext(
+      'secretary preference',
+      'team',
+      false,
+    );
+    expect(context.facts.some((fact) => fact.kind === 'preference')).toBe(true);
+  });
+
+  it('should not treat "authentication" as sensitive material (contains no real secrets)', async () => {
+    // The word "password" might appear in discussion about password policies without
+    // containing actual passwords. But this regex also catches "passport" discussions.
+    const service = makeService();
+
+    await service.reflectAfterTurn({
+      groupFolder: 'team',
+      isMain: false,
+      prompt:
+        'We use OAuth2 for authentication. Our convention is to always run integration tests.',
+      result: 'Understood. The team convention is OAuth2 auth and integration tests.',
+    });
+
+    const context = await service.buildMemoryContext(
+      'authentication convention',
+      'team',
+      false,
+    );
+    // "oauth" in "OAuth2" triggers the sensitive material filter, blocking legitimate facts
+    expect(context.facts.length).toBeGreaterThan(0);
+  });
+
+  // --- Adversarial: extractProcedure false negative on "error" in instructional text ---
+
+  it('should extract procedure from error-resolution workflow', async () => {
+    // Bug: extractProcedure rejects any result containing "error", "failed", "cannot", etc.
+    // via `/\b(can't|cannot|unable|failed|error)\b/i.test(result)`.
+    // This means a legitimate instructional procedure about resolving errors is rejected.
+    // E.g., "Here's how to fix the deployment error: 1. check logs 2. fix config 3. redeploy"
+    // is skipped because it contains the word "error".
+    const service = makeService();
+
+    await service.reflectAfterTurn({
+      groupFolder: 'team',
+      isMain: false,
+      prompt: 'How do I fix the deployment error?',
+      result: [
+        'Here is how to resolve the deployment error:',
+        '1. Check the application logs for the root cause',
+        '2. Fix the configuration in the deployment manifest',
+        '3. Run the integration test suite locally',
+        '4. Redeploy using the staging pipeline first',
+        '5. Monitor the health endpoint for ten minutes',
+      ].join('\n'),
+    });
+
+    const context = await service.buildMemoryContext(
+      'deployment error procedure',
+      'team',
+      false,
+    );
+    // The procedure should be extracted despite containing the word "error"
+    expect(context.procedures.length).toBeGreaterThan(0);
+  });
 });

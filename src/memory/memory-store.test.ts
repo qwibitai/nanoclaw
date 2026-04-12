@@ -312,4 +312,104 @@ describe('MemoryStore', () => {
     expect(store.getCachedEmbedding('hash-1', 'test-model')).toEqual(embedding);
     expect(store.getCachedEmbedding('hash-1', 'other-model')).toBeNull();
   });
+
+  // --- Adversarial: NaN propagation bugs ---
+
+  it('bumpConfidence with NaN should be a no-op, not reset confidence to 0', () => {
+    // Bug: bumpConfidence(ids, NaN) — the guard `if (delta <= 0) return` does not
+    // catch NaN because `NaN <= 0` is false. Then adjustConfidence runs with NaN.
+    // `delta === 0` is also false for NaN. The SQL `confidence + NaN` evaluates to
+    // NULL in SQLite, and `MAX(0.0, NULL)` returns 0.0, silently resetting confidence.
+    const store = makeStore();
+    const item = store.saveItem({
+      scope: 'group',
+      group_folder: 'team',
+      user_id: null,
+      kind: 'fact',
+      key: 'important-fact',
+      value: 'critical data',
+      source: 'test',
+      confidence: 0.8,
+    });
+
+    store.bumpConfidence([item.id], NaN);
+
+    const updated = store.getItemById(item.id)!;
+    // Confidence should remain 0.8 — NaN bump should be a no-op
+    expect(updated.confidence).toBe(0.8);
+  });
+
+  it('adjustConfidence with NaN should not corrupt confidence', () => {
+    // Same root cause: adjustConfidence(ids, NaN) passes NaN guard (NaN === 0 is false),
+    // then SQLite does confidence + NaN → NULL → MAX(0.0, NULL) → 0.0
+    const store = makeStore();
+    const item = store.saveItem({
+      scope: 'group',
+      group_folder: 'team',
+      user_id: null,
+      kind: 'fact',
+      key: 'important-fact-2',
+      value: 'important',
+      source: 'test',
+      confidence: 0.6,
+    });
+
+    store.adjustConfidence([item.id], NaN);
+
+    const updated = store.getItemById(item.id)!;
+    // Confidence should remain 0.6 — NaN should not silently zero it
+    expect(updated.confidence).toBe(0.6);
+  });
+
+  it('adjustConfidence with Infinity should not set confidence beyond 1.0', () => {
+    // adjustConfidence with Infinity: `confidence + Infinity` in SQLite → Inf,
+    // `MIN(1.0, Inf)` depends on SQLite's handling. If it returns 1.0, that's
+    // correct clamping. But if it returns Inf or NULL, confidence is corrupted.
+    const store = makeStore();
+    const item = store.saveItem({
+      scope: 'group',
+      group_folder: 'team',
+      user_id: null,
+      kind: 'fact',
+      key: 'inf-test',
+      value: 'data',
+      source: 'test',
+      confidence: 0.5,
+    });
+
+    store.adjustConfidence([item.id], Infinity);
+
+    const updated = store.getItemById(item.id)!;
+    // Confidence should be clamped to 1.0, not Infinity or NULL
+    expect(updated.confidence).toBe(1.0);
+    expect(Number.isFinite(updated.confidence)).toBe(true);
+  });
+
+  it('recordRetrievalSignal with NaN score should not corrupt total_score', () => {
+    // recordRetrievalSignal has a guard: `Number.isFinite(score) && score > 0 ? score : 0`
+    // NaN → safeScore=0 → total_score + 0 is fine. But what about MAX(max_score, 0)?
+    // That's also fine — 0 won't exceed existing max_score.
+    // The real concern: what if total_score itself becomes NaN from prior corruption?
+    const store = makeStore();
+    const item = store.saveItem({
+      scope: 'group',
+      group_folder: 'team',
+      user_id: null,
+      kind: 'fact',
+      key: 'nan-score-test',
+      value: 'data',
+      source: 'test',
+      confidence: 0.5,
+    });
+
+    store.recordRetrievalSignal(item.id, 0.5, 'q1');
+    store.recordRetrievalSignal(item.id, NaN, 'q2');
+    store.recordRetrievalSignal(item.id, 0.3, 'q3');
+
+    const updated = store.getItemById(item.id)!;
+    // total_score should be 0.5 + 0 + 0.3 = 0.8
+    expect(updated.total_score).toBeCloseTo(0.8, 5);
+    expect(updated.max_score).toBeCloseTo(0.5, 5);
+    expect(Number.isFinite(updated.total_score)).toBe(true);
+  });
 });

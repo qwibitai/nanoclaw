@@ -614,6 +614,100 @@ describe('job CRUD', () => {
   });
 });
 
+// --- botPrefix LIKE injection ---
+
+describe('botPrefix LIKE wildcard injection', () => {
+  // Bug: getMessagesSince and getNewMessages build a LIKE pattern as
+  // `${botPrefix}:%` without escaping SQL wildcards (% and _).
+  // If botPrefix contains _ or %, they act as LIKE wildcards, causing
+  // legitimate user messages to be incorrectly filtered out.
+
+  beforeEach(() => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+  });
+
+  it('underscore in botPrefix should NOT match single-char wildcard in getMessagesSince', () => {
+    // A user sends a message that looks like "test1bot:hello".
+    // With botPrefix "test_bot", the LIKE pattern becomes "test_bot:%"
+    // where _ matches any single char, so "test1bot:hello" is incorrectly excluded.
+    store({
+      id: 'user-msg-1',
+      chat_jid: 'group@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'test1bot:hello from a real user',
+      timestamp: '2024-01-01T00:00:01.000Z',
+    });
+
+    const msgs = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'test_bot',
+    );
+    // The message is from a real user, not the bot.
+    // It should NOT be filtered, but the unescaped _ wildcard in LIKE causes it to be dropped.
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].content).toBe('test1bot:hello from a real user');
+  });
+
+  it('percent in botPrefix should NOT match multi-char wildcard in getMessagesSince', () => {
+    // With botPrefix "A%ndy", the LIKE pattern "A%ndy:%" matches strings
+    // like "Aandy:...", "Abcndy:...", etc. This could exclude user messages.
+    store({
+      id: 'user-msg-2',
+      chat_jid: 'group@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'Abcndy: I was saying something',
+      timestamp: '2024-01-01T00:00:01.000Z',
+    });
+
+    const msgs = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'A%ndy',
+    );
+    // User message should NOT be filtered
+    expect(msgs).toHaveLength(1);
+  });
+
+  it('underscore in botPrefix should NOT match wildcard in getNewMessages', () => {
+    store({
+      id: 'user-msg-3',
+      chat_jid: 'group@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'testXbot:this is user content',
+      timestamp: '2024-01-01T00:00:01.000Z',
+    });
+
+    const { messages } = getNewMessages(
+      ['group@g.us'],
+      '2024-01-01T00:00:00.000Z',
+      'test_bot',
+    );
+    // Same bug: _ in LIKE matches X, so user message is incorrectly filtered
+    expect(messages).toHaveLength(1);
+  });
+
+  it('underscore in botPrefix should NOT match wildcard in getLastBotMessageTimestamp', () => {
+    // A non-bot message with content "testXbot:something" should NOT be
+    // matched as a bot message when botPrefix is "test_bot".
+    store({
+      id: 'user-msg-4',
+      chat_jid: 'group@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'testXbot:this is user content',
+      timestamp: '2024-01-01T00:00:01.000Z',
+    });
+
+    const ts = getLastBotMessageTimestamp('group@g.us', 'test_bot');
+    // Should NOT find a bot message — the user message is not from the bot
+    expect(ts).toBeUndefined();
+  });
+});
+
 // --- LIMIT behavior ---
 
 describe('message query LIMIT', () => {

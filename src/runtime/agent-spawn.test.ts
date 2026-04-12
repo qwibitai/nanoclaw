@@ -148,12 +148,7 @@ describe('agent-spawn timeout behavior', () => {
 
   it('timeout after output resolves as success', async () => {
     const onOutput = vi.fn(async () => {});
-    const resultPromise = spawnAgent(
-      testGroup,
-      testInput,
-      () => {},
-      onOutput,
-    );
+    const resultPromise = spawnAgent(testGroup, testInput, () => {}, onOutput);
 
     // Emit output with a result
     emitOutputMarker(fakeProc, {
@@ -184,12 +179,7 @@ describe('agent-spawn timeout behavior', () => {
 
   it('timeout with no output resolves as error', async () => {
     const onOutput = vi.fn(async () => {});
-    const resultPromise = spawnAgent(
-      testGroup,
-      testInput,
-      () => {},
-      onOutput,
-    );
+    const resultPromise = spawnAgent(testGroup, testInput, () => {}, onOutput);
 
     // No output emitted — fire the hard timeout
     await vi.advanceTimersByTimeAsync(1830000);
@@ -207,12 +197,7 @@ describe('agent-spawn timeout behavior', () => {
 
   it('normal exit after output resolves as success', async () => {
     const onOutput = vi.fn(async () => {});
-    const resultPromise = spawnAgent(
-      testGroup,
-      testInput,
-      () => {},
-      onOutput,
-    );
+    const resultPromise = spawnAgent(testGroup, testInput, () => {}, onOutput);
 
     // Emit output
     emitOutputMarker(fakeProc, {
@@ -242,11 +227,7 @@ describe('agent-spawn timeout behavior', () => {
       ...testGroup,
       agentConfig: { model: 'opus' },
     };
-    const resultPromise = spawnAgent(
-      groupWithModel,
-      testInput,
-      () => {},
-    );
+    const resultPromise = spawnAgent(groupWithModel, testInput, () => {});
 
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);

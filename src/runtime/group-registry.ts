@@ -97,9 +97,7 @@ export function setGroupModelOverride(
   const updatedGroup: RegisteredGroup = {
     ...existingGroup,
     agentConfig:
-      Object.keys(nextAgentConfig).length > 0
-        ? nextAgentConfig
-        : undefined,
+      Object.keys(nextAgentConfig).length > 0 ? nextAgentConfig : undefined,
   };
 
   registeredGroups[chatJid] = updatedGroup;
@@ -136,9 +134,7 @@ export function setGroupThinkingOverride(
   const updatedGroup: RegisteredGroup = {
     ...existingGroup,
     agentConfig:
-      Object.keys(nextAgentConfig).length > 0
-        ? nextAgentConfig
-        : undefined,
+      Object.keys(nextAgentConfig).length > 0 ? nextAgentConfig : undefined,
   };
 
   registeredGroups[chatJid] = updatedGroup;

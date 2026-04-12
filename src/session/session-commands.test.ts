@@ -797,6 +797,39 @@ describe('handleSessionCommand', () => {
     expect(deps.setGroupModelOverride).not.toHaveBeenCalled();
   });
 
+  it('/new should not archive session if clear will fail (inconsistent state)', async () => {
+    // Bug: archiveCurrentSession runs first, then clearCurrentSession throws.
+    // The session transcript is archived but the session is not cleared.
+    // User is told "session is unchanged" but the archive already happened.
+    // On retry, the session gets archived again (duplicate archive).
+    //
+    // Correct behavior: either don't archive until clear succeeds,
+    // or don't claim "session is unchanged" when archive already happened.
+    const deps = makeDeps({
+      clearCurrentSession: vi.fn(() => {
+        throw new Error('clear failed');
+      }),
+    });
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/new')],
+      isMainGroup: true,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+
+    // The command should fail
+    expect(result).toEqual({ handled: true, success: false });
+
+    // BUG: archive was called BEFORE clear was attempted.
+    // If clear fails, the session is in an inconsistent state:
+    // transcript archived, but session still active.
+    // The assertion below tests that archive should NOT be called
+    // when the overall /new operation fails.
+    expect(deps.archiveCurrentSession).not.toHaveBeenCalled();
+  });
+
   it('denies unauthorized /thinking in non-main group', async () => {
     const deps = makeDeps();
 
