@@ -21,6 +21,44 @@ import type { ChannelManager } from './channel-manager.js';
 import type { GroupManager } from './group-manager.js';
 import type { TaskManager } from './task-manager.js';
 
+/**
+ * Build the runtime MCP server configs for ContainerInput.
+ * Strips `source` (host path), keeps command/args/env,
+ * and injects --experimental-transform-types for .ts entry files
+ * so Node 22+ runs them natively inside the container.
+ */
+export function buildMcpRuntimeConfig(
+  mcpServers: Record<
+    string,
+    {
+      source: string;
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+    }
+  > | null,
+): Record<
+  string,
+  { command: string; args?: string[]; env?: Record<string, string> }
+> | null {
+  if (!mcpServers) return null;
+  return Object.fromEntries(
+    Object.entries(mcpServers).map(([name, cfg]) => {
+      const needsTs = cfg.command === 'node' && cfg.args?.[0]?.endsWith('.ts');
+      return [
+        name,
+        {
+          command: cfg.command,
+          args: needsTs
+            ? ['--experimental-transform-types', ...(cfg.args ?? [])]
+            : cfg.args,
+          env: cfg.env,
+        },
+      ];
+    }),
+  );
+}
+
 export class MessageProcessor {
   private messageLoopRunning = false;
   private _messageLoopPromise: Promise<void> | null = null;
@@ -256,16 +294,7 @@ export class MessageProcessor {
           dataDir: this.ctx.config.dataDir,
           credentialResolver: this.ctx.credentialResolver ?? undefined,
           mountAllowlist: this.ctx.resolvedMountAllowlist,
-          mcpServers: this.ctx.config.mcpServers
-            ? Object.fromEntries(
-                Object.entries(this.ctx.config.mcpServers).map(
-                  ([name, cfg]) => [
-                    name,
-                    { command: cfg.command, args: cfg.args, env: cfg.env },
-                  ],
-                ),
-              )
-            : null,
+          mcpServers: buildMcpRuntimeConfig(this.ctx.config.mcpServers),
         },
         this.ctx.runtimeConfig,
         (boxName, _containerName) =>
