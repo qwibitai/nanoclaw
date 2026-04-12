@@ -242,6 +242,31 @@ function buildVolumeMounts(
     }
   }
 
+  // Sync custom MCP server sources into each group's .claude/mcp/{name}/.
+  // Per-group copy so each container is isolated. A dangling symlink to
+  // /app/node_modules is created — it resolves inside the container for
+  // ESM import resolution without needing agent-runner changes.
+  const agentMcpSrc = path.join(agentDir, 'mcp');
+  const mcpDst = path.join(groupSessionsDir, 'mcp');
+  if (fs.existsSync(agentMcpSrc)) {
+    if (fs.existsSync(mcpDst)) {
+      fs.rmSync(mcpDst, { recursive: true });
+    }
+    for (const name of fs.readdirSync(agentMcpSrc)) {
+      const srcDir = path.join(agentMcpSrc, name);
+      if (!fs.statSync(srcDir).isDirectory()) continue;
+      const dstDir = path.join(mcpDst, name);
+      copyDirRecursive(srcDir, dstDir);
+      // Symlink targets /app/node_modules inside the container
+      const nmLink = path.join(dstDir, 'node_modules');
+      if (!fs.existsSync(nmLink)) {
+        fs.symlinkSync('/app/node_modules', nmLink);
+      }
+    }
+  } else if (fs.existsSync(mcpDst)) {
+    fs.rmSync(mcpDst, { recursive: true });
+  }
+
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
