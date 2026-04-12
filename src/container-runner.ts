@@ -83,6 +83,10 @@ interface VolumeMount {
   hostPath: string;
   containerPath: string;
   readonly: boolean;
+  /** If true, mount failure won't prevent container from starting. */
+  optional?: boolean;
+  /** Internal: set to true on retry to skip this mount. */
+  _skip?: boolean;
 }
 
 function buildVolumeMounts(
@@ -230,6 +234,7 @@ function buildVolumeMounts(
         hostPath: gmailDir,
         containerPath: `/home/node/${gd.containerDir}`,
         readonly: false, // MCP may need to refresh OAuth tokens
+        optional: true,
       });
     } else if (fs.existsSync(gmailDir)) {
       if (!gmailSkipLoggedFor.has(gmailDir)) {
@@ -310,6 +315,7 @@ function buildVolumeMounts(
           hostPath: contactsCacheDir,
           containerPath: '/workspace/contacts',
           readonly: true,
+          optional: true,
         });
       }
     }
@@ -327,7 +333,9 @@ function buildVolumeMounts(
       group.name,
       isMain,
     );
-    mounts.push(...validatedMounts);
+    mounts.push(
+      ...validatedMounts.map((m) => ({ ...m, optional: true })),
+    );
   }
 
   return mounts;
@@ -571,6 +579,7 @@ async function buildContainerArgs(
   }
 
   for (const mount of mounts) {
+    if (mount.optional && mount._skip) continue; // Skipped on retry
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
     } else {
@@ -589,8 +598,6 @@ export async function runContainerAgent(
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
-  const startTime = Date.now();
-
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
@@ -601,6 +608,32 @@ export async function runContainerAgent(
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
+
+  const result = await spawnContainerWithRetry(
+    group,
+    input,
+    mounts,
+    containerName,
+    agentIdentifier,
+    onProcess,
+    onOutput,
+  );
+  return result;
+}
+
+/**
+ * Spawn container with automatic retry on mount failures.
+ * If exit code 125 (Docker config error), retry without optional mounts.
+ */
+async function spawnContainerWithRetry(
+  group: RegisteredGroup,
+  input: ContainerInput,
+  mounts: VolumeMount[],
+  containerName: string,
+  agentIdentifier: string | undefined,
+  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onOutput?: (output: ContainerOutput) => Promise<void>,
+): Promise<ContainerOutput> {
   const { args: containerArgs, oauthToken: selectedToken } =
     await buildContainerArgs(
       mounts,
@@ -609,29 +642,80 @@ export async function runContainerAgent(
       agentIdentifier,
     );
 
-  logger.debug(
-    {
-      group: group.name,
-      containerName,
-      mounts: mounts.map(
-        (m) =>
-          `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
-      ),
-      containerArgs: containerArgs.join(' '),
-    },
-    'Container mount configuration',
+  const result = await spawnContainer(
+    group,
+    input,
+    containerArgs,
+    containerName,
+    selectedToken,
+    onProcess,
+    onOutput,
   );
+
+  // If Docker failed with exit code 125 (mount/config error) and we have
+  // optional mounts, retry without them. This prevents optional features
+  // (contacts, gmail, extra dirs) from taking down the entire bot.
+  if (
+    result.status === 'error' &&
+    result.error?.includes('code 125') &&
+    mounts.some((m) => m.optional && !m._skip)
+  ) {
+    const skippedPaths: string[] = [];
+    for (const m of mounts) {
+      if (m.optional) {
+        m._skip = true;
+        skippedPaths.push(m.hostPath);
+      }
+    }
+    logger.warn(
+      { group: group.name, skippedMounts: skippedPaths },
+      'Container failed with mount error — retrying without optional mounts',
+    );
+
+    const retryName = `${containerName}-retry`;
+    const { args: retryArgs, oauthToken: retryToken } =
+      await buildContainerArgs(
+        mounts,
+        retryName,
+        input.isMain,
+        agentIdentifier,
+      );
+
+    return spawnContainer(
+      group,
+      input,
+      retryArgs,
+      retryName,
+      retryToken,
+      onProcess,
+      onOutput,
+    );
+  }
+
+  return result;
+}
+
+async function spawnContainer(
+  group: RegisteredGroup,
+  input: ContainerInput,
+  containerArgs: string[],
+  containerName: string,
+  selectedToken: string | null,
+  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onOutput?: (output: ContainerOutput) => Promise<void>,
+): Promise<ContainerOutput> {
+  const startTime = Date.now();
 
   logger.info(
     {
       group: group.name,
       containerName,
-      mountCount: mounts.length,
       isMain: input.isMain,
     },
     'Spawning container agent',
   );
 
+  const groupDir = resolveGroupFolderPath(input.groupFolder);
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
@@ -862,13 +946,8 @@ export async function runContainerAgent(
           `=== Container Args ===`,
           containerArgs.join(' '),
           ``,
-          `=== Mounts ===`,
-          mounts
-            .map(
-              (m) =>
-                `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
-            )
-            .join('\n'),
+          `=== Mounts (from args) ===`,
+          containerArgs.filter((a) => a.includes(':/workspace') || a.includes(':/home')).join('\n'),
           ``,
           `=== Stderr${stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
           stderr,
@@ -882,10 +961,8 @@ export async function runContainerAgent(
           `Prompt length: ${input.prompt.length} chars`,
           `Session ID: ${input.sessionId || 'new'}`,
           ``,
-          `=== Mounts ===`,
-          mounts
-            .map((m) => `${m.containerPath}${m.readonly ? ' (ro)' : ''}`)
-            .join('\n'),
+          `=== Mounts (from args) ===`,
+          containerArgs.filter((a) => a.includes(':/workspace') || a.includes(':/home')).join('\n'),
           ``,
         );
       }

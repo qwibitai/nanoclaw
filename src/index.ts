@@ -326,8 +326,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         const elapsedSec = Math.round((Date.now() - responseStartMs) / 1000);
         const parts: string[] = [];
         if (result.numTurns != null) parts.push(`${result.numTurns} turns`);
-        if (result.totalCostUsd != null)
-          parts.push(`$${result.totalCostUsd.toFixed(2)}`);
         parts.push(`${elapsedSec}s`);
         const footer = `\n\n_${parts.join(' · ')}_`;
         await channel.sendMessage(chatJid, text + footer);
