@@ -21,11 +21,18 @@ import type { ChannelManager } from './channel-manager.js';
 import type { GroupManager } from './group-manager.js';
 import type { TaskManager } from './task-manager.js';
 
+const CONTAINER_MCP_DIR = '/workspace/agent/mcp';
+const CONTAINER_NODE_MODULES = '/app/node_modules';
+
 /**
  * Build the runtime MCP server configs for ContainerInput.
- * Strips `source` (host path), keeps command/args/env,
- * and injects --experimental-transform-types for .ts entry files
- * so Node 22+ runs them natively inside the container.
+ *
+ * Transforms user-facing McpServerConfig into container-ready runtime configs:
+ * - Strips `source` (host path) — not needed at runtime
+ * - For `node` commands: resolves entry file to container path,
+ *   injects --experimental-transform-types for .ts files (Node 22+)
+ * - For other commands (npx, python): passes args through unchanged
+ * - Sets NODE_PATH so MCP servers can resolve shared deps from /app/node_modules
  */
 export function buildMcpRuntimeConfig(
   mcpServers: Record<
@@ -44,17 +51,31 @@ export function buildMcpRuntimeConfig(
   if (!mcpServers) return null;
   return Object.fromEntries(
     Object.entries(mcpServers).map(([name, cfg]) => {
-      const needsTs = cfg.command === 'node' && cfg.args?.[0]?.endsWith('.ts');
-      return [
-        name,
-        {
-          command: cfg.command,
-          args: needsTs
-            ? ['--experimental-transform-types', ...(cfg.args ?? [])]
-            : cfg.args,
-          env: cfg.env,
-        },
-      ];
+      const mcpDir = `${CONTAINER_MCP_DIR}/${name}`;
+      const isNode = cfg.command === 'node';
+      const entry = cfg.args?.[0];
+
+      // For node commands, resolve first arg (entry file) to container path
+      // and inject --experimental-transform-types for .ts files.
+      // For other commands (npx, python), pass args through unchanged.
+      let args = cfg.args;
+      if (isNode && entry && !entry.startsWith('/')) {
+        const resolvedEntry = `${mcpDir}/${entry}`;
+        const rest = cfg.args!.slice(1);
+        args = entry.endsWith('.ts')
+          ? ['--experimental-transform-types', resolvedEntry, ...rest]
+          : [resolvedEntry, ...rest];
+      }
+
+      // Set NODE_PATH so the MCP server can resolve shared deps
+      // (e.g. @modelcontextprotocol/sdk, zod) from the container's
+      // agent-runner node_modules without bundling them per-server.
+      const env = {
+        NODE_PATH: CONTAINER_NODE_MODULES,
+        ...cfg.env,
+      };
+
+      return [name, { command: cfg.command, args, env }];
     }),
   );
 }
