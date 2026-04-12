@@ -509,3 +509,108 @@ describe('syncAgentCustomizations', () => {
     ).toThrow('not a directory');
   });
 });
+
+// ─── MCP runtime config building ────────────────────────────────────
+
+import { buildMcpRuntimeConfig } from './message-processor.js';
+
+describe('buildMcpRuntimeConfig', () => {
+  it('returns null for null input', () => {
+    expect(buildMcpRuntimeConfig(null)).toBeNull();
+  });
+
+  it('strips source and passes through JS args unchanged', () => {
+    const result = buildMcpRuntimeConfig({
+      'my-db': {
+        source: '/host/path/my-db',
+        command: 'node',
+        args: ['index.js'],
+        env: { DB_URL: 'postgres://localhost' },
+      },
+    });
+    expect(result).toEqual({
+      'my-db': {
+        command: 'node',
+        args: ['index.js'],
+        env: { DB_URL: 'postgres://localhost' },
+      },
+    });
+  });
+
+  it('injects --experimental-transform-types for .ts entry with node command', () => {
+    const result = buildMcpRuntimeConfig({
+      dune: {
+        source: '/host/path/dune-mcp',
+        command: 'node',
+        args: ['server.ts', '--port', '3000'],
+      },
+    });
+    expect(result).toEqual({
+      dune: {
+        command: 'node',
+        args: ['--experimental-transform-types', 'server.ts', '--port', '3000'],
+      },
+    });
+  });
+
+  it('does not inject flag for non-node commands', () => {
+    const result = buildMcpRuntimeConfig({
+      pyserver: {
+        source: '/host/path/py',
+        command: 'python',
+        args: ['server.ts'],
+      },
+    });
+    expect(result).toEqual({
+      pyserver: {
+        command: 'python',
+        args: ['server.ts'],
+      },
+    });
+  });
+
+  it('does not inject flag for .js entry files', () => {
+    const result = buildMcpRuntimeConfig({
+      plain: {
+        source: '/host/path/plain',
+        command: 'node',
+        args: ['server.js'],
+      },
+    });
+    expect(result).toEqual({
+      plain: {
+        command: 'node',
+        args: ['server.js'],
+      },
+    });
+  });
+
+  it('handles multiple servers with mixed .ts and .js', () => {
+    const result = buildMcpRuntimeConfig({
+      ts: {
+        source: '/a',
+        command: 'node',
+        args: ['index.ts'],
+      },
+      js: {
+        source: '/b',
+        command: 'node',
+        args: ['index.js'],
+      },
+    });
+    expect(result!['ts'].args).toEqual([
+      '--experimental-transform-types',
+      'index.ts',
+    ]);
+    expect(result!['js'].args).toEqual(['index.js']);
+  });
+
+  it('handles server with no args', () => {
+    const result = buildMcpRuntimeConfig({
+      noargs: { source: '/x', command: 'node' },
+    });
+    expect(result).toEqual({
+      noargs: { command: 'node', args: undefined },
+    });
+  });
+});
