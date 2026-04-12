@@ -668,9 +668,23 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
           log('Notion MCP server registered');
         }
 
-        // SuperPilot MCP — requires a local bridge at SUPERPILOT_MCP_URL.
-        // Not yet available as a standalone service. Email intelligence
-        // works via SSE triggers on the host side instead.
+        // SuperPilot MCP — local stdio server that proxies to production API
+        const superpilotApiUrl = process.env.SUPERPILOT_API_URL;
+        const serviceToken = process.env.NANOCLAW_SERVICE_TOKEN;
+        if (superpilotApiUrl && serviceToken) {
+          const superpilotMcpPath = path.join(__dirname, 'superpilot-mcp.js');
+          if (fs.existsSync(superpilotMcpPath)) {
+            servers['superpilot'] = {
+              command: 'node',
+              args: [superpilotMcpPath],
+              env: {
+                SUPERPILOT_API_URL: superpilotApiUrl,
+                NANOCLAW_SERVICE_TOKEN: serviceToken,
+              },
+            };
+            log('SuperPilot MCP server registered');
+          }
+        }
 
         return servers;
       })(),
