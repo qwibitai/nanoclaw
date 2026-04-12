@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Force Apple Container runtime for these tests. vi.hoisted() runs BEFORE
+// the (also-hoisted) module imports, so detectRuntime() picks up the env vars
+// at module load.
+vi.hoisted(() => {
+  process.env.CONTAINER_RUNTIME = 'container';
+  process.env.CREDENTIAL_PROXY_HOST = '127.0.0.1';
+});
+
 // Mock logger
 vi.mock('./logger.js', () => ({
   logger: {
