@@ -831,7 +831,7 @@ export interface ContainerOutput {
 }
 
 export interface ProgressEvent {
-  eventType: 'text' | 'tool_use' | 'thinking' | 'system';
+  eventType: 'text' | 'tool_use' | 'thinking' | 'system' | 'pipe_ack';
   data: Record<string, string | undefined>;
   seq: number;
   ts: number;
@@ -1626,6 +1626,10 @@ export function buildVolumeMounts(
     MAX_THINKING_TOKENS: '127999',
     // Enable ToolSearch (deferred tool discovery)
     ENABLE_TOOL_SEARCH: 'true',
+    // Auto-compact at 80% of context window instead of SDK default (~97%).
+    // Prevents sessions from hitting the hard context limit and triggering
+    // silent model fallback (opus[1m] → sonnet) on upstream 400 errors.
+    CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '80',
   };
   const requiredSettings: Record<string, unknown> = {
     // Schema helps Claude Code recognize settings correctly
@@ -3106,8 +3110,8 @@ export async function runContainerAgent(
           turnInFlight = true;
           resetTimeout();
           onProgress?.(parsed);
-        } catch {
-          // skip malformed progress events
+        } catch (err) {
+          logger.debug({ err }, 'Progress event handler threw');
         }
       }
     });
