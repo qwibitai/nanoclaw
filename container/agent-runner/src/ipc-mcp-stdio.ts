@@ -536,6 +536,151 @@ server.tool(
   },
 );
 
+// --- Contacts lookup (reads macOS AddressBook mounted at /workspace/contacts) ---
+
+/**
+ * Find the Contacts database. macOS stores it under Sources/{UUID}/AddressBook-v22.abcddb.
+ */
+function findContactsDb(): string | null {
+  const sourcesDir = '/workspace/contacts/Sources';
+  try {
+    for (const entry of fs.readdirSync(sourcesDir)) {
+      const dbPath = path.join(sourcesDir, entry, 'AddressBook-v22.abcddb');
+      if (fs.existsSync(dbPath)) return dbPath;
+    }
+  } catch {
+    // Not mounted or no access
+  }
+  return null;
+}
+
+const contactsDbPath = findContactsDb();
+
+if (contactsDbPath) {
+  // Import better-sqlite3 dynamically (available in container)
+  let Database: any;
+  try {
+    Database = (await import('better-sqlite3')).default;
+  } catch {
+    // better-sqlite3 not available in container — skip contacts tool
+  }
+
+  if (Database) {
+    server.tool(
+      'search_contacts',
+      'Search the macOS Contacts (address book) for a person by name, phone number, or email. Returns matching contacts with all their phone numbers and email addresses.',
+      {
+        query: z
+          .string()
+          .describe(
+            'Search term — name, phone number, or email address (partial match supported)',
+          ),
+      },
+      async (args) => {
+        try {
+          const db = new Database(contactsDbPath, { readonly: true });
+          const q = `%${args.query}%`;
+          const rows = db
+            .prepare(
+              `SELECT DISTINCT p.ZFIRSTNAME, p.ZLASTNAME, p.ZORGANIZATION,
+                      pn.ZFULLNUMBER, pn.ZLABEL AS phone_label,
+                      pe.ZADDRESS AS email, pe.ZLABEL AS email_label
+               FROM ZABCDRECORD p
+               LEFT JOIN ZABCDPHONENUMBER pn ON pn.ZOWNER = p.Z_PK
+               LEFT JOIN ZABCDEMAILADDRESS pe ON pe.ZOWNER = p.Z_PK
+               WHERE p.ZFIRSTNAME LIKE ? OR p.ZLASTNAME LIKE ?
+                  OR pn.ZFULLNUMBER LIKE ? OR pe.ZADDRESS LIKE ?
+                  OR p.ZORGANIZATION LIKE ?
+               ORDER BY p.ZLASTNAME, p.ZFIRSTNAME
+               LIMIT 20`,
+            )
+            .all(q, q, q, q, q) as Array<{
+            ZFIRSTNAME: string | null;
+            ZLASTNAME: string | null;
+            ZORGANIZATION: string | null;
+            ZFULLNUMBER: string | null;
+            phone_label: string | null;
+            email: string | null;
+            email_label: string | null;
+          }>;
+          db.close();
+
+          if (rows.length === 0) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `No contacts found for "${args.query}".`,
+                },
+              ],
+            };
+          }
+
+          // Group by person
+          const contacts = new Map<
+            string,
+            {
+              name: string;
+              org: string | null;
+              phones: string[];
+              emails: string[];
+            }
+          >();
+          for (const r of rows) {
+            const name =
+              [r.ZFIRSTNAME, r.ZLASTNAME].filter(Boolean).join(' ') ||
+              'Unknown';
+            if (!contacts.has(name)) {
+              contacts.set(name, {
+                name,
+                org: r.ZORGANIZATION,
+                phones: [],
+                emails: [],
+              });
+            }
+            const c = contacts.get(name)!;
+            if (r.ZFULLNUMBER && !c.phones.includes(r.ZFULLNUMBER)) {
+              c.phones.push(r.ZFULLNUMBER);
+            }
+            if (r.email && !c.emails.includes(r.email)) {
+              c.emails.push(r.email);
+            }
+          }
+
+          const lines = [...contacts.values()].map((c) => {
+            const parts = [`**${c.name}**`];
+            if (c.org) parts.push(`(${c.org})`);
+            if (c.phones.length > 0)
+              parts.push(`📱 ${c.phones.join(', ')}`);
+            if (c.emails.length > 0)
+              parts.push(`✉️ ${c.emails.join(', ')}`);
+            return parts.join(' — ');
+          });
+
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Found ${contacts.size} contact(s):\n\n${lines.join('\n')}`,
+              },
+            ],
+          };
+        } catch (err: any) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Contacts search error: ${err?.message || String(err)}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      },
+    );
+  }
+}
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

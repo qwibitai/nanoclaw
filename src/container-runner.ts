@@ -287,6 +287,21 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // macOS Contacts database (readonly) — enables contact lookup from agents
+  const addressBookDir = path.join(
+    homeDir,
+    'Library',
+    'Application Support',
+    'AddressBook',
+  );
+  if (fs.existsSync(addressBookDir)) {
+    mounts.push({
+      hostPath: addressBookDir,
+      containerPath: '/workspace/contacts',
+      readonly: true,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
