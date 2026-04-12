@@ -45,6 +45,11 @@ export const SENDER_ALLOWLIST_PATH = path.join(
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+export const LIVE_LOCATION_LOG_DIR = path.resolve(DATA_DIR, 'location_logs');
+export const LIVE_LOCATION_IDLE_TIMEOUT_MS = parseInt(
+  process.env.LIVE_LOCATION_IDLE_TIMEOUT_MS || '600000',
+  10,
+); // 10 min default
 
 export const HOST_MODE =
   (process.env.HOST_MODE || envConfig.HOST_MODE) === 'true';

@@ -7,15 +7,22 @@ import { Api, Bot, InlineKeyboard, InputFile } from 'grammy';
 import {
   ASSISTANT_NAME,
   DEFAULT_MODEL,
+  LIVE_LOCATION_IDLE_TIMEOUT_MS,
+  LIVE_LOCATION_LOG_DIR,
   resolveModelAlias,
   loadModelAliases,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from '../config.js';
 import {
+  LiveLocationManager,
+  buildLocationPrefix,
+  _setActiveLiveLocationManager,
+  getActiveLiveLocationContext,
+} from '../live-location.js';
+import {
   setGroupModel,
   setGroupEffort,
-  deleteSession,
   getTaskById,
   getTasksForGroup,
   updateTask,
@@ -70,6 +77,7 @@ export class TelegramChannel implements Channel {
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
+  private liveLocation: LiveLocationManager | null = null;
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
@@ -134,6 +142,19 @@ export class TelegramChannel implements Channel {
         baseFetchConfig: { agent: https.globalAgent, compress: true },
       },
     });
+
+    this.liveLocation = new LiveLocationManager({
+      logDir: LIVE_LOCATION_LOG_DIR,
+      idleTimeoutMs: LIVE_LOCATION_IDLE_TIMEOUT_MS,
+      onTimeout: (chatJid) => {
+        void this.sendMessage(chatJid, '📍 Live location sharing timeout.');
+      },
+      onStopped: (chatJid) => {
+        void this.sendMessage(chatJid, '📍 Live location sharing stopped by user.');
+      },
+    });
+    this.liveLocation.initialize();
+    _setActiveLiveLocationManager(this.liveLocation);
 
     // Command to get chat ID (useful for registration)
     this.bot.command('chatid', (ctx) => {
@@ -214,9 +235,8 @@ export class TelegramChannel implements Channel {
       if (args[0] === 'reset') {
         setGroupModel(chatJid, null);
         group.model = undefined;
-        deleteSession(group.folder);
         ctx.reply(
-          `Model reset to default (\`${DEFAULT_MODEL}\`). Session cleared.`,
+          `Model reset to default (\`${DEFAULT_MODEL}\`).`,
           {
             parse_mode: 'Markdown',
           },
@@ -227,8 +247,7 @@ export class TelegramChannel implements Channel {
       const resolved = resolveModelAlias(args[0]);
       setGroupModel(chatJid, resolved);
       group.model = resolved;
-      deleteSession(group.folder);
-      ctx.reply(`Model set to \`${resolved}\`. Session cleared.`, {
+      ctx.reply(`Model set to \`${resolved}\`.`, {
         parse_mode: 'Markdown',
       });
     });
@@ -607,6 +626,10 @@ export class TelegramChannel implements Channel {
         return;
       }
 
+      // Prepend live location context if sharing is active for this chat
+      const locationContext = getActiveLiveLocationContext(chatJid);
+      if (locationContext) content = locationContext + content;
+
       // Deliver message — startMessageLoop() will pick it up
       this.opts.onMessage(chatJid, {
         id: msgId,
@@ -667,7 +690,7 @@ export class TelegramChannel implements Channel {
           chat_jid: chatJid,
           sender: ctx.from?.id?.toString() || '',
           sender_name: senderName,
-          content,
+          content: getActiveLiveLocationContext(chatJid) + content,
           timestamp,
           is_from_me: false,
         });
@@ -734,7 +757,92 @@ export class TelegramChannel implements Channel {
       const emoji = ctx.message.sticker?.emoji || '';
       storeMedia(ctx, `[Sticker ${emoji}]`);
     });
-    this.bot.on('message:location', (ctx) => storeMedia(ctx, '[Location]'));
+    this.bot.on('message:location', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const loc = ctx.message.location;
+      if (!loc) return;
+
+      const threadId = ctx.message.message_thread_id?.toString();
+      const livePeriod = loc.live_period ?? 0;
+
+      if (livePeriod > 0 && this.liveLocation) {
+        const logPath = this.liveLocation.startSession(
+          chatJid,
+          ctx.message.message_id,
+          loc.latitude,
+          loc.longitude,
+          livePeriod,
+          loc.horizontal_accuracy,
+          loc.heading,
+        );
+
+        // System message → user
+        await this.sendMessage(chatJid, '📍 Live location sharing start.', threadId);
+
+        // Agent notification
+        const agentContent = buildLocationPrefix(
+          '[Live location sharing start]',
+          loc.latitude,
+          loc.longitude,
+          logPath,
+          loc.horizontal_accuracy,
+          loc.heading,
+        );
+        const timestamp = new Date(ctx.message.date * 1000).toISOString();
+        const senderName =
+          ctx.from?.first_name ||
+          ctx.from?.username ||
+          ctx.from?.id?.toString() ||
+          'Unknown';
+        const isGroup =
+          ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+        this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+        this.opts.onMessage(chatJid, {
+          id: ctx.message.message_id.toString(),
+          chat_jid: chatJid,
+          sender: ctx.from?.id?.toString() || '',
+          sender_name: senderName,
+          content: agentContent,
+          timestamp,
+          is_from_me: false,
+          thread_id: threadId,
+        });
+      } else {
+        // Static (non-live) location — unchanged behaviour
+        storeMedia(ctx, '[Location]');
+      }
+    });
+
+    this.bot.on('edited_message:location', async (ctx) => {
+      const loc = ctx.editedMessage?.location;
+      if (!loc) return;
+
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      if (!this.liveLocation) return;
+
+      const result = this.liveLocation.updateSession(
+        chatJid,
+        ctx.editedMessage.message_id,
+        loc.latitude,
+        loc.longitude,
+        loc.horizontal_accuracy,
+        loc.heading,
+        loc.live_period,
+      );
+
+      if (result === 'stopped') {
+        this.liveLocation.stopSession(chatJid);
+        // onStopped callback fires inside stopSession
+      }
+      // 'updated' / 'recovery-created': log already appended, no agent notification
+    });
+
     this.bot.on('message:contact', (ctx) => storeMedia(ctx, '[Contact]'));
 
     // Handle errors gracefully
@@ -859,6 +967,9 @@ export class TelegramChannel implements Channel {
     if (this.bot) {
       this.bot.stop();
       this.bot = null;
+      this.liveLocation?.destroy();
+      this.liveLocation = null;
+      _setActiveLiveLocationManager(null);
       logger.info('Telegram bot stopped');
     }
   }

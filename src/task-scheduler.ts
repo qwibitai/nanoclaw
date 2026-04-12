@@ -9,6 +9,7 @@ import {
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
+import { getActiveLiveLocationContext } from './live-location.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -169,6 +170,12 @@ async function runTask(
   const sessionId =
     task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
 
+  // Inject live location context for group-context tasks
+  const locationContext =
+    task.context_mode === 'group'
+      ? getActiveLiveLocationContext(task.chat_jid)
+      : '';
+
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
   // query loop to time out. A short delay handles any final MCP calls.
@@ -188,7 +195,7 @@ async function runTask(
     const output = await runAgent_(
       group,
       {
-        prompt: task.prompt,
+        prompt: locationContext + task.prompt,
         sessionId,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,

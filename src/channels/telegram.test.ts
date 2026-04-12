@@ -14,6 +14,8 @@ vi.mock('../config.js', () => ({
   DEFAULT_MODEL: 'claude-sonnet-4-20250514',
   TIMEZONE: 'Asia/Tokyo',
   TRIGGER_PATTERN: /^@Andy\b/i,
+  LIVE_LOCATION_IDLE_TIMEOUT_MS: 600000,
+  LIVE_LOCATION_LOG_DIR: '/tmp/test-data/location_logs',
   resolveModelAlias: vi.fn((name: string) => {
     const aliases: Record<string, string> = {
       opus: 'claude-opus-4-20250514',
@@ -29,11 +31,40 @@ vi.mock('../config.js', () => ({
   })),
 }));
 
+// Mock live-location module
+vi.mock('../live-location.js', () => {
+  const MockLiveLocationManager = vi.fn(function MockLiveLocationManager() {
+    return {
+      initialize: vi.fn(),
+      startSession: vi.fn(
+        () => '/tmp/test-data/location_logs/_100200300_1.log',
+      ),
+      updateSession: vi.fn(() => 'updated'),
+      stopSession: vi.fn(),
+      getLatestPosition: vi.fn(() => undefined),
+      destroy: vi.fn(),
+    };
+  });
+  return {
+    LiveLocationManager: MockLiveLocationManager,
+    buildLocationPrefix: vi.fn(
+      (
+        label: string,
+        lat: number,
+        lng: number,
+        logPath: string,
+      ) => `${label} lat: ${lat}, long: ${lng}. check \`tail ${logPath}\``,
+    ),
+    _setActiveLiveLocationManager: vi.fn(),
+    getActiveLiveLocationContext: vi.fn(() => ''),
+  };
+});
+
 // Mock db functions used by /model and /tasks commands
 vi.mock('../db.js', () => ({
   setGroupModel: vi.fn(),
   setGroupEffort: vi.fn(),
-  deleteSession: vi.fn(),
+
   getTaskById: vi.fn((id: string) => {
     if (id === 'task-123') {
       return {
@@ -182,9 +213,9 @@ import fs from 'fs';
 import {
   setGroupModel,
   setGroupEffort,
-  deleteSession,
   updateTask,
 } from '../db.js';
+import { getActiveLiveLocationContext } from '../live-location.js';
 import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
 
 // --- Test helpers ---
@@ -304,6 +335,29 @@ async function triggerMediaMessage(
   ctx: ReturnType<typeof createMediaCtx>,
 ) {
   const handlers = currentBot().filterHandlers.get(filter) || [];
+  for (const h of handlers) await h(ctx);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createEditedLocationCtx(location: Record<string, any>) {
+  return {
+    chat: { id: 100200300, type: 'group', title: 'Test Group' },
+    from: { id: 99001, first_name: 'Alice', username: 'alice_user' },
+    editedMessage: {
+      message_id: 1,
+      date: Math.floor(Date.now() / 1000),
+      location,
+    },
+    me: { username: 'andy_ai_bot' },
+  };
+}
+
+async function triggerEditedLocationMessage(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: any,
+) {
+  const handlers =
+    currentBot().filterHandlers.get('edited_message:location') || [];
   for (const h of handlers) await h(ctx);
 }
 
@@ -997,12 +1051,15 @@ describe('TelegramChannel', () => {
       );
     });
 
-    it('stores location with placeholder (no download)', async () => {
+    it('stores static location with placeholder (no live_period)', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
 
-      const ctx = createMediaCtx({});
+      // Provide an explicit location object without live_period — static location
+      const ctx = createMediaCtx({
+        extra: { location: { latitude: 35.6762, longitude: 139.6503 } },
+      });
       await triggerMediaMessage('message:location', ctx);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
@@ -1451,7 +1508,7 @@ describe('TelegramChannel', () => {
       expect(replyText).toContain('haiku');
     });
 
-    it('/model <alias> sets model and clears session', async () => {
+    it('/model <alias> sets model and preserves session', async () => {
       const groups = {
         'tg:100200300': {
           name: 'Test Group',
@@ -1479,13 +1536,8 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         'claude-opus-4-20250514',
       );
-      expect(deleteSession).toHaveBeenCalledWith('test-group');
       expect(ctx.reply).toHaveBeenCalledWith(
         expect.stringContaining('claude-opus-4-20250514'),
-        expect.any(Object),
-      );
-      expect(ctx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('Session cleared'),
         expect.any(Object),
       );
     });
@@ -1518,10 +1570,9 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         'claude-opus-4-20250514',
       );
-      expect(deleteSession).toHaveBeenCalledWith('test-group');
     });
 
-    it('/model reset clears per-group model and session', async () => {
+    it('/model reset clears per-group model and preserves session', async () => {
       const groups = {
         'tg:100200300': {
           name: 'Test Group',
@@ -1547,7 +1598,6 @@ describe('TelegramChannel', () => {
       await handler(ctx);
 
       expect(setGroupModel).toHaveBeenCalledWith('tg:100200300', null);
-      expect(deleteSession).toHaveBeenCalledWith('test-group');
       expect(ctx.reply).toHaveBeenCalledWith(
         expect.stringContaining('default'),
         expect.any(Object),
@@ -2215,6 +2265,167 @@ describe('TelegramChannel', () => {
       expect(result).toBeInstanceOf(Error);
       expect((result as Error).message).toContain('429');
       vi.useRealTimers();
+    });
+  });
+
+  // --- Live location ---
+
+  describe('live location', () => {
+    it('registers edited_message:location handler on connect', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+      expect(
+        currentBot().filterHandlers.has('edited_message:location'),
+      ).toBe(true);
+    });
+
+    it('start: calls startSession, sends system msg, calls onMessage', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      // Get the LiveLocationManager mock instance created inside connect()
+      const { LiveLocationManager } = await import('../live-location.js');
+      const mockInstance = vi.mocked(LiveLocationManager).mock.results[0]?.value;
+
+      const ctx = createMediaCtx({
+        extra: {
+          location: { latitude: 35.6762, longitude: 139.6503, live_period: 600 },
+        },
+      });
+      await triggerMediaMessage('message:location', ctx);
+
+      expect(mockInstance.startSession).toHaveBeenCalledWith(
+        'tg:100200300',
+        1,
+        35.6762,
+        139.6503,
+        600,
+        undefined,
+        undefined,
+      );
+      expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
+        expect.anything(),
+        '📍 Live location sharing start.',
+        expect.anything(),
+      );
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: expect.stringContaining('[Live location sharing start]'),
+        }),
+      );
+    });
+
+    it('start: unregistered chat is ignored', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({})),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const { LiveLocationManager } = await import('../live-location.js');
+      const mockInstance = vi.mocked(LiveLocationManager).mock.results[0]?.value;
+
+      const ctx = createMediaCtx({
+        extra: {
+          location: { latitude: 35, longitude: 139, live_period: 600 },
+        },
+      });
+      await triggerMediaMessage('message:location', ctx);
+
+      expect(mockInstance.startSession).not.toHaveBeenCalled();
+      expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
+    it('message:text with active session prepends prefix', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      vi.mocked(getActiveLiveLocationContext).mockReturnValue(
+        '[Live location sharing enabled] lat: 35, long: 139. check `tail /path/log`\n',
+      );
+
+      const ctx = createTextCtx({ text: '@Andy hello' });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: expect.stringContaining(
+            '[Live location sharing enabled] lat: 35, long: 139',
+          ),
+        }),
+      );
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: expect.stringContaining('@Andy hello'),
+        }),
+      );
+    });
+
+    it('message:text without active session leaves content unchanged', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      vi.mocked(getActiveLiveLocationContext).mockReturnValue('');
+
+      const ctx = createTextCtx({ text: '@Andy hello' });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({ content: '@Andy hello' }),
+      );
+    });
+
+    it('edited_message:location update calls updateSession', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const { LiveLocationManager } = await import('../live-location.js');
+      const mockInstance = vi.mocked(LiveLocationManager).mock.results[0]?.value;
+
+      const ctx = createEditedLocationCtx({
+        latitude: 36,
+        longitude: 140,
+        live_period: 600,
+      });
+      await triggerEditedLocationMessage(ctx);
+
+      expect(mockInstance.updateSession).toHaveBeenCalledWith(
+        'tg:100200300',
+        1,
+        36,
+        140,
+        undefined,
+        undefined,
+        600,
+      );
+      expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
+    it('edited_message:location stopped calls stopSession', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const { LiveLocationManager } = await import('../live-location.js');
+      const mockInstance = vi.mocked(LiveLocationManager).mock.results[0]?.value;
+      mockInstance.updateSession.mockReturnValue('stopped');
+
+      const ctx = createEditedLocationCtx({
+        latitude: 36,
+        longitude: 140,
+        live_period: 0,
+      });
+      await triggerEditedLocationMessage(ctx);
+
+      expect(mockInstance.stopSession).toHaveBeenCalledWith('tg:100200300');
     });
   });
 });
