@@ -547,12 +547,21 @@ async function runQuery(
           command: 'npx',
           args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
           env: {
-            // Explicitly point the gmail-mcp at the personal account home.
-            // The autoauth-mcp's default credential discovery looks at
-            // $HOME/.gmail-mcp; pinning it here makes the resolution
-            // deterministic and immune to env-variable surprises.
-            GMAIL_MCP_HOME: '/home/node/.gmail-mcp',
-            HOME: '/home/node',
+            // Pin credential paths explicitly. The @gongrzhe/server-gmail-autoauth-mcp
+            // package defaults to ${HOME}/.gmail-mcp, which works in the steady state
+            // but breaks if HOME is unset or if the package version changes its
+            // default location. These two env vars are documented in the package
+            // (dist/index.js lines 21-22 read process.env.GMAIL_OAUTH_PATH and
+            // process.env.GMAIL_CREDENTIALS_PATH directly) and short-circuit the
+            // homedir() lookup entirely.
+            //
+            // NOTE: The upstream package is hard-coded to a SINGLE account directory
+            // — it cannot read .gmail-mcp-jonathan or .gmail-mcp-attaxion. Those
+            // mounts exist for forward compatibility with a future per-account
+            // launcher, but today only the personal account is reachable from this
+            // MCP server instance.
+            GMAIL_OAUTH_PATH: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+            GMAIL_CREDENTIALS_PATH: '/home/node/.gmail-mcp/credentials.json',
           },
         },
       },

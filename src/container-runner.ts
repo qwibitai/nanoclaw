@@ -34,6 +34,11 @@ import { RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
+// Track which gmail account directories we've already logged the
+// "skipping mount, no credentials.json" warning for, so the operator
+// gets one nudge per process lifetime instead of one per spawn.
+const gmailSkipLoggedFor = new Set<string>();
+
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
@@ -201,8 +206,14 @@ function buildVolumeMounts(
   // attaxion, dev). Only mount accounts that have a credentials.json — mounting
   // a directory with only gcp-oauth.keys.json gives the gmail-mcp something
   // to discover but no usable token, which produces confusing "no credentials"
-  // errors mid-session. Better to omit the account entirely so the agent
-  // never thinks it can search there.
+  // errors when the agent first tries to call a Gmail tool. Better to omit
+  // the mount entirely so the gmail-mcp never sees a half-configured directory.
+  //
+  // NOTE: The in-container @gongrzhe/server-gmail-autoauth-mcp package is
+  // hard-coded to a single account directory (~/.gmail-mcp), so the jonathan,
+  // attaxion, and dev mounts are reserved for a future per-account MCP launcher
+  // and are currently inert from the agent's perspective. Personal is the only
+  // reachable account today.
   const homeDir = os.homedir();
   const gmailDirs = [
     { hostDir: '.gmail-mcp', containerDir: '.gmail-mcp' },
@@ -220,10 +231,13 @@ function buildVolumeMounts(
         readonly: false, // MCP may need to refresh OAuth tokens
       });
     } else if (fs.existsSync(gmailDir)) {
-      logger.debug(
-        { gmailDir },
-        'Gmail account directory present but no credentials.json — skipping mount (account not authorized yet)',
-      );
+      if (!gmailSkipLoggedFor.has(gmailDir)) {
+        gmailSkipLoggedFor.add(gmailDir);
+        logger.info(
+          { gmailDir },
+          'Gmail account directory present but no credentials.json — skipping mount (account not authorized yet; run gmail-mcp auth flow to enable)',
+        );
+      }
     }
   }
 
