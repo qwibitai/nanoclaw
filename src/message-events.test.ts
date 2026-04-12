@@ -7,11 +7,11 @@ import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AgentImpl } from './agent-impl.js';
+import { AgentImpl } from './agent/agent-impl.js';
 import {
   buildAgentConfig,
   resolveSerializableAgentSettings,
-} from './agent-config.js';
+} from './agent/config.js';
 import { buildRuntimeConfig } from './runtime-config.js';
 import { _initTestDatabase, AgentDb } from './db.js';
 import type { Channel } from './types.js';
@@ -236,10 +236,10 @@ describe('message.out event', () => {
 
     (
       agent as unknown as {
-        _channels: Map<string, Channel>;
+        channels: Map<string, Channel>;
         sendOutboundMessage: (jid: string, text: string) => Promise<boolean>;
       }
-    )._channels.set('mock', channel);
+    ).channels.set('mock', channel);
 
     const sent = await (
       agent as unknown as {
@@ -269,10 +269,10 @@ describe('message.out event', () => {
 
     (
       agent as unknown as {
-        _channels: Map<string, Channel>;
+        channels: Map<string, Channel>;
         sendOutboundMessage: (jid: string, text: string) => Promise<boolean>;
       }
-    )._channels.set('mock', channel);
+    ).channels.set('mock', channel);
 
     const sentVisible = await (
       agent as unknown as {

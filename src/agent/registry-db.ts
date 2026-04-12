@@ -7,9 +7,9 @@ import {
   normalizeJson,
   serializeMountAllowlist,
   type SerializableAgentSettings,
-} from './agent-config.js';
-import type { MountAllowlist } from './types.js';
-import type { McpServerConfig } from './api/options.js';
+} from './config.js';
+import type { MountAllowlist } from '../types.js';
+import type { McpServerConfig } from '../api/options.js';
 
 const AGENT_REGISTRY_DB = 'agentlite.db';
 const AGENT_REGISTRY_DIR = 'store';
