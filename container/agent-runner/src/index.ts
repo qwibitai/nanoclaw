@@ -546,6 +546,14 @@ async function runQuery(
         gmail: {
           command: 'npx',
           args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+          env: {
+            // Explicitly point the gmail-mcp at the personal account home.
+            // The autoauth-mcp's default credential discovery looks at
+            // $HOME/.gmail-mcp; pinning it here makes the resolution
+            // deterministic and immune to env-variable surprises.
+            GMAIL_MCP_HOME: '/home/node/.gmail-mcp',
+            HOME: '/home/node',
+          },
         },
       },
       hooks: {

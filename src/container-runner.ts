@@ -197,21 +197,33 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Gmail credentials directories (multi-account: personal, whoisxml, attaxion)
+  // Gmail credentials directories (multi-account: personal, whoisxml/jonathan,
+  // attaxion, dev). Only mount accounts that have a credentials.json — mounting
+  // a directory with only gcp-oauth.keys.json gives the gmail-mcp something
+  // to discover but no usable token, which produces confusing "no credentials"
+  // errors mid-session. Better to omit the account entirely so the agent
+  // never thinks it can search there.
   const homeDir = os.homedir();
   const gmailDirs = [
     { hostDir: '.gmail-mcp', containerDir: '.gmail-mcp' },
     { hostDir: '.gmail-mcp-jonathan', containerDir: '.gmail-mcp-jonathan' },
     { hostDir: '.gmail-mcp-attaxion', containerDir: '.gmail-mcp-attaxion' },
+    { hostDir: '.gmail-mcp-dev', containerDir: '.gmail-mcp-dev' },
   ];
   for (const gd of gmailDirs) {
     const gmailDir = path.join(homeDir, gd.hostDir);
-    if (fs.existsSync(gmailDir)) {
+    const credsFile = path.join(gmailDir, 'credentials.json');
+    if (fs.existsSync(gmailDir) && fs.existsSync(credsFile)) {
       mounts.push({
         hostPath: gmailDir,
         containerPath: `/home/node/${gd.containerDir}`,
         readonly: false, // MCP may need to refresh OAuth tokens
       });
+    } else if (fs.existsSync(gmailDir)) {
+      logger.debug(
+        { gmailDir },
+        'Gmail account directory present but no credentials.json — skipping mount (account not authorized yet)',
+      );
     }
   }
 
