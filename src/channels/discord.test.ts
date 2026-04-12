@@ -643,7 +643,8 @@ describe('DiscordChannel', () => {
       });
       await triggerMessage(msg);
 
-      const call = (opts.onMessage as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      const call = (opts.onMessage as ReturnType<typeof vi.fn>).mock
+        .calls[0][1];
       expect(call.reply_to_message_id).toBeUndefined();
       expect(call.reply_to_sender_name).toBeUndefined();
       expect(call.reply_to_message_content).toBeUndefined();
@@ -659,10 +660,13 @@ describe('DiscordChannel', () => {
         reference: { messageId: 'deleted_msg_id' },
         guildName: 'Server',
       });
-      msg.channel.messages.fetch = vi.fn().mockRejectedValue(new Error('Unknown Message'));
+      msg.channel.messages.fetch = vi
+        .fn()
+        .mockRejectedValue(new Error('Unknown Message'));
       await triggerMessage(msg);
 
-      const call = (opts.onMessage as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      const call = (opts.onMessage as ReturnType<typeof vi.fn>).mock
+        .calls[0][1];
       expect(call.content).toBe('Replying to deleted');
       expect(call.reply_to_message_id).toBeUndefined();
     });
