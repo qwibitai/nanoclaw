@@ -4,10 +4,12 @@ import path from 'path';
 import { customAlphabet } from 'nanoid';
 
 import {
+  normalizeJson,
   serializeMountAllowlist,
   type SerializableAgentSettings,
 } from './agent-config.js';
 import type { MountAllowlist } from './types.js';
+import type { McpServerConfig } from './api/options.js';
 
 const AGENT_REGISTRY_DB = 'agentlite.db';
 const AGENT_REGISTRY_DIR = 'store';
@@ -31,6 +33,7 @@ interface AgentRegistryRow {
   mount_allowlist_json: string | null;
   instructions: string | null;
   skills_sources_json: string | null;
+  mcp_servers_json: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -41,9 +44,9 @@ function addColumnIfMissing(
   column: string,
   type: string,
 ): void {
-  const cols = database
-    .prepare(`PRAGMA table_info(${table})`)
-    .all() as { name: string }[];
+  const cols = database.prepare(`PRAGMA table_info(${table})`).all() as {
+    name: string;
+  }[];
   if (!cols.some((c) => c.name === column)) {
     database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
@@ -59,6 +62,7 @@ function createSchema(database: Database.Database): void {
       mount_allowlist_json TEXT,
       instructions TEXT,
       skills_sources_json TEXT,
+      mcp_servers_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -66,6 +70,7 @@ function createSchema(database: Database.Database): void {
   // Migrate existing databases that lack the new columns
   addColumnIfMissing(database, 'agents', 'instructions', 'TEXT');
   addColumnIfMissing(database, 'agents', 'skills_sources_json', 'TEXT');
+  addColumnIfMissing(database, 'agents', 'mcp_servers_json', 'TEXT');
 }
 
 function parseMountAllowlist(raw: string | null): MountAllowlist | null {
@@ -85,6 +90,9 @@ function mapRow(
     instructions: row.instructions ?? null,
     skillsSources: row.skills_sources_json
       ? (JSON.parse(row.skills_sources_json) as string[])
+      : null,
+    mcpServers: row.mcp_servers_json
+      ? (JSON.parse(row.mcp_servers_json) as Record<string, McpServerConfig>)
       : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -131,6 +139,9 @@ export class AgentRegistryDb {
     const skillsSourcesJson = settings.skillsSources
       ? JSON.stringify(settings.skillsSources)
       : null;
+    const mcpServersJson = settings.mcpServers
+      ? JSON.stringify(normalizeJson(settings.mcpServers))
+      : null;
 
     while (true) {
       const agentId = generateAgentId();
@@ -146,9 +157,10 @@ export class AgentRegistryDb {
                 mount_allowlist_json,
                 instructions,
                 skills_sources_json,
+                mcp_servers_json,
                 created_at,
                 updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
           )
           .run(
@@ -159,6 +171,7 @@ export class AgentRegistryDb {
             mountAllowlistJson,
             settings.instructions,
             skillsSourcesJson,
+            mcpServersJson,
             now,
             now,
           );

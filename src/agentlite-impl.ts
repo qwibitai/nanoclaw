@@ -204,6 +204,7 @@ class AgentLiteImpl implements AgentLite {
       mountAllowlist: record.mountAllowlist,
       instructions: record.instructions,
       skillsSources: record.skillsSources,
+      mcpServers: record.mcpServers,
     });
 
     return new this._agentModule.AgentImpl(

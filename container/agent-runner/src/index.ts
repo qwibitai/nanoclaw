@@ -23,6 +23,12 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
+interface McpServerRuntimeConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -31,6 +37,8 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  /** Custom MCP server runtime configs. Sources are at /workspace/agent/mcp/{name}/. */
+  mcpServers?: Record<string, McpServerRuntimeConfig> | null;
 }
 
 interface ContainerOutput {
@@ -508,6 +516,10 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__agentlite__*',
+        // Allow tools from all custom MCP servers
+        ...Object.keys(containerInput.mcpServers ?? {}).map(
+          (name) => `mcp__${name}__*`,
+        ),
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -523,6 +535,24 @@ async function runQuery(
             AGENTLITE_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...Object.fromEntries(
+          Object.entries(containerInput.mcpServers ?? {}).map(
+            ([name, cfg]) => {
+              const mcpDir = `/workspace/agent/mcp/${name}`;
+              const [entry, ...rest] = cfg.args ?? [];
+              return [
+                name,
+                {
+                  command: cfg.command,
+                  args: entry
+                    ? [path.join(mcpDir, entry), ...rest]
+                    : undefined,
+                  env: cfg.env,
+                },
+              ];
+            },
+          ),
+        ),
       },
       hooks: {
         PreCompact: [
