@@ -40,6 +40,17 @@ const DEFAULT_SCRIPT_PATH = path.resolve(
  * callers can decide whether to spawn the agent anyway (subject-only
  * classification is still better than no classification).
  */
+export interface GmailRefreshLoopOptions {
+  /** Refresh interval in ms. Default: 45 minutes. */
+  intervalMs?: number;
+  /**
+   * Called when a refresh fails with a permanent error (invalid_grant,
+   * revoked token). The summary string describes which account(s) failed.
+   * Use this to alert the user via their primary channel.
+   */
+  onAuthExpired?: (summary: string) => void;
+}
+
 export async function refreshGmailTokens(
   options: GmailRefreshOptions = {},
 ): Promise<GmailRefreshResult> {
@@ -107,4 +118,60 @@ export async function refreshGmailTokens(
       },
     );
   });
+}
+
+const DEFAULT_REFRESH_INTERVAL_MS = 45 * 60 * 1000; // 45 minutes
+
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+// Track which error summaries we've already alerted on, to avoid
+// spamming the user with the same "personal: invalid_grant" every 45 min.
+let alertedErrors = new Set<string>();
+
+/**
+ * Start a background loop that refreshes Gmail OAuth tokens periodically.
+ * Safe to call multiple times — stops any existing loop first.
+ */
+export function startGmailRefreshLoop(
+  options: GmailRefreshLoopOptions = {},
+): void {
+  stopGmailRefreshLoop(); // idempotent
+
+  const intervalMs = options.intervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
+  const onAuthExpired = options.onAuthExpired;
+
+  logger.info({ intervalMs }, 'Gmail token refresh loop started');
+
+  refreshTimer = setInterval(() => {
+    void refreshGmailTokens().then((result) => {
+      if (result.status === 'error' && onAuthExpired) {
+        // Only alert once per unique error message to avoid spam
+        if (!alertedErrors.has(result.summary)) {
+          alertedErrors.add(result.summary);
+          onAuthExpired(result.summary);
+        }
+      }
+      if (result.status === 'ok') {
+        // Reset alerts when refresh succeeds (user re-authed)
+        alertedErrors.clear();
+      }
+    });
+  }, intervalMs);
+
+  // Don't prevent Node from exiting
+  refreshTimer.unref();
+}
+
+/**
+ * Stop the background refresh loop. Safe to call even if not started.
+ */
+export function stopGmailRefreshLoop(): void {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
+/** @internal — test helper to reset alert state */
+export function _testResetAlertState(): void {
+  alertedErrors.clear();
 }

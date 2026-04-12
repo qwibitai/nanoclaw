@@ -1,11 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
 }));
 
 import { execFile } from 'child_process';
-import { refreshGmailTokens } from './gmail-token-refresh.js';
+import {
+  refreshGmailTokens,
+  startGmailRefreshLoop,
+  stopGmailRefreshLoop,
+  _testResetAlertState,
+} from './gmail-token-refresh.js';
 
 describe('refreshGmailTokens', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -88,5 +93,47 @@ describe('refreshGmailTokens', () => {
     const result = await refreshGmailTokens({ timeoutMs: 50 });
     expect(result.status).toBe('error');
     expect(result.summary).toMatch(/timeout|timed out/i);
+  });
+});
+
+describe('startGmailRefreshLoop', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    // Default mock: successful refresh
+    (execFile as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+        cb(null, '[OK] all accounts refreshed\n', '');
+      },
+    );
+  });
+
+  afterEach(() => {
+    stopGmailRefreshLoop();
+    _testResetAlertState();
+    vi.useRealTimers();
+  });
+
+  it('should call refreshGmailTokens on interval', async () => {
+    startGmailRefreshLoop({ intervalMs: 1000 });
+
+    // Advance past first interval
+    await vi.advanceTimersByTimeAsync(1100);
+
+    // execFile should have been called by the interval
+    expect(execFile).toHaveBeenCalled();
+  });
+
+  it('should stop cleanly', async () => {
+    startGmailRefreshLoop({ intervalMs: 500 });
+    stopGmailRefreshLoop();
+
+    // Clear call count after stop
+    vi.clearAllMocks();
+
+    // Advancing time should not trigger any callbacks
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(execFile).not.toHaveBeenCalled();
   });
 });
