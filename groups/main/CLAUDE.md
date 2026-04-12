@@ -342,6 +342,14 @@ Morning briefings, thread summaries, and status reports go directly to the user 
 4. **Prefer underclaim over overclaim.** If uncertain, say "Yacine replied 'I confirm' — meaning unclear, may need follow-up" rather than "Yacine confirmed cancellation." Users trust conservative agents more than confident-wrong ones.
 5. **Numbers come from the email, not from your head.** If a dollar figure or date isn't literally in the thread, don't invent one. Sum only what the thread actually states.
 6. **When in doubt, flag for follow-up instead of summarizing.** A briefing entry like "OVH thread needs your review — multiple parties discussing cancellation, status unclear" is better than a wrong summary.
+7. **Tool failures must be reported, not hidden.** If a tool call returns
+   an error or becomes unavailable mid-session, surface it with a clear
+   prefix (`GMAIL-DEGRADED:`, `SUPERPILOT-DEGRADED:`, etc.) and the literal
+   error text. Then continue with whatever subset of the work you can do
+   from the remaining tools, labeling degraded outputs (e.g.
+   `[CLASSIFIED FROM SUBJECT ONLY — body unavailable]`). Never invent a
+   reason for the failure. Never silently skip a section that the user is
+   expecting.
 
 Lesson recorded from 2026-04-11 OVH briefing: the agent turned Dmitrii's *recommendation* to cancel + Yacine's ambiguous "I confirm" into "team confirmed cancellation of all OVH servers." This was wrong — nobody had confirmed the cancellation was *executed*, and the user had to re-ask Dmitrii to cancel in the same thread. Follow rules 1–4 to prevent this class of error.
 

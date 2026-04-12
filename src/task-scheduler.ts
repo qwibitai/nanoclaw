@@ -18,6 +18,7 @@ import {
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
+import { refreshGmailTokens } from './gmail-token-refresh.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -125,6 +126,28 @@ async function runTask(
     { taskId: task.id, group: task.group_folder },
     'Running scheduled task',
   );
+
+  // Pre-refresh Gmail tokens for tasks that may touch email (morning
+  // briefing, weekly review). Cheap and harmless for tasks that don't
+  // touch Gmail; the refresh script is fast and only does network work
+  // when something is actually about to expire. We don't gate this on
+  // task name because users can rename briefings.
+  const gmailRefresh = await refreshGmailTokens();
+  if (gmailRefresh.status === 'error') {
+    logger.warn(
+      {
+        taskId: task.id,
+        group: task.group_folder,
+        summary: gmailRefresh.summary,
+      },
+      'Gmail token refresh failed before scheduled task — Gmail-dependent sections may degrade',
+    );
+  } else if (gmailRefresh.status === 'missing') {
+    logger.debug(
+      { taskId: task.id, group: task.group_folder },
+      'Gmail accounts not yet authorized — proceeding with available accounts',
+    );
+  }
 
   const groups = deps.registeredGroups();
   const group = Object.values(groups).find(

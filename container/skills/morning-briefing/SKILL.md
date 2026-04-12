@@ -18,6 +18,15 @@ Daily at 7:30 AM CST. Scheduled as a cron task: `30 7 * * *`
 - Call `get_triaged_emails(since=yesterday)` for recent arrivals
 - Show [account] tag, sender, subject, and age for each
 - Highlight any marked as high priority or needs_reply
+- **If superpilot or gmail tools become unavailable mid-section** (the
+  classifier is the canary — if it returns "tool error" or "no such tool",
+  the connection has dropped):
+  - Print one literal line: `GMAIL-DEGRADED: <verbatim error from the tool>`
+  - Continue the briefing with `[CLASSIFIED FROM SUBJECT ONLY]` tags on
+    each affected email
+  - DO NOT pretend the tool is working. DO NOT invent thread bodies.
+  - This is the same Evidence discipline rule (Case 4) — quote literal
+    failures, never paraphrase.
 
 ### 3. Commitments Due
 - Check the commitments table for items due today or this week
