@@ -560,6 +560,65 @@ describe('sendMessage', () => {
     globalThis.fetch = mockFetch;
 
     const channel = new SignalChannel(API_URL, PHONE, createTestOpts());
-    await expect(channel.sendMessage('sig:+15559876543', 'Hello')).resolves.toBeUndefined();
+    await expect(
+      channel.sendMessage('sig:+15559876543', 'Hello'),
+    ).resolves.toBeUndefined();
+  });
+});
+
+// --- setTyping tests ---
+
+describe('setTyping', () => {
+  const PHONE = '+15551234567';
+  const API_URL = 'http://localhost:18080';
+
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('sends typing indicator for 1:1 chat', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    globalThis.fetch = mockFetch;
+
+    const channel = new SignalChannel(API_URL, PHONE, createTestOpts());
+    await channel.setTyping('sig:+15559876543', true);
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch).toHaveBeenCalledWith(
+      `http://localhost:18080/v1/typing-indicator/${PHONE}`,
+      expect.objectContaining({
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipient: '+15559876543' }),
+      }),
+    );
+  });
+
+  it('does nothing when isTyping is false', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    globalThis.fetch = mockFetch;
+
+    const channel = new SignalChannel(API_URL, PHONE, createTestOpts());
+    await channel.setTyping('sig:+15559876543', false);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('handles typing failure gracefully', async () => {
+    const mockFetch = vi.fn().mockRejectedValue(new Error('Network error'));
+    globalThis.fetch = mockFetch;
+
+    const channel = new SignalChannel(API_URL, PHONE, createTestOpts());
+    await expect(
+      channel.setTyping('sig:+15559876543', true),
+    ).resolves.toBeUndefined();
   });
 });

@@ -182,7 +182,10 @@ export class SignalChannel implements Channel {
           body: JSON.stringify(body),
         });
         if (!res.ok) {
-          logger.warn({ jid, status: res.status }, 'Signal: send returned non-OK status');
+          logger.warn(
+            { jid, status: res.status },
+            'Signal: send returned non-OK status',
+          );
         }
       }
       logger.info({ jid, length: text.length }, 'Signal message sent');
@@ -221,8 +224,23 @@ export class SignalChannel implements Channel {
     logger.info('Signal channel disconnected');
   }
 
-  async setTyping(_jid: string, _isTyping: boolean): Promise<void> {
-    // Stub: Signal typing indicator not yet implemented
+  async setTyping(jid: string, isTyping: boolean): Promise<void> {
+    if (!isTyping) return;
+    try {
+      const recipient = jid.startsWith('sig:group:')
+        ? jid.slice('sig:group:'.length)
+        : jid.slice('sig:'.length);
+      await fetch(
+        `${this.apiUrl}/v1/typing-indicator/${this.phoneNumber}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recipient }),
+        },
+      );
+    } catch (err) {
+      logger.debug({ jid, err }, 'Failed to send Signal typing indicator');
+    }
   }
 }
 
