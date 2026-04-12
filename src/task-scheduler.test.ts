@@ -40,6 +40,7 @@ describe('task scheduler', () => {
 
     schedulerHandle = startSchedulerLoop({
       db,
+      agentId: 'test0001',
       assistantName: 'Andy',
       schedulerPollInterval: 60000,
       timezone: 'UTC',

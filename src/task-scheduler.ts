@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
-  ContainerOutput,
+  ContainerEvent,
   runContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
@@ -59,6 +59,7 @@ export function computeNextRun(
 }
 
 export interface SchedulerDependencies {
+  agentId: string;
   assistantName: string;
   schedulerPollInterval: number;
   timezone: string;
@@ -80,6 +81,14 @@ export interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  onStateChange?: (event: {
+    agentId: string;
+    jid: string;
+    groupFolder: string;
+    state: import('./container-runner.js').ContainerState;
+    reason?: string;
+    exitCode?: number;
+  }) => void;
 }
 
 async function runTask(
@@ -201,18 +210,31 @@ async function runTask(
           containerName,
           task.group_folder,
         ),
-      async (streamedOutput: ContainerOutput) => {
-        if (streamedOutput.result) {
+      async (streamedOutput: ContainerEvent) => {
+        if (streamedOutput.type === 'state') {
+          deps.onStateChange?.({
+            agentId: deps.agentId,
+            jid: task.chat_jid,
+            groupFolder: task.group_folder,
+            state: streamedOutput.state,
+            reason: streamedOutput.reason,
+            exitCode: streamedOutput.exitCode,
+          });
+          if (streamedOutput.state === 'idle') {
+            deps.queue.notifyIdle(task.chat_jid);
+            scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
+          }
+          return;
+        }
+
+        if (streamedOutput.type === 'result' && streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting)
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
           scheduleClose();
         }
-        if (streamedOutput.status === 'success') {
-          deps.queue.notifyIdle(task.chat_jid);
-          scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
-        }
-        if (streamedOutput.status === 'error') {
+
+        if (streamedOutput.type === 'error') {
           error = streamedOutput.error || 'Unknown error';
         }
       },

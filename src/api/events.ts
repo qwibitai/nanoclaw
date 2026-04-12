@@ -8,6 +8,7 @@
 export interface AgentEvents extends Record<string, any[]> {
   'message.in': [payload: MessageInEvent];
   'message.out': [payload: MessageOutEvent];
+  'run.state': [payload: RunStateEvent];
   'chat.metadata': [payload: ChatMetadataEvent];
   'channel.connected': [payload: { key: string }];
   'channel.disconnected': [payload: { key: string }];
@@ -46,6 +47,26 @@ export interface MessageOutEvent {
   text: string;
   /** ISO timestamp when the message was sent. */
   timestamp: string;
+}
+
+/** The runtime state of a container-backed agent run. */
+export interface RunStateEvent {
+  /** Stable agent identifier that owns the runtime. */
+  agentId: string;
+  /** Group/chat identifier where the run is executing. */
+  jid: string;
+  /** Human-readable group name. */
+  name: string;
+  /** Folder name for the group's data. */
+  folder: string;
+  /** Current lifecycle state. */
+  state: 'active' | 'idle' | 'stopped';
+  /** ISO timestamp when the transition was observed. */
+  timestamp: string;
+  /** Optional stop/transition reason from the runtime. */
+  reason?: string;
+  /** Exit code when the runtime reaches stopped. */
+  exitCode?: number;
 }
 
 /** Chat/group metadata discovered from a channel. */
