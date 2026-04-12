@@ -3,6 +3,7 @@
  * Spawns agent execution in containers and handles IPC
  */
 import { ChildProcess, execSync, spawn } from 'child_process';
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -503,7 +504,7 @@ async function buildContainerArgs(
   containerName: string,
   isMain: boolean,
   agentIdentifier?: string,
-): Promise<{ args: string[]; oauthToken: string | null }> {
+): Promise<{ args: string[]; oauthToken: string | null; envFilePath: string | null }> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
@@ -601,7 +602,49 @@ async function buildContainerArgs(
 
   args.push(CONTAINER_IMAGE);
 
-  return { args, oauthToken };
+  // Security: extract secret -e flags into a tmpfile so they're not visible in `ps aux`.
+  // Sensitive keys include our own secrets plus anything OneCLI injected (proxy creds, certs).
+  const SECRET_KEY_PREFIXES = [
+    'DISCORD_BOT_TOKEN=',
+    'NANOCLAW_SERVICE_TOKEN=',
+    'GH_TOKEN=',
+    'NOTION_TOKEN=',
+    'CLAUDE_CODE_OAUTH_TOKEN=',
+    'HTTPS_PROXY=',
+    'HTTP_PROXY=',
+    'https_proxy=',
+    'http_proxy=',
+    'ANTHROPIC_API_KEY=',
+  ];
+
+  const secretEnvLines: string[] = [];
+  const cleanedArgs: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-e' && i + 1 < args.length) {
+      const envVal = args[i + 1];
+      if (SECRET_KEY_PREFIXES.some((prefix) => envVal.startsWith(prefix))) {
+        secretEnvLines.push(envVal);
+        i++; // skip the value too
+        continue;
+      }
+    }
+    cleanedArgs.push(args[i]);
+  }
+
+  let envFilePath: string | null = null;
+  if (secretEnvLines.length > 0) {
+    envFilePath = path.join(os.tmpdir(), `nanoclaw-env-${randomUUID()}`);
+    fs.writeFileSync(envFilePath, secretEnvLines.join('\n') + '\n', { mode: 0o600 });
+    // Insert --env-file right after 'run' (before other flags)
+    const runIdx = cleanedArgs.indexOf('run');
+    cleanedArgs.splice(runIdx + 1, 0, '--env-file', envFilePath);
+  }
+
+  // Replace args contents with cleaned version
+  args.length = 0;
+  args.push(...cleanedArgs);
+
+  return { args, oauthToken, envFilePath };
 }
 
 export async function runContainerAgent(
@@ -646,7 +689,7 @@ async function spawnContainerWithRetry(
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
-  const { args: containerArgs, oauthToken: selectedToken } =
+  const { args: containerArgs, oauthToken: selectedToken, envFilePath } =
     await buildContainerArgs(
       mounts,
       containerName,
@@ -663,6 +706,11 @@ async function spawnContainerWithRetry(
     onProcess,
     onOutput,
   );
+
+  // Clean up secrets tmpfile
+  if (envFilePath) {
+    try { fs.unlinkSync(envFilePath); } catch { /* already gone */ }
+  }
 
   // If Docker failed with exit code 125 (mount/config error) and we have
   // optional mounts, retry without them. This prevents optional features
@@ -685,7 +733,7 @@ async function spawnContainerWithRetry(
     );
 
     const retryName = `${containerName}-retry`;
-    const { args: retryArgs, oauthToken: retryToken } =
+    const { args: retryArgs, oauthToken: retryToken, envFilePath: retryEnvFilePath } =
       await buildContainerArgs(
         mounts,
         retryName,
@@ -693,7 +741,7 @@ async function spawnContainerWithRetry(
         agentIdentifier,
       );
 
-    return spawnContainer(
+    const retryResult = await spawnContainer(
       group,
       input,
       retryArgs,
@@ -702,6 +750,13 @@ async function spawnContainerWithRetry(
       onProcess,
       onOutput,
     );
+
+    // Clean up retry secrets tmpfile
+    if (retryEnvFilePath) {
+      try { fs.unlinkSync(retryEnvFilePath); } catch { /* already gone */ }
+    }
+
+    return retryResult;
   }
 
   return result;
