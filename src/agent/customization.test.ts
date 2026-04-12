@@ -647,9 +647,7 @@ describe('buildMcpRuntimeConfig', () => {
     const result = buildMcpRuntimeConfig({
       db: { source: '/host/db', command: 'node', args: ['server.js'] },
     });
-    expect(result!['db'].args).toEqual([
-      '/workspace/agent/mcp/db/server.js',
-    ]);
+    expect(result!['db'].args).toEqual(['/workspace/agent/mcp/db/server.js']);
   });
 
   it('regression: npx args NOT path-resolved (--yes would become /workspace/.../--yes)', () => {
