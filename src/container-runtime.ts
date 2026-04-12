@@ -9,6 +9,7 @@
 import { execSync } from 'child_process';
 import os from 'os';
 
+import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 
 export type Runtime = 'docker' | 'container';
@@ -62,7 +63,9 @@ function detectHostGateway(): string {
  *     host.docker.internal → loopback routing).
  */
 export const PROXY_BIND_HOST: string =
-  process.env.CREDENTIAL_PROXY_HOST ?? defaultProxyBindHost();
+  process.env.CREDENTIAL_PROXY_HOST ??
+  readEnvFile(['CREDENTIAL_PROXY_HOST']).CREDENTIAL_PROXY_HOST ??
+  defaultProxyBindHost();
 
 function defaultProxyBindHost(): string {
   if (CONTAINER_RUNTIME_BIN === 'container') {
@@ -163,7 +166,9 @@ function printRuntimeFatal(runtime: string, steps: string[]): void {
     '╔════════════════════════════════════════════════════════════════╗',
     '║  FATAL: Container runtime failed to start                      ║',
     '║                                                                ║',
-    `║  Agents cannot run without a container runtime (${runtime}).`.padEnd(66) + '║',
+    `║  Agents cannot run without a container runtime (${runtime}).`.padEnd(
+      66,
+    ) + '║',
     '║                                                                ║',
     ...steps.map((s) => `║  ${s}`.padEnd(66) + '║'),
     '╚════════════════════════════════════════════════════════════════╝',
