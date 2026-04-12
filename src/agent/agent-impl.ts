@@ -351,9 +351,7 @@ export class AgentImpl
   }
 
   /** @internal — test helper for setting registered groups directly. */
-  _setRegisteredGroups(
-    groups: Record<string, InternalRegisteredGroup>,
-  ): void {
+  _setRegisteredGroups(groups: Record<string, InternalRegisteredGroup>): void {
     this.registeredGroups = groups;
   }
 
