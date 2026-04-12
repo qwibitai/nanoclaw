@@ -28,13 +28,23 @@ import type { TaskManager } from './task-manager.js';
  * so Node 22+ runs them natively inside the container.
  */
 export function buildMcpRuntimeConfig(
-  mcpServers: Record<string, { source: string; command: string; args?: string[]; env?: Record<string, string> }> | null,
-): Record<string, { command: string; args?: string[]; env?: Record<string, string> }> | null {
+  mcpServers: Record<
+    string,
+    {
+      source: string;
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+    }
+  > | null,
+): Record<
+  string,
+  { command: string; args?: string[]; env?: Record<string, string> }
+> | null {
   if (!mcpServers) return null;
   return Object.fromEntries(
     Object.entries(mcpServers).map(([name, cfg]) => {
-      const needsTs =
-        cfg.command === 'node' && cfg.args?.[0]?.endsWith('.ts');
+      const needsTs = cfg.command === 'node' && cfg.args?.[0]?.endsWith('.ts');
       return [
         name,
         {
