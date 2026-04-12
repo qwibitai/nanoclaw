@@ -451,6 +451,37 @@ async function tryConfirmEffortSwitch(
 }
 
 /**
+ * Set deferred confirmation entries for a model and/or effort switch.
+ * When both are present, effort is bundled into the model confirmation
+ * (model verification gates the combined message). When effort-only,
+ * it gets its own entry verified by the container's applyFlagSettings ack.
+ */
+function deferSwitchConfirmation(
+  sessionKey: string,
+  modelPart: string | undefined,
+  effortPart: string | undefined,
+  requestedModel: string | undefined,
+  chatJid: string,
+  threadId: string | undefined,
+): void {
+  if (modelPart && requestedModel) {
+    const body = effortPart ? `${modelPart}, ${effortPart}` : modelPart;
+    pendingModelConfirmations.set(sessionKey, {
+      family: getModelFamily(requestedModel),
+      message: body,
+      chatJid,
+      threadId,
+    });
+  } else if (effortPart) {
+    pendingEffortConfirmations.set(sessionKey, {
+      message: effortPart,
+      chatJid,
+      threadId,
+    });
+  }
+}
+
+/**
  * Extract a per-message model override from raw message content.
  * Checks (in priority order):
  *   1. One-shot flag: "-m1 opus" — this invocation only, doesn't persist
@@ -1401,27 +1432,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       effortPart = `Effort reverted to default (${effort})`;
     }
 
-    if (modelPart) {
-      // Defer the combined message until the result confirms the switch.
-      // Drop any prior pending entry for this session — the new request
-      // supersedes it.
-      const body = effortPart ? `${modelPart}, ${effortPart}` : modelPart;
-      pendingModelConfirmations.set(sessionKey, {
-        family: getModelFamily(model),
-        message: body,
-        chatJid,
-        threadId: effectiveThreadId,
-      });
-    } else if (effortPart) {
-      // Defer until the container confirms applyFlagSettings() succeeded —
-      // eager confirmation was unreliable because it fired before the IPC
-      // even reached the container.
-      pendingEffortConfirmations.set(sessionKey, {
-        message: effortPart,
-        chatJid,
-        threadId: effectiveThreadId,
-      });
-    }
+    deferSwitchConfirmation(
+      sessionKey,
+      modelPart,
+      effortPart,
+      model,
+      chatJid,
+      effectiveThreadId,
+    );
   }
 
   await channel.setTyping?.(chatJid, true);
@@ -2337,31 +2355,17 @@ async function startMessageLoop(): Promise<void> {
                 }
               }
 
-              if (modelPart) {
-                // Defer combined confirmation. The pending entry is keyed by
-                // sessionKey so it's picked up by the running container's
-                // outer onOutput callback on its next result.
-                const requestedModel = pipeModelOverride?.reset
-                  ? resolveModel(group)
-                  : pipeModelOverride!.model;
-                const body = effortPart
-                  ? `${modelPart}, ${effortPart}`
-                  : modelPart;
-                pendingModelConfirmations.set(sessionKey, {
-                  family: getModelFamily(requestedModel),
-                  message: body,
-                  chatJid,
-                  threadId: incomingThreadId,
-                });
-              } else if (effortPart) {
-                // Defer until the container confirms applyFlagSettings()
-                // succeeded — eager confirmation was unreliable.
-                pendingEffortConfirmations.set(sessionKey, {
-                  message: effortPart,
-                  chatJid,
-                  threadId: incomingThreadId,
-                });
-              }
+              const requestedModel = pipeModelOverride?.reset
+                ? resolveModel(group)
+                : pipeModelOverride?.model;
+              deferSwitchConfirmation(
+                sessionKey,
+                modelPart,
+                effortPart,
+                requestedModel,
+                chatJid,
+                incomingThreadId,
+              );
 
               // Strip flags from the piped text so the agent sees clean prompt
               formatted = stripControlFlags(formatted).trim();
