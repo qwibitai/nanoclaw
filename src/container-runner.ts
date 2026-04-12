@@ -35,7 +35,8 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 /**
  * Load external MCP server configs from .mcp.json.
- * Rewrites localhost URLs to host.docker.internal so containers can reach host services.
+ * Rewrites localhost URLs to the container host gateway (host.docker.internal
+ * for Docker, bridge IP for Apple Container) so containers can reach host services.
  */
 function loadExternalMcpServers(): Record<string, McpServerConfig> | undefined {
   const mcpJsonPath = path.join(process.cwd(), '.mcp.json');
@@ -50,8 +51,8 @@ function loadExternalMcpServers(): Record<string, McpServerConfig> | undefined {
     for (const [name, config] of Object.entries(servers)) {
       if (config.url) {
         config.url = config.url
-          .replace(/localhost/g, 'host.docker.internal')
-          .replace(/127\.0\.0\.1/g, 'host.docker.internal');
+          .replace(/localhost/g, CONTAINER_HOST_GATEWAY)
+          .replace(/127\.0\.0\.1/g, CONTAINER_HOST_GATEWAY);
       }
       logger.info(
         { name, type: config.type || 'stdio' },
