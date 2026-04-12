@@ -39,6 +39,10 @@ export interface SerializableAgentSettings {
   readonly assistantName: string;
   readonly workDir: string;
   readonly mountAllowlist: MountAllowlist | null;
+  /** Agent-level instructions appended to the system prompt. */
+  readonly instructions: string | null;
+  /** Source paths for agent-level skill directories (for re-sync on start). */
+  readonly skillsSources: string[] | null;
 }
 
 export interface PersistedAgentSettings extends SerializableAgentSettings {
@@ -51,6 +55,8 @@ export interface AgentConfig extends PersistedAgentSettings {
   readonly storeDir: string;
   readonly groupsDir: string;
   readonly dataDir: string;
+  /** Agent-level customization directory. */
+  readonly agentDir: string;
 }
 
 /** Resolve the serializable subset of AgentOptions that is stored in the registry. */
@@ -66,6 +72,10 @@ export function resolveSerializableAgentSettings(
       opts?.workdir ?? path.join(baseWorkdir, 'agents', agentName),
     ),
     mountAllowlist: opts?.mountAllowlist ?? null,
+    instructions: opts?.instructions ?? null,
+    skillsSources: opts?.skills?.length
+      ? opts.skills.map((s) => path.resolve(s))
+      : null,
   };
 }
 
@@ -82,6 +92,9 @@ export function buildAgentConfig(input: PersistedAgentSettings): AgentConfig {
     storeDir: path.join(workDir, 'store'),
     groupsDir: path.join(workDir, 'groups'),
     dataDir: path.join(workDir, 'data'),
+    agentDir: path.join(workDir, 'agent'),
     mountAllowlist: input.mountAllowlist,
+    instructions: input.instructions,
+    skillsSources: input.skillsSources,
   };
 }

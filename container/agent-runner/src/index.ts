@@ -438,12 +438,25 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
-  // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
-  let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
-    globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
+  // Assemble system prompt from layered instruction sources.
+  // Precedence: agent instructions (operator, immutable) > group CLAUDE.md (session, mutable).
+  // Group CLAUDE.md is loaded separately by the SDK via settingSources from /workspace/group/.
+  const systemPromptParts: string[] = [];
+  const agentClaudeMdPath = '/workspace/agent/CLAUDE.md';
+  if (fs.existsSync(agentClaudeMdPath)) {
+    const agentInstructions = fs.readFileSync(agentClaudeMdPath, 'utf-8');
+    systemPromptParts.push(
+      `# Agent Instructions (immutable — takes precedence over group memory)\n\n${agentInstructions}`,
+    );
   }
+  // Legacy: global CLAUDE.md for non-main groups (backward compat)
+  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
+    systemPromptParts.push(fs.readFileSync(globalClaudeMdPath, 'utf-8'));
+  }
+  const appendedSystemPrompt = systemPromptParts.length
+    ? systemPromptParts.join('\n\n---\n\n')
+    : undefined;
 
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
@@ -468,11 +481,11 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
+      systemPrompt: appendedSystemPrompt
         ? {
             type: 'preset' as const,
             preset: 'claude_code' as const,
-            append: globalClaudeMd,
+            append: appendedSystemPrompt,
           }
         : undefined,
       allowedTools: [

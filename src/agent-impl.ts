@@ -69,6 +69,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { syncAgentCustomizations } from './agent-customization.js';
 
 import type { Agent } from './api/agent.js';
 
@@ -414,6 +415,7 @@ export class AgentImpl
     fs.mkdirSync(this.config.dataDir, { recursive: true });
 
     this.copyGroupTemplates();
+    this.syncAgentCustomizations();
     await cleanupOrphans(this.id);
 
     this.resolvedMountAllowlist = resolveMountAllowlist(
@@ -702,6 +704,20 @@ export class AgentImpl
       }
     }
   }
+
+  private syncAgentCustomizations(): void {
+    syncAgentCustomizations({
+      instructions: this.config.instructions,
+      skillsSources: this.config.skillsSources,
+      agentDir: this.config.agentDir,
+      builtinSkillsDir: path.join(
+        this.runtimeConfig.packageRoot,
+        'container',
+        'skills',
+      ),
+    });
+  }
+
 
   // ─── Remote control ──────────────────────────────────────────────
 

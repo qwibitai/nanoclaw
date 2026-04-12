@@ -212,11 +212,36 @@ function buildVolumeMounts(
       copyDirRecursive(srcDir, dstDir);
     }
   }
+
+  // Sync agent-level skills (copied by syncAgentCustomizations in agent-impl)
+  const agentDir = path.join(workDir, 'agent');
+  const agentSkillsSrc = path.join(agentDir, 'skills');
+  if (fs.existsSync(agentSkillsSrc)) {
+    for (const skillDir of fs.readdirSync(agentSkillsSrc)) {
+      const srcDir = path.join(agentSkillsSrc, skillDir);
+      if (!fs.statSync(srcDir).isDirectory()) continue;
+      const dstDir = path.join(skillsDst, skillDir);
+      if (fs.existsSync(dstDir)) {
+        throw new Error(`Skill "${skillDir}" collides with built-in skill`);
+      }
+      copyDirRecursive(srcDir, dstDir);
+    }
+  }
+
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+
+  // Mount agent-level customization dir (read-only) for CLAUDE.md
+  if (fs.existsSync(agentDir)) {
+    mounts.push({
+      hostPath: agentDir,
+      containerPath: '/workspace/agent',
+      readonly: true,
+    });
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC

@@ -29,8 +29,24 @@ interface AgentRegistryRow {
   workdir: string;
   assistant_name: string;
   mount_allowlist_json: string | null;
+  instructions: string | null;
+  skills_sources_json: string | null;
   created_at: string;
   updated_at: string;
+}
+
+function addColumnIfMissing(
+  database: Database.Database,
+  table: string,
+  column: string,
+  type: string,
+): void {
+  const cols = database
+    .prepare(`PRAGMA table_info(${table})`)
+    .all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
 }
 
 function createSchema(database: Database.Database): void {
@@ -41,10 +57,15 @@ function createSchema(database: Database.Database): void {
       workdir TEXT NOT NULL,
       assistant_name TEXT NOT NULL,
       mount_allowlist_json TEXT,
+      instructions TEXT,
+      skills_sources_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
   `);
+  // Migrate existing databases that lack the new columns
+  addColumnIfMissing(database, 'agents', 'instructions', 'TEXT');
+  addColumnIfMissing(database, 'agents', 'skills_sources_json', 'TEXT');
 }
 
 function parseMountAllowlist(raw: string | null): MountAllowlist | null {
@@ -61,6 +82,10 @@ function mapRow(
     workDir: row.workdir,
     assistantName: row.assistant_name,
     mountAllowlist: parseMountAllowlist(row.mount_allowlist_json),
+    instructions: row.instructions ?? null,
+    skillsSources: row.skills_sources_json
+      ? (JSON.parse(row.skills_sources_json) as string[])
+      : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -103,6 +128,9 @@ export class AgentRegistryDb {
   createAgent(settings: SerializableAgentSettings): AgentRegistryRecord {
     const now = new Date().toISOString();
     const mountAllowlistJson = serializeMountAllowlist(settings.mountAllowlist);
+    const skillsSourcesJson = settings.skillsSources
+      ? JSON.stringify(settings.skillsSources)
+      : null;
 
     while (true) {
       const agentId = generateAgentId();
@@ -116,9 +144,11 @@ export class AgentRegistryDb {
                 workdir,
                 assistant_name,
                 mount_allowlist_json,
+                instructions,
+                skills_sources_json,
                 created_at,
                 updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?)
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
           )
           .run(
@@ -127,6 +157,8 @@ export class AgentRegistryDb {
             settings.workDir,
             settings.assistantName,
             mountAllowlistJson,
+            settings.instructions,
+            skillsSourcesJson,
             now,
             now,
           );

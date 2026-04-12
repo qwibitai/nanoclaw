@@ -202,6 +202,8 @@ class AgentLiteImpl implements AgentLite {
       assistantName: record.assistantName,
       workDir: record.workDir,
       mountAllowlist: record.mountAllowlist,
+      instructions: record.instructions,
+      skillsSources: record.skillsSources,
     });
 
     return new this._agentModule.AgentImpl(
