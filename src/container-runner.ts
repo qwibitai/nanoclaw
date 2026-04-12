@@ -222,14 +222,23 @@ function buildVolumeMounts(
   const agentDir = path.join(workDir, 'agent');
   const agentSkillsSrc = path.join(agentDir, 'skills');
   if (fs.existsSync(agentSkillsSrc)) {
+    // Collect built-in skill names to check collisions against the source
+    // of truth — not against whatever exists in the persistent .claude/skills/
+    // directory (which may contain stale agent skills from previous runs).
+    const builtinNames = new Set(
+      fs.existsSync(skillsSrc)
+        ? fs
+            .readdirSync(skillsSrc)
+            .filter((e) => fs.statSync(path.join(skillsSrc, e)).isDirectory())
+        : [],
+    );
     for (const skillDir of fs.readdirSync(agentSkillsSrc)) {
       const srcDir = path.join(agentSkillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
-      const dstDir = path.join(skillsDst, skillDir);
-      if (fs.existsSync(dstDir)) {
+      if (builtinNames.has(skillDir)) {
         throw new Error(`Skill "${skillDir}" collides with built-in skill`);
       }
-      copyDirRecursive(srcDir, dstDir);
+      copyDirRecursive(srcDir, path.join(skillsDst, skillDir));
     }
   }
 
