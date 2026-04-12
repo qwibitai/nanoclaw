@@ -23,6 +23,7 @@ import {
   PreCompactHookInput,
   SessionStartHookInput,
   SDKResultMessage,
+  SDKRateLimitEvent,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 import {
@@ -74,6 +75,16 @@ interface ContainerOutput {
   partial?: boolean;
   /** Cumulative token usage from the SDK result message */
   usage?: { inputTokens: number; outputTokens: number; numTurns: number };
+  /** Model context window size in tokens (from SDK modelUsage) */
+  contextWindow?: number;
+  /** True when a compact_boundary event was observed during this query */
+  compacted?: boolean;
+  /** Rate limit info from SDKRateLimitEvent (subscription users) */
+  rateLimit?: {
+    utilization?: number;
+    resetsAt?: number;
+    rateLimitType?: string;
+  };
 }
 
 interface SessionEntry {
@@ -500,6 +511,8 @@ async function runQuery(
   let lastFinalText: string | null = null;
   let streamingTextBuffer = '';
   let completedTurnsText = '';
+  let compactedDuringQuery = false;
+  let lastRateLimitInfo: SDKRateLimitEvent['rate_limit_info'] | undefined;
 
   // Build dynamic system prompt from template + identity/memory/warm context
   const systemPromptPath = path.resolve(
@@ -650,6 +663,23 @@ async function runQuery(
       );
     }
 
+    if (message.type === 'rate_limit_event') {
+      const rlEvent = message as unknown as SDKRateLimitEvent;
+      lastRateLimitInfo = rlEvent.rate_limit_info;
+      log(
+        `Rate limit: status=${rlEvent.rate_limit_info.status} utilization=${rlEvent.rate_limit_info.utilization ?? 'N/A'} type=${rlEvent.rate_limit_info.rateLimitType ?? 'N/A'}`,
+      );
+    }
+
+    if (
+      message.type === 'system' &&
+      (message as { subtype?: string }).subtype === 'compact_boundary'
+    ) {
+      compactedDuringQuery = true;
+      log(`Compact boundary observed`);
+      writeOutput({ status: 'success', result: null, newSessionId, compacted: true });
+    }
+
     if (message.type === 'stream_event') {
       // Streaming text delta — emit full accumulated text as partial
       const event = (message as { event: { type: string; delta?: { type?: string; text?: string } } }).event;
@@ -695,6 +725,11 @@ async function runQuery(
             numTurns: resultMsg.num_turns ?? 0,
           }
         : undefined;
+      const modelUsageEntries = Object.values(
+        (resultMsg as unknown as { modelUsage?: Record<string, { contextWindow?: number }> }).modelUsage ?? {},
+      );
+      const contextWindow =
+        modelUsageEntries.length > 0 ? modelUsageEntries[0].contextWindow : undefined;
       if (textResult && textResult === lastFinalText) {
         log(`Result #${resultCount}: SKIPPED (duplicate)`);
       } else {
@@ -707,8 +742,18 @@ async function runQuery(
           result: textResult || null,
           newSessionId,
           usage,
+          contextWindow,
+          compacted: compactedDuringQuery || undefined,
+          rateLimit: lastRateLimitInfo
+            ? {
+                utilization: lastRateLimitInfo.utilization,
+                resetsAt: lastRateLimitInfo.resetsAt,
+                rateLimitType: lastRateLimitInfo.rateLimitType,
+              }
+            : undefined,
         });
       }
+      compactedDuringQuery = false;
       // Reset streaming buffers for next user turn within the same runQuery
       completedTurnsText = '';
       streamingTextBuffer = '';

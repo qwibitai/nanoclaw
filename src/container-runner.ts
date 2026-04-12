@@ -57,6 +57,16 @@ export interface ContainerOutput {
   partial?: boolean;
   /** Cumulative token usage from the SDK result message */
   usage?: { inputTokens: number; outputTokens: number; numTurns: number };
+  /** Model context window size in tokens (from SDK modelUsage) */
+  contextWindow?: number;
+  /** True when a compact_boundary event was observed during this query */
+  compacted?: boolean;
+  /** Rate limit info from SDKRateLimitEvent (subscription users) */
+  rateLimit?: {
+    utilization?: number;
+    resetsAt?: number;
+    rateLimitType?: string;
+  };
 }
 
 interface VolumeMount {

@@ -93,7 +93,12 @@ let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 const lastUsage: Record<
   string,
-  { inputTokens: number; outputTokens: number; numTurns: number }
+  { inputTokens: number; outputTokens: number; numTurns: number; contextWindow?: number }
+> = {};
+const compactCount: Record<string, number> = {};
+const lastRateLimit: Record<
+  string,
+  { utilization?: number; resetsAt?: number; rateLimitType?: string }
 > = {};
 
 const channels: Channel[] = [];
@@ -275,7 +280,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  const prompt = formatMessages(missedMessages, TIMEZONE, group);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -423,9 +428,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             }
           } else if (!cleanText) {
             // No text content in final result — delete the streaming placeholder
-            await channel.deleteMessage?.(chatJid, streamMessageId).catch(
-              () => {},
-            );
+            await channel
+              .deleteMessage?.(chatJid, streamMessageId)
+              .catch(() => {});
           }
           await sendImages(channel, chatJid, images);
           outputSentToUser = true;
@@ -565,7 +570,16 @@ async function runAgent(
           }
         }
         if (output.usage) {
-          lastUsage[group.folder] = output.usage;
+          lastUsage[group.folder] = {
+            ...output.usage,
+            contextWindow: output.contextWindow ?? lastUsage[group.folder]?.contextWindow,
+          };
+        }
+        if (output.compacted) {
+          compactCount[group.folder] = (compactCount[group.folder] || 0) + 1;
+        }
+        if (output.rateLimit) {
+          lastRateLimit[group.folder] = output.rateLimit;
         }
         await onOutput(output);
       }
@@ -595,7 +609,16 @@ async function runAgent(
       setSession(group.folder, output.newSessionId);
     }
     if (output.usage) {
-      lastUsage[group.folder] = output.usage;
+      lastUsage[group.folder] = {
+        ...output.usage,
+        contextWindow: output.contextWindow ?? lastUsage[group.folder]?.contextWindow,
+      };
+    }
+    if (output.compacted) {
+      compactCount[group.folder] = (compactCount[group.folder] || 0) + 1;
+    }
+    if (output.rateLimit) {
+      lastRateLimit[group.folder] = output.rateLimit;
     }
 
     if (output.status === 'error') {
@@ -710,7 +733,7 @@ async function startMessageLoop(): Promise<void> {
           // Skip if cursor already covers these messages (event-driven
           // onMessage handler already piped them to the active container).
           if (allPending.length === 0) continue;
-          const formatted = formatMessages(allPending, TIMEZONE);
+          const formatted = formatMessages(allPending, TIMEZONE, group);
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
@@ -957,7 +980,7 @@ async function main(): Promise<void> {
         MAX_MESSAGES_PER_PROMPT,
       );
       if (allPending.length > 0) {
-        const formatted = formatMessages(allPending, TIMEZONE);
+        const formatted = formatMessages(allPending, TIMEZONE, group);
         if (queue.sendMessage(chatJid, formatted)) {
           // Advance cursor so the next pipe doesn't re-send these messages
           lastAgentTimestamp[chatJid] =
@@ -986,6 +1009,8 @@ async function main(): Promise<void> {
       uptimeSeconds: Math.floor(process.uptime()),
       sessions: { ...sessions },
       lastUsage: { ...lastUsage },
+      compactCount: { ...compactCount },
+      lastRateLimit: { ...lastRateLimit },
     }),
     sendIpcMessage: (chatJid: string, text: string) => {
       const sent = queue.sendMessage(chatJid, text);
@@ -1137,7 +1162,11 @@ async function main(): Promise<void> {
           MAX_MESSAGES_PER_PROMPT,
         );
         if (allPending.length > 0) {
-          const formatted = formatMessages(allPending, TIMEZONE);
+          const formatted = formatMessages(
+            allPending,
+            TIMEZONE,
+            registeredGroups[chatJid],
+          );
           if (queue.sendMessage(chatJid, formatted)) {
             lastAgentTimestamp[chatJid] =
               allPending[allPending.length - 1].timestamp;

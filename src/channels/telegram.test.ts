@@ -211,6 +211,7 @@ import { setGroupModel, setGroupEffort, updateTask } from '../db.js';
 import { loadModelAliases } from '../config.js';
 import { getActiveLiveLocationContext } from '../live-location.js';
 import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
+import { RegisteredGroup } from '../types.js';
 
 // --- Test helpers ---
 
@@ -233,7 +234,20 @@ function createTestOpts(
       uptimeSeconds: 9240,
       sessions: { 'test-group': 'session-abc123-def456' },
       lastUsage: {
-        'test-group': { inputTokens: 45200, outputTokens: 3100, numTurns: 12 },
+        'test-group': {
+          inputTokens: 45200,
+          outputTokens: 3100,
+          numTurns: 12,
+          contextWindow: 200000,
+        },
+      },
+      compactCount: { 'test-group': 2 },
+      lastRateLimit: {
+        'test-group': {
+          utilization: 0.35,
+          resetsAt: 1744531200,
+          rateLimitType: 'seven_day',
+        },
       },
     })),
     sendIpcMessage: vi.fn(() => true),
@@ -1666,7 +1680,8 @@ describe('TelegramChannel', () => {
         const bot = currentBot();
         const entry = bot.callbackQueryHandlers.find(
           (h: { pattern: RegExp | string }) =>
-            h.pattern instanceof RegExp && h.pattern.source === /^model:/.source,
+            h.pattern instanceof RegExp &&
+            h.pattern.source === /^model:/.source,
         );
         return entry?.handler;
       }
@@ -1791,6 +1806,169 @@ describe('TelegramChannel', () => {
         expect(setGroupModel).not.toHaveBeenCalled();
       });
     });
+
+    describe('pendingModelNotice', () => {
+      it('/model <alias> sets pendingModelNotice when model changes', async () => {
+        const groups: Record<string, RegisteredGroup> = {
+          'tg:100200300': {
+            name: 'Test Group',
+            folder: 'test-group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+          },
+        };
+        const opts = createTestOpts({
+          registeredGroups: vi.fn(() => groups),
+        });
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+
+        const handler = currentBot().commandHandlers.get('model')!;
+        const ctx = {
+          chat: { id: 100200300 },
+          message: { text: '/model opus' },
+          reply: vi.fn(),
+        };
+
+        await handler(ctx);
+
+        expect(groups['tg:100200300'].pendingModelNotice).toContain(
+          'model has switched from',
+        );
+        expect(groups['tg:100200300'].pendingModelNotice).toContain(
+          'claude-opus-4-20250514',
+        );
+      });
+
+      it('/model does not set notice when switching to same model', async () => {
+        const groups: Record<string, RegisteredGroup> = {
+          'tg:100200300': {
+            name: 'Test Group',
+            folder: 'test-group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            model: 'claude-opus-4-20250514',
+          },
+        };
+        const opts = createTestOpts({
+          registeredGroups: vi.fn(() => groups),
+        });
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+
+        const handler = currentBot().commandHandlers.get('model')!;
+        const ctx = {
+          chat: { id: 100200300 },
+          message: { text: '/model opus' },
+          reply: vi.fn(),
+        };
+
+        await handler(ctx);
+
+        expect(groups['tg:100200300'].pendingModelNotice).toBeUndefined();
+      });
+
+      it('/model reset sets notice when model was non-default', async () => {
+        const groups: Record<string, RegisteredGroup> = {
+          'tg:100200300': {
+            name: 'Test Group',
+            folder: 'test-group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            model: 'claude-opus-4-20250514',
+          },
+        };
+        const opts = createTestOpts({
+          registeredGroups: vi.fn(() => groups),
+        });
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+
+        const handler = currentBot().commandHandlers.get('model')!;
+        const ctx = {
+          chat: { id: 100200300 },
+          message: { text: '/model reset' },
+          reply: vi.fn(),
+        };
+
+        await handler(ctx);
+
+        expect(groups['tg:100200300'].pendingModelNotice).toContain(
+          'model has switched from claude-opus-4-20250514',
+        );
+      });
+
+      it('callback model:set sets pendingModelNotice', async () => {
+        const groups: Record<string, RegisteredGroup> = {
+          'tg:100200300': {
+            name: 'Test Group',
+            folder: 'test-group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+          },
+        };
+        const opts = createTestOpts({
+          registeredGroups: vi.fn(() => groups),
+        });
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+
+        const entry = currentBot().callbackQueryHandlers.find(
+          (h: { pattern: RegExp | string }) =>
+            h.pattern instanceof RegExp &&
+            h.pattern.source === /^model:/.source,
+        );
+        const handler = entry!.handler;
+        const ctx = {
+          callbackQuery: { data: 'model:set:opus' },
+          chat: { id: 100200300 },
+          editMessageText: vi.fn(),
+          answerCallbackQuery: vi.fn(),
+        };
+
+        await handler(ctx);
+
+        expect(groups['tg:100200300'].pendingModelNotice).toContain(
+          'model has switched from',
+        );
+      });
+
+      it('callback model:reset sets pendingModelNotice when model was non-default', async () => {
+        const groups: Record<string, RegisteredGroup> = {
+          'tg:100200300': {
+            name: 'Test Group',
+            folder: 'test-group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            model: 'claude-opus-4-20250514',
+          },
+        };
+        const opts = createTestOpts({
+          registeredGroups: vi.fn(() => groups),
+        });
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+
+        const entry = currentBot().callbackQueryHandlers.find(
+          (h: { pattern: RegExp | string }) =>
+            h.pattern instanceof RegExp &&
+            h.pattern.source === /^model:/.source,
+        );
+        const handler = entry!.handler;
+        const ctx = {
+          callbackQuery: { data: 'model:reset' },
+          chat: { id: 100200300 },
+          editMessageText: vi.fn(),
+          answerCallbackQuery: vi.fn(),
+        };
+
+        await handler(ctx);
+
+        expect(groups['tg:100200300'].pendingModelNotice).toContain(
+          'model has switched from claude-opus-4-20250514',
+        );
+      });
+    });
   });
 
   // --- /status command ---
@@ -1813,8 +1991,9 @@ describe('TelegramChannel', () => {
       expect(replyText).toContain('Status: Online');
       expect(replyText).toContain('2h 34m');
       expect(replyText).toContain('Active containers: 1');
-      expect(replyText).toContain('45,200 input tokens');
-      expect(replyText).toContain('12 turns');
+      expect(replyText).toContain('Context: 45k/200k');
+      expect(replyText).toContain('Compactions: 2');
+      expect(replyText).toContain('Weekly usage: 35%');
       expect(replyText).toContain('session-abc1');
     });
 
@@ -1825,6 +2004,8 @@ describe('TelegramChannel', () => {
           uptimeSeconds: 120,
           sessions: {},
           lastUsage: {},
+          compactCount: {},
+          lastRateLimit: {},
         })),
       });
       const channel = new TelegramChannel('test-token', opts);
@@ -1840,6 +2021,8 @@ describe('TelegramChannel', () => {
 
       const replyText = ctx.reply.mock.calls[0][0];
       expect(replyText).toContain('no usage data');
+      expect(replyText).toContain('Compactions: 0');
+      expect(replyText).not.toContain('Weekly usage');
       expect(replyText).toContain('Session: none');
     });
 

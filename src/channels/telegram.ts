@@ -193,13 +193,10 @@ export class TelegramChannel implements Channel {
 
       if (args.length === 0) {
         const current = group.model || DEFAULT_MODEL;
-        ctx.reply(
-          `Model: \`${current}\`${group.model ? '' : ' (default)'}`,
-          {
-            parse_mode: 'Markdown',
-            reply_markup: buildModelKeyboard(group.model),
-          },
-        );
+        ctx.reply(`Model: \`${current}\`${group.model ? '' : ' (default)'}`, {
+          parse_mode: 'Markdown',
+          reply_markup: buildModelKeyboard(group.model),
+        });
         return;
       }
 
@@ -234,8 +231,12 @@ export class TelegramChannel implements Channel {
       }
 
       if (args[0] === 'reset') {
+        const previous = group.model || DEFAULT_MODEL;
         setGroupModel(chatJid, null);
         group.model = undefined;
+        if (previous !== DEFAULT_MODEL) {
+          group.pendingModelNotice = `[model has switched from ${previous} to ${DEFAULT_MODEL}]`;
+        }
         ctx.reply(`Model reset to default (\`${DEFAULT_MODEL}\`).`, {
           parse_mode: 'Markdown',
         });
@@ -243,8 +244,12 @@ export class TelegramChannel implements Channel {
       }
 
       const resolved = resolveModelAlias(args[0]);
+      const previous = group.model || DEFAULT_MODEL;
       setGroupModel(chatJid, resolved);
       group.model = resolved;
+      if (previous !== resolved) {
+        group.pendingModelNotice = `[model has switched from ${previous} to ${resolved}]`;
+      }
       ctx.reply(`Model set to \`${resolved}\`.`, {
         parse_mode: 'Markdown',
       });
@@ -455,8 +460,12 @@ export class TelegramChannel implements Channel {
       }
 
       if (data === 'model:reset') {
+        const previous = group.model || DEFAULT_MODEL;
         setGroupModel(chatJid, null);
         group.model = undefined;
+        if (previous !== DEFAULT_MODEL) {
+          group.pendingModelNotice = `[model has switched from ${previous} to ${DEFAULT_MODEL}]`;
+        }
         ctx.editMessageText(`Model reset to default (\`${DEFAULT_MODEL}\`).`, {
           parse_mode: 'Markdown',
         });
@@ -467,8 +476,12 @@ export class TelegramChannel implements Channel {
       const match = data.match(/^model:set:(.+)$/);
       if (match) {
         const resolved = resolveModelAlias(match[1]);
+        const previous = group.model || DEFAULT_MODEL;
         setGroupModel(chatJid, resolved);
         group.model = resolved;
+        if (previous !== resolved) {
+          group.pendingModelNotice = `[model has switched from ${previous} to ${resolved}]`;
+        }
         ctx.editMessageText(`Model set to \`${resolved}\`.`, {
           parse_mode: 'Markdown',
         });
@@ -493,6 +506,8 @@ export class TelegramChannel implements Channel {
       const model = group.model || DEFAULT_MODEL;
       const sessionId = status.sessions[group.folder];
       const usage = status.lastUsage[group.folder];
+      const compacts = status.compactCount[group.folder] || 0;
+      const rateLimit = status.lastRateLimit[group.folder];
 
       const hours = Math.floor(status.uptimeSeconds / 3600);
       const minutes = Math.floor((status.uptimeSeconds % 3600) / 60);
@@ -508,11 +523,29 @@ export class TelegramChannel implements Channel {
       ];
 
       if (usage) {
-        lines.push(
-          `Context: ~${usage.inputTokens.toLocaleString()} input tokens / ${usage.numTurns} turns`,
-        );
+        const usedK = Math.round(usage.inputTokens / 1000);
+        const totalK = usage.contextWindow
+          ? Math.round(usage.contextWindow / 1000)
+          : '?';
+        lines.push(`Context: ${usedK}k/${totalK}k`);
       } else {
         lines.push('Context: no usage data');
+      }
+
+      lines.push(`Compactions: ${compacts}`);
+
+      if (rateLimit?.utilization != null) {
+        const pct = Math.round(rateLimit.utilization * 100);
+        let resetStr = 'unknown';
+        if (rateLimit.resetsAt) {
+          const resetDate = new Date(rateLimit.resetsAt * 1000);
+          const hh = resetDate.getHours().toString().padStart(2, '0');
+          const mm = resetDate.getMinutes().toString().padStart(2, '0');
+          const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+          const dow = days[resetDate.getDay()];
+          resetStr = `${hh}:${mm} ${dow}.`;
+        }
+        lines.push(`Weekly usage: ${pct}% / Reset at: ${resetStr}`);
       }
 
       ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });

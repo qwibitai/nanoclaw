@@ -9,6 +9,13 @@ export interface UsageInfo {
   inputTokens: number;
   outputTokens: number;
   numTurns: number;
+  contextWindow?: number;
+}
+
+export interface RateLimitInfo {
+  utilization?: number;
+  resetsAt?: number;
+  rateLimitType?: string;
 }
 
 export interface StatusInfo {
@@ -16,6 +23,8 @@ export interface StatusInfo {
   uptimeSeconds: number;
   sessions: Record<string, string>;
   lastUsage: Record<string, UsageInfo>;
+  compactCount: Record<string, number>;
+  lastRateLimit: Record<string, RateLimitInfo>;
 }
 
 export interface ChannelOpts {
