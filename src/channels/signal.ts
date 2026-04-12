@@ -61,7 +61,9 @@ export class SignalChannel implements Channel {
       { phone: this.phoneNumber, apiUrl: this.apiUrl },
       'Signal channel connected (polling mode)',
     );
-    console.log(`\n  Signal channel: polling ${this.apiUrl} every ${POLL_INTERVAL_MS / 1000}s\n`);
+    console.log(
+      `\n  Signal channel: polling ${this.apiUrl} every ${POLL_INTERVAL_MS / 1000}s\n`,
+    );
     this.schedulePoll();
   }
 
@@ -73,9 +75,7 @@ export class SignalChannel implements Channel {
   private async poll(): Promise<void> {
     if (this.closed) return;
     try {
-      const res = await fetch(
-        `${this.apiUrl}/v1/receive/${this.phoneNumber}`,
-      );
+      const res = await fetch(`${this.apiUrl}/v1/receive/${this.phoneNumber}`);
       if (!res.ok) {
         logger.warn({ status: res.status }, 'Signal: poll returned non-OK');
       } else {

@@ -283,37 +283,57 @@ describe('SignalChannel', () => {
   });
 });
 
-// --- Inbound message tests ---
+// --- Inbound message tests (polling mode) ---
 
 describe('inbound messages', () => {
   const PHONE = '+15551234567';
   const API_URL = 'http://localhost:18080';
 
+  let originalFetch: typeof globalThis.fetch;
+
   beforeEach(() => {
     vi.clearAllMocks();
-    installWsMock();
+    vi.useFakeTimers();
+    originalFetch = globalThis.fetch;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
+    globalThis.fetch = originalFetch;
   });
 
-  it('connects WebSocket to correct URL', async () => {
-    const channel = new SignalChannel(API_URL, PHONE, createInboundTestOpts());
+  /** Mock fetch to return the given payloads once, then empty arrays */
+  function mockPollResponse(...payloads: unknown[]) {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(payloads),
+    });
+  }
+
+  /** Connect + trigger one poll cycle */
+  async function connectAndPoll(channel: SignalChannel) {
     await channel.connect();
-    expect(mockWsInstance).not.toBeNull();
-    expect(mockWsInstance!.url).toBe(
-      `ws://localhost:18080/v1/receive/${PHONE}`,
+    // Advance past the poll interval to trigger poll()
+    await vi.advanceTimersByTimeAsync(2100);
+  }
+
+  it('polls the correct URL', async () => {
+    mockPollResponse();
+    const channel = new SignalChannel(API_URL, PHONE, createInboundTestOpts());
+    await connectAndPoll(channel);
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      `http://localhost:18080/v1/receive/${PHONE}`,
     );
+    await channel.disconnect();
   });
 
   it('parses 1:1 text message and calls onMessage', async () => {
     const opts = createInboundTestOpts();
+    mockPollResponse(make1to1Envelope());
     const channel = new SignalChannel(API_URL, PHONE, opts);
-    await channel.connect();
-
-    const envelope = make1to1Envelope();
-    mockWsInstance!.simulateMessage(envelope);
+    await connectAndPoll(channel);
 
     expect(opts.onChatMetadata).toHaveBeenCalledWith(
       'sig:+15559876543',
@@ -333,15 +353,14 @@ describe('inbound messages', () => {
         is_from_me: false,
       }),
     );
+    await channel.disconnect();
   });
 
   it('parses group message and uses sig:group: JID', async () => {
     const opts = createInboundTestOpts();
+    mockPollResponse(makeGroupEnvelope());
     const channel = new SignalChannel(API_URL, PHONE, opts);
-    await channel.connect();
-
-    const envelope = makeGroupEnvelope();
-    mockWsInstance!.simulateMessage(envelope);
+    await connectAndPoll(channel);
 
     expect(opts.onChatMetadata).toHaveBeenCalledWith(
       'sig:group:dGVzdGdyb3VwMTIz',
@@ -357,32 +376,27 @@ describe('inbound messages', () => {
         content: 'Hello from group',
       }),
     );
+    await channel.disconnect();
   });
 
   it('ignores messages from unregistered chats', async () => {
     const opts = createInboundTestOpts();
-    const channel = new SignalChannel(API_URL, PHONE, opts);
-    await channel.connect();
-
-    // This sender is not in registeredGroups
     const envelope = make1to1Envelope({
       sourceNumber: '+15550000000',
       source: '+15550000000',
     });
-    mockWsInstance!.simulateMessage(envelope);
+    mockPollResponse(envelope);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
 
-    // onChatMetadata should still be called
     expect(opts.onChatMetadata).toHaveBeenCalled();
-    // onMessage should NOT be called
     expect(opts.onMessage).not.toHaveBeenCalled();
+    await channel.disconnect();
   });
 
   it('ignores envelopes without dataMessage', async () => {
     const opts = createInboundTestOpts();
-    const channel = new SignalChannel(API_URL, PHONE, opts);
-    await channel.connect();
-
-    mockWsInstance!.simulateMessage({
+    mockPollResponse({
       envelope: {
         source: '+15559876543',
         sourceNumber: '+15559876543',
@@ -392,23 +406,25 @@ describe('inbound messages', () => {
       },
       account: PHONE,
     });
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
 
     expect(opts.onChatMetadata).not.toHaveBeenCalled();
     expect(opts.onMessage).not.toHaveBeenCalled();
+    await channel.disconnect();
   });
 
   it('ignores dataMessage with null message (e.g., reactions)', async () => {
     const opts = createInboundTestOpts();
-    const channel = new SignalChannel(API_URL, PHONE, opts);
-    await channel.connect();
-
     const envelope = make1to1Envelope();
     // @ts-expect-error — intentionally set message to null
     envelope.envelope.dataMessage.message = null;
-
-    mockWsInstance!.simulateMessage(envelope);
+    mockPollResponse(envelope);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
 
     expect(opts.onMessage).not.toHaveBeenCalled();
+    await channel.disconnect();
   });
 
   it('marks messages from own number as is_from_me', async () => {
@@ -422,27 +438,24 @@ describe('inbound messages', () => {
         },
       })),
     });
-    const channel = new SignalChannel(API_URL, PHONE, opts);
-    await channel.connect();
-
     const envelope = make1to1Envelope({
       sourceNumber: PHONE,
       source: PHONE,
       sourceName: 'Me',
     });
-    mockWsInstance!.simulateMessage(envelope);
+    mockPollResponse(envelope);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
 
     expect(opts.onMessage).toHaveBeenCalledWith(
       `sig:${PHONE}`,
       expect.objectContaining({ is_from_me: true }),
     );
+    await channel.disconnect();
   });
 
   it('stores non-text attachments as placeholders', async () => {
     const opts = createInboundTestOpts();
-    const channel = new SignalChannel(API_URL, PHONE, opts);
-    await channel.connect();
-
     const envelope = make1to1Envelope();
     // @ts-expect-error — override message to null, add attachment
     envelope.envelope.dataMessage.message = null;
@@ -450,20 +463,24 @@ describe('inbound messages', () => {
     envelope.envelope.dataMessage.attachments = [
       { contentType: 'image/jpeg', filename: 'photo.jpg' },
     ];
-
-    mockWsInstance!.simulateMessage(envelope);
+    mockPollResponse(envelope);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
 
     expect(opts.onMessage).toHaveBeenCalledWith(
       'sig:+15559876543',
       expect.objectContaining({ content: '[Photo]' }),
     );
+    await channel.disconnect();
   });
 
   it('isConnected returns true after connect', async () => {
+    mockPollResponse();
     const channel = new SignalChannel(API_URL, PHONE, createInboundTestOpts());
     expect(channel.isConnected()).toBe(false);
     await channel.connect();
     expect(channel.isConnected()).toBe(true);
+    await channel.disconnect();
   });
 });
 
