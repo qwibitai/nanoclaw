@@ -449,42 +449,64 @@ async function runQuery(
             append: globalClaudeMd,
           }
         : undefined,
-      allowedTools: [
-        'Bash',
-        'Read',
-        'Write',
-        'Edit',
-        'Glob',
-        'Grep',
-        'WebSearch',
-        'WebFetch',
-        'Task',
-        'TaskOutput',
-        'TaskStop',
-        'TeamCreate',
-        'TeamDelete',
-        'SendMessage',
-        'TodoWrite',
-        'ToolSearch',
-        'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*',
-      ],
+      allowedTools: (() => {
+        const tools = [
+          'Bash',
+          'Read',
+          'Write',
+          'Edit',
+          'Glob',
+          'Grep',
+          'WebSearch',
+          'WebFetch',
+          'Task',
+          'TaskOutput',
+          'TaskStop',
+          'TeamCreate',
+          'TeamDelete',
+          'SendMessage',
+          'TodoWrite',
+          'ToolSearch',
+          'Skill',
+          'NotebookEdit',
+          'mcp__nanoclaw__*',
+        ];
+        if (process.env.TODOIST_API_TOKEN) {
+          tools.push('mcp__todoist__*');
+        }
+        return tools;
+      })(),
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      mcpServers: (() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const servers: Record<string, any> = {
+          nanoclaw: {
+            command: 'node',
+            args: [mcpServerPath],
+            env: {
+              NANOCLAW_CHAT_JID: containerInput.chatJid,
+              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+              NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            },
           },
-        },
-      },
+        };
+        // Register todoist-mcp only when the host has placed a token in
+        // .env. Absent token → zero behaviour change.
+        const todoistToken = process.env.TODOIST_API_TOKEN;
+        if (todoistToken) {
+          servers['todoist'] = {
+            command: 'npx',
+            args: ['-y', 'todoist-mcp'],
+            env: { TODOIST_API_TOKEN: todoistToken },
+          };
+          log('Todoist MCP server configured');
+        }
+        return servers;
+      })(),
       hooks: {
         PreCompact: [
           { hooks: [createPreCompactHook(containerInput.assistantName)] },

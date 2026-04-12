@@ -25,6 +25,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -264,6 +265,20 @@ async function buildContainerArgs(
     logger.warn(
       { containerName },
       'OneCLI gateway not reachable — container will have no credentials',
+    );
+  }
+
+  // Pass through optional integration secrets that the agent-runner uses
+  // to configure additional MCP servers (Todoist, etc.). These are NOT
+  // routed through the OneCLI gateway — they're plain env var passthrough.
+  // Acceptable because the container is isolated and the host user is the
+  // only consumer. Read via readEnvFile so the secret doesn't need to live
+  // in process.env on the host.
+  const integrationSecrets = readEnvFile(['TODOIST_API_TOKEN']);
+  if (integrationSecrets.TODOIST_API_TOKEN) {
+    args.push(
+      '-e',
+      `TODOIST_API_TOKEN=${integrationSecrets.TODOIST_API_TOKEN}`,
     );
   }
 
