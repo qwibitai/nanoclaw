@@ -36,6 +36,7 @@ import {
 // [DISABLED 2026-04-09] import { createTask } from './db.js';
 // [DISABLED 2026-04-09] import { CROSS_CHANNEL_DIGEST_PROMPT } from './watcher-registration.js';
 
+import { populateCrossChannelContext } from './cross-channel-context.js';
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
@@ -432,6 +433,8 @@ export async function runContainerAgent(
   fs.mkdirSync(groupDir, { recursive: true });
 
   const mounts = buildVolumeMounts(group, input.isMain);
+  // Refresh cross-channel context with raw messages before spawning
+  populateCrossChannelContext(process.cwd(), input.chatJid);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
