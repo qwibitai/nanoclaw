@@ -300,7 +300,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
-      if (text) {
+      // [no-reply] signals the agent chose silence — don't post anything
+      if (text && text !== '[no-reply]') {
         await channel.sendMessage(chatJid, text);
         storeOutboundMessage(chatJid, text, ASSISTANT_NAME);
         outputSentToUser = true;
