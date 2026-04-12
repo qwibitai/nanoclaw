@@ -515,13 +515,14 @@ describe('syncAgentCustomizations', () => {
 import { buildMcpRuntimeConfig } from './message-processor.js';
 
 describe('buildMcpRuntimeConfig', () => {
-  const NODE_PATH = '/app/node_modules';
+  // Paths resolve to /home/node/.claude/mcp/{name}/ — the entrypoint copies sources there
+  // from read-only /home/node/.claude/mcp/ and symlinks node_modules.
 
   it('returns null for null input', () => {
     expect(buildMcpRuntimeConfig(null)).toBeNull();
   });
 
-  it('resolves node .js entry to container path and sets NODE_PATH', () => {
+  it('resolves node .js entry to /home/node/.claude/mcp/ path', () => {
     const result = buildMcpRuntimeConfig({
       'my-db': {
         source: '/host/path/my-db',
@@ -533,8 +534,8 @@ describe('buildMcpRuntimeConfig', () => {
     expect(result).toEqual({
       'my-db': {
         command: 'node',
-        args: ['/workspace/agent/mcp/my-db/index.js'],
-        env: { NODE_PATH, DB_URL: 'postgres://localhost' },
+        args: ['/home/node/.claude/mcp/my-db/index.js'],
+        env: { DB_URL: 'postgres://localhost' },
       },
     });
   });
@@ -552,11 +553,10 @@ describe('buildMcpRuntimeConfig', () => {
         command: 'node',
         args: [
           '--experimental-transform-types',
-          '/workspace/agent/mcp/dune/server.ts',
+          '/home/node/.claude/mcp/dune/server.ts',
           '--port',
           '3000',
         ],
-        env: { NODE_PATH },
       },
     });
   });
@@ -570,11 +570,7 @@ describe('buildMcpRuntimeConfig', () => {
       },
     });
     expect(result).toEqual({
-      pyserver: {
-        command: 'python',
-        args: ['server.ts'],
-        env: { NODE_PATH },
-      },
+      pyserver: { command: 'python', args: ['server.ts'] },
     });
   });
 
@@ -587,11 +583,7 @@ describe('buildMcpRuntimeConfig', () => {
       },
     });
     expect(result).toEqual({
-      tool: {
-        command: 'npx',
-        args: ['--yes', 'tsx', 'server.ts'],
-        env: { NODE_PATH },
-      },
+      tool: { command: 'npx', args: ['--yes', 'tsx', 'server.ts'] },
     });
   });
 
@@ -602,9 +594,9 @@ describe('buildMcpRuntimeConfig', () => {
     });
     expect(result!['ts'].args).toEqual([
       '--experimental-transform-types',
-      '/workspace/agent/mcp/ts/index.ts',
+      '/home/node/.claude/mcp/ts/index.ts',
     ]);
-    expect(result!['js'].args).toEqual(['/workspace/agent/mcp/js/index.js']);
+    expect(result!['js'].args).toEqual(['/home/node/.claude/mcp/js/index.js']);
   });
 
   it('does not resolve already-absolute paths', () => {
@@ -618,18 +610,16 @@ describe('buildMcpRuntimeConfig', () => {
     expect(result!['abs'].args).toEqual(['/custom/path/server.js']);
   });
 
-  it('user env overrides NODE_PATH if set explicitly', () => {
+  it('preserves user env as-is', () => {
     const result = buildMcpRuntimeConfig({
       custom: {
         source: '/x',
         command: 'node',
         args: ['server.js'],
-        env: { NODE_PATH: '/custom/modules' },
+        env: { FOO: 'bar' },
       },
     });
-    expect(result!['custom'].env).toEqual({
-      NODE_PATH: '/custom/modules',
-    });
+    expect(result!['custom'].env).toEqual({ FOO: 'bar' });
   });
 
   it('handles server with no args', () => {
@@ -637,20 +627,20 @@ describe('buildMcpRuntimeConfig', () => {
       noargs: { source: '/x', command: 'node' },
     });
     expect(result).toEqual({
-      noargs: { command: 'node', args: undefined, env: { NODE_PATH } },
+      noargs: { command: 'node', args: undefined, env: undefined },
     });
   });
 
-  // ─── Regression tests for the 3 root causes ────────────────────
+  // ─── Regression tests ──────────────────────────────────────────
 
-  it('regression: node entry file resolved to container path (not left relative)', () => {
+  it('regression: node entry resolved to /home/node/.claude/mcp/ (not left relative)', () => {
     const result = buildMcpRuntimeConfig({
       db: { source: '/host/db', command: 'node', args: ['server.js'] },
     });
-    expect(result!['db'].args).toEqual(['/workspace/agent/mcp/db/server.js']);
+    expect(result!['db'].args).toEqual(['/home/node/.claude/mcp/db/server.js']);
   });
 
-  it('regression: npx args NOT path-resolved (--yes would become /workspace/.../--yes)', () => {
+  it('regression: npx args NOT path-resolved', () => {
     const result = buildMcpRuntimeConfig({
       tool: {
         source: '/host/tool',
@@ -659,14 +649,5 @@ describe('buildMcpRuntimeConfig', () => {
       },
     });
     expect(result!['tool'].args).toEqual(['--yes', 'tsx', 'server.ts']);
-  });
-
-  it('regression: NODE_PATH set so MCP servers resolve shared deps', () => {
-    const result = buildMcpRuntimeConfig({
-      mcp: { source: '/host/mcp', command: 'node', args: ['index.js'] },
-    });
-    expect(result!['mcp'].env).toEqual(
-      expect.objectContaining({ NODE_PATH: '/app/node_modules' }),
-    );
   });
 });

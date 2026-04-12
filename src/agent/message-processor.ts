@@ -21,18 +21,19 @@ import type { ChannelManager } from './channel-manager.js';
 import type { GroupManager } from './group-manager.js';
 import type { TaskManager } from './task-manager.js';
 
-const CONTAINER_MCP_DIR = '/workspace/agent/mcp';
-const CONTAINER_NODE_MODULES = '/app/node_modules';
+// MCP sources are copied per-group into /home/node/.claude/mcp/{name}/.
+// A host-created symlink node_modules → /app/node_modules resolves inside
+// the container for ESM import resolution. Verified by e2e test.
+const CONTAINER_MCP_DIR = '/home/node/.claude/mcp';
 
 /**
  * Build the runtime MCP server configs for ContainerInput.
  *
  * Transforms user-facing McpServerConfig into container-ready runtime configs:
  * - Strips `source` (host path) — not needed at runtime
- * - For `node` commands: resolves entry file to container path,
+ * - For `node` commands: resolves entry file to /tmp/mcp/{name}/ (prepared by entrypoint),
  *   injects --experimental-transform-types for .ts files (Node 22+)
  * - For other commands (npx, python): passes args through unchanged
- * - Sets NODE_PATH so MCP servers can resolve shared deps from /app/node_modules
  */
 export function buildMcpRuntimeConfig(
   mcpServers: Record<
@@ -55,8 +56,9 @@ export function buildMcpRuntimeConfig(
       const isNode = cfg.command === 'node';
       const entry = cfg.args?.[0];
 
-      // For node commands, resolve first arg (entry file) to container path
-      // and inject --experimental-transform-types for .ts files.
+      // For node commands, resolve first arg (entry file) to the prepared
+      // /tmp/mcp/{name}/ dir (writable, with node_modules symlinked).
+      // Inject --experimental-transform-types for .ts files (Node 22+).
       // For other commands (npx, python), pass args through unchanged.
       let args = cfg.args;
       if (isNode && entry && !entry.startsWith('/')) {
@@ -67,15 +69,7 @@ export function buildMcpRuntimeConfig(
           : [resolvedEntry, ...rest];
       }
 
-      // Set NODE_PATH so the MCP server can resolve shared deps
-      // (e.g. @modelcontextprotocol/sdk, zod) from the container's
-      // agent-runner node_modules without bundling them per-server.
-      const env = {
-        NODE_PATH: CONTAINER_NODE_MODULES,
-        ...cfg.env,
-      };
-
-      return [name, { command: cfg.command, args, env }];
+      return [name, { command: cfg.command, args, env: cfg.env }];
     }),
   );
 }
