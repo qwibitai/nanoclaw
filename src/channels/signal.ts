@@ -36,15 +36,16 @@ interface SignalPayload {
   account?: string;
 }
 
+const POLL_INTERVAL_MS = 2000;
+
 export class SignalChannel implements Channel {
   name = 'signal';
 
   private apiUrl: string;
   private phoneNumber: string;
   private opts: SignalChannelOpts;
-  private ws: WebSocket | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectDelay = 1000;
+  private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  private connected = false;
   private closed = false;
 
   constructor(apiUrl: string, phoneNumber: string, opts: SignalChannelOpts) {
@@ -55,55 +56,38 @@ export class SignalChannel implements Channel {
 
   async connect(): Promise<void> {
     this.closed = false;
-    return this.openWebSocket();
+    this.connected = true;
+    logger.info(
+      { phone: this.phoneNumber, apiUrl: this.apiUrl },
+      'Signal channel connected (polling mode)',
+    );
+    console.log(`\n  Signal channel: polling ${this.apiUrl} every ${POLL_INTERVAL_MS / 1000}s\n`);
+    this.schedulePoll();
   }
 
-  private openWebSocket(): Promise<void> {
-    return new Promise((resolve) => {
-      const wsUrl =
-        this.apiUrl.replace(/^http/, 'ws') + `/v1/receive/${this.phoneNumber}`;
-      const ws = new WebSocket(wsUrl);
-      this.ws = ws;
-
-      ws.onopen = () => {
-        this.reconnectDelay = 1000;
-        logger.info({ wsUrl }, 'Signal WebSocket connected');
-        resolve();
-      };
-
-      ws.onmessage = (event: { data: string }) => {
-        try {
-          const data: SignalPayload = JSON.parse(event.data);
-          this.handleEnvelope(data);
-        } catch (err) {
-          logger.debug({ err }, 'Signal: failed to parse WebSocket message');
-        }
-      };
-
-      ws.onclose = () => {
-        if (!this.closed) {
-          this.scheduleReconnect();
-        }
-      };
-
-      ws.onerror = (err: unknown) => {
-        logger.debug({ err }, 'Signal WebSocket error');
-      };
-    });
-  }
-
-  private scheduleReconnect(): void {
+  private schedulePoll(): void {
     if (this.closed) return;
-    const delay = Math.min(this.reconnectDelay, 30000);
-    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
-    logger.info({ delay }, 'Signal: scheduling reconnect');
-    this.reconnectTimer = setTimeout(() => {
-      if (!this.closed) {
-        this.openWebSocket().catch((err) => {
-          logger.debug({ err }, 'Signal: reconnect failed');
-        });
+    this.pollTimer = setTimeout(() => this.poll(), POLL_INTERVAL_MS);
+  }
+
+  private async poll(): Promise<void> {
+    if (this.closed) return;
+    try {
+      const res = await fetch(
+        `${this.apiUrl}/v1/receive/${this.phoneNumber}`,
+      );
+      if (!res.ok) {
+        logger.warn({ status: res.status }, 'Signal: poll returned non-OK');
+      } else {
+        const payloads = (await res.json()) as SignalPayload[];
+        for (const payload of payloads) {
+          this.handleEnvelope(payload);
+        }
       }
-    }, delay);
+    } catch (err) {
+      logger.debug({ err }, 'Signal: poll failed');
+    }
+    this.schedulePoll();
   }
 
   private handleEnvelope(data: SignalPayload): void {
@@ -204,7 +188,7 @@ export class SignalChannel implements Channel {
   }
 
   isConnected(): boolean {
-    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+    return this.connected;
   }
 
   ownsJid(jid: string): boolean {
@@ -213,13 +197,10 @@ export class SignalChannel implements Channel {
 
   async disconnect(): Promise<void> {
     this.closed = true;
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    if (this.ws !== null) {
-      this.ws.close();
-      this.ws = null;
+    this.connected = false;
+    if (this.pollTimer !== null) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = null;
     }
     logger.info('Signal channel disconnected');
   }
@@ -230,14 +211,11 @@ export class SignalChannel implements Channel {
       const recipient = jid.startsWith('sig:group:')
         ? jid.slice('sig:group:'.length)
         : jid.slice('sig:'.length);
-      await fetch(
-        `${this.apiUrl}/v1/typing-indicator/${this.phoneNumber}`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ recipient }),
-        },
-      );
+      await fetch(`${this.apiUrl}/v1/typing-indicator/${this.phoneNumber}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipient }),
+      });
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Signal typing indicator');
     }
