@@ -48,13 +48,49 @@ describe('stopContainer', () => {
     expect(mockSpawnSync).toHaveBeenCalledWith(
       CONTAINER_RUNTIME_BIN,
       ['stop', '-t', '1', 'nanoclaw-test-123'],
-      { stdio: 'pipe' },
+      { stdio: 'pipe', timeout: 10_000 },
     );
   });
 
   it('accepts names with dots and underscores', () => {
     stopContainer('nanoclaw-my_group.test-123');
     expect(mockSpawnSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to docker kill when docker stop fails', () => {
+    mockSpawnSync.mockReturnValueOnce({ stdout: '', stderr: '', status: 1 });
+    mockSpawnSync.mockReturnValueOnce({ stdout: '', stderr: '', status: 0 });
+
+    stopContainer('nanoclaw-test-123');
+
+    expect(mockSpawnSync).toHaveBeenCalledTimes(2);
+    expect(mockSpawnSync).toHaveBeenNthCalledWith(
+      1,
+      CONTAINER_RUNTIME_BIN,
+      ['stop', '-t', '1', 'nanoclaw-test-123'],
+      { stdio: 'pipe', timeout: 10_000 },
+    );
+    expect(mockSpawnSync).toHaveBeenNthCalledWith(
+      2,
+      CONTAINER_RUNTIME_BIN,
+      ['kill', 'nanoclaw-test-123'],
+      { stdio: 'pipe', timeout: 5_000 },
+    );
+  });
+
+  it('falls back to docker kill when docker stop times out (status null)', () => {
+    mockSpawnSync.mockReturnValueOnce({ stdout: '', stderr: '', status: null });
+    mockSpawnSync.mockReturnValueOnce({ stdout: '', stderr: '', status: 0 });
+
+    stopContainer('nanoclaw-test-123');
+
+    expect(mockSpawnSync).toHaveBeenCalledTimes(2);
+    expect(mockSpawnSync).toHaveBeenNthCalledWith(
+      2,
+      CONTAINER_RUNTIME_BIN,
+      ['kill', 'nanoclaw-test-123'],
+      { stdio: 'pipe', timeout: 5_000 },
+    );
   });
 });
 
@@ -106,13 +142,13 @@ describe('cleanupOrphans', () => {
       2,
       CONTAINER_RUNTIME_BIN,
       ['stop', '-t', '1', 'nanoclaw-group1-111'],
-      { stdio: 'pipe' },
+      { stdio: 'pipe', timeout: 10_000 },
     );
     expect(mockSpawnSync).toHaveBeenNthCalledWith(
       3,
       CONTAINER_RUNTIME_BIN,
       ['stop', '-t', '1', 'nanoclaw-group2-222'],
-      { stdio: 'pipe' },
+      { stdio: 'pipe', timeout: 10_000 },
     );
     expect(logger.info).toHaveBeenCalledWith(
       { count: 2, names: ['nanoclaw-group1-111', 'nanoclaw-group2-222'] },
