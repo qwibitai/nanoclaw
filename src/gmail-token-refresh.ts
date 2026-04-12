@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { logger } from './logger.js';
 
 export interface GmailRefreshResult {
@@ -8,13 +9,27 @@ export interface GmailRefreshResult {
 }
 
 export interface GmailRefreshOptions {
-  /** Override path to scripts/refresh-gmail-tokens.py (default: <cwd>/scripts/...) */
+  /** Override path to scripts/refresh-gmail-tokens.py. Default is anchored to
+   *  this module's location, NOT process.cwd(), so it works regardless of
+   *  where the host service was launched from. */
   scriptPath?: string;
   /** Maximum time to wait for the script to complete (ms). Default 15s. */
   timeoutMs?: number;
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+
+// Anchor the default script path to this module's location, not process.cwd().
+// At runtime this resolves to <project>/dist/gmail-token-refresh.js, so the
+// script lives one level up at <project>/scripts/refresh-gmail-tokens.py.
+// This survives launchers that don't set cwd to the repo root (systemd,
+// future Docker entrypoints, ad-hoc `node dist/index.js` invocations).
+const DEFAULT_SCRIPT_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'scripts',
+  'refresh-gmail-tokens.py',
+);
 
 /**
  * Refresh all Gmail account OAuth tokens by shelling out to
@@ -28,9 +43,7 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 export async function refreshGmailTokens(
   options: GmailRefreshOptions = {},
 ): Promise<GmailRefreshResult> {
-  const scriptPath =
-    options.scriptPath ||
-    path.join(process.cwd(), 'scripts', 'refresh-gmail-tokens.py');
+  const scriptPath = options.scriptPath || DEFAULT_SCRIPT_PATH;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return new Promise((resolve) => {
