@@ -640,6 +640,26 @@ export function setRouterState(key: string, value: string): void {
   ).run(key, value);
 }
 
+export function deleteRouterState(key: string): void {
+  db.prepare('DELETE FROM router_state WHERE key = ?').run(key);
+}
+
+/**
+ * Find all pending cursors left by interrupted processing.
+ * Returns a map of chatJid → previousCursor to roll back to.
+ */
+export function getPendingCursors(): Map<string, string> {
+  const rows = db
+    .prepare("SELECT key, value FROM router_state WHERE key LIKE 'pending_cursor:%'")
+    .all() as Array<{ key: string; value: string }>;
+  const result = new Map<string, string>();
+  for (const row of rows) {
+    const jid = row.key.replace('pending_cursor:', '');
+    result.set(jid, row.value);
+  }
+  return result;
+}
+
 // --- Session accessors ---
 
 export function getSession(groupFolder: string): string | undefined {

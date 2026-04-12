@@ -30,6 +30,7 @@ import {
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
 import {
+  deleteRouterState,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -38,6 +39,7 @@ import {
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
+  getPendingCursors,
   getRouterState,
   initDatabase,
   logSessionCost,
@@ -112,6 +114,25 @@ function loadState(): void {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
     lastAgentTimestamp = {};
   }
+  // Recover from interrupted processing: if any group has a pending cursor,
+  // it means the previous process was killed mid-work. Roll back the cursor
+  // so those messages get re-processed.
+  const pendingCursors = getPendingCursors();
+  for (const [jid, previousCursor] of pendingCursors) {
+    const currentCursor = lastAgentTimestamp[jid];
+    if (currentCursor && currentCursor > previousCursor) {
+      lastAgentTimestamp[jid] = previousCursor;
+      logger.info(
+        { jid, rolledBackFrom: currentCursor, rolledBackTo: previousCursor },
+        'Recovered pending cursor — messages will be re-processed',
+      );
+    }
+    deleteRouterState(`pending_cursor:${jid}`);
+  }
+  if (pendingCursors.size > 0) {
+    setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
+  }
+
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
   logger.info(
@@ -259,7 +280,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
+  // The pending cursor is persisted to DB so we can recover on crash/restart.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
+  setRouterState(`pending_cursor:${chatJid}`, previousCursor);
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
@@ -334,11 +357,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
+      deleteRouterState(`pending_cursor:${chatJid}`);
       return true;
     }
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
+    deleteRouterState(`pending_cursor:${chatJid}`);
     logger.warn(
       { group: group.name },
       'Agent error, rolled back message cursor for retry',
@@ -346,6 +371,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  // Processing complete — clear the pending cursor
+  deleteRouterState(`pending_cursor:${chatJid}`);
   return true;
 }
 
