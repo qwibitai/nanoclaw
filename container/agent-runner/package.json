@@ -9,7 +9,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.76",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.92",
     "@bitbonsai/mcpvault": "^0.9.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "bibtex-parse": "^2.1.0",
