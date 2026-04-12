@@ -709,6 +709,7 @@ export class AgentImpl
     syncAgentCustomizations({
       instructions: this.config.instructions,
       skillsSources: this.config.skillsSources,
+      mcpServers: this.config.mcpServers,
       agentDir: this.config.agentDir,
       builtinSkillsDir: path.join(
         this.runtimeConfig.packageRoot,
@@ -717,7 +718,6 @@ export class AgentImpl
       ),
     });
   }
-
 
   // ─── Remote control ──────────────────────────────────────────────
 
@@ -946,6 +946,14 @@ export class AgentImpl
           dataDir: this.config.dataDir,
           credentialResolver: this.credentialResolver ?? undefined,
           mountAllowlist: this.resolvedMountAllowlist,
+          mcpServers: this.config.mcpServers
+            ? Object.fromEntries(
+                Object.entries(this.config.mcpServers).map(([name, cfg]) => [
+                  name,
+                  { command: cfg.command, args: cfg.args, env: cfg.env },
+                ]),
+              )
+            : null,
         },
         this.runtimeConfig,
         (boxName, _containerName) =>

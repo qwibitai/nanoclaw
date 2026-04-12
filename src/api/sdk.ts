@@ -19,6 +19,7 @@ export type {
   AgentLiteOptions,
   AgentOptions,
   CredentialResolver,
+  McpServerConfig,
 } from './options.js';
 export type { Agent } from './agent.js';
 export type {

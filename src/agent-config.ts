@@ -6,13 +6,13 @@
 import path from 'path';
 
 import type { MountAllowlist } from './types.js';
-import type { AgentOptions } from './api/options.js';
+import type { AgentOptions, McpServerConfig } from './api/options.js';
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function normalizeJson(value: unknown): unknown {
+export function normalizeJson(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(normalizeJson);
   }
@@ -43,6 +43,8 @@ export interface SerializableAgentSettings {
   readonly instructions: string | null;
   /** Source paths for agent-level skill directories (for re-sync on start). */
   readonly skillsSources: string[] | null;
+  /** Custom MCP servers passed into agent containers. */
+  readonly mcpServers: Record<string, McpServerConfig> | null;
 }
 
 export interface PersistedAgentSettings extends SerializableAgentSettings {
@@ -76,6 +78,15 @@ export function resolveSerializableAgentSettings(
     skillsSources: opts?.skills?.length
       ? opts.skills.map((s) => path.resolve(s))
       : null,
+    mcpServers:
+      opts?.mcpServers && Object.keys(opts.mcpServers).length > 0
+        ? Object.fromEntries(
+            Object.entries(opts.mcpServers).map(([name, cfg]) => [
+              name,
+              { ...cfg, source: path.resolve(cfg.source) },
+            ]),
+          )
+        : null,
   };
 }
 
@@ -96,5 +107,6 @@ export function buildAgentConfig(input: PersistedAgentSettings): AgentConfig {
     mountAllowlist: input.mountAllowlist,
     instructions: input.instructions,
     skillsSources: input.skillsSources,
+    mcpServers: input.mcpServers,
   };
 }
