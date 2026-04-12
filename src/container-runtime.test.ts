@@ -86,6 +86,12 @@ describe('stopContainer', () => {
 
     expect(mockSpawnSync).toHaveBeenCalledTimes(2);
     expect(mockSpawnSync).toHaveBeenNthCalledWith(
+      1,
+      CONTAINER_RUNTIME_BIN,
+      ['stop', '-t', '1', 'nanoclaw-test-123'],
+      { stdio: 'pipe', timeout: 10_000 },
+    );
+    expect(mockSpawnSync).toHaveBeenNthCalledWith(
       2,
       CONTAINER_RUNTIME_BIN,
       ['kill', 'nanoclaw-test-123'],
