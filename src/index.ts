@@ -63,6 +63,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { isBudgetExceeded } from './budget.js';
+import { startDealWatchLoop } from './deal-watch-loop.js';
 import { startEmailSSE } from './email-sse.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -876,6 +877,20 @@ async function main(): Promise<void> {
   });
   // Real-time email notifications via SSE (poll is fallback)
   startEmailSSE();
+  // Deal-watch: real-time HubSpot + Gong signal layer → main group.
+  // Opt-in via DEAL_WATCH_ENABLED=1 in .env; no-op otherwise.
+  startDealWatchLoop({
+    sendMessage: async (jid, rawText) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) {
+        logger.warn({ jid }, 'deal-watch: no channel owns JID, cannot send');
+        return;
+      }
+      const text = formatOutbound(rawText);
+      if (text) await channel.sendMessage(jid, text);
+    },
+    registeredGroups: () => registeredGroups,
+  });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
