@@ -2,7 +2,9 @@ import fs from 'fs';
 import https from 'https';
 import path from 'path';
 
-import { Api, Bot } from 'grammy';
+import { Api, Bot, Context } from 'grammy';
+import { autoRetry } from '@grammyjs/auto-retry';
+import { StreamFlavor, stream, streamApi } from '@grammyjs/stream';
 
 import {
   ASSISTANT_NAME,
@@ -21,11 +23,34 @@ import {
   PermissionApprovalDecision,
   PermissionApprovalRequest,
   RegisteredGroup,
+  StreamingChunkOptions,
 } from '../core/types.js';
+import { parseTextStyles } from '../text-styles.js';
 
 const TELEGRAM_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
+const TELEGRAM_DRAFT_MAX_LENGTH = 4096;
+const TELEGRAM_STREAM_CHUNK_MAX_LENGTH = 3500;
+const TELEGRAM_GROUP_EDIT_INTERVAL_MS = 900;
 const TELEGRAM_PERMISSION_CALLBACK_PATTERN =
   /^perm:(approve|deny):([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})$/;
+
+type TelegramContext = StreamFlavor<Context>;
+type TelegramStreamApi = ReturnType<typeof streamApi>;
+type ActiveDraftStreamState = {
+  chatId: number;
+  threadId?: number;
+  rawBuffer: string;
+  pushChunk: (chunk: string) => void;
+  closeStream: () => void;
+  streamPromise: Promise<void>;
+};
+type ActiveGroupStreamState = {
+  chatId: string;
+  threadId?: number;
+  rawBuffer: string;
+  messageId?: number;
+  lastFlushAt: number;
+};
 
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
@@ -33,10 +58,87 @@ export interface TelegramChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+function escapeTelegramMarkdownV2Plain(text: string): string {
+  return text.replace(/[\[\]()`>#+\-=|{}.!\\]/g, '\\$&');
+}
+
+function escapeTelegramMarkdownV2Literal(text: string): string {
+  return text.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
+}
+
+function escapeTelegramMarkdownV2CodeSegment(segment: string): string {
+  if (segment.startsWith('```') && segment.endsWith('```')) {
+    const body = segment.slice(3, -3);
+    const firstNewline = body.indexOf('\n');
+    if (firstNewline === -1) {
+      return `\`\`\`${body.replace(/[\\`]/g, '\\$&')}\`\`\``;
+    }
+    const language = body.slice(0, firstNewline);
+    const code = body.slice(firstNewline + 1).replace(/[\\`]/g, '\\$&');
+    return `\`\`\`${language}\n${code}\`\`\``;
+  }
+  const code = segment.slice(1, -1).replace(/[\\`]/g, '\\$&');
+  return `\`${code}\``;
+}
+
+function escapeTelegramMarkdownV2LinkSegment(segment: string): string {
+  const match = /^\[([\s\S]+)]\(([\s\S]+)\)$/.exec(segment);
+  if (!match) return escapeTelegramMarkdownV2Plain(segment);
+  const escapedText = escapeTelegramMarkdownV2Plain(match[1]);
+  const escapedUrl = match[2].replace(/[)\\]/g, '\\$&');
+  return `[${escapedText}](${escapedUrl})`;
+}
+
 /**
- * Send a message with Telegram Markdown parse mode, falling back to plain text.
- * Claude's output naturally matches Telegram's Markdown v1 format:
- *   *bold*, _italic_, `code`, ```code blocks```, [links](url)
+ * Escape text for Telegram MarkdownV2 while preserving markdown formatting
+ * markers produced by parseTextStyles (bold/italic/strikethrough/links/code).
+ */
+function escapeTelegramMarkdownV2(text: string): string {
+  if (!text) return text;
+  const protectedPattern =
+    /```[\s\S]*?```|`[^`\n]+`|\[[^\]\n]+\]\((?:\\.|[^\\\n)])+\)/g;
+  let out = '';
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = protectedPattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      out += escapeTelegramMarkdownV2Plain(text.slice(lastIndex, match.index));
+    }
+    const token = match[0];
+    if (token.startsWith('`')) {
+      out += escapeTelegramMarkdownV2CodeSegment(token);
+    } else {
+      out += escapeTelegramMarkdownV2LinkSegment(token);
+    }
+    lastIndex = match.index + token.length;
+  }
+  if (lastIndex < text.length) {
+    out += escapeTelegramMarkdownV2Plain(text.slice(lastIndex));
+  }
+  return out;
+}
+
+function splitTelegramDraftChunks(text: string): string[] {
+  if (text.length <= TELEGRAM_STREAM_CHUNK_MAX_LENGTH) return [text];
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += TELEGRAM_STREAM_CHUNK_MAX_LENGTH) {
+    chunks.push(text.slice(i, i + TELEGRAM_STREAM_CHUNK_MAX_LENGTH));
+  }
+  return chunks;
+}
+
+function stripInternalTagsPreserveWhitespace(text: string): string {
+  return text.replace(/<internal>[\s\S]*?<\/internal>/g, '');
+}
+
+function formatTelegramStreamingText(rawText: string): string {
+  const text = stripInternalTagsPreserveWhitespace(rawText);
+  if (!text) return '';
+  return parseTextStyles(text, 'telegram');
+}
+
+/**
+ * Send a message with Telegram MarkdownV2, then plain text.
  */
 async function sendTelegramMessage(
   api: { sendMessage: Api['sendMessage'] },
@@ -44,22 +146,83 @@ async function sendTelegramMessage(
   text: string,
   options: { message_thread_id?: number } = {},
 ): Promise<void> {
+  await sendTelegramMessageWithResult(api, chatId, text, options);
+}
+
+async function sendTelegramMessageWithResult(
+  api: { sendMessage: Api['sendMessage'] },
+  chatId: string | number,
+  text: string,
+  options: { message_thread_id?: number } = {},
+): Promise<number | undefined> {
   try {
-    await api.sendMessage(chatId, text, {
+    const sent = await api.sendMessage(chatId, text, {
       ...options,
-      parse_mode: 'Markdown',
+      parse_mode: 'MarkdownV2',
     });
-  } catch (err) {
-    // Fallback: send as plain text if Markdown parsing fails
-    logger.debug({ err }, 'Markdown send failed, falling back to plain text');
-    await api.sendMessage(chatId, text, options);
+    return (sent as { message_id?: number })?.message_id;
+  } catch (errV2Raw) {
+    logger.debug(
+      { err: errV2Raw },
+      'MarkdownV2 send failed, retrying with escaped text',
+    );
   }
+
+  try {
+    const sent = await api.sendMessage(chatId, escapeTelegramMarkdownV2(text), {
+      ...options,
+      parse_mode: 'MarkdownV2',
+    });
+    return (sent as { message_id?: number })?.message_id;
+  } catch (errV2Escaped) {
+    logger.debug(
+      { err: errV2Escaped },
+      'Escaped MarkdownV2 send failed, falling back to plain text',
+    );
+  }
+
+  const sent = await api.sendMessage(chatId, text, options);
+  return (sent as { message_id?: number })?.message_id;
+}
+
+async function editTelegramMessage(
+  api: { editMessageText: Api['editMessageText'] },
+  chatId: string | number,
+  messageId: number,
+  text: string,
+): Promise<void> {
+  try {
+    await api.editMessageText(chatId, messageId, text, {
+      parse_mode: 'MarkdownV2',
+    });
+    return;
+  } catch (errV2Raw) {
+    logger.debug(
+      { err: errV2Raw },
+      'MarkdownV2 edit failed, retrying with escaped text',
+    );
+  }
+
+  try {
+    await api.editMessageText(chatId, messageId, escapeTelegramMarkdownV2(text), {
+      parse_mode: 'MarkdownV2',
+    });
+    return;
+  } catch (errV2Escaped) {
+    logger.debug(
+      { err: errV2Escaped },
+      'Escaped MarkdownV2 edit failed, falling back to plain text',
+    );
+  }
+
+  await api.editMessageText(chatId, messageId, text);
 }
 
 export class TelegramChannel implements Channel {
   name = 'telegram';
 
-  private bot: Bot | null = null;
+  private bot: Bot<TelegramContext> | null = null;
+  private draftStreamApi: TelegramStreamApi | null = null;
   private isStopping = false;
   private pollingRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private opts: TelegramChannelOpts;
@@ -73,6 +236,9 @@ export class TelegramChannel implements Channel {
       resolve: (decision: PermissionApprovalDecision) => void;
     }
   >();
+  private activeDraftStreams = new Map<string, ActiveDraftStreamState>();
+  private activeGroupStreams = new Map<string, ActiveGroupStreamState>();
+  private nextDraftIdOffset = 1;
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
@@ -195,6 +361,137 @@ export class TelegramChannel implements Channel {
     if (!this.pollingRetryTimer) return;
     clearTimeout(this.pollingRetryTimer);
     this.pollingRetryTimer = null;
+  }
+
+  private buildDraftStreamKey(jid: string, threadId?: string): string {
+    return `${jid}:${threadId || ''}`;
+  }
+
+  private isLikelyPrivateChatId(numericId: string): boolean {
+    return !numericId.startsWith('-');
+  }
+
+  private createDraftChunkStream(): {
+    iterator: AsyncIterable<string>;
+    push: (chunk: string) => void;
+    close: () => void;
+  } {
+    const chunks: string[] = [];
+    let closed = false;
+    let resolver: (() => void) | null = null;
+    const wake = () => {
+      if (resolver) {
+        const resolve = resolver;
+        resolver = null;
+        resolve();
+      }
+    };
+    return {
+      iterator: (async function* () {
+        while (!closed || chunks.length > 0) {
+          if (chunks.length === 0) {
+            await new Promise<void>((resolve) => {
+              resolver = resolve;
+            });
+            continue;
+          }
+          const next = chunks.shift();
+          if (next) yield next;
+        }
+      })(),
+      push: (chunk: string) => {
+        if (!chunk) return;
+        chunks.push(chunk);
+        wake();
+      },
+      close: () => {
+        closed = true;
+        wake();
+      },
+    };
+  }
+
+  private async handleGroupStreamingChunk(
+    jid: string,
+    numericId: string,
+    text: string,
+    options: StreamingChunkOptions,
+  ): Promise<void> {
+    if (!this.bot) return;
+    const parsedThreadId = options.threadId
+      ? Number.parseInt(options.threadId, 10)
+      : undefined;
+    const key = this.buildDraftStreamKey(jid, options.threadId);
+    let state = this.activeGroupStreams.get(key);
+    if (!state) {
+      state = {
+        chatId: numericId,
+        threadId: Number.isFinite(parsedThreadId) ? parsedThreadId : undefined,
+        rawBuffer: '',
+        lastFlushAt: 0,
+      };
+      this.activeGroupStreams.set(key, state);
+    }
+
+    if (text) state.rawBuffer += text;
+    const renderedBuffer = formatTelegramStreamingText(state.rawBuffer);
+    const hasContent = renderedBuffer.trim().length > 0;
+    if (!hasContent) {
+      if (options.done) this.activeGroupStreams.delete(key);
+      return;
+    }
+
+    const now = Date.now();
+    const shouldFlush =
+      options.done ||
+      !state.messageId ||
+      now - state.lastFlushAt >= TELEGRAM_GROUP_EDIT_INTERVAL_MS;
+
+    try {
+      if (shouldFlush) {
+        const headText = renderedBuffer.slice(0, TELEGRAM_DRAFT_MAX_LENGTH);
+        if (!state.messageId) {
+          const sendOptions = state.threadId
+            ? { message_thread_id: state.threadId }
+            : {};
+          const messageId = await sendTelegramMessageWithResult(
+            this.bot.api,
+            numericId,
+            headText,
+            sendOptions,
+          );
+          if (messageId) state.messageId = messageId;
+        } else {
+          await editTelegramMessage(
+            this.bot.api,
+            numericId,
+            state.messageId,
+            headText,
+          );
+        }
+        state.lastFlushAt = now;
+      }
+    } catch (err) {
+      logger.warn(
+        { jid, err: this.sanitizeErrorMessage(err) },
+        'Telegram group stream update failed',
+      );
+      if (options.done) {
+        await this.sendMessage(jid, renderedBuffer, options.threadId);
+        this.activeGroupStreams.delete(key);
+      }
+      return;
+    }
+
+    if (options.done) {
+      this.activeGroupStreams.delete(key);
+      const overflowText = renderedBuffer
+        .slice(TELEGRAM_DRAFT_MAX_LENGTH)
+        .trim();
+      if (overflowText) {
+        await this.sendMessage(jid, overflowText, options.threadId);
+      }
+    }
   }
 
   private schedulePollingRetry(): void {
@@ -378,11 +675,14 @@ export class TelegramChannel implements Channel {
   async connect(): Promise<void> {
     this.isStopping = false;
     this.clearPollingRetryTimer();
-    this.bot = new Bot(this.botToken, {
+    this.bot = new Bot<TelegramContext>(this.botToken, {
       client: {
         baseFetchConfig: { agent: https.globalAgent, compress: true },
       },
     });
+    this.bot.api.config.use(autoRetry());
+    this.bot.use(stream());
+    this.draftStreamApi = streamApi(this.bot.api.raw);
 
     // Command to get chat ID (useful for registration)
     this.bot.command('chatid', (ctx) => {
@@ -394,8 +694,8 @@ export class TelegramChannel implements Channel {
           : (ctx.chat as any).title || 'Unknown';
 
       ctx.reply(
-        `Chat ID: \`tg:${chatId}\`\nName: ${chatName}\nType: ${chatType}`,
-        { parse_mode: 'Markdown' },
+        `Chat ID: \`tg:${escapeTelegramMarkdownV2Literal(String(chatId))}\`\nName: ${escapeTelegramMarkdownV2Literal(chatName)}\nType: ${escapeTelegramMarkdownV2Literal(chatType)}`,
+        { parse_mode: 'MarkdownV2' },
       );
     });
 
@@ -723,6 +1023,95 @@ export class TelegramChannel implements Channel {
     }
   }
 
+  async sendStreamingChunk(
+    jid: string,
+    text: string,
+    options: StreamingChunkOptions = {},
+  ): Promise<void> {
+    if (!this.bot || !this.draftStreamApi) return;
+
+    const numericId = jid.replace(/^tg:/, '');
+    const parsedChatId = Number.parseInt(numericId, 10);
+    if (!Number.isFinite(parsedChatId)) {
+      logger.warn({ jid }, 'Invalid Telegram chat id for streaming chunk');
+      return;
+    }
+    if (!this.isLikelyPrivateChatId(numericId)) {
+      await this.handleGroupStreamingChunk(jid, numericId, text, options);
+      return;
+    }
+
+    const parsedThreadId = options.threadId
+      ? Number.parseInt(options.threadId, 10)
+      : undefined;
+    const key = this.buildDraftStreamKey(jid, options.threadId);
+    let state = this.activeDraftStreams.get(key);
+    if (!state) {
+      const draftThreadId = Number.isFinite(parsedThreadId)
+        ? parsedThreadId
+        : undefined;
+      const draftOptions = draftThreadId
+        ? { message_thread_id: draftThreadId, parse_mode: 'MarkdownV2' as const }
+        : { parse_mode: 'MarkdownV2' as const };
+      const queue = this.createDraftChunkStream();
+      const draftIdOffset = this.nextDraftIdOffset * 256;
+      this.nextDraftIdOffset += 1;
+      const streamState: ActiveDraftStreamState = {
+        chatId: parsedChatId,
+        threadId: draftThreadId,
+        rawBuffer: '',
+        pushChunk: queue.push,
+        closeStream: queue.close,
+        streamPromise: Promise.resolve(),
+      };
+      streamState.streamPromise = this.draftStreamApi
+          .streamMessage(
+            parsedChatId,
+            draftIdOffset,
+            queue.iterator,
+            draftOptions,
+            draftOptions,
+          )
+          .then(() => undefined)
+          .catch(async (err) => {
+            logger.warn(
+              { jid, err: this.sanitizeErrorMessage(err) },
+              'Telegram stream send failed; falling back to final message send',
+            );
+            const fallbackText = streamState.rawBuffer.trim();
+            if (fallbackText) {
+              await this.sendMessage(jid, fallbackText, options.threadId);
+            }
+          })
+          .finally(() => {
+            this.activeDraftStreams.delete(key);
+          });
+      this.activeDraftStreams.set(key, streamState);
+      state = streamState;
+    }
+    if (!state) return;
+
+    if (text) {
+      state.rawBuffer += text;
+      const escaped = escapeTelegramMarkdownV2(text);
+      for (const chunk of splitTelegramDraftChunks(escaped)) {
+        if (chunk.length > TELEGRAM_DRAFT_MAX_LENGTH) {
+          logger.warn(
+            { jid, length: chunk.length },
+            'Skipping oversize Telegram stream chunk',
+          );
+          continue;
+        }
+        state.pushChunk(chunk);
+      }
+    }
+
+    if (options.done) {
+      state.closeStream();
+      await state.streamPromise;
+    }
+  }
+
   async requestPermissionApproval(
     jid: string,
     request: PermissionApprovalRequest,
@@ -799,6 +1188,11 @@ export class TelegramChannel implements Channel {
   async disconnect(): Promise<void> {
     this.isStopping = true;
     this.clearPollingRetryTimer();
+    for (const streamState of this.activeDraftStreams.values()) {
+      streamState.closeStream();
+    }
+    this.activeDraftStreams.clear();
+    this.activeGroupStreams.clear();
     for (const [
       requestId,
       pending,
@@ -814,6 +1208,7 @@ export class TelegramChannel implements Channel {
     if (this.bot) {
       this.bot.stop();
       this.bot = null;
+      this.draftStreamApi = null;
       logger.info('Telegram bot stopped');
     }
   }

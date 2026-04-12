@@ -20,9 +20,15 @@ async function loadRuntimeDiagnosticsModule(config: {
   vi.resetModules();
   vi.doMock('../core/config.js', () => ({
     ONECLI_URL: config.ONECLI_URL || '',
+    AGENT_ROOT: '/tmp/nanoclaw-home',
   }));
   vi.doMock('../core/env.js', () => ({
     readEnvFile: () => config.envVars || {},
+  }));
+  vi.doMock('./agent-spawn-layout.js', () => ({
+    getRepoAgentRunnerRoot: () => '/repo/agent-runner',
+    getRuntimeAgentRunnerRoot: () => '/tmp/nanoclaw-home/.runtime/agent-runner',
+    syncHostAgentRunnerRuntime: vi.fn(),
   }));
   return import('./runtime-diagnostics.js');
 }
@@ -65,8 +71,9 @@ describe('runtime-diagnostics', () => {
     mockExecSync.mockReturnValue('');
     mockExistsSync.mockImplementation((pathValue: string) => {
       return (
-        pathValue.endsWith('/container/agent-runner/dist/index.js') ||
-        pathValue.endsWith('/container/agent-runner/dist/ipc-mcp-stdio.js') ||
+        pathValue.endsWith('/.runtime/agent-runner/dist/index.js') ||
+        pathValue.endsWith('/.runtime/agent-runner/dist/ipc-mcp-stdio.js') ||
+        pathValue.endsWith('/repo/agent-runner/package.json') ||
         pathValue === process.execPath
       );
     });
@@ -80,7 +87,7 @@ describe('runtime-diagnostics', () => {
     expect(diagnostics.ok).toBe(true);
     expect(diagnostics.details.hostBuildAttempted).toBe(true);
     expect(mockExecSync).toHaveBeenCalledWith(
-      'npm --prefix container/agent-runner run build',
+      'npm --prefix agent-runner run build',
       {
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 300000,
@@ -90,7 +97,7 @@ describe('runtime-diagnostics', () => {
 
   it('fails startup preflight when host auto-build fails', async () => {
     mockExecSync.mockImplementation((cmd: string) => {
-      if (cmd.includes('npm --prefix container/agent-runner run build')) {
+      if (cmd.includes('npm --prefix agent-runner run build')) {
         throw new Error('build failed');
       }
       return '';
@@ -116,9 +123,12 @@ describe('runtime-diagnostics', () => {
   it('reports error when host runner build succeeds but artifacts are still missing (lines 77-83)', async () => {
     // execSync succeeds (build completes) but existsSync returns false for artifacts
     mockExecSync.mockReturnValue('');
-    mockExistsSync.mockImplementation(
-      (pathValue: string) => pathValue === process.execPath,
-    );
+    mockExistsSync.mockImplementation((pathValue: string) => {
+      return (
+        pathValue === process.execPath ||
+        pathValue.endsWith('/repo/agent-runner/package.json')
+      );
+    });
     const mod = await loadRuntimeDiagnosticsModule({
       ONECLI_URL: 'http://localhost:10254',
       envVars: { CLAUDE_CODE_OAUTH_TOKEN: 'token' },
@@ -213,8 +223,9 @@ describe('runtime-diagnostics', () => {
     mockExecSync.mockReturnValue('');
     mockExistsSync.mockImplementation((pathValue: string) => {
       return (
-        pathValue.endsWith('/container/agent-runner/dist/index.js') ||
-        pathValue.endsWith('/container/agent-runner/dist/ipc-mcp-stdio.js') ||
+        pathValue.endsWith('/.runtime/agent-runner/dist/index.js') ||
+        pathValue.endsWith('/.runtime/agent-runner/dist/ipc-mcp-stdio.js') ||
+        pathValue.endsWith('/repo/agent-runner/package.json') ||
         pathValue === process.execPath
       );
     });
@@ -257,9 +268,12 @@ describe('runtime-diagnostics', () => {
     mockExecSync.mockImplementation(() => {
       throw 'string error message';
     });
-    mockExistsSync.mockImplementation(
-      (pathValue: string) => pathValue === process.execPath,
-    );
+    mockExistsSync.mockImplementation((pathValue: string) => {
+      return (
+        pathValue === process.execPath ||
+        pathValue.endsWith('/repo/agent-runner/package.json')
+      );
+    });
     const mod = await loadRuntimeDiagnosticsModule({
       ONECLI_URL: 'http://localhost:10254',
       envVars: { CLAUDE_CODE_OAUTH_TOKEN: 'token' },

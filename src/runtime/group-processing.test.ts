@@ -44,9 +44,12 @@ vi.mock('../memory/memory-service.js', () => ({
 
 const mockFindChannel = vi.fn();
 const mockFormatMessages = vi.fn();
+const mockFormatOutboundForChannel = vi.fn();
 vi.mock('../messaging/router.js', () => ({
   findChannel: (...args: unknown[]) => mockFindChannel(...args),
   formatMessages: (...args: unknown[]) => mockFormatMessages(...args),
+  formatOutboundForChannel: (...args: unknown[]) =>
+    mockFormatOutboundForChannel(...args),
 }));
 
 const mockIsTriggerAllowed = vi.fn();
@@ -202,6 +205,9 @@ function setupHappyPath(
   mockGetMessagesSince.mockReturnValue(messages);
   mockHandleSessionCommand.mockResolvedValue({ handled: false });
   mockFormatMessages.mockReturnValue('formatted prompt');
+  mockFormatOutboundForChannel.mockImplementation((raw: string) =>
+    raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim(),
+  );
   mockGetAllJobs.mockReturnValue([]);
   mockGetRecentJobRuns.mockReturnValue([]);
   mockWriteMemoryContextSnapshot.mockResolvedValue({ retrievedItemIds: [] });
@@ -515,8 +521,20 @@ describe('createGroupProcessor', () => {
       ]);
     });
 
-    it('notifies idle on success status from onOutput callback', async () => {
+    it('notifies idle on final success marker from onOutput callback', async () => {
       const { deps } = setupHappyPath();
+      mockSpawnAgent.mockImplementation(
+        async (
+          _group: RegisteredGroup,
+          _prompt: string,
+          _chatJid: string,
+          onOutput?: (output: AgentOutput) => Promise<void>,
+        ) => {
+          await onOutput?.({ status: 'success', result: 'partial reply' });
+          await onOutput?.({ status: 'success', result: null });
+          return { status: 'success', result: null } as AgentOutput;
+        },
+      );
 
       const { processGroupMessages } = createGroupProcessor(deps);
       await processGroupMessages('group1@g.us');

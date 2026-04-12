@@ -35,7 +35,7 @@ import {
 import { GroupQueue } from './runtime/group-queue.js';
 import { startIpcWatcher } from './runtime/ipc.js';
 import { writeSchedulerStateFileSafe } from './runtime/scheduler-state-file.js';
-import { findChannel, formatOutbound } from './messaging/router.js';
+import { findChannel, formatOutboundForChannel } from './messaging/router.js';
 import { restoreRemoteControl } from './runtime/remote-control.js';
 import {
   isSenderAllowed,
@@ -379,7 +379,7 @@ async function main(): Promise<void> {
         logger.warn({ jid }, 'No channel owns JID, cannot send message');
         return;
       }
-      const text = formatOutbound(rawText);
+      const text = formatOutboundForChannel(rawText, channel.name);
       if (text) await channel.sendMessage(jid, text);
     },
     onSchedulerChanged: syncSchedulerState,
@@ -388,7 +388,9 @@ async function main(): Promise<void> {
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      const formatted = formatOutboundForChannel(text, channel.name);
+      if (!formatted) return Promise.resolve();
+      return channel.sendMessage(jid, formatted);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

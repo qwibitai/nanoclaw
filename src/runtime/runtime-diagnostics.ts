@@ -2,8 +2,13 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { ONECLI_URL } from '../core/config.js';
+import { AGENT_ROOT, ONECLI_URL } from '../core/config.js';
 import { readEnvFile } from '../core/env.js';
+import {
+  getRepoAgentRunnerRoot,
+  getRuntimeAgentRunnerRoot,
+  syncHostAgentRunnerRuntime,
+} from './agent-spawn-layout.js';
 
 export interface RuntimeDiagnosticDetails {
   runtimeBinary: string;
@@ -11,6 +16,7 @@ export interface RuntimeDiagnosticDetails {
   hostRunnerPath: string;
   hostMcpPath: string;
   hostArtifactsPresent: boolean;
+  runtimeConfigRoot: string;
   hostBuildAttempted: boolean;
   hostBuildSucceeded: boolean;
   onecliUrlConfigured: boolean;
@@ -54,21 +60,30 @@ function readCredentialPathStatus():
 }
 
 function buildHostArtifacts(
+  repoRunnerRoot: string,
   hostRunnerPath: string,
   hostMcpPath: string,
   errors: string[],
   fixes: string[],
 ): { attempted: boolean; succeeded: boolean } {
   const attempted = true;
+  if (!fs.existsSync(path.join(repoRunnerRoot, 'package.json'))) {
+    errors.push(`Host runner source not found: ${repoRunnerRoot}`);
+    fixes.push(
+      `Restore \`${repoRunnerRoot}\` or provide prebuilt runner assets under \`${getRuntimeAgentRunnerRoot()}\`.`,
+    );
+    return { attempted, succeeded: false };
+  }
   try {
-    execSync('npm --prefix container/agent-runner run build', {
+    execSync('npm --prefix agent-runner run build', {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 300_000,
     });
+    syncHostAgentRunnerRuntime();
   } catch (err) {
     errors.push(`Host runner build failed: ${summarizeExecError(err)}`);
     fixes.push(
-      'Run `npm --prefix container/agent-runner run build` and resolve build errors.',
+      'Run `npm --prefix agent-runner run build` and resolve build errors.',
     );
     return { attempted, succeeded: false };
   }
@@ -78,7 +93,7 @@ function buildHostArtifacts(
       'Host runner build completed but required artifacts are still missing.',
     );
     fixes.push(
-      'Verify `container/agent-runner/dist/index.js` and `container/agent-runner/dist/ipc-mcp-stdio.js` exist.',
+      `Verify \`${hostRunnerPath}\` and \`${hostMcpPath}\` exist.`,
     );
     return { attempted, succeeded: false };
   }
@@ -92,20 +107,11 @@ export async function collectRuntimeDiagnostics(
   const warnings: string[] = [];
   const fixes: string[] = [];
 
-  const hostRunnerPath = path.join(
-    process.cwd(),
-    'container',
-    'agent-runner',
-    'dist',
-    'index.js',
-  );
-  const hostMcpPath = path.join(
-    process.cwd(),
-    'container',
-    'agent-runner',
-    'dist',
-    'ipc-mcp-stdio.js',
-  );
+  const repoRunnerRoot = getRepoAgentRunnerRoot();
+  const runtimeRunnerRoot = getRuntimeAgentRunnerRoot();
+  syncHostAgentRunnerRuntime();
+  const hostRunnerPath = path.join(runtimeRunnerRoot, 'dist', 'index.js');
+  const hostMcpPath = path.join(runtimeRunnerRoot, 'dist', 'ipc-mcp-stdio.js');
 
   const runtimeBinaryReady = fs.existsSync(process.execPath);
   if (!runtimeBinaryReady) {
@@ -122,6 +128,7 @@ export async function collectRuntimeDiagnostics(
 
   if (options.autoBuildHostRunner) {
     const build = buildHostArtifacts(
+      repoRunnerRoot,
       hostRunnerPath,
       hostMcpPath,
       errors,
@@ -136,9 +143,9 @@ export async function collectRuntimeDiagnostics(
   }
   if (!hostArtifactsPresent) {
     errors.push(
-      'Host runtime requires built `container/agent-runner/dist` artifacts.',
+      `Host runtime requires runner artifacts under \`${runtimeRunnerRoot}/dist\`.`,
     );
-    fixes.push('Run `npm --prefix container/agent-runner run build`.');
+    fixes.push('Run `npm --prefix agent-runner run build`.');
   }
 
   const credentialPathStatus = readCredentialPathStatus();
@@ -163,6 +170,7 @@ export async function collectRuntimeDiagnostics(
       hostRunnerPath,
       hostMcpPath,
       hostArtifactsPresent,
+      runtimeConfigRoot: AGENT_ROOT,
       hostBuildAttempted,
       hostBuildSucceeded,
       onecliUrlConfigured: Boolean(ONECLI_URL?.trim()),

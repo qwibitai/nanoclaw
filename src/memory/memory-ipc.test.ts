@@ -2,11 +2,24 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ORIGINAL_ENV = { ...process.env };
+const tempRoots: string[] = [];
+
+beforeEach(() => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'myclaw-memory-ipc-'));
+  tempRoots.push(root);
+  process.env.AGENT_ROOT = root;
+});
 
 afterEach(async () => {
+  while (tempRoots.length > 0) {
+    const root = tempRoots.pop();
+    if (!root) continue;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
   for (const key of Object.keys(process.env)) {
     if (!(key in ORIGINAL_ENV)) {
       delete process.env[key];
@@ -249,7 +262,7 @@ describe('memory IPC provider integration', () => {
     vi.doUnmock('./memory-service.js');
   });
 
-  it('memory_search returns error response on embedding failure', async () => {
+  it('memory_search returns uninitialized provider when embeddings are invalid', async () => {
     // The search path goes through MemoryService.search which calls the embedding
     // provider. Without a valid embedding provider, the search returns an error
     // response. This still covers the memory_search IPC branch.
@@ -319,9 +332,10 @@ describe('memory IPC provider integration', () => {
       false,
     );
 
-    // The error response still exercises the memory_search case branch
+    // Invalid embedding config fails service initialization before search.
+    expect(response.ok).toBe(false);
     expect(response.requestId).toBe('req-search');
-    expect(response.provider).toBe('ipc-search-provider');
+    expect(response.provider).toBe('uninitialized');
   });
 
   it('returns error for empty search query', async () => {

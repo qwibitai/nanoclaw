@@ -6,7 +6,7 @@ import { OneCLI } from '@onecli-sh/sdk';
 import {
   DATA_DIR,
   GROUPS_DIR,
-  NANOCLAW_CONFIG_DIR,
+  AGENT_ROOT,
   ONECLI_URL,
 } from '../core/config.js';
 import { readEnvFile } from '../core/env.js';
@@ -19,6 +19,7 @@ import {
 import {
   ensureGroupIpcLayout,
   ensureSharedSessionSettings,
+  syncHostAgentRunnerRuntime,
   syncGroupSkills,
 } from './agent-spawn-layout.js';
 import { HostRuntimeContext } from './agent-spawn-types.js';
@@ -103,9 +104,10 @@ export function prepareHostRuntimeContext(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  // Shared .claude/ under NANOCLAW_CONFIG_DIR for skills, settings, plugins
+  // Shared .claude/ under AGENT_ROOT for skills, settings, plugins
   ensureSharedSessionSettings();
   syncGroupSkills();
+  const runnerRoot = syncHostAgentRunnerRuntime();
 
   const groupIpcDir = resolveGroupIpcPath(group.folder);
   ensureGroupIpcLayout(groupIpcDir);
@@ -119,5 +121,6 @@ export function prepareHostRuntimeContext(
     groupDir,
     globalDir,
     groupIpcDir,
+    runnerRoot,
   };
 }

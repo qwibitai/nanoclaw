@@ -30,6 +30,7 @@ export interface HostRuntimeContext {
   groupDir: string;
   globalDir?: string;
   groupIpcDir: string;
+  runnerRoot: string;
 }
 
 export interface AvailableGroup {

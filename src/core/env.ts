@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { logger } from './logger.js';
 
@@ -9,12 +10,20 @@ import { logger } from './logger.js';
  * so they don't leak to child processes.
  */
 export function readEnvFile(keys: string[]): Record<string, string> {
-  const envFile = path.join(process.cwd(), '.env');
-  let content: string;
-  try {
-    content = fs.readFileSync(envFile, 'utf-8');
-  } catch (err) {
-    logger.debug({ err }, '.env file not found, using defaults');
+  const homeDir = process.env.HOME || os.homedir();
+  const rootDir = process.env.AGENT_ROOT?.trim() || path.join(homeDir, 'myclaw');
+  const candidates = [path.join(rootDir, '.env')];
+  let content: string | undefined;
+  for (const envFile of candidates) {
+    try {
+      content = fs.readFileSync(envFile, 'utf-8');
+      break;
+    } catch {
+      // try next candidate
+    }
+  }
+  if (!content) {
+    logger.debug?.('.env file not found, using defaults');
     return {};
   }
 

@@ -16,7 +16,7 @@ export interface ThinkingOverride {
 
 /**
  * Mount Allowlist - Security configuration for additional mounts
- * This file should be stored at ~/.config/nanoclaw/mount-allowlist.json
+ * This file should be stored at ~/myclaw/mount-allowlist.json
  * and is NOT mounted into any container, making it tamper-proof from agents.
  */
 export interface MountAllowlist {
@@ -150,6 +150,11 @@ export interface PermissionApprovalDecision {
   reason?: string;
 }
 
+export interface StreamingChunkOptions {
+  threadId?: string;
+  done?: boolean;
+}
+
 export interface Channel {
   name: string;
   connect(): Promise<void>;
@@ -159,6 +164,12 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: streaming sink for progressive output.
+  sendStreamingChunk?(
+    jid: string,
+    text: string,
+    options?: StreamingChunkOptions,
+  ): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
   // Optional: human approval flow for sensitive tool permission requests.

@@ -39,6 +39,9 @@ vi.mock('../core/logger.js', () => ({
 const mockEnsureGroupIpcLayout = vi.fn();
 const mockEnsureSharedSessionSettings = vi.fn();
 const mockSyncGroupSkills = vi.fn();
+const mockSyncHostAgentRunnerRuntime = vi.fn(
+  () => '/tmp/nanoclaw-test/config/.runtime/agent-runner',
+);
 
 vi.mock('./agent-spawn-layout.js', () => ({
   ensureGroupIpcLayout: (...args: unknown[]) =>
@@ -46,6 +49,7 @@ vi.mock('./agent-spawn-layout.js', () => ({
   ensureSharedSessionSettings: (...args: unknown[]) =>
     mockEnsureSharedSessionSettings(...args),
   syncGroupSkills: (...args: unknown[]) => mockSyncGroupSkills(...args),
+  syncHostAgentRunnerRuntime: () => mockSyncHostAgentRunnerRuntime(),
 }));
 
 /* ------------------------------------------------------------------ */
@@ -56,7 +60,7 @@ async function loadModule(config: {
   ONECLI_URL?: string;
   DATA_DIR?: string;
   GROUPS_DIR?: string;
-  NANOCLAW_CONFIG_DIR?: string;
+  AGENT_ROOT?: string;
   envFromFile?: Record<string, string>;
 }) {
   vi.resetModules();
@@ -92,14 +96,15 @@ async function loadModule(config: {
     ensureSharedSessionSettings: (...args: unknown[]) =>
       mockEnsureSharedSessionSettings(...args),
     syncGroupSkills: (...args: unknown[]) => mockSyncGroupSkills(...args),
+    syncHostAgentRunnerRuntime: () => mockSyncHostAgentRunnerRuntime(),
   }));
 
   vi.doMock('../core/config.js', () => ({
     ONECLI_URL: config.ONECLI_URL ?? '',
     DATA_DIR: config.DATA_DIR ?? '/tmp/nanoclaw-test/data',
     GROUPS_DIR: config.GROUPS_DIR ?? '/tmp/nanoclaw-test/groups',
-    NANOCLAW_CONFIG_DIR:
-      config.NANOCLAW_CONFIG_DIR ?? '/tmp/nanoclaw-test/config',
+    AGENT_ROOT:
+      config.AGENT_ROOT ?? '/tmp/nanoclaw-test/config',
   }));
 
   vi.doMock('../core/env.js', () => ({
@@ -316,6 +321,7 @@ describe('prepareHostRuntimeContext', () => {
 
     expect(ctx.groupDir).toBe('/tmp/nanoclaw-test/groups/test-group');
     expect(ctx.groupIpcDir).toBe('/tmp/nanoclaw-test/data/ipc/test-group');
+    expect(ctx.runnerRoot).toBe('/tmp/nanoclaw-test/config/.runtime/agent-runner');
 
     // Verify mkdirSync was called for the group directory
     expect(mockMkdirSync).toHaveBeenCalledWith(
@@ -326,6 +332,7 @@ describe('prepareHostRuntimeContext', () => {
     // Verify layout helpers were called
     expect(mockEnsureSharedSessionSettings).toHaveBeenCalled();
     expect(mockSyncGroupSkills).toHaveBeenCalled();
+    expect(mockSyncHostAgentRunnerRuntime).toHaveBeenCalled();
     expect(mockEnsureGroupIpcLayout).toHaveBeenCalledWith(
       '/tmp/nanoclaw-test/data/ipc/test-group',
     );

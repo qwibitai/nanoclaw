@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MEMORY_VECTOR_DIMENSIONS } from '../core/config.js';
 import { EmbeddingProvider } from './memory-embeddings.js';
@@ -11,7 +11,13 @@ import { MemoryStore } from './memory-store.js';
 
 const tempRoots: string[] = [];
 
+beforeEach(() => {
+  // Keep consolidation tests independent from local .env files.
+  vi.stubEnv('CLAUDE_MODEL', 'claude-3-5-sonnet-latest');
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const root of tempRoots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
   }

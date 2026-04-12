@@ -48,14 +48,27 @@ vi.mock('grammy', () => ({
 
     api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 987 }),
+      sendMessageDraft: vi.fn().mockResolvedValue(true),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: 'photos/file_0.jpg' }),
       getChatMember: vi.fn().mockResolvedValue({ status: 'administrator' }),
       editMessageText: vi.fn().mockResolvedValue(undefined),
+      config: { use: vi.fn() },
+      raw: null as any,
     };
 
     constructor(token: string) {
       this.token = token;
+      this.api.raw = {
+        sendMessage: vi.fn((params: any) => {
+          const { chat_id, text, ...rest } = params;
+          return this.api.sendMessage(chat_id.toString(), text, rest);
+        }),
+        sendMessageDraft: vi.fn((params: any) => {
+          const { chat_id, draft_id, text, ...rest } = params;
+          return this.api.sendMessageDraft(chat_id, draft_id, text, rest);
+        }),
+      };
       botRef.current = this;
     }
 
@@ -72,6 +85,8 @@ vi.mock('grammy', () => ({
     catch(handler: Handler) {
       this.errorHandler = handler;
     }
+
+    use(_middleware: Handler) {}
 
     start(opts: { onStart: (botInfo: any) => void }) {
       opts.onStart({ username: 'andy_ai_bot', id: 12345 });
@@ -1245,7 +1260,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '100200300',
         'Hello',
-        { parse_mode: 'Markdown' },
+        { parse_mode: 'MarkdownV2' },
       );
     });
 
@@ -1259,7 +1274,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '-1001234567890',
         'Group message',
-        { parse_mode: 'Markdown' },
+        { parse_mode: 'MarkdownV2' },
       );
     });
 
@@ -1276,13 +1291,13 @@ describe('TelegramChannel', () => {
         1,
         '100200300',
         'x'.repeat(4096),
-        { parse_mode: 'Markdown' },
+        { parse_mode: 'MarkdownV2' },
       );
       expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
         2,
         '100200300',
         'x'.repeat(904),
-        { parse_mode: 'Markdown' },
+        { parse_mode: 'MarkdownV2' },
       );
     });
 
@@ -1312,6 +1327,32 @@ describe('TelegramChannel', () => {
       ).resolves.toBeUndefined();
     });
 
+    it('falls back to escaped MarkdownV2 when raw MarkdownV2 fails', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      currentBot().api.sendMessage.mockReset();
+      currentBot()
+        .api.sendMessage.mockRejectedValueOnce(new Error('Bad MarkdownV2'))
+        .mockResolvedValueOnce({ message_id: 1 });
+
+      await channel.sendMessage('tg:100200300', 'Hello (world)');
+
+      expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
+        1,
+        '100200300',
+        'Hello (world)',
+        { parse_mode: 'MarkdownV2' },
+      );
+      expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
+        2,
+        '100200300',
+        'Hello \\(world\\)',
+        { parse_mode: 'MarkdownV2' },
+      );
+    });
+
     it('does nothing when bot is not initialized', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
@@ -1320,6 +1361,52 @@ describe('TelegramChannel', () => {
       await channel.sendMessage('tg:100200300', 'No bot');
 
       // No error, no API call
+    });
+  });
+
+  describe('sendStreamingChunk', () => {
+    it('uses sendMessageDraft in private chats and sends final message on done', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendStreamingChunk('tg:100200300', 'Hello ');
+      await channel.sendStreamingChunk('tg:100200300', 'world');
+      await channel.sendStreamingChunk('tg:100200300', '', { done: true });
+
+      expect(currentBot().api.sendMessageDraft).toHaveBeenCalledWith(
+        100200300,
+        expect.any(Number),
+        expect.stringContaining('Hello'),
+        expect.objectContaining({ parse_mode: 'MarkdownV2' }),
+      );
+      expect(currentBot().api.sendMessage).toHaveBeenLastCalledWith(
+        '100200300',
+        'Hello world',
+        expect.objectContaining({ parse_mode: 'MarkdownV2' }),
+      );
+    });
+
+    it('streams in groups via send+edit fallback', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendStreamingChunk('tg:-1001234567890', 'group update');
+      await channel.sendStreamingChunk('tg:-1001234567890', '', { done: true });
+
+      expect(currentBot().api.sendMessageDraft).not.toHaveBeenCalled();
+      expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
+        '-1001234567890',
+        'group update',
+        expect.objectContaining({ parse_mode: 'MarkdownV2' }),
+      );
+      expect(currentBot().api.editMessageText).toHaveBeenCalledWith(
+        '-1001234567890',
+        987,
+        'group update',
+        expect.objectContaining({ parse_mode: 'MarkdownV2' }),
+      );
     });
   });
 
@@ -1422,7 +1509,7 @@ describe('TelegramChannel', () => {
 
       expect(ctx.reply).toHaveBeenCalledWith(
         expect.stringContaining('tg:100200300'),
-        expect.objectContaining({ parse_mode: 'Markdown' }),
+        expect.objectContaining({ parse_mode: 'MarkdownV2' }),
       );
     });
 

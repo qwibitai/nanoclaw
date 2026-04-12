@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { GROUPS_DIR, NANOCLAW_CONFIG_DIR } from '../core/config.js';
+import { GROUPS_DIR, AGENT_ROOT } from '../core/config.js';
 import { logger } from '../core/logger.js';
 import { isValidGroupFolder } from '../platform/group-folder.js';
 
@@ -175,7 +175,7 @@ export class PromptProfileService {
   private readonly totalBudget: number;
 
   constructor(options: PromptProfileServiceOptions = {}) {
-    this.configDir = options.configDir || NANOCLAW_CONFIG_DIR;
+    this.configDir = options.configDir || AGENT_ROOT;
     this.groupsDir = options.groupsDir || GROUPS_DIR;
     this.sectionBudgets = {
       ...DEFAULT_PROMPT_SECTION_BUDGETS,

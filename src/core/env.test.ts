@@ -6,15 +6,22 @@ import { readEnvFile } from './env.js';
 
 describe('readEnvFile', () => {
   const originalCwd = process.cwd();
+  const originalAgentRoot = process.env.AGENT_ROOT;
   let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'env-test-'));
     vi.spyOn(process, 'cwd').mockReturnValue(tmpDir);
+    process.env.AGENT_ROOT = tmpDir;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    if (originalAgentRoot === undefined) {
+      delete process.env.AGENT_ROOT;
+    } else {
+      process.env.AGENT_ROOT = originalAgentRoot;
+    }
   });
 
   function writeEnv(content: string): void {
@@ -23,6 +30,17 @@ describe('readEnvFile', () => {
 
   it('returns empty object when .env file does not exist', () => {
     const result = readEnvFile(['KEY']);
+    expect(result).toEqual({});
+  });
+
+  it('does not fall back to repo .env when AGENT_ROOT .env is missing', () => {
+    fs.writeFileSync(path.join(tmpDir, '.env'), 'FROM_CWD=1');
+    const isolatedRoot = fs.mkdtempSync(
+      path.join(require('os').tmpdir(), 'env-root-'),
+    );
+    process.env.AGENT_ROOT = isolatedRoot;
+
+    const result = readEnvFile(['FROM_CWD']);
     expect(result).toEqual({});
   });
 

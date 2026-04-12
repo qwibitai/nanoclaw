@@ -26,6 +26,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",
+    "@grammyjs/auto-retry": "^2.0.2",
+    "@grammyjs/stream": "^1.0.1",
     "@onecli-sh/sdk": "^0.2.0",
     "better-sqlite3": "11.10.0",
     "cron-parser": "5.5.0",

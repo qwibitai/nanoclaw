@@ -12,7 +12,12 @@ import { logger } from '../core/logger.js';
 import { Channel, RegisteredGroup, ThinkingOverride } from '../core/types.js';
 import { writeMemoryContextSnapshot } from '../memory/memory-ipc.js';
 import { MemoryService } from '../memory/memory-service.js';
-import { findChannel, formatMessages } from '../messaging/router.js';
+import {
+  findChannel,
+  formatMessages,
+  formatOutboundForChannel,
+  stripInternalTagsPreserveWhitespace,
+} from '../messaging/router.js';
 import {
   isTriggerAllowed,
   loadSenderAllowlist,
@@ -341,6 +346,8 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
     let hadError = false;
     let outputSentToUser = false;
     let collectedOutput = '';
+    const supportsStreamingChunks =
+      typeof channel.sendStreamingChunk === 'function';
     let retrievedItemIdsForTurn: string[] = [];
     const memoryUserId = [...missedMessages]
       .reverse()
@@ -356,27 +363,55 @@ export function createGroupProcessor(deps: GroupProcessingDeps): {
             typeof result.result === 'string'
               ? result.result
               : JSON.stringify(result.result);
-          const text = raw
-            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-            .trim();
+          const isTelegramGroupStreaming =
+            supportsStreamingChunks &&
+            channel.name === 'telegram' &&
+            chatJid.startsWith('tg:-');
+          const text = isTelegramGroupStreaming
+            ? stripInternalTagsPreserveWhitespace(raw)
+            : formatOutboundForChannel(raw, channel.name);
           logger.info(
             { group: group.name },
             `Agent output: ${raw.length} chars`,
           );
           if (text) {
-            await channel.sendMessage(chatJid, text);
+            if (supportsStreamingChunks) {
+              await channel.sendStreamingChunk!(chatJid, text);
+            } else {
+              await channel.sendMessage(chatJid, text);
+            }
             outputSentToUser = true;
             collectedOutput += `${text}\n`;
           }
           resetIdleTimer();
         }
 
-        if (result.status === 'success') {
+        if (result.status === 'success' && !result.result) {
+          if (supportsStreamingChunks) {
+            try {
+              await channel.sendStreamingChunk!(chatJid, '', { done: true });
+            } catch (err) {
+              logger.warn(
+                { err, group: group.name },
+                'Failed to finalize streaming output',
+              );
+            }
+          }
           deps.queue.notifyIdle(chatJid);
         }
 
         if (result.status === 'error') {
           hadError = true;
+          if (supportsStreamingChunks) {
+            try {
+              await channel.sendStreamingChunk!(chatJid, '', { done: true });
+            } catch (err) {
+              logger.warn(
+                { err, group: group.name },
+                'Failed to finalize streaming output after error',
+              );
+            }
+          }
         }
       },
       undefined,

@@ -51,9 +51,9 @@ describe('ensureSharedSessionSettings', () => {
       ),
     );
 
-    // Mock NANOCLAW_CONFIG_DIR to point to our temp root
+    // Mock AGENT_ROOT to point to our temp root
     vi.doMock('../core/config.js', () => ({
-      NANOCLAW_CONFIG_DIR: root,
+      AGENT_ROOT: root,
       DATA_DIR: root,
     }));
 
@@ -77,7 +77,7 @@ describe('ensureSharedSessionSettings', () => {
     const root = makeTmpRoot(roots);
 
     vi.doMock('../core/config.js', () => ({
-      NANOCLAW_CONFIG_DIR: root,
+      AGENT_ROOT: root,
       DATA_DIR: root,
     }));
 
@@ -105,7 +105,7 @@ describe('ensureSharedSessionSettings', () => {
     fs.writeFileSync(settingsPath, '{{not valid json}}');
 
     vi.doMock('../core/config.js', () => ({
-      NANOCLAW_CONFIG_DIR: root,
+      AGENT_ROOT: root,
       DATA_DIR: root,
     }));
 
@@ -134,7 +134,7 @@ describe('ensureSharedSessionSettings', () => {
     fs.writeFileSync(settingsPath, '"just a string"');
 
     vi.doMock('../core/config.js', () => ({
-      NANOCLAW_CONFIG_DIR: root,
+      AGENT_ROOT: root,
       DATA_DIR: root,
     }));
 
@@ -186,11 +186,10 @@ describe('syncGroupSkills', () => {
     fs.symlinkSync(symlinkTarget, skillsDst);
     expect(fs.lstatSync(skillsDst).isSymbolicLink()).toBe(true);
 
-    // No container/skills source, so it just ensures the dir
     process.chdir(cwdRoot);
 
     vi.doMock('../core/config.js', () => ({
-      NANOCLAW_CONFIG_DIR: configRoot,
+      AGENT_ROOT: configRoot,
       DATA_DIR: configRoot,
     }));
 
@@ -203,15 +202,14 @@ describe('syncGroupSkills', () => {
     expect(stat.isDirectory()).toBe(true);
   });
 
-  it('creates skills dir when no source exists', async () => {
+  it('creates skills dir when it does not exist', async () => {
     const configRoot = makeTmpRoot(roots);
     const cwdRoot = makeTmpRoot(roots);
     originalCwd = process.cwd();
     process.chdir(cwdRoot);
-    // No container/skills dir at cwdRoot
 
     vi.doMock('../core/config.js', () => ({
-      NANOCLAW_CONFIG_DIR: configRoot,
+      AGENT_ROOT: configRoot,
       DATA_DIR: configRoot,
     }));
 
@@ -221,108 +219,32 @@ describe('syncGroupSkills', () => {
     const skillsDst = path.join(configRoot, '.claude', 'skills');
     expect(fs.existsSync(skillsDst)).toBe(true);
     expect(fs.statSync(skillsDst).isDirectory()).toBe(true);
-    // Should be empty — no source to copy from
-    expect(fs.readdirSync(skillsDst)).toEqual([]);
   });
 
-  it('copies skills from source when destination lacks them', async () => {
+  it('preserves existing skills in the directory', async () => {
     const configRoot = makeTmpRoot(roots);
     const cwdRoot = makeTmpRoot(roots);
     originalCwd = process.cwd();
 
-    // Set up container/skills/my-skill/SKILL.md as source
-    const skillSrc = path.join(cwdRoot, 'container', 'skills', 'my-skill');
-    fs.mkdirSync(skillSrc, { recursive: true });
-    fs.writeFileSync(path.join(skillSrc, 'SKILL.md'), '# My Skill');
-    fs.writeFileSync(path.join(skillSrc, 'extra.txt'), 'extra content');
+    // Pre-create a skill in the destination
+    const skillDir = path.join(configRoot, '.claude', 'skills', 'my-skill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# My Skill');
 
     process.chdir(cwdRoot);
 
     vi.doMock('../core/config.js', () => ({
-      NANOCLAW_CONFIG_DIR: configRoot,
+      AGENT_ROOT: configRoot,
       DATA_DIR: configRoot,
     }));
 
     const { syncGroupSkills } = await import('./agent-spawn-layout.js');
     syncGroupSkills();
 
-    const dstSkill = path.join(configRoot, '.claude', 'skills', 'my-skill');
-    expect(fs.existsSync(path.join(dstSkill, 'SKILL.md'))).toBe(true);
-    expect(fs.readFileSync(path.join(dstSkill, 'SKILL.md'), 'utf-8')).toBe(
-      '# My Skill',
-    );
-    expect(fs.readFileSync(path.join(dstSkill, 'extra.txt'), 'utf-8')).toBe(
-      'extra content',
-    );
-  });
-
-  it('skips copy when destination is up to date', async () => {
-    const configRoot = makeTmpRoot(roots);
-    const cwdRoot = makeTmpRoot(roots);
-    originalCwd = process.cwd();
-
-    // Create source skill
-    const skillSrc = path.join(cwdRoot, 'container', 'skills', 'up-to-date');
-    fs.mkdirSync(skillSrc, { recursive: true });
-    fs.writeFileSync(path.join(skillSrc, 'SKILL.md'), 'v1');
-
-    // Create destination skill with a NEWER SKILL.md
-    const skillDst = path.join(configRoot, '.claude', 'skills', 'up-to-date');
-    fs.mkdirSync(skillDst, { recursive: true });
-    // Write destination first, then backdate source so dst is newer
-    fs.writeFileSync(path.join(skillDst, 'SKILL.md'), 'already-here');
-
-    // Backdate the source marker so dest is newer
-    const pastTime = new Date(Date.now() - 60_000);
-    fs.utimesSync(path.join(skillSrc, 'SKILL.md'), pastTime, pastTime);
-
-    process.chdir(cwdRoot);
-
-    vi.doMock('../core/config.js', () => ({
-      NANOCLAW_CONFIG_DIR: configRoot,
-      DATA_DIR: configRoot,
-    }));
-
-    const { syncGroupSkills } = await import('./agent-spawn-layout.js');
-    syncGroupSkills();
-
-    // Destination content should be unchanged
-    expect(fs.readFileSync(path.join(skillDst, 'SKILL.md'), 'utf-8')).toBe(
-      'already-here',
-    );
-  });
-
-  it('skips non-directory entries in source skills folder', async () => {
-    const configRoot = makeTmpRoot(roots);
-    const cwdRoot = makeTmpRoot(roots);
-    originalCwd = process.cwd();
-
-    const skillsSrc = path.join(cwdRoot, 'container', 'skills');
-    fs.mkdirSync(skillsSrc, { recursive: true });
-    // A regular file (not a directory) — should be skipped
-    fs.writeFileSync(path.join(skillsSrc, 'README.md'), '# readme');
-    // A real skill directory
-    const realSkill = path.join(skillsSrc, 'real-skill');
-    fs.mkdirSync(realSkill);
-    fs.writeFileSync(path.join(realSkill, 'SKILL.md'), '# real');
-
-    process.chdir(cwdRoot);
-
-    vi.doMock('../core/config.js', () => ({
-      NANOCLAW_CONFIG_DIR: configRoot,
-      DATA_DIR: configRoot,
-    }));
-
-    const { syncGroupSkills } = await import('./agent-spawn-layout.js');
-    syncGroupSkills();
-
-    const dstSkills = path.join(configRoot, '.claude', 'skills');
-    const entries = fs.readdirSync(dstSkills);
-    // Only the real-skill directory should appear, not README.md
-    expect(entries).toEqual(['real-skill']);
+    // Existing skill should be untouched
     expect(
-      fs.readFileSync(path.join(dstSkills, 'real-skill', 'SKILL.md'), 'utf-8'),
-    ).toBe('# real');
+      fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf-8'),
+    ).toBe('# My Skill');
   });
 });
 
@@ -349,7 +271,7 @@ describe('ensureGroupIpcLayout', () => {
     const ipcDir = path.join(root, 'group-ipc');
 
     vi.doMock('../core/config.js', () => ({
-      NANOCLAW_CONFIG_DIR: root,
+      AGENT_ROOT: root,
       DATA_DIR: root,
     }));
 
@@ -382,7 +304,7 @@ describe('ensureGroupIpcLayout', () => {
     const ipcDir = path.join(root, 'ipc-idem');
 
     vi.doMock('../core/config.js', () => ({
-      NANOCLAW_CONFIG_DIR: root,
+      AGENT_ROOT: root,
       DATA_DIR: root,
     }));
 

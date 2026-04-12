@@ -78,11 +78,11 @@ Workflows and guides with no code changes. The SKILL.md is the entire skill — 
 - Use `AskUserQuestion` for interactive prompts
 - These stay on `main` and are always available to every user
 
-#### 4. Container skills (agent runtime)
+#### 4. Custom skills (agent runtime)
 
-Skills that run inside the agent container, not on the host. These teach the container agent how to use tools, format output, or perform tasks. They are synced into each group's `.claude/skills/` directory when a container starts.
+Skills that run inside the agent container, not on the host. These teach the container agent how to use tools, format output, or perform tasks. They live under `$AGENT_ROOT/.claude/skills/` as the single source of truth and are available to all agent sessions.
 
-**Location:** `container/skills/<name>/`
+**Location:** `$AGENT_ROOT/.claude/skills/<name>/` (default root: `~/myclaw`)
 
 **Examples:** `agent-browser` (web browsing), `capabilities` (/capabilities command), `status` (/status command), `slack-formatting` (Slack mrkdwn syntax)
 

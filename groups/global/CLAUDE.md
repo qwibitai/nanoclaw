@@ -74,7 +74,20 @@ Use Slack mrkdwn syntax. Run `/slack-formatting` for the full reference. Key rul
 - `>` for block quotes
 - No `##` headings — use `*Bold text*` instead
 
-### WhatsApp/Telegram channels (folder starts with `whatsapp_` or `telegram_`)
+### Telegram channels (folder starts with `telegram_`)
+
+Use Telegram MarkdownV2 syntax. Run `/telegram-formatting` for the full reference. Key rules:
+- `*bold*` (single asterisks)
+- `_italic_` (underscores), `__underline__`, `~strikethrough~`
+- `||spoiler||` for hidden text
+- `[text](url)` for links
+- `>blockquote`, `**>expandable blockquote`
+- ` ``` ` code blocks with language hints
+- `•` bullet points
+- No `##` headings — use `*Bold text*` instead
+- Escape special chars in regular text: `_ * [ ] ( ) ~ > # + - = | { } . !`
+
+### WhatsApp channels (folder starts with `whatsapp_`)
 
 - `*bold*` (single asterisks, NEVER **double**)
 - `_italic_` (underscores)

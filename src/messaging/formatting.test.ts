@@ -10,9 +10,11 @@ import {
   findChannel,
   formatMessages,
   formatOutbound,
+  formatOutboundForChannel,
   stripInternalTags,
 } from './router.js';
 import { Channel, NewMessage } from '../core/types.js';
+import { parseSignalStyles, parseTextStyles } from '../text-styles.js';
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
   return {
@@ -283,6 +285,82 @@ describe('formatOutbound', () => {
     expect(
       formatOutbound('<internal>thinking</internal>The answer is 42'),
     ).toBe('The answer is 42');
+  });
+});
+
+describe('parseTextStyles', () => {
+  it('passes through discord unchanged', () => {
+    const md = '**bold** and *italic* and [link](https://example.com)';
+    expect(parseTextStyles(md, 'discord')).toBe(md);
+  });
+
+  it('converts bold and italic markers for telegram', () => {
+    expect(parseTextStyles('**bold** *italic*', 'telegram')).toBe(
+      '*bold* _italic_',
+    );
+  });
+
+  it('converts links for whatsapp but preserves telegram links', () => {
+    expect(parseTextStyles('[Link](https://example.com)', 'whatsapp')).toBe(
+      'Link (https://example.com)',
+    );
+    expect(parseTextStyles('[Link](https://example.com)', 'telegram')).toBe(
+      '[Link](https://example.com)',
+    );
+  });
+
+  it('converts links for slack', () => {
+    expect(parseTextStyles('[Click](https://example.com)', 'slack')).toBe(
+      '<https://example.com|Click>',
+    );
+  });
+
+  it('does not transform content inside code spans', () => {
+    expect(parseTextStyles('**bold** and `*code*`', 'telegram')).toBe(
+      '*bold* and `*code*`',
+    );
+  });
+});
+
+describe('parseSignalStyles', () => {
+  it('extracts style ranges from markdown', () => {
+    const { text, textStyle } = parseSignalStyles('**bold** and *italic*');
+    expect(text).toBe('bold and italic');
+    expect(textStyle).toContainEqual({ style: 'BOLD', start: 0, length: 4 });
+    expect(textStyle).toContainEqual({
+      style: 'ITALIC',
+      start: 9,
+      length: 6,
+    });
+  });
+
+  it('does not italicize snake_case', () => {
+    const { text, textStyle } = parseSignalStyles('use snake_case_here');
+    expect(text).toBe('use snake_case_here');
+    expect(textStyle).toHaveLength(0);
+  });
+});
+
+describe('formatOutboundForChannel', () => {
+  it('strips internal tags and applies channel formatting', () => {
+    expect(
+      formatOutboundForChannel(
+        '<internal>thinking</internal>**done**',
+        'telegram',
+      ),
+    ).toBe('*done*');
+  });
+
+  it('returns stripped text when channel is unknown', () => {
+    expect(formatOutboundForChannel('**done**', 'custom-channel')).toBe(
+      '**done**',
+    );
+  });
+
+  it('returns empty when all text is internal', () => {
+    expect(
+      formatOutboundForChannel('<internal>hidden</internal>', 'telegram'),
+    ).toBe('');
   });
 });
 

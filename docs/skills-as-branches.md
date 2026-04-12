@@ -11,7 +11,7 @@ NanoClaw has four types of skills overall. See [CONTRIBUTING.md](../CONTRIBUTING
 | **Feature** (this doc) | `.claude/skills/` + `skill/*` branch | SKILL.md has instructions; code lives on a branch, applied via `git merge` |
 | **Utility** | `.claude/skills/<name>/` with code files | Self-contained tools; code in skill directory, copied into place on install |
 | **Operational** | `.claude/skills/` on `main` | Instruction-only workflows (setup, debug, update) |
-| **Container** | `container/skills/` | Loaded inside agent containers at runtime |
+| **Custom** | `$AGENT_ROOT/.claude/skills/` | Managed externally, available to all agent sessions |
 
 ---
 
@@ -323,7 +323,7 @@ Standard fork contribution workflow. Their custom changes stay on their main and
 
 ## Contributing a Skill
 
-The flow below is for **feature skills** (branch-based). For utility skills (self-contained tools) and container skills, the contributor opens a PR that adds files directly to `.claude/skills/<name>/` or `container/skills/<name>/` — no branch extraction needed. See [CONTRIBUTING.md](../CONTRIBUTING.md) for all skill types.
+The flow below is for **feature skills** (branch-based). For utility skills (self-contained tools) and custom skills, the contributor opens a PR that adds files directly to `.claude/skills/<name>/` — no branch extraction needed. Custom skills are managed under `$AGENT_ROOT/.claude/skills/` (default root: `~/myclaw`). See [CONTRIBUTING.md](../CONTRIBUTING.md) for all skill types.
 
 ### Contributor flow (feature skills)
 

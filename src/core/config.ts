@@ -6,6 +6,7 @@ import { isValidTimezone } from './timezone.js';
 
 // Read config values from .env (falls back to process.env).
 const envConfig = readEnvFile([
+  'AGENT_ROOT',
   'ASSISTANT_NAME',
   'ONECLI_URL',
   'TZ',
@@ -68,32 +69,37 @@ export const ASSISTANT_NAME =
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
-// Absolute paths needed for container mounts
-const PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || os.homedir();
-export const NANOCLAW_CONFIG_DIR = path.join(HOME_DIR, '.config', 'nanoclaw');
+const AGENT_ROOT_RAW =
+  process.env.AGENT_ROOT?.trim() || envConfig.AGENT_ROOT?.trim() || '';
+const DEFAULT_AGENT_ROOT = path.join(HOME_DIR, 'myclaw');
+export const AGENT_ROOT = path.resolve(AGENT_ROOT_RAW || DEFAULT_AGENT_ROOT);
+const RUNTIME_ROOT = AGENT_ROOT;
 
 export const SENDER_ALLOWLIST_PATH = path.join(
-  NANOCLAW_CONFIG_DIR,
+  AGENT_ROOT,
   'sender-allowlist.json',
 );
 export const SCHEDULER_JOBS_JSON_PATH = path.join(
-  NANOCLAW_CONFIG_DIR,
+  AGENT_ROOT,
   'scheduler-jobs.json',
 );
-export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
-export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
-export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
-export const MEMORY_SQLITE_PATH = path.resolve(
-  PROJECT_ROOT,
+export const STORE_DIR = path.resolve(RUNTIME_ROOT, 'store');
+export const GROUPS_DIR = path.resolve(RUNTIME_ROOT, 'groups');
+export const DATA_DIR = path.resolve(RUNTIME_ROOT, 'data');
+const MEMORY_SQLITE_PATH_RAW =
   process.env.MEMORY_SQLITE_PATH ||
-    envConfig.MEMORY_SQLITE_PATH ||
-    'store/memory.db',
-);
+  envConfig.MEMORY_SQLITE_PATH ||
+  'store/memory.db';
+export const MEMORY_SQLITE_PATH = path.isAbsolute(MEMORY_SQLITE_PATH_RAW)
+  ? path.resolve(MEMORY_SQLITE_PATH_RAW)
+  : path.resolve(RUNTIME_ROOT, MEMORY_SQLITE_PATH_RAW);
 export const MEMORY_PROVIDER =
   process.env.MEMORY_PROVIDER || envConfig.MEMORY_PROVIDER || 'sqlite';
 export const AGENT_MEMORY_ROOT =
-  process.env.AGENT_MEMORY_ROOT || envConfig.AGENT_MEMORY_ROOT || '';
+  process.env.AGENT_MEMORY_ROOT ||
+  envConfig.AGENT_MEMORY_ROOT ||
+  path.join(AGENT_ROOT, 'agent-memory');
 const MEMORY_GLOBAL_KNOWLEDGE_DIR_RAW =
   process.env.MEMORY_GLOBAL_KNOWLEDGE_DIR ||
   envConfig.MEMORY_GLOBAL_KNOWLEDGE_DIR ||
@@ -103,7 +109,7 @@ function resolveOptionalPath(raw: string): string {
   if (!trimmed) return '';
   return path.isAbsolute(trimmed)
     ? path.resolve(trimmed)
-    : path.resolve(PROJECT_ROOT, trimmed);
+    : path.resolve(RUNTIME_ROOT, trimmed);
 }
 
 function parseBooleanEnv(raw: string | undefined, fallback: boolean): boolean {

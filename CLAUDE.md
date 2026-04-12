@@ -19,7 +19,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
-| `container/skills/` | Skills loaded inside agent containers (browser, status, formatting) |
+| `$AGENT_ROOT/.claude/skills/` | Custom skills (single source of truth, managed externally) |
 
 ## Secrets / Credentials / Proxy (OneCLI)
 
@@ -32,7 +32,7 @@ Four types of skills exist in NanoClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) f
 - **Feature skills** — merge a `skill/*` branch to add capabilities (e.g. `/add-telegram`, `/add-slack`)
 - **Utility skills** — ship code files alongside SKILL.md (e.g. `/claw`)
 - **Operational skills** — instruction-only workflows, always on `main` (e.g. `/setup`, `/debug`)
-- **Container skills** — loaded inside agent containers at runtime (`container/skills/`)
+- **Custom skills** — managed under `$AGENT_ROOT/.claude/skills/` (single source of truth, defaults to `~/myclaw/.claude/skills/`)
 
 | Skill | When to Use |
 |-------|-------------|

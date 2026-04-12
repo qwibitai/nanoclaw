@@ -649,11 +649,9 @@ describe('config fallback branches for parseInt/parseFloat || default', () => {
 
 describe('resolveOptionalPath branches', () => {
   it('returns empty string when input is empty or whitespace', async () => {
-    // When MEMORY_GLOBAL_KNOWLEDGE_DIR and AGENT_MEMORY_ROOT are both empty,
-    // resolveOptionalPath gets '' which triggers the !trimmed early return
+    // Whitespace MEMORY_GLOBAL_KNOWLEDGE_DIR should normalize to empty.
     const cfg = await loadConfigWithAllEnv({
-      MEMORY_GLOBAL_KNOWLEDGE_DIR: undefined,
-      AGENT_MEMORY_ROOT: undefined,
+      MEMORY_GLOBAL_KNOWLEDGE_DIR: '   ',
     });
     expect(cfg.MEMORY_GLOBAL_KNOWLEDGE_DIR).toBe('');
   });
@@ -677,6 +675,31 @@ describe('resolveOptionalPath branches', () => {
   });
 });
 
+describe('AGENT_ROOT runtime root', () => {
+  it('uses AGENT_ROOT for runtime directories and relative sqlite path', async () => {
+    const cfg = await loadConfigWithAllEnv({
+      AGENT_ROOT: '/tmp/nanoclaw-home',
+      MEMORY_SQLITE_PATH: 'store/custom-memory.db',
+    });
+
+    expect(cfg.AGENT_ROOT).toBe('/tmp/nanoclaw-home');
+    expect(cfg.STORE_DIR).toBe('/tmp/nanoclaw-home/store');
+    expect(cfg.GROUPS_DIR).toBe('/tmp/nanoclaw-home/groups');
+    expect(cfg.DATA_DIR).toBe('/tmp/nanoclaw-home/data');
+    expect(cfg.MEMORY_SQLITE_PATH).toBe(
+      '/tmp/nanoclaw-home/store/custom-memory.db',
+    );
+  });
+
+  it('preserves absolute sqlite path when AGENT_ROOT is set', async () => {
+    const cfg = await loadConfigWithAllEnv({
+      AGENT_ROOT: '/tmp/nanoclaw-home',
+      MEMORY_SQLITE_PATH: '/var/lib/nanoclaw/memory.db',
+    });
+    expect(cfg.MEMORY_SQLITE_PATH).toBe('/var/lib/nanoclaw/memory.db');
+  });
+});
+
 describe('HOME fallback', () => {
   it('uses os.homedir() when HOME is not set', async () => {
     const originalHome = process.env.HOME;
@@ -687,9 +710,9 @@ describe('HOME fallback', () => {
     }));
     try {
       const cfg = await import('./config.js');
-      // NANOCLAW_CONFIG_DIR should still be defined (using os.homedir())
-      expect(typeof cfg.NANOCLAW_CONFIG_DIR).toBe('string');
-      expect(cfg.NANOCLAW_CONFIG_DIR.length).toBeGreaterThan(0);
+      // AGENT_ROOT should still be defined (using os.homedir())
+      expect(typeof cfg.AGENT_ROOT).toBe('string');
+      expect(cfg.AGENT_ROOT.length).toBeGreaterThan(0);
     } finally {
       if (originalHome !== undefined) {
         process.env.HOME = originalHome;

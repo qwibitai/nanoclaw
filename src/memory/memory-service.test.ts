@@ -13,6 +13,7 @@ const configOverrides = vi.hoisted(() => ({
   MEMORY_USAGE_FEEDBACK_ENABLED: undefined as boolean | undefined,
   MEMORY_CONSOLIDATION_ENABLED: undefined as boolean | undefined,
   MEMORY_GLOBAL_KNOWLEDGE_DIR: undefined as string | undefined,
+  OPENAI_API_KEY: undefined as string | null | undefined,
 }));
 
 vi.mock('../core/config.js', async (importOriginal) => {
@@ -48,6 +49,9 @@ vi.mock('../core/config.js', async (importOriginal) => {
         original.MEMORY_GLOBAL_KNOWLEDGE_DIR
       );
     },
+    get OPENAI_API_KEY() {
+      return configOverrides.OPENAI_API_KEY ?? original.OPENAI_API_KEY;
+    },
   };
 });
 
@@ -74,6 +78,7 @@ afterEach(() => {
   configOverrides.MEMORY_USAGE_FEEDBACK_ENABLED = undefined;
   configOverrides.MEMORY_CONSOLIDATION_ENABLED = undefined;
   configOverrides.MEMORY_GLOBAL_KNOWLEDGE_DIR = undefined;
+  configOverrides.OPENAI_API_KEY = undefined;
 
   for (const root of tempRoots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
@@ -2134,28 +2139,36 @@ describe('MemoryService', () => {
     expect(called).toBe(true);
   });
 
-  it('getInstance returns a singleton and closeInstance cleans it up', () => {
+  it('getInstance returns a singleton and closeInstance cleans it up', async () => {
+    configOverrides.OPENAI_API_KEY = 'test-key';
+
+    vi.resetModules();
+    const { MemoryService: FreshMemoryService } =
+      await import('./memory-service.js');
+
     // Make sure singleton is clean before test
-    MemoryService.closeInstance();
+    FreshMemoryService.closeInstance();
 
-    const instance1 = MemoryService.getInstance();
-    expect(instance1).toBeInstanceOf(MemoryService);
+    const instance1 = FreshMemoryService.getInstance();
+    expect(instance1).toBeInstanceOf(FreshMemoryService);
 
-    const instance2 = MemoryService.getInstance();
+    const instance2 = FreshMemoryService.getInstance();
     expect(instance2).toBe(instance1); // Same instance
 
     // Provider name should be set for default provider
     expect(['sqlite', 'qmd']).toContain(instance1.getProviderName());
 
     // Close cleans up
-    MemoryService.closeInstance();
+    FreshMemoryService.closeInstance();
 
     // After close, getInstance creates a new instance
-    const instance3 = MemoryService.getInstance();
+    const instance3 = FreshMemoryService.getInstance();
     expect(instance3).not.toBe(instance1);
 
     // Clean up
-    MemoryService.closeInstance();
+    FreshMemoryService.closeInstance();
+    configOverrides.OPENAI_API_KEY = undefined;
+    vi.resetModules();
   });
 
   it('closeInstance is safe to call when no singleton exists', () => {

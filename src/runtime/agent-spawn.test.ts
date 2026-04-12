@@ -14,7 +14,7 @@ vi.mock('../core/config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
-  NANOCLAW_CONFIG_DIR: '/tmp/nanoclaw-config',
+  AGENT_ROOT: '/tmp/nanoclaw-config',
   ONECLI_URL: 'http://localhost:10254',
   PERMISSION_APPROVAL_TIMEOUT_MS: 300000,
   TIMEZONE: 'America/Los_Angeles',
@@ -62,6 +62,7 @@ vi.mock('./agent-spawn-host.js', () => ({
   prepareHostRuntimeContext: vi.fn(() => ({
     groupDir: '/tmp/nanoclaw-test-data/groups/test-group',
     groupIpcDir: '/tmp/nanoclaw-test-data/ipc/test-group',
+    runnerRoot: '/tmp/nanoclaw-home/.runtime/agent-runner',
   })),
 }));
 

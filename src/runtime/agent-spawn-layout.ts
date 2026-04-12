@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
-import { NANOCLAW_CONFIG_DIR } from '../core/config.js';
+import { AGENT_ROOT } from '../core/config.js';
+import { logger } from '../core/logger.js';
 
 const CLAUDE_SESSION_SETTINGS = {
   env: {
@@ -11,12 +12,55 @@ const CLAUDE_SESSION_SETTINGS = {
   },
 };
 
+const AGENT_RUNNER_SOURCE_DIR = path.join(process.cwd(), 'agent-runner');
+const AGENT_RUNNER_RUNTIME_DIR = path.join(
+  AGENT_ROOT,
+  '.runtime',
+  'agent-runner',
+);
+const AGENT_RUNNER_REQUIRED_FILES = [
+  path.join('dist', 'index.js'),
+  path.join('dist', 'ipc-mcp-stdio.js'),
+  path.join(
+    'node_modules',
+    '@anthropic-ai',
+    'claude-agent-sdk',
+    'package.json',
+  ),
+];
+
+let lastRunnerSyncSignature: string | null = null;
+
+function hasRequiredRunnerFiles(root: string): boolean {
+  return AGENT_RUNNER_REQUIRED_FILES.every((relPath) =>
+    fs.existsSync(path.join(root, relPath)),
+  );
+}
+
+function statMtime(pathValue: string): string {
+  try {
+    return String(fs.statSync(pathValue).mtimeMs);
+  } catch {
+    return 'missing';
+  }
+}
+
+function computeRunnerSourceSignature(sourceRoot: string): string {
+  const signatureParts = [
+    statMtime(path.join(sourceRoot, 'package-lock.json')),
+    statMtime(path.join(sourceRoot, 'package.json')),
+    statMtime(path.join(sourceRoot, 'dist', 'index.js')),
+    statMtime(path.join(sourceRoot, 'dist', 'ipc-mcp-stdio.js')),
+  ];
+  return signatureParts.join('|');
+}
+
 /**
- * Ensure shared .claude/settings.json under NANOCLAW_CONFIG_DIR.
+ * Ensure shared .claude/settings.json under AGENT_ROOT.
  * This is the single HOME for all agent processes.
  */
 export function ensureSharedSessionSettings(): void {
-  const claudeDir = path.join(NANOCLAW_CONFIG_DIR, '.claude');
+  const claudeDir = path.join(AGENT_ROOT, '.claude');
   fs.mkdirSync(claudeDir, { recursive: true });
   const settingsFile = path.join(claudeDir, 'settings.json');
 
@@ -49,13 +93,12 @@ export function ensureSharedSessionSettings(): void {
 }
 
 /**
- * Ensure ~/.config/nanoclaw/.claude/skills/ exists as a real directory.
- * In dev mode (container/skills/ source present), seed new or updated
- * skill folders into it. User-added skills are never removed.
- * In production (no source), just ensures the directory exists.
+ * Ensure AGENT_ROOT/.claude/skills/ exists as a real directory.
+ * Skills are managed directly under this directory (single source of truth).
+ * Legacy symlinks are migrated to real directories automatically.
  */
 export function syncGroupSkills(): void {
-  const skillsDst = path.join(NANOCLAW_CONFIG_DIR, '.claude', 'skills');
+  const skillsDst = path.join(AGENT_ROOT, '.claude', 'skills');
 
   // Migrate legacy symlink to a real directory
   try {
@@ -68,28 +111,47 @@ export function syncGroupSkills(): void {
   }
 
   fs.mkdirSync(skillsDst, { recursive: true });
+}
 
-  // Dev mode: seed skills from source (container/skills/)
-  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
-  if (!fs.existsSync(skillsSrc)) return;
+export function getRepoAgentRunnerRoot(): string {
+  return AGENT_RUNNER_SOURCE_DIR;
+}
 
-  for (const entry of fs.readdirSync(skillsSrc, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const src = path.join(skillsSrc, entry.name);
-    const dst = path.join(skillsDst, entry.name);
-    const srcMarker = path.join(src, 'SKILL.md');
-    const dstMarker = path.join(dst, 'SKILL.md');
+export function getRuntimeAgentRunnerRoot(): string {
+  return AGENT_RUNNER_RUNTIME_DIR;
+}
 
-    // Copy if skill doesn't exist at destination, or source is newer
-    const needsCopy =
-      !fs.existsSync(dstMarker) ||
-      (fs.existsSync(srcMarker) &&
-        fs.statSync(srcMarker).mtimeMs > fs.statSync(dstMarker).mtimeMs);
+/**
+ * Keep a runtime-local copy of host runner assets under AGENT_ROOT.
+ * This avoids runtime dependence on `<repo>/container` or `<repo>/agent-runner`
+ * paths after startup.
+ */
+export function syncHostAgentRunnerRuntime(): string {
+  fs.mkdirSync(path.dirname(AGENT_RUNNER_RUNTIME_DIR), { recursive: true });
 
-    if (needsCopy) {
-      fs.cpSync(src, dst, { recursive: true });
-    }
+  // If source is unavailable, rely on already-synced runtime files.
+  if (!fs.existsSync(AGENT_RUNNER_SOURCE_DIR)) {
+    return AGENT_RUNNER_RUNTIME_DIR;
   }
+
+  const sourceSignature = computeRunnerSourceSignature(AGENT_RUNNER_SOURCE_DIR);
+  if (
+    lastRunnerSyncSignature === sourceSignature &&
+    hasRequiredRunnerFiles(AGENT_RUNNER_RUNTIME_DIR)
+  ) {
+    return AGENT_RUNNER_RUNTIME_DIR;
+  }
+
+  fs.cpSync(AGENT_RUNNER_SOURCE_DIR, AGENT_RUNNER_RUNTIME_DIR, {
+    recursive: true,
+    force: true,
+  });
+  lastRunnerSyncSignature = sourceSignature;
+  logger.debug(
+    { source: AGENT_RUNNER_SOURCE_DIR, destination: AGENT_RUNNER_RUNTIME_DIR },
+    'Synchronized host agent-runner runtime assets',
+  );
+  return AGENT_RUNNER_RUNTIME_DIR;
 }
 
 export function ensureGroupIpcLayout(groupIpcDir: string): void {

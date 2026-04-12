@@ -8,9 +8,11 @@ describe('database migrations', () => {
   it('defaults Telegram backfill chats to direct messages', async () => {
     const repoRoot = process.cwd();
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-db-test-'));
+    const originalAgentRoot = process.env.AGENT_ROOT;
 
     try {
       process.chdir(tempDir);
+      process.env.AGENT_ROOT = tempDir;
       fs.mkdirSync(path.join(tempDir, 'store'), { recursive: true });
 
       const dbPath = path.join(tempDir, 'store', 'messages.db');
@@ -61,6 +63,11 @@ describe('database migrations', () => {
 
       _closeDatabase();
     } finally {
+      if (originalAgentRoot === undefined) {
+        delete process.env.AGENT_ROOT;
+      } else {
+        process.env.AGENT_ROOT = originalAgentRoot;
+      }
       process.chdir(repoRoot);
     }
   });

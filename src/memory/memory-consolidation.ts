@@ -246,7 +246,11 @@ async function tryMergeWithAnthropic(
   items: MemoryItem[],
 ): Promise<Omit<ConsolidatedFact, 'mode'> | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  const model = MEMORY_CONSOLIDATION_MODEL?.trim();
+  const model =
+    process.env.MEMORY_CONSOLIDATION_MODEL?.trim() ||
+    process.env.CLAUDE_MODEL?.trim() ||
+    process.env.ANTHROPIC_MODEL?.trim() ||
+    MEMORY_CONSOLIDATION_MODEL?.trim();
   if (!apiKey || !model) return null;
 
   const prompt = [

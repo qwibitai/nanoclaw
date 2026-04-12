@@ -1,5 +1,6 @@
 import { Channel, NewMessage } from '../core/types.js';
 import { formatLocalTime } from '../core/timezone.js';
+import { ChannelType, parseTextStyles } from '../text-styles.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -35,10 +36,34 @@ export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
+export function stripInternalTagsPreserveWhitespace(text: string): string {
+  return text.replace(/<internal>[\s\S]*?<\/internal>/g, '');
+}
+
 export function formatOutbound(rawText: string): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
   return text;
+}
+
+const SUPPORTED_FORMATTING_CHANNELS = new Set<ChannelType>([
+  'signal',
+  'whatsapp',
+  'telegram',
+  'slack',
+  'discord',
+]);
+
+export function formatOutboundForChannel(
+  rawText: string,
+  channel?: string,
+): string {
+  const text = stripInternalTags(rawText);
+  if (!text) return '';
+  if (!channel || !SUPPORTED_FORMATTING_CHANNELS.has(channel as ChannelType)) {
+    return text;
+  }
+  return parseTextStyles(text, channel as ChannelType);
 }
 
 export function findChannel(

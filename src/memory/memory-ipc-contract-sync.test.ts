@@ -18,7 +18,6 @@ describe('memory IPC contract sync', () => {
     );
     const runnerContract = path.join(
       projectRoot,
-      'container',
       'agent-runner',
       'src',
       'memory-ipc-contract.ts',

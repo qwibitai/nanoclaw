@@ -7,7 +7,7 @@ import path from 'path';
 import {
   AGENT_MEMORY_ROOT,
   DATA_DIR,
-  NANOCLAW_CONFIG_DIR,
+  AGENT_ROOT,
   PERMISSION_APPROVAL_TIMEOUT_MS,
   TIMEZONE,
   getEffectiveModelConfig,
@@ -85,7 +85,7 @@ export async function spawnAgent(
   fs.mkdirSync(groupDir, { recursive: true });
 
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const processName = `nanoclaw-${safeName}-${Date.now()}`;
+  const processName = `myclaw-${safeName}-${Date.now()}`;
   const modelConfig = getEffectiveModelConfig(group.agentConfig?.model);
   const promptProfileService = getPromptProfileService();
   const agentIdentifier = input.isMain
@@ -112,12 +112,7 @@ export async function spawnAgent(
 
   const hostRuntime = prepareHostRuntimeContext(group);
   const hostCredentials = await getHostRuntimeCredentialEnv(agentIdentifier);
-  const agentRunnerDir = path.join(
-    process.cwd(),
-    'container',
-    'agent-runner',
-    'dist',
-  );
+  const agentRunnerDir = path.join(hostRuntime.runnerRoot, 'dist');
   const hostRunnerPath = path.join(agentRunnerDir, 'index.js');
   const mcpServerPath = path.join(agentRunnerDir, 'ipc-mcp-stdio.js');
   if (!fs.existsSync(hostRunnerPath) || !fs.existsSync(mcpServerPath)) {
@@ -125,7 +120,7 @@ export async function spawnAgent(
       status: 'error',
       result: null,
       error:
-        'Host runtime is missing built agent-runner files. Run "npm --prefix container/agent-runner run build".',
+        'Host runtime is missing built agent-runner files. Run "npm --prefix agent-runner run build".',
     };
   }
 
@@ -135,8 +130,8 @@ export async function spawnAgent(
     ...pickSafeHostEnv(process.env),
     ...hostCredentials.env,
     TZ: TIMEZONE,
-    HOME: NANOCLAW_CONFIG_DIR,
-    GH_CONFIG_DIR: path.join(NANOCLAW_CONFIG_DIR, '..', 'gh'),
+    HOME: AGENT_ROOT,
+    GH_CONFIG_DIR: path.join(AGENT_ROOT, '..', 'gh'),
     NANOCLAW_WORKSPACE_GROUP_DIR: hostRuntime.groupDir,
     NANOCLAW_WORKSPACE_GLOBAL_DIR: hostRuntime.globalDir || '',
     NANOCLAW_WORKSPACE_EXTRA_DIR: path.join(
@@ -161,7 +156,7 @@ export async function spawnAgent(
   const runtimeDetails = [
     `groupDir=${hostRuntime.groupDir}`,
     `globalDir=${hostRuntime.globalDir || '(none)'}`,
-    `home=${NANOCLAW_CONFIG_DIR}`,
+    `home=${AGENT_ROOT}`,
     `ipcInput=${path.join(hostRuntime.groupIpcDir, 'input')}`,
     `onecliApplied=${hostCredentials.onecliApplied}`,
     `onecliCaPath=${hostCredentials.onecliCaPath || '(none)'}`,
