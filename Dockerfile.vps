@@ -1,0 +1,11 @@
+FROM node:20-bookworm
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends docker.io ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+# Runtime path must match host path for docker socket mount semantics.
+# Keep this in sync with LEARNCLAW_HOST_PATH in docker-compose.vps.yml.
+WORKDIR /opt/learnclaw
+
+CMD ["sh", "-lc", "npm ci && npm run build && npm start"]

@@ -1,0 +1,18 @@
+FROM node:20-bookworm
+
+WORKDIR /app
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends docker.io ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+RUN chmod +x /app/scripts/start-railway.sh
+
+EXPOSE 3000
+CMD ["/app/scripts/start-railway.sh"]

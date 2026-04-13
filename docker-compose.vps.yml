@@ -1,0 +1,20 @@
+services:
+  learnclaw:
+    build:
+      context: .
+      dockerfile: Dockerfile.vps
+    container_name: learnclaw
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Must match working_dir and both mount endpoints below.
+      LEARNCLAW_HOST_PATH: ${LEARNCLAW_HOST_PATH:-/opt/learnclaw}
+    working_dir: ${LEARNCLAW_HOST_PATH:-/opt/learnclaw}
+    volumes:
+      # Mount project at identical host/container path so spawned agent
+      # container mounts resolve correctly via host docker socket.
+      - ${LEARNCLAW_HOST_PATH:-/opt/learnclaw}:${LEARNCLAW_HOST_PATH:-/opt/learnclaw}
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: >
+      sh -lc "npm ci && npm run build && npm start"
