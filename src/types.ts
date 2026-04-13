@@ -94,6 +94,9 @@ export interface Channel {
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
+  // Optional: signal that the agent has finished responding to this JID.
+  // Channels like the API channel use this to close HTTP responses / SSE streams.
+  endMessage?(jid: string): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.

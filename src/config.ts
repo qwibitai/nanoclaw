@@ -4,8 +4,10 @@ import path from 'path';
 import { readEnvFile } from './env.js';
 
 // Read config values from .env (falls back to process.env).
-// Secrets (API keys, tokens) are NOT read here — they are loaded only
-// by the credential proxy (credential-proxy.ts), never exposed to containers.
+// Container secrets (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY) are NOT read
+// here — they are loaded only by the credential proxy (credential-proxy.ts).
+// Host-only tokens (API_TOKEN, GITHUB_TOKEN, etc.) are loaded here but never
+// exposed to containers.
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
@@ -124,11 +126,20 @@ export const TIMEZONE =
 // Direct Message API channel
 export const API_TOKEN =
   process.env.NANOCLAW_API_TOKEN || envConfig.NANOCLAW_API_TOKEN || '';
-export const API_PORT = parseInt(
+const rawApiPort = parseInt(
   process.env.NANOCLAW_API_PORT || envConfig.NANOCLAW_API_PORT || '3200',
   10,
 );
-export const API_TIMEOUT = parseInt(
-  process.env.NANOCLAW_API_TIMEOUT || envConfig.NANOCLAW_API_TIMEOUT || '120000',
+export const API_PORT =
+  Number.isInteger(rawApiPort) && rawApiPort >= 1 && rawApiPort <= 65535
+    ? rawApiPort
+    : 3200;
+
+const rawApiTimeout = parseInt(
+  process.env.NANOCLAW_API_TIMEOUT ||
+    envConfig.NANOCLAW_API_TIMEOUT ||
+    '120000',
   10,
 );
+export const API_TIMEOUT =
+  Number.isInteger(rawApiTimeout) && rawApiTimeout > 0 ? rawApiTimeout : 120000;

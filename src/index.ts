@@ -275,6 +275,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
+  await channel.endMessage?.(chatJid);
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 

@@ -59,7 +59,11 @@ async function req(
   path: string,
   body?: Record<string, unknown>,
   headers?: Record<string, string>,
-): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> {
+): Promise<{
+  status: number;
+  body: string;
+  headers: http.IncomingHttpHeaders;
+}> {
   return new Promise((resolve, reject) => {
     const r = http.request(
       {
@@ -205,7 +209,9 @@ describe('API channel HTTP endpoints', () => {
       { Authorization: 'Bearer test-secret-token' },
     );
     expect(res.status).toBe(400);
-    expect(JSON.parse(res.body).error).toMatch(/Missing required fields/);
+    expect(JSON.parse(res.body).error).toMatch(
+      /Missing required fields|must be non-empty strings/,
+    );
   });
 
   it('rejects unknown group with 404', async () => {
@@ -261,8 +267,13 @@ describe('API channel HTTP endpoints', () => {
     // ownsJid should be true while request is pending
     expect(channel.ownsJid('telegram:123')).toBe(true);
 
-    // Simulate agent response via sendMessage
+    // Simulate agent response via sendMessage + endMessage
     await channel.sendMessage('telegram:123', 'It is 3pm');
+
+    // ownsJid should still be true — endMessage hasn't been called yet
+    expect(channel.ownsJid('telegram:123')).toBe(true);
+
+    await channel.endMessage!('telegram:123');
 
     const res = await httpPromise;
     expect(res.status).toBe(200);
@@ -270,7 +281,7 @@ describe('API channel HTTP endpoints', () => {
     expect(body.response).toBe('It is 3pm');
     expect(typeof body.elapsed_ms).toBe('number');
 
-    // ownsJid should be false after response
+    // ownsJid should be false after endMessage
     expect(channel.ownsJid('telegram:123')).toBe(false);
   });
 
@@ -298,9 +309,7 @@ describe('API channel HTTP endpoints', () => {
             res.on('data', (chunk: Buffer) => {
               events.push(chunk.toString('utf-8'));
             });
-            res.on('end', () =>
-              resolve({ status: res.statusCode!, events }),
-            );
+            res.on('end', () => resolve({ status: res.statusCode!, events }));
             res.on('error', reject);
           },
         );
@@ -325,17 +334,19 @@ describe('API channel HTTP endpoints', () => {
     await channel.sendMessage('telegram:123', 'chunk 1');
     await channel.sendMessage('telegram:123', 'chunk 2');
 
-    // End the stream by disconnecting (which drains pending)
-    await channel.disconnect();
+    // Signal completion — sends terminal `event: done` and closes the stream
+    await channel.endMessage!('telegram:123');
 
     const result = await ssePromise;
     expect(result.status).toBe(200);
 
-    // The events should contain our chunks
+    // The events should contain our chunks and a terminal done event
     const allData = result.events.join('');
     expect(allData).toContain('"content":"chunk 1"');
     expect(allData).toContain('"content":"chunk 2"');
     expect(allData).toContain('event: message');
+    expect(allData).toContain('event: done');
+    expect(allData).toContain('elapsed_ms');
   });
 
   // ── Timeout ──────────────────────────────────────────
@@ -436,6 +447,7 @@ describe('API channel HTTP endpoints', () => {
 
     // Clean up first request
     await channel.sendMessage('telegram:123', 'done');
+    await channel.endMessage!('telegram:123');
     await first;
   });
 });

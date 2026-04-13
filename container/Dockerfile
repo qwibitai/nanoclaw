@@ -52,7 +52,7 @@ RUN printf '#!/bin/bash\nset -e\n# Dynamic uid mapping for SSH (container may ru
 RUN chmod 666 /etc/passwd
 
 # Set ownership to node user (non-root) for writable directories
-RUN chown -R node:node /workspace && chmod 777 /home/node
+RUN chown -R node:node /workspace && chmod 755 /home/node
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node

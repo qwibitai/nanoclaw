@@ -121,15 +121,31 @@ export function createApiChannel(opts: ChannelOpts): Channel | null {
 
     // Validate required fields
     const { group, sender, sender_name, content, stream } = body as {
-      group?: string;
-      sender?: string;
-      sender_name?: string;
-      content?: string;
-      stream?: boolean;
+      group?: unknown;
+      sender?: unknown;
+      sender_name?: unknown;
+      content?: unknown;
+      stream?: unknown;
     };
-    if (!group || !sender || !sender_name || !content) {
+    if (
+      typeof group !== 'string' ||
+      !group ||
+      typeof sender !== 'string' ||
+      !sender ||
+      typeof sender_name !== 'string' ||
+      !sender_name ||
+      typeof content !== 'string' ||
+      !content
+    ) {
       jsonResponse(res, 400, {
-        error: 'Missing required fields: group, sender, sender_name, content',
+        error:
+          'Missing required fields: group, sender, sender_name, content must be non-empty strings',
+      });
+      return;
+    }
+    if (stream !== undefined && typeof stream !== 'boolean') {
+      jsonResponse(res, 400, {
+        error: 'Field "stream" must be a boolean when provided',
       });
       return;
     }
@@ -300,14 +316,32 @@ export function createApiChannel(opts: ChannelOpts): Channel | null {
           `event: message\ndata: ${JSON.stringify({ content: text })}\n\n`,
         );
       } else {
-        // Resolve the HTTP response with the full text
-        cleanupPending(jid);
-        const elapsed = Date.now() - entry.startTime;
+        // Buffer chunk — sync response is sent when endMessage() is called
+        entry.chunks.push(text);
+      }
+    },
+
+    async endMessage(jid: string): Promise<void> {
+      const entry = pending.get(jid);
+      if (!entry) return;
+
+      const elapsed = Date.now() - entry.startTime;
+
+      if (entry.stream) {
+        // Send terminal SSE event and close the stream
+        entry.res.write(
+          `event: done\ndata: ${JSON.stringify({ elapsed_ms: elapsed })}\n\n`,
+        );
+        entry.res.end();
+      } else {
+        // Respond with the concatenated output
         jsonResponse(entry.res, 200, {
-          response: text,
+          response: entry.chunks.join(''),
           elapsed_ms: elapsed,
         });
       }
+
+      cleanupPending(jid);
     },
 
     isConnected(): boolean {
