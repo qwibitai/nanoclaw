@@ -247,9 +247,9 @@ async function spawnThreadForUrl(
     chat_jid: threadJid,
     sender: msg.sender,
     sender_name: msg.sender_name,
-    content: url,
+    content: `@${ASSISTANT_NAME} ${url}`,
     timestamp: msg.timestamp,
-    is_from_me: false,
+    is_from_me: true,
     is_thread: true,
     parent_jid: chatJid,
   };
