@@ -14,24 +14,7 @@ BASE="http://192.168.64.1:3100/api"
 COMPANY="7d1f8ff0-64ef-4660-93b8-57424168ceb1"
 ```
 
-## Agents
-
-| Name | ID | Role |
-|------|-----|------|
-| Unic 🦄 | `58d40903-7aa6-454e-b649-4fd97b97ebd6` | CEO |
-| Hawk 🦅 | `7c1a3fc3-8479-43d9-a1a8-335b3c258246` | Architect |
-| Rune 🦌 | `bb80b7b4-7191-4092-ba2a-d9535830d15a` | Tech Lead |
-| Loki 🐺 | `fe967440-17c2-42b1-a99c-b8204099a920` | Executor |
-| Sage 🦉 | `125588b7-f0ab-48fc-9bfb-07f801c5ca23` | Auditor |
-| Koda 🦊 | `77e1c285-a2ce-450f-b5e1-bcccd244476c` | COO |
-
-## Projects
-
-| Name | ID | Use for |
-|------|-----|---------|
-| Onboarding | `aa50d322-9c17-4e19-b923-c934b8202664` | Onboarding tasks |
-| M0 — Foundation | `69fcf005-4d2f-43eb-99d2-e96accb99957` | Core infra, architecture, foundational work |
-| M2 — Orchestration | `b99faf7d-aeba-4fd5-8b74-ffa70964a135` | Agent orchestration, pipelines |
+For project IDs, agent IDs, and team roster — check memory files, or query the API.
 
 **Always set `projectId`** when creating issues.
 

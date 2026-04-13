@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     jq \
     sqlite3 \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
