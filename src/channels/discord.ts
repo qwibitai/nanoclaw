@@ -327,7 +327,7 @@ export class DiscordChannel implements Channel {
       const baseThreadOpts = {
         name: name.slice(0, 100),
         autoArchiveDuration: 60,
-      };
+      } as const;
       if (messageId) {
         try {
           const linkedThread = await (channel as TextChannel).threads.create({
