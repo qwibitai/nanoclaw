@@ -45,6 +45,11 @@ export type {
   MessageOutEvent,
   ChatMetadataEvent,
   GroupRegisteredEvent,
+  RunSdkMessageEvent,
+  RunToolEvent,
+  RunToolProgressEvent,
+  RunSubagentEvent,
+  RunStatusEvent,
 } from './events.js';
 export type {
   AvailableGroup,

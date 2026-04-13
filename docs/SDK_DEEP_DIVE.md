@@ -1,6 +1,6 @@
 # Claude Agent SDK Deep Dive
 
-Findings from reverse-engineering `@anthropic-ai/claude-agent-sdk` v0.2.29–0.2.34 to understand how `query()` works, why agent teams subagents were being killed, and how to fix it. Supplemented with official SDK reference docs.
+Findings from reverse-engineering `@anthropic-ai/claude-agent-sdk` v0.2.29–0.2.76 to understand how `query()` works, why agent teams subagents were being killed, and how to fix it. Supplemented with official SDK reference docs.
 
 ## Architecture
 
@@ -59,13 +59,15 @@ All complex logic — the agent loop, tool execution, background tasks, teammate
 
 ## query() Options
 
-Full `Options` type from the official docs:
+Full `Options` type from sdk.d.ts (v0.2.76):
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `abortController` | `AbortController` | `new AbortController()` | Controller for cancelling operations |
 | `additionalDirectories` | `string[]` | `[]` | Additional directories Claude can access |
+| `agent` | `string` | `undefined` | Agent name for the main thread (like `--agent` CLI flag). Must be defined in `agents` option or settings. |
 | `agents` | `Record<string, AgentDefinition>` | `undefined` | Programmatically define subagents (not agent teams — no orchestration) |
+| `agentProgressSummaries` | `boolean` | `false` | Enable periodic AI-generated progress summaries for running subagents (~30s). Emitted on `task_progress` events via `summary` field. |
 | `allowDangerouslySkipPermissions` | `boolean` | `false` | Required when using `permissionMode: 'bypassPermissions'` |
 | `allowedTools` | `string[]` | All tools | List of allowed tool names |
 | `betas` | `SdkBeta[]` | `[]` | Beta features (e.g., `['context-1m-2025-08-07']` for 1M context) |
@@ -73,34 +75,45 @@ Full `Options` type from the official docs:
 | `continue` | `boolean` | `false` | Continue the most recent conversation |
 | `cwd` | `string` | `process.cwd()` | Current working directory |
 | `disallowedTools` | `string[]` | `[]` | List of disallowed tool names |
+| `effort` | `'low' \| 'medium' \| 'high' \| 'max'` | `'high'` | Controls reasoning effort. Works with adaptive thinking to guide depth. `'max'` is Opus 4.6 only. |
 | `enableFileCheckpointing` | `boolean` | `false` | Enable file change tracking for rewinding |
-| `env` | `Dict<string>` | `process.env` | Environment variables |
+| `env` | `Dict<string>` | `process.env` | Environment variables. Set `CLAUDE_AGENT_SDK_CLIENT_APP` for User-Agent identification. |
 | `executable` | `'bun' \| 'deno' \| 'node'` | Auto-detected | JavaScript runtime |
+| `executableArgs` | `string[]` | `[]` | Additional arguments to pass to the runtime executable |
+| `extraArgs` | `Record<string, string \| null>` | `undefined` | Additional CLI args (keys without `--`, `null` for boolean flags) |
 | `fallbackModel` | `string` | `undefined` | Model to use if primary fails |
 | `forkSession` | `boolean` | `false` | When resuming, fork to a new session ID instead of continuing original |
-| `hooks` | `Partial<Record<HookEvent, HookCallbackMatcher[]>>` | `{}` | Hook callbacks for events |
-| `includePartialMessages` | `boolean` | `false` | Include partial message events (streaming) |
+| `hooks` | `Partial<Record<HookEvent, HookCallbackMatcher[]>>` | `{}` | Hook callbacks for events (22 event types) |
+| `includePartialMessages` | `boolean` | `false` | Include `SDKPartialAssistantMessage` (stream_event) during streaming — token-by-token deltas |
 | `maxBudgetUsd` | `number` | `undefined` | Maximum budget in USD for the query |
-| `maxThinkingTokens` | `number` | `undefined` | Maximum tokens for thinking process |
+| `maxThinkingTokens` | `number` | `undefined` | *Deprecated: use `thinking` instead.* On Opus 4.6, treated as on/off. |
 | `maxTurns` | `number` | `undefined` | Maximum conversation turns |
 | `mcpServers` | `Record<string, McpServerConfig>` | `{}` | MCP server configurations |
 | `model` | `string` | Default from CLI | Claude model to use |
-| `outputFormat` | `{ type: 'json_schema', schema: JSONSchema }` | `undefined` | Structured output format |
+| `onElicitation` | `OnElicitation` | `undefined` | Callback for MCP elicitation requests (auth, forms) not handled by hooks |
+| `outputFormat` | `OutputFormat` | `undefined` | Structured output format (JSON schema) |
 | `pathToClaudeCodeExecutable` | `string` | Uses built-in | Path to Claude Code executable |
 | `permissionMode` | `PermissionMode` | `'default'` | Permission mode |
+| `permissionPromptToolName` | `string` | `undefined` | MCP tool name to route permission prompts through |
+| `persistSession` | `boolean` | `true` | When `false`, disables session persistence to disk. Sessions cannot be resumed later. Useful for ephemeral workflows. |
 | `plugins` | `SdkPluginConfig[]` | `[]` | Load custom plugins from local paths |
+| `promptSuggestions` | `boolean` | `false` | Emit `prompt_suggestion` after each turn with predicted next user prompt |
 | `resume` | `string` | `undefined` | Session ID to resume |
 | `resumeSessionAt` | `string` | `undefined` | Resume session at a specific message UUID |
 | `sandbox` | `SandboxSettings` | `undefined` | Sandbox behavior configuration |
+| `sessionId` | `string` | auto-generated UUID | Use a specific session ID. Cannot combine with `continue`/`resume` unless `forkSession` is set. |
+| `settings` | `string \| object` | `undefined` | Additional settings (path to file or inline). Loaded as highest-priority "flag settings" layer. |
 | `settingSources` | `SettingSource[]` | `[]` (none) | Which filesystem settings to load. Must include `'project'` to load CLAUDE.md |
-| `stderr` | `(data: string) => void` | `undefined` | Callback for stderr output |
 | `systemPrompt` | `string \| { type: 'preset'; preset: 'claude_code'; append?: string }` | `undefined` | System prompt. Use preset to get Claude Code's prompt, with optional `append` |
+| `thinking` | `ThinkingConfig` | `{ type: 'adaptive' }` for supported models | Controls thinking behavior: `{type:'adaptive'}` (Opus 4.6+), `{type:'enabled', budgetTokens:N}`, or `{type:'disabled'}` |
+| `toolConfig` | `ToolConfig` | `undefined` | Per-tool configuration (e.g., `{askUserQuestion: {previewFormat:'html'}}`) |
 | `tools` | `string[] \| { type: 'preset'; preset: 'claude_code' }` | `undefined` | Tool configuration |
 
 ### PermissionMode
 
 ```typescript
-type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
+type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk';
+// 'dontAsk' — Don't prompt for permissions, deny if not pre-approved
 ```
 
 ### SettingSource
@@ -120,10 +133,15 @@ Programmatic subagents (NOT agent teams — these are simpler, no inter-agent co
 
 ```typescript
 type AgentDefinition = {
-  description: string;  // When to use this agent
-  tools?: string[];     // Allowed tools (inherits all if omitted)
-  prompt: string;       // Agent's system prompt
-  model?: 'sonnet' | 'opus' | 'haiku' | 'inherit';
+  description: string;        // When to use this agent
+  prompt: string;             // Agent's system prompt
+  tools?: string[];           // Allowed tools (inherits all if omitted)
+  disallowedTools?: string[]; // Explicitly disallowed tools
+  model?: string;             // Model alias ('sonnet', 'opus', 'haiku') or full ID. Omit to inherit.
+  mcpServers?: AgentMcpServerSpec[];  // MCP servers for this agent
+  skills?: string[];          // Skill names to preload
+  maxTurns?: number;          // Max agentic turns before stopping
+  criticalSystemReminder_EXPERIMENTAL?: string;  // Critical reminder in system prompt
 }
 ```
 
@@ -134,7 +152,8 @@ type McpServerConfig =
   | { type?: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
   | { type: 'sse'; url: string; headers?: Record<string, string> }
   | { type: 'http'; url: string; headers?: Record<string, string> }
-  | { type: 'sdk'; name: string; instance: McpServer }  // in-process
+  | { type: 'sdk'; name: string; instance: McpServer }         // in-process
+  | { type: 'claude_ai_proxy'; name: string; url: string }     // claude.ai proxy
 ```
 
 ### SdkBeta
@@ -149,8 +168,15 @@ type SdkBeta = 'context-1m-2025-08-07';
 ```typescript
 type CanUseTool = (
   toolName: string,
-  input: ToolInput,
-  options: { signal: AbortSignal; suggestions?: PermissionUpdate[] }
+  input: Record<string, unknown>,
+  options: {
+    signal: AbortSignal;
+    suggestions?: PermissionUpdate[];
+    blockedPath?: string;        // File path that triggered the request
+    decisionReason?: string;     // Why this permission request was triggered
+    toolUseID: string;           // Unique ID for this tool call
+    agentID?: string;            // Sub-agent ID if running in sub-agent context
+  }
 ) => Promise<PermissionResult>;
 
 type PermissionResult =
@@ -160,26 +186,36 @@ type PermissionResult =
 
 ## SDKMessage Types
 
-`query()` can yield 16 message types. The official docs show a simplified union of 7, but `sdk.d.ts` has the full set:
+`query()` can yield 21 message types (v0.2.76). The `SDKMessage` discriminated union from `sdk.d.ts`:
 
 | Type | Subtype | Purpose |
 |------|---------|---------|
-| `system` | `init` | Session initialized, contains session_id, tools, model |
-| `system` | `task_notification` | Background agent completed/failed/stopped |
-| `system` | `compact_boundary` | Conversation was compacted |
-| `system` | `status` | Status change (e.g. compacting) |
+| `assistant` | — | Claude's response (text + tool_use + thinking content blocks) |
+| `user` | — | User message echo |
+| `user` (replay) | — | Replayed user messages on session resume |
+| `result` | `success` | Turn complete — result text, cost, usage, duration, model breakdown |
+| `result` | `error_during_execution` | Error during execution |
+| `result` | `error_max_turns` | Hit max turns limit |
+| `result` | `error_max_budget_usd` | Hit budget limit |
+| `result` | `error_max_structured_output_retries` | Structured output retries exhausted |
+| `stream_event` | — | Token-by-token deltas wrapping `BetaRawMessageStreamEvent` (requires `includePartialMessages: true`) |
+| `tool_progress` | — | Long-running tool heartbeat (tool_name, elapsed_time_seconds) |
+| `tool_use_summary` | — | AI summary of preceding tool uses |
+| `system` | `init` | Session initialized: version, model, tools, MCP servers, skills, plugins |
+| `system` | `status` | Status change (e.g. `'compacting'`) |
+| `system` | `task_started` | Subagent spawned (task_id, description, task_type, prompt) |
+| `system` | `task_progress` | Subagent progress (usage, last_tool_name, summary) |
+| `system` | `task_notification` | Subagent completed/failed/stopped (summary, output_file, usage) |
+| `system` | `compact_boundary` | Context compaction occurred |
+| `system` | `local_command_output` | Slash command output (e.g. /voice, /cost) |
 | `system` | `hook_started` | Hook execution started |
 | `system` | `hook_progress` | Hook progress output |
 | `system` | `hook_response` | Hook completed |
-| `system` | `files_persisted` | Files saved |
-| `assistant` | — | Claude's response (text + tool calls) |
-| `user` | — | User message (internal) |
-| `user` (replay) | — | Replayed user message on resume |
-| `result` | `success` / `error_*` | Final result of a prompt processing round |
-| `stream_event` | — | Partial streaming (when includePartialMessages) |
-| `tool_progress` | — | Long-running tool progress |
+| `system` | `files_persisted` | File checkpoints saved |
+| `system` | `elicitation_complete` | MCP elicitation resolved |
 | `auth_status` | — | Authentication state changes |
-| `tool_use_summary` | — | Summary of preceding tool uses |
+| `rate_limit_event` | — | Rate limit info (status, utilization, resets, overage) |
+| `prompt_suggestion` | — | Predicted next user prompt (requires `promptSuggestions: true`) |
 
 ### SDKTaskNotificationMessage (sdk.d.ts:1507)
 
@@ -431,7 +467,22 @@ for await (const msg of q) { /* process events */ }
 ### V2: `createSession()` + `send()` / `stream()` — Persistent session
 
 ```typescript
-await using session = unstable_v2_createSession({ model: "..." });
+// Three V2 entry points (all unstable/alpha):
+unstable_v2_createSession(options: SDKSessionOptions): SDKSession
+unstable_v2_resumeSession(sessionId: string, options: SDKSessionOptions): SDKSession
+unstable_v2_prompt(message: string, options: SDKSessionOptions): Promise<SDKResultMessage>  // one-shot
+
+// SDKSession interface:
+interface SDKSession {
+  readonly sessionId: string;
+  send(message: string | SDKUserMessage): Promise<void>;
+  stream(): AsyncGenerator<SDKMessage, void>;
+  close(): void;
+  [Symbol.asyncDispose](): Promise<void>;  // async using support
+}
+
+// Usage:
+await using session = unstable_v2_createSession({ model: "claude-sonnet-4-6" });
 await session.send("first message");
 for await (const msg of session.stream()) { /* events */ }
 await session.send("follow-up");
@@ -443,6 +494,7 @@ for await (const msg of session.stream()) { /* events */ }
 - `stream()` yields from the same message generator, stopping on `result` type
 - Multi-turn is natural — just alternate `send()` / `stream()`
 - V2 does NOT call V1 `query()` internally — both independently create Transport + Query
+- Supports `Symbol.asyncDispose` for automatic cleanup
 
 ### Comparison Table
 
@@ -460,20 +512,32 @@ for await (const msg of session.stream()) { /* events */ }
 
 ## Hook Events
 
+22 hook event types (v0.2.76):
+
 ```typescript
 type HookEvent =
-  | 'PreToolUse'         // Before tool execution
+  | 'PreToolUse'         // Before tool execution (can modify/block)
   | 'PostToolUse'        // After successful tool execution
   | 'PostToolUseFailure' // After failed tool execution
-  | 'Notification'       // Notification messages
+  | 'PreCompact'         // Before conversation compaction
+  | 'PostCompact'        // After conversation compaction
+  | 'PermissionRequest'  // Permission being requested
   | 'UserPromptSubmit'   // User prompt submitted
   | 'SessionStart'       // Session started (startup/resume/clear/compact)
   | 'SessionEnd'         // Session ended
   | 'Stop'               // Agent stopping
   | 'SubagentStart'      // Subagent spawned
   | 'SubagentStop'       // Subagent stopped
-  | 'PreCompact'         // Before conversation compaction
-  | 'PermissionRequest'; // Permission being requested
+  | 'TeammateIdle'       // Teammate agent idle
+  | 'TaskCompleted'      // Task finished
+  | 'Notification'       // Agent wants to notify user
+  | 'Setup'              // First-time setup
+  | 'Elicitation'        // MCP elicitation request
+  | 'ElicitationResult'  // MCP elicitation resolved
+  | 'ConfigChange'       // Settings file changed
+  | 'WorktreeCreate'     // Git worktree created
+  | 'WorktreeRemove'     // Git worktree removed
+  | 'InstructionsLoaded'; // CLAUDE.md files loaded
 ```
 
 ### Hook Configuration
@@ -535,26 +599,38 @@ type SubagentStopHookInput = BaseHookInput & {
 
 ## Query Interface Methods
 
-The `Query` object (sdk.d.ts:931). Official docs list these public methods:
+The `Query` object extends `AsyncGenerator<SDKMessage, void>` with control methods:
 
 ```typescript
 interface Query extends AsyncGenerator<SDKMessage, void> {
-  interrupt(): Promise<void>;                     // Stop current execution (streaming input mode only)
-  rewindFiles(userMessageUuid: string): Promise<void>; // Restore files to state at message (needs enableFileCheckpointing)
-  setPermissionMode(mode: PermissionMode): Promise<void>; // Change permissions (streaming input mode only)
-  setModel(model?: string): Promise<void>;        // Change model (streaming input mode only)
-  setMaxThinkingTokens(max: number | null): Promise<void>; // Change thinking tokens (streaming input mode only)
-  supportedCommands(): Promise<SlashCommand[]>;   // Available slash commands
-  supportedModels(): Promise<ModelInfo[]>;         // Available models
-  mcpServerStatus(): Promise<McpServerStatus[]>;  // MCP server connection status
-  accountInfo(): Promise<AccountInfo>;             // Authenticated user info
+  // ── Execution control ──────────────────────────────────────
+  interrupt(): Promise<void>;                       // Stop current execution
+  close(): void;                                    // Kill query and all resources
+  streamInput(stream: AsyncIterable<SDKUserMessage>): Promise<void>; // Inject more user messages
+  stopTask(taskId: string): Promise<void>;          // Stop a running subagent
+
+  // ── Live configuration ─────────────────────────────────────
+  setPermissionMode(mode: PermissionMode): Promise<void>;
+  setModel(model?: string): Promise<void>;
+  setMaxThinkingTokens(max: number | null): Promise<void>; // Deprecated: use thinking option
+
+  // ── MCP server management ──────────────────────────────────
+  setMcpServers(servers: Record<string, McpServerConfig>): Promise<McpSetServersResult>;
+  reconnectMcpServer(serverName: string): Promise<void>;
+  toggleMcpServer(serverName: string, enabled: boolean): Promise<void>;
+  mcpServerStatus(): Promise<McpServerStatus[]>;
+
+  // ── Introspection ──────────────────────────────────────────
+  initializationResult(): Promise<SDKControlInitializeResponse>;
+  supportedCommands(): Promise<SlashCommand[]>;     // Available skills/slash commands
+  supportedModels(): Promise<ModelInfo[]>;
+  supportedAgents(): Promise<AgentInfo[]>;           // Available subagents
+  accountInfo(): Promise<AccountInfo>;
+
+  // ── File management ────────────────────────────────────────
+  rewindFiles(userMessageId: string, options?: { dryRun?: boolean }): Promise<RewindFilesResult>;
 }
 ```
-
-Found in sdk.d.ts but NOT in official docs (may be internal):
-- `streamInput(stream)` — stream additional user messages
-- `close()` — forcefully end the query
-- `setMcpServers(servers)` — dynamically add/remove MCP servers
 
 ## Sandbox Configuration
 
@@ -607,6 +683,71 @@ function createSdkMcpServer(options: {
 }): McpSdkServerConfigWithInstance
 ```
 
+## Session Management APIs
+
+Standalone functions for reading/managing session history (v0.2.76). These read from the JSONL transcript files on disk (`~/.claude/projects/`):
+
+```typescript
+// List all sessions — supports pagination
+listSessions(options?: {
+  dir?: string;       // Project directory (omit for all projects)
+  limit?: number;
+  offset?: number;
+}): Promise<SDKSessionInfo[]>
+
+// Get metadata for one session
+getSessionInfo(sessionId: string, options?: {
+  dir?: string;
+}): Promise<SDKSessionInfo | undefined>
+
+// Read full conversation — chain-resolved user/assistant messages
+getSessionMessages(sessionId: string, options?: {
+  dir?: string;
+  limit?: number;     // Pagination
+  offset?: number;
+}): Promise<SessionMessage[]>
+
+// Mutate sessions
+renameSession(sessionId: string, title: string, options?: { dir?: string }): Promise<void>
+tagSession(sessionId: string, tag: string | null, options?: { dir?: string }): Promise<void>
+forkSession(sessionId: string, options?: {
+  dir?: string;
+  upToMessageId?: string;  // Branch at this message (inclusive)
+  title?: string;
+}): Promise<{ sessionId: string }>
+```
+
+### SDKSessionInfo
+
+```typescript
+type SDKSessionInfo = {
+  sessionId: string;        // UUID
+  summary: string;          // Display title
+  lastModified: number;     // ms since epoch
+  fileSize?: number;        // JSONL file size (bytes)
+  customTitle?: string;     // User-set title via /rename
+  firstPrompt?: string;     // First meaningful user prompt
+  gitBranch?: string;       // Git branch at end of session
+  cwd?: string;             // Working directory
+  tag?: string;             // User-set tag
+  createdAt?: number;       // ms since epoch
+}
+```
+
+### SessionMessage
+
+```typescript
+type SessionMessage = {
+  type: 'user' | 'assistant';
+  uuid: string;
+  session_id: string;
+  message: unknown;           // Full API message (content blocks, tool_use, etc.)
+  parent_tool_use_id: null;
+}
+```
+
+These APIs are useful for **audit logging**: call `getSessionMessages()` from the host after each container run to read the full conversation without parsing JSONL yourself. The SDK handles chain resolution, compaction boundaries, and subagent merging internally.
+
 ## Internals Reference
 
 ### Key minified identifiers (sdk.mjs)
@@ -637,7 +778,9 @@ function createSdkMcpServer(options: {
 
 ## Key Files
 
-- `sdk.d.ts` — All type definitions (1777 lines)
+- `sdk.d.ts` — All type definitions (~3500 lines, v0.2.76)
 - `sdk-tools.d.ts` — Tool input schemas
-- `sdk.mjs` — SDK runtime (minified, 376KB)
+- `browser-sdk.d.ts` — Browser API (WebSocket transport)
+- `sdk.mjs` — SDK runtime (minified)
 - `cli.js` — CLI executable (minified, runs as subprocess)
+- `embed.js` — Exports CLI path for embedding

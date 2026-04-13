@@ -198,27 +198,28 @@ export class MessageProcessor {
       group,
       prompt,
       chatJid,
-      async (result) => {
-        if (result.type === 'state') {
+      async (event) => {
+        // ── Container lifecycle events ────────────────────────
+        if (event.type === 'state') {
           this.ctx.emit('run.state', {
             agentId: this.ctx.id,
             jid: chatJid,
             name: group.name,
             folder: group.folder,
-            state: result.state,
+            state: event.state,
             timestamp: new Date().toISOString(),
-            reason: result.reason,
-            exitCode: result.exitCode,
+            reason: event.reason,
+            exitCode: event.exitCode,
           });
-          if (result.state === 'idle') this.ctx.queue.notifyIdle(chatJid);
+          if (event.state === 'idle') this.ctx.queue.notifyIdle(chatJid);
           return;
         }
 
-        if (result.type === 'result' && result.result) {
+        if (event.type === 'result' && event.result) {
           const raw =
-            typeof result.result === 'string'
-              ? result.result
-              : JSON.stringify(result.result);
+            typeof event.result === 'string'
+              ? event.result
+              : JSON.stringify(event.result);
           const text = raw
             .replace(/<internal>[\s\S]*?<\/internal>/g, '')
             .trim();
@@ -234,8 +235,108 @@ export class MessageProcessor {
             );
           }
           resetIdleTimer();
+          return;
         }
-        if (result.type === 'error') hadError = true;
+
+        if (event.type === 'error') {
+          hadError = true;
+          return;
+        }
+
+        // ── Raw SDK message: emit raw + derive curated events ─
+        if (event.type === 'sdk_message') {
+          const now = new Date().toISOString();
+          const msg = event.message;
+
+          // Always emit raw event — consumers get all 21 SDK types
+          this.ctx.emit('run.sdk_message', {
+            agentId: this.ctx.id,
+            jid: chatJid,
+            sdkType: event.sdkType,
+            sdkSubtype: event.sdkSubtype,
+            message: msg,
+            timestamp: now,
+          });
+
+          // Derive curated convenience events from SDK messages
+          if (event.sdkType === 'assistant' && msg?.message?.content) {
+            for (const block of msg.message.content) {
+              if (block.type === 'tool_use' && block.name && block.id) {
+                this.ctx.emit('run.tool', {
+                  agentId: this.ctx.id,
+                  jid: chatJid,
+                  toolName: block.name,
+                  toolUseId: block.id,
+                  input: block.input
+                    ? JSON.stringify(block.input).slice(0, 500)
+                    : undefined,
+                  timestamp: now,
+                });
+              }
+            }
+            resetIdleTimer();
+          }
+
+          if (event.sdkType === 'tool_progress') {
+            this.ctx.emit('run.tool_progress', {
+              agentId: this.ctx.id,
+              jid: chatJid,
+              toolName: msg.tool_name,
+              toolUseId: msg.tool_use_id,
+              elapsedSeconds: msg.elapsed_time_seconds,
+              timestamp: now,
+            });
+            resetIdleTimer();
+          }
+
+          if (event.sdkSubtype === 'task_started') {
+            this.ctx.emit('run.subagent', {
+              agentId: this.ctx.id,
+              jid: chatJid,
+              subtype: 'started',
+              taskId: msg.task_id,
+              description: msg.description,
+              timestamp: now,
+            });
+            resetIdleTimer();
+          }
+
+          if (event.sdkSubtype === 'task_progress') {
+            this.ctx.emit('run.subagent', {
+              agentId: this.ctx.id,
+              jid: chatJid,
+              subtype: 'progress',
+              taskId: msg.task_id,
+              description: msg.description,
+              lastToolName: msg.last_tool_name,
+              summary: msg.summary,
+              timestamp: now,
+            });
+            resetIdleTimer();
+          }
+
+          if (event.sdkSubtype === 'task_notification') {
+            this.ctx.emit('run.subagent', {
+              agentId: this.ctx.id,
+              jid: chatJid,
+              subtype: msg.status,
+              taskId: msg.task_id,
+              description: msg.summary,
+              summary: msg.summary,
+              timestamp: now,
+            });
+            resetIdleTimer();
+          }
+
+          if (event.sdkSubtype === 'status' && msg.status) {
+            this.ctx.emit('run.status', {
+              agentId: this.ctx.id,
+              jid: chatJid,
+              status: msg.status,
+              timestamp: now,
+            });
+          }
+        }
       },
     );
 
@@ -285,7 +386,12 @@ export class MessageProcessor {
 
     const wrappedOnOutput = onOutput
       ? async (output: ContainerEvent) => {
-          if (output.newSessionId) {
+          if (
+            (output.type === 'state' ||
+              output.type === 'result' ||
+              output.type === 'error') &&
+            output.newSessionId
+          ) {
             this.ctx.sessions[group.folder] = output.newSessionId;
             this.ctx.db.setSession(group.folder, output.newSessionId);
           }

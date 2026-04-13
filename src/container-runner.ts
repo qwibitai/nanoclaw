@@ -89,10 +89,27 @@ export interface ContainerErrorEvent {
   newSessionId?: string;
 }
 
+/**
+ * Raw SDK message forwarded from the container.
+ * The container is a dumb pipe — every SDK message is forwarded as-is.
+ * All 21 SDK message types flow through this single event.
+ */
+export interface ContainerSdkMessageEvent {
+  type: 'sdk_message';
+  /** Top-level SDK message type (e.g. 'assistant', 'result', 'system', 'tool_progress', 'stream_event'). */
+  sdkType: string;
+  /** For system messages: the subtype (e.g. 'init', 'status', 'task_started'). */
+  sdkSubtype?: string;
+  /** The raw SDK message object. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  message: any;
+}
+
 export type ContainerEvent =
   | ContainerStateEvent
   | ContainerResultEvent
-  | ContainerErrorEvent;
+  | ContainerErrorEvent
+  | ContainerSdkMessageEvent;
 
 export interface ContainerOutput {
   status: 'success' | 'error';
@@ -591,7 +608,12 @@ export async function runContainerAgent(
 
             try {
               const parsed: ContainerEvent = JSON.parse(jsonStr);
-              if (parsed.newSessionId) {
+              if (
+                (parsed.type === 'state' ||
+                  parsed.type === 'result' ||
+                  parsed.type === 'error') &&
+                parsed.newSessionId
+              ) {
                 newSessionId = parsed.newSessionId;
               }
               if (parsed.type === 'state') {
@@ -842,7 +864,12 @@ export async function runContainerAgent(
 
       const event = JSON.parse(jsonLine) as ContainerEvent;
       events.push(event);
-      if (event.newSessionId) {
+      if (
+        (event.type === 'state' ||
+          event.type === 'result' ||
+          event.type === 'error') &&
+        event.newSessionId
+      ) {
         newSessionId = event.newSessionId;
       }
     }
