@@ -443,7 +443,15 @@ if (isMainModule) {
     );
     process.exit(1);
   }
-  const store = new MemoryStore(resolveDbPath(), groupFolder);
+  const resolvedPath = resolveDbPath();
+  const sourceLabel =
+    process.env.MEMORY_DB_PATH && process.env.MEMORY_DB_PATH.length > 0
+      ? 'MEMORY_DB_PATH env'
+      : 'default';
+  console.error(
+    `[memory-mcp] group=${groupFolder} db=${resolvedPath} (${sourceLabel})`,
+  );
+  const store = new MemoryStore(resolvedPath, groupFolder);
   const mcpServer = new McpServer({ name: 'memory', version: '1.0.0' });
   registerMemoryTools(mcpServer, store);
   const transport = new StdioServerTransport();
