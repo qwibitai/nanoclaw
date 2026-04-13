@@ -51,16 +51,25 @@ export async function executeImapCommand(
 
   try {
     switch (operation) {
-      case 'list':   return await listEmails(config, params);
-      case 'read':   return await readEmail(config, params);
-      case 'search': return await searchEmails(config, params);
-      case 'send':   return await sendEmail(config, params);
-      case 'delete': return await deleteEmail(config, params);
-      default:       return deny(`Unknown operation: ${operation}`);
+      case 'list':
+        return await listEmails(config, params);
+      case 'read':
+        return await readEmail(config, params);
+      case 'search':
+        return await searchEmails(config, params);
+      case 'send':
+        return await sendEmail(config, params);
+      case 'delete':
+        return await deleteEmail(config, params);
+      default:
+        return deny(`Unknown operation: ${operation}`);
     }
   } catch (err) {
     logger.error({ err, operation }, 'IMAP command failed');
-    return { error: err instanceof Error ? err.message : String(err), exitCode: 1 };
+    return {
+      error: err instanceof Error ? err.message : String(err),
+      exitCode: 1,
+    };
   }
 }
 
@@ -68,7 +77,8 @@ export async function executeImapCommand(
 
 function checkFolder(config: ImapConfig, folder: string): ImapResult | null {
   const allowed = config.allowedFolders ?? DEFAULT_ALLOWED_FOLDERS;
-  if (!allowed.includes(folder)) return deny(`Folder '${folder}' is not allowed.`);
+  if (!allowed.includes(folder))
+    return deny(`Folder '${folder}' is not allowed.`);
   return null;
 }
 
@@ -104,9 +114,13 @@ async function listEmails(
       } else {
         const status = await client.status(folder, { messages: true });
         const total = status.messages ?? 0;
-        if (total === 0) return { data: { emails: [], total: 0, folder }, exitCode: 0 };
+        if (total === 0)
+          return { data: { emails: [], total: 0, folder }, exitCode: 0 };
         uids = [];
-        for await (const msg of client.fetch(`${Math.max(1, total - limit + 1)}:*`, { uid: true })) {
+        for await (const msg of client.fetch(
+          `${Math.max(1, total - limit + 1)}:*`,
+          { uid: true },
+        )) {
           uids.push(msg.uid);
         }
       }
@@ -175,12 +189,16 @@ async function readEmail(
           uid,
           subject: parsed.subject ?? '(no subject)',
           from: parsed.from?.text ?? '',
-          to: parsed.to?.text ?? '',
-          cc: parsed.cc?.text ?? '',
+          to: Array.isArray(parsed.to)
+            ? parsed.to.map((a) => a.text).join(', ')
+            : (parsed.to?.text ?? ''),
+          cc: Array.isArray(parsed.cc)
+            ? parsed.cc.map((a) => a.text).join(', ')
+            : (parsed.cc?.text ?? ''),
           date: parsed.date?.toISOString() ?? '',
           body: parsed.text ?? '',
           html: parsed.html || undefined,
-          attachments: (parsed.attachments ?? []).map((a) => ({
+          attachments: (parsed.attachments ?? []).map((a: any) => ({
             filename: a.filename ?? 'attachment',
             contentType: a.contentType,
             size: a.size,
@@ -211,7 +229,10 @@ async function searchEmails(
   try {
     const lock = await client.getMailboxLock(folder);
     try {
-      const uids = (await client.search({ text: String(params.query) }, { uid: true })) as number[];
+      const uids = (await client.search(
+        { text: String(params.query) },
+        { uid: true },
+      )) as number[];
       const selectedUids = uids.slice(-limit);
       const emails: object[] = [];
 
@@ -235,7 +256,12 @@ async function searchEmails(
       }
 
       return {
-        data: { emails: emails.reverse(), total: uids.length, folder, query: params.query },
+        data: {
+          emails: emails.reverse(),
+          total: uids.length,
+          folder,
+          query: params.query,
+        },
         exitCode: 0,
       };
     } finally {
@@ -252,7 +278,8 @@ async function sendEmail(
 ): Promise<ImapResult> {
   if (!params.to) return deny('to is required for send.');
   if (!params.subject) return deny('subject is required for send.');
-  if (!params.body && !params.html) return deny('body or html is required for send.');
+  if (!params.body && !params.html)
+    return deny('body or html is required for send.');
 
   const password = process.env.IMAP_PASSWORD;
   if (!password) return deny('IMAP_PASSWORD environment variable not set.');
@@ -295,7 +322,12 @@ async function deleteEmail(
     const lock = await client.getMailboxLock(folder);
     try {
       // Try common Trash folder names in order
-      const trashCandidates = ['Trash', 'Deleted Messages', 'Deleted Items', '[Gmail]/Trash'];
+      const trashCandidates = [
+        'Trash',
+        'Deleted Messages',
+        'Deleted Items',
+        '[Gmail]/Trash',
+      ];
       let movedTo = '';
       for (const trashName of trashCandidates) {
         try {

@@ -30,6 +30,16 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  imap?: ImapConfig;
+}
+
+export interface ImapConfig {
+  host: string;
+  port?: number; // Default: 993 (IMAPS)
+  smtpPort?: number; // Default: 465 (SMTPS)
+  username: string;
+  allowedFolders?: string[]; // Default: ['INBOX']
+  allowedOperations?: string[]; // Default: all. Values: 'list','read','search','search','delete','send'
 }
 
 export interface RegisteredGroup {

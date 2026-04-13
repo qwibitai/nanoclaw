@@ -42,6 +42,7 @@
   "devDependencies": {
     "@eslint/js": "^9.35.0",
     "@types/better-sqlite3": "^7.6.12",
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^22.10.0",
     "@types/nodemailer": "^8.0.0",
     "@types/qrcode-terminal": "^0.12.0",
