@@ -221,7 +221,9 @@ describe('url_watch flow', () => {
       parent_jid: chatJid,
     });
 
-    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [makeChannel()]);
+    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [
+      makeChannel(),
+    ]);
 
     expect(handled).toBe(true);
     expect(storeMessageMock).toHaveBeenCalledTimes(1);
@@ -258,7 +260,9 @@ describe('url_watch flow', () => {
       parent_jid: chatJid,
     });
 
-    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [makeChannel()]);
+    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [
+      makeChannel(),
+    ]);
 
     expect(handled).toBe(true);
     expect(storeMessageMock).toHaveBeenCalledTimes(1);
@@ -287,10 +291,11 @@ describe('url_watch flow', () => {
       parent_jid: parentJid,
     });
 
-    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [makeChannel()]);
+    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [
+      makeChannel(),
+    ]);
 
     expect(handled).toBe(false);
     expect(storeMessageMock).not.toHaveBeenCalled();
   });
-
 });
