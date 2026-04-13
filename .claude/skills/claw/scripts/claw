@@ -121,8 +121,48 @@ def find_group(groups: list[dict], query: str) -> dict | None:
     return None
 
 
-def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -> None:
-    cmd = [runtime, "run", "-i", "--rm", image]
+def build_mounts(folder: str, is_main: bool) -> list[tuple[str, str, bool]]:
+    """Return list of (host_path, container_path, readonly) tuples."""
+    groups_dir  = NANOCLAW_DIR / "groups"
+    data_dir    = NANOCLAW_DIR / "data"
+    sessions_dir = data_dir / "sessions" / folder
+    ipc_dir     = data_dir / "ipc" / folder
+
+    # Ensure required dirs exist
+    group_dir = groups_dir / folder
+    group_dir.mkdir(parents=True, exist_ok=True)
+    (sessions_dir / ".claude").mkdir(parents=True, exist_ok=True)
+    for sub in ("messages", "tasks", "input"):
+        (ipc_dir / sub).mkdir(parents=True, exist_ok=True)
+
+    agent_runner_src = sessions_dir / "agent-runner-src"
+    project_agent_runner = NANOCLAW_DIR / "container" / "agent-runner" / "src"
+    if not agent_runner_src.exists() and project_agent_runner.exists():
+        import shutil
+        shutil.copytree(project_agent_runner, agent_runner_src)
+
+    mounts: list[tuple[str, str, bool]] = []
+    if is_main:
+        mounts.append((str(NANOCLAW_DIR), "/workspace/project", True))
+    mounts.append((str(group_dir),           "/workspace/group",    False))
+    mounts.append((str(sessions_dir / ".claude"), "/home/node/.claude", False))
+    mounts.append((str(ipc_dir),             "/workspace/ipc",      False))
+    if agent_runner_src.exists():
+        mounts.append((str(agent_runner_src), "/app/src",           False))
+    return mounts
+
+
+def run_container(runtime: str, image: str, payload: dict,
+                  folder: str | None = None, is_main: bool = False,
+                  timeout: int = 300) -> None:
+    cmd = [runtime, "run", "-i", "--rm"]
+    if folder:
+        for host, container, readonly in build_mounts(folder, is_main):
+            if readonly:
+                cmd += ["--mount", f"type=bind,source={host},target={container},readonly"]
+            else:
+                cmd += ["-v", f"{host}:{container}"]
+    cmd.append(image)
     dbg(f"cmd: {' '.join(cmd)}")
 
     # Show payload sans secrets
@@ -167,7 +207,12 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
                 dbg("output sentinel found, terminating container")
                 done.set()
                 try:
-                    proc.kill()
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        dbg("graceful stop timed out, force killing container")
+                        proc.kill()
                 except ProcessLookupError:
                     pass
                 return
@@ -197,6 +242,8 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
         stdout,
         re.DOTALL,
     )
+    success = False
+
     if match:
         try:
             data = json.loads(match.group(1))
@@ -206,6 +253,7 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
                 session_id = data.get("newSessionId") or data.get("sessionId")
                 if session_id:
                     print(f"\n[session: {session_id}]", file=sys.stderr)
+                success = True
             else:
                 print(f"[{status}] {data.get('result', '')}", file=sys.stderr)
                 sys.exit(1)
@@ -214,6 +262,9 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
     else:
         # No structured output — print raw stdout
         print(stdout)
+
+    if success:
+        return
 
     if proc.returncode not in (0, None):
         sys.exit(proc.returncode)
@@ -273,6 +324,7 @@ def main():
     # Resolve group → jid
     jid = args.jid
     group_name = None
+    group_folder = None
     is_main = False
 
     if args.group:
@@ -281,6 +333,7 @@ def main():
             sys.exit(f"error: group '{args.group}' not found. Run --list-groups to see options.")
         jid = g["jid"]
         group_name = g["name"]
+        group_folder = g["folder"]
         is_main = g["is_main"]
     elif not jid:
         # Default: main group
@@ -288,6 +341,7 @@ def main():
         if mains:
             jid = mains[0]["jid"]
             group_name = mains[0]["name"]
+            group_folder = mains[0]["folder"]
             is_main = True
         else:
             sys.exit("error: no group specified and no main group found. Use -g or -j.")
@@ -311,7 +365,9 @@ def main():
         payload["resumeAt"] = "latest"
 
     print(f"[{group_name or jid}] running via {runtime}...", file=sys.stderr)
-    run_container(runtime, args.image, payload, timeout=args.timeout)
+    run_container(runtime, args.image, payload,
+                  folder=group_folder, is_main=is_main,
+                  timeout=args.timeout)
 
 
 if __name__ == "__main__":

@@ -1,15 +1,21 @@
 ---
 name: add-ollama-tool
-description: Add Ollama MCP server so the container agent can call local models for cheaper/faster tasks like summarization, translation, or general queries.
+description: Add Ollama MCP server so the container agent can call local models and optionally manage the Ollama model library.
 ---
 
 # Add Ollama Integration
 
-This skill adds a stdio-based MCP server that exposes local Ollama models as tools for the container agent. Claude remains the orchestrator but can offload work to local models.
+This skill adds a stdio-based MCP server that exposes local Ollama models as tools for the container agent. Claude remains the orchestrator but can offload work to local models, and can optionally manage the model library directly.
 
-Tools added:
-- `ollama_list_models` — lists installed Ollama models
-- `ollama_generate` — sends a prompt to a specified model and returns the response
+Core tools (always available):
+- `ollama_list_models` — list installed Ollama models with name, size, and family
+- `ollama_generate` — send a prompt to a specified model and return the response
+
+Management tools (opt-in via `OLLAMA_ADMIN_TOOLS=true`):
+- `ollama_pull_model` — pull (download) a model from the Ollama registry
+- `ollama_delete_model` — delete a locally installed model to free disk space
+- `ollama_show_model` — show model details: modelfile, parameters, and architecture info
+- `ollama_list_running` — list models currently loaded in memory with memory usage and processor type
 
 ## Phase 1: Pre-flight
 
@@ -89,6 +95,23 @@ Build must be clean before proceeding.
 
 ## Phase 3: Configure
 
+### Enable model management tools (optional)
+
+Ask the user:
+
+> Would you like the agent to be able to **manage Ollama models** (pull, delete, inspect, list running)?
+>
+> - **Yes** — adds tools to pull new models, delete old ones, show model info, and check what's loaded in memory
+> - **No** — the agent can only list installed models and generate responses (you manage models yourself on the host)
+
+If the user wants management tools, add to `.env`:
+
+```bash
+OLLAMA_ADMIN_TOOLS=true
+```
+
+If they decline (or don't answer), do not add the variable — management tools will be disabled by default.
+
 ### Set Ollama host (optional)
 
 By default, the MCP server connects to `http://host.docker.internal:11434` (Docker Desktop) with a fallback to `localhost`. To use a custom Ollama host, add to `.env`:
@@ -106,13 +129,21 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 
 ## Phase 4: Verify
 
-### Test via WhatsApp
+### Test inference
 
 Tell the user:
 
 > Send a message like: "use ollama to tell me the capital of France"
 >
 > The agent should use `ollama_list_models` to find available models, then `ollama_generate` to get a response.
+
+### Test model management (if enabled)
+
+If `OLLAMA_ADMIN_TOOLS=true` was set, tell the user:
+
+> Send a message like: "pull the gemma3:1b model" or "which ollama models are currently loaded in memory?"
+>
+> The agent should call `ollama_pull_model` or `ollama_list_running` respectively.
 
 ### Monitor activity (optional)
 
@@ -129,9 +160,10 @@ tail -f logs/nanoclaw.log | grep -i ollama
 ```
 
 Look for:
-- `Agent output: ... Ollama ...` — agent used Ollama successfully
-- `[OLLAMA] >>> Generating` — generation started (if log surfacing works)
+- `[OLLAMA] >>> Generating` — generation started
 - `[OLLAMA] <<< Done` — generation completed
+- `[OLLAMA] Pulling model:` — pull in progress (management tools)
+- `[OLLAMA] Deleted:` — model removed (management tools)
 
 ## Troubleshooting
 
@@ -151,3 +183,11 @@ The agent is trying to run `ollama` CLI inside the container instead of using th
 ### Agent doesn't use Ollama tools
 
 The agent may not know about the tools. Try being explicit: "use the ollama_generate tool with gemma3:1b to answer: ..."
+
+### `ollama_pull_model` times out on large models
+
+Large models (7B+) can take several minutes. The tool uses `stream: false` so it blocks until complete — this is intentional. For very large pulls, use the host CLI directly: `ollama pull <model>`
+
+### Management tools not showing up
+
+Ensure `OLLAMA_ADMIN_TOOLS=true` is set in `.env` and the service was restarted after adding it.
