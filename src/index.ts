@@ -228,8 +228,6 @@ async function spawnThreadForUrl(
     return false;
   }
 
-  finalizeSpawnedThread(msg.id, threadJid);
-
   const childGroup: RegisteredGroup = {
     name: threadName,
     folder: group.folder,
@@ -240,7 +238,6 @@ async function spawnThreadForUrl(
     requiresTrigger: false,
     type: 'thread',
   };
-  registerGroup(threadJid, childGroup);
 
   const syntheticMsg: InboundMessage = {
     id: `${msg.id}_url`,
@@ -253,20 +250,60 @@ async function spawnThreadForUrl(
     is_thread: true,
     parent_jid: chatJid,
   };
-  storeMessage(syntheticMsg);
-  queue.enqueueTask(threadJid, `url-watch-initial:${msg.id}`, async () => {
-    const processed = await processMessagesForGroup(
-      threadJid,
-      childGroup,
-      channel,
-    );
-    if (!processed) {
-      logger.error(
-        { chatJid, threadJid, sourceMessageId: msg.id, url },
-        'Initial URL direct processing failed',
-      );
+
+  type UrlWatchInitStage =
+    | 'chat_metadata'
+    | 'store_message'
+    | 'register_group'
+    | 'enqueue_initial_task'
+    | 'finalize_spawn';
+  let initStage: UrlWatchInitStage = 'chat_metadata';
+  try {
+    // programmatic に作成した thread は受信イベントが来ないため、
+    // synthetic メッセージ保存前に chats 行を作成して FK 制約を満たす。
+    storeChatMetadata(threadJid, msg.timestamp, threadName, channel.name, true);
+
+    initStage = 'store_message';
+    storeMessage(syntheticMsg);
+
+    initStage = 'register_group';
+    registerGroup(threadJid, childGroup);
+    if (!registeredGroups[threadJid]) {
+      throw new Error('Thread group registration was rejected');
     }
-  });
+
+    initStage = 'enqueue_initial_task';
+    queue.enqueueTask(threadJid, `url-watch-initial:${msg.id}`, async () => {
+      const processed = await processMessagesForGroup(
+        threadJid,
+        childGroup,
+        channel,
+      );
+      if (!processed) {
+        logger.error(
+          { chatJid, threadJid, sourceMessageId: msg.id, url },
+          'Initial URL direct processing failed',
+        );
+      }
+    });
+
+    initStage = 'finalize_spawn';
+    finalizeSpawnedThread(msg.id, threadJid);
+  } catch (err) {
+    releaseSpawnedThreadReservation(msg.id);
+    logger.error(
+      {
+        err,
+        chatJid,
+        threadJid,
+        sourceMessageId: msg.id,
+        url,
+        stage: initStage,
+      },
+      'Failed to initialize URL watch thread',
+    );
+    return false;
+  }
 
   logger.info(
     { chatJid, threadJid, url, folder: group.folder },
