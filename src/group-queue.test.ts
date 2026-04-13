@@ -481,4 +481,48 @@ describe('GroupQueue', () => {
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
   });
+
+  it('drains pending user messages into a fresh container after task completes', async () => {
+    const executionOrder: string[] = [];
+    let resolveTask: () => void;
+
+    const taskFn = vi.fn(async () => {
+      executionOrder.push('task');
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    const processMessages = vi.fn(async () => {
+      executionOrder.push('messages');
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Start a task (email trigger scenario)
+    queue.enqueueTask('group1@g.us', 'email-trigger-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(executionOrder).toEqual(['task']);
+
+    // User message arrives while task is running — sendMessage returns false
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+    const piped = queue.sendMessage('group1@g.us', 'review Ryan\'s email');
+    expect(piped).toBe(false);
+
+    // Message is queued via enqueueMessageCheck (what index.ts does on false)
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // Task completes — drainGroup should start a fresh container for messages
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(executionOrder).toEqual(['task', 'messages']);
+    expect(processMessages).toHaveBeenCalledWith('group1@g.us');
+  });
 });
