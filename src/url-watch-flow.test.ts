@@ -4,20 +4,67 @@ import type { Channel, InboundMessage, RegisteredGroup } from './types.js';
 
 const {
   storeMessageMock,
+  getMessagesSinceMock,
+  resetStoredMessages,
   setRegisteredGroupMock,
   reserveSpawnedThreadMock,
   finalizeSpawnedThreadMock,
   releaseSpawnedThreadReservationMock,
-} = vi.hoisted(() => ({
-  storeMessageMock: vi.fn(),
-  setRegisteredGroupMock: vi.fn(),
-  reserveSpawnedThreadMock: vi.fn(() => true),
-  finalizeSpawnedThreadMock: vi.fn(),
-  releaseSpawnedThreadReservationMock: vi.fn(),
-}));
+  enqueueMessageCheckMock,
+  enqueueTaskMock,
+  runContainerAgentMock,
+  loggerErrorMock,
+} = vi.hoisted(() => {
+  const storedMessages: InboundMessage[] = [];
+  const storeMessageMock = vi.fn((msg: InboundMessage) => {
+    storedMessages.push(msg);
+  });
+  const getMessagesSinceMock = vi.fn((chatJid: string, sinceTimestamp: string) =>
+    storedMessages
+      .filter(
+        (m) => m.chat_jid === chatJid && m.timestamp > sinceTimestamp && !!m.content,
+      )
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      .map((m) => ({
+        id: m.id,
+        chat_jid: m.chat_jid,
+        sender: m.sender,
+        sender_name: m.sender_name,
+        content: m.content,
+        timestamp: m.timestamp,
+        is_from_me: !!m.is_from_me,
+      })),
+  );
+  return {
+    storeMessageMock,
+    getMessagesSinceMock,
+    resetStoredMessages: () => {
+      storedMessages.length = 0;
+    },
+    setRegisteredGroupMock: vi.fn(),
+    reserveSpawnedThreadMock: vi.fn(() => true),
+    finalizeSpawnedThreadMock: vi.fn(),
+    releaseSpawnedThreadReservationMock: vi.fn(),
+    enqueueMessageCheckMock: vi.fn(),
+    enqueueTaskMock: vi.fn(),
+    runContainerAgentMock: vi.fn(async () => ({ status: 'success' })),
+    loggerErrorMock: vi.fn(),
+  };
+});
 
 vi.mock('./logger.js', () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: loggerErrorMock,
+  },
+}));
+
+vi.mock('./container-runner.js', () => ({
+  runContainerAgent: runContainerAgentMock,
+  writeGroupsSnapshot: vi.fn(),
+  writeTasksSnapshot: vi.fn(),
 }));
 
 vi.mock('./db.js', () => ({
@@ -27,7 +74,7 @@ vi.mock('./db.js', () => ({
   getAllSessions: vi.fn(() => ({})),
   getAllTasks: vi.fn(() => []),
   getAllChats: vi.fn(() => []),
-  getMessagesSince: vi.fn(() => []),
+  getMessagesSince: getMessagesSinceMock,
   getNewMessages: vi.fn(() => ({ messages: [], newTimestamp: '' })),
   getRegisteredGroup: vi.fn(),
   getRouterState: vi.fn(() => null),
@@ -39,6 +86,28 @@ vi.mock('./db.js', () => ({
   setSession: vi.fn(),
   storeChatMetadata: vi.fn(),
   storeMessage: storeMessageMock,
+}));
+
+vi.mock('./group-queue.js', () => ({
+  GroupQueue: class {
+    setProcessMessagesFn = vi.fn();
+    enqueueMessageCheck(groupJid: string): void {
+      enqueueMessageCheckMock(groupJid);
+    }
+    enqueueTask(
+      groupJid: string,
+      taskId: string,
+      fn: () => Promise<void>,
+    ): void {
+      enqueueTaskMock(groupJid, taskId);
+      void fn();
+    }
+    registerProcess = vi.fn();
+    notifyIdle = vi.fn();
+    closeStdin = vi.fn();
+    sendMessage = vi.fn(() => false);
+    shutdown = vi.fn(async () => {});
+  },
 }));
 
 vi.mock('./group-folder.js', () => ({
@@ -54,7 +123,11 @@ vi.mock('fs', () => ({
   existsSync: vi.fn(() => false),
 }));
 
-import { _maybeHandleUrlWatchMessage, _setRegisteredGroups } from './index.js';
+import {
+  _maybeHandleUrlWatchMessage,
+  _processMessagesForGroup,
+  _setRegisteredGroups,
+} from './index.js';
 
 const chatJid = 'dc:parent';
 const baseGroup: RegisteredGroup = {
@@ -98,6 +171,7 @@ async function flushAsyncWork(): Promise<void> {
 describe('url_watch flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetStoredMessages();
     reserveSpawnedThreadMock.mockReturnValue(true);
     _setRegisteredGroups({ [chatJid]: baseGroup });
   });
@@ -137,6 +211,18 @@ describe('url_watch flow', () => {
         content: 'https://example.com/post',
       }),
     );
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
+      'dc:thread-1',
+      'url-watch-initial:msg-1',
+    );
+    expect(enqueueMessageCheckMock).not.toHaveBeenCalled();
+    expect(runContainerAgentMock).toHaveBeenCalledTimes(1);
+    const firstCall = runContainerAgentMock.mock.calls.at(0) as
+      | unknown[]
+      | undefined;
+    const firstPrompt =
+      (firstCall?.[1] as { prompt?: string } | undefined)?.prompt ?? '';
+    expect(firstPrompt).toContain('https://example.com/post');
   });
 
   it('URL なし: 元メッセージを通常保存する', async () => {
@@ -190,6 +276,29 @@ describe('url_watch flow', () => {
     expect(finalizeSpawnedThreadMock).not.toHaveBeenCalled();
     expect(storeMessageMock).toHaveBeenCalledTimes(1);
     expect(storeMessageMock).toHaveBeenCalledWith(msg);
+  });
+
+  it('初回直接起動が失敗したらエラーログを残す', async () => {
+    runContainerAgentMock.mockResolvedValueOnce({
+      status: 'error',
+    });
+    const createThread = vi.fn(async () => 'dc:thread-direct-fail');
+    const msg = makeMsg({ id: 'msg-direct-fail' });
+
+    const handled = _maybeHandleUrlWatchMessage(chatJid, msg, [
+      makeChannel(createThread),
+    ]);
+    expect(handled).toBe(true);
+    await flushAsyncWork();
+
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatJid,
+        threadJid: 'dc:thread-direct-fail',
+        sourceMessageId: 'msg-direct-fail',
+      }),
+      'Initial URL direct processing failed',
+    );
   });
 
   it('url_watch で createThread が未実装でも元メッセージを保存する', () => {
@@ -305,6 +414,54 @@ describe('url_watch flow', () => {
     expect(handled).toBe(true);
     expect(storeMessageMock).toHaveBeenCalledTimes(1);
     expect(storeMessageMock).toHaveBeenCalledWith(msg);
+  });
+
+  it('url_watch スレッド後続会話でも初回 URL をコンテキストに含める', async () => {
+    const threadJid = 'dc:thread-context';
+    const threadGroup: RegisteredGroup = {
+      name: 'Thread',
+      folder: baseGroup.folder,
+      parent_folder: baseGroup.folder,
+      trigger: baseGroup.trigger,
+      added_at: '2024-01-01T00:00:02.000Z',
+      type: 'thread',
+    };
+    _setRegisteredGroups({
+      [chatJid]: baseGroup,
+      [threadJid]: threadGroup,
+    });
+
+    const initialUrl = makeMsg({
+      id: 'msg-thread-seed',
+      chat_jid: threadJid,
+      content: 'https://example.com/root',
+      timestamp: '2024-01-01T00:00:10.000Z',
+      is_thread: true,
+      parent_jid: chatJid,
+    });
+    const followup = makeMsg({
+      id: 'msg-thread-followup',
+      chat_jid: threadJid,
+      content: 'next question without url',
+      timestamp: '2024-01-01T00:00:20.000Z',
+      is_thread: true,
+      parent_jid: chatJid,
+    });
+
+    _maybeHandleUrlWatchMessage(threadJid, initialUrl, [makeChannel()]);
+    await _processMessagesForGroup(threadJid, threadGroup, makeChannel());
+    runContainerAgentMock.mockClear();
+    _maybeHandleUrlWatchMessage(threadJid, followup, [makeChannel()]);
+    await _processMessagesForGroup(threadJid, threadGroup, makeChannel());
+
+    expect(runContainerAgentMock).toHaveBeenCalledTimes(1);
+    const followupCall = runContainerAgentMock.mock.calls.at(0) as
+      | unknown[]
+      | undefined;
+    const followupPrompt =
+      (followupCall?.[1] as { prompt?: string } | undefined)?.prompt ?? '';
+    expect(followupPrompt).toContain('https://example.com/root');
+    expect(followupPrompt).toContain('next question without url');
   });
 
   it('url_watch 以外の親配下 thread は処理せずスキップする', () => {
