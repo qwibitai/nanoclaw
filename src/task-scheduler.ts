@@ -350,8 +350,16 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Strip <internal>...</internal> blocks and filter [no-reply] —
+          // scheduled tasks routinely fire during quiet windows where the
+          // agent correctly chooses silence. Without this filter the literal
+          // sentinel gets posted to the channel.
+          const filtered = streamedOutput.result
+            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+            .trim();
+          if (filtered && filtered !== '[no-reply]') {
+            await deps.sendMessage(task.chat_jid, filtered);
+          }
           scheduleClose();
         }
         if (streamedOutput.usage && streamedOutput.usage.input_tokens > 0) {
