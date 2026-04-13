@@ -154,6 +154,7 @@ Status: [x] done, [~] partial, [ ] not started
 - [x] Admin user ID per group
 - [x] Admin-only command filtering in container
 - [ ] Admin model refactor — instance-level default admin (user + messaging app) for all approval routing, overridable per agent group; deliver approval cards to admin's DM when the platform supports it
+- [ ] Replace the `is_admin`/main vs. non-main distinction on agent groups with an explicit owner/admin model — every agent group has a recorded owner (the platform user who created or installed it) and an admin (who receives approvals and can change wiring); the two default to the same identity but can diverge (e.g. handoff). Drops the "main group = admin group" coupling. Downstream consequence: non-main group registration on Telegram must use the same pairing-code flow as main (`setup --step pair-telegram` with a `wire-to:<folder>` or `new-agent:<folder>` intent), since there's no longer a privileged "main" chat whose identity is trusted transitively — every group binds its own admin at registration time.
 - [x] Approval flow (sensitive action -> card to admin -> approve/reject -> execute) — `pending_approvals` table, `requestApproval()` helper, reuses interactive card infra
 - [x] Agent requests dependency/package install (install_packages, admin approval, rebuild on approval)
 - [x] Self-modification — direct tools:
