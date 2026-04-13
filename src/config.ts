@@ -16,6 +16,9 @@ const envConfig = readEnvFile([
   'TELEMETRY_BOT_ID',
   'GROQ_API_KEY',
   'TELEGRAM_BOT_TOKEN',
+  'NANOCLAW_API_TOKEN',
+  'NANOCLAW_API_PORT',
+  'NANOCLAW_API_TIMEOUT',
 ]);
 
 // Service Bot: expose GITHUB_TOKEN to process.env so container-runner can pass it
@@ -117,3 +120,15 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Direct Message API channel
+export const API_TOKEN =
+  process.env.NANOCLAW_API_TOKEN || envConfig.NANOCLAW_API_TOKEN || '';
+export const API_PORT = parseInt(
+  process.env.NANOCLAW_API_PORT || envConfig.NANOCLAW_API_PORT || '3200',
+  10,
+);
+export const API_TIMEOUT = parseInt(
+  process.env.NANOCLAW_API_TIMEOUT || envConfig.NANOCLAW_API_TIMEOUT || '120000',
+  10,
+);
