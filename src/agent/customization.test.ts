@@ -510,6 +510,254 @@ describe('syncAgentCustomizations', () => {
   });
 });
 
+// ─── Agent management APIs ──────────────────────────────────────────
+
+import { AgentImpl } from './agent-impl.js';
+import { buildRuntimeConfig } from '../runtime-config.js';
+
+const rtConfig = buildRuntimeConfig({}, '/tmp/agentlite-test-pkg');
+
+function createTestAgent(
+  name: string,
+  opts?: Parameters<typeof resolveSerializableAgentSettings>[1],
+) {
+  const config = buildAgentConfig({
+    agentId: `${name}00000000`.slice(0, 8),
+    ...resolveSerializableAgentSettings(name, opts, tmpDir),
+  });
+  return new AgentImpl(config, rtConfig);
+}
+
+describe('MCP server management API', () => {
+  it('addMcpServer persists and is readable via getMcpServers', () => {
+    const agent = createTestAgent('mcp-test');
+    expect(agent.getMcpServers()).toEqual({});
+
+    agent.addMcpServer('db', {
+      source: '/host/db',
+      command: 'node',
+      args: ['server.js'],
+    });
+
+    const servers = agent.getMcpServers();
+    expect(servers['db']).toBeDefined();
+    expect(servers['db'].command).toBe('node');
+    expect(servers['db'].source).toBe('/host/db');
+  });
+
+  it('removeMcpServer removes by name', () => {
+    const agent = createTestAgent('mcp-test');
+    agent.addMcpServer('a', { source: '/a', command: 'node', args: ['s.js'] });
+    agent.addMcpServer('b', { source: '/b', command: 'node', args: ['s.js'] });
+    expect(Object.keys(agent.getMcpServers())).toEqual(['a', 'b']);
+
+    agent.removeMcpServer('a');
+    expect(Object.keys(agent.getMcpServers())).toEqual(['b']);
+  });
+
+  it('setMcpServers replaces all', () => {
+    const agent = createTestAgent('mcp-test');
+    agent.addMcpServer('old', {
+      source: '/old',
+      command: 'node',
+      args: ['s.js'],
+    });
+
+    agent.setMcpServers({
+      new1: { source: '/new1', command: 'node', args: ['s.js'] },
+      new2: { source: '/new2', command: 'npx', args: ['tsx', 's.ts'] },
+    });
+
+    const servers = agent.getMcpServers();
+    expect(Object.keys(servers)).toEqual(['new1', 'new2']);
+    expect(servers['old']).toBeUndefined();
+  });
+
+  it('setMcpServers({}) clears all', () => {
+    const agent = createTestAgent('mcp-test');
+    agent.addMcpServer('x', { source: '/x', command: 'node', args: ['s.js'] });
+    agent.setMcpServers({});
+    expect(agent.getMcpServers()).toEqual({});
+  });
+
+  it('getMcpServers returns snapshot (not live reference)', () => {
+    const agent = createTestAgent('mcp-test');
+    agent.addMcpServer('a', { source: '/a', command: 'node', args: ['s.js'] });
+    const snap = agent.getMcpServers();
+    agent.removeMcpServer('a');
+    expect(snap['a']).toBeDefined(); // snapshot unchanged
+    expect(agent.getMcpServers()['a']).toBeUndefined(); // live changed
+  });
+});
+
+describe('skill management API', () => {
+  it('addSkill validates and is readable via getSkills', () => {
+    const skillDir = createSkillFixture('my-skill');
+    const agent = createTestAgent('skill-test');
+    expect(agent.getSkills()).toEqual([]);
+
+    agent.addSkill(skillDir);
+    expect(agent.getSkills()).toContain(skillDir);
+  });
+
+  it('addSkill throws on missing directory', () => {
+    const agent = createTestAgent('skill-test');
+    expect(() => agent.addSkill('/nonexistent')).toThrow('not a directory');
+  });
+
+  it('addSkill throws on missing SKILL.md', () => {
+    const dir = path.join(tmpDir, 'no-skill-md');
+    fs.mkdirSync(dir, { recursive: true });
+    const agent = createTestAgent('skill-test');
+    expect(() => agent.addSkill(dir)).toThrow('missing SKILL.md');
+  });
+
+  it('removeSkill removes by basename', () => {
+    const s1 = createSkillFixture('alpha');
+    const s2 = createSkillFixture('beta');
+    const agent = createTestAgent('skill-test');
+    agent.addSkill(s1);
+    agent.addSkill(s2);
+    expect(agent.getSkills()).toHaveLength(2);
+
+    agent.removeSkill('alpha');
+    expect(agent.getSkills()).toHaveLength(1);
+    expect(agent.getSkills()[0]).toContain('beta');
+  });
+
+  it('setSkills replaces all', () => {
+    const s1 = createSkillFixture('one');
+    const s2 = createSkillFixture('two');
+    const agent = createTestAgent('skill-test');
+    agent.addSkill(s1);
+
+    agent.setSkills([s2]);
+    expect(agent.getSkills()).toHaveLength(1);
+    expect(agent.getSkills()[0]).toContain('two');
+  });
+});
+
+describe('instructions management API', () => {
+  it('setInstructions and getInstructions round-trip', () => {
+    const agent = createTestAgent('instr-test');
+    expect(agent.getInstructions()).toBeNull();
+
+    agent.setInstructions('Be helpful.');
+    expect(agent.getInstructions()).toBe('Be helpful.');
+
+    agent.setInstructions(null);
+    expect(agent.getInstructions()).toBeNull();
+  });
+});
+
+// ─── Persistence: management APIs write to registry DB ──────────────
+
+describe('management API persistence', () => {
+  function createAgentWithRegistry(name: string) {
+    const registry = initAgentRegistryDb(tmpDir);
+    const settings = resolveSerializableAgentSettings(name, {}, tmpDir);
+    const record = registry.createAgent(settings);
+    const config = buildAgentConfig({
+      agentId: record.agentId,
+      agentName: record.agentName,
+      assistantName: record.assistantName,
+      workDir: record.workDir,
+      mountAllowlist: record.mountAllowlist,
+      instructions: record.instructions,
+      skillsSources: record.skillsSources,
+      mcpServers: record.mcpServers,
+    });
+    const agent = new AgentImpl(config, rtConfig, undefined, registry);
+    return { agent, registry };
+  }
+
+  it('addMcpServer persists to registry DB', () => {
+    const { agent, registry } = createAgentWithRegistry('persist-mcp');
+    agent.addMcpServer('weather', {
+      source: '/srv/weather',
+      command: 'node',
+      args: ['server.ts'],
+    });
+
+    // Read back from DB — simulates restart
+    const record = registry.getAgent('persist-mcp')!;
+    expect(record.mcpServers).toBeDefined();
+    expect(record.mcpServers!['weather'].command).toBe('node');
+    registry.close();
+  });
+
+  it('removeMcpServer persists removal to registry DB', () => {
+    const { agent, registry } = createAgentWithRegistry('persist-rm');
+    agent.addMcpServer('a', { source: '/a', command: 'node', args: ['s.js'] });
+    agent.addMcpServer('b', { source: '/b', command: 'node', args: ['s.js'] });
+    agent.removeMcpServer('a');
+
+    const record = registry.getAgent('persist-rm')!;
+    expect(record.mcpServers!['a']).toBeUndefined();
+    expect(record.mcpServers!['b']).toBeDefined();
+    registry.close();
+  });
+
+  it('setMcpServers({}) clears in registry DB', () => {
+    const { agent, registry } = createAgentWithRegistry('persist-clear');
+    agent.addMcpServer('x', { source: '/x', command: 'node', args: ['s.js'] });
+    agent.setMcpServers({});
+
+    const record = registry.getAgent('persist-clear')!;
+    expect(record.mcpServers).toBeNull();
+    registry.close();
+  });
+
+  it('setInstructions persists to registry DB', () => {
+    const { agent, registry } = createAgentWithRegistry('persist-instr');
+    agent.setInstructions('Be concise.');
+
+    const record = registry.getAgent('persist-instr')!;
+    expect(record.instructions).toBe('Be concise.');
+
+    agent.setInstructions(null);
+    const record2 = registry.getAgent('persist-instr')!;
+    expect(record2.instructions).toBeNull();
+    registry.close();
+  });
+
+  it('addSkill persists to registry DB', () => {
+    const skillDir = createSkillFixture('persist-skill');
+    const { agent, registry } = createAgentWithRegistry('persist-skill');
+    agent.addSkill(skillDir);
+
+    const record = registry.getAgent('persist-skill')!;
+    expect(record.skillsSources).toContain(skillDir);
+    registry.close();
+  });
+
+  it('full round-trip: create agent, mutate, read back from fresh registry', () => {
+    const { agent, registry } = createAgentWithRegistry('roundtrip');
+    const skillDir = createSkillFixture('rt-skill');
+
+    agent.setInstructions('You are a finance bot.');
+    agent.addSkill(skillDir);
+    agent.addMcpServer('stocks', {
+      source: '/srv/stocks',
+      command: 'node',
+      args: ['index.ts'],
+      env: { API_KEY: 'test' },
+    });
+    registry.close();
+
+    // Open fresh registry — simulates process restart
+    const registry2 = initAgentRegistryDb(tmpDir);
+    const record = registry2.getAgent('roundtrip')!;
+
+    expect(record.instructions).toBe('You are a finance bot.');
+    expect(record.skillsSources).toContain(skillDir);
+    expect(record.mcpServers!['stocks'].command).toBe('node');
+    expect(record.mcpServers!['stocks'].args).toEqual(['index.ts']);
+    expect(record.mcpServers!['stocks'].env).toEqual({ API_KEY: 'test' });
+    registry2.close();
+  });
+});
+
 // ─── MCP runtime config building ────────────────────────────────────
 
 import { buildMcpRuntimeConfig } from './message-processor.js';

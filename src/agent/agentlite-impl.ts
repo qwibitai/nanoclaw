@@ -212,6 +212,7 @@ class AgentLiteImpl implements AgentLite {
       agentConfig,
       this._runtimeConfig,
       toRuntimeOptions(record, runtimeOptions),
+      this._registry ?? undefined,
     );
   }
 
