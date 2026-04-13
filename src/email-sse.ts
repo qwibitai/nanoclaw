@@ -170,10 +170,7 @@ function connect(conn: SSEConnection): void {
   });
 
   conn.currentRequest.on('error', (err) => {
-    logger.warn(
-      { err: err.message, label: conn.label },
-      'SSE request error',
-    );
+    logger.warn({ err: err.message, label: conn.label }, 'SSE request error');
     scheduleReconnect(conn);
   });
 }

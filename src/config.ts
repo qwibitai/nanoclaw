@@ -74,7 +74,9 @@ export const NANOCLAW_SERVICE_TOKEN =
  */
 export const SSE_CONNECTIONS: { token: string; label: string }[] = (() => {
   const raw =
-    process.env.NANOCLAW_SERVICE_TOKEN || envConfig.NANOCLAW_SERVICE_TOKEN || '';
+    process.env.NANOCLAW_SERVICE_TOKEN ||
+    envConfig.NANOCLAW_SERVICE_TOKEN ||
+    '';
   return raw
     .split(',')
     .map((s) => s.trim())

@@ -552,7 +552,9 @@ async function buildContainerArgs(
     process.env.NANOCLAW_SERVICE_TOKEN || containerEnv.NANOCLAW_SERVICE_TOKEN;
   if (rawServiceToken) {
     const first = rawServiceToken.split(',')[0].trim();
-    const token = first.includes('@') ? first.slice(0, first.indexOf('@')) : first;
+    const token = first.includes('@')
+      ? first.slice(0, first.indexOf('@'))
+      : first;
     args.push('-e', `NANOCLAW_SERVICE_TOKEN=${token}`);
   }
   // GitHub token for gh CLI and git push (same pattern as GitHub Actions)
