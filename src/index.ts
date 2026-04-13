@@ -384,13 +384,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           await progressHandle.clear();
           progressHandle = null;
         }
-        // Build transparency footer with stats
-        const elapsedSec = Math.round((Date.now() - responseStartMs) / 1000);
-        const parts: string[] = [];
-        if (result.numTurns != null) parts.push(`${result.numTurns} turns`);
-        parts.push(`${elapsedSec}s`);
-        const footer = `\n\n_${parts.join(' · ')}_`;
-        await channel.sendMessage(chatJid, text + footer);
+        // Only add transparency footer to substantive responses.
+        // Short one-liners (< 80 chars) don't need turn counts and elapsed time.
+        let outText = text;
+        if (text.length >= 80) {
+          const elapsedSec = Math.round(
+            (Date.now() - responseStartMs) / 1000,
+          );
+          const parts: string[] = [];
+          if (result.numTurns != null) parts.push(`${result.numTurns} turns`);
+          parts.push(`${elapsedSec}s`);
+          outText = text + `\n\n_${parts.join(' · ')}_`;
+        }
+        await channel.sendMessage(chatJid, outText);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -677,10 +683,7 @@ async function startMessageLoop(): Promise<void> {
             // Acknowledge receipt so the user knows their message wasn't lost.
             // The agent is already busy — this ack bridges the gap until it responds.
             channel
-              .sendMessage(
-                chatJid,
-                '↳ Got it — queued behind current task.',
-              )
+              .sendMessage(chatJid, '↳ Got it — queued behind current task.')
               .catch((err) =>
                 logger.warn({ chatJid, err }, 'Failed to send pipe ack'),
               );

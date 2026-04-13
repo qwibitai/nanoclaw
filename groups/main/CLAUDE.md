@@ -22,6 +22,14 @@ You also have `mcp__nanoclaw__send_message` which sends a message immediately wh
 
 When the user sends multiple messages or commands, you MUST address each one — even if they're unrelated to each other or to your current context. Scan all incoming messages for distinct requests and respond to each. If you can't act on one (e.g. a tool is offline), explicitly say so rather than silently skipping it. Never let a command go unacknowledged.
 
+### Batch results, don't spam
+
+When processing multiple items (emails, tasks, etc.), consolidate results into ONE summary message — not one message per item. For example, instead of sending 5 separate "Stale — no action needed" messages, send a single message like:
+
+"Processed 5 emails: 3 stale (no action), 1 archived, 1 needs reply (details below)."
+
+If an item truly needs no action, wrap it in `<internal>` tags so it's logged but not sent. Only surface items that the user needs to see: escalations, proposals, errors, or items requiring a decision.
+
 ### Internal thoughts
 
 If part of your output is internal reasoning rather than something for the user, wrap it in `<internal>` tags:
