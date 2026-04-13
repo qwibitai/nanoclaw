@@ -113,6 +113,11 @@ describe('url_watch flow', () => {
     await flushAsyncWork();
 
     expect(createThread).toHaveBeenCalledTimes(1);
+    expect(createThread).toHaveBeenCalledWith(
+      chatJid,
+      expect.any(String),
+      'msg-1',
+    );
     expect(finalizeSpawnedThreadMock).toHaveBeenCalledWith(
       'msg-1',
       'dc:thread-1',
@@ -195,4 +200,140 @@ describe('url_watch flow', () => {
     expect(storeMessageMock).toHaveBeenCalledWith(msg);
   });
 
+  it('url_watch 親配下の thread で URL あり: synthetic メッセージを保存する', () => {
+    const threadJid = 'dc:thread-99';
+    _setRegisteredGroups({
+      [chatJid]: baseGroup,
+      [threadJid]: {
+        name: 'Thread',
+        folder: baseGroup.folder,
+        parent_folder: baseGroup.folder,
+        trigger: baseGroup.trigger,
+        added_at: '2024-01-01T00:00:02.000Z',
+        type: 'thread',
+      },
+    });
+    const msg = makeMsg({
+      id: 'msg-thread-url',
+      chat_jid: threadJid,
+      content: 'please summarize https://example.com/next',
+      is_thread: true,
+      parent_jid: chatJid,
+    });
+
+    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [
+      makeChannel(),
+    ]);
+
+    expect(handled).toBe(true);
+    expect(storeMessageMock).toHaveBeenCalledTimes(1);
+    expect(storeMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'msg-thread-url_url',
+        chat_jid: threadJid,
+        content: 'https://example.com/next',
+        parent_jid: chatJid,
+        is_thread: true,
+      }),
+    );
+    expect(reserveSpawnedThreadMock).not.toHaveBeenCalled();
+  });
+
+  it('url_watch 親配下の thread で URL 複数: 最初の URL を保存する', () => {
+    const threadJid = 'dc:thread-99-multi';
+    _setRegisteredGroups({
+      [chatJid]: baseGroup,
+      [threadJid]: {
+        name: 'Thread',
+        folder: baseGroup.folder,
+        parent_folder: baseGroup.folder,
+        trigger: baseGroup.trigger,
+        added_at: '2024-01-01T00:00:02.500Z',
+        type: 'thread',
+      },
+    });
+    const msg = makeMsg({
+      id: 'msg-thread-url-multi',
+      chat_jid: threadJid,
+      content:
+        'first https://example.com/first then https://example.com/second',
+      is_thread: true,
+      parent_jid: chatJid,
+    });
+
+    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [
+      makeChannel(),
+    ]);
+
+    expect(handled).toBe(true);
+    expect(storeMessageMock).toHaveBeenCalledTimes(1);
+    expect(storeMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'msg-thread-url-multi_url',
+        chat_jid: threadJid,
+        content: 'https://example.com/first',
+      }),
+    );
+    expect(reserveSpawnedThreadMock).not.toHaveBeenCalled();
+  });
+
+  it('url_watch 親配下の thread で URL なし: 元メッセージを通常保存する', () => {
+    const threadJid = 'dc:thread-100';
+    _setRegisteredGroups({
+      [chatJid]: baseGroup,
+      [threadJid]: {
+        name: 'Thread',
+        folder: baseGroup.folder,
+        parent_folder: baseGroup.folder,
+        trigger: baseGroup.trigger,
+        added_at: '2024-01-01T00:00:03.000Z',
+        type: 'thread',
+      },
+    });
+    const msg = makeMsg({
+      id: 'msg-thread-no-url',
+      chat_jid: threadJid,
+      content: 'just chatting',
+      is_thread: true,
+      parent_jid: chatJid,
+    });
+
+    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [
+      makeChannel(),
+    ]);
+
+    expect(handled).toBe(true);
+    expect(storeMessageMock).toHaveBeenCalledTimes(1);
+    expect(storeMessageMock).toHaveBeenCalledWith(msg);
+  });
+
+  it('url_watch 以外の親配下 thread は処理せずスキップする', () => {
+    const parentJid = 'dc:parent-non-url-watch';
+    const threadJid = 'dc:thread-101';
+    _setRegisteredGroups({
+      [parentJid]: { ...baseGroup, channel_mode: 'chat' },
+      [threadJid]: {
+        name: 'Thread',
+        folder: baseGroup.folder,
+        parent_folder: baseGroup.folder,
+        trigger: baseGroup.trigger,
+        added_at: '2024-01-01T00:00:04.000Z',
+        type: 'thread',
+      },
+    });
+    const msg = makeMsg({
+      id: 'msg-thread-skipped',
+      chat_jid: threadJid,
+      content: 'https://example.com/not-handled',
+      is_thread: true,
+      parent_jid: parentJid,
+    });
+
+    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [
+      makeChannel(),
+    ]);
+
+    expect(handled).toBe(false);
+    expect(storeMessageMock).not.toHaveBeenCalled();
+  });
 });

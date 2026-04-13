@@ -199,9 +199,8 @@ async function spawnThreadForUrl(
   group: RegisteredGroup,
   channel: Channel,
 ): Promise<boolean> {
-  const urls = msg.content.match(URL_RE_GLOBAL);
-  if (!urls || urls.length === 0) return false;
-  const url = urls[0];
+  const url = extractFirstUrl(msg.content);
+  if (!url) return false;
 
   // 重複スポーン防止: まず source_message_id を予約してから非同期 createThread を実行する
   const reserved = reserveSpawnedThread(msg.id, 'url', url);
@@ -217,7 +216,7 @@ async function spawnThreadForUrl(
 
   let threadJid: string | null;
   try {
-    threadJid = await channel.createThread!(chatJid, threadName);
+    threadJid = await channel.createThread!(chatJid, threadName, msg.id);
   } catch (err) {
     releaseSpawnedThreadReservation(msg.id);
     logger.error({ err, chatJid, url }, 'Failed to create thread for URL');
@@ -265,7 +264,11 @@ async function spawnThreadForUrl(
 }
 
 const URL_RE = /https?:\/\/[^\s<>"']+/i;
-const URL_RE_GLOBAL = /https?:\/\/[^\s<>"']+/gi;
+
+function extractFirstUrl(value: string): string | null {
+  const firstMatch = value.match(URL_RE);
+  return firstMatch?.[0] ?? null;
+}
 
 function stringContainsUrl(value: string): boolean {
   return URL_RE.test(value);
@@ -276,6 +279,26 @@ function maybeHandleUrlWatchMessage(
   msg: InboundMessage,
   availableChannels: Channel[] = channels,
 ): boolean {
+  const parentGroup = msg.parent_jid
+    ? registeredGroups[msg.parent_jid]
+    : undefined;
+  const isUrlWatchThreadMessage =
+    msg.is_thread === true && parentGroup?.channel_mode === 'url_watch';
+  if (isUrlWatchThreadMessage) {
+    const url = extractFirstUrl(msg.content);
+    if (!url) {
+      storeMessage(msg);
+      return true;
+    }
+    const syntheticMsg: InboundMessage = {
+      ...msg,
+      id: `${msg.id}_url`,
+      content: url,
+    };
+    storeMessage(syntheticMsg);
+    return true;
+  }
+
   const group = registeredGroups[chatJid];
   if (
     group?.channel_mode !== 'url_watch' ||

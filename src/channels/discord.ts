@@ -307,7 +307,11 @@ export class DiscordChannel implements Channel {
     }
   }
 
-  async createThread(parentJid: string, name: string): Promise<string | null> {
+  async createThread(
+    parentJid: string,
+    name: string,
+    messageId?: string,
+  ): Promise<string | null> {
     if (!this.client) return null;
     try {
       const channelId = parentJid.replace(/^dc:/, '');
@@ -320,10 +324,27 @@ export class DiscordChannel implements Channel {
         );
         return null;
       }
-      const thread = await (channel as TextChannel).threads.create({
+      const baseThreadOpts = {
         name: name.slice(0, 100),
         autoArchiveDuration: 60,
-      });
+      } as const;
+      if (messageId) {
+        try {
+          const linkedThread = await (channel as TextChannel).threads.create({
+            ...baseThreadOpts,
+            startMessage: messageId,
+          });
+          return `dc:${linkedThread.id}`;
+        } catch (err) {
+          logger.warn(
+            { parentJid, messageId, err },
+            'Failed to create Discord message-linked thread; falling back',
+          );
+        }
+      }
+      const thread = await (channel as TextChannel).threads.create(
+        baseThreadOpts,
+      );
       return `dc:${thread.id}`;
     } catch (err) {
       logger.error({ parentJid, err }, 'Failed to create Discord thread');
