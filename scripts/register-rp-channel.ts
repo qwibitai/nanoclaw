@@ -1,14 +1,15 @@
 import { initDatabase, setRegisteredGroup } from '../src/db.js';
+import { readEnvFile } from '../src/env.js';
 import { resolveGroupFolderPath } from '../src/group-folder.js';
 import fs from 'fs';
 import path from 'path';
 
-// Discord bot token from environment
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID;
+const env = readEnvFile(['DISCORD_BOT_TOKEN', 'DISCORD_GUILD_ID']);
+const DISCORD_TOKEN = process.env.DISCORD_BOT_TOKEN || env.DISCORD_BOT_TOKEN;
+const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID || env.DISCORD_GUILD_ID;
 
 if (!DISCORD_TOKEN || !DISCORD_GUILD_ID) {
-  console.error('Set DISCORD_TOKEN and DISCORD_GUILD_ID in environment');
+  console.error('Set DISCORD_BOT_TOKEN and DISCORD_GUILD_ID in .env');
   process.exit(1);
 }
 
