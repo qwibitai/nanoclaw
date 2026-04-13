@@ -323,7 +323,10 @@ function stringContainsUrl(value: string): boolean {
   return URL_RE.test(value);
 }
 
-function isUrlWatchThreadGroup(chatJid: string, group: RegisteredGroup): boolean {
+function isUrlWatchThreadGroup(
+  chatJid: string,
+  group: RegisteredGroup,
+): boolean {
   if (group.type !== 'thread' || !group.parent_folder) return false;
   return Object.entries(registeredGroups).some(
     ([jid, parentGroup]) =>

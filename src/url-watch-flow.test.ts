@@ -20,21 +20,25 @@ const {
   const storeMessageMock = vi.fn((msg: InboundMessage) => {
     storedMessages.push(msg);
   });
-  const getMessagesSinceMock = vi.fn((chatJid: string, sinceTimestamp: string) =>
-    storedMessages
-      .filter(
-        (m) => m.chat_jid === chatJid && m.timestamp > sinceTimestamp && !!m.content,
-      )
-      .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-      .map((m) => ({
-        id: m.id,
-        chat_jid: m.chat_jid,
-        sender: m.sender,
-        sender_name: m.sender_name,
-        content: m.content,
-        timestamp: m.timestamp,
-        is_from_me: !!m.is_from_me,
-      })),
+  const getMessagesSinceMock = vi.fn(
+    (chatJid: string, sinceTimestamp: string) =>
+      storedMessages
+        .filter(
+          (m) =>
+            m.chat_jid === chatJid &&
+            m.timestamp > sinceTimestamp &&
+            !!m.content,
+        )
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+        .map((m) => ({
+          id: m.id,
+          chat_jid: m.chat_jid,
+          sender: m.sender,
+          sender_name: m.sender_name,
+          content: m.content,
+          timestamp: m.timestamp,
+          is_from_me: !!m.is_from_me,
+        })),
   );
   return {
     storeMessageMock,
@@ -225,7 +229,8 @@ describe('url_watch flow', () => {
       storeChatMetadataMock.mock.invocationCallOrder[0] ?? -1;
     const syntheticStoreCallOrder =
       storeMessageMock.mock.invocationCallOrder[0] ?? -1;
-    const enqueueTaskCallOrder = enqueueTaskMock.mock.invocationCallOrder[0] ?? -1;
+    const enqueueTaskCallOrder =
+      enqueueTaskMock.mock.invocationCallOrder[0] ?? -1;
     const finalizeCallOrder =
       finalizeSpawnedThreadMock.mock.invocationCallOrder[0] ?? -1;
     expect(metadataCallOrder).toBeLessThan(syntheticStoreCallOrder);
