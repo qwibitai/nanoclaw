@@ -566,6 +566,17 @@ function buildContainerArgs(
     );
     // Group folder is read-only for untrusted (set above).
     // Agent can read CLAUDE.md/skills but can't write 7GB of numbers.
+  } else {
+    // Trusted/main: cap memory to prevent host OOM when multiple containers
+    // run in parallel. The NAS has 7.5GB RAM total; without a cap, multiple
+    // Claude SDK processes can exhaust host memory and trigger kernel OOM
+    // killer (SIGKILL exit 137). 1.5GB is plenty for Claude Code + skills.
+    args.push(
+      '--memory',
+      '1536m', // 1.5GB RAM hard limit
+      '--memory-swap',
+      '2048m', // allow 512MB swap as buffer
+    );
   }
 
   // Pass host timezone so container's local time matches the user's
