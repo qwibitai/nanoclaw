@@ -15,6 +15,7 @@ import {
   updateAttachmentMessageId,
 } from './db.js';
 import { resolveGroupFolderPath, isValidGroupFolder } from './group-folder.js';
+import { executeImapCommand } from './imap-service.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -375,6 +376,10 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For IMAP
+    commandId?: string;
+    operation?: string;
+    params?: any;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -655,6 +660,40 @@ export async function processTaskIpc(
           { data },
           'Invalid register_group request - missing required fields',
         );
+      }
+      break;
+
+    case 'imap':
+      if (data.commandId && data.operation) {
+        // Authorization: only groups with IMAP configured can use this
+        const groupEntry = Object.values(registeredGroups).find(
+          (g) => g.folder === sourceGroup,
+        );
+        if (groupEntry?.containerConfig?.imap) {
+          const result = await executeImapCommand(
+            groupEntry.containerConfig.imap,
+            data.operation,
+            data.params || {},
+          );
+
+          // Write result back to group's command folder
+          const groupFolderPath = resolveGroupFolderPath(sourceGroup);
+          const commandsDir = path.join(groupFolderPath, 'commands');
+          fs.mkdirSync(commandsDir, { recursive: true });
+
+          const resultPath = path.join(
+            commandsDir,
+            `${data.commandId}-result.json`,
+          );
+          fs.writeFileSync(resultPath, JSON.stringify(result, null, 2));
+
+          logger.info(
+            { commandId: data.commandId, sourceGroup, op: data.operation },
+            'IMAP command result written',
+          );
+        } else {
+          logger.warn({ sourceGroup }, 'Unauthorized IMAP attempt blocked');
+        }
       }
       break;
 

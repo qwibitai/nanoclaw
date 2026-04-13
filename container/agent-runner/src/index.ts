@@ -497,7 +497,9 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      model: 'claude-haiku-4-5-20251001',
+      model: containerInput.isMain
+        ? 'claude-sonnet-4-6'
+        : 'claude-haiku-4-5-20251001',
       systemPrompt: globalClaudeMd
         ? {
             type: 'preset' as const,

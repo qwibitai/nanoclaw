@@ -27,10 +27,17 @@ export interface AllowedRoot {
   description?: string;
 }
 
+export interface GoogleWorkspaceConfig {
+  allowedServices?: string[]; // Default: ['drive'] when omitted
+  allowedDrives?: string[];
+  allowedFolders?: string[];
+}
+
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
   imap?: ImapConfig;
+  googleWorkspace?: GoogleWorkspaceConfig;
 }
 
 export interface ImapConfig {
