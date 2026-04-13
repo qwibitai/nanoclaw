@@ -41,8 +41,11 @@ import { writeGroupsSnapshot } from '../container-runner.js';
 import { startIpcWatcher } from '../ipc.js';
 import { startSchedulerLoop } from '../task-scheduler.js';
 
+import path from 'path';
 import type { Agent } from '../api/agent.js';
+import type { McpServerConfig } from '../api/options.js';
 import type { AgentContext } from './agent-context.js';
+import type { AgentRegistryDb } from './registry-db.js';
 import { ChannelManager } from './channel-manager.js';
 import { GroupManager } from './group-manager.js';
 import { TaskManager } from './task-manager.js';
@@ -83,6 +86,7 @@ export class AgentImpl
   db!: AgentDb;
   queue!: GroupQueue;
   private _options: AgentOptions | undefined;
+  private _registry: AgentRegistryDb | null = null;
   private ipcHandle: { stop(): void } | null = null;
   private schedulerHandle: { stop(): void } | null = null;
 
@@ -96,11 +100,13 @@ export class AgentImpl
     agentConfig: AgentConfig,
     runtimeConfig: RuntimeConfig,
     options?: AgentOptions,
+    registry?: AgentRegistryDb,
   ) {
     super();
     this.config = agentConfig;
     this.runtimeConfig = runtimeConfig;
     this._options = options;
+    this._registry = registry ?? null;
     this.credentialResolver = options?.credentials ?? null;
     this.queue = new GroupQueue({
       dataDir: this.config.dataDir,
@@ -187,6 +193,96 @@ export class AgentImpl
 
   async cancelTask(taskId: string): Promise<void> {
     return this.taskMgr.cancelTask(taskId);
+  }
+
+  // ─── MCP Server Management ──────────────────────────────────────
+
+  setMcpServers(servers: Record<string, McpServerConfig>): void {
+    const resolved =
+      Object.keys(servers).length > 0
+        ? Object.fromEntries(
+            Object.entries(servers).map(([name, cfg]) => [
+              name,
+              { ...cfg, source: path.resolve(cfg.source) },
+            ]),
+          )
+        : null;
+    (this.config as { mcpServers: typeof resolved }).mcpServers = resolved;
+    this.persistAndSync({ mcpServers: resolved });
+  }
+
+  addMcpServer(name: string, config: McpServerConfig): void {
+    const current = this.config.mcpServers ?? {};
+    this.setMcpServers({ ...current, [name]: config });
+  }
+
+  removeMcpServer(name: string): void {
+    const current = { ...(this.config.mcpServers ?? {}) };
+    delete current[name];
+    this.setMcpServers(current);
+  }
+
+  getMcpServers(): Record<string, McpServerConfig> {
+    return { ...(this.config.mcpServers ?? {}) };
+  }
+
+  // ─── Skill Management ─────────────────────────────────────────
+
+  setSkills(sourcePaths: string[]): void {
+    const resolved = sourcePaths.length > 0
+      ? sourcePaths.map((s) => path.resolve(s))
+      : null;
+    (this.config as { skillsSources: typeof resolved }).skillsSources =
+      resolved;
+    this.persistAndSync({ skillsSources: resolved });
+  }
+
+  addSkill(sourcePath: string): void {
+    const resolved = path.resolve(sourcePath);
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      throw new Error(`Skill source is not a directory: ${resolved}`);
+    }
+    if (!fs.existsSync(path.join(resolved, 'SKILL.md'))) {
+      throw new Error(`Skill directory missing SKILL.md: ${resolved}`);
+    }
+    const current = this.config.skillsSources ?? [];
+    if (!current.includes(resolved)) {
+      this.setSkills([...current, resolved]);
+    }
+  }
+
+  removeSkill(name: string): void {
+    const current = this.config.skillsSources ?? [];
+    this.setSkills(current.filter((s) => path.basename(s) !== name));
+  }
+
+  getSkills(): string[] {
+    return [...(this.config.skillsSources ?? [])];
+  }
+
+  // ─── Instructions Management ──────────────────────────────────
+
+  setInstructions(instructions: string | null): void {
+    (this.config as { instructions: string | null }).instructions =
+      instructions;
+    this.persistAndSync({ instructions });
+  }
+
+  getInstructions(): string | null {
+    return this.config.instructions;
+  }
+
+  // ─── Persist + sync helper ────────────────────────────────────
+
+  private persistAndSync(updates: {
+    instructions?: string | null;
+    skillsSources?: string[] | null;
+    mcpServers?: Record<string, McpServerConfig> | null;
+  }): void {
+    this._registry?.updateAgent(this.config.agentName, updates);
+    if (this._started) {
+      this.groupMgr.syncAgentCustomizations();
+    }
   }
 
   // ─── AgentContext: saveState ─────────────────────────────────────

@@ -9,6 +9,7 @@ import type {
   RegisterGroupOptions,
   RegisteredGroup,
 } from './group.js';
+import type { McpServerConfig } from './options.js';
 import type {
   ListTasksOptions,
   ScheduleTaskOptions,
@@ -48,6 +49,37 @@ export interface Agent {
   resumeTask(taskId: string): Promise<Task>;
   /** Cancel and delete a scheduled task. Only after start(). */
   cancelTask(taskId: string): Promise<void>;
+  // ─── MCP Server Management ─────────────────────────────────
+
+  /** Replace all custom MCP servers. Persists and re-syncs immediately. */
+  setMcpServers(servers: Record<string, McpServerConfig>): void;
+  /** Add or update a single MCP server. */
+  addMcpServer(name: string, config: McpServerConfig): void;
+  /** Remove a MCP server by name. */
+  removeMcpServer(name: string): void;
+  /** Snapshot of configured MCP servers. */
+  getMcpServers(): Record<string, McpServerConfig>;
+
+  // ─── Skill Management ──────────────────────────────────────
+
+  /** Replace all agent-level skill source paths. Persists and re-syncs. */
+  setSkills(sourcePaths: string[]): void;
+  /** Add a skill directory. Validates source exists + has SKILL.md. */
+  addSkill(sourcePath: string): void;
+  /** Remove a skill by name (directory basename). */
+  removeSkill(name: string): void;
+  /** Snapshot of configured skill source paths. */
+  getSkills(): string[];
+
+  // ─── Instructions Management ───────────────────────────────
+
+  /** Set agent instructions (appended to system prompt). Null to clear. */
+  setInstructions(instructions: string | null): void;
+  /** Get current instructions. */
+  getInstructions(): string | null;
+
+  // ─── Lifecycle ─────────────────────────────────────────────
+
   /** Start the agent — connects channels, begins processing messages. */
   start(): Promise<void>;
   /** Stop the agent — disconnects channels, stops processing. */

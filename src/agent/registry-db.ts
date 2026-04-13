@@ -190,6 +190,49 @@ export class AgentRegistryDb {
     }
   }
 
+  updateAgent(
+    name: string,
+    updates: {
+      instructions?: string | null;
+      skillsSources?: string[] | null;
+      mcpServers?: Record<string, McpServerConfig> | null;
+    },
+  ): void {
+    const sets: string[] = [];
+    const values: unknown[] = [];
+
+    if ('instructions' in updates) {
+      sets.push('instructions = ?');
+      values.push(updates.instructions ?? null);
+    }
+    if ('skillsSources' in updates) {
+      sets.push('skills_sources_json = ?');
+      values.push(
+        updates.skillsSources
+          ? JSON.stringify(updates.skillsSources)
+          : null,
+      );
+    }
+    if ('mcpServers' in updates) {
+      sets.push('mcp_servers_json = ?');
+      values.push(
+        updates.mcpServers
+          ? JSON.stringify(normalizeJson(updates.mcpServers))
+          : null,
+      );
+    }
+
+    if (sets.length === 0) return;
+
+    sets.push('updated_at = ?');
+    values.push(new Date().toISOString());
+    values.push(name);
+
+    this.db
+      .prepare(`UPDATE agents SET ${sets.join(', ')} WHERE name = ?`)
+      .run(...values);
+  }
+
   deleteAgent(name: string): void {
     this.db.prepare('DELETE FROM agents WHERE name = ?').run(name);
   }
