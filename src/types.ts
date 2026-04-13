@@ -136,7 +136,12 @@ export interface Channel {
   // オプション: プラットフォームからグループ/チャット名を同期する。
   syncGroups?(force: boolean): Promise<void>;
   // オプション: 親チャンネルにスレッドを作成し、新スレッドの JID を返す。
-  createThread?(parentJid: string, name: string): Promise<string | null>;
+  // messageId がある場合は、元メッセージ起点のスレッド作成を試みる。
+  createThread?(
+    parentJid: string,
+    name: string,
+    messageId?: string,
+  ): Promise<string | null>;
 }
 
 // チャネルが受信メッセージを配信するために使用するコールバック型。

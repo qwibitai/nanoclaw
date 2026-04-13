@@ -737,6 +737,100 @@ describe('DiscordChannel', () => {
     });
   });
 
+  // --- createThread ---
+
+  describe('createThread', () => {
+    it('creates message-linked thread when messageId is provided', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const mockThreadsCreate = vi
+        .fn()
+        .mockResolvedValue({ id: 'thread-linked-1' });
+      currentClient().channels.fetch.mockResolvedValue({
+        type: 0,
+        threads: { create: mockThreadsCreate },
+      });
+
+      const threadJid = await channel.createThread(
+        'dc:1234567890123456',
+        'linked-thread',
+        'msg_001',
+      );
+
+      expect(currentClient().channels.fetch).toHaveBeenCalledWith(
+        '1234567890123456',
+      );
+      expect(mockThreadsCreate).toHaveBeenCalledTimes(1);
+      expect(mockThreadsCreate).toHaveBeenCalledWith({
+        name: 'linked-thread',
+        autoArchiveDuration: 60,
+        startMessage: 'msg_001',
+      });
+      expect(threadJid).toBe('dc:thread-linked-1');
+    });
+
+    it('falls back to standalone thread when linked creation fails', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const mockThreadsCreate = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('missing source message'))
+        .mockResolvedValueOnce({ id: 'thread-fallback-1' });
+      currentClient().channels.fetch.mockResolvedValue({
+        type: 0,
+        threads: { create: mockThreadsCreate },
+      });
+
+      const threadJid = await channel.createThread(
+        'dc:1234567890123456',
+        'fallback-thread',
+        'msg_missing',
+      );
+
+      expect(mockThreadsCreate).toHaveBeenCalledTimes(2);
+      expect(mockThreadsCreate).toHaveBeenNthCalledWith(1, {
+        name: 'fallback-thread',
+        autoArchiveDuration: 60,
+        startMessage: 'msg_missing',
+      });
+      expect(mockThreadsCreate).toHaveBeenNthCalledWith(2, {
+        name: 'fallback-thread',
+        autoArchiveDuration: 60,
+      });
+      expect(threadJid).toBe('dc:thread-fallback-1');
+    });
+
+    it('creates standalone thread when messageId is omitted', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const mockThreadsCreate = vi
+        .fn()
+        .mockResolvedValue({ id: 'thread-standalone-1' });
+      currentClient().channels.fetch.mockResolvedValue({
+        type: 0,
+        threads: { create: mockThreadsCreate },
+      });
+
+      const threadJid = await channel.createThread(
+        'dc:1234567890123456',
+        'standalone-thread',
+      );
+
+      expect(mockThreadsCreate).toHaveBeenCalledTimes(1);
+      expect(mockThreadsCreate).toHaveBeenCalledWith({
+        name: 'standalone-thread',
+        autoArchiveDuration: 60,
+      });
+      expect(threadJid).toBe('dc:thread-standalone-1');
+    });
+  });
+
   // --- ownsJid ---
 
   describe('ownsJid', () => {
