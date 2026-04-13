@@ -36,6 +36,32 @@ const onecli = new OneCLI({ url: ONECLI_URL });
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
+// World-readable cache for OneCLI CA certs (see relocateOneCliCertMounts).
+const ONECLI_CERT_CACHE_DIR = '/tmp/nanoclaw-onecli-certs';
+
+/**
+ * Copy each `-v <src>:<dst>:ro` source whose path lives under macOS's
+ * user-private $TMPDIR into a world-readable cache, and rewrite the arg
+ * to point there. Without this, Apple Container's virtiofs surfaces the
+ * file but `open()` fails because the parent dir is mode 700.
+ */
+function relocateOneCliCertMounts(args: string[]): void {
+  fs.mkdirSync(ONECLI_CERT_CACHE_DIR, { recursive: true, mode: 0o755 });
+  for (let i = 0; i < args.length - 1; i++) {
+    if (args[i] !== '-v') continue;
+    // Format: <host_abs_path>:<container_abs_path>[:ro|:rw]. Both paths are
+    // absolute (start with /) and contain no `:`, so a plain split works.
+    const parts = args[i + 1].split(':');
+    if (parts.length < 2 || parts.length > 3) continue;
+    const [src, dst, mode] = parts;
+    if (!src.endsWith('.pem')) continue;
+    const cached = path.join(ONECLI_CERT_CACHE_DIR, path.basename(src));
+    fs.copyFileSync(src, cached);
+    fs.chmodSync(cached, 0o644);
+    args[i + 1] = mode ? `${cached}:${dst}:${mode}` : `${cached}:${dst}`;
+  }
+}
+
 /**
  * Load external MCP server configs from .mcp.json.
  * Rewrites localhost URLs to the container host gateway (host.docker.internal
@@ -301,6 +327,27 @@ async function buildContainerArgs(
     agent: agentIdentifier,
   });
   if (onecliApplied) {
+    // OneCLI hardcodes host.docker.internal in HTTP_PROXY/HTTPS_PROXY, which
+    // Apple Container can't resolve. Rewrite to the detected host gateway so
+    // containers can actually reach the OneCLI proxy. No-op on Docker (since
+    // CONTAINER_HOST_GATEWAY === 'host.docker.internal' there).
+    if (CONTAINER_HOST_GATEWAY !== 'host.docker.internal') {
+      for (let i = 0; i < args.length; i++) {
+        if (args[i].includes('host.docker.internal')) {
+          args[i] = args[i].replace(
+            /host\.docker\.internal/g,
+            CONTAINER_HOST_GATEWAY,
+          );
+        }
+      }
+    }
+    // OneCLI mounts CA certs from $TMPDIR (drwx------ user-private dir on
+    // macOS). Apple Container's virtiofs inherits the parent's permissions,
+    // so the container can't read the certs. Copy them to a world-readable
+    // location and rewrite the -v sources to point there.
+    if (CONTAINER_RUNTIME_BIN === 'container') {
+      relocateOneCliCertMounts(args);
+    }
     logger.info({ containerName }, 'OneCLI gateway config applied');
   } else {
     logger.warn(

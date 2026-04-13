@@ -33,8 +33,9 @@ export const CONTAINER_RUNTIME_BIN: Runtime = detectRuntime();
 
 /**
  * IP address containers use to reach the host machine.
- *   - Apple Container (macOS): bridge network gateway (192.168.64.x). Detected from
- *     bridge100/bridge0, falls back to 192.168.64.1.
+ *   - Apple Container (macOS): bridge network gateway in the 192.168.64.0/24 subnet.
+ *     Scans all bridge* interfaces (host may have multiple — VPNs, other VMs)
+ *     and picks the one in AC's subnet. Falls back to 192.168.64.1.
  *   - Docker Desktop (macOS) / Docker on Linux: host.docker.internal.
  * Can be overridden with the CONTAINER_HOST_GATEWAY env var.
  */
@@ -44,10 +45,13 @@ export const CONTAINER_HOST_GATEWAY =
 function detectHostGateway(): string {
   if (CONTAINER_RUNTIME_BIN === 'container') {
     const ifaces = os.networkInterfaces();
-    const bridge = ifaces['bridge100'] || ifaces['bridge0'];
-    if (bridge) {
-      const ipv4 = bridge.find((a) => a.family === 'IPv4');
-      if (ipv4) return ipv4.address;
+    for (const [name, addrs] of Object.entries(ifaces)) {
+      if (!name.startsWith('bridge') || !addrs) continue;
+      const ipv4 = addrs.find((a) => a.family === 'IPv4');
+      // Apple Container always uses the 192.168.64.0/24 subnet.
+      if (ipv4 && ipv4.address.startsWith('192.168.64.')) {
+        return ipv4.address;
+      }
     }
     return '192.168.64.1';
   }
