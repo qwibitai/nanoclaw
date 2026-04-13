@@ -229,9 +229,8 @@ export class AgentImpl
   // ─── Skill Management ─────────────────────────────────────────
 
   setSkills(sourcePaths: string[]): void {
-    const resolved = sourcePaths.length > 0
-      ? sourcePaths.map((s) => path.resolve(s))
-      : null;
+    const resolved =
+      sourcePaths.length > 0 ? sourcePaths.map((s) => path.resolve(s)) : null;
     (this.config as { skillsSources: typeof resolved }).skillsSources =
       resolved;
     this.persistAndSync({ skillsSources: resolved });

@@ -517,7 +517,10 @@ import { buildRuntimeConfig } from '../runtime-config.js';
 
 const rtConfig = buildRuntimeConfig({}, '/tmp/agentlite-test-pkg');
 
-function createTestAgent(name: string, opts?: Parameters<typeof resolveSerializableAgentSettings>[1]) {
+function createTestAgent(
+  name: string,
+  opts?: Parameters<typeof resolveSerializableAgentSettings>[1],
+) {
   const config = buildAgentConfig({
     agentId: `${name}00000000`.slice(0, 8),
     ...resolveSerializableAgentSettings(name, opts, tmpDir),
@@ -554,7 +557,11 @@ describe('MCP server management API', () => {
 
   it('setMcpServers replaces all', () => {
     const agent = createTestAgent('mcp-test');
-    agent.addMcpServer('old', { source: '/old', command: 'node', args: ['s.js'] });
+    agent.addMcpServer('old', {
+      source: '/old',
+      command: 'node',
+      args: ['s.js'],
+    });
 
     agent.setMcpServers({
       new1: { source: '/new1', command: 'node', args: ['s.js'] },

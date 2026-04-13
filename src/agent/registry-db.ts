@@ -208,9 +208,7 @@ export class AgentRegistryDb {
     if ('skillsSources' in updates) {
       sets.push('skills_sources_json = ?');
       values.push(
-        updates.skillsSources
-          ? JSON.stringify(updates.skillsSources)
-          : null,
+        updates.skillsSources ? JSON.stringify(updates.skillsSources) : null,
       );
     }
     if ('mcpServers' in updates) {
