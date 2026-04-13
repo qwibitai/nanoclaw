@@ -6,6 +6,20 @@ allowed-tools: Bash(outlook:*)
 
 # Outlook Tool
 
+## Confirmation Wall
+
+**MANDATORY: Before sending or modifying anything, ask for explicit user confirmation.**
+
+Actions requiring confirmation:
+- Sending a new email (`outlook send`)
+- Replying to an email (`outlook reply`, `outlook reply-all`)
+- Forwarding an email (`outlook forward`)
+- Creating, updating, or deleting calendar events
+
+Tell the user exactly what you're about to do (recipient, subject, body summary) and wait for a clear "yes" / "go ahead" / "send it" before executing. If they say no or don't confirm, abort.
+
+Read-only actions (listing emails, reading, searching, viewing calendar) do NOT require confirmation.
+
 Use the `outlook` command to interact with Outlook email and calendar via Microsoft Graph.
 
 ## Email

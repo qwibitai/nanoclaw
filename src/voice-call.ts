@@ -92,13 +92,21 @@ async function waitForCallEnd(
   callSid: string,
 ): Promise<string> {
   const url = `https://api.twilio.com/2010-04-01/Accounts/${config.accountSid}/Calls/${callSid}.json`;
-  const terminalStatuses = new Set(['completed', 'no-answer', 'busy', 'failed', 'canceled']);
+  const terminalStatuses = new Set([
+    'completed',
+    'no-answer',
+    'busy',
+    'failed',
+    'canceled',
+  ]);
 
   for (let i = 0; i < 60; i++) {
     await new Promise((r) => setTimeout(r, 5000));
     try {
       const res = await fetch(url, {
-        headers: { Authorization: authHeader(config.accountSid, config.authToken) },
+        headers: {
+          Authorization: authHeader(config.accountSid, config.authToken),
+        },
       });
       if (res.ok) {
         const data = (await res.json()) as { status: string };
@@ -135,7 +143,10 @@ export async function makeReminderCall(message: string): Promise<void> {
     logger.info({ callSid, status: finalStatus }, 'Primary call ended');
 
     if (finalStatus !== 'completed') {
-      logger.info({ to: config.fallbackNumber }, 'Primary not answered, calling fallback');
+      logger.info(
+        { to: config.fallbackNumber },
+        'Primary not answered, calling fallback',
+      );
       await initiateCall(config, config.fallbackNumber, twiml);
     }
   } catch (err) {

@@ -339,9 +339,13 @@ export async function runContainerAgent(
   }
 
   // Inject Composio credentials so the Composio MCP server loads inside the container
-  const { COMPOSIO_API_KEY, COMPOSIO_CUSTOMER_ID } = readEnvFile(['COMPOSIO_API_KEY', 'COMPOSIO_CUSTOMER_ID']);
+  const { COMPOSIO_API_KEY, COMPOSIO_CUSTOMER_ID } = readEnvFile([
+    'COMPOSIO_API_KEY',
+    'COMPOSIO_CUSTOMER_ID',
+  ]);
   if (COMPOSIO_API_KEY) extraEnv['COMPOSIO_API_KEY'] = COMPOSIO_API_KEY;
-  if (COMPOSIO_CUSTOMER_ID) extraEnv['COMPOSIO_CUSTOMER_ID'] = COMPOSIO_CUSTOMER_ID;
+  if (COMPOSIO_CUSTOMER_ID)
+    extraEnv['COMPOSIO_CUSTOMER_ID'] = COMPOSIO_CUSTOMER_ID;
 
   const containerArgs = buildContainerArgs(mounts, containerName, extraEnv);
 

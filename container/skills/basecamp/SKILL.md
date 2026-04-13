@@ -68,6 +68,22 @@ argument-hint: "[action] [args...]"
 
 Full CLI coverage: 130 endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, and chat.
 
+## Confirmation Wall
+
+**MANDATORY: Before any write action, ask for explicit user confirmation.**
+
+Write actions requiring confirmation:
+- Creating, updating, or completing todos
+- Posting messages or comments
+- Moving or updating cards
+- Sending campfire/chat messages
+- Creating, updating, or deleting schedule events
+- Any action that changes data in Basecamp
+
+Tell the user what you're about to do and wait for a clear "yes" / "go ahead" / "send it" before executing. If they say no or don't confirm, abort.
+
+Read-only actions (listing, searching, fetching) do NOT require confirmation.
+
 ## Agent Invariants
 
 **MUST follow these rules:**
