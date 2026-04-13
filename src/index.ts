@@ -73,6 +73,46 @@ import { logger } from './logger.js';
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
 
+/**
+ * Dispatch a message to the Research Partner service.
+ * Returns true on success (or no-op), false on error.
+ * Exported for testing — called internally by processGroupMessages().
+ */
+export async function dispatchToRpService(
+  latestMessage: { content: string; sender_name: string } | undefined,
+  chatJid: string,
+  channel: { sendMessage(jid: string, text: string): Promise<void> | void },
+): Promise<boolean> {
+  if (!latestMessage) return true;
+
+  const rpUrl = process.env.RP_SERVICE_URL || 'http://localhost:8300';
+  try {
+    const res = await fetch(`${rpUrl}/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: latestMessage.content,
+        sender: latestMessage.sender_name,
+        channel: chatJid,
+      }),
+    });
+    if (res.ok) {
+      const { response } = (await res.json()) as { response?: string };
+      if (response) await channel.sendMessage(chatJid, response);
+      return true;
+    } else {
+      const errBody = await res.text();
+      logger.error(`RP service error: ${res.status} ${errBody}`);
+      await channel.sendMessage(chatJid, 'Research Partner is currently unavailable.');
+      return false;
+    }
+  } catch (err: any) {
+    logger.error(`RP service unreachable: ${err.message}`);
+    await channel.sendMessage(chatJid, 'Research Partner service is not running.');
+    return false;
+  }
+}
+
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
@@ -296,6 +336,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
 
   if (missedMessages.length === 0) return true;
+
+  // RP service dispatch — bypass container pipeline entirely
+  if (group.dispatch === 'rp_service') {
+    const latest = missedMessages[missedMessages.length - 1];
+    // Advance cursor before dispatching
+    lastAgentTimestamp[chatJid] = latest.timestamp;
+    saveState();
+    await dispatchToRpService(
+      { content: latest.content, sender_name: latest.sender_name },
+      chatJid,
+      channel,
+    );
+    return true;
+  }
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
