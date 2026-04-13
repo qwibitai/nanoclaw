@@ -247,14 +247,26 @@ async function spawnThreadForUrl(
     chat_jid: threadJid,
     sender: msg.sender,
     sender_name: msg.sender_name,
-    content: `@${ASSISTANT_NAME} ${url}`,
+    content: url,
     timestamp: msg.timestamp,
     is_from_me: true,
     is_thread: true,
     parent_jid: chatJid,
   };
   storeMessage(syntheticMsg);
-  queue.enqueueMessageCheck(threadJid);
+  queue.enqueueTask(threadJid, `url-watch-initial:${msg.id}`, async () => {
+    const processed = await processMessagesForGroup(
+      threadJid,
+      childGroup,
+      channel,
+    );
+    if (!processed) {
+      logger.error(
+        { chatJid, threadJid, sourceMessageId: msg.id, url },
+        'Initial URL direct processing failed',
+      );
+    }
+  });
 
   logger.info(
     { chatJid, threadJid, url, folder: group.folder },
@@ -272,6 +284,30 @@ function extractFirstUrl(value: string): string | null {
 
 function stringContainsUrl(value: string): boolean {
   return URL_RE.test(value);
+}
+
+function isUrlWatchThreadGroup(chatJid: string, group: RegisteredGroup): boolean {
+  if (group.type !== 'thread' || !group.parent_folder) return false;
+  return Object.entries(registeredGroups).some(
+    ([jid, parentGroup]) =>
+      jid !== chatJid &&
+      parentGroup.channel_mode === 'url_watch' &&
+      parentGroup.folder === group.parent_folder,
+  );
+}
+
+function getUrlWatchSeedMessage(
+  chatJid: string,
+  group: RegisteredGroup,
+): NewMessage | null {
+  if (!isUrlWatchThreadGroup(chatJid, group)) return null;
+  const allMessages = getMessagesSince(chatJid, '', ASSISTANT_NAME, 1000);
+  for (const message of allMessages) {
+    const url = extractFirstUrl(message.content);
+    if (!url) continue;
+    return message.content === url ? message : { ...message, content: url };
+  }
+  return null;
 }
 
 function maybeHandleUrlWatchMessage(
@@ -359,6 +395,8 @@ export function _setRegisteredGroups(
 export const _spawnThreadForUrl = spawnThreadForUrl;
 /** @internal - テスト用にエクスポート */
 export const _maybeHandleUrlWatchMessage = maybeHandleUrlWatchMessage;
+/** @internal - テスト用にエクスポート */
+export const _processMessagesForGroup = processMessagesForGroup;
 
 /** @internal - テスト用にエクスポート */
 export const _autoRegisterThread = autoRegisterThread;
@@ -377,6 +415,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
+  return processMessagesForGroup(chatJid, group, channel);
+}
+
+async function processMessagesForGroup(
+  chatJid: string,
+  group: RegisteredGroup,
+  channel: Channel,
+): Promise<boolean> {
   const isPrivileged = hasPrivilege(group);
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
@@ -399,7 +445,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  const urlSeedMessage = getUrlWatchSeedMessage(chatJid, group);
+  const promptMessages =
+    urlSeedMessage && !missedMessages.some((m) => m.id === urlSeedMessage.id)
+      ? [urlSeedMessage, ...missedMessages]
+      : missedMessages;
+  const prompt = formatMessages(promptMessages, TIMEZONE);
 
   // startMessageLoop 内のパイプパスがこれらのメッセージを再取得しないように
   // カーソルを進めます。エラー時にロールバックできるよう古いカーソルを保存します。
