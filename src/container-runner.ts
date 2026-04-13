@@ -294,16 +294,27 @@ function buildContainerArgs(
   }
 
   // Google Workspace MCP credentials (Drive, Sheets, Docs)
-  const gcpOauthPath = path.join(os.homedir(), '.gmail-mcp', 'gcp-oauth.keys.json');
-  const gcpCredsPath = path.join(os.homedir(), '.gmail-mcp', 'credentials.json');
+  const gcpOauthPath = path.join(
+    os.homedir(),
+    '.gmail-mcp',
+    'gcp-oauth.keys.json',
+  );
+  const gcpCredsPath = path.join(
+    os.homedir(),
+    '.gmail-mcp',
+    'credentials.json',
+  );
   if (fs.existsSync(gcpOauthPath) && fs.existsSync(gcpCredsPath)) {
     try {
       const oauthKeys = JSON.parse(fs.readFileSync(gcpOauthPath, 'utf-8'));
       const creds = JSON.parse(fs.readFileSync(gcpCredsPath, 'utf-8'));
       const installed = oauthKeys.installed || oauthKeys.web || {};
-      if (installed.client_id) args.push('-e', `GOOGLE_CLIENT_ID=${installed.client_id}`);
-      if (installed.client_secret) args.push('-e', `GOOGLE_CLIENT_SECRET=${installed.client_secret}`);
-      if (creds.refresh_token) args.push('-e', `GOOGLE_REFRESH_TOKEN=${creds.refresh_token}`);
+      if (installed.client_id)
+        args.push('-e', `GOOGLE_CLIENT_ID=${installed.client_id}`);
+      if (installed.client_secret)
+        args.push('-e', `GOOGLE_CLIENT_SECRET=${installed.client_secret}`);
+      if (creds.refresh_token)
+        args.push('-e', `GOOGLE_REFRESH_TOKEN=${creds.refresh_token}`);
     } catch (err) {
       logger.debug({ err }, 'Could not read Google Workspace credentials');
     }

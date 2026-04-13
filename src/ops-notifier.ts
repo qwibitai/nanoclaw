@@ -182,7 +182,7 @@ async function pollLoop(): Promise<void> {
           } else {
             await sendRaw(
               token,
-              "Send that to @GMRNanoBot — I only handle quick ops commands.\n\nTry: close #N, mute <keyword>, unmute <keyword>, mutes, status, ack",
+              'Send that to @GMRNanoBot — I only handle quick ops commands.\n\nTry: close #N, mute <keyword>, unmute <keyword>, mutes, status, ack',
               false,
             );
           }

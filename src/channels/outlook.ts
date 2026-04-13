@@ -99,9 +99,15 @@ async function classifyEmail(
           try {
             const data = JSON.parse(Buffer.concat(chunks).toString());
             const text = data.content?.[0]?.text?.trim();
-            if (!text) { resolve(null); return; }
+            if (!text) {
+              resolve(null);
+              return;
+            }
             // IGNORE items get no category at all
-            if (text.toUpperCase() === 'IGNORE') { resolve(null); return; }
+            if (text.toUpperCase() === 'IGNORE') {
+              resolve(null);
+              return;
+            }
             const match = VALID_CATEGORIES.find(
               (c) => c.toLowerCase() === text.toLowerCase(),
             );
@@ -116,7 +122,10 @@ async function classifyEmail(
       logger.warn({ err }, 'classifyEmail request failed');
       resolve(null);
     });
-    req.setTimeout(10000, () => { req.destroy(); resolve(null); });
+    req.setTimeout(10000, () => {
+      req.destroy();
+      resolve(null);
+    });
     req.write(payload);
     req.end();
   });
@@ -317,14 +326,15 @@ export class OutlookChannel implements Channel {
       return;
     }
 
-    await this.client
-      .api(`/me/messages/${emailId}`)
-      .patch({ categories });
+    await this.client.api(`/me/messages/${emailId}`).patch({ categories });
 
     logger.info({ emailId, categories }, 'Outlook email categories set');
   }
 
-  async flagEmail(emailId: string, status: 'flagged' | 'complete' | 'notFlagged'): Promise<void> {
+  async flagEmail(
+    emailId: string,
+    status: 'flagged' | 'complete' | 'notFlagged',
+  ): Promise<void> {
     if (!this.client) {
       logger.warn('Outlook not initialized, cannot flag');
       return;
@@ -372,7 +382,9 @@ export class OutlookChannel implements Channel {
         .filter('isRead eq false')
         .orderby('receivedDateTime desc')
         .top(10)
-        .select('id,subject,from,receivedDateTime,body,conversationId,categories')
+        .select(
+          'id,subject,from,receivedDateTime,body,conversationId,categories',
+        )
         .get();
 
       const messages: any[] = res.value || [];
@@ -516,9 +528,10 @@ export class OutlookChannel implements Channel {
     }
 
     const mainJid = mainEntry[0];
-    const categoryLine = existingCategories.length > 0
-      ? `\nCategories: ${existingCategories.join(', ')}`
-      : '';
+    const categoryLine =
+      existingCategories.length > 0
+        ? `\nCategories: ${existingCategories.join(', ')}`
+        : '';
     const enrichedSender = enrichSenderLine(senderEmail, senderName);
     const content = `[Outlook email from ${enrichedSender}]\nEmail ID: ${msg.id}\nSubject: ${subject}${categoryLine}\n\n${body}`;
 
@@ -583,10 +596,7 @@ export class OutlookChannel implements Channel {
           );
         }
       } catch (err) {
-        logger.warn(
-          { msgId: msg.id, err },
-          'Auto-categorization failed',
-        );
+        logger.warn({ msgId: msg.id, err }, 'Auto-categorization failed');
       }
     }
 

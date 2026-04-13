@@ -30,15 +30,22 @@ export async function transcribeTelegramVoice(
 
     // Send to OpenAI Whisper API
     const formData = new FormData();
-    formData.append('file', new Blob([buffer], { type: 'audio/ogg' }), 'voice.ogg');
+    formData.append(
+      'file',
+      new Blob([buffer], { type: 'audio/ogg' }),
+      'voice.ogg',
+    );
     formData.append('model', 'whisper-1');
     formData.append('response_format', 'text');
 
-    const whisperResp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}` },
-      body: formData,
-    });
+    const whisperResp = await fetch(
+      'https://api.openai.com/v1/audio/transcriptions',
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: formData,
+      },
+    );
 
     if (!whisperResp.ok) {
       const err = await whisperResp.text();

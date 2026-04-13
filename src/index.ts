@@ -657,7 +657,10 @@ async function main(): Promise<void> {
       }
       await (outlookChannel as any).categorizeEmail(emailId, categories);
     },
-    flagEmail: async (emailId: string, status: 'flagged' | 'complete' | 'notFlagged') => {
+    flagEmail: async (
+      emailId: string,
+      status: 'flagged' | 'complete' | 'notFlagged',
+    ) => {
       const outlookChannel = channels.find((ch) => ch.name === 'outlook');
       if (!outlookChannel || !('flagEmail' in outlookChannel)) {
         throw new Error('Outlook channel not available');

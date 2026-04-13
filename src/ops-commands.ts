@@ -61,9 +61,7 @@ export function parseOpsCommand(text: string): OpsCommand | null {
   }
 
   // close CATEGORY #N
-  const closeAltMatch = t.match(
-    /^(?:close|done|✅)\s+(\w+)\s+#?(\d+)$/i,
-  );
+  const closeAltMatch = t.match(/^(?:close|done|✅)\s+(\w+)\s+#?(\d+)$/i);
   if (closeAltMatch) {
     const rawCat = closeAltMatch[1].toLowerCase();
     const category = CATEGORY_ALIASES[rawCat];
@@ -73,9 +71,7 @@ export function parseOpsCommand(text: string): OpsCommand | null {
   }
 
   // mute <keyword> [for Xh/Xm]
-  const muteMatch = t.match(
-    /^mute\s+(.+?)(?:\s+for\s+(\d+)\s*([hm]))?$/i,
-  );
+  const muteMatch = t.match(/^mute\s+(.+?)(?:\s+for\s+(\d+)\s*([hm]))?$/i);
   if (muteMatch) {
     const keyword = muteMatch[1].trim();
     if (!keyword) return null;
@@ -168,9 +164,7 @@ function executeMute(cmd: MuteCommand): string {
     : null;
   mutes[key] = { until, keyword: cmd.keyword };
   saveMutes(mutes);
-  const duration = cmd.hours
-    ? `for ${cmd.hours}h`
-    : 'indefinitely';
+  const duration = cmd.hours ? `for ${cmd.hours}h` : 'indefinitely';
   return `Muted "${cmd.keyword}" ${duration}.`;
 }
 
@@ -239,13 +233,18 @@ async function notionRequest(
           if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
             resolve(JSON.parse(text));
           } else {
-            reject(new Error(`Notion ${res.statusCode}: ${text.slice(0, 200)}`));
+            reject(
+              new Error(`Notion ${res.statusCode}: ${text.slice(0, 200)}`),
+            );
           }
         });
       },
     );
     req.on('error', reject);
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Notion timeout')); });
+    req.setTimeout(15000, () => {
+      req.destroy();
+      reject(new Error('Notion timeout'));
+    });
     if (payload) req.write(payload);
     req.end();
   });
@@ -300,7 +299,11 @@ async function executeClose(cmd: CloseCommand): Promise<string> {
     });
 
     logger.info(
-      { blockId: targetBlock.id, title: targetTitle, category: currentCategory },
+      {
+        blockId: targetBlock.id,
+        title: targetTitle,
+        category: currentCategory,
+      },
       'Ops bot closed Notion item',
     );
 
@@ -315,9 +318,7 @@ async function executeClose(cmd: CloseCommand): Promise<string> {
 
 function getBlockText(block: any): string {
   const richText =
-    block[block.type]?.rich_text ||
-    block[block.type]?.text ||
-    [];
+    block[block.type]?.rich_text || block[block.type]?.text || [];
   return richText.map((t: any) => t.plain_text || '').join('');
 }
 

@@ -24,7 +24,10 @@ export interface IpcDeps {
   ) => void;
   onTasksChanged: () => void;
   categorizeEmail?: (emailId: string, categories: string[]) => Promise<void>;
-  flagEmail?: (emailId: string, status: 'flagged' | 'complete' | 'notFlagged') => Promise<void>;
+  flagEmail?: (
+    emailId: string,
+    status: 'flagged' | 'complete' | 'notFlagged',
+  ) => Promise<void>;
   upsertOpenItem?: (input: {
     title: string;
     owner?: string;
@@ -36,7 +39,11 @@ export interface IpcDeps {
     due_date?: string;
     notes?: string;
   }) => Promise<number>;
-  updateOpenItemStatus?: (id: number, status: string, notes?: string) => Promise<number>;
+  updateOpenItemStatus?: (
+    id: number,
+    status: string,
+    notes?: string,
+  ) => Promise<number>;
   logAudit?: (
     actionType: string,
     target: string | null,
