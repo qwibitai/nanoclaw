@@ -154,7 +154,8 @@ async function ensureTarget(port: number): Promise<string | undefined> {
       const type = typeof row.type === 'string' ? row.type : '';
       return Boolean(id) && (!type || type === 'page');
     }) as Record<string, unknown> | undefined;
-    const id = firstPage && typeof firstPage.id === 'string' ? firstPage.id : '';
+    const id =
+      firstPage && typeof firstPage.id === 'string' ? firstPage.id : '';
     if (id) return id;
   }
 

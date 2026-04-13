@@ -264,7 +264,11 @@ describe('agent-spawn timeout behavior', () => {
       model: 'claude-sonnet-4-6',
     };
 
-    const resultPromise = spawnAgent(groupWithModel, inputWithJobModel, () => {});
+    const resultPromise = spawnAgent(
+      groupWithModel,
+      inputWithJobModel,
+      () => {},
+    );
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);

@@ -204,8 +204,7 @@ async function editTelegramMessage(
     });
     return;
   } catch (errV2Raw) {
-    const msg =
-      errV2Raw instanceof Error ? errV2Raw.message : String(errV2Raw);
+    const msg = errV2Raw instanceof Error ? errV2Raw.message : String(errV2Raw);
     if (/message is not modified/i.test(msg)) return;
     logger.debug(
       { err: errV2Raw },
@@ -225,7 +224,9 @@ async function editTelegramMessage(
     return;
   } catch (errV2Escaped) {
     const msg =
-      errV2Escaped instanceof Error ? errV2Escaped.message : String(errV2Escaped);
+      errV2Escaped instanceof Error
+        ? errV2Escaped.message
+        : String(errV2Escaped);
     if (/message is not modified/i.test(msg)) return;
     logger.debug(
       { err: errV2Escaped },
@@ -511,7 +512,11 @@ export class TelegramChannel implements Channel {
         } else {
           // Intermediate edits — plain text, single API call, no fallback cascade
           try {
-            await this.bot.api.editMessageText(numericId, state.messageId, headText);
+            await this.bot.api.editMessageText(
+              numericId,
+              state.messageId,
+              headText,
+            );
           } catch (err) {
             const msg = this.sanitizeErrorMessage(err);
             if (!/message is not modified/i.test(msg)) {
