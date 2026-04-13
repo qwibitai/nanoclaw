@@ -66,14 +66,35 @@ Then run `/setup`. Claude Code handles dependencies, authentication, container s
 ## What It Supports
 
 - **Self-hosted learning companion** - Use a messaging-first study partner that can plan, teach, remind, and review.
+- **Telegram-first operations** - LearnClaw is currently optimized around Telegram as the primary control and learning channel.
 - **Multi-channel messaging** - Talk to LearnClaw from WhatsApp, Telegram, Discord, Slack, or Gmail as those skills are added to your fork.
 - **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
 - **Learning memory files** - Maintain learner profile, study plan, resources, and heartbeat files directly in the workspace.
 - **Scheduled tasks** - Recurring jobs that can deliver lessons, revision prompts, quizzes, and weekly summaries.
+- **Agent teams (Telegram swarm)** - Optional pool bots can show sub-agents as distinct identities in the same Telegram group.
 - **Web access** - Search and fetch content from the Web
 - **Container isolation** - Agents are sandboxed in Docker (macOS/Linux), [Docker Sandboxes](docs/docker-sandboxes.md) (micro VM isolation), or Apple Container (macOS)
-- **Credential security** - Agents never hold raw API keys. Outbound requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects credentials at request time and enforces per-agent policies and rate limits.
+- **Provider flexibility** - Use Anthropic directly, OpenRouter, or OpenAI-compatible endpoints (including local/self-hosted options).
+- **Credential security** - Agents never hold raw API keys. Host-side credential proxying injects auth at request time; OneCLI is optional.
 - **Exam package scaffolding** - Start structuring subject-specific content under `exams/` for lessons, quizzes, plans, and resources.
+
+## Deployment Templates
+
+LearnClaw now ships with production-oriented deployment scaffolds:
+
+- **Railway (DinD template)**
+  - Files: `railway.toml`, `Dockerfile.railway`, `scripts/start-railway.sh`
+  - Use this if you want Railway as the primary managed deployment target.
+  - Note: requires privileged Docker-in-Docker runtime support.
+
+- **VPS Docker Compose (recommended for reliability)**
+  - Files: `docker-compose.vps.yml`, `Dockerfile.vps`
+  - Works on DigitalOcean, Hetzner, Linode, AWS EC2, etc.
+  - Uses host Docker socket (no DinD), which is typically simpler and more stable for LearnClaw's container-spawning runtime.
+
+- **Environment bootstrap**
+  - File: `.env.example`
+  - Contains safe defaults and all required variable names without secrets.
 
 ## Usage
 
@@ -168,19 +189,20 @@ We don't want configuration sprawl. Every user should customize NanoClaw so that
 
 **Can I use third-party or open-source models?**
 
-Yes. NanoClaw supports any Claude API-compatible model endpoint. Set these environment variables in your `.env` file:
+Yes. LearnClaw supports multiple provider modes via environment config:
 
 ```bash
-ANTHROPIC_BASE_URL=https://your-api-endpoint.com
-ANTHROPIC_AUTH_TOKEN=your-token-here
+AGENT_PROVIDER=openrouter   # anthropic | openrouter | openai
+AGENT_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+OPENROUTER_API_KEY=...
 ```
 
-This allows you to use:
-- Local models via [Ollama](https://ollama.ai) with an API proxy
-- Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
-- Custom model deployments with Anthropic-compatible APIs
+You can also use:
+- **Anthropic native** via `AGENT_PROVIDER=anthropic`
+- **OpenAI-compatible endpoints** (e.g. Ollama, Groq, xAI, custom gateways) via `AGENT_PROVIDER=openai` and `ANTHROPIC_BASE_URL`
+- **OpenRouter model catalog** including free and paid models
 
-Note: The model must support the Anthropic API format for best compatibility.
+For a complete set of variables, copy `.env.example` to `.env` and fill only the credentials you need.
 
 **How do I debug issues?**
 
@@ -201,6 +223,18 @@ This keeps the base system minimal and lets every user customize their installat
 ## Community
 
 Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
+
+## Fork Credit and Upstream Support
+
+LearnClaw is a maintained fork of NanoClaw and builds directly on NanoClaw's architecture, runtime model, and skill workflow.
+
+If LearnClaw helps you, please also support upstream NanoClaw:
+
+- Star and follow: [NanoClaw repository](https://github.com/dnakov/nanoclaw)
+- Visit: [nanoclaw.dev](https://nanoclaw.dev)
+- Review upstream docs and releases: [docs.nanoclaw.dev](https://docs.nanoclaw.dev)
+
+When contributing reusable improvements, consider upstreaming foundational changes so both ecosystems benefit.
 
 ## Changelog
 
