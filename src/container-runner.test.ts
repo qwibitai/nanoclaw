@@ -395,4 +395,204 @@ describe('container-runner with BoxLite', () => {
       }),
     );
   });
+
+  it('streams sdk_message events through stdout markers', async () => {
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      testRuntimeConfig,
+      () => {},
+      onOutput,
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    emitOutputToExec(mockExec, {
+      type: 'sdk_message',
+      sdkType: 'assistant',
+      message: {
+        uuid: 'a1',
+        message: {
+          content: [
+            { type: 'tool_use', name: 'Bash', id: 'tool-abc', input: { command: 'echo hello' } },
+          ],
+        },
+      },
+    });
+    emitOutputToExec(mockExec, {
+      type: 'sdk_message',
+      sdkType: 'tool_progress',
+      message: { tool_name: 'Bash', tool_use_id: 'tool-abc', elapsed_time_seconds: 2.5 },
+    });
+    emitOutputToExec(mockExec, {
+      type: 'sdk_message',
+      sdkType: 'stream_event',
+      message: { event: { type: 'content_block_delta', delta: { text: 'hi' } } },
+    });
+    emitOutputToExec(mockExec, {
+      type: 'result',
+      result: 'hello',
+      newSessionId: 'session-tool',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockExec.closeStdout();
+    mockExec.closeStderr();
+    mockExec.resolveWait(0);
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+
+    const sdkCalls = (onOutput.mock.calls as unknown as [ContainerEvent][])
+      .map(([evt]) => evt)
+      .filter((e) => e.type === 'sdk_message');
+    expect(sdkCalls).toHaveLength(3);
+    expect(sdkCalls.map((e: any) => e.sdkType)).toEqual([
+      'assistant',
+      'tool_progress',
+      'stream_event',
+    ]);
+  });
+
+  it('streams sdk_message with system subtypes through stdout markers', async () => {
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      testRuntimeConfig,
+      () => {},
+      onOutput,
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    emitOutputToExec(mockExec, {
+      type: 'sdk_message',
+      sdkType: 'system',
+      sdkSubtype: 'task_started',
+      message: { subtype: 'task_started', task_id: 'task-e2e', description: 'Running research' },
+    });
+    emitOutputToExec(mockExec, {
+      type: 'sdk_message',
+      sdkType: 'system',
+      sdkSubtype: 'status',
+      message: { subtype: 'status', status: 'compacting' },
+    });
+    emitOutputToExec(mockExec, {
+      type: 'sdk_message',
+      sdkType: 'rate_limit_event',
+      message: { rate_limit_info: { status: 'allowed' } },
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockExec.closeStdout();
+    mockExec.closeStderr();
+    mockExec.resolveWait(0);
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+
+    const sdkCalls = (onOutput.mock.calls as unknown as [ContainerEvent][])
+      .map(([evt]) => evt)
+      .filter((e) => e.type === 'sdk_message');
+    expect(sdkCalls).toHaveLength(3);
+    expect(sdkCalls[0]).toMatchObject({
+      sdkType: 'system',
+      sdkSubtype: 'task_started',
+    });
+    expect(sdkCalls[1]).toMatchObject({
+      sdkType: 'system',
+      sdkSubtype: 'status',
+    });
+    expect(sdkCalls[2]).toMatchObject({
+      sdkType: 'rate_limit_event',
+    });
+  });
+
+  it('resets timeout on sdk_message events', async () => {
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      testRuntimeConfig,
+      () => {},
+      onOutput,
+    );
+
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
+
+    // Emit an sdk_message partway through the timeout window
+    await vi.advanceTimersByTimeAsync(1800000 - 100);
+    emitOutputToExec(mockExec, {
+      type: 'sdk_message',
+      sdkType: 'tool_progress',
+      message: { tool_name: 'Bash', tool_use_id: 't1', elapsed_time_seconds: 10 },
+    });
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
+
+    // Another sdk_message to keep alive
+    await vi.advanceTimersByTimeAsync(1800000 - 100);
+    emitOutputToExec(mockExec, {
+      type: 'sdk_message',
+      sdkType: 'system',
+      sdkSubtype: 'task_started',
+      message: { subtype: 'task_started', task_id: 't2', description: 'keep alive' },
+    });
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
+
+    // Now exit cleanly
+    mockExec.closeStdout();
+    mockExec.closeStderr();
+    mockExec.resolveWait(0);
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+  });
+
+  it('does not extract newSessionId from sdk_message events', async () => {
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      testRuntimeConfig,
+      () => {},
+      onOutput,
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    // sdk_message doesn't carry newSessionId
+    emitOutputToExec(mockExec, {
+      type: 'sdk_message',
+      sdkType: 'assistant',
+      message: { uuid: 'a1', message: { content: [] } },
+    });
+    // Only result carries the session
+    emitOutputToExec(mockExec, {
+      type: 'result',
+      result: 'done',
+      newSessionId: 'session-only-here',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockExec.closeStdout();
+    mockExec.closeStderr();
+    mockExec.resolveWait(0);
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+    expect(result.newSessionId).toBe('session-only-here');
+  });
 });

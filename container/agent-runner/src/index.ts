@@ -41,14 +41,45 @@ interface ContainerInput {
   mcpServers?: Record<string, McpServerRuntimeConfig> | null;
 }
 
-interface ContainerOutput {
-  type: 'state' | 'result' | 'error';
-  state?: 'active' | 'idle' | 'stopped';
-  result?: string | null;
+// ── Container lifecycle events (not SDK) ─────────────────────────
+
+interface ContainerStateOutput {
+  type: 'state';
+  state: 'active' | 'idle' | 'stopped';
   newSessionId?: string;
-  error?: string;
   reason?: 'query_started' | 'awaiting_input';
 }
+
+interface ContainerResultOutput {
+  type: 'result';
+  result: string | null;
+  newSessionId?: string;
+}
+
+interface ContainerErrorOutput {
+  type: 'error';
+  error: string;
+  newSessionId?: string;
+}
+
+// ── Raw SDK message passthrough ──────────────────────────────────
+
+/** Every SDK message forwarded as-is. The container is a dumb pipe. */
+interface ContainerSdkMessageOutput {
+  type: 'sdk_message';
+  /** Top-level SDK message type (e.g. 'assistant', 'result', 'system', 'tool_progress', 'stream_event'). */
+  sdkType: string;
+  /** For system messages: the subtype (e.g. 'init', 'status', 'task_started'). */
+  sdkSubtype?: string;
+  /** The raw SDK message object, serialized as-is. */
+  message: unknown;
+}
+
+type ContainerOutput =
+  | ContainerStateOutput
+  | ContainerResultOutput
+  | ContainerErrorOutput
+  | ContainerSdkMessageOutput;
 
 interface SessionEntry {
   sessionId: string;
@@ -485,6 +516,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      includePartialMessages: true,
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
@@ -555,29 +587,28 @@ async function runQuery(
         : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
 
+    // ── Internal bookkeeping (not forwarded) ────────────────────
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
     }
-
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
       log(`Session initialized: ${newSessionId}`);
     }
 
-    if (
-      message.type === 'system' &&
-      (message as { subtype?: string }).subtype === 'task_notification'
-    ) {
-      const tn = message as {
-        task_id: string;
-        status: string;
-        summary: string;
-      };
-      log(
-        `Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`,
-      );
-    }
+    // ── Forward every SDK message raw ─────────────────────────
+    const sdkSubtype =
+      message.type === 'system'
+        ? (message as { subtype?: string }).subtype
+        : undefined;
+    writeOutput({
+      type: 'sdk_message',
+      sdkType: message.type,
+      sdkSubtype,
+      message,
+    });
 
+    // ── Backward-compat: emit result for host message delivery ─
     if (message.type === 'result') {
       resultCount++;
       const textResult =

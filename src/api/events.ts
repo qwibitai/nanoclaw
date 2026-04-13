@@ -9,6 +9,11 @@ export interface AgentEvents extends Record<string, any[]> {
   'message.in': [payload: MessageInEvent];
   'message.out': [payload: MessageOutEvent];
   'run.state': [payload: RunStateEvent];
+  'run.sdk_message': [payload: RunSdkMessageEvent];
+  'run.tool': [payload: RunToolEvent];
+  'run.tool_progress': [payload: RunToolProgressEvent];
+  'run.subagent': [payload: RunSubagentEvent];
+  'run.status': [payload: RunStatusEvent];
   'chat.metadata': [payload: ChatMetadataEvent];
   'channel.connected': [payload: { key: string }];
   'channel.disconnected': [payload: { key: string }];
@@ -67,6 +72,101 @@ export interface RunStateEvent {
   reason?: string;
   /** Exit code when the runtime reaches stopped. */
   exitCode?: number;
+}
+
+/**
+ * Raw SDK message from the agent runtime.
+ * Exposes all 21 SDK message types — consumers can filter by sdkType/sdkSubtype.
+ *
+ * Common sdkType values: 'assistant', 'result', 'system', 'stream_event',
+ * 'tool_progress', 'tool_use_summary', 'auth_status', 'rate_limit_event',
+ * 'prompt_suggestion'.
+ *
+ * Common sdkSubtype values (when sdkType='system'): 'init', 'status',
+ * 'task_started', 'task_progress', 'task_notification', 'compact_boundary',
+ * 'local_command_output', 'hook_started', 'hook_progress', 'hook_response',
+ * 'files_persisted', 'elicitation_complete'.
+ */
+export interface RunSdkMessageEvent {
+  /** Stable agent identifier. */
+  agentId: string;
+  /** Group/chat identifier. */
+  jid: string;
+  /** Top-level SDK message type. */
+  sdkType: string;
+  /** For system messages: the subtype. */
+  sdkSubtype?: string;
+  /** The raw SDK message object. Shape depends on sdkType. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  message: any;
+  /** ISO timestamp when the event was received by the host. */
+  timestamp: string;
+}
+
+// ── Curated convenience events (derived from sdk_message) ────────
+
+/** The agent is invoking a tool. */
+export interface RunToolEvent {
+  /** Stable agent identifier. */
+  agentId: string;
+  /** Group/chat identifier. */
+  jid: string;
+  /** Tool name (e.g. 'Bash', 'Read', 'WebSearch'). */
+  toolName: string;
+  /** SDK tool use ID. */
+  toolUseId: string;
+  /** Truncated tool input for observability. */
+  input?: string;
+  /** ISO timestamp. */
+  timestamp: string;
+}
+
+/** Tool execution progress heartbeat. */
+export interface RunToolProgressEvent {
+  /** Stable agent identifier. */
+  agentId: string;
+  /** Group/chat identifier. */
+  jid: string;
+  /** Tool name. */
+  toolName: string;
+  /** SDK tool use ID. */
+  toolUseId: string;
+  /** Seconds since tool invocation started. */
+  elapsedSeconds: number;
+  /** ISO timestamp. */
+  timestamp: string;
+}
+
+/** Subagent lifecycle event. */
+export interface RunSubagentEvent {
+  /** Stable agent identifier. */
+  agentId: string;
+  /** Group/chat identifier. */
+  jid: string;
+  /** Subagent lifecycle phase. */
+  subtype: 'started' | 'progress' | 'completed' | 'failed' | 'stopped';
+  /** SDK task ID for the subagent. */
+  taskId: string;
+  /** Description of what the subagent is doing. */
+  description: string;
+  /** Summary of progress or result. */
+  summary?: string;
+  /** Last tool the subagent used. */
+  lastToolName?: string;
+  /** ISO timestamp. */
+  timestamp: string;
+}
+
+/** Agent status change (e.g. context compaction). */
+export interface RunStatusEvent {
+  /** Stable agent identifier. */
+  agentId: string;
+  /** Group/chat identifier. */
+  jid: string;
+  /** Status string (e.g. 'compacting'). */
+  status: string;
+  /** ISO timestamp. */
+  timestamp: string;
 }
 
 /** Chat/group metadata discovered from a channel. */
