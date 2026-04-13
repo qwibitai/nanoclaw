@@ -264,12 +264,10 @@ async function spawnThreadForUrl(
 }
 
 const URL_RE = /https?:\/\/[^\s<>"']+/i;
-const URL_RE_GLOBAL = /https?:\/\/[^\s<>"']+/gi;
 
 function extractFirstUrl(value: string): string | null {
-  const urls = value.match(URL_RE_GLOBAL);
-  if (!urls || urls.length === 0) return null;
-  return urls[0];
+  const firstMatch = value.match(URL_RE);
+  return firstMatch?.[0] ?? null;
 }
 
 function stringContainsUrl(value: string): boolean {

@@ -239,6 +239,44 @@ describe('url_watch flow', () => {
     expect(reserveSpawnedThreadMock).not.toHaveBeenCalled();
   });
 
+  it('url_watch 親配下の thread で URL 複数: 最初の URL を保存する', () => {
+    const threadJid = 'dc:thread-99-multi';
+    _setRegisteredGroups({
+      [chatJid]: baseGroup,
+      [threadJid]: {
+        name: 'Thread',
+        folder: baseGroup.folder,
+        parent_folder: baseGroup.folder,
+        trigger: baseGroup.trigger,
+        added_at: '2024-01-01T00:00:02.500Z',
+        type: 'thread',
+      },
+    });
+    const msg = makeMsg({
+      id: 'msg-thread-url-multi',
+      chat_jid: threadJid,
+      content:
+        'first https://example.com/first then https://example.com/second',
+      is_thread: true,
+      parent_jid: chatJid,
+    });
+
+    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [
+      makeChannel(),
+    ]);
+
+    expect(handled).toBe(true);
+    expect(storeMessageMock).toHaveBeenCalledTimes(1);
+    expect(storeMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'msg-thread-url-multi_url',
+        chat_jid: threadJid,
+        content: 'https://example.com/first',
+      }),
+    );
+    expect(reserveSpawnedThreadMock).not.toHaveBeenCalled();
+  });
+
   it('url_watch 親配下の thread で URL なし: 元メッセージを通常保存する', () => {
     const threadJid = 'dc:thread-100';
     _setRegisteredGroups({
