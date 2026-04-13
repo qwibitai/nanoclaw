@@ -19,6 +19,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { sendOpsNotification } from './ops-notifier.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 /**
@@ -185,8 +186,29 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Silent sentinel: tasks can return "NO_UPDATE" to indicate nothing
+          // worth surfacing. Match when the final non-empty line is exactly
+          // NO_UPDATE — tolerates agents that prepend reasoning before the
+          // sentinel, which they often do despite prompt instructions.
+          const lines = streamedOutput.result
+            .split('\n')
+            .map((l) => l.trim())
+            .filter(Boolean);
+          const lastLine = lines[lines.length - 1] || '';
+          const isSilent = /^NO[_ ]?UPDATE\.?$/i.test(lastLine);
+          if (!isSilent) {
+            const useOps = task.output_target === 'ops';
+            if (useOps) {
+              await sendOpsNotification(streamedOutput.result);
+            } else {
+              await deps.sendMessage(task.chat_jid, streamedOutput.result);
+            }
+          } else {
+            logger.info(
+              { taskId: task.id, linesSuppressed: lines.length },
+              'Task returned NO_UPDATE, suppressing message',
+            );
+          }
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {

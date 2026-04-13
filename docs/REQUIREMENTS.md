@@ -108,6 +108,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - Containers provide filesystem isolation - agents can only see mounted paths
 - Bash access is safe because commands run inside the container, not on the host
 - Browser automation via agent-browser with Chromium in the container
+- All agents (main and non-main) have identical internet tool access (WebSearch, WebFetch, agent-browser). This is intentional — container isolation already limits blast radius, and the credential proxy prevents key leakage. Restricting main-agent internet access is unnecessary given these boundaries.
 
 ### Scheduled Tasks
 - Users can ask Claude to schedule recurring or one-time tasks from any group

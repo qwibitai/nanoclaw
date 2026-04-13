@@ -333,6 +333,162 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'open_item_upsert',
+  `Track a new open item or update an existing one in Nano's follow-up tracker. Use this instead of writing SQL. If an open item with the same source_ref already exists in a non-closed status, it will be updated; otherwise a new row is inserted.
+
+Use cases:
+- New delegation from Gabe: owner = named person, status = 'waiting', source = 'telegram'
+- Inbound CRITICAL or APPROVAL needing Gabe's action: owner = 'Gabe', status = 'open', priority = 'high'
+- Tracked sent email (direct ask awaiting reply): owner = recipient first name, status = 'waiting', source = 'sent_email', source_ref = conversationId, due_date = 48 hours from sent
+- Stalled item follow-up: update status or priority
+
+Valid status: open | waiting | in_progress | done | cancelled
+Valid priority: critical | high | normal | low`,
+  {
+    title: z.string().describe('Short one-line summary of the item'),
+    owner: z.string().optional().describe('Person responsible (first name from org chart)'),
+    status: z.string().optional().describe('open | waiting | in_progress | done | cancelled'),
+    priority: z.string().optional().describe('critical | high | normal | low'),
+    source: z.string().optional().describe('email | telegram | calendar | granola | manual | sent_email | outlook_inbox'),
+    source_ref: z.string().optional().describe('Unique reference like email ID, conversationId, telegram msg id'),
+    context: z.string().optional().describe('One line of why it matters'),
+    due_date: z.string().optional().describe('ISO 8601 due date'),
+    notes: z.string().optional().describe('Freeform notes'),
+  },
+  async (args) => {
+    const data = {
+      type: 'open_item_upsert',
+      title: args.title,
+      owner: args.owner,
+      status: args.status,
+      priority: args.priority,
+      source: args.source,
+      source_ref: args.source_ref,
+      context: args.context,
+      due_date: args.due_date,
+      notes: args.notes,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return {
+      content: [{ type: 'text' as const, text: `Open item upserted: ${args.title}` }],
+    };
+  },
+);
+
+server.tool(
+  'open_item_update_status',
+  `Update the status of an existing open_item row. Used when Gabe says "mark done", "Leah handled it", "close it", or when a reply closes a tracked follow-up.`,
+  {
+    open_item_id: z.number().describe('The id of the open_item row'),
+    status: z.string().describe('New status: open | waiting | in_progress | done | cancelled'),
+    notes: z.string().optional().describe('Optional note to append'),
+  },
+  async (args) => {
+    const data = {
+      type: 'open_item_update_status',
+      openItemId: args.open_item_id,
+      status: args.status,
+      notes: args.notes,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return {
+      content: [{ type: 'text' as const, text: `Open item ${args.open_item_id} status set to: ${args.status}` }],
+    };
+  },
+);
+
+server.tool(
+  'log_audit',
+  `Log an action to the audit_log table. Used to record every outbound action Nano takes on Gabe's behalf: emails sent, Notion writes, Sheets updates, Drive writes, file deletes, task changes, open_items changes, delegations.`,
+  {
+    action_type: z.string().describe('email_sent | notion_write | sheets_write | drive_write | file_delete | task_created | open_item_created | open_item_updated | delegation_sent | other'),
+    target: z.string().optional().describe('Recipient email, Notion page ID, sheet ID, file path, etc.'),
+    summary: z.string().optional().describe('One line description'),
+    triggered_by: z.string().optional().describe('scheduled_task:<id> | telegram_message | email_reply | manual'),
+    metadata: z.string().optional().describe('Optional JSON blob with extra context'),
+  },
+  async (args) => {
+    const data = {
+      type: 'log_audit',
+      actionType: args.action_type,
+      target: args.target,
+      summary: args.summary,
+      triggeredBy: args.triggered_by,
+      metadata: args.metadata,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return {
+      content: [{ type: 'text' as const, text: `Logged: ${args.action_type}` }],
+    };
+  },
+);
+
+server.tool(
+  'flag_email',
+  `Set, clear, or complete a follow-up flag on an Outlook email. Use this after classifying inbound email: flag CRITICAL and APPROVAL items, unflag (status 'notFlagged') when the item is resolved, or set 'complete' when Gabe confirms it's handled. Never flag FYI, DELEGATE, or IGNORE items.
+
+flagStatus values: "flagged" | "complete" | "notFlagged"`,
+  {
+    email_id: z.string().describe('The Outlook email/message ID'),
+    flag_status: z.string().describe('The flag status to set: "flagged", "complete", or "notFlagged"'),
+  },
+  async (args) => {
+    const validStatuses = ['flagged', 'complete', 'notFlagged'];
+    if (!validStatuses.includes(args.flag_status)) {
+      return {
+        content: [{ type: 'text' as const, text: `Invalid flag_status. Must be one of: ${validStatuses.join(', ')}` }],
+        isError: true,
+      };
+    }
+    const data = {
+      type: 'flag_email',
+      emailId: args.email_id,
+      flagStatus: args.flag_status,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Email flag set to: ${args.flag_status}` }],
+    };
+  },
+);
+
+server.tool(
+  'categorize_email',
+  `Set categories on an Outlook email. Uses durable server-side auth (no container token needed). Categories are color-coded labels visible in Outlook. You can set multiple categories at once. Only use when explicitly asked by Gabe — auto-categorization is handled by the Outlook channel.
+
+Common categories: "Reservations", "Finance", "IT", "Newsletter", "Urgent", "Follow Up", "Personal". You can use any string — if the category doesn't exist in Outlook, it will be created with a default color.`,
+  {
+    email_id: z.string().describe('The Outlook email/message ID'),
+    categories: z.array(z.string()).describe('Categories to set on the email (replaces existing categories)'),
+  },
+  async (args) => {
+    const data = {
+      type: 'categorize_email',
+      emailId: args.email_id,
+      categories: args.categories,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Email categorized as: ${args.categories.join(', ')}` }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

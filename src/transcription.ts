@@ -15,7 +15,7 @@ const DEFAULT_CONFIG: TranscriptionConfig = {
   fallbackMessage: '[Voice Message - transcription unavailable]',
 };
 
-async function transcribeWithOpenAI(
+export async function transcribeWithOpenAI(
   audioBuffer: Buffer,
   config: TranscriptionConfig,
 ): Promise<string | null> {

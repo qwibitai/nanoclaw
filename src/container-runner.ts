@@ -17,6 +17,7 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -290,6 +291,34 @@ function buildContainerArgs(
         args.push('-e', `${match[1]}=${match[2].trim()}`);
       }
     }
+  }
+
+  // Google Workspace MCP credentials (Drive, Sheets, Docs)
+  const gcpOauthPath = path.join(os.homedir(), '.gmail-mcp', 'gcp-oauth.keys.json');
+  const gcpCredsPath = path.join(os.homedir(), '.gmail-mcp', 'credentials.json');
+  if (fs.existsSync(gcpOauthPath) && fs.existsSync(gcpCredsPath)) {
+    try {
+      const oauthKeys = JSON.parse(fs.readFileSync(gcpOauthPath, 'utf-8'));
+      const creds = JSON.parse(fs.readFileSync(gcpCredsPath, 'utf-8'));
+      const installed = oauthKeys.installed || oauthKeys.web || {};
+      if (installed.client_id) args.push('-e', `GOOGLE_CLIENT_ID=${installed.client_id}`);
+      if (installed.client_secret) args.push('-e', `GOOGLE_CLIENT_SECRET=${installed.client_secret}`);
+      if (creds.refresh_token) args.push('-e', `GOOGLE_REFRESH_TOKEN=${creds.refresh_token}`);
+    } catch (err) {
+      logger.debug({ err }, 'Could not read Google Workspace credentials');
+    }
+  }
+
+  // Notion MCP token
+  const notionEnv = readEnvFile(['NOTION_API_TOKEN']);
+  if (notionEnv.NOTION_API_TOKEN) {
+    args.push('-e', `NOTION_API_TOKEN=${notionEnv.NOTION_API_TOKEN}`);
+  }
+
+  // Granola API key (for Granola MCP inside the container)
+  const granolaEnv = readEnvFile(['GRANOLA_API_KEY']);
+  if (granolaEnv.GRANOLA_API_KEY) {
+    args.push('-e', `GRANOLA_API_KEY=${granolaEnv.GRANOLA_API_KEY}`);
   }
 
   // Runtime-specific args for host gateway resolution

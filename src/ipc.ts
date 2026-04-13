@@ -23,6 +23,27 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  categorizeEmail?: (emailId: string, categories: string[]) => Promise<void>;
+  flagEmail?: (emailId: string, status: 'flagged' | 'complete' | 'notFlagged') => Promise<void>;
+  upsertOpenItem?: (input: {
+    title: string;
+    owner?: string;
+    status?: string;
+    priority?: string;
+    source?: string;
+    source_ref?: string;
+    context?: string;
+    due_date?: string;
+    notes?: string;
+  }) => Promise<number>;
+  updateOpenItemStatus?: (id: number, status: string, notes?: string) => Promise<number>;
+  logAudit?: (
+    actionType: string,
+    target: string | null,
+    summary: string | null,
+    triggeredBy: string | null,
+    metadata?: string,
+  ) => Promise<void>;
 }
 
 let ipcWatcherRunning = false;
@@ -172,6 +193,26 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For categorize_email and flag_email
+    emailId?: string;
+    categories?: string[];
+    flagStatus?: 'flagged' | 'complete' | 'notFlagged';
+    // For open_item_upsert and log_audit
+    title?: string;
+    owner?: string;
+    priority?: string;
+    source?: string;
+    source_ref?: string;
+    context?: string;
+    due_date?: string;
+    notes?: string;
+    status?: string;
+    openItemId?: number;
+    actionType?: string;
+    target?: string;
+    summary?: string;
+    triggeredBy?: string;
+    metadata?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -418,6 +459,114 @@ export async function processTaskIpc(
           { sourceGroup },
           'Unauthorized refresh_groups attempt blocked',
         );
+      }
+      break;
+
+    case 'categorize_email':
+      if (data.emailId && data.categories && deps.categorizeEmail) {
+        try {
+          await deps.categorizeEmail(
+            data.emailId as string,
+            data.categories as string[],
+          );
+          logger.info(
+            { emailId: data.emailId, categories: data.categories, sourceGroup },
+            'Email categorized via IPC',
+          );
+        } catch (err) {
+          logger.error(
+            { emailId: data.emailId, err },
+            'Failed to categorize email via IPC',
+          );
+        }
+      }
+      break;
+
+    case 'flag_email':
+      if (data.emailId && data.flagStatus && deps.flagEmail) {
+        try {
+          await deps.flagEmail(data.emailId as string, data.flagStatus);
+          logger.info(
+            { emailId: data.emailId, flagStatus: data.flagStatus, sourceGroup },
+            'Email flag set via IPC',
+          );
+        } catch (err) {
+          logger.error(
+            { emailId: data.emailId, err },
+            'Failed to flag email via IPC',
+          );
+        }
+      }
+      break;
+
+    case 'open_item_upsert':
+      if (data.title && deps.upsertOpenItem) {
+        try {
+          const id = await deps.upsertOpenItem({
+            title: data.title,
+            owner: data.owner,
+            status: data.status,
+            priority: data.priority,
+            source: data.source,
+            source_ref: data.source_ref,
+            context: data.context,
+            due_date: data.due_date,
+            notes: data.notes,
+          });
+          logger.info(
+            { id, title: data.title, owner: data.owner, sourceGroup },
+            'open_item upserted via IPC',
+          );
+        } catch (err) {
+          logger.error(
+            { title: data.title, err },
+            'Failed to upsert open_item via IPC',
+          );
+        }
+      }
+      break;
+
+    case 'open_item_update_status':
+      if (data.openItemId && data.status && deps.updateOpenItemStatus) {
+        try {
+          const changes = await deps.updateOpenItemStatus(
+            data.openItemId,
+            data.status,
+            data.notes,
+          );
+          logger.info(
+            { id: data.openItemId, status: data.status, changes, sourceGroup },
+            'open_item status updated via IPC',
+          );
+        } catch (err) {
+          logger.error(
+            { id: data.openItemId, err },
+            'Failed to update open_item status via IPC',
+          );
+        }
+      }
+      break;
+
+    case 'log_audit':
+      if (data.actionType && deps.logAudit) {
+        try {
+          await deps.logAudit(
+            data.actionType,
+            data.target ?? null,
+            data.summary ?? null,
+            data.triggeredBy ?? null,
+            data.metadata,
+          );
+          logger.info(
+            { actionType: data.actionType, target: data.target, sourceGroup },
+            'audit_log entry added via IPC',
+          );
+        } catch (err) {
+          logger.error(
+            { actionType: data.actionType, err },
+            'Failed to log audit via IPC',
+          );
+        }
       }
       break;
 

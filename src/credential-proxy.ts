@@ -23,23 +23,28 @@ export interface ProxyConfig {
   authMode: AuthMode;
 }
 
-export function startCredentialProxy(
-  port: number,
-  host = '127.0.0.1',
-): Promise<Server> {
+/** Re-read auth secrets from .env (cheap — small file, no syscall cache). */
+function loadSecrets() {
   const secrets = readEnvFile([
     'ANTHROPIC_API_KEY',
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_AUTH_TOKEN',
     'ANTHROPIC_BASE_URL',
   ]);
-
   const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
   const oauthToken =
     secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
+  return { secrets, authMode, oauthToken };
+}
+
+export function startCredentialProxy(
+  port: number,
+  host = '127.0.0.1',
+): Promise<Server> {
+  const initial = loadSecrets();
 
   const upstreamUrl = new URL(
-    secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
+    initial.secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
   );
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
@@ -61,6 +66,10 @@ export function startCredentialProxy(
         delete headers['connection'];
         delete headers['keep-alive'];
         delete headers['transfer-encoding'];
+
+        // Re-read secrets on each request so rotated tokens are picked up
+        // without restarting the process.
+        const { authMode, secrets, oauthToken } = loadSecrets();
 
         if (authMode === 'api-key') {
           // API key mode: inject x-api-key on every request
@@ -110,7 +119,7 @@ export function startCredentialProxy(
     });
 
     server.listen(port, host, () => {
-      logger.info({ port, host, authMode }, 'Credential proxy started');
+      logger.info({ port, host, authMode: initial.authMode }, 'Credential proxy started');
       resolve(server);
     });
 

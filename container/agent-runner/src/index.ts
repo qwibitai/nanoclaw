@@ -411,6 +411,9 @@ async function runQuery(
         'mcp__gmail__*',
         'mcp__googlecalendar__*',
         'mcp__outlook__*',
+        'mcp__googleworkspace__*',
+        'mcp__notion__*',
+        'mcp__granola__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -426,26 +429,42 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
-        gmail: {
-          command: 'npx',
-          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
-        },
-        googlecalendar: {
-          command: 'npx',
-          args: ['-y', '@cocal/google-calendar-mcp'],
-          env: {
-            GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
-          },
-        },
         outlook: {
           command: 'npx',
-          args: ['-y', 'outlook-mcp'],
+          args: ['outlook-mcp'],
           env: {
             MS_CLIENT_ID: process.env.MS_CLIENT_ID || '',
             MS_CLIENT_SECRET: process.env.MS_CLIENT_SECRET || '',
             HOME: '/home/node',
           },
         },
+        notion: {
+          command: '/usr/local/bin/notion-mcp-server',
+          args: [],
+          env: {
+            NOTION_TOKEN: process.env.NOTION_API_TOKEN || '',
+          },
+        },
+        ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_REFRESH_TOKEN ? {
+          googleworkspace: {
+            command: 'node',
+            args: ['/opt/google-workspace-mcp/build/index.js'],
+            env: {
+              GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+              GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
+              GOOGLE_REFRESH_TOKEN: process.env.GOOGLE_REFRESH_TOKEN,
+            },
+          },
+        } : {}),
+        ...(process.env.GRANOLA_API_KEY ? {
+          granola: {
+            command: 'node',
+            args: ['/usr/local/lib/granola-mcp-server.js'],
+            env: {
+              GRANOLA_API_KEY: process.env.GRANOLA_API_KEY,
+            },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],

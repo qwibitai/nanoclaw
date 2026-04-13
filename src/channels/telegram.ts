@@ -4,7 +4,13 @@ import { Api, Bot, Context } from 'grammy';
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
+import {
+  describeTelegramImage,
+  extractTelegramPdf,
+  transcribeTelegramVoice,
+} from '../telegram-media.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+import { markConnected, markDisconnected } from '../runtime-status.js';
 import {
   Channel,
   OnChatMetadata,
@@ -199,14 +205,73 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    this.bot.on('message:photo', (ctx: any) => storeNonText(ctx, '[Photo]'));
+    this.bot.on('message:photo', async (ctx: any) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const photos = ctx.message.photo;
+      const largest = photos?.[photos.length - 1];
+
+      if (largest?.file_id) {
+        const description = await describeTelegramImage(
+          this.botToken,
+          largest.file_id,
+        );
+        if (description) {
+          storeNonText(ctx, `[Photo: ${description}]`);
+          return;
+        }
+      }
+      storeNonText(ctx, '[Photo]');
+    });
+
     this.bot.on('message:video', (ctx: any) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx: any) =>
-      storeNonText(ctx, '[Voice message]'),
-    );
-    this.bot.on('message:audio', (ctx: any) => storeNonText(ctx, '[Audio]'));
-    this.bot.on('message:document', (ctx: Context) => {
-      const name = (ctx.message as any)?.document?.file_name || 'file';
+
+    this.bot.on('message:voice', async (ctx: any) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const fileId = ctx.message.voice?.file_id;
+      if (fileId) {
+        const transcript = await transcribeTelegramVoice(this.botToken, fileId);
+        storeNonText(ctx, `[Voice: ${transcript}]`);
+        return;
+      }
+      storeNonText(ctx, '[Voice message]');
+    });
+
+    this.bot.on('message:audio', async (ctx: any) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const fileId = ctx.message.audio?.file_id;
+      if (fileId) {
+        const transcript = await transcribeTelegramVoice(this.botToken, fileId);
+        storeNonText(ctx, `[Audio: ${transcript}]`);
+        return;
+      }
+      storeNonText(ctx, '[Audio]');
+    });
+
+    this.bot.on('message:document', async (ctx: Context) => {
+      const doc = (ctx.message as any)?.document;
+      const name = doc?.file_name || 'file';
+      const isPdf = name.toLowerCase().endsWith('.pdf');
+
+      if (isPdf && doc?.file_id) {
+        const chatJid = `tg:${(ctx.chat as any).id}`;
+        const group = this.opts.registeredGroups()[chatJid];
+        if (group) {
+          const text = await extractTelegramPdf(this.botToken, doc.file_id);
+          if (text) {
+            storeNonText(ctx, `[PDF: ${name}]\n${text}`);
+            return;
+          }
+        }
+      }
       storeNonText(ctx, `[Document: ${name}]`);
     });
     this.bot.on('message:sticker', (ctx: Context) => {
@@ -223,6 +288,7 @@ export class TelegramChannel implements Channel {
     // Handle errors gracefully
     this.bot.catch((err: any) => {
       logger.error({ err: err.message }, 'Telegram bot error');
+      markDisconnected('telegram');
     });
 
     // Start polling — returns a Promise that resolves when started
@@ -233,6 +299,10 @@ export class TelegramChannel implements Channel {
             { username: botInfo.username, id: botInfo.id },
             'Telegram bot connected',
           );
+          markConnected('telegram', {
+            botUsername: botInfo.username,
+            botId: botInfo.id,
+          });
           console.log(`\n  Telegram bot: @${botInfo.username}`);
           console.log(
             `  Send /chatid to the bot to get a chat's registration ID\n`,
@@ -283,6 +353,7 @@ export class TelegramChannel implements Channel {
     if (this.bot) {
       this.bot.stop();
       this.bot = null;
+      markDisconnected('telegram');
       logger.info('Telegram bot stopped');
     }
   }

@@ -92,6 +92,13 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN output_target TEXT DEFAULT 'main'`,
+    );
+  } catch {
+    /* column already exists */
+  }
 
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
@@ -368,8 +375,8 @@ export function createTask(
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, output_target, next_run, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
@@ -379,6 +386,7 @@ export function createTask(
     task.schedule_type,
     task.schedule_value,
     task.context_mode || 'isolated',
+    task.output_target || 'main',
     task.next_run,
     task.status,
     task.created_at,
@@ -494,6 +502,139 @@ export function logTaskRun(log: TaskRunLog): void {
     log.result,
     log.error,
   );
+}
+
+// --- Open items (follow-up tracker) ---
+
+/**
+ * If a waiting sent_email row exists for the given conversationId, close it.
+ * Called when a new inbound email arrives on a tracked thread.
+ * Returns the number of rows updated.
+ */
+export function closeOpenItemByConversationId(conversationId: string): number {
+  const result = db
+    .prepare(
+      `UPDATE open_items
+       SET status = 'done',
+           closed_at = datetime('now'),
+           last_activity = datetime('now'),
+           notes = COALESCE(notes || ' | ', '') || 'Auto-closed on reply received'
+       WHERE source = 'sent_email'
+         AND source_ref = ?
+         AND status = 'waiting'`,
+    )
+    .run(conversationId);
+  return result.changes;
+}
+
+/**
+ * Log an action to the audit_log table.
+ */
+export function logAudit(
+  actionType: string,
+  target: string | null,
+  summary: string | null,
+  triggeredBy: string | null,
+  metadata?: string,
+): void {
+  db.prepare(
+    `INSERT INTO audit_log (timestamp, action_type, target, summary, triggered_by, metadata)
+     VALUES (datetime('now'), ?, ?, ?, ?, ?)`,
+  ).run(actionType, target, summary, triggeredBy, metadata ?? null);
+}
+
+/**
+ * Upsert an open_items row. If source_ref matches an existing waiting row,
+ * update last_activity and context. Otherwise insert new.
+ * Returns the resulting row id.
+ */
+export interface OpenItemInput {
+  title: string;
+  owner?: string;
+  status?: string; // open | waiting | in_progress | done | cancelled
+  priority?: string; // critical | high | normal | low
+  source?: string; // email | telegram | calendar | granola | manual | sent_email
+  source_ref?: string;
+  context?: string;
+  due_date?: string;
+  notes?: string;
+}
+
+export function upsertOpenItem(input: OpenItemInput): number {
+  const existing = input.source_ref
+    ? (db
+        .prepare(
+          `SELECT id FROM open_items
+           WHERE source_ref = ? AND status IN ('open','waiting','in_progress')
+           LIMIT 1`,
+        )
+        .get(input.source_ref) as { id: number } | undefined)
+    : undefined;
+
+  if (existing) {
+    db.prepare(
+      `UPDATE open_items
+       SET last_activity = datetime('now'),
+           title = COALESCE(?, title),
+           owner = COALESCE(?, owner),
+           status = COALESCE(?, status),
+           priority = COALESCE(?, priority),
+           context = COALESCE(?, context),
+           due_date = COALESCE(?, due_date),
+           notes = CASE WHEN ? IS NULL THEN notes ELSE COALESCE(notes || ' | ', '') || ? END
+       WHERE id = ?`,
+    ).run(
+      input.title ?? null,
+      input.owner ?? null,
+      input.status ?? null,
+      input.priority ?? null,
+      input.context ?? null,
+      input.due_date ?? null,
+      input.notes ?? null,
+      input.notes ?? null,
+      existing.id,
+    );
+    return existing.id;
+  }
+
+  const result = db
+    .prepare(
+      `INSERT INTO open_items (title, owner, status, priority, source, source_ref, context, created_at, last_activity, due_date, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?)`,
+    )
+    .run(
+      input.title,
+      input.owner ?? null,
+      input.status ?? 'open',
+      input.priority ?? 'normal',
+      input.source ?? 'manual',
+      input.source_ref ?? null,
+      input.context ?? null,
+      input.due_date ?? null,
+      input.notes ?? null,
+    );
+  return result.lastInsertRowid as number;
+}
+
+/**
+ * Update the status of a specific open_item row.
+ */
+export function updateOpenItemStatus(
+  id: number,
+  status: string,
+  notes?: string,
+): number {
+  const result = db
+    .prepare(
+      `UPDATE open_items
+       SET status = ?,
+           last_activity = datetime('now'),
+           closed_at = CASE WHEN ? IN ('done','cancelled') THEN datetime('now') ELSE closed_at END,
+           notes = CASE WHEN ? IS NULL THEN notes ELSE COALESCE(notes || ' | ', '') || ? END
+       WHERE id = ?`,
+    )
+    .run(status, status, notes ?? null, notes ?? null, id);
+  return result.changes;
 }
 
 // --- Router state accessors ---

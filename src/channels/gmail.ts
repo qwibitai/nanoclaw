@@ -9,6 +9,11 @@ import { OAuth2Client } from 'google-auth-library';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
+  markConnected,
+  markDisconnected,
+  markEvent,
+} from '../runtime-status.js';
+import {
   Channel,
   OnChatMetadata,
   OnInboundMessage,
@@ -88,6 +93,7 @@ export class GmailChannel implements Channel {
     const profile = await this.gmail.users.getProfile({ userId: 'me' });
     this.userEmail = profile.data.emailAddress || '';
     logger.info({ email: this.userEmail }, 'Gmail channel connected');
+    markConnected('gmail', { email: this.userEmail });
 
     // Start polling with error backoff
     const schedulePoll = () => {
@@ -176,6 +182,7 @@ export class GmailChannel implements Channel {
     }
     this.gmail = null;
     this.oauth2Client = null;
+    markDisconnected('gmail');
     logger.info('Gmail channel stopped');
   }
 
@@ -212,6 +219,7 @@ export class GmailChannel implements Channel {
       }
 
       this.consecutiveErrors = 0;
+      markEvent('gmail');
     } catch (err) {
       this.consecutiveErrors++;
       const backoffMs = Math.min(
@@ -226,6 +234,9 @@ export class GmailChannel implements Channel {
         },
         'Gmail poll failed',
       );
+      if (this.consecutiveErrors >= 3) {
+        markDisconnected('gmail');
+      }
     }
   }
 

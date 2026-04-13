@@ -30,8 +30,24 @@ RUN apt-get update && apt-get install -y \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install agent-browser, claude-code, and MCP servers globally
+RUN npm install -g agent-browser @anthropic-ai/claude-code outlook-mcp @notionhq/notion-mcp-server
+
+# Patch outlook-mcp@2.4.2: upstream list.js ignores well-known folder aliases
+# (falls back to inbox for folder: "sent"); search.js combines $search with
+# $orderby which Graph rejects with HTTP 400; graph-api.js never sets the
+# ConsistencyLevel: eventual header, which Graph requires for $search with
+# KQL field syntax (from:"...", subject:"..."). See the patch files.
+COPY patches/outlook-mcp-list.js /usr/local/lib/node_modules/outlook-mcp/email/list.js
+COPY patches/outlook-mcp-search.js /usr/local/lib/node_modules/outlook-mcp/email/search.js
+COPY patches/outlook-mcp-graph-api.js /usr/local/lib/node_modules/outlook-mcp/utils/graph-api.js
+
+# Install google-workspace-mcp (Drive, Sheets, Docs) from source
+RUN git clone --depth 1 https://github.com/VolksRat71/google-workspace-mcp.git /opt/google-workspace-mcp \
+    && cd /opt/google-workspace-mcp && npm install && npm run build
+
+# Copy Granola MCP server (lightweight custom server, no npm package)
+COPY patches/granola-mcp-server.js /usr/local/lib/granola-mcp-server.js
 
 # Create app directory
 WORKDIR /app

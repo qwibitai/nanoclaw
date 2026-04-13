@@ -59,6 +59,8 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { startOpsPolling } from './ops-notifier.js';
+import { initRuntimeStatus } from './runtime-status.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -473,6 +475,7 @@ async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
+  initRuntimeStatus();
   loadState();
   restoreRemoteControl();
 
@@ -582,9 +585,9 @@ async function main(): Promise<void> {
     const factory = getChannelFactory(channelName)!;
     const channel = factory(channelOpts);
     if (!channel) {
-      logger.warn(
+      logger.debug(
         { channel: channelName },
-        'Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.',
+        'Channel installed but credentials missing, skipping.',
       );
       continue;
     }
@@ -613,6 +616,7 @@ async function main(): Promise<void> {
       if (text) await channel.sendMessage(jid, text);
     },
   });
+  startOpsPolling();
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
@@ -645,6 +649,32 @@ async function main(): Promise<void> {
       for (const group of Object.values(registeredGroups)) {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
       }
+    },
+    categorizeEmail: async (emailId: string, categories: string[]) => {
+      const outlookChannel = channels.find((ch) => ch.name === 'outlook');
+      if (!outlookChannel || !('categorizeEmail' in outlookChannel)) {
+        throw new Error('Outlook channel not available');
+      }
+      await (outlookChannel as any).categorizeEmail(emailId, categories);
+    },
+    flagEmail: async (emailId: string, status: 'flagged' | 'complete' | 'notFlagged') => {
+      const outlookChannel = channels.find((ch) => ch.name === 'outlook');
+      if (!outlookChannel || !('flagEmail' in outlookChannel)) {
+        throw new Error('Outlook channel not available');
+      }
+      await (outlookChannel as any).flagEmail(emailId, status);
+    },
+    upsertOpenItem: async (input) => {
+      const { upsertOpenItem } = await import('./db.js');
+      return upsertOpenItem(input);
+    },
+    updateOpenItemStatus: async (id, status, notes) => {
+      const { updateOpenItemStatus } = await import('./db.js');
+      return updateOpenItemStatus(id, status, notes);
+    },
+    logAudit: async (actionType, target, summary, triggeredBy, metadata) => {
+      const { logAudit } = await import('./db.js');
+      logAudit(actionType, target, summary, triggeredBy, metadata);
     },
   });
   queue.setProcessMessagesFn(processGroupMessages);

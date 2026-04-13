@@ -1,19 +1,126 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-
-import { PublicClientApplication, AccountInfo } from '@azure/msal-node';
 import { Client } from '@microsoft/microsoft-graph-client';
+import { readFileSync } from 'fs';
+import { request as httpRequest } from 'http';
+import { homedir } from 'os';
+import { join } from 'path';
 
+import { CREDENTIAL_PROXY_PORT, DATA_DIR } from '../config.js';
+import { closeOpenItemByConversationId, logAudit } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+import {
+  markConnected,
+  markDisconnected,
+  markEvent,
+} from '../runtime-status.js';
 import {
   Channel,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+
+// Descriptive category vocabulary (what the email IS), matching Gabe's existing
+// Outlook master category list. Nano's internal COO triage (CRITICAL, APPROVAL,
+// DELEGATE, FYI, IGNORE) is applied separately when generating digests.
+// IGNORE is returned when an email is cold outreach, pure noise, or already
+// handled. IGNORE emails receive NO category.
+const VALID_CATEGORIES = [
+  'Needs Response',
+  'Approval Required',
+  'FYI - Urgent',
+  'Waiting for Reply',
+  'FYI',
+  'Meeting Updates',
+  'Notifications',
+  'Marketing',
+  'Negative Review',
+  'Positive Review',
+];
+
+const CATEGORY_PROMPT = `You are Gabriel Ratner's inbox categorizer. Gabe is COO of Proper Hospitality, a multi-property hotel group. Classify this incoming email into exactly one category from the table below. Categories describe WHAT the email is, not what to do about it.
+
+| Category | When to use |
+|---|---|
+| Needs Response | Use ONLY when the email contains a DIRECT ASK of Gabe personally. A direct ask is an explicit question or request addressed to Gabe that requires him to reply with an answer, decision, or action. If the email mentions him but doesn't ask him anything directly, use FYI or another category. This category should be rare and precise. |
+| Approval Required | Needs Gabe's sign-off, signature, or explicit decision. Contracts, hires, terminations, PTO above a day, spend approvals. |
+| FYI - Urgent | Important info, time-sensitive, Gabe needs to be aware immediately. No direct action required but worth knowing now. |
+| Waiting for Reply | A reply came in on a thread where Gabe previously asked something. |
+| FYI | Informational, business-relevant, no urgency. Portfolio awareness only. Policy updates, routine status, general communication. |
+| Meeting Updates | Calendar invites, meeting confirmations, reschedules, cancellations, agendas for upcoming meetings. |
+| Notifications | Automated system alerts, routine reports, internal tooling notifications, scheduled digests from other systems. |
+| Marketing | Newsletters, promotions, vendor pitches, product announcements, cold sales from services Gabe already uses. |
+| Negative Review | Guest complaint or negative review, usually from Revinate or a similar system. |
+| Positive Review | Positive guest review. |
+| IGNORE | True noise: cold outreach from unknown senders, recruiters pitching services, mass marketing blasts with no relevance, bounce notifications, automated confirmations with zero signal. Respond with literally the word IGNORE. |
+
+Rules:
+1. Prefer IGNORE over Marketing for cold unsolicited outreach from UNKNOWN senders. Marketing category is for known vendors and newsletters Gabe has signed up for.
+2. ALICE glitch reports ALWAYS get IGNORE, UNLESS the glitch describes: police involvement, fire/EMS, guest injury, security breach, legal liability, or major employee incident. Routine ops issues are IGNORE.
+3. Revinate and similar guest review alerts get Negative Review or Positive Review ONLY if Gabe needs to know (named GM, pattern, serious complaint). Routine pillow-was-cold feedback gets IGNORE.
+4. Anything from Brad Korzen (CEO) or Brian Delowe (President) is at minimum FYI, usually Needs Response or Approval Required.
+5. Calendar invites and meeting confirmations from attendees go to Meeting Updates.
+
+Respond with ONLY the category name from the list above. Nothing else.`;
+
+async function classifyEmail(
+  sender: string,
+  subject: string,
+  body: string,
+): Promise<string | null> {
+  const truncatedBody = body.slice(0, 2000);
+  const prompt = `${CATEGORY_PROMPT}\n\nFrom: ${sender}\nSubject: ${subject}\n\n${truncatedBody}`;
+
+  return new Promise((resolve) => {
+    const payload = JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 20,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const req = httpRequest(
+      {
+        hostname: '127.0.0.1',
+        port: CREDENTIAL_PROXY_PORT,
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'anthropic-version': '2023-06-01',
+          'x-api-key': 'placeholder',
+          'content-length': Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(Buffer.concat(chunks).toString());
+            const text = data.content?.[0]?.text?.trim();
+            if (!text) { resolve(null); return; }
+            // IGNORE items get no category at all
+            if (text.toUpperCase() === 'IGNORE') { resolve(null); return; }
+            const match = VALID_CATEGORIES.find(
+              (c) => c.toLowerCase() === text.toLowerCase(),
+            );
+            resolve(match || null);
+          } catch {
+            resolve(null);
+          }
+        });
+      },
+    );
+    req.on('error', (err) => {
+      logger.warn({ err }, 'classifyEmail request failed');
+      resolve(null);
+    });
+    req.setTimeout(10000, () => { req.destroy(); resolve(null); });
+    req.write(payload);
+    req.end();
+  });
+}
 
 export interface OutlookChannelOpts {
   onMessage: OnInboundMessage;
@@ -28,16 +135,58 @@ interface ThreadMeta {
   conversationId: string;
 }
 
-const SCOPES = ['Mail.Read', 'Mail.Send', 'User.Read'];
-const CRED_DIR = path.join(os.homedir(), '.outlook-mcp');
-const CACHE_PATH = path.join(CRED_DIR, 'msal-cache.json');
+const TOKENS_PATH = join(homedir(), '.outlook-mcp-tokens.json');
+const CONTACTS_PATH = join(DATA_DIR, 'contacts', 'macos-contacts.json');
+const CONTACTS_CACHE_TTL = 5 * 60 * 1000;
+
+interface Contact {
+  name: string;
+  organization: string;
+  title: string;
+  emails: string[];
+  phones: string[];
+}
+
+let contactsCache: { data: Map<string, Contact>; at: number } | null = null;
+
+function loadContacts(): Map<string, Contact> {
+  if (contactsCache && Date.now() - contactsCache.at < CONTACTS_CACHE_TTL) {
+    return contactsCache.data;
+  }
+  try {
+    const raw = readFileSync(CONTACTS_PATH, 'utf-8');
+    const contacts: Contact[] = JSON.parse(raw);
+    const emailMap = new Map<string, Contact>();
+    for (const c of contacts) {
+      for (const email of c.emails) {
+        if (email) emailMap.set(email.toLowerCase(), c);
+      }
+    }
+    contactsCache = { data: emailMap, at: Date.now() };
+    logger.info(
+      { count: emailMap.size },
+      'Contacts loaded for sender enrichment',
+    );
+    return emailMap;
+  } catch {
+    return contactsCache?.data ?? new Map();
+  }
+}
+
+function enrichSenderLine(senderEmail: string, senderName: string): string {
+  const contacts = loadContacts();
+  const contact = contacts.get(senderEmail.toLowerCase());
+  if (!contact) return `${senderName} <${senderEmail}>`;
+  const parts = [contact.name || senderName];
+  if (contact.title) parts.push(contact.title);
+  if (contact.organization) parts.push(contact.organization);
+  return `${parts.join(', ')} <${senderEmail}>`;
+}
 
 export class OutlookChannel implements Channel {
   name = 'outlook';
 
   private client: Client | null = null;
-  private pca: PublicClientApplication | null = null;
-  private account: AccountInfo | null = null;
   private opts: OutlookChannelOpts;
   private userEmail: string;
   private pollIntervalMs: number;
@@ -57,61 +206,41 @@ export class OutlookChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    if (!fs.existsSync(CACHE_PATH)) {
-      logger.warn(
-        'Outlook credentials not found in ~/.outlook-mcp/. Skipping. Run: npx tsx scripts/outlook-login.ts',
-      );
+    // Read delegated token from tokens file (refreshed by cron)
+    const token = this.readToken();
+    if (!token) {
+      logger.error('Outlook: no token found in ' + TOKENS_PATH);
       return;
     }
-
-    const secrets = readEnvFile(['MS_TENANT_ID', 'MS_CLIENT_ID']);
-
-    this.pca = new PublicClientApplication({
-      auth: {
-        clientId: secrets.MS_CLIENT_ID,
-        authority: `https://login.microsoftonline.com/${secrets.MS_TENANT_ID}`,
-      },
-    });
-
-    // Load cached tokens
-    const cache = fs.readFileSync(CACHE_PATH, 'utf-8');
-    this.pca.getTokenCache().deserialize(cache);
-
-    const accounts = await this.pca.getTokenCache().getAllAccounts();
-    if (accounts.length === 0) {
-      logger.error(
-        'Outlook: no cached accounts. Run: npx tsx scripts/outlook-login.ts',
-      );
-      return;
-    }
-
-    this.account = accounts[0];
-
-    // Acquire token silently (uses refresh token)
-    const tokenResult = await this.acquireToken();
-    if (!tokenResult) return;
 
     this.client = Client.init({
       authProvider: async (done) => {
-        const result = await this.acquireToken();
-        if (result) {
-          done(null, result);
+        const t = this.readToken();
+        if (t) {
+          done(null, t);
         } else {
-          done(new Error('Failed to acquire Outlook token'), null);
+          done(new Error('Failed to read Outlook token'), null);
         }
       },
     });
 
-    // Verify connection
+    // Verify connection — use /me since this is a delegated token
     try {
-      const user = await this.client.api('/me').get();
-      this.userEmail = user.mail || user.userPrincipalName || this.userEmail;
+      const user = await this.client
+        .api('/me')
+        .select('mail,displayName,userPrincipalName')
+        .get();
       logger.info(
-        { email: this.userEmail, name: user.displayName },
-        'Outlook channel connected',
+        { email: user.mail || this.userEmail, name: user.displayName },
+        'Outlook channel connected (delegated)',
       );
+      markConnected('outlook', {
+        email: user.mail || this.userEmail,
+        name: user.displayName,
+      });
     } catch (err) {
       logger.error({ err }, 'Outlook: failed to verify connection');
+      markDisconnected('outlook');
       this.client = null;
       return;
     }
@@ -182,36 +311,54 @@ export class OutlookChannel implements Channel {
     return jid.startsWith('outlook:');
   }
 
+  async categorizeEmail(emailId: string, categories: string[]): Promise<void> {
+    if (!this.client) {
+      logger.warn('Outlook not initialized, cannot categorize');
+      return;
+    }
+
+    await this.client
+      .api(`/me/messages/${emailId}`)
+      .patch({ categories });
+
+    logger.info({ emailId, categories }, 'Outlook email categories set');
+  }
+
+  async flagEmail(emailId: string, status: 'flagged' | 'complete' | 'notFlagged'): Promise<void> {
+    if (!this.client) {
+      logger.warn('Outlook not initialized, cannot flag');
+      return;
+    }
+
+    await this.client
+      .api(`/me/messages/${emailId}`)
+      .patch({ flag: { flagStatus: status } });
+
+    logger.info({ emailId, status }, 'Outlook email flag set');
+  }
+
   async disconnect(): Promise<void> {
     if (this.pollTimer) {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
     this.client = null;
+    markDisconnected('outlook');
     logger.info('Outlook channel stopped');
   }
 
   // --- Private ---
 
-  private async acquireToken(): Promise<string | null> {
-    if (!this.pca || !this.account) return null;
-
+  private readToken(): string | null {
     try {
-      const result = await this.pca.acquireTokenSilent({
-        account: this.account,
-        scopes: SCOPES,
-      });
-
-      // Persist updated cache (new refresh tokens)
-      const cache = this.pca.getTokenCache().serialize();
-      fs.writeFileSync(CACHE_PATH, cache);
-
-      return result.accessToken;
+      const data = JSON.parse(readFileSync(TOKENS_PATH, 'utf-8'));
+      if (!data.access_token) {
+        logger.error('Outlook: no access_token in tokens file');
+        return null;
+      }
+      return data.access_token;
     } catch (err) {
-      logger.error(
-        { err },
-        'Outlook: silent token acquisition failed — re-run scripts/outlook-login.ts',
-      );
+      logger.error({ err }, 'Outlook: failed to read tokens file');
       return null;
     }
   }
@@ -221,11 +368,11 @@ export class OutlookChannel implements Channel {
 
     try {
       const res = await this.client
-        .api('/me/messages')
+        .api(`/me/messages`)
         .filter('isRead eq false')
         .orderby('receivedDateTime desc')
         .top(10)
-        .select('id,subject,from,receivedDateTime,body,conversationId')
+        .select('id,subject,from,receivedDateTime,body,conversationId,categories')
         .get();
 
       const messages: any[] = res.value || [];
@@ -243,12 +390,18 @@ export class OutlookChannel implements Channel {
       }
 
       this.consecutiveErrors = 0;
+      markEvent('outlook');
     } catch (err) {
       this.consecutiveErrors++;
       logger.error(
         { err, consecutiveErrors: this.consecutiveErrors },
         'Outlook poll failed',
       );
+      // Three strikes: treat channel as disconnected so the dashboard
+      // flips to down and alerts can fire. Transient hiccups don't flap.
+      if (this.consecutiveErrors >= 3) {
+        markDisconnected('outlook');
+      }
     }
   }
 
@@ -303,6 +456,52 @@ export class OutlookChannel implements Channel {
       }
     }
 
+    // Existing categories from Outlook
+    const existingCategories: string[] = msg.categories || [];
+
+    // Pre-filter noisy operational alerts that don't need COO attention.
+    // ALICE glitch reports and Revinate review alerts are IGNORE by default
+    // per nanoclawrules.md Inbox Hard Rules. Drop them before they reach the
+    // main group unless the content contains a C-suite escalation keyword.
+    const senderLower = senderEmail.toLowerCase();
+    const isRevinate = senderLower.endsWith('@revinate.com');
+    const isAliceGlitch =
+      senderLower.endsWith('@actabl.com') && /\bALICE\b/i.test(subject);
+    if (isRevinate || isAliceGlitch) {
+      const escalationRegex =
+        /\bpolice\b|\bfire (department|dept|brigade|rescue)\b|\bambulance\b|\bparamedic|\bEMS\b|\bEMT\b|\binjur(y|ed|ies)\b|\bmedical emergency\b|\blawsuit\b|\bliability\b|\bassault\b|\bdiscriminat|\bharass|unauthorized access|security breach/i;
+      const haystack = `${subject}\n${body}`;
+      if (!escalationRegex.test(haystack)) {
+        logger.info(
+          {
+            source: isRevinate ? 'revinate' : 'alice',
+            senderName,
+            subject,
+          },
+          'Outlook noisy alert filtered (no C-suite escalation keyword)',
+        );
+        try {
+          await this.client.api(`/me/messages/${msg.id}`).patch({
+            isRead: true,
+          });
+        } catch (err) {
+          logger.warn(
+            { msgId: msg.id, err },
+            'Failed to mark filtered email as read',
+          );
+        }
+        return;
+      }
+      logger.info(
+        {
+          source: isRevinate ? 'revinate' : 'alice',
+          senderName,
+          subject,
+        },
+        'Outlook noisy alert escalated (matched C-suite keyword)',
+      );
+    }
+
     this.opts.onChatMetadata(chatJid, timestamp, subject, 'outlook', false);
 
     const groups = this.opts.registeredGroups();
@@ -317,7 +516,11 @@ export class OutlookChannel implements Channel {
     }
 
     const mainJid = mainEntry[0];
-    const content = `[Outlook email from ${senderName} <${senderEmail}>]\nSubject: ${subject}\n\n${body}`;
+    const categoryLine = existingCategories.length > 0
+      ? `\nCategories: ${existingCategories.join(', ')}`
+      : '';
+    const enrichedSender = enrichSenderLine(senderEmail, senderName);
+    const content = `[Outlook email from ${enrichedSender}]\nEmail ID: ${msg.id}\nSubject: ${subject}${categoryLine}\n\n${body}`;
 
     this.opts.onMessage(mainJid, {
       id: msg.id,
@@ -329,6 +532,26 @@ export class OutlookChannel implements Channel {
       is_from_me: false,
     });
 
+    // Reply matcher: if this incoming email matches a tracked sent email
+    // (same conversationId, waiting for reply), auto-close the open_item.
+    try {
+      const closed = closeOpenItemByConversationId(conversationId);
+      if (closed > 0) {
+        logAudit(
+          'open_item_updated',
+          conversationId,
+          `Auto-closed follow-up: ${subject} (reply from ${senderName})`,
+          'outlook_reply_matcher',
+        );
+        logger.info(
+          { conversationId, senderName, subject, rowsClosed: closed },
+          'Auto-closed follow-up on reply received',
+        );
+      }
+    } catch (err) {
+      logger.warn({ err, conversationId }, 'Reply matcher failed');
+    }
+
     // Mark as read
     try {
       await this.client.api(`/me/messages/${msg.id}`).patch({ isRead: true });
@@ -339,8 +562,36 @@ export class OutlookChannel implements Channel {
       );
     }
 
+    // Auto-categorize via Haiku. Enable by setting OUTLOOK_AUTO_CATEGORIZE=true in .env.
+    // Reads via readEnvFile because process.env is not populated from .env on launchd.
+    const catEnv = readEnvFile(['OUTLOOK_AUTO_CATEGORIZE']);
+    const autoCategorize = catEnv.OUTLOOK_AUTO_CATEGORIZE === 'true';
+    if (autoCategorize && existingCategories.length === 0) {
+      try {
+        const category = await classifyEmail(
+          `${senderName} <${senderEmail}>`,
+          subject,
+          body,
+        );
+        if (category) {
+          await this.client.api(`/me/messages/${msg.id}`).patch({
+            categories: [category],
+          });
+          logger.info(
+            { emailId: msg.id, category },
+            'Outlook email auto-categorized',
+          );
+        }
+      } catch (err) {
+        logger.warn(
+          { msgId: msg.id, err },
+          'Auto-categorization failed',
+        );
+      }
+    }
+
     logger.info(
-      { mainJid, from: senderName, subject },
+      { mainJid, from: senderName, subject, categories: existingCategories },
       'Outlook email delivered to main group',
     );
   }
@@ -350,21 +601,17 @@ registerChannel('outlook', (opts: ChannelOpts) => {
   const secrets = readEnvFile([
     'MS_TENANT_ID',
     'MS_CLIENT_ID',
+    'MS_CLIENT_SECRET',
     'MS_USER_EMAIL',
   ]);
   if (
     !secrets.MS_TENANT_ID ||
     !secrets.MS_CLIENT_ID ||
+    !secrets.MS_CLIENT_SECRET ||
     !secrets.MS_USER_EMAIL
   ) {
     logger.warn(
-      'Outlook: MS_TENANT_ID, MS_CLIENT_ID, MS_USER_EMAIL required in .env. Skipping.',
-    );
-    return null;
-  }
-  if (!fs.existsSync(CACHE_PATH)) {
-    logger.warn(
-      'Outlook: no cached tokens in ~/.outlook-mcp/. Run: npx tsx scripts/outlook-login.ts',
+      'Outlook: MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET, MS_USER_EMAIL required in .env. Skipping.',
     );
     return null;
   }
