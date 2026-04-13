@@ -481,6 +481,103 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'imap',
+  `Read, search, and manage emails via IMAP, or send emails via SMTP.
+Requires IMAP to be configured for this group.
+
+Operations:
+- list   — list recent emails. Params: folder?, limit?, unread_only?, from?, since?
+- read   — fetch full email body by UID. Params: uid, folder?
+- search — full-text search. Params: query, folder?, limit?
+- send   — send an email. Params: to, subject, body?, html?, cc?
+- delete — move email to Trash. Params: uid, folder?
+           ⚠️  ALWAYS ask the user for confirmation before calling delete.`,
+  {
+    operation: z.enum(['list', 'read', 'search', 'send', 'delete']).describe(
+      'The email operation to perform.'
+    ),
+    folder:     z.string().optional().describe('Mailbox folder (default: INBOX)'),
+    uid:        z.number().optional().describe('Email UID — required for read and delete'),
+    limit:      z.number().optional().describe('Max emails to return, max 50 (default: 20)'),
+    unread_only: z.boolean().optional().describe('Only return unread emails (list only)'),
+    from:       z.string().optional().describe('Filter by sender address (list only)'),
+    since:      z.string().optional().describe('ISO 8601 date string to filter emails after (list only)'),
+    query:      z.string().optional().describe('Full-text search query (search only)'),
+    to:         z.string().optional().describe('Recipient address (send only)'),
+    subject:    z.string().optional().describe('Email subject (send only)'),
+    body:       z.string().optional().describe('Plain text email body (send only)'),
+    html:       z.string().optional().describe('HTML email body (send only)'),
+    cc:         z.string().optional().describe('CC address (send only)'),
+  },
+  async (args) => {
+    fs.mkdirSync(COMMANDS_DIR, { recursive: true });
+
+    const commandId = `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestFile = path.join(COMMANDS_DIR, `${commandId}.json`);
+    const resultFile  = path.join(COMMANDS_DIR, `${commandId}-result.json`);
+
+    const data = {
+      type: 'imap',
+      commandId,
+      operation: args.operation,
+      params: {
+        folder:      args.folder,
+        uid:         args.uid,
+        limit:       args.limit,
+        unread_only: args.unread_only,
+        from:        args.from,
+        since:       args.since,
+        query:       args.query,
+        to:          args.to,
+        subject:     args.subject,
+        body:        args.body,
+        html:        args.html,
+        cc:          args.cc,
+      },
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    const tempPath = `${requestFile}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
+    fs.renameSync(tempPath, requestFile);
+
+    const pollInterval = 500;
+    const maxWaitTime  = 30000;
+    const startTime    = Date.now();
+
+    while (Date.now() - startTime < maxWaitTime) {
+      if (fs.existsSync(resultFile)) {
+        try {
+          const result = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
+          try { fs.unlinkSync(resultFile); }  catch {}
+          try { fs.unlinkSync(requestFile); } catch {}
+
+          if (result.error) {
+            return { content: [{ type: 'text' as const, text: result.error }], isError: true };
+          }
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }],
+          };
+        } catch (err) {
+          return {
+            content: [{ type: 'text' as const, text: `Failed to read result: ${err instanceof Error ? err.message : String(err)}` }],
+            isError: true,
+          };
+        }
+      }
+      await new Promise(r => setTimeout(r, pollInterval));
+    }
+
+    try { fs.unlinkSync(requestFile); } catch {}
+    return {
+      content: [{ type: 'text' as const, text: `IMAP command timed out after ${maxWaitTime / 1000}s.` }],
+      isError: true,
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
