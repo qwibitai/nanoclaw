@@ -86,9 +86,10 @@ function setupAgent(): AgentImpl {
   agent._setRegisteredGroups({ 'mock:stream': MAIN_GROUP });
   (agent as unknown as { _started: boolean })._started = true;
   const channel = createMockChannel();
-  (
-    agent as unknown as { channels: Map<string, Channel> }
-  ).channels.set('mock', channel);
+  (agent as unknown as { channels: Map<string, Channel> }).channels.set(
+    'mock',
+    channel,
+  );
 
   db.storeChatMetadata(
     'mock:stream',
@@ -135,12 +136,33 @@ describe('run.sdk_message (raw passthrough)', () => {
     vi.mocked(runContainerAgent).mockImplementation(
       async (_group, _input, _rc, _onProcess, onOutput) => {
         await onOutput?.({ type: 'state', state: 'active' });
-        await onOutput?.(sdkMsg('assistant', { uuid: 'a1', message: { content: [] } }));
-        await onOutput?.(sdkMsg('tool_progress', { tool_name: 'Bash', tool_use_id: 't1', elapsed_time_seconds: 1 }));
-        await onOutput?.(sdkMsg('stream_event', { event: { type: 'content_block_delta' } }));
-        await onOutput?.(sdkMsg('rate_limit_event', { rate_limit_info: { status: 'allowed' } }));
-        await onOutput?.(sdkMsg('system', { subtype: 'init', session_id: 's1' }, 'init'));
-        await onOutput?.({ type: 'state', state: 'stopped', reason: 'exit', exitCode: 0 });
+        await onOutput?.(
+          sdkMsg('assistant', { uuid: 'a1', message: { content: [] } }),
+        );
+        await onOutput?.(
+          sdkMsg('tool_progress', {
+            tool_name: 'Bash',
+            tool_use_id: 't1',
+            elapsed_time_seconds: 1,
+          }),
+        );
+        await onOutput?.(
+          sdkMsg('stream_event', { event: { type: 'content_block_delta' } }),
+        );
+        await onOutput?.(
+          sdkMsg('rate_limit_event', {
+            rate_limit_info: { status: 'allowed' },
+          }),
+        );
+        await onOutput?.(
+          sdkMsg('system', { subtype: 'init', session_id: 's1' }, 'init'),
+        );
+        await onOutput?.({
+          type: 'state',
+          state: 'stopped',
+          reason: 'exit',
+          exitCode: 0,
+        });
         return { status: 'success', result: null };
       },
     );
@@ -171,10 +193,25 @@ describe('run.sdk_message (raw passthrough)', () => {
 
     vi.mocked(runContainerAgent).mockImplementation(
       async (_group, _input, _rc, _onProcess, onOutput) => {
-        await onOutput?.(sdkMsg('system', { subtype: 'status', status: 'compacting' }, 'status'));
-        await onOutput?.(sdkMsg('system', { subtype: 'compact_boundary' }, 'compact_boundary'));
-        await onOutput?.(sdkMsg('system', { subtype: 'files_persisted' }, 'files_persisted'));
-        await onOutput?.({ type: 'state', state: 'stopped', reason: 'exit', exitCode: 0 });
+        await onOutput?.(
+          sdkMsg(
+            'system',
+            { subtype: 'status', status: 'compacting' },
+            'status',
+          ),
+        );
+        await onOutput?.(
+          sdkMsg('system', { subtype: 'compact_boundary' }, 'compact_boundary'),
+        );
+        await onOutput?.(
+          sdkMsg('system', { subtype: 'files_persisted' }, 'files_persisted'),
+        );
+        await onOutput?.({
+          type: 'state',
+          state: 'stopped',
+          reason: 'exit',
+          exitCode: 0,
+        });
         return { status: 'success', result: null };
       },
     );
@@ -203,7 +240,12 @@ describe('run.sdk_message (raw passthrough)', () => {
     vi.mocked(runContainerAgent).mockImplementation(
       async (_group, _input, _rc, _onProcess, onOutput) => {
         await onOutput?.(sdkMsg('rate_limit_event', rawMsg));
-        await onOutput?.({ type: 'state', state: 'stopped', reason: 'exit', exitCode: 0 });
+        await onOutput?.({
+          type: 'state',
+          state: 'stopped',
+          reason: 'exit',
+          exitCode: 0,
+        });
         return { status: 'success', result: null };
       },
     );
@@ -237,17 +279,34 @@ describe('run.tool (derived from sdk_message)', () => {
 
     vi.mocked(runContainerAgent).mockImplementation(
       async (_group, _input, _rc, _onProcess, onOutput) => {
-        await onOutput?.(sdkMsg('assistant', {
-          uuid: 'a1',
-          message: {
-            content: [
-              { type: 'text', text: 'Let me check...' },
-              { type: 'tool_use', name: 'Bash', id: 'tool-abc', input: { command: 'ls -la' } },
-              { type: 'tool_use', name: 'Read', id: 'tool-def', input: { file_path: '/tmp/x' } },
-            ],
-          },
-        }));
-        await onOutput?.({ type: 'state', state: 'stopped', reason: 'exit', exitCode: 0 });
+        await onOutput?.(
+          sdkMsg('assistant', {
+            uuid: 'a1',
+            message: {
+              content: [
+                { type: 'text', text: 'Let me check...' },
+                {
+                  type: 'tool_use',
+                  name: 'Bash',
+                  id: 'tool-abc',
+                  input: { command: 'ls -la' },
+                },
+                {
+                  type: 'tool_use',
+                  name: 'Read',
+                  id: 'tool-def',
+                  input: { file_path: '/tmp/x' },
+                },
+              ],
+            },
+          }),
+        );
+        await onOutput?.({
+          type: 'state',
+          state: 'stopped',
+          reason: 'exit',
+          exitCode: 0,
+        });
         return { status: 'success', result: null };
       },
     );
@@ -275,15 +334,27 @@ describe('run.tool (derived from sdk_message)', () => {
 
     vi.mocked(runContainerAgent).mockImplementation(
       async (_group, _input, _rc, _onProcess, onOutput) => {
-        await onOutput?.(sdkMsg('assistant', {
-          uuid: 'a1',
-          message: {
-            content: [
-              { type: 'tool_use', name: 'Write', id: 'tool-long', input: longInput },
-            ],
-          },
-        }));
-        await onOutput?.({ type: 'state', state: 'stopped', reason: 'exit', exitCode: 0 });
+        await onOutput?.(
+          sdkMsg('assistant', {
+            uuid: 'a1',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  name: 'Write',
+                  id: 'tool-long',
+                  input: longInput,
+                },
+              ],
+            },
+          }),
+        );
+        await onOutput?.({
+          type: 'state',
+          state: 'stopped',
+          reason: 'exit',
+          exitCode: 0,
+        });
         return { status: 'success', result: null };
       },
     );
@@ -317,12 +388,19 @@ describe('run.tool_progress (derived from sdk_message)', () => {
 
     vi.mocked(runContainerAgent).mockImplementation(
       async (_group, _input, _rc, _onProcess, onOutput) => {
-        await onOutput?.(sdkMsg('tool_progress', {
-          tool_name: 'Bash',
-          tool_use_id: 'tool-789',
-          elapsed_time_seconds: 5.2,
-        }));
-        await onOutput?.({ type: 'state', state: 'stopped', reason: 'exit', exitCode: 0 });
+        await onOutput?.(
+          sdkMsg('tool_progress', {
+            tool_name: 'Bash',
+            tool_use_id: 'tool-789',
+            elapsed_time_seconds: 5.2,
+          }),
+        );
+        await onOutput?.({
+          type: 'state',
+          state: 'stopped',
+          reason: 'exit',
+          exitCode: 0,
+        });
         return { status: 'success', result: null };
       },
     );
@@ -363,25 +441,48 @@ describe('run.subagent (derived from sdk_message)', () => {
 
     vi.mocked(runContainerAgent).mockImplementation(
       async (_group, _input, _rc, _onProcess, onOutput) => {
-        await onOutput?.(sdkMsg('system', {
-          subtype: 'task_started',
-          task_id: 'task-1',
-          description: 'Researching API docs',
-        }, 'task_started'));
-        await onOutput?.(sdkMsg('system', {
-          subtype: 'task_progress',
-          task_id: 'task-1',
-          description: 'Researching API docs',
-          last_tool_name: 'WebFetch',
-          summary: 'Found 3 endpoints',
-        }, 'task_progress'));
-        await onOutput?.(sdkMsg('system', {
-          subtype: 'task_notification',
-          task_id: 'task-1',
-          status: 'completed',
-          summary: 'Documented all 3 endpoints',
-        }, 'task_notification'));
-        await onOutput?.({ type: 'state', state: 'stopped', reason: 'exit', exitCode: 0 });
+        await onOutput?.(
+          sdkMsg(
+            'system',
+            {
+              subtype: 'task_started',
+              task_id: 'task-1',
+              description: 'Researching API docs',
+            },
+            'task_started',
+          ),
+        );
+        await onOutput?.(
+          sdkMsg(
+            'system',
+            {
+              subtype: 'task_progress',
+              task_id: 'task-1',
+              description: 'Researching API docs',
+              last_tool_name: 'WebFetch',
+              summary: 'Found 3 endpoints',
+            },
+            'task_progress',
+          ),
+        );
+        await onOutput?.(
+          sdkMsg(
+            'system',
+            {
+              subtype: 'task_notification',
+              task_id: 'task-1',
+              status: 'completed',
+              summary: 'Documented all 3 endpoints',
+            },
+            'task_notification',
+          ),
+        );
+        await onOutput?.({
+          type: 'state',
+          state: 'stopped',
+          reason: 'exit',
+          exitCode: 0,
+        });
         return { status: 'success', result: null };
       },
     );
@@ -392,9 +493,19 @@ describe('run.subagent (derived from sdk_message)', () => {
     await agent.processGroupMessages('mock:stream');
 
     expect(events).toHaveLength(3);
-    expect(events.map((e) => e.subtype)).toEqual(['started', 'progress', 'completed']);
-    expect(events[0]).toMatchObject({ taskId: 'task-1', description: 'Researching API docs' });
-    expect(events[1]).toMatchObject({ lastToolName: 'WebFetch', summary: 'Found 3 endpoints' });
+    expect(events.map((e) => e.subtype)).toEqual([
+      'started',
+      'progress',
+      'completed',
+    ]);
+    expect(events[0]).toMatchObject({
+      taskId: 'task-1',
+      description: 'Researching API docs',
+    });
+    expect(events[1]).toMatchObject({
+      lastToolName: 'WebFetch',
+      summary: 'Found 3 endpoints',
+    });
     expect(events[2]).toMatchObject({ summary: 'Documented all 3 endpoints' });
   });
 
@@ -403,13 +514,24 @@ describe('run.subagent (derived from sdk_message)', () => {
 
     vi.mocked(runContainerAgent).mockImplementation(
       async (_group, _input, _rc, _onProcess, onOutput) => {
-        await onOutput?.(sdkMsg('system', {
-          subtype: 'task_notification',
-          task_id: 'task-2',
-          status: 'failed',
-          summary: 'Out of memory',
-        }, 'task_notification'));
-        await onOutput?.({ type: 'state', state: 'stopped', reason: 'exit', exitCode: 0 });
+        await onOutput?.(
+          sdkMsg(
+            'system',
+            {
+              subtype: 'task_notification',
+              task_id: 'task-2',
+              status: 'failed',
+              summary: 'Out of memory',
+            },
+            'task_notification',
+          ),
+        );
+        await onOutput?.({
+          type: 'state',
+          state: 'stopped',
+          reason: 'exit',
+          exitCode: 0,
+        });
         return { status: 'success', result: null };
       },
     );
@@ -420,7 +542,10 @@ describe('run.subagent (derived from sdk_message)', () => {
     await agent.processGroupMessages('mock:stream');
 
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ subtype: 'failed', summary: 'Out of memory' });
+    expect(events[0]).toMatchObject({
+      subtype: 'failed',
+      summary: 'Out of memory',
+    });
   });
 });
 
@@ -444,11 +569,22 @@ describe('run.status (derived from sdk_message)', () => {
 
     vi.mocked(runContainerAgent).mockImplementation(
       async (_group, _input, _rc, _onProcess, onOutput) => {
-        await onOutput?.(sdkMsg('system', {
-          subtype: 'status',
-          status: 'compacting',
-        }, 'status'));
-        await onOutput?.({ type: 'state', state: 'stopped', reason: 'exit', exitCode: 0 });
+        await onOutput?.(
+          sdkMsg(
+            'system',
+            {
+              subtype: 'status',
+              status: 'compacting',
+            },
+            'status',
+          ),
+        );
+        await onOutput?.({
+          type: 'state',
+          state: 'stopped',
+          reason: 'exit',
+          exitCode: 0,
+        });
         return { status: 'success', result: null };
       },
     );
@@ -489,38 +625,85 @@ describe('mixed streaming events', () => {
       async (_group, _input, _rc, _onProcess, onOutput) => {
         await onOutput?.({ type: 'state', state: 'active' });
         // assistant with tool_use
-        await onOutput?.(sdkMsg('assistant', {
-          uuid: 'a1',
-          message: {
-            content: [
-              { type: 'tool_use', name: 'Read', id: 't-1', input: { file_path: '/README.md' } },
-            ],
-          },
-        }));
+        await onOutput?.(
+          sdkMsg('assistant', {
+            uuid: 'a1',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  name: 'Read',
+                  id: 't-1',
+                  input: { file_path: '/README.md' },
+                },
+              ],
+            },
+          }),
+        );
         // tool progress
-        await onOutput?.(sdkMsg('tool_progress', {
-          tool_name: 'Read', tool_use_id: 't-1', elapsed_time_seconds: 0.5,
-        }));
+        await onOutput?.(
+          sdkMsg('tool_progress', {
+            tool_name: 'Read',
+            tool_use_id: 't-1',
+            elapsed_time_seconds: 0.5,
+          }),
+        );
         // subagent
-        await onOutput?.(sdkMsg('system', {
-          subtype: 'task_started', task_id: 'sub-1', description: 'Checking tests',
-        }, 'task_started'));
+        await onOutput?.(
+          sdkMsg(
+            'system',
+            {
+              subtype: 'task_started',
+              task_id: 'sub-1',
+              description: 'Checking tests',
+            },
+            'task_started',
+          ),
+        );
         // stream_event (partial token)
-        await onOutput?.(sdkMsg('stream_event', {
-          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello' } },
-        }));
+        await onOutput?.(
+          sdkMsg('stream_event', {
+            event: {
+              type: 'content_block_delta',
+              delta: { type: 'text_delta', text: 'Hello' },
+            },
+          }),
+        );
         // status
-        await onOutput?.(sdkMsg('system', {
-          subtype: 'status', status: 'compacting',
-        }, 'status'));
+        await onOutput?.(
+          sdkMsg(
+            'system',
+            {
+              subtype: 'status',
+              status: 'compacting',
+            },
+            'status',
+          ),
+        );
         // subagent completed
-        await onOutput?.(sdkMsg('system', {
-          subtype: 'task_notification', task_id: 'sub-1', status: 'completed', summary: 'Tests pass',
-        }, 'task_notification'));
+        await onOutput?.(
+          sdkMsg(
+            'system',
+            {
+              subtype: 'task_notification',
+              task_id: 'sub-1',
+              status: 'completed',
+              summary: 'Tests pass',
+            },
+            'task_notification',
+          ),
+        );
         // result — container emits both sdk_message and backward-compat result
-        await onOutput?.(sdkMsg('result', { subtype: 'success', result: 'All done!' }));
+        await onOutput?.(
+          sdkMsg('result', { subtype: 'success', result: 'All done!' }),
+        );
         await onOutput?.({ type: 'result', result: 'All done!' });
-        await onOutput?.({ type: 'state', state: 'stopped', reason: 'exit', exitCode: 0 });
+        await onOutput?.({
+          type: 'state',
+          state: 'stopped',
+          reason: 'exit',
+          exitCode: 0,
+        });
         return { status: 'success', result: 'All done!' };
       },
     );
@@ -567,9 +750,16 @@ describe('mixed streaming events', () => {
     vi.mocked(runContainerAgent).mockImplementation(
       async (_group, _input, _rc, _onProcess, onOutput) => {
         // The container emits both sdk_message and result for SDK result messages
-        await onOutput?.(sdkMsg('result', { subtype: 'success', result: 'done' }));
+        await onOutput?.(
+          sdkMsg('result', { subtype: 'success', result: 'done' }),
+        );
         await onOutput?.({ type: 'result', result: 'done' });
-        await onOutput?.({ type: 'state', state: 'stopped', reason: 'exit', exitCode: 0 });
+        await onOutput?.({
+          type: 'state',
+          state: 'stopped',
+          reason: 'exit',
+          exitCode: 0,
+        });
         return { status: 'success', result: 'done' };
       },
     );

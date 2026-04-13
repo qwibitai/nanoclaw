@@ -415,7 +415,12 @@ describe('container-runner with BoxLite', () => {
         uuid: 'a1',
         message: {
           content: [
-            { type: 'tool_use', name: 'Bash', id: 'tool-abc', input: { command: 'echo hello' } },
+            {
+              type: 'tool_use',
+              name: 'Bash',
+              id: 'tool-abc',
+              input: { command: 'echo hello' },
+            },
           ],
         },
       },
@@ -423,12 +428,18 @@ describe('container-runner with BoxLite', () => {
     emitOutputToExec(mockExec, {
       type: 'sdk_message',
       sdkType: 'tool_progress',
-      message: { tool_name: 'Bash', tool_use_id: 'tool-abc', elapsed_time_seconds: 2.5 },
+      message: {
+        tool_name: 'Bash',
+        tool_use_id: 'tool-abc',
+        elapsed_time_seconds: 2.5,
+      },
     });
     emitOutputToExec(mockExec, {
       type: 'sdk_message',
       sdkType: 'stream_event',
-      message: { event: { type: 'content_block_delta', delta: { text: 'hi' } } },
+      message: {
+        event: { type: 'content_block_delta', delta: { text: 'hi' } },
+      },
     });
     emitOutputToExec(mockExec, {
       type: 'result',
@@ -474,7 +485,11 @@ describe('container-runner with BoxLite', () => {
       type: 'sdk_message',
       sdkType: 'system',
       sdkSubtype: 'task_started',
-      message: { subtype: 'task_started', task_id: 'task-e2e', description: 'Running research' },
+      message: {
+        subtype: 'task_started',
+        task_id: 'task-e2e',
+        description: 'Running research',
+      },
     });
     emitOutputToExec(mockExec, {
       type: 'sdk_message',
@@ -533,7 +548,11 @@ describe('container-runner with BoxLite', () => {
     emitOutputToExec(mockExec, {
       type: 'sdk_message',
       sdkType: 'tool_progress',
-      message: { tool_name: 'Bash', tool_use_id: 't1', elapsed_time_seconds: 10 },
+      message: {
+        tool_name: 'Bash',
+        tool_use_id: 't1',
+        elapsed_time_seconds: 10,
+      },
     });
     for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
 
@@ -543,7 +562,11 @@ describe('container-runner with BoxLite', () => {
       type: 'sdk_message',
       sdkType: 'system',
       sdkSubtype: 'task_started',
-      message: { subtype: 'task_started', task_id: 't2', description: 'keep alive' },
+      message: {
+        subtype: 'task_started',
+        task_id: 't2',
+        description: 'keep alive',
+      },
     });
     for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
 
