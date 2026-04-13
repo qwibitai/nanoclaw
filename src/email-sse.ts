@@ -1,8 +1,9 @@
 /**
  * SSE client for real-time email triage notifications from superpilot.
  *
- * Maintains a persistent outbound connection to superpilot's SSE endpoint.
+ * Maintains one persistent SSE connection per configured service token.
  * When new triaged emails arrive, writes IPC trigger files for the agent.
+ * Each connection has independent reconnect/backoff state.
  */
 import fs from 'fs';
 import path from 'path';
@@ -12,55 +13,81 @@ import http from 'http';
 import {
   DATA_DIR,
   EMAIL_INTELLIGENCE_ENABLED,
-  NANOCLAW_SERVICE_TOKEN,
+  SSE_CONNECTIONS,
   SUPERPILOT_API_URL,
 } from './config.js';
 import { logger } from './logger.js';
 
 const SSE_RECONNECT_MIN_MS = 5_000;
 const SSE_RECONNECT_MAX_MS = 300_000; // 5 minutes max backoff
-// NANOCLAW_SERVICE_TOKEN imported from config.js (reads .env file)
 
-let reconnectMs = SSE_RECONNECT_MIN_MS;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let currentRequest: ReturnType<typeof https.get> | null = null;
+/** Per-connection state for independent reconnect/backoff. */
+interface SSEConnection {
+  label: string;
+  token: string;
+  reconnectMs: number;
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
+  currentRequest: ReturnType<typeof https.get> | null;
+}
+
 let running = false;
+const connections: SSEConnection[] = [];
 
 /**
- * Start the SSE connection to superpilot.
+ * Start SSE connections to superpilot.
  * Call once at startup — reconnects are handled internally.
+ * Spawns one connection per configured service token.
  */
 export function startEmailSSE(): void {
   if (!EMAIL_INTELLIGENCE_ENABLED) {
-    logger.debug('Email intelligence disabled, skipping SSE connection');
+    logger.debug('Email intelligence disabled, skipping SSE connections');
     return;
   }
 
-  if (!NANOCLAW_SERVICE_TOKEN) {
-    logger.warn('NANOCLAW_SERVICE_TOKEN not set, skipping SSE connection');
+  if (SSE_CONNECTIONS.length === 0) {
+    logger.warn('No NANOCLAW_SERVICE_TOKEN configured, skipping SSE');
     return;
   }
 
   running = true;
-  connect();
+
+  for (const { token, label } of SSE_CONNECTIONS) {
+    const conn: SSEConnection = {
+      label,
+      token,
+      reconnectMs: SSE_RECONNECT_MIN_MS,
+      reconnectTimer: null,
+      currentRequest: null,
+    };
+    connections.push(conn);
+    connect(conn);
+  }
+
+  logger.info(
+    { count: connections.length, labels: connections.map((c) => c.label) },
+    'SSE connections started',
+  );
 }
 
 /**
- * Stop the SSE connection.
+ * Stop all SSE connections.
  */
 export function stopEmailSSE(): void {
   running = false;
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+  for (const conn of connections) {
+    if (conn.reconnectTimer) {
+      clearTimeout(conn.reconnectTimer);
+      conn.reconnectTimer = null;
+    }
+    if (conn.currentRequest) {
+      conn.currentRequest.destroy();
+      conn.currentRequest = null;
+    }
   }
-  if (currentRequest) {
-    currentRequest.destroy();
-    currentRequest = null;
-  }
+  connections.length = 0;
 }
 
-function connect(): void {
+function connect(conn: SSEConnection): void {
   if (!running) return;
 
   const url = new URL(`${SUPERPILOT_API_URL}/nanoclaw/events`);
@@ -73,24 +100,30 @@ function connect(): void {
     path: url.pathname + url.search,
     headers: {
       Accept: 'text/event-stream',
-      'x-service-token': NANOCLAW_SERVICE_TOKEN,
+      'x-service-token': conn.token,
       'Cache-Control': 'no-cache',
     },
   };
 
-  logger.info({ url: url.toString() }, 'SSE connecting to superpilot');
+  logger.info(
+    { url: url.toString(), label: conn.label },
+    'SSE connecting to superpilot',
+  );
 
-  currentRequest = mod.get(options, (res) => {
+  conn.currentRequest = mod.get(options, (res) => {
     if (res.statusCode !== 200) {
-      logger.warn({ statusCode: res.statusCode }, 'SSE connection rejected');
+      logger.warn(
+        { statusCode: res.statusCode, label: conn.label },
+        'SSE connection rejected',
+      );
       res.destroy();
-      scheduleReconnect();
+      scheduleReconnect(conn);
       return;
     }
 
     // Connected successfully — reset backoff
-    reconnectMs = SSE_RECONNECT_MIN_MS;
-    logger.info('SSE connected to superpilot');
+    conn.reconnectMs = SSE_RECONNECT_MIN_MS;
+    logger.info({ label: conn.label }, 'SSE connected to superpilot');
 
     let buffer = '';
 
@@ -117,44 +150,53 @@ function connect(): void {
         }
 
         if (eventType === 'triaged_emails' && data) {
-          handleTriagedEmails(data);
+          handleTriagedEmails(data, conn.label);
         }
       }
     });
 
     res.on('end', () => {
-      logger.info('SSE connection closed by server');
-      scheduleReconnect();
+      logger.info({ label: conn.label }, 'SSE connection closed by server');
+      scheduleReconnect(conn);
     });
 
     res.on('error', (err) => {
-      logger.warn({ err: err.message }, 'SSE connection error');
-      scheduleReconnect();
+      logger.warn(
+        { err: err.message, label: conn.label },
+        'SSE connection error',
+      );
+      scheduleReconnect(conn);
     });
   });
 
-  currentRequest.on('error', (err) => {
-    logger.warn({ err: err.message }, 'SSE request error');
-    scheduleReconnect();
+  conn.currentRequest.on('error', (err) => {
+    logger.warn(
+      { err: err.message, label: conn.label },
+      'SSE request error',
+    );
+    scheduleReconnect(conn);
   });
 }
 
-function scheduleReconnect(): void {
+function scheduleReconnect(conn: SSEConnection): void {
   if (!running) return;
 
-  currentRequest = null;
-  logger.info({ reconnectMs }, 'SSE reconnecting');
+  conn.currentRequest = null;
+  logger.info(
+    { reconnectMs: conn.reconnectMs, label: conn.label },
+    'SSE reconnecting',
+  );
 
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connect();
-  }, reconnectMs);
+  conn.reconnectTimer = setTimeout(() => {
+    conn.reconnectTimer = null;
+    connect(conn);
+  }, conn.reconnectMs);
 
   // Exponential backoff
-  reconnectMs = Math.min(reconnectMs * 2, SSE_RECONNECT_MAX_MS);
+  conn.reconnectMs = Math.min(conn.reconnectMs * 2, SSE_RECONNECT_MAX_MS);
 }
 
-function handleTriagedEmails(data: string): void {
+function handleTriagedEmails(data: string, label: string): void {
   try {
     const parsed = JSON.parse(data);
     const rawEmails = parsed.emails;
@@ -170,7 +212,7 @@ function handleTriagedEmails(data: string): void {
     );
     if (emails.length === 0) {
       logger.info(
-        { skipped: rawEmails.length },
+        { skipped: rawEmails.length, label },
         'Skipped SSE trigger — all emails matched test-fixture pattern',
       );
       return;
@@ -180,6 +222,7 @@ function handleTriagedEmails(data: string): void {
         {
           dropped: rawEmails.length - emails.length,
           kept: emails.length,
+          label,
         },
         'Filtered test-fixture emails from SSE trigger',
       );
@@ -208,6 +251,7 @@ function handleTriagedEmails(data: string): void {
       ),
       triggered_at: new Date().toISOString(),
       source: 'sse',
+      connection: label,
     };
 
     const filename = `sse_trigger_${Date.now()}.json`;
@@ -216,12 +260,12 @@ function handleTriagedEmails(data: string): void {
       JSON.stringify(payload, null, 2),
     );
     logger.info(
-      { count: emails.length, filename },
+      { count: emails.length, filename, label },
       'SSE email trigger written',
     );
   } catch (err) {
     logger.warn(
-      { err: String(err) },
+      { err: String(err), label },
       'Failed to process SSE triaged_emails event',
     );
   }

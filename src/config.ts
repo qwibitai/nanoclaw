@@ -65,6 +65,28 @@ export const SUPERPILOT_API_URL =
   'https://app.inboxsuperpilot.com/api';
 export const NANOCLAW_SERVICE_TOKEN =
   process.env.NANOCLAW_SERVICE_TOKEN || envConfig.NANOCLAW_SERVICE_TOKEN || '';
+
+/**
+ * Parsed list of SSE connections for email intelligence.
+ * Supports comma-separated tokens in NANOCLAW_SERVICE_TOKEN, each optionally
+ * labeled with @label (e.g. "tok1@primary,tok2@dev"). Unlabeled tokens get
+ * "default" / "connection-N" labels.
+ */
+export const SSE_CONNECTIONS: { token: string; label: string }[] = (() => {
+  const raw =
+    process.env.NANOCLAW_SERVICE_TOKEN || envConfig.NANOCLAW_SERVICE_TOKEN || '';
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((entry, i) => {
+      const atIdx = entry.indexOf('@');
+      if (atIdx > 0) {
+        return { token: entry.slice(0, atIdx), label: entry.slice(atIdx + 1) };
+      }
+      return { token: entry, label: i === 0 ? 'default' : `connection-${i}` };
+    });
+})();
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,

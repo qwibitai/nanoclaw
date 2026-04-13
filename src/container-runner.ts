@@ -545,10 +545,15 @@ async function buildContainerArgs(
   if (discordToken) {
     args.push('-e', `DISCORD_BOT_TOKEN=${discordToken}`);
   }
-  const serviceToken =
+  // Pass only the primary (first) service token to containers.
+  // The env may contain comma-separated tokens with @label suffixes
+  // for multi-account SSE; containers only need the primary token for MCP auth.
+  const rawServiceToken =
     process.env.NANOCLAW_SERVICE_TOKEN || containerEnv.NANOCLAW_SERVICE_TOKEN;
-  if (serviceToken) {
-    args.push('-e', `NANOCLAW_SERVICE_TOKEN=${serviceToken}`);
+  if (rawServiceToken) {
+    const first = rawServiceToken.split(',')[0].trim();
+    const token = first.includes('@') ? first.slice(0, first.indexOf('@')) : first;
+    args.push('-e', `NANOCLAW_SERVICE_TOKEN=${token}`);
   }
   // GitHub token for gh CLI and git push (same pattern as GitHub Actions)
   const ghToken = process.env.GH_TOKEN || containerEnv.GH_TOKEN;
