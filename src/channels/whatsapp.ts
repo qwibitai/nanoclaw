@@ -17,8 +17,18 @@ import {
   STORE_DIR,
 } from '../config.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
-import { logger } from '../logger.js';
+import { logger as appLogger } from '../logger.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
+
+// Baileys requires a pino-compatible ILogger with level, child(), and trace().
+// Wrap our built-in logger to satisfy the interface.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const logger: any = Object.assign({}, appLogger, {
+  level: 'warn',
+  trace: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
+    appLogger.debug(dataOrMsg, msg),
+  child: () => logger,
+});
 import {
   Channel,
   OnInboundMessage,
