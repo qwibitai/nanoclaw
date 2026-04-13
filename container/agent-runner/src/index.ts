@@ -23,6 +23,7 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { SYSTEM_PROMPT } from './system-prompt.js';
 
 interface ContainerInput {
   prompt: string;
@@ -625,13 +626,15 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
+      // Slim custom system prompt (see system-prompt.ts) replaces the
+      // ~4-8k-token claude_code preset — the preset is coding-CLI-focused
+      // (SQL injection warnings, TDD, git workflows, PR creation) and
+      // irrelevant to Claudio. globalClaudeMd is concatenated at the end
+      // since we can no longer use the preset's `append` field.
+      // To revert: restore the preset object above.
       systemPrompt: globalClaudeMd
-        ? {
-            type: 'preset' as const,
-            preset: 'claude_code' as const,
-            append: globalClaudeMd,
-          }
-        : undefined,
+        ? `${SYSTEM_PROMPT}\n\n${globalClaudeMd}`
+        : SYSTEM_PROMPT,
       allowedTools,
       maxTurns,
       env: sdkEnv,
