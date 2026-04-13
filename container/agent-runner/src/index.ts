@@ -469,6 +469,7 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__microsoft_graph__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -484,6 +485,15 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        // MS Graph MCP exposed by mcp-proxy on the host
+        ...(process.env.MS_GRAPH_MCP_URL
+          ? {
+              microsoft_graph: {
+                type: 'http' as const,
+                url: process.env.MS_GRAPH_MCP_URL,
+              },
+            }
+          : {}),
       },
       hooks: {
         PreCompact: [
