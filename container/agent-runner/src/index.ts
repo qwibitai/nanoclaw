@@ -726,19 +726,24 @@ async function main(): Promise<void> {
     // Build system prompt: personality.md first, then CLAUDE.md for capabilities
     let systemPrompt = 'You are a helpful assistant.';
     const personalityPath = '/workspace/group/personality.md';
+    // Support AGENT.md (model-agnostic) with CLAUDE.md fallback
+    const groupAgentMd = '/workspace/group/AGENT.md';
     const groupClaudeMdPath2 = '/workspace/group/CLAUDE.md';
+    const groupConfigPath = fs.existsSync(groupAgentMd) ? groupAgentMd : groupClaudeMdPath2;
+    const globalAgentMd = '/workspace/global/AGENT.md';
     const globalClaudeMdPath2 = '/workspace/global/CLAUDE.md';
+    const globalConfigPath = fs.existsSync(globalAgentMd) ? globalAgentMd : globalClaudeMdPath2;
 
     const parts: string[] = [];
     if (fs.existsSync(personalityPath)) {
       parts.push(fs.readFileSync(personalityPath, 'utf-8'));
       log(`Loaded personality.md (${parts[parts.length - 1].length} chars)`);
     }
-    if (fs.existsSync(globalClaudeMdPath2)) {
-      parts.push(fs.readFileSync(globalClaudeMdPath2, 'utf-8'));
+    if (fs.existsSync(globalConfigPath)) {
+      parts.push(fs.readFileSync(globalConfigPath, 'utf-8'));
     }
-    if (fs.existsSync(groupClaudeMdPath2)) {
-      parts.push(fs.readFileSync(groupClaudeMdPath2, 'utf-8'));
+    if (fs.existsSync(groupConfigPath)) {
+      parts.push(fs.readFileSync(groupConfigPath, 'utf-8'));
     }
     if (parts.length > 0) {
       systemPrompt = parts.join('\n\n---\n\n');
