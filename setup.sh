@@ -120,6 +120,10 @@ check_build_tools() {
 
 log "=== Bootstrap started ==="
 
+# Keep all caches project-local so setup works inside sandboxed environments
+# (e.g. Claude Code sandbox) without needing write access to ~/.npm or global stores.
+export npm_config_cache="$PROJECT_ROOT/.npm-cache"
+
 detect_platform
 
 check_node
