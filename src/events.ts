@@ -234,6 +234,32 @@ export interface SystemShutdownEvent extends NanoClawEvent {
   };
 }
 
+// --- Proactive Monitor events ---
+
+export interface EmailReceivedEvent extends NanoClawEvent {
+  type: 'email.received';
+  source: 'email-sse';
+  payload: {
+    count: number;
+    emails: Array<{
+      thread_id: string;
+      account: string;
+      subject: string;
+      sender: string;
+    }>;
+    connection: string;
+  };
+}
+
+export interface WebhookReceivedEvent extends NanoClawEvent {
+  type: 'webhook.received';
+  source: 'webhook';
+  payload: {
+    webhookSource: string;
+    data: Record<string, unknown>;
+  };
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -256,6 +282,8 @@ export interface EventMap {
   'system.error': SystemErrorEvent;
   'system.startup': SystemStartupEvent;
   'system.shutdown': SystemShutdownEvent;
+  'email.received': EmailReceivedEvent;
+  'webhook.received': WebhookReceivedEvent;
 }
 
 export type EventType = keyof EventMap;

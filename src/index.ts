@@ -79,6 +79,8 @@ import {
   refreshGmailTokens,
   startGmailRefreshLoop,
 } from './gmail-token-refresh.js';
+import { runDailyDigest } from './daily-digest.js';
+import { startEventRouter } from './event-router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -1135,6 +1137,59 @@ async function main(): Promise<void> {
 
   // Real-time email notifications via SSE (poll is fallback)
   startEmailSSE();
+
+  // Event router: processes events against per-group rules
+  startEventRouter({
+    sendMessage: async (jid, text) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) {
+        logger.warn({ jid }, 'event-router: no channel for JID');
+        return;
+      }
+      await channel.sendMessage(jid, text);
+    },
+    enqueueTask: (chatJid, prompt, groupFolder) => {
+      const taskId = `event-router-${Date.now()}`;
+      const group = registeredGroups[chatJid];
+      if (!group) return;
+      queue.enqueueTask(chatJid, taskId, async () => {
+        await runAgent(group, prompt, chatJid);
+      });
+    },
+    registeredGroups: () => registeredGroups,
+  });
+
+  // Daily digest: schedule to run every day at 8:00 AM
+  const DAILY_DIGEST_INTERVAL_MS = 60 * 60 * 1000; // Check every hour
+  const digestDeps = {
+    sendMessage: async (jid: string, text: string) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) return;
+      await channel.sendMessage(jid, text);
+    },
+    getMainGroupJid: () =>
+      Object.keys(registeredGroups).find(
+        (jid) => registeredGroups[jid].isMain,
+      ),
+  };
+  let lastDigestDate = '';
+  setInterval(async () => {
+    const now = new Date();
+    // Convert to configured timezone and check if it's 8 AM
+    const localHour = parseInt(
+      now.toLocaleString('en-US', { timeZone: TIMEZONE, hour: 'numeric', hour12: false }),
+      10,
+    );
+    const todayKey = now.toISOString().slice(0, 10);
+    if (localHour === 8 && lastDigestDate !== todayKey) {
+      lastDigestDate = todayKey;
+      try {
+        await runDailyDigest(digestDeps);
+      } catch (err) {
+        logger.error({ err }, 'Daily digest failed');
+      }
+    }
+  }, DAILY_DIGEST_INTERVAL_MS);
   // Deal-watch: real-time HubSpot + Gong signal layer → main group.
   // Opt-in via DEAL_WATCH_ENABLED=1 in .env; no-op otherwise.
   startDealWatchLoop({

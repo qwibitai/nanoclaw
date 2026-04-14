@@ -589,7 +589,11 @@ export async function processTaskIpc(
       const [targetJidRelay] = targetEntry;
       await deps.sendMessage(targetJidRelay, relayText);
       logger.info(
-        { targetJid: targetJidRelay, targetGroup: targetGroupName, sourceGroup },
+        {
+          targetJid: targetJidRelay,
+          targetGroup: targetGroupName,
+          sourceGroup,
+        },
         'Message relayed to target group',
       );
       break;

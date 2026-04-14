@@ -16,6 +16,8 @@ import {
   SSE_CONNECTIONS,
   SUPERPILOT_API_URL,
 } from './config.js';
+import { eventBus } from './event-bus.js';
+import type { EmailReceivedEvent } from './events.js';
 import { logger } from './logger.js';
 
 const SSE_RECONNECT_MIN_MS = 5_000;
@@ -260,6 +262,31 @@ function handleTriagedEmails(data: string, label: string): void {
       { count: emails.length, filename, label },
       'SSE email trigger written',
     );
+
+    // Emit structured event for the event router / proactive monitor
+    const emailEvent: EmailReceivedEvent = {
+      type: 'email.received',
+      source: 'email-sse',
+      timestamp: Date.now(),
+      payload: {
+        count: emails.length,
+        emails: emails.map(
+          (e: {
+            thread_id: string;
+            account: string;
+            subject?: string;
+            sender?: string;
+          }) => ({
+            thread_id: e.thread_id,
+            account: e.account || 'unknown',
+            subject: e.subject || '',
+            sender: e.sender || '',
+          }),
+        ),
+        connection: label,
+      },
+    };
+    eventBus.emit('email.received', emailEvent);
   } catch (err) {
     logger.warn(
       { err: String(err), label },

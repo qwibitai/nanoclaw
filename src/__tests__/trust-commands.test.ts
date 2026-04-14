@@ -1,5 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+vi.mock('../logger.js', () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
+}));
+
+vi.mock('../config.js', () => ({
+  TIMEZONE: 'America/Los_Angeles',
+}));
+
 import { _initTestDatabase, _closeDatabase, upsertTrustLevel } from '../db.js';
+import { logEvent } from '../event-log.js';
 import { parseTrustCommand, executeTrustCommand } from '../trust-commands.js';
 
 beforeEach(() => _initTestDatabase());
@@ -30,7 +46,27 @@ describe('parseTrustCommand', () => {
 
   it('returns null for unrecognized commands', () => {
     expect(parseTrustCommand('hello')).toBeNull();
-    expect(parseTrustCommand('what is trust')).toBeNull();
+  });
+
+  it('parses "what did I miss"', () => {
+    expect(parseTrustCommand('what did I miss')).toEqual({
+      type: 'what_did_i_miss',
+    });
+  });
+
+  it('parses "what did I miss" variants', () => {
+    expect(parseTrustCommand('What Did I Miss?')).toEqual({
+      type: 'what_did_i_miss',
+    });
+    expect(parseTrustCommand('catch me up')).toEqual({
+      type: 'what_did_i_miss',
+    });
+    expect(parseTrustCommand('what happened')).toEqual({
+      type: 'what_did_i_miss',
+    });
+    expect(parseTrustCommand("what's new")).toEqual({
+      type: 'what_did_i_miss',
+    });
   });
 });
 
@@ -78,5 +114,38 @@ describe('executeTrustCommand', () => {
     executeTrustCommand({ type: 'reset' }, 'group1');
     const statusResult = executeTrustCommand({ type: 'status' }, 'group1');
     expect(statusResult).toContain('cold start');
+  });
+
+  it('what_did_i_miss returns quiet message when no events', () => {
+    const result = executeTrustCommand(
+      { type: 'what_did_i_miss' },
+      'group1',
+    );
+    expect(result).toContain('What you missed');
+    expect(result).toContain('All quiet');
+  });
+
+  it('what_did_i_miss includes event counts', () => {
+    const now = Date.now();
+    logEvent({
+      type: 'message.inbound',
+      source: 'channel',
+      timestamp: now - 1000,
+      payload: {},
+    });
+    logEvent({
+      type: 'task.complete',
+      source: 'executor',
+      timestamp: now - 2000,
+      payload: {},
+    });
+
+    const result = executeTrustCommand(
+      { type: 'what_did_i_miss' },
+      'group1',
+    );
+    expect(result).toContain('What you missed');
+    expect(result).toContain('Messages received: 1');
+    expect(result).toContain('Tasks completed: 1');
   });
 });

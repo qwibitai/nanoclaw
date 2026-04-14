@@ -31,7 +31,11 @@ function makeDeps(
 }
 
 const GROUPS = {
-  'tg:-1001111111111': { name: 'Main Chat', folder: 'telegram_main', isMain: true },
+  'tg:-1001111111111': {
+    name: 'Main Chat',
+    folder: 'telegram_main',
+    isMain: true,
+  },
   'tg:-1002222222222': { name: 'Dev Team', folder: 'telegram_dev-team' },
   'dc:3333333333': { name: 'Family Chat', folder: 'discord_family-chat' },
 };
@@ -45,7 +49,11 @@ describe('relay_message IPC', () => {
 
   it('relays message from main group by display name', async () => {
     await processTaskIpc(
-      { type: 'relay_message', targetGroup: 'Dev Team', text: 'Hello dev team!' },
+      {
+        type: 'relay_message',
+        targetGroup: 'Dev Team',
+        text: 'Hello dev team!',
+      },
       'telegram_main',
       true,
       deps,
@@ -59,7 +67,11 @@ describe('relay_message IPC', () => {
 
   it('relays message from main group by folder name', async () => {
     await processTaskIpc(
-      { type: 'relay_message', targetGroup: 'discord_family-chat', text: 'Hi family!' },
+      {
+        type: 'relay_message',
+        targetGroup: 'discord_family-chat',
+        text: 'Hi family!',
+      },
       'telegram_main',
       true,
       deps,
@@ -73,7 +85,11 @@ describe('relay_message IPC', () => {
 
   it('matches target group case-insensitively', async () => {
     await processTaskIpc(
-      { type: 'relay_message', targetGroup: 'dev team', text: 'lowercase match' },
+      {
+        type: 'relay_message',
+        targetGroup: 'dev team',
+        text: 'lowercase match',
+      },
       'telegram_main',
       true,
       deps,
@@ -87,7 +103,11 @@ describe('relay_message IPC', () => {
 
   it('blocks relay from non-main group', async () => {
     await processTaskIpc(
-      { type: 'relay_message', targetGroup: 'Family Chat', text: 'sneaky message' },
+      {
+        type: 'relay_message',
+        targetGroup: 'Family Chat',
+        text: 'sneaky message',
+      },
       'telegram_dev-team',
       false,
       deps,
@@ -98,7 +118,11 @@ describe('relay_message IPC', () => {
 
   it('fails gracefully for unknown target group', async () => {
     await processTaskIpc(
-      { type: 'relay_message', targetGroup: 'Nonexistent Group', text: 'hello?' },
+      {
+        type: 'relay_message',
+        targetGroup: 'Nonexistent Group',
+        text: 'hello?',
+      },
       'telegram_main',
       true,
       deps,

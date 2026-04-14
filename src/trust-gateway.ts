@@ -13,11 +13,13 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { randomUUID } from 'crypto';
+import { WEBHOOK_SECRET } from './config.js';
 import {
   evaluateTrust,
   classifyTool,
   recordTrustDecision,
 } from './trust-engine.js';
+import type { WebhookReceivedEvent } from './events.js';
 import {
   insertTrustApproval,
   getTrustApproval,
@@ -368,6 +370,52 @@ function handleStatus(
   json(res, 200, { levels });
 }
 
+/** Handle POST /webhook/:source */
+async function handleWebhook(
+  req: IncomingMessage,
+  res: ServerResponse,
+  webhookSource: string,
+): Promise<void> {
+  // Authenticate via shared secret
+  if (!WEBHOOK_SECRET) {
+    json(res, 503, { error: 'Webhook endpoint not configured (no WEBHOOK_SECRET)' });
+    return;
+  }
+
+  const providedSecret = req.headers['x-webhook-secret'] as string | undefined;
+  if (providedSecret !== WEBHOOK_SECRET) {
+    json(res, 401, { error: 'Invalid webhook secret' });
+    return;
+  }
+
+  const raw = await readBody(req);
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    json(res, 400, { error: 'Invalid JSON' });
+    return;
+  }
+
+  const webhookEvent: WebhookReceivedEvent = {
+    type: 'webhook.received',
+    source: 'webhook',
+    timestamp: Date.now(),
+    payload: {
+      webhookSource,
+      data,
+    },
+  };
+  eventBus.emit('webhook.received', webhookEvent);
+
+  logger.info(
+    { webhookSource, keys: Object.keys(data) },
+    'Webhook received',
+  );
+
+  json(res, 200, { status: 'accepted' });
+}
+
 /**
  * Start the trust gateway HTTP server.
  * Containers call this to evaluate trust before executing write/transact operations.
@@ -396,6 +444,13 @@ export function startTrustGateway(port: number = 10255): { close: () => void } {
       // GET /trust/status
       if (method === 'GET' && pathname === '/trust/status') {
         handleStatus(res, query);
+        return;
+      }
+
+      // POST /webhook/:source
+      const webhookMatch = pathname.match(/^\/webhook\/(.+)$/);
+      if (method === 'POST' && webhookMatch) {
+        await handleWebhook(req, res, webhookMatch[1]);
         return;
       }
 

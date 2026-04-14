@@ -156,3 +156,6 @@ export const EMAIL_INTELLIGENCE_ENABLED =
   (process.env.EMAIL_INTELLIGENCE_ENABLED ??
     envConfig.EMAIL_INTELLIGENCE_ENABLED ??
     'true') !== 'false';
+
+export const WEBHOOK_SECRET =
+  process.env.WEBHOOK_SECRET || '';
