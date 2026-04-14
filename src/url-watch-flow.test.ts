@@ -480,6 +480,7 @@ describe('url_watch flow', () => {
       added_at: '2024-01-01T00:00:02.000Z',
       requiresTrigger: false,
       type: 'thread',
+      channel_mode: 'url_watch',
     };
     _setRegisteredGroups({
       [chatJid]: baseGroup,

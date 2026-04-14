@@ -59,22 +59,29 @@ FOREIGN KEY (chat_jid) REFERENCES chats(jid)
 ```typescript
 // src/index.ts - spawnThreadForUrl 内
 
-finalizeSpawnedThread(msg.id, threadJid);
-
 // ★ 追加: chats テーブルに threadJid を事前登録（storeMessage の FK 制約を満たすため）
 storeChatMetadata(
   threadJid,
   msg.timestamp,
   threadName,
-  'discord',   // チャンネル名は channel.name から取得するのがベター
+  channel.name,
   true,
 );
 
-const childGroup: RegisteredGroup = { ... };
+const childGroup: RegisteredGroup = {
+  ...
+  channel_mode: 'url_watch',  // ★ 追加: url_watch スレッドとして識別するため
+};
 registerGroup(threadJid, childGroup);
+if (!registeredGroups[threadJid]) {
+  throw new Error('Thread group registration was rejected');
+}
 
 const syntheticMsg: InboundMessage = { ... };
 storeMessage(syntheticMsg);  // これで FK 違反が起きなくなる
+
+// 全初期化が成功した後に予約を確定する
+finalizeSpawnedThread(msg.id, threadJid);
 ```
 
 `storeChatMetadata` は `src/index.ts` の L45 で既にインポート済み。

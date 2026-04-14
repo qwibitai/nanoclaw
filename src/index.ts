@@ -237,6 +237,7 @@ async function spawnThreadForUrl(
     containerConfig: group.containerConfig,
     requiresTrigger: false,
     type: 'thread',
+    channel_mode: 'url_watch',
   };
 
   const syntheticMsg: InboundMessage = {
@@ -323,24 +324,15 @@ function stringContainsUrl(value: string): boolean {
   return URL_RE.test(value);
 }
 
-function isUrlWatchThreadGroup(
-  chatJid: string,
-  group: RegisteredGroup,
-): boolean {
-  if (group.type !== 'thread' || !group.parent_folder) return false;
-  return Object.entries(registeredGroups).some(
-    ([jid, parentGroup]) =>
-      jid !== chatJid &&
-      parentGroup.channel_mode === 'url_watch' &&
-      parentGroup.folder === group.parent_folder,
-  );
+function isUrlWatchThreadGroup(group: RegisteredGroup): boolean {
+  return group.type === 'thread' && group.channel_mode === 'url_watch';
 }
 
 function getUrlWatchSeedMessage(
   chatJid: string,
   group: RegisteredGroup,
 ): NewMessage | null {
-  if (!isUrlWatchThreadGroup(chatJid, group)) return null;
+  if (!isUrlWatchThreadGroup(group)) return null;
   const allMessages = getMessagesSince(chatJid, '', ASSISTANT_NAME, 1000);
   for (const message of allMessages) {
     const url = extractFirstUrl(message.content);
