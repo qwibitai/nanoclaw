@@ -64,6 +64,7 @@ import { hasPrivilege, resolveGroupType } from './group-type.js';
 import {
   Channel,
   InboundMessage,
+  NewMessage,
   RegisteredGroup,
 } from './types.js';
 import { logger } from './logger.js';
