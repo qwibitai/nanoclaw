@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   _initTestDatabase,
   _getTestDatabase,
+  clearSession,
   createTask,
   deleteTask,
   getAllChats,
@@ -11,8 +12,10 @@ import {
   getMessagesSince,
   getNewMessages,
   getRegisteredGroup,
+  getSession,
   getTaskById,
   setRegisteredGroup,
+  setSession,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -771,5 +774,30 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+describe('clearSession', () => {
+  it('removes the session row for the given group', () => {
+    setSession('whatsapp_main', 'abc-123');
+    expect(getSession('whatsapp_main')).toBe('abc-123');
+
+    clearSession('whatsapp_main');
+    expect(getSession('whatsapp_main')).toBeUndefined();
+  });
+
+  it('is a no-op when the group has no session row', () => {
+    expect(() => clearSession('nonexistent')).not.toThrow();
+    expect(getSession('nonexistent')).toBeUndefined();
+  });
+
+  it('only clears the given group, not others', () => {
+    setSession('group_a', 'aaa');
+    setSession('group_b', 'bbb');
+
+    clearSession('group_a');
+
+    expect(getSession('group_a')).toBeUndefined();
+    expect(getSession('group_b')).toBe('bbb');
   });
 });

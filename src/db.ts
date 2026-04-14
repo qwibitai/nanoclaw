@@ -603,6 +603,10 @@ export function getAllSessions(): Record<string, string> {
   return result;
 }
 
+export function clearSession(groupFolder: string): void {
+  db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
+}
+
 // --- Registered group accessors ---
 
 export function getRegisteredGroup(
