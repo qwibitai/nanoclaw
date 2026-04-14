@@ -172,6 +172,39 @@ export interface TrustGraduatedEvent extends NanoClawEvent {
   };
 }
 
+// --- Verification events ---
+
+export interface VerifyCheckEvent extends NanoClawEvent {
+  type: 'verify.check';
+  source: 'router';
+  payload: {
+    taskId: string;
+    groupId: string;
+    claimsFound: number;
+  };
+}
+
+export interface VerifyPassedEvent extends NanoClawEvent {
+  type: 'verify.passed';
+  source: 'router';
+  payload: {
+    taskId: string;
+    groupId: string;
+    confidenceMarkers: number;
+  };
+}
+
+export interface VerifyFailedEvent extends NanoClawEvent {
+  type: 'verify.failed';
+  source: 'trust-gateway';
+  payload: {
+    taskId: string;
+    groupId: string;
+    toolName: string;
+    reason: string;
+  };
+}
+
 // --- System events ---
 
 export interface SystemErrorEvent extends NanoClawEvent {
@@ -217,6 +250,9 @@ export interface EventMap {
   'trust.approved': TrustApprovedEvent;
   'trust.denied': TrustDeniedEvent;
   'trust.graduated': TrustGraduatedEvent;
+  'verify.check': VerifyCheckEvent;
+  'verify.passed': VerifyPassedEvent;
+  'verify.failed': VerifyFailedEvent;
   'system.error': SystemErrorEvent;
   'system.startup': SystemStartupEvent;
   'system.shutdown': SystemShutdownEvent;

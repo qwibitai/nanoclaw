@@ -162,7 +162,9 @@ function createSchema(database: Database.Database): void {
       decision TEXT NOT NULL,
       outcome TEXT,
       group_id TEXT NOT NULL,
-      timestamp DATETIME NOT NULL
+      timestamp DATETIME NOT NULL,
+      confidence_level TEXT,
+      was_correct INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_trust_actions_class ON trust_actions(action_class, group_id);
     CREATE INDEX IF NOT EXISTS idx_trust_actions_time ON trust_actions(timestamp);
@@ -275,6 +277,24 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* column already exists */
+  }
+
+  // Add confidence_level column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE trust_actions ADD COLUMN confidence_level TEXT`,
+    );
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Add was_correct column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE trust_actions ADD COLUMN was_correct INTEGER`,
+    );
+  } catch {
+    // Column already exists — ignore
   }
 }
 

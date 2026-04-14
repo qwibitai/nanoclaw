@@ -35,10 +35,32 @@ export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
-export function formatOutbound(rawText: string): string {
+/**
+ * Normalize confidence markers in agent output for channel delivery.
+ *
+ * The agent emits:
+ *   ✓ Verified: ...  — KNOWN fact with a source
+ *   ~ Unverified: ... — REMEMBERED claim
+ *   ? Unknown: ...   — unconfirmed claim
+ *
+ * For channels that support Unicode (WhatsApp, Telegram, Signal, Discord),
+ * the markers pass through unchanged. For plain-text channels, map to text.
+ */
+export function normalizeConfidenceMarkers(
+  text: string,
+  plainText: boolean = false,
+): string {
+  if (!plainText) return text;
+  return text
+    .replace(/^✓ Verified:/gm, '[confirmed]')
+    .replace(/^~ Unverified:/gm, '[from memory]')
+    .replace(/^\? Unknown:/gm, '[uncertain]');
+}
+
+export function formatOutbound(rawText: string, plainText: boolean = false): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
-  return text;
+  return normalizeConfidenceMarkers(text, plainText);
 }
 
 export function routeOutbound(

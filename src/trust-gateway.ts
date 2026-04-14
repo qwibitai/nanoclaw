@@ -32,6 +32,7 @@ import type {
   TrustRequestEvent,
   TrustApprovedEvent,
   TrustDeniedEvent,
+  VerifyFailedEvent,
 } from './events.js';
 
 const APPROVAL_TIMEOUT_S = 1800; // 30 minutes
@@ -149,6 +150,44 @@ export function resolveApproval(
   return true;
 }
 
+/**
+ * Rule-based pre-action intent validation (v1).
+ *
+ * Checks that the action's tool name is plausibly consistent with the
+ * description. Returns null if validation passes, or a string reason
+ * if it fails.
+ *
+ * This is intentionally lightweight — no LLM call. The goal is to catch
+ * obvious mismatches (e.g. a "write email" description paired with a
+ * "delete_file" tool) without adding latency.
+ *
+ * LLM-based validation (Haiku cross-check) is deferred to a later plan.
+ */
+function validateActionIntent(
+  toolName: string,
+  description: string | undefined,
+): string | null {
+  if (!description) return null; // no description to check against
+
+  const desc = description.toLowerCase();
+  const tool = toolName.toLowerCase();
+
+  // Destructive tools should not appear with purely read-intent descriptions
+  const destructiveTools = ['delete', 'remove', 'drop', 'truncate', 'wipe'];
+  const readOnlyDescriptions = ['read', 'fetch', 'list', 'get', 'search', 'find', 'check', 'view'];
+
+  const toolIsDestructive = destructiveTools.some((d) => tool.includes(d));
+  const descIsReadOnly =
+    readOnlyDescriptions.some((r) => desc.startsWith(r) || desc.includes(`to ${r}`)) &&
+    !destructiveTools.some((d) => desc.includes(d));
+
+  if (toolIsDestructive && descIsReadOnly) {
+    return `tool "${toolName}" appears destructive but description implies read-only: "${description}"`;
+  }
+
+  return null;
+}
+
 /** Handle POST /trust/evaluate */
 async function handleEvaluate(
   req: IncomingMessage,
@@ -184,6 +223,27 @@ async function handleEvaluate(
   const chatJid = String(chat_jid);
   const desc = description ? String(description) : undefined;
   const selfClass = action_class ? String(action_class) : undefined;
+
+  // Pre-action intent validation (v1: rule-based)
+  const intentMismatch = validateActionIntent(toolName, desc);
+  if (intentMismatch) {
+    logger.warn({ toolName, groupId, reason: intentMismatch }, 'Intent mismatch detected');
+    const failedEvent: VerifyFailedEvent = {
+      type: 'verify.failed',
+      source: 'trust-gateway',
+      groupId,
+      timestamp: Date.now(),
+      payload: {
+        taskId: '',
+        groupId,
+        toolName,
+        reason: intentMismatch,
+      },
+    };
+    eventBus.emit('verify.failed', failedEvent);
+    // Log the mismatch but do not block — trust evaluation proceeds normally.
+    // A future plan will optionally reject here or escalate to the user.
+  }
 
   const result = evaluateTrust(toolName, groupId, selfClass);
   const resolvedClass = classifyTool(toolName, selfClass);

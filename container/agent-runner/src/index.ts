@@ -544,6 +544,22 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
     ? globalClaudeMd + escalationInstruction
     : escalationInstruction;
 
+  // Append fact-classification discipline for self-check verification
+  const factClassification = `\n\n## Fact Classification
+
+Before stating any fact in a response, classify it internally:
+- KNOWN: directly observed in this session (tool result, file content, message text)
+- REMEMBERED: from memory files or prior conversation
+- INFERRED: reasoned from other facts, not directly confirmed
+
+In your final response, prefix claims with a confidence marker:
+- ✓ Verified: [claim] (source: [where you saw it])
+- ~ Unverified: [claim] (source: memory)
+- ? Unknown: [claim] (not confirmed)
+
+Only use ✓ for KNOWN facts with a named source. Use ~ for REMEMBERED claims. Use ? when you cannot confirm. Omit markers entirely for routine, conversational phrases that carry no factual claim.`;
+  globalClaudeMd += factClassification;
+
   // When verbose mode is on, append thinking instruction to the system prompt
   if (containerInput.verbose) {
     const thinkingInstruction = `\n\n## Verbose Mode (Active)\nBefore each response, include a brief 1-2 sentence summary of your reasoning approach as a blockquote. Format:\n> Considering X, checking Y...\n\nKeep the thinking summary concise — one or two lines max. Then continue with your normal response. Do NOT use this for trivial responses (greetings, confirmations). Only include it when there is genuine reasoning or decision-making to surface.`;
