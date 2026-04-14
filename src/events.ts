@@ -120,6 +120,58 @@ export interface PoolWarmEvictedEvent extends NanoClawEvent {
   };
 }
 
+// --- Trust events ---
+
+export interface TrustRequestEvent extends NanoClawEvent {
+  type: 'trust.request';
+  source: 'trust-gateway';
+  payload: {
+    approvalId: string;
+    actionClass: string;
+    toolName: string;
+    description: string;
+    groupId: string;
+    chatJid: string;
+    confidence: number;
+    threshold: number;
+  };
+}
+
+export interface TrustApprovedEvent extends NanoClawEvent {
+  type: 'trust.approved';
+  source: 'trust-gateway';
+  payload: {
+    approvalId: string;
+    actionClass: string;
+    toolName: string;
+    groupId: string;
+    auto: boolean; // true = auto-approved by confidence, false = user approved
+  };
+}
+
+export interface TrustDeniedEvent extends NanoClawEvent {
+  type: 'trust.denied';
+  source: 'trust-gateway';
+  payload: {
+    approvalId: string;
+    actionClass: string;
+    toolName: string;
+    groupId: string;
+    reason: 'user_denied' | 'timeout';
+  };
+}
+
+export interface TrustGraduatedEvent extends NanoClawEvent {
+  type: 'trust.graduated';
+  source: 'trust-engine';
+  payload: {
+    actionClass: string;
+    confidence: number;
+    threshold: number;
+    groupId: string;
+  };
+}
+
 // --- System events ---
 
 export interface SystemErrorEvent extends NanoClawEvent {
@@ -161,6 +213,10 @@ export interface EventMap {
   'pool.warm.created': PoolWarmCreatedEvent;
   'pool.warm.used': PoolWarmUsedEvent;
   'pool.warm.evicted': PoolWarmEvictedEvent;
+  'trust.request': TrustRequestEvent;
+  'trust.approved': TrustApprovedEvent;
+  'trust.denied': TrustDeniedEvent;
+  'trust.graduated': TrustGraduatedEvent;
   'system.error': SystemErrorEvent;
   'system.startup': SystemStartupEvent;
   'system.shutdown': SystemShutdownEvent;
