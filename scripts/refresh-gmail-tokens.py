@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Refresh Google OAuth tokens for all NanoClaw Gmail accounts.
+"""Refresh Google OAuth tokens for all Gmail and GDrive accounts.
 
-Reads ~/.gmail-mcp{,-jonathan,-attaxion,-dev}/credentials.json, checks if
-the access_token is within REFRESH_THRESHOLD_SECONDS of expiry, and if so
-exchanges the refresh_token for a new access_token via Google's OAuth2
-endpoint.
+Gmail: Reads ~/.gmail-mcp{,-jonathan,-attaxion,-dev}/credentials.json
+GDrive: Reads ~/.config/google-drive-mcp/{personal,whoisxml,attaxion,dev}-token.json
+
+Checks if the access_token is within REFRESH_THRESHOLD_SECONDS of expiry,
+and if so exchanges the refresh_token for a new access_token via Google's
+OAuth2 endpoint.
 
 Exit codes:
   0  All accounts checked, none required refresh OR all refreshes succeeded
@@ -25,12 +27,22 @@ import urllib.request
 from pathlib import Path
 
 HOME = Path.home()
-ACCOUNTS = [
+GMAIL_ACCOUNTS = [
     ("personal", HOME / ".gmail-mcp"),
     ("jonathan", HOME / ".gmail-mcp-jonathan"),
     ("attaxion", HOME / ".gmail-mcp-attaxion"),
     ("dev",      HOME / ".gmail-mcp-dev"),
 ]
+GDRIVE_DIR = HOME / ".config" / "google-drive-mcp"
+GDRIVE_ACCOUNTS = [
+    ("personal", GDRIVE_DIR / "personal-token.json"),
+    ("whoisxml", GDRIVE_DIR / "whoisxml-token.json"),
+    ("attaxion", GDRIVE_DIR / "attaxion-token.json"),
+    ("dev",      GDRIVE_DIR / "dev-token.json"),
+]
+GDRIVE_OAUTH_KEYS = GDRIVE_DIR / "oauth-credentials.json"
+# For backwards compatibility
+ACCOUNTS = GMAIL_ACCOUNTS
 REFRESH_THRESHOLD_SECONDS = 5 * 60  # refresh if expiring within 5 minutes
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 NETWORK_RETRY_DELAY_SECONDS = 1.0  # single retry on transient network failure
@@ -197,13 +209,122 @@ def refresh_token(account: str, account_dir: Path) -> tuple[str, str]:
     return ("ok", f"{account}: refreshed (now valid for ~60 min)")
 
 
+def refresh_gdrive_token(account: str, token_file: Path, oauth_keys_file: Path) -> tuple[str, str]:
+    """Refresh a GDrive token. Same OAuth flow, different file layout.
+
+    GDrive stores tokens as standalone files (not in per-account dirs),
+    and shares one oauth-credentials.json across all accounts.
+    """
+    if not token_file.exists():
+        return ("missing", f"gdrive-{account}: {token_file} not found")
+
+    creds = json.loads(token_file.read_text())
+    if not needs_refresh(creds):
+        expiry_min = (creds["expiry_date"] - int(time.time() * 1000)) / 1000 / 60
+        return ("ok", f"gdrive-{account}: token valid for {expiry_min:.0f} more min")
+
+    keys = load_oauth_keys(oauth_keys_file.parent)
+    if not keys:
+        # GDrive uses oauth-credentials.json, not gcp-oauth.keys.json —
+        # load_oauth_keys looks for gcp-oauth.keys.json by default.
+        # Fall back to reading the file directly.
+        if not oauth_keys_file.exists():
+            return ("error", f"gdrive-{account}: {oauth_keys_file} missing")
+        data = json.loads(oauth_keys_file.read_text())
+        for wrapper in ("installed", "web"):
+            if wrapper in data:
+                keys = data[wrapper]
+                break
+        if not keys:
+            keys = data
+
+    refresh = creds.get("refresh_token")
+    if not refresh:
+        return ("error", f"gdrive-{account}: no refresh_token — re-auth required")
+
+    body = urllib.parse.urlencode({
+        "client_id": keys["client_id"],
+        "client_secret": keys["client_secret"],
+        "refresh_token": refresh,
+        "grant_type": "refresh_token",
+    }).encode()
+    req = urllib.request.Request(
+        GOOGLE_TOKEN_URL,
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    new = None
+    last_err: "Exception | None" = None
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                new = json.loads(resp.read())
+            break
+        except Exception as e:
+            last_err = e
+            if attempt == 0 and _is_transient_network_error(e):
+                time.sleep(NETWORK_RETRY_DELAY_SECONDS)
+                continue
+            return ("error", f"gdrive-{account}: refresh failed - {type(e).__name__}: {e}")
+    if new is None:
+        return ("error", f"gdrive-{account}: refresh failed - {type(last_err).__name__ if last_err else 'Unknown'}: {last_err}")
+
+    creds["access_token"] = new["access_token"]
+    creds["expiry_date"] = int(time.time() * 1000) + (new.get("expires_in", 3600) * 1000)
+    if "scope" in new:
+        creds["scope"] = new["scope"]
+    if "refresh_token" in new:
+        creds["refresh_token"] = new["refresh_token"]
+
+    try:
+        orig_mode = token_file.stat().st_mode & 0o777
+    except FileNotFoundError:
+        orig_mode = 0o600
+
+    tmp = token_file.parent / f"{token_file.name}.tmp.{os.getpid()}"
+    try:
+        tmp.write_text(json.dumps(creds, indent=2))
+        os.chmod(tmp, orig_mode)
+        os.replace(tmp, token_file)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+    return ("ok", f"gdrive-{account}: refreshed (now valid for ~60 min)")
+
+
+LOG_FILE = Path("/tmp/gmail-token-refresh.log")
+MAX_LOG_LINES = 200
+
+
+def rotate_log():
+    """Truncate log to last MAX_LOG_LINES to prevent unbounded growth."""
+    try:
+        if not LOG_FILE.exists():
+            return
+        lines = LOG_FILE.read_text().splitlines()
+        if len(lines) > MAX_LOG_LINES:
+            LOG_FILE.write_text("\n".join(lines[-MAX_LOG_LINES:]) + "\n")
+    except OSError:
+        pass
+
+
 def main():
+    rotate_log()
     statuses = []
-    for account, account_dir in ACCOUNTS:
+
+    # Gmail accounts
+    for account, account_dir in GMAIL_ACCOUNTS:
         if not account_dir.exists():
             statuses.append(("missing", f"{account}: directory {account_dir} not present"))
             continue
         statuses.append(refresh_token(account, account_dir))
+
+    # GDrive accounts
+    for account, token_file in GDRIVE_ACCOUNTS:
+        statuses.append(refresh_gdrive_token(account, token_file, GDRIVE_OAUTH_KEYS))
 
     any_error = False
     any_missing = False

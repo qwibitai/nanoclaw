@@ -120,7 +120,7 @@ export async function refreshGmailTokens(
   });
 }
 
-const DEFAULT_REFRESH_INTERVAL_MS = 45 * 60 * 1000; // 45 minutes
+const DEFAULT_REFRESH_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 // Track which error summaries we've already alerted on, to avoid

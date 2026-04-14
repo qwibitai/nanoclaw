@@ -335,7 +335,11 @@ You have access to the superpilot MCP server which provides email triage, KB sea
 
 ### Processing Flow
 
-When triggered with new emails:
+**This flow ONLY applies when your prompt starts with `## Email Intelligence Trigger`.** That header is injected by the system for automated email batches — it is never present in user messages.
+
+If a user asks you about an email (e.g. "review Ryan's email", "what did Mike say?", "check my inbox"), that is a **direct user command** — NOT an email intelligence trigger. Handle it conversationally: search for the email, read it, and report back. Do NOT run the triage/classify/processed_items pipeline below.
+
+When triggered with new emails (prompt starts with `## Email Intelligence Trigger`):
 1. Check if each email is already in processed_items (avoid double-processing)
 2. Skip any thread whose thread_id starts with `test-approval-` (these are test fixtures from the dev harness, not real emails — NEVER reply, archive, or classify them; just mark processed and move on)
 3. Use superpilot MCP to get full thread context
