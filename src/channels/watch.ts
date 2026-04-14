@@ -461,12 +461,22 @@ export class WatchChannel implements Channel {
   // Voice reminder — /api/watch/reminder
   // -----------------------------------------------------------------------
 
-  // Parses a "remind me in/at X to Y" phrase and schedules a notification
-  // to fire at the parsed time via this.addNotification(). The scheduling
-  // is in-memory (setTimeout) — reminders are lost on host restart. If
-  // that becomes a pain point in practice, persist to SQLite and re-hydrate
-  // on startup. For MVP, in-memory is fine — the host runs as a stable
-  // systemd service and restarts are rare.
+  // The watch captures audio for the Remind tile and POSTs it here. The
+  // host transcribes, wraps the transcript in a short system framing, and
+  // routes it through injectAndAwaitReply() exactly like a normal watch
+  // message. Jorgenclaw (the agent) parses the natural-language time using
+  // Claude's own language understanding, calls schedule_task to create a
+  // one-shot task at the parsed time, and replies with a short confirmation
+  // that the watch shows on its response screen.
+  //
+  // Why this is better than the old on-device regex parser (rewritten
+  // 2026-04-14): regex parsers only handle phrasings you thought of ahead
+  // of time and every missed phrasing is a silent user-facing failure.
+  // Claude parses natural language correctly on the first try —
+  // "tomorrow at noon", "in an hour and a half", "at 3:30 in the afternoon",
+  // "half past eight" all just work. Cost is one agent turn per reminder,
+  // which is an acceptable tradeoff for a rarely-used feature that used
+  // to fail loudly on anything outside the two documented phrasings.
   private async handleReminderPost(
     req: http.IncomingMessage,
     res: http.ServerResponse,
@@ -488,50 +498,31 @@ export class WatchChannel implements Channel {
         return;
       }
 
-      const parsed = this.parseReminder(cleaned);
-      if (!parsed) {
-        this.sendJson(res, 200, {
-          reply:
-            `Could not parse time.\n\n` +
-            `Heard: "${cleaned}"\n\n` +
-            `Try: "in 10 minutes to call Mom" or "at 3pm to take out trash"`,
-        });
-        return;
-      }
+      const deviceId =
+        (req.headers['x-device-id'] as string | undefined) || 'unknown';
 
-      const delta = parsed.when.getTime() - Date.now();
-      if (delta <= 0) {
-        this.sendJson(res, 200, {
-          reply: `That time is in the past (${parsed.when.toLocaleTimeString('en-US')}). Try again.`,
-        });
-        return;
-      }
-
-      // Schedule the haptic/visual reminder via the existing notification
-      // push pipeline. Using the 'signal' type so it renders with the
-      // generic notification styling (the only other type is 'email').
-      setTimeout(() => {
-        this.addNotification('signal', 'Reminder', parsed.what);
-        logger.info(
-          { what: parsed.what, at: parsed.when.toISOString() },
-          'watch: reminder fired',
-        );
-      }, delta);
-
-      const timeStr = parsed.when.toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-      });
       logger.info(
-        { at: parsed.when.toISOString(), deltaMs: delta, what: parsed.what },
-        'watch: reminder scheduled',
+        { deviceId, preview: cleaned.slice(0, 100) },
+        'watch: reminder request — routing to agent',
       );
 
-      // Mirror to Signal so Scott can see it on his phone too.
-      this.mirrorSend(`[Reminder scheduled ${timeStr}] ${parsed.what}`);
+      // Mirror the user side of the exchange to Signal so Scott's phone
+      // thread shows what was captured.
+      this.mirrorSend(`⌚ [Watch reminder] Scott: ${cleaned}`);
 
-      const reply = `Reminder set for ${timeStr}:\n${parsed.what}`;
+      // System framing: kept short to minimize agent context noise. The
+      // agent is expected to (a) parse the time from the quoted transcript,
+      // (b) call schedule_task with schedule_type "once", and (c) reply
+      // with a brief confirmation that fits on the watch's response screen.
+      const framed =
+        `SYSTEM: Scott tapped the 'Remind' tile on his watch and said: ` +
+        `"${cleaned}". Parse the time from his statement and schedule a ` +
+        `one-shot task for that exact time using the schedule_task tool ` +
+        `with schedule_type "once". The scheduled task's prompt should ` +
+        `send Scott a Signal reminder of the action. Reply with only a ` +
+        `short confirmation, e.g. "Reminder set for 3:45 PM: call Mom".`;
+
+      const reply = await this.injectAndAwaitReply(framed, deviceId);
       this.sendJson(res, 200, { reply });
     } catch (err) {
       logger.warn({ err }, 'watch: reminder error');
@@ -552,62 +543,6 @@ export class WatchChannel implements Channel {
       .replace(/\s+/g, ' ')
       .trim();
     return cleaned;
-  }
-
-  // Minimal natural-language reminder parser. Handles the two phrasings
-  // we document in the user guide:
-  //   "in N minute(s)/hour(s) [to] <action>"
-  //   "at HH[:MM] (am|pm) [to] <action>"
-  // plus a lenient "tomorrow at HH[:MM] (am|pm) [to] <action>". Returns
-  // null if neither matches — the caller then returns a "could not parse"
-  // message to the user with examples.
-  //
-  // Deliberately dumb: no LLM round-trip, no chrono-node dependency. If
-  // a user's phrasing doesn't match, the error message tells them how
-  // to rephrase. That's an acceptable tradeoff for zero new dependencies
-  // and deterministic behavior.
-  private parseReminder(text: string): { when: Date; what: string } | null {
-    // Whisper sometimes inserts a leading "Remind me " which we can strip
-    // since it's implicit in the tile.
-    const stripped = text.replace(/^\s*(?:please\s+)?remind\s+me\s+/i, '');
-
-    // Pattern 1: "in N minute(s)/hour(s) [to] <action>"
-    const inMatch = stripped.match(
-      /^in\s+(\d+)\s+(minute|hour|min|hr)s?\s*(?:to\s+)?(.+)$/i,
-    );
-    if (inMatch) {
-      const n = parseInt(inMatch[1], 10);
-      const unit = inMatch[2].toLowerCase();
-      const ms =
-        unit.startsWith('min') ? n * 60_000 : n * 3_600_000;
-      const when = new Date(Date.now() + ms);
-      return { when, what: inMatch[3].trim() };
-    }
-
-    // Pattern 2: "[tomorrow] at HH[:MM] (am|pm) [to] <action>"
-    const atMatch = stripped.match(
-      /^(tomorrow\s+)?at\s+(\d+)(?::(\d+))?\s*(am|pm|a\.m\.|p\.m\.)\s*(?:to\s+)?(.+)$/i,
-    );
-    if (atMatch) {
-      const isTomorrow = !!atMatch[1];
-      let hour = parseInt(atMatch[2], 10);
-      const minute = atMatch[3] ? parseInt(atMatch[3], 10) : 0;
-      const ampm = atMatch[4].toLowerCase().replace(/\./g, '');
-      if (ampm === 'pm' && hour !== 12) hour += 12;
-      if (ampm === 'am' && hour === 12) hour = 0;
-
-      const when = new Date();
-      when.setHours(hour, minute, 0, 0);
-      if (isTomorrow) {
-        when.setDate(when.getDate() + 1);
-      } else if (when.getTime() <= Date.now()) {
-        // "at 3pm" when it's already 4pm → roll over to tomorrow
-        when.setDate(when.getDate() + 1);
-      }
-      return { when, what: atMatch[5].trim() };
-    }
-
-    return null;
   }
 
   private async handleMessagePost(
