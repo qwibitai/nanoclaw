@@ -2,7 +2,11 @@
 
 export type TaskPriority = 'interactive' | 'scheduled' | 'proactive';
 
-const PRIORITY_ORDER: TaskPriority[] = ['interactive', 'scheduled', 'proactive'];
+const PRIORITY_ORDER: TaskPriority[] = [
+  'interactive',
+  'scheduled',
+  'proactive',
+];
 
 interface Entry<T> {
   item: T;
@@ -27,7 +31,9 @@ interface DequeueResult<T> {
  * Within each level, groups are served in round-robin order so no single group
  * can starve others at the same priority level.
  */
-export class PriorityQueue<T extends { groupJid?: never } | { groupJid: never } | object = object> {
+export class PriorityQueue<
+  T extends { groupJid?: never } | { groupJid: never } | object = object,
+> {
   // Per-priority bucket: each bucket is a Map<groupJid, Entry<T>[]>
   // The bucket also maintains a round-robin pointer (lastServedGroup) per
   // priority level so we rotate fairly.
@@ -44,7 +50,8 @@ export class PriorityQueue<T extends { groupJid?: never } | { groupJid: never } 
     // groupJid can come from item or be passed explicitly
     const gid =
       groupJid ??
-      ((item as unknown as { groupJid?: string }).groupJid ?? '__global__');
+      (item as unknown as { groupJid?: string }).groupJid ??
+      '__global__';
     const bucket = this.buckets.get(priority)!;
     if (!bucket.has(gid)) {
       bucket.set(gid, []);
@@ -59,7 +66,7 @@ export class PriorityQueue<T extends { groupJid?: never } | { groupJid: never } 
 
       // Round-robin: find the next group after the last-served group
       const groups = Array.from(bucket.keys());
-      const lastServed = this.roundRobinCursor.get(priority);
+      const lastServed = this.roundRobinCursor.get(priority) ?? null;
       let startIdx = 0;
       if (lastServed !== null) {
         const lastIdx = groups.indexOf(lastServed);

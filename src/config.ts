@@ -99,6 +99,14 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
+export const WARM_POOL_SIZE = Math.max(
+  0,
+  parseInt(process.env.WARM_POOL_SIZE || '2', 10) || 2,
+);
+export const WARM_POOL_IDLE_TIMEOUT = parseInt(
+  process.env.WARM_POOL_IDLE_TIMEOUT || '600000',
+  10,
+); // 10 minutes default
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
