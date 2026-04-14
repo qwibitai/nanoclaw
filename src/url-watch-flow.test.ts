@@ -4,6 +4,7 @@ import type { Channel, InboundMessage, RegisteredGroup } from './types.js';
 
 const {
   storeMessageMock,
+  storeChatMetadataMock,
   getMessagesSinceMock,
   resetStoredMessages,
   setRegisteredGroupMock,
@@ -19,24 +20,29 @@ const {
   const storeMessageMock = vi.fn((msg: InboundMessage) => {
     storedMessages.push(msg);
   });
-  const getMessagesSinceMock = vi.fn((chatJid: string, sinceTimestamp: string) =>
-    storedMessages
-      .filter(
-        (m) => m.chat_jid === chatJid && m.timestamp > sinceTimestamp && !!m.content,
-      )
-      .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-      .map((m) => ({
-        id: m.id,
-        chat_jid: m.chat_jid,
-        sender: m.sender,
-        sender_name: m.sender_name,
-        content: m.content,
-        timestamp: m.timestamp,
-        is_from_me: !!m.is_from_me,
-      })),
+  const getMessagesSinceMock = vi.fn(
+    (chatJid: string, sinceTimestamp: string) =>
+      storedMessages
+        .filter(
+          (m) =>
+            m.chat_jid === chatJid &&
+            m.timestamp > sinceTimestamp &&
+            !!m.content,
+        )
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+        .map((m) => ({
+          id: m.id,
+          chat_jid: m.chat_jid,
+          sender: m.sender,
+          sender_name: m.sender_name,
+          content: m.content,
+          timestamp: m.timestamp,
+          is_from_me: !!m.is_from_me,
+        })),
   );
   return {
     storeMessageMock,
+    storeChatMetadataMock: vi.fn(),
     getMessagesSinceMock,
     resetStoredMessages: () => {
       storedMessages.length = 0;
@@ -84,7 +90,7 @@ vi.mock('./db.js', () => ({
   setRegisteredGroup: setRegisteredGroupMock,
   setRouterState: vi.fn(),
   setSession: vi.fn(),
-  storeChatMetadata: vi.fn(),
+  storeChatMetadata: storeChatMetadataMock,
   storeMessage: storeMessageMock,
 }));
 
@@ -100,7 +106,11 @@ vi.mock('./group-queue.js', () => ({
       fn: () => Promise<void>,
     ): void {
       enqueueTaskMock(groupJid, taskId);
-      void fn();
+      void fn().catch((error) => {
+        queueMicrotask(() => {
+          throw error;
+        });
+      });
     }
     registerProcess = vi.fn();
     notifyIdle = vi.fn();
@@ -163,9 +173,10 @@ function makeChannel(createThread?: Channel['createThread']): Channel {
   };
 }
 
-async function flushAsyncWork(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+async function flushAsyncWork(turns = 6): Promise<void> {
+  for (let i = 0; i < turns; i += 1) {
+    await Promise.resolve();
+  }
 }
 
 describe('url_watch flow', () => {
@@ -203,6 +214,13 @@ describe('url_watch flow', () => {
         parent_folder: 'discord_main',
       }),
     );
+    expect(storeChatMetadataMock).toHaveBeenCalledWith(
+      'dc:thread-1',
+      '2024-01-01T00:00:01.000Z',
+      expect.any(String),
+      'discord',
+      true,
+    );
     expect(storeMessageMock).toHaveBeenCalledTimes(1);
     expect(storeMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -211,6 +229,16 @@ describe('url_watch flow', () => {
         content: 'https://example.com/post',
       }),
     );
+    const metadataCallOrder =
+      storeChatMetadataMock.mock.invocationCallOrder[0] ?? -1;
+    const syntheticStoreCallOrder =
+      storeMessageMock.mock.invocationCallOrder[0] ?? -1;
+    const enqueueTaskCallOrder =
+      enqueueTaskMock.mock.invocationCallOrder[0] ?? -1;
+    const finalizeCallOrder =
+      finalizeSpawnedThreadMock.mock.invocationCallOrder[0] ?? -1;
+    expect(metadataCallOrder).toBeLessThan(syntheticStoreCallOrder);
+    expect(enqueueTaskCallOrder).toBeLessThan(finalizeCallOrder);
     expect(enqueueTaskMock).toHaveBeenCalledWith(
       'dc:thread-1',
       'url-watch-initial:msg-1',
@@ -223,6 +251,36 @@ describe('url_watch flow', () => {
     const firstPrompt =
       (firstCall?.[1] as { prompt?: string } | undefined)?.prompt ?? '';
     expect(firstPrompt).toContain('https://example.com/post');
+  });
+
+  it('初期化失敗時は予約解放し元メッセージ保存へフォールバックする', async () => {
+    const createThread = vi.fn(async () => 'dc:thread-init-fail');
+    const msg = makeMsg({ id: 'msg-init-fail' });
+    storeChatMetadataMock.mockImplementationOnce(() => {
+      throw new Error('chat metadata failed');
+    });
+
+    const handled = _maybeHandleUrlWatchMessage(chatJid, msg, [
+      makeChannel(createThread),
+    ]);
+    expect(handled).toBe(true);
+    await flushAsyncWork();
+
+    expect(releaseSpawnedThreadReservationMock).toHaveBeenCalledWith(
+      'msg-init-fail',
+    );
+    expect(finalizeSpawnedThreadMock).not.toHaveBeenCalled();
+    expect(setRegisteredGroupMock).not.toHaveBeenCalled();
+    expect(storeMessageMock).toHaveBeenCalledTimes(1);
+    expect(storeMessageMock).toHaveBeenCalledWith(msg);
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceMessageId: 'msg-init-fail',
+        threadJid: 'dc:thread-init-fail',
+        stage: 'chat_metadata',
+      }),
+      'Failed to initialize URL watch thread',
+    );
   });
 
   it('URL なし: 元メッセージを通常保存する', async () => {
@@ -297,7 +355,7 @@ describe('url_watch flow', () => {
         threadJid: 'dc:thread-direct-fail',
         sourceMessageId: 'msg-direct-fail',
       }),
-      'Initial URL direct processing failed',
+      'Initial URL direct processing failed; re-enqueueing message check',
     );
   });
 
@@ -424,7 +482,9 @@ describe('url_watch flow', () => {
       parent_folder: baseGroup.folder,
       trigger: baseGroup.trigger,
       added_at: '2024-01-01T00:00:02.000Z',
+      requiresTrigger: false,
       type: 'thread',
+      channel_mode: 'url_watch',
     };
     _setRegisteredGroups({
       [chatJid]: baseGroup,

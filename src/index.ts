@@ -228,8 +228,6 @@ async function spawnThreadForUrl(
     return false;
   }
 
-  finalizeSpawnedThread(msg.id, threadJid);
-
   const childGroup: RegisteredGroup = {
     name: threadName,
     folder: group.folder,
@@ -239,8 +237,8 @@ async function spawnThreadForUrl(
     containerConfig: group.containerConfig,
     requiresTrigger: false,
     type: 'thread',
+    channel_mode: 'url_watch',
   };
-  registerGroup(threadJid, childGroup);
 
   const syntheticMsg: InboundMessage = {
     id: `${msg.id}_url`,
@@ -253,20 +251,69 @@ async function spawnThreadForUrl(
     is_thread: true,
     parent_jid: chatJid,
   };
-  storeMessage(syntheticMsg);
-  queue.enqueueTask(threadJid, `url-watch-initial:${msg.id}`, async () => {
-    const processed = await processMessagesForGroup(
-      threadJid,
-      childGroup,
-      channel,
-    );
-    if (!processed) {
-      logger.error(
-        { chatJid, threadJid, sourceMessageId: msg.id, url },
-        'Initial URL direct processing failed',
-      );
+
+  type UrlWatchInitStage =
+    | 'chat_metadata'
+    | 'store_message'
+    | 'register_group'
+    | 'enqueue_initial_task'
+    | 'finalize_spawn';
+  let initStage: UrlWatchInitStage = 'chat_metadata';
+  try {
+    // programmatic に作成した thread は受信イベントが来ないため、
+    // synthetic メッセージ保存前に chats 行を作成して FK 制約を満たす。
+    storeChatMetadata(threadJid, msg.timestamp, threadName, channel.name, true);
+
+    initStage = 'store_message';
+    storeMessage(syntheticMsg);
+
+    initStage = 'register_group';
+    registerGroup(threadJid, childGroup);
+    if (!registeredGroups[threadJid]) {
+      throw new Error('Thread group registration was rejected');
     }
-  });
+
+    initStage = 'enqueue_initial_task';
+    queue.enqueueTask(threadJid, `url-watch-initial:${msg.id}`, async () => {
+      try {
+        const processed = await processMessagesForGroup(
+          threadJid,
+          childGroup,
+          channel,
+        );
+        if (!processed) {
+          logger.error(
+            { chatJid, threadJid, sourceMessageId: msg.id, url },
+            'Initial URL direct processing failed; re-enqueueing message check',
+          );
+          queue.enqueueMessageCheck(threadJid);
+        }
+      } catch (err) {
+        logger.error(
+          { err, chatJid, threadJid, sourceMessageId: msg.id, url },
+          'Initial URL direct processing threw; re-enqueueing message check',
+        );
+        queue.enqueueMessageCheck(threadJid);
+      }
+    });
+
+    initStage = 'finalize_spawn';
+    finalizeSpawnedThread(msg.id, threadJid);
+  } catch (err) {
+    releaseSpawnedThreadReservation(msg.id);
+    logger.error(
+      {
+        err,
+        chatJid,
+        threadJid,
+        sourceMessageId: msg.id,
+        url,
+        stage: initStage,
+      },
+      'Failed to initialize URL watch thread',
+    );
+    return false;
+  }
 
   logger.info(
     { chatJid, threadJid, url, folder: group.folder },
@@ -286,22 +333,24 @@ function stringContainsUrl(value: string): boolean {
   return URL_RE.test(value);
 }
 
-function isUrlWatchThreadGroup(chatJid: string, group: RegisteredGroup): boolean {
-  if (group.type !== 'thread' || !group.parent_folder) return false;
-  return Object.entries(registeredGroups).some(
-    ([jid, parentGroup]) =>
-      jid !== chatJid &&
-      parentGroup.channel_mode === 'url_watch' &&
-      parentGroup.folder === group.parent_folder,
-  );
+function isUrlWatchThreadGroup(group: RegisteredGroup): boolean {
+  if (group.type !== 'thread') return false;
+  if (group.channel_mode != null) return group.channel_mode === 'url_watch';
+  const parentGroup = group.parent_folder
+    ? getRegisteredGroup(group.parent_folder)
+    : undefined;
+  return parentGroup?.channel_mode === 'url_watch';
 }
 
 function getUrlWatchSeedMessage(
   chatJid: string,
   group: RegisteredGroup,
 ): NewMessage | null {
-  if (!isUrlWatchThreadGroup(chatJid, group)) return null;
-  const allMessages = getMessagesSince(chatJid, '', ASSISTANT_NAME, 1000);
+  if (!isUrlWatchThreadGroup(group)) return null;
+  const allMessages = getMessagesSince(chatJid, '', ASSISTANT_NAME).slice(
+    0,
+    1000,
+  );
   for (const message of allMessages) {
     const url = extractFirstUrl(message.content);
     if (!url) continue;
