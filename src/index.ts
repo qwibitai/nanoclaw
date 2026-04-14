@@ -703,53 +703,53 @@ async function startMessageLoop(): Promise<void> {
             if (groupMessages.length === 0) continue;
           }
 
-          // --- Trust command interception ---
-          // Check if any trigger message is a trust command (e.g. "trust status").
+          // --- Trust & assistant command interception ---
+          // Intercept commands BEFORE they reach the agent. Track IDs of
+          // intercepted messages so we can filter them from the DB re-read
+          // in getMessagesSince() below (which would otherwise re-include them).
+          const interceptedMessageIds = new Set<string>();
           const triggerPatternForCmd = getTriggerPattern(group.trigger);
-          for (const msg of groupMessages) {
-            const trimmedContent = msg.content.trim();
-            if (triggerPatternForCmd.test(trimmedContent)) {
-              const strippedText = trimmedContent
-                .replace(triggerPatternForCmd, '')
-                .trim();
-              const trustCmd = parseTrustCommand(strippedText);
-              if (trustCmd) {
-                const response = executeTrustCommand(trustCmd, group.folder);
-                channel
-                  .sendMessage(chatJid, response)
-                  .catch((err) =>
-                    logger.warn(
-                      { chatJid, err },
-                      'Failed to send trust command response',
-                    ),
-                  );
-                const idx = groupMessages.indexOf(msg);
-                if (idx >= 0) groupMessages.splice(idx, 1);
-              }
-            }
-          }
-          // --- Assistant command interception ---
-          // Check for cost report, teach, and other assistant commands.
           for (const msg of [...groupMessages]) {
             const trimmedContent = msg.content.trim();
-            if (triggerPatternForCmd.test(trimmedContent)) {
-              const strippedText = trimmedContent
-                .replace(triggerPatternForCmd, '')
-                .trim();
-              const assistantCmd = parseAssistantCommand(strippedText);
-              if (assistantCmd) {
-                const response = executeAssistantCommand(assistantCmd);
-                channel
-                  .sendMessage(chatJid, response)
-                  .catch((err) =>
-                    logger.warn(
-                      { chatJid, err },
-                      'Failed to send assistant command response',
-                    ),
-                  );
-                const idx = groupMessages.indexOf(msg);
-                if (idx >= 0) groupMessages.splice(idx, 1);
-              }
+            if (!triggerPatternForCmd.test(trimmedContent)) continue;
+            const strippedText = trimmedContent
+              .replace(triggerPatternForCmd, '')
+              .trim();
+
+            // Trust commands: trust status, never auto-execute, reset trust, what did I miss
+            const trustCmd = parseTrustCommand(strippedText);
+            if (trustCmd) {
+              const response = executeTrustCommand(trustCmd, group.folder);
+              channel
+                .sendMessage(chatJid, response)
+                .catch((err) =>
+                  logger.warn(
+                    { chatJid, err },
+                    'Failed to send trust command response',
+                  ),
+                );
+              interceptedMessageIds.add(msg.id);
+              const idx = groupMessages.indexOf(msg);
+              if (idx >= 0) groupMessages.splice(idx, 1);
+              continue;
+            }
+
+            // Assistant commands: cost report, teach, etc.
+            const assistantCmd = parseAssistantCommand(strippedText);
+            if (assistantCmd) {
+              const response = executeAssistantCommand(assistantCmd);
+              channel
+                .sendMessage(chatJid, response)
+                .catch((err) =>
+                  logger.warn(
+                    { chatJid, err },
+                    'Failed to send assistant command response',
+                  ),
+                );
+              interceptedMessageIds.add(msg.id);
+              const idx = groupMessages.indexOf(msg);
+              if (idx >= 0) groupMessages.splice(idx, 1);
+              continue;
             }
           }
 
@@ -781,8 +781,12 @@ async function startMessageLoop(): Promise<void> {
             ASSISTANT_NAME,
             MAX_MESSAGES_PER_PROMPT,
           );
+          // Filter out intercepted command messages so the agent doesn't see them
+          const filteredPending = interceptedMessageIds.size > 0
+            ? allPending.filter((m) => !interceptedMessageIds.has(m.id))
+            : allPending;
           const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
+            filteredPending.length > 0 ? filteredPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
