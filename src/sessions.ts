@@ -14,7 +14,10 @@ import { logger } from './logger.js';
  * to the container mount layout AND with scripts/cleanup-sessions.sh, which
  * encodes the same path pattern.
  */
-export function sessionJsonlPath(groupFolder: string, sessionId: string): string {
+export function sessionJsonlPath(
+  groupFolder: string,
+  sessionId: string,
+): string {
   return path.join(
     DATA_DIR,
     'sessions',
