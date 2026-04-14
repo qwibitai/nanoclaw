@@ -185,6 +185,9 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For relay_message
+    targetGroup?: string;
+    text?: string;
     // For email_trigger
     emails?: Array<{
       thread_id: string;
@@ -543,6 +546,51 @@ export async function processTaskIpc(
       logger.info(
         { emailCount, sourceGroup, agentJid },
         'Email trigger enqueued for agent processing',
+      );
+      break;
+    }
+
+    case 'relay_message': {
+      // Cross-channel relay: main group only
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized relay_message attempt blocked',
+        );
+        break;
+      }
+
+      const targetGroupName = data.targetGroup as string | undefined;
+      const relayText = data.text as string | undefined;
+
+      if (!targetGroupName || !relayText) {
+        logger.warn(
+          { sourceGroup },
+          'relay_message: missing targetGroup or text',
+        );
+        break;
+      }
+
+      // Find the target group by folder name or display name (case-insensitive)
+      const targetEntry = Object.entries(registeredGroups).find(
+        ([, g]) =>
+          g.folder.toLowerCase() === targetGroupName.toLowerCase() ||
+          g.name.toLowerCase() === targetGroupName.toLowerCase(),
+      );
+
+      if (!targetEntry) {
+        logger.warn(
+          { targetGroup: targetGroupName, sourceGroup },
+          'relay_message: target group not found',
+        );
+        break;
+      }
+
+      const [targetJidRelay] = targetEntry;
+      await deps.sendMessage(targetJidRelay, relayText);
+      logger.info(
+        { targetJid: targetJidRelay, targetGroup: targetGroupName, sourceGroup },
+        'Message relayed to target group',
       );
       break;
     }

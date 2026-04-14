@@ -3,7 +3,8 @@ import { normalizeConfidenceMarkers } from './router.js';
 
 describe('normalizeConfidenceMarkers', () => {
   it('passes markers through unchanged in rich-text mode', () => {
-    const text = '✓ Verified: your refill is ready (source: browser)\n~ Unverified: Thursday appointment (source: memory)';
+    const text =
+      '✓ Verified: your refill is ready (source: browser)\n~ Unverified: Thursday appointment (source: memory)';
     expect(normalizeConfidenceMarkers(text, false)).toBe(text);
   });
 

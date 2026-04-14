@@ -174,12 +174,22 @@ function validateActionIntent(
 
   // Destructive tools should not appear with purely read-intent descriptions
   const destructiveTools = ['delete', 'remove', 'drop', 'truncate', 'wipe'];
-  const readOnlyDescriptions = ['read', 'fetch', 'list', 'get', 'search', 'find', 'check', 'view'];
+  const readOnlyDescriptions = [
+    'read',
+    'fetch',
+    'list',
+    'get',
+    'search',
+    'find',
+    'check',
+    'view',
+  ];
 
   const toolIsDestructive = destructiveTools.some((d) => tool.includes(d));
   const descIsReadOnly =
-    readOnlyDescriptions.some((r) => desc.startsWith(r) || desc.includes(`to ${r}`)) &&
-    !destructiveTools.some((d) => desc.includes(d));
+    readOnlyDescriptions.some(
+      (r) => desc.startsWith(r) || desc.includes(`to ${r}`),
+    ) && !destructiveTools.some((d) => desc.includes(d));
 
   if (toolIsDestructive && descIsReadOnly) {
     return `tool "${toolName}" appears destructive but description implies read-only: "${description}"`;
@@ -227,7 +237,10 @@ async function handleEvaluate(
   // Pre-action intent validation (v1: rule-based)
   const intentMismatch = validateActionIntent(toolName, desc);
   if (intentMismatch) {
-    logger.warn({ toolName, groupId, reason: intentMismatch }, 'Intent mismatch detected');
+    logger.warn(
+      { toolName, groupId, reason: intentMismatch },
+      'Intent mismatch detected',
+    );
     const failedEvent: VerifyFailedEvent = {
       type: 'verify.failed',
       source: 'trust-gateway',

@@ -281,18 +281,14 @@ function createSchema(database: Database.Database): void {
 
   // Add confidence_level column if it doesn't exist (migration for existing DBs)
   try {
-    database.exec(
-      `ALTER TABLE trust_actions ADD COLUMN confidence_level TEXT`,
-    );
+    database.exec(`ALTER TABLE trust_actions ADD COLUMN confidence_level TEXT`);
   } catch {
     // Column already exists — ignore
   }
 
   // Add was_correct column if it doesn't exist (migration for existing DBs)
   try {
-    database.exec(
-      `ALTER TABLE trust_actions ADD COLUMN was_correct INTEGER`,
-    );
+    database.exec(`ALTER TABLE trust_actions ADD COLUMN was_correct INTEGER`);
   } catch {
     // Column already exists — ignore
   }

@@ -86,6 +86,55 @@ Use search_contacts to look up phone numbers before sending iMessage/SMS.`,
 );
 
 server.tool(
+  'relay_message',
+  `Relay a message to a different group/channel. Main group only.
+
+Use this to forward or send messages across channels — e.g., "send that to the family chat" or "forward this to the dev team".
+
+The target_group can be either the group's display name (e.g., "Family Chat") or its folder name (e.g., "telegram_family-chat"). Case-insensitive matching.`,
+  {
+    target_group: z
+      .string()
+      .describe(
+        'Name or folder of the target group (e.g., "Family Chat" or "telegram_dev-team")',
+      ),
+    text: z.string().describe('The message text to relay'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Only the main group can relay messages to other groups.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'relay_message',
+      targetGroup: args.target_group,
+      text: args.text,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Message relayed to "${args.target_group}".`,
+        },
+      ],
+    };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 

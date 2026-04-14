@@ -57,7 +57,10 @@ export function normalizeConfidenceMarkers(
     .replace(/^\? Unknown:/gm, '[uncertain]');
 }
 
-export function formatOutbound(rawText: string, plainText: boolean = false): string {
+export function formatOutbound(
+  rawText: string,
+  plainText: boolean = false,
+): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
   return normalizeConfidenceMarkers(text, plainText);
