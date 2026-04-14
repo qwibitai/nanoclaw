@@ -67,6 +67,7 @@ import {
 } from './sender-allowlist.js';
 import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { isSessionNotFoundError, resolveSessionId } from './sessions.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -463,7 +464,10 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const sessionId = resolveSessionId(group.folder);
+  if (!sessionId) {
+    delete sessions[group.folder];
+  }
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
