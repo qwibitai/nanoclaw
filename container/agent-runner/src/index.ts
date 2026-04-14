@@ -723,15 +723,25 @@ async function main(): Promise<void> {
   if (useOpenAI) {
     log(`Using OpenAI runner with model: ${modelOverride2}`);
 
-    // Build system prompt from CLAUDE.md files
+    // Build system prompt: personality.md first, then CLAUDE.md for capabilities
     let systemPrompt = 'You are a helpful assistant.';
+    const personalityPath = '/workspace/group/personality.md';
     const groupClaudeMdPath2 = '/workspace/group/CLAUDE.md';
-    if (fs.existsSync(groupClaudeMdPath2)) {
-      systemPrompt = fs.readFileSync(groupClaudeMdPath2, 'utf-8');
-    }
     const globalClaudeMdPath2 = '/workspace/global/CLAUDE.md';
+
+    const parts: string[] = [];
+    if (fs.existsSync(personalityPath)) {
+      parts.push(fs.readFileSync(personalityPath, 'utf-8'));
+      log(`Loaded personality.md (${parts[parts.length - 1].length} chars)`);
+    }
     if (fs.existsSync(globalClaudeMdPath2)) {
-      systemPrompt = fs.readFileSync(globalClaudeMdPath2, 'utf-8') + '\n\n' + systemPrompt;
+      parts.push(fs.readFileSync(globalClaudeMdPath2, 'utf-8'));
+    }
+    if (fs.existsSync(groupClaudeMdPath2)) {
+      parts.push(fs.readFileSync(groupClaudeMdPath2, 'utf-8'));
+    }
+    if (parts.length > 0) {
+      systemPrompt = parts.join('\n\n---\n\n');
     }
 
     // MCP server configs — only start what's needed for this group
@@ -794,12 +804,33 @@ async function main(): Promise<void> {
     }
 
     try {
-      const result = await runOpenAIAgent(prompt, systemPrompt, modelOverride2, mcpConfigs);
-      writeOutput({
-        status: result.error ? 'error' : 'success',
-        result: result.result,
-        error: result.error,
-      });
+      // Run loop: process prompt → wait for IPC follow-up → repeat
+      while (true) {
+        const result = await runOpenAIAgent(prompt, systemPrompt, modelOverride2, mcpConfigs);
+        writeOutput({
+          status: result.error ? 'error' : 'success',
+          result: result.result,
+          error: result.error,
+        });
+
+        if (result.error) break;
+
+        // Check if close sentinel already exists
+        if (shouldClose()) {
+          log('Close sentinel detected after response, exiting');
+          break;
+        }
+
+        log('Waiting for next IPC message...');
+        const nextMessage = await waitForIpcMessage();
+        if (nextMessage === null) {
+          log('Close sentinel received, exiting');
+          break;
+        }
+
+        log(`Got follow-up message (${nextMessage.length} chars)`);
+        prompt = nextMessage;
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       log(`OpenAI agent error: ${errorMessage}`);
