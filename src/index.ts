@@ -30,6 +30,7 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  clearSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -536,6 +537,14 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
+      if (isSessionNotFoundError(output.error)) {
+        logger.warn(
+          { group: group.name, sessionId },
+          'Clearing stale session pointer after "No conversation found" error',
+        );
+        clearSession(group.folder);
+        delete sessions[group.folder];
+      }
       return 'error';
     }
 
