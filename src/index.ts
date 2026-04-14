@@ -74,6 +74,8 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { eventBus } from './event-bus.js';
+import type { MessageInboundEvent, MessageOutboundEvent, SystemStartupEvent } from './events.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -407,6 +409,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           outText = text + `\n\n_${parts.join(' · ')}_`;
         }
         await channel.sendMessage(chatJid, outText);
+        eventBus.emit('message.outbound', {
+          type: 'message.outbound',
+          source: 'router',
+          groupId: chatJid,
+          timestamp: Date.now(),
+          payload: { chatJid, channel: channel.name, text: outText.slice(0, 200) },
+        });
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -705,6 +714,13 @@ async function startMessageLoop(): Promise<void> {
               );
           } else {
             // No active container — enqueue for a new one
+            eventBus.emit('message.inbound', {
+              type: 'message.inbound',
+              source: 'channel',
+              groupId: chatJid,
+              timestamp: Date.now(),
+              payload: { chatJid, channel: channel.name, messageCount: 1 },
+            });
             queue.enqueueMessageCheck(chatJid);
           }
         }
@@ -1094,6 +1110,16 @@ async function main(): Promise<void> {
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
+  });
+
+  eventBus.emit('system.startup', {
+    type: 'system.startup',
+    source: 'orchestrator',
+    timestamp: Date.now(),
+    payload: {
+      channels: channels.map(c => c.name),
+      groupCount: Object.keys(registeredGroups).length,
+    },
   });
 }
 
