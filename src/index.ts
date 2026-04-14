@@ -342,7 +342,7 @@ function getUrlWatchSeedMessage(
   group: RegisteredGroup,
 ): NewMessage | null {
   if (!isUrlWatchThreadGroup(group)) return null;
-  const allMessages = getMessagesSince(chatJid, '', ASSISTANT_NAME, 1000);
+  const allMessages = getMessagesSince(chatJid, '', ASSISTANT_NAME).slice(0, 1000);
   for (const message of allMessages) {
     const url = extractFirstUrl(message.content);
     if (!url) continue;
