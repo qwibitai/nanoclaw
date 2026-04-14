@@ -294,7 +294,6 @@ async function spawnThreadForUrl(
           'Initial URL direct processing threw; re-enqueueing message check',
         );
         queue.enqueueMessageCheck(threadJid);
-        throw err;
       }
     });
 
