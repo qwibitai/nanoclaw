@@ -1,0 +1,28 @@
+[package]
+name = "nanoclaw-cli"
+version = "0.1.0"
+edition = "2021"
+description = "TUI chat interface for NanoClaw"
+
+[[bin]]
+name = "nanoclaw-cli"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+regex = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+unicode-width = "0.2"
+futures = "0.3"
+rand = "0.8"
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"
