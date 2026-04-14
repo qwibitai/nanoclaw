@@ -334,7 +334,12 @@ function stringContainsUrl(value: string): boolean {
 }
 
 function isUrlWatchThreadGroup(group: RegisteredGroup): boolean {
-  return group.type === 'thread' && group.channel_mode === 'url_watch';
+  if (group.type !== 'thread') return false;
+  if (group.channel_mode != null) return group.channel_mode === 'url_watch';
+  const parentGroup = group.parent_folder
+    ? getRegisteredGroup(group.parent_folder)
+    : undefined;
+  return parentGroup?.channel_mode === 'url_watch';
 }
 
 function getUrlWatchSeedMessage(
