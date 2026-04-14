@@ -4,6 +4,7 @@ import path from 'path';
 import { OneCLI } from '@onecli-sh/sdk';
 
 import {
+  AGENT_MODEL_TIMEOUT_MS,
   ASSISTANT_NAME,
   DEFAULT_MODEL,
   DEFAULT_TRIGGER,
@@ -77,6 +78,7 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import { SessionGuard } from './session-guard.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { createStreamEditLoop } from './stream-edit-loop.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -88,12 +90,18 @@ export { escapeXml, formatMessages } from './router.js';
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
+const sessionGuard = new SessionGuard();
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 const lastUsage: Record<
   string,
-  { inputTokens: number; outputTokens: number; numTurns: number; contextWindow?: number }
+  {
+    inputTokens: number;
+    outputTokens: number;
+    numTurns: number;
+    contextWindow?: number;
+  }
 > = {};
 const compactCount: Record<string, number> = {};
 const lastRateLimit: Record<
@@ -280,7 +288,32 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE, group);
+  // Resolve effective model (checks agent override + timeout)
+  const {
+    model: effectiveModel,
+    reverted,
+    revertedFrom,
+  } = getEffectiveModel(group);
+  if (reverted) {
+    channel
+      .sendMessage(
+        chatJid,
+        `Model override expired — reverted from ${revertedFrom} to ${effectiveModel}`,
+      )
+      .catch((err) =>
+        logger.warn(
+          { chatJid, err },
+          'Failed to send model revert notification',
+        ),
+      );
+  }
+
+  const prompt = formatMessages(
+    missedMessages,
+    TIMEZONE,
+    group,
+    effectiveModel,
+  );
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -371,122 +404,135 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   let output: 'success' | 'error';
   try {
-    output = await runAgent(group, prompt, chatJid, async (result) => {
-      // Streaming output callback — called for each agent result
-      if (result.result) {
-        const raw =
-          typeof result.result === 'string'
-            ? result.result
-            : JSON.stringify(result.result);
-        const text = stripInternalTags(raw);
+    output = await runAgent(
+      group,
+      prompt,
+      chatJid,
+      effectiveModel,
+      async (result) => {
+        // Streaming output callback — called for each agent result
+        if (result.result) {
+          const raw =
+            typeof result.result === 'string'
+              ? result.result
+              : JSON.stringify(result.result);
+          const text = stripInternalTags(raw);
 
-        if (result.partial) {
-          // --- Streaming partial chunk ---
-          // Re-enable typing if it was paused after a previous query's final result (#26)
-          if (!typingActive) {
-            typingActive = true;
-            await channel.setTyping?.(chatJid, true).catch(() => {});
-          }
-          if (!text || streamingFailed || !channel.sendStreamMessage) {
+          if (result.partial) {
+            // --- Streaming partial chunk ---
+            // Re-enable typing if it was paused after a previous query's final result (#26)
+            if (!typingActive) {
+              typingActive = true;
+              await channel.setTyping?.(chatJid, true).catch(() => {});
+            }
+            if (!text || streamingFailed || !channel.sendStreamMessage) {
+              resetIdleTimer();
+              return;
+            }
+            streamLoop.update(text);
             resetIdleTimer();
             return;
           }
-          streamLoop.update(text);
-          resetIdleTimer();
-          return;
-        }
 
-        // --- Final result ---
-        // Flush any buffered streaming text before handling the final result
-        await streamLoop.flush();
-        await streamLoop.waitForInFlight();
+          // --- Final result ---
+          // Flush any buffered streaming text before handling the final result
+          await streamLoop.flush();
+          await streamLoop.waitForInFlight();
 
-        logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+          logger.info(
+            { group: group.name },
+            `Agent output: ${raw.length} chars`,
+          );
 
-        const { cleanText, images } = extractImages(text);
+          const { cleanText, images } = extractImages(text);
 
-        if (streamMessageId !== null) {
-          // Streaming was active — accumulated text already displayed.
-          if (cleanText && cleanText !== lastSentText) {
-            try {
-              if (
-                !streamingFailed &&
-                cleanText.length <= 4096 &&
-                !queue.hasPendingMessages(chatJid)
-              ) {
-                await channel.editMessage!(chatJid, streamMessageId, cleanText);
-              } else {
-                await channel.sendMessage(chatJid, cleanText);
+          if (streamMessageId !== null) {
+            // Streaming was active — accumulated text already displayed.
+            if (cleanText && cleanText !== lastSentText) {
+              try {
+                if (
+                  !streamingFailed &&
+                  cleanText.length <= 4096 &&
+                  !queue.hasPendingMessages(chatJid)
+                ) {
+                  await channel.editMessage!(
+                    chatJid,
+                    streamMessageId,
+                    cleanText,
+                  );
+                } else {
+                  await channel.sendMessage(chatJid, cleanText);
+                }
+                // eslint-disable-next-line no-catch-all/no-catch-all
+              } catch (err) {
+                logger.error(
+                  { group: group.name, error: err },
+                  'Failed to send final message, queuing for retry',
+                );
+                enqueueOutbox(chatJid, cleanText);
               }
+            } else if (!cleanText) {
+              // No text content in final result — delete the streaming placeholder
+              await channel
+                .deleteMessage?.(chatJid, streamMessageId)
+                .catch(() => {});
+            }
+            await sendImages(channel, chatJid, images);
+            outputSentToUser = true;
+            queue.markResponseSent(chatJid);
+            lastSentText = cleanText;
+          } else if (cleanText && cleanText !== lastSentText) {
+            // No streaming — use normal send
+            try {
+              await channel.sendMessage(chatJid, cleanText);
               // eslint-disable-next-line no-catch-all/no-catch-all
             } catch (err) {
               logger.error(
                 { group: group.name, error: err },
-                'Failed to send final message, queuing for retry',
+                'Failed to send message, queuing for retry',
               );
               enqueueOutbox(chatJid, cleanText);
             }
-          } else if (!cleanText) {
-            // No text content in final result — delete the streaming placeholder
-            await channel
-              .deleteMessage?.(chatJid, streamMessageId)
-              .catch(() => {});
+            await sendImages(channel, chatJid, images);
+            outputSentToUser = true;
+            queue.markResponseSent(chatJid);
+            lastSentText = cleanText;
+          } else if (cleanText && cleanText === lastSentText) {
+            logger.warn({ group: group.name }, 'Duplicate output suppressed');
           }
-          await sendImages(channel, chatJid, images);
-          outputSentToUser = true;
-          queue.markResponseSent(chatJid);
-          lastSentText = cleanText;
-        } else if (cleanText && cleanText !== lastSentText) {
-          // No streaming — use normal send
-          try {
-            await channel.sendMessage(chatJid, cleanText);
-            // eslint-disable-next-line no-catch-all/no-catch-all
-          } catch (err) {
-            logger.error(
-              { group: group.name, error: err },
-              'Failed to send message, queuing for retry',
-            );
-            enqueueOutbox(chatJid, cleanText);
+
+          // Non-streaming, image-only response — send images even without cleanText
+          if (streamMessageId === null && !cleanText && images.length > 0) {
+            await sendImages(channel, chatJid, images);
+            outputSentToUser = true;
+            queue.markResponseSent(chatJid);
+            lastSentText = cleanText;
           }
-          await sendImages(channel, chatJid, images);
-          outputSentToUser = true;
-          queue.markResponseSent(chatJid);
-          lastSentText = cleanText;
-        } else if (cleanText && cleanText === lastSentText) {
-          logger.warn({ group: group.name }, 'Duplicate output suppressed');
+          // Reset streaming state for next IPC query — the onOutput callback
+          // persists across multiple queries within the same agent process.
+          streamLoop.resetForNextQuery();
+          streamMessageId = null;
+          streamingFailed = false;
+          lastSentText = null;
+          // Only reset idle timer on actual results, not session-update markers (result: null)
+          resetIdleTimer();
         }
 
-        // Non-streaming, image-only response — send images even without cleanText
-        if (streamMessageId === null && !cleanText && images.length > 0) {
-          await sendImages(channel, chatJid, images);
-          outputSentToUser = true;
-          queue.markResponseSent(chatJid);
-          lastSentText = cleanText;
+        // Stop typing indicator for any non-partial result — covers empty text,
+        // duplicate suppression, and null-result (session update marker) paths.
+        if (!result.partial) {
+          typingActive = false;
         }
-        // Reset streaming state for next IPC query — the onOutput callback
-        // persists across multiple queries within the same agent process.
-        streamLoop.resetForNextQuery();
-        streamMessageId = null;
-        streamingFailed = false;
-        lastSentText = null;
-        // Only reset idle timer on actual results, not session-update markers (result: null)
-        resetIdleTimer();
-      }
 
-      // Stop typing indicator for any non-partial result — covers empty text,
-      // duplicate suppression, and null-result (session update marker) paths.
-      if (!result.partial) {
-        typingActive = false;
-      }
+        if (result.status === 'success' && !result.partial) {
+          queue.notifyIdle(chatJid);
+        }
 
-      if (result.status === 'success' && !result.partial) {
-        queue.notifyIdle(chatJid);
-      }
-
-      if (result.status === 'error') {
-        hadError = true;
-      }
-    });
+        if (result.status === 'error') {
+          hadError = true;
+        }
+      },
+    );
   } finally {
     streamLoop.stop();
     clearInterval(typingKeepalive);
@@ -517,13 +563,47 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+/** @internal - exported for testing */
+export interface EffectiveModelResult {
+  model: string;
+  reverted?: boolean;
+  revertedFrom?: string;
+}
+
+/** @internal - exported for testing */
+export function getEffectiveModel(
+  group: RegisteredGroup,
+): EffectiveModelResult {
+  if (group.agentModelOverride && group.agentModelOverrideSetAt) {
+    const elapsed = Date.now() - group.agentModelOverrideSetAt;
+    if (elapsed < AGENT_MODEL_TIMEOUT_MS) {
+      return { model: group.agentModelOverride };
+    }
+    // Override expired — clear and set revert notice
+    const expiredModel = group.agentModelOverride;
+    group.agentModelOverride = undefined;
+    group.agentModelOverrideSetAt = undefined;
+    const revertedTo = group.model || DEFAULT_MODEL;
+    group.pendingModelNotice = `[model override expired — reverted from ${expiredModel} to ${revertedTo}]`;
+    logger.info(
+      { folder: group.folder, expiredModel, revertedTo },
+      'Agent model override expired',
+    );
+    return { model: revertedTo, reverted: true, revertedFrom: expiredModel };
+  }
+  return { model: group.model || DEFAULT_MODEL };
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  effectiveModel: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
+  // Allow session saves for this new agent run (previous clear is consumed)
+  sessionGuard.startRun(group.folder);
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
@@ -557,7 +637,7 @@ async function runAgent(
   // Wrap onOutput to track session ID and usage from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
+        if (output.newSessionId && !sessionGuard.isCleared(group.folder)) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
 
@@ -572,7 +652,8 @@ async function runAgent(
         if (output.usage) {
           lastUsage[group.folder] = {
             ...output.usage,
-            contextWindow: output.contextWindow ?? lastUsage[group.folder]?.contextWindow,
+            contextWindow:
+              output.contextWindow ?? lastUsage[group.folder]?.contextWindow,
           };
         }
         if (output.compacted) {
@@ -596,22 +677,24 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
-        model: group.model || DEFAULT_MODEL,
+        model: effectiveModel,
         effort: group.effort,
+        thinking_budget: group.thinking_budget,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
+    if (output.newSessionId && !sessionGuard.isCleared(group.folder)) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
     }
     if (output.usage) {
       lastUsage[group.folder] = {
         ...output.usage,
-        contextWindow: output.contextWindow ?? lastUsage[group.folder]?.contextWindow,
+        contextWindow:
+          output.contextWindow ?? lastUsage[group.folder]?.contextWindow,
       };
     }
     if (output.compacted) {
@@ -733,7 +816,12 @@ async function startMessageLoop(): Promise<void> {
           // Skip if cursor already covers these messages (event-driven
           // onMessage handler already piped them to the active container).
           if (allPending.length === 0) continue;
-          const formatted = formatMessages(allPending, TIMEZONE, group);
+          const formatted = formatMessages(
+            allPending,
+            TIMEZONE,
+            group,
+            getEffectiveModel(group).model,
+          );
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
@@ -980,7 +1068,12 @@ async function main(): Promise<void> {
         MAX_MESSAGES_PER_PROMPT,
       );
       if (allPending.length > 0) {
-        const formatted = formatMessages(allPending, TIMEZONE, group);
+        const formatted = formatMessages(
+          allPending,
+          TIMEZONE,
+          group,
+          getEffectiveModel(group).model,
+        );
         if (queue.sendMessage(chatJid, formatted)) {
           // Advance cursor so the next pipe doesn't re-send these messages
           lastAgentTimestamp[chatJid] =
@@ -1022,6 +1115,7 @@ async function main(): Promise<void> {
     clearSession: (groupFolder: string, chatJid: string) => {
       delete sessions[groupFolder];
       deleteSession(groupFolder);
+      sessionGuard.markCleared(groupFolder);
       queue.closeStdin(chatJid);
     },
   };
@@ -1162,10 +1256,12 @@ async function main(): Promise<void> {
           MAX_MESSAGES_PER_PROMPT,
         );
         if (allPending.length > 0) {
+          const grp = registeredGroups[chatJid];
           const formatted = formatMessages(
             allPending,
             TIMEZONE,
-            registeredGroups[chatJid],
+            grp,
+            grp ? getEffectiveModel(grp).model : undefined,
           );
           if (queue.sendMessage(chatJid, formatted)) {
             lastAgentTimestamp[chatJid] =

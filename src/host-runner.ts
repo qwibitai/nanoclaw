@@ -240,9 +240,21 @@ export async function runHostAgent(
   const tsconfigPath = path.join(agentRunnerPkg, 'tsconfig.json');
   const entryPoint = path.join(buildDir, 'index.js');
 
-  // Only recompile if source is newer than dist
-  const srcFile = path.join(agentRunnerPkg, 'src', 'index.ts');
-  const srcMtime = fs.existsSync(srcFile) ? fs.statSync(srcFile).mtimeMs : 0;
+  // Only recompile if any source file is newer than dist
+  const agentRunnerSrcDir = path.join(agentRunnerPkg, 'src');
+  let srcMtime = 0;
+  if (fs.existsSync(agentRunnerSrcDir)) {
+    for (const f of fs.readdirSync(agentRunnerSrcDir)) {
+      if (
+        f.endsWith('.ts') &&
+        !f.endsWith('.test.ts') &&
+        !f.endsWith('.d.ts')
+      ) {
+        const mt = fs.statSync(path.join(agentRunnerSrcDir, f)).mtimeMs;
+        if (mt > srcMtime) srcMtime = mt;
+      }
+    }
+  }
   const distMtime = fs.existsSync(entryPoint)
     ? fs.statSync(entryPoint).mtimeMs
     : 0;

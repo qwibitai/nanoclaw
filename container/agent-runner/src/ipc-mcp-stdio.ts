@@ -517,6 +517,80 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'switch_model',
+  `Switch the model, effort level, or thinking budget for your conversation. Changes take effect from the next conversation turn. Model overrides automatically revert after 20 minutes.
+
+Use model aliases (e.g., "opus", "sonnet", "haiku") or full model IDs. Use "reset" to clear overrides.
+
+Parameters:
+• model: Model alias or full ID. Use "reset" to clear.
+• effort (optional): "low", "medium", "high", "max", or "reset"
+• thinking_budget (optional): "low" (42k), "medium" (85k), "high" (128k), "adaptive", or "reset"`,
+  {
+    model: z
+      .string()
+      .describe(
+        'Model alias or full model ID (e.g., "opus", "haiku", "claude-opus-4-20250514"). Use "reset" to clear the override.',
+      ),
+    effort: z
+      .string()
+      .optional()
+      .describe(
+        'Effort level: "low", "medium", "high", "max", or "reset" to clear.',
+      ),
+    thinking_budget: z
+      .string()
+      .optional()
+      .describe(
+        'Thinking budget preset: "low" (42k tokens), "medium" (85k), "high" (128k), "adaptive", or "reset" to clear.',
+      ),
+  },
+  async (args) => {
+    const data = {
+      type: 'switch_model',
+      model: args.model,
+      effort: args.effort,
+      thinking_budget: args.thinking_budget,
+      chatJid,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    const parts: string[] = [];
+    const isReset = args.model === 'reset';
+    if (isReset) {
+      parts.push(
+        'Model override cleared. The group/default model will be used from the next turn.',
+      );
+    } else {
+      parts.push(
+        `Model switch to "${args.model}" requested. It will take effect from the next conversation turn and revert automatically after 20 minutes.`,
+      );
+    }
+    if (args.effort) {
+      parts.push(
+        args.effort === 'reset'
+          ? 'Effort reset to default.'
+          : `Effort set to "${args.effort}".`,
+      );
+    }
+    if (args.thinking_budget) {
+      parts.push(
+        args.thinking_budget === 'reset'
+          ? 'Thinking budget reset to default.'
+          : `Thinking budget set to "${args.thinking_budget}".`,
+      );
+    }
+
+    return {
+      content: [{ type: 'text' as const, text: parts.join(' ') }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

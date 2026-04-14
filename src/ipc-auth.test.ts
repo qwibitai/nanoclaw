@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import {
   _initTestDatabase,
@@ -676,5 +676,209 @@ describe('register_group success', () => {
     );
 
     expect(getRegisteredGroup('partial@g.us')).toBeUndefined();
+  });
+});
+
+// --- switch_model ---
+
+describe('switch_model', () => {
+  it('sets agentModelOverride on target group', async () => {
+    await processTaskIpc(
+      {
+        type: 'switch_model',
+        model: 'claude-opus-4-20250514',
+        chatJid: 'other@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(groups['other@g.us'].agentModelOverride).toBe(
+      'claude-opus-4-20250514',
+    );
+    expect(groups['other@g.us'].agentModelOverrideSetAt).toBeGreaterThan(0);
+  });
+
+  it('sets pendingModelNotice when model changes', async () => {
+    await processTaskIpc(
+      {
+        type: 'switch_model',
+        model: 'claude-opus-4-20250514',
+        chatJid: 'other@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(groups['other@g.us'].pendingModelNotice).toContain(
+      'claude-opus-4-20250514',
+    );
+    expect(groups['other@g.us'].pendingModelNotice).toContain(
+      'agent-initiated',
+    );
+  });
+
+  it('sends user notification via deps.sendMessage', async () => {
+    const sendSpy = vi.fn().mockResolvedValue(undefined);
+    deps.sendMessage = sendSpy;
+
+    await processTaskIpc(
+      {
+        type: 'switch_model',
+        model: 'claude-opus-4-20250514',
+        chatJid: 'other@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(sendSpy).toHaveBeenCalledWith(
+      'other@g.us',
+      expect.stringContaining('claude-opus-4-20250514'),
+    );
+  });
+
+  it('reset clears override fields', async () => {
+    // First set an override
+    groups['other@g.us'].agentModelOverride = 'claude-opus-4-20250514';
+    groups['other@g.us'].agentModelOverrideSetAt = Date.now();
+
+    await processTaskIpc(
+      {
+        type: 'switch_model',
+        model: 'reset',
+        chatJid: 'other@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(groups['other@g.us'].agentModelOverride).toBeUndefined();
+    expect(groups['other@g.us'].agentModelOverrideSetAt).toBeUndefined();
+  });
+
+  it('reset sets revert notice and notifies user', async () => {
+    const sendSpy = vi.fn().mockResolvedValue(undefined);
+    deps.sendMessage = sendSpy;
+
+    groups['other@g.us'].agentModelOverride = 'claude-opus-4-20250514';
+    groups['other@g.us'].agentModelOverrideSetAt = Date.now();
+
+    await processTaskIpc(
+      {
+        type: 'switch_model',
+        model: 'reset',
+        chatJid: 'other@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(groups['other@g.us'].pendingModelNotice).toContain('reverted');
+    expect(sendSpy).toHaveBeenCalledWith(
+      'other@g.us',
+      expect.stringContaining('reverted'),
+    );
+  });
+
+  it('blocks cross-group switch_model', async () => {
+    await processTaskIpc(
+      {
+        type: 'switch_model',
+        model: 'claude-opus-4-20250514',
+        chatJid: 'main@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(groups['main@g.us'].agentModelOverride).toBeUndefined();
+  });
+
+  it('replaces previous override and resets timer', async () => {
+    groups['other@g.us'].agentModelOverride = 'claude-haiku-4-5-20251001';
+    groups['other@g.us'].agentModelOverrideSetAt = Date.now() - 600_000; // 10 min ago
+
+    const before = Date.now();
+    await processTaskIpc(
+      {
+        type: 'switch_model',
+        model: 'claude-opus-4-20250514',
+        chatJid: 'other@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(groups['other@g.us'].agentModelOverride).toBe(
+      'claude-opus-4-20250514',
+    );
+    expect(groups['other@g.us'].agentModelOverrideSetAt).toBeGreaterThanOrEqual(
+      before,
+    );
+  });
+
+  it('sets effort via switch_model', async () => {
+    await processTaskIpc(
+      {
+        type: 'switch_model',
+        model: 'claude-opus-4-20250514',
+        effort: 'high',
+        chatJid: 'other@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(groups['other@g.us'].effort).toBe('high');
+    const dbGroup = getRegisteredGroup('other@g.us');
+    expect(dbGroup?.effort).toBe('high');
+  });
+
+  it('sets thinking_budget via switch_model', async () => {
+    await processTaskIpc(
+      {
+        type: 'switch_model',
+        model: 'claude-opus-4-20250514',
+        thinking_budget: 'adaptive',
+        chatJid: 'other@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(groups['other@g.us'].thinking_budget).toBe('adaptive');
+    const dbGroup = getRegisteredGroup('other@g.us');
+    expect(dbGroup?.thinking_budget).toBe('adaptive');
+  });
+
+  it('resets effort and thinking_budget via switch_model', async () => {
+    groups['other@g.us'].effort = 'high';
+    groups['other@g.us'].thinking_budget = 'low';
+
+    await processTaskIpc(
+      {
+        type: 'switch_model',
+        model: 'reset',
+        effort: 'reset',
+        thinking_budget: 'reset',
+        chatJid: 'other@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(groups['other@g.us'].effort).toBeUndefined();
+    expect(groups['other@g.us'].thinking_budget).toBeUndefined();
   });
 });

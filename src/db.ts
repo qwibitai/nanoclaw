@@ -172,6 +172,24 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add thinking_budget column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN thinking_budget TEXT`,
+    );
+    // eslint-disable-next-line no-catch-all/no-catch-all
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN thinking_budget TEXT`,
+    );
+    // eslint-disable-next-line no-catch-all/no-catch-all
+  } catch {
+    /* column already exists */
+  }
+
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
@@ -468,8 +486,8 @@ export function createTask(
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, silent, model, effort, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, silent, model, effort, thinking_budget, next_run, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
@@ -483,6 +501,7 @@ export function createTask(
     task.silent ? 1 : 0,
     task.model || null,
     task.effort || null,
+    task.thinking_budget || null,
     task.next_run,
     task.status,
     task.created_at,
@@ -522,6 +541,7 @@ export function updateTask(
       | 'status'
       | 'model'
       | 'effort'
+      | 'thinking_budget'
     >
   >,
 ): void {
@@ -559,6 +579,10 @@ export function updateTask(
   if (updates.effort !== undefined) {
     fields.push('effort = ?');
     values.push(updates.effort || null);
+  }
+  if (updates.thinking_budget !== undefined) {
+    fields.push('thinking_budget = ?');
+    values.push(updates.thinking_budget || null);
   }
 
   if (fields.length === 0) return;
@@ -683,6 +707,7 @@ export function getRegisteredGroup(
         is_main: number | null;
         model: string | null;
         effort: string | null;
+        thinking_budget: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -707,6 +732,7 @@ export function getRegisteredGroup(
     isMain: row.is_main === 1 ? true : undefined,
     model: row.model || undefined,
     effort: row.effort || undefined,
+    thinking_budget: row.thinking_budget || undefined,
   };
 }
 
@@ -715,8 +741,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, model, effort)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, model, effort, thinking_budget)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -728,6 +754,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.isMain ? 1 : 0,
     group.model || null,
     group.effort || null,
+    group.thinking_budget || null,
   );
 }
 
@@ -743,6 +770,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     is_main: number | null;
     model: string | null;
     effort: string | null;
+    thinking_budget: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -766,6 +794,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       isMain: row.is_main === 1 ? true : undefined,
       model: row.model || undefined,
       effort: row.effort || undefined,
+      thinking_budget: row.thinking_budget || undefined,
     };
   }
   return result;
@@ -783,6 +812,15 @@ export function setGroupEffort(jid: string, effort: string | null): void {
     effort,
     jid,
   );
+}
+
+export function setGroupThinkingBudget(
+  jid: string,
+  thinkingBudget: string | null,
+): void {
+  db.prepare(
+    'UPDATE registered_groups SET thinking_budget = ? WHERE jid = ?',
+  ).run(thinkingBudget, jid);
 }
 
 // --- Outbox ---

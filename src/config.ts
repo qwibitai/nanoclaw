@@ -115,6 +115,20 @@ export const DEFAULT_MODEL =
   envConfig.DEFAULT_MODEL ||
   'claude-sonnet-4-20250514';
 
+// Timeout for agent-initiated model overrides (switch_model tool)
+export const AGENT_MODEL_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes
+
+export const THINKING_BUDGET_PRESETS: Record<
+  string,
+  { type: 'enabled'; budgetTokens: number } | { type: 'adaptive' }
+> = {
+  low: { type: 'enabled', budgetTokens: 42667 },
+  medium: { type: 'enabled', budgetTokens: 85334 },
+  high: { type: 'enabled', budgetTokens: 128000 },
+  adaptive: { type: 'adaptive' },
+};
+export const DEFAULT_THINKING_BUDGET = 'adaptive';
+
 // Model alias config: maps short names (e.g. "opus") to full model IDs
 export const MODEL_ALIASES_PATH = path.join(
   HOME_DIR,

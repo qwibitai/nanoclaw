@@ -5,12 +5,20 @@ import { CronExpressionParser } from 'cron-parser';
 
 import {
   DATA_DIR,
+  DEFAULT_MODEL,
   IPC_POLL_INTERVAL,
   resolveModelAlias,
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getTaskById,
+  setGroupEffort,
+  setGroupThinkingBudget,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -174,6 +182,8 @@ export async function processTaskIpc(
     context_mode?: string;
     script?: string;
     model?: string;
+    effort?: string;
+    thinking_budget?: string;
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
@@ -482,6 +492,99 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'switch_model': {
+      if (!data.chatJid) {
+        logger.warn({ sourceGroup }, 'switch_model missing chatJid');
+        break;
+      }
+      const targetGroup = registeredGroups[data.chatJid];
+      if (!targetGroup) {
+        logger.warn(
+          { chatJid: data.chatJid, sourceGroup },
+          'switch_model: target group not registered',
+        );
+        break;
+      }
+      // Authorization: agent can only switch model for its own group
+      if (targetGroup.folder !== sourceGroup) {
+        logger.warn(
+          { chatJid: data.chatJid, sourceGroup },
+          'Unauthorized switch_model attempt blocked',
+        );
+        break;
+      }
+
+      if (data.model === 'reset' || data.model === '') {
+        const previousOverride = targetGroup.agentModelOverride;
+        targetGroup.agentModelOverride = undefined;
+        targetGroup.agentModelOverrideSetAt = undefined;
+        if (previousOverride) {
+          const effectiveModel = targetGroup.model || DEFAULT_MODEL;
+          targetGroup.pendingModelNotice = `[model override cleared — reverted to ${effectiveModel}]`;
+          deps
+            .sendMessage(
+              data.chatJid,
+              `Model override cleared — reverted to ${effectiveModel}`,
+            )
+            .catch((err) =>
+              logger.error({ err }, 'Failed to send model reset notification'),
+            );
+        }
+        logger.info(
+          { chatJid: data.chatJid, sourceGroup },
+          'Agent model override cleared via IPC',
+        );
+      } else {
+        const resolved = resolveModelAlias(data.model!);
+        const previousEffective =
+          targetGroup.agentModelOverride || targetGroup.model || DEFAULT_MODEL;
+        targetGroup.agentModelOverride = resolved;
+        targetGroup.agentModelOverrideSetAt = Date.now();
+        if (previousEffective !== resolved) {
+          targetGroup.pendingModelNotice = `[model has switched to ${resolved} (agent-initiated, auto-reverts in 20 min)]`;
+        }
+        deps
+          .sendMessage(
+            data.chatJid,
+            `Model switched to ${resolved} (agent-initiated, auto-reverts in 20 min)`,
+          )
+          .catch((err) =>
+            logger.error({ err }, 'Failed to send model switch notification'),
+          );
+        logger.info(
+          { chatJid: data.chatJid, sourceGroup, model: resolved },
+          'Agent model override set via IPC',
+        );
+      }
+
+      // Handle effort override (if provided)
+      if (data.effort) {
+        const effortValue =
+          data.effort === 'reset' ? null : (data.effort as string);
+        setGroupEffort(data.chatJid, effortValue);
+        targetGroup.effort = effortValue || undefined;
+        logger.info(
+          { chatJid: data.chatJid, effort: effortValue },
+          'Effort set via switch_model IPC',
+        );
+      }
+
+      // Handle thinking_budget override (if provided)
+      if (data.thinking_budget) {
+        const tbValue =
+          data.thinking_budget === 'reset'
+            ? null
+            : (data.thinking_budget as string);
+        setGroupThinkingBudget(data.chatJid, tbValue);
+        targetGroup.thinking_budget = tbValue || undefined;
+        logger.info(
+          { chatJid: data.chatJid, thinking_budget: tbValue },
+          'Thinking budget set via switch_model IPC',
+        );
+      }
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

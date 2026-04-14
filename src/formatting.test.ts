@@ -234,6 +234,26 @@ describe('formatMessages', () => {
     const result = formatMessages([makeMsg()], TZ, group);
     expect(result).not.toContain('<notice>');
   });
+
+  it('includes model attribute in context header when provided', () => {
+    const result = formatMessages(
+      [makeMsg()],
+      TZ,
+      undefined,
+      'claude-opus-4-20250514',
+    );
+    expect(result).toContain('model="claude-opus-4-20250514"');
+  });
+
+  it('omits model attribute when not provided', () => {
+    const result = formatMessages([makeMsg()], TZ);
+    expect(result).not.toContain('model=');
+  });
+
+  it('escapes special characters in model name', () => {
+    const result = formatMessages([makeMsg()], TZ, undefined, 'model<>&"test');
+    expect(result).toContain('model="model&lt;&gt;&amp;&quot;test"');
+  });
 });
 
 // --- buildTriggerPattern ---

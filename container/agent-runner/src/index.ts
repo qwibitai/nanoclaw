@@ -53,6 +53,21 @@ function loadMcpConfig(
   }
 }
 
+function resolveThinkingBudget(
+  preset?: string,
+): { type: 'enabled'; budgetTokens: number } | { type: 'adaptive' } {
+  const PRESETS: Record<
+    string,
+    { type: 'enabled'; budgetTokens: number } | { type: 'adaptive' }
+  > = {
+    low: { type: 'enabled', budgetTokens: 42667 },
+    medium: { type: 'enabled', budgetTokens: 85334 },
+    high: { type: 'enabled', budgetTokens: 128000 },
+    adaptive: { type: 'adaptive' },
+  };
+  return PRESETS[preset || 'adaptive'] || PRESETS['adaptive'];
+}
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -64,6 +79,7 @@ interface ContainerInput {
   script?: string;
   model?: string;
   effort?: string;
+  thinking_budget?: string;
 }
 
 interface ContainerOutput {
@@ -574,7 +590,7 @@ async function runQuery(
     prompt: stream,
     options: {
       model: containerInput.model || undefined,
-      thinking: { type: 'adaptive' },
+      thinking: resolveThinkingBudget(containerInput.thinking_budget),
       effort: (containerInput.effort as 'low' | 'medium' | 'high' | 'max') || undefined,
       cwd: WORKSPACE_GROUP,
       pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_PATH || undefined,
@@ -619,6 +635,7 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            NANOCLAW_IPC_DIR: process.env.NANOCLAW_IPC_DIR || '/workspace/ipc',
           },
         },
         ...additionalMcpServers,

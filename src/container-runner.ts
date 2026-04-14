@@ -46,6 +46,7 @@ export interface ContainerInput {
   script?: string;
   model?: string;
   effort?: string;
+  thinking_budget?: string;
 }
 
 export interface ContainerOutput {

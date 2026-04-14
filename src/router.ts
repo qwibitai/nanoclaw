@@ -14,6 +14,7 @@ export function formatMessages(
   messages: NewMessage[],
   timezone: string,
   group?: RegisteredGroup,
+  model?: string,
 ): string {
   const lines = messages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
@@ -34,7 +35,8 @@ export function formatMessages(
     group.pendingModelNotice = undefined;
   }
 
-  const header = `<context timezone="${escapeXml(timezone)}" current_time="${escapeXml(formatCurrentTime(timezone))}" />\n`;
+  const modelAttr = model ? ` model="${escapeXml(model)}"` : '';
+  const header = `<context timezone="${escapeXml(timezone)}" current_time="${escapeXml(formatCurrentTime(timezone))}"${modelAttr} />\n`;
 
   return `${header}<messages>\n${noticeLine}${lines.join('\n')}\n</messages>`;
 }

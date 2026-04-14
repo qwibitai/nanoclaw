@@ -42,7 +42,10 @@ export interface RegisteredGroup {
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
   model?: string; // Per-group model override (e.g. "claude-opus-4-20250514")
   effort?: string; // Per-group thinking effort ('low' | 'medium' | 'high' | 'max')
+  thinking_budget?: string; // Per-group thinking budget preset ('low' | 'medium' | 'high' | 'adaptive')
   pendingModelNotice?: string; // One-shot notice injected into next formatted prompt
+  agentModelOverride?: string; // Transient model override requested by agent via switch_model
+  agentModelOverrideSetAt?: number; // Date.now() when override was set (for 20-min timeout)
 }
 
 export interface NewMessage {
@@ -75,6 +78,7 @@ export interface ScheduledTask {
   silent?: boolean | number;
   model?: string | null;
   effort?: string | null;
+  thinking_budget?: string | null;
   status: 'active' | 'paused' | 'completed';
   created_at: string;
 }
