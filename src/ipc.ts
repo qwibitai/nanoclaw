@@ -28,7 +28,7 @@ import {
 
 const VALID_CHANNEL_MODES = new Set<
   NonNullable<RegisteredGroup['channel_mode']>
->(['chat', 'url_watch', 'admin_control']);
+>(['chat', 'thread_per_message', 'admin_control']);
 
 function parseIpcGroupType(value: unknown): GroupType | null {
   if (typeof value === 'string' && VALID_GROUP_TYPES.has(value)) {
@@ -44,13 +44,19 @@ function parseIpcChannelMode(
     return undefined;
   }
 
-  if (
-    typeof value === 'string' &&
-    VALID_CHANNEL_MODES.has(
-      value as NonNullable<RegisteredGroup['channel_mode']>,
-    )
-  ) {
-    return value as RegisteredGroup['channel_mode'];
+  if (typeof value === 'string') {
+    // Legacy alias: url_watch → thread_per_message
+    if (value === 'url_watch') {
+      return 'thread_per_message';
+    }
+
+    if (
+      VALID_CHANNEL_MODES.has(
+        value as NonNullable<RegisteredGroup['channel_mode']>,
+      )
+    ) {
+      return value as RegisteredGroup['channel_mode'];
+    }
   }
 
   logger.warn(

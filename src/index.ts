@@ -34,7 +34,6 @@ import {
   getAllTasks,
   getMessagesSince,
   getNewMessages,
-  getRegisteredGroup,
   getRouterState,
   initDatabase,
   releaseSpawnedThreadReservation,
@@ -190,41 +189,42 @@ function autoRegisterThread(
 }
 
 /**
- * URL を含むメッセージを受信したとき、Discord スレッドを自動作成してエージェントに要約させる。
- * channel_mode = 'url_watch' のチャンネル専用。
+ * メッセージを受信したとき、Discord スレッドを自動作成してエージェントに処理させる。
+ * channel_mode = 'thread_per_message' のチャンネル専用。
  */
-async function spawnThreadForUrl(
+async function spawnThreadForMessage(
   chatJid: string,
   msg: InboundMessage,
   group: RegisteredGroup,
   channel: Channel,
 ): Promise<boolean> {
-  const url = extractFirstUrl(msg.content);
-  if (!url) return false;
-
   // 重複スポーン防止: まず source_message_id を予約してから非同期 createThread を実行する
-  const reserved = reserveSpawnedThread(msg.id, 'url', url);
+  const reserved = reserveSpawnedThread(
+    msg.id,
+    'thread_per_message',
+    msg.content.slice(0, 256),
+  );
   if (!reserved) return false;
 
-  let threadName: string;
-  try {
-    const parsed = new URL(url);
-    threadName = `${parsed.hostname}${parsed.pathname}`.slice(0, 80);
-  } catch {
-    threadName = url.slice(0, 80);
-  }
+  const threadName = buildThreadNameForMessage(msg);
 
   let threadJid: string | null;
   try {
     threadJid = await channel.createThread!(chatJid, threadName, msg.id);
   } catch (err) {
     releaseSpawnedThreadReservation(msg.id);
-    logger.error({ err, chatJid, url }, 'Failed to create thread for URL');
+    logger.error(
+      { err, chatJid, sourceMessageId: msg.id },
+      'Failed to create thread for message',
+    );
     return false;
   }
   if (!threadJid) {
     releaseSpawnedThreadReservation(msg.id);
-    logger.warn({ chatJid, url }, 'Failed to create thread for URL');
+    logger.warn(
+      { chatJid, sourceMessageId: msg.id },
+      'Failed to create thread for message',
+    );
     return false;
   }
 
@@ -237,28 +237,28 @@ async function spawnThreadForUrl(
     containerConfig: group.containerConfig,
     requiresTrigger: false,
     type: 'thread',
-    channel_mode: 'url_watch',
+    channel_mode: 'thread_per_message',
   };
 
   const syntheticMsg: InboundMessage = {
-    id: `${msg.id}_url`,
+    id: `${msg.id}_thread`,
     chat_jid: threadJid,
     sender: msg.sender,
     sender_name: msg.sender_name,
-    content: url,
+    content: msg.content,
     timestamp: msg.timestamp,
-    is_from_me: true,
+    is_from_me: msg.is_from_me,
     is_thread: true,
     parent_jid: chatJid,
   };
 
-  type UrlWatchInitStage =
+  type ThreadPerMessageInitStage =
     | 'chat_metadata'
     | 'store_message'
     | 'register_group'
     | 'enqueue_initial_task'
     | 'finalize_spawn';
-  let initStage: UrlWatchInitStage = 'chat_metadata';
+  let initStage: ThreadPerMessageInitStage = 'chat_metadata';
   try {
     // programmatic に作成した thread は受信イベントが来ないため、
     // synthetic メッセージ保存前に chats 行を作成して FK 制約を満たす。
@@ -274,28 +274,32 @@ async function spawnThreadForUrl(
     }
 
     initStage = 'enqueue_initial_task';
-    queue.enqueueTask(threadJid, `url-watch-initial:${msg.id}`, async () => {
-      try {
-        const processed = await processMessagesForGroup(
-          threadJid,
-          childGroup,
-          channel,
-        );
-        if (!processed) {
+    queue.enqueueTask(
+      threadJid,
+      `thread-per-message-initial:${msg.id}`,
+      async () => {
+        try {
+          const processed = await processMessagesForGroup(
+            threadJid,
+            childGroup,
+            channel,
+          );
+          if (!processed) {
+            logger.error(
+              { chatJid, threadJid, sourceMessageId: msg.id },
+              'Initial thread-per-message direct processing failed; re-enqueueing message check',
+            );
+            queue.enqueueMessageCheck(threadJid);
+          }
+        } catch (err) {
           logger.error(
-            { chatJid, threadJid, sourceMessageId: msg.id, url },
-            'Initial URL direct processing failed; re-enqueueing message check',
+            { err, chatJid, threadJid, sourceMessageId: msg.id },
+            'Initial thread-per-message direct processing threw; re-enqueueing message check',
           );
           queue.enqueueMessageCheck(threadJid);
         }
-      } catch (err) {
-        logger.error(
-          { err, chatJid, threadJid, sourceMessageId: msg.id, url },
-          'Initial URL direct processing threw; re-enqueueing message check',
-        );
-        queue.enqueueMessageCheck(threadJid);
-      }
-    });
+      },
+    );
 
     initStage = 'finalize_spawn';
     finalizeSpawnedThread(msg.id, threadJid);
@@ -307,17 +311,16 @@ async function spawnThreadForUrl(
         chatJid,
         threadJid,
         sourceMessageId: msg.id,
-        url,
         stage: initStage,
       },
-      'Failed to initialize URL watch thread',
+      'Failed to initialize thread-per-message thread',
     );
     return false;
   }
 
   logger.info(
-    { chatJid, threadJid, url, folder: group.folder },
-    'URL thread spawned',
+    { chatJid, threadJid, folder: group.folder, sourceMessageId: msg.id },
+    'Thread-per-message thread spawned',
   );
   return true;
 }
@@ -329,37 +332,26 @@ function extractFirstUrl(value: string): string | null {
   return firstMatch?.[0] ?? null;
 }
 
-function stringContainsUrl(value: string): boolean {
-  return URL_RE.test(value);
-}
-
-function isUrlWatchThreadGroup(group: RegisteredGroup): boolean {
-  if (group.type !== 'thread') return false;
-  if (group.channel_mode != null) return group.channel_mode === 'url_watch';
-  const parentGroup = group.parent_folder
-    ? getRegisteredGroup(group.parent_folder)
-    : undefined;
-  return parentGroup?.channel_mode === 'url_watch';
-}
-
-function getUrlWatchSeedMessage(
-  chatJid: string,
-  group: RegisteredGroup,
-): NewMessage | null {
-  if (!isUrlWatchThreadGroup(group)) return null;
-  const allMessages = getMessagesSince(chatJid, '', ASSISTANT_NAME).slice(
-    0,
-    1000,
-  );
-  for (const message of allMessages) {
-    const url = extractFirstUrl(message.content);
-    if (!url) continue;
-    return message.content === url ? message : { ...message, content: url };
+function buildThreadNameForMessage(msg: InboundMessage): string {
+  const firstUrl = extractFirstUrl(msg.content);
+  if (firstUrl) {
+    try {
+      const parsed = new URL(firstUrl);
+      const fromUrl = `${parsed.hostname}${parsed.pathname}`.slice(0, 80);
+      if (fromUrl) return fromUrl;
+    } catch {
+      const trimmed = firstUrl.trim().slice(0, 80);
+      if (trimmed) return trimmed;
+    }
   }
-  return null;
+
+  const compact = msg.content.replace(/\s+/g, ' ').trim();
+  if (compact) return compact.slice(0, 80);
+  if (msg.sender_name) return `Thread from ${msg.sender_name}`.slice(0, 80);
+  return 'Thread';
 }
 
-function maybeHandleUrlWatchMessage(
+function maybeHandleThreadPerMessageMessage(
   chatJid: string,
   msg: InboundMessage,
   availableChannels: Channel[] = channels,
@@ -367,26 +359,17 @@ function maybeHandleUrlWatchMessage(
   const parentGroup = msg.parent_jid
     ? registeredGroups[msg.parent_jid]
     : undefined;
-  const isUrlWatchThreadMessage =
-    msg.is_thread === true && parentGroup?.channel_mode === 'url_watch';
-  if (isUrlWatchThreadMessage) {
-    const url = extractFirstUrl(msg.content);
-    if (!url) {
-      storeMessage(msg);
-      return true;
-    }
-    const syntheticMsg: InboundMessage = {
-      ...msg,
-      id: `${msg.id}_url`,
-      content: url,
-    };
-    storeMessage(syntheticMsg);
+  const isThreadPerMessageThreadMessage =
+    msg.is_thread === true &&
+    parentGroup?.channel_mode === 'thread_per_message';
+  if (isThreadPerMessageThreadMessage) {
+    storeMessage(msg);
     return true;
   }
 
   const group = registeredGroups[chatJid];
   if (
-    group?.channel_mode !== 'url_watch' ||
+    group?.channel_mode !== 'thread_per_message' ||
     msg.is_thread === true ||
     Boolean(msg.parent_jid)
   ) {
@@ -399,17 +382,12 @@ function maybeHandleUrlWatchMessage(
     return true;
   }
 
-  if (!stringContainsUrl(msg.content)) {
-    storeMessage(msg);
-    return true;
-  }
-
-  spawnThreadForUrl(chatJid, msg, group, ch)
+  spawnThreadForMessage(chatJid, msg, group, ch)
     .then((handled) => {
       if (!handled) storeMessage(msg);
     })
     .catch((err) => {
-      logger.error({ err, chatJid }, 'URL thread spawn failed');
+      logger.error({ err, chatJid }, 'Thread-per-message spawn failed');
       storeMessage(msg);
     });
   return true;
@@ -441,9 +419,10 @@ export function _setRegisteredGroups(
 }
 
 /** @internal - テスト用にエクスポート */
-export const _spawnThreadForUrl = spawnThreadForUrl;
+export const _spawnThreadForMessage = spawnThreadForMessage;
 /** @internal - テスト用にエクスポート */
-export const _maybeHandleUrlWatchMessage = maybeHandleUrlWatchMessage;
+export const _maybeHandleThreadPerMessageMessage =
+  maybeHandleThreadPerMessageMessage;
 /** @internal - テスト用にエクスポート */
 export const _processMessagesForGroup = processMessagesForGroup;
 
@@ -494,12 +473,7 @@ async function processMessagesForGroup(
     if (!hasTrigger) return true;
   }
 
-  const urlSeedMessage = getUrlWatchSeedMessage(chatJid, group);
-  const promptMessages =
-    urlSeedMessage && !missedMessages.some((m) => m.id === urlSeedMessage.id)
-      ? [urlSeedMessage, ...missedMessages]
-      : missedMessages;
-  const prompt = formatMessages(promptMessages, TIMEZONE);
+  const prompt = formatMessages(missedMessages, TIMEZONE);
 
   // startMessageLoop 内のパイプパスがこれらのメッセージを再取得しないように
   // カーソルを進めます。エラー時にロールバックできるよう古いカーソルを保存します。
@@ -897,8 +871,8 @@ async function main(): Promise<void> {
         }
       }
 
-      // url_watch チャンネル: URL が投稿されたらスレッドを自動作成してエージェントに処理させる
-      if (maybeHandleUrlWatchMessage(chatJid, msg)) return;
+      // thread_per_message チャンネル: すべてのメッセージでスレッド作成を試行する
+      if (maybeHandleThreadPerMessageMessage(chatJid, msg)) return;
 
       storeMessage(msg);
     },

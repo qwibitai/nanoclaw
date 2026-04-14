@@ -11,7 +11,7 @@
 ## VRC-AI-Bot — コンテキスト駆動
 
 - **場所と文脈の精密なモデリング**: `PlaceType`（7種）、`ActorRole`（3段階）、`Scope`（3種）、`WatchMode`（4種）、`ChatBehavior`（2種）を組み合わせて、メッセージの「どこで・誰が・どんな文脈で」をリッチにモデル化
-- **チャネルごとのモード制御**: 同じサーバー内でもチャネルを `url_watch` / `chat` / `admin_control` / `forum_longform` と使い分け
+- **チャネルごとのモード制御**: 同じサーバー内でもチャネルを `thread_per_message` / `chat` / `admin_control` と使い分け
 - **知識管理システム**: AI 応答から知識を抽出・永続化・検索。URL 自動収集とスコープに基づく公開範囲制御
 - **多層アーキテクチャ**: Intake → Queue → Processing → Harness → Knowledge/Reply の明確なパイプライン
 - **エンゲージメントポリシー**: 5段階のトリガーで Bot が「空気を読んで」返信頻度を変える

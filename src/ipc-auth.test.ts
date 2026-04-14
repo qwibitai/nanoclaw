@@ -773,6 +773,50 @@ describe('register_group group_type', () => {
     expect(allGroups['sanitize-cc@g.us']).toBeDefined();
     expect(allGroups['sanitize-cc@g.us'].containerConfig).toEqual({});
   });
+
+  it('register_group で channel_mode: thread_per_message を設定できる', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'thread-per-message@g.us',
+        name: 'Thread Per Message',
+        folder: 'thread-per-message',
+        trigger: '@Andy',
+        channel_mode: 'thread_per_message',
+      },
+      'main@g.us',
+      true,
+      deps,
+    );
+
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['thread-per-message@g.us']).toBeDefined();
+    expect(allGroups['thread-per-message@g.us'].channel_mode).toBe(
+      'thread_per_message',
+    );
+  });
+
+  it('register_group で legacy channel_mode: url_watch は thread_per_message にマッピングされる', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'legacy-urlwatch@g.us',
+        name: 'Legacy Url Watch',
+        folder: 'legacy-urlwatch',
+        trigger: '@Andy',
+        channel_mode: 'url_watch',
+      },
+      'main@g.us',
+      true,
+      deps,
+    );
+
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['legacy-urlwatch@g.us']).toBeDefined();
+    expect(allGroups['legacy-urlwatch@g.us'].channel_mode).toBe(
+      'thread_per_message',
+    );
+  });
 });
 
 describe('update_group group_type', () => {

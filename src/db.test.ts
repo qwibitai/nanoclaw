@@ -27,6 +27,7 @@ import {
   storeMessage,
   updateTask,
 } from './db.js';
+import type { RegisteredGroup } from './types.js';
 
 beforeEach(() => {
   _initTestDatabase();
@@ -554,13 +555,29 @@ describe('registered group type', () => {
       parent_folder: 'discord_parent',
       trigger: '@Andy',
       added_at: '2024-01-01T00:00:00.000Z',
-      channel_mode: 'url_watch',
+      channel_mode: 'thread_per_message',
       type: 'chat',
     });
 
     const groups = getAllRegisteredGroups();
     expect(groups['dc:urlwatch'].parent_folder).toBe('discord_parent');
-    expect(groups['dc:urlwatch'].channel_mode).toBe('url_watch');
+    expect(groups['dc:urlwatch'].channel_mode).toBe('thread_per_message');
+  });
+
+  it('maps legacy url_watch channel_mode to thread_per_message', () => {
+    setRegisteredGroup('dc:legacy-urlwatch', {
+      name: 'Legacy URL Watch',
+      folder: 'discord_legacy_urlwatch',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      channel_mode: 'url_watch' as unknown as RegisteredGroup['channel_mode'],
+      type: 'chat',
+    });
+
+    const groups = getAllRegisteredGroups();
+    expect(groups['dc:legacy-urlwatch'].channel_mode).toBe(
+      'thread_per_message',
+    );
   });
 
   it('handles malformed thread_defaults JSON safely', () => {
