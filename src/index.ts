@@ -242,6 +242,18 @@ export function _setRegisteredGroups(
   registeredGroups = groups;
 }
 
+/** @internal - exported for testing */
+export { loadState as _loadState };
+
+/** @internal - exported for testing */
+export { registerGroup as _registerGroup };
+
+/** @internal - exported for testing */
+export { processGroupMessages as _processGroupMessages };
+
+/** @internal - exported for testing */
+export { runAgent as _runAgent };
+
 /**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
@@ -388,9 +400,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         // Short one-liners (< 80 chars) don't need turn counts and elapsed time.
         let outText = text;
         if (text.length >= 80) {
-          const elapsedSec = Math.round(
-            (Date.now() - responseStartMs) / 1000,
-          );
+          const elapsedSec = Math.round((Date.now() - responseStartMs) / 1000);
           const parts: string[] = [];
           if (result.numTurns != null) parts.push(`${result.numTurns} turns`);
           parts.push(`${elapsedSec}s`);
