@@ -9,11 +9,7 @@
  * Decay: -0.01 per day without activity (floor 0.0)
  */
 
-import {
-  getTrustLevel,
-  upsertTrustLevel,
-  insertTrustAction,
-} from './db.js';
+import { getTrustLevel, upsertTrustLevel, insertTrustAction } from './db.js';
 import { eventBus } from './event-bus.js';
 import type { TrustGraduatedEvent } from './events.js';
 

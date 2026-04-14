@@ -144,6 +144,14 @@ export const DAILY_BUDGET_USD = parseFloat(
   envConfig.DAILY_BUDGET_USD || process.env.DAILY_BUDGET_USD || '50',
 );
 
+export const TRUST_GATEWAY_PORT = parseInt(
+  process.env.TRUST_GATEWAY_PORT || '10255',
+  10,
+);
+export const TRUST_GATEWAY_URL =
+  process.env.TRUST_GATEWAY_URL ||
+  `http://host.docker.internal:${TRUST_GATEWAY_PORT}`;
+
 export const EMAIL_INTELLIGENCE_ENABLED =
   (process.env.EMAIL_INTELLIGENCE_ENABLED ??
     envConfig.EMAIL_INTELLIGENCE_ENABLED ??
