@@ -3,6 +3,7 @@ node_modules/
 .npm-cache/
 # Build output
 dist/
+cli/target/
 
 # Local data & auth
 store/
