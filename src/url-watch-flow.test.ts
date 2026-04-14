@@ -106,7 +106,11 @@ vi.mock('./group-queue.js', () => ({
       fn: () => Promise<void>,
     ): void {
       enqueueTaskMock(groupJid, taskId);
-      void fn();
+      void fn().catch((error) => {
+        queueMicrotask(() => {
+          throw error;
+        });
+      });
     }
     registerProcess = vi.fn();
     notifyIdle = vi.fn();
