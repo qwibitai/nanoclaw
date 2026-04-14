@@ -796,7 +796,7 @@ describe('register_group group_type', () => {
     );
   });
 
-  it('register_group で legacy channel_mode: url_watch は無効値として無視される', async () => {
+  it('register_group で legacy channel_mode: url_watch は thread_per_message にマッピングされる', async () => {
     await processTaskIpc(
       {
         type: 'register_group',
@@ -813,7 +813,9 @@ describe('register_group group_type', () => {
 
     const allGroups = getAllRegisteredGroups();
     expect(allGroups['legacy-urlwatch@g.us']).toBeDefined();
-    expect(allGroups['legacy-urlwatch@g.us'].channel_mode).toBeUndefined();
+    expect(allGroups['legacy-urlwatch@g.us'].channel_mode).toBe(
+      'thread_per_message',
+    );
   });
 });
 
