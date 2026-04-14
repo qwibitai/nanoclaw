@@ -90,6 +90,36 @@ export interface TaskProgressEvent extends NanoClawEvent {
   };
 }
 
+// --- Warm pool events ---
+
+export interface PoolWarmCreatedEvent extends NanoClawEvent {
+  type: 'pool.warm.created';
+  source: 'executor';
+  payload: {
+    containerId: string;
+    poolSize: number;
+  };
+}
+
+export interface PoolWarmUsedEvent extends NanoClawEvent {
+  type: 'pool.warm.used';
+  source: 'executor';
+  payload: {
+    containerId: string;
+    groupJid: string;
+    taskId: string;
+  };
+}
+
+export interface PoolWarmEvictedEvent extends NanoClawEvent {
+  type: 'pool.warm.evicted';
+  source: 'executor';
+  payload: {
+    containerId: string;
+    reason: 'idle_timeout' | 'crash' | 'shutdown';
+  };
+}
+
 // --- System events ---
 
 export interface SystemErrorEvent extends NanoClawEvent {
@@ -128,6 +158,9 @@ export interface EventMap {
   'task.started': TaskStartedEvent;
   'task.complete': TaskCompleteEvent;
   'task.progress': TaskProgressEvent;
+  'pool.warm.created': PoolWarmCreatedEvent;
+  'pool.warm.used': PoolWarmUsedEvent;
+  'pool.warm.evicted': PoolWarmEvictedEvent;
   'system.error': SystemErrorEvent;
   'system.startup': SystemStartupEvent;
   'system.shutdown': SystemShutdownEvent;
