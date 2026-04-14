@@ -82,7 +82,6 @@ vi.mock('./db.js', () => ({
   getAllChats: vi.fn(() => []),
   getMessagesSince: getMessagesSinceMock,
   getNewMessages: vi.fn(() => ({ messages: [], newTimestamp: '' })),
-  getRegisteredGroup: vi.fn(),
   getRouterState: vi.fn(() => null),
   initDatabase: vi.fn(),
   releaseSpawnedThreadReservation: releaseSpawnedThreadReservationMock,
@@ -134,7 +133,7 @@ vi.mock('fs', () => ({
 }));
 
 import {
-  _maybeHandleUrlWatchMessage,
+  _maybeHandleThreadPerMessageMessage,
   _processMessagesForGroup,
   _setRegisteredGroups,
 } from './index.js';
@@ -146,7 +145,7 @@ const baseGroup: RegisteredGroup = {
   trigger: '@Andy',
   added_at: '2024-01-01T00:00:00.000Z',
   type: 'chat',
-  channel_mode: 'url_watch',
+  channel_mode: 'thread_per_message',
 };
 
 function makeMsg(overrides?: Partial<InboundMessage>): InboundMessage {
@@ -179,7 +178,7 @@ async function flushAsyncWork(turns = 6): Promise<void> {
   }
 }
 
-describe('url_watch flow', () => {
+describe('thread_per_message flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetStoredMessages();
@@ -187,11 +186,11 @@ describe('url_watch flow', () => {
     _setRegisteredGroups({ [chatJid]: baseGroup });
   });
 
-  it('URL あり + createThread 成功: スレッド作成し元メッセージ保存をスキップ', async () => {
+  it('createThread 成功時はスレッド作成し元メッセージ保存をスキップ', async () => {
     const createThread = vi.fn(async () => 'dc:thread-1');
     const msg = makeMsg();
 
-    const handled = _maybeHandleUrlWatchMessage(chatJid, msg, [
+    const handled = _maybeHandleThreadPerMessageMessage(chatJid, msg, [
       makeChannel(createThread),
     ]);
     expect(handled).toBe(true);
@@ -212,6 +211,7 @@ describe('url_watch flow', () => {
       expect.objectContaining({
         type: 'thread',
         parent_folder: 'discord_main',
+        channel_mode: 'thread_per_message',
       }),
     );
     expect(storeChatMetadataMock).toHaveBeenCalledWith(
@@ -224,24 +224,14 @@ describe('url_watch flow', () => {
     expect(storeMessageMock).toHaveBeenCalledTimes(1);
     expect(storeMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: 'msg-1_url',
+        id: 'msg-1_thread',
         chat_jid: 'dc:thread-1',
         content: 'https://example.com/post',
       }),
     );
-    const metadataCallOrder =
-      storeChatMetadataMock.mock.invocationCallOrder[0] ?? -1;
-    const syntheticStoreCallOrder =
-      storeMessageMock.mock.invocationCallOrder[0] ?? -1;
-    const enqueueTaskCallOrder =
-      enqueueTaskMock.mock.invocationCallOrder[0] ?? -1;
-    const finalizeCallOrder =
-      finalizeSpawnedThreadMock.mock.invocationCallOrder[0] ?? -1;
-    expect(metadataCallOrder).toBeLessThan(syntheticStoreCallOrder);
-    expect(enqueueTaskCallOrder).toBeLessThan(finalizeCallOrder);
     expect(enqueueTaskMock).toHaveBeenCalledWith(
       'dc:thread-1',
-      'url-watch-initial:msg-1',
+      'thread-per-message-initial:msg-1',
     );
     expect(enqueueMessageCheckMock).not.toHaveBeenCalled();
     expect(runContainerAgentMock).toHaveBeenCalledTimes(1);
@@ -253,6 +243,26 @@ describe('url_watch flow', () => {
     expect(firstPrompt).toContain('https://example.com/post');
   });
 
+  it('URL なしでも createThread を実行してスレッドへ保存する', async () => {
+    const createThread = vi.fn(async () => 'dc:thread-no-url');
+    const msg = makeMsg({ id: 'msg-no-url', content: 'hello world' });
+
+    const handled = _maybeHandleThreadPerMessageMessage(chatJid, msg, [
+      makeChannel(createThread),
+    ]);
+    expect(handled).toBe(true);
+    await flushAsyncWork();
+
+    expect(createThread).toHaveBeenCalledTimes(1);
+    expect(storeMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'msg-no-url_thread',
+        chat_jid: 'dc:thread-no-url',
+        content: 'hello world',
+      }),
+    );
+  });
+
   it('初期化失敗時は予約解放し元メッセージ保存へフォールバックする', async () => {
     const createThread = vi.fn(async () => 'dc:thread-init-fail');
     const msg = makeMsg({ id: 'msg-init-fail' });
@@ -260,7 +270,7 @@ describe('url_watch flow', () => {
       throw new Error('chat metadata failed');
     });
 
-    const handled = _maybeHandleUrlWatchMessage(chatJid, msg, [
+    const handled = _maybeHandleThreadPerMessageMessage(chatJid, msg, [
       makeChannel(createThread),
     ]);
     expect(handled).toBe(true);
@@ -279,30 +289,15 @@ describe('url_watch flow', () => {
         threadJid: 'dc:thread-init-fail',
         stage: 'chat_metadata',
       }),
-      'Failed to initialize URL watch thread',
+      'Failed to initialize thread-per-message thread',
     );
   });
 
-  it('URL なし: 元メッセージを通常保存する', async () => {
-    const createThread = vi.fn(async () => 'dc:thread-1');
-    const msg = makeMsg({ id: 'msg-no-url', content: 'hello world' });
-
-    const handled = _maybeHandleUrlWatchMessage(chatJid, msg, [
-      makeChannel(createThread),
-    ]);
-    expect(handled).toBe(true);
-    await flushAsyncWork();
-
-    expect(createThread).not.toHaveBeenCalled();
-    expect(storeMessageMock).toHaveBeenCalledTimes(1);
-    expect(storeMessageMock).toHaveBeenCalledWith(msg);
-  });
-
-  it('URL あり + createThread が null: 元メッセージを通常保存する', async () => {
+  it('createThread が null の場合は元メッセージを通常保存する', async () => {
     const createThread = vi.fn(async () => null);
     const msg = makeMsg({ id: 'msg-null-thread' });
 
-    const handled = _maybeHandleUrlWatchMessage(chatJid, msg, [
+    const handled = _maybeHandleThreadPerMessageMessage(chatJid, msg, [
       makeChannel(createThread),
     ]);
     expect(handled).toBe(true);
@@ -316,13 +311,13 @@ describe('url_watch flow', () => {
     expect(storeMessageMock).toHaveBeenCalledWith(msg);
   });
 
-  it('URL あり + createThread が例外: 元メッセージを通常保存する', async () => {
+  it('createThread が例外の場合は元メッセージを通常保存する', async () => {
     const createThread = vi.fn(async () => {
       throw new Error('createThread failed');
     });
     const msg = makeMsg({ id: 'msg-create-throws' });
 
-    const handled = _maybeHandleUrlWatchMessage(chatJid, msg, [
+    const handled = _maybeHandleThreadPerMessageMessage(chatJid, msg, [
       makeChannel(createThread),
     ]);
     expect(handled).toBe(true);
@@ -336,38 +331,17 @@ describe('url_watch flow', () => {
     expect(storeMessageMock).toHaveBeenCalledWith(msg);
   });
 
-  it('初回直接起動が失敗したらエラーログを残す', async () => {
-    runContainerAgentMock.mockResolvedValueOnce({
-      status: 'error',
-    });
-    const createThread = vi.fn(async () => 'dc:thread-direct-fail');
-    const msg = makeMsg({ id: 'msg-direct-fail' });
-
-    const handled = _maybeHandleUrlWatchMessage(chatJid, msg, [
-      makeChannel(createThread),
-    ]);
-    expect(handled).toBe(true);
-    await flushAsyncWork();
-
-    expect(loggerErrorMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        chatJid,
-        threadJid: 'dc:thread-direct-fail',
-        sourceMessageId: 'msg-direct-fail',
-      }),
-      'Initial URL direct processing failed; re-enqueueing message check',
-    );
-  });
-
-  it('url_watch で createThread が未実装でも元メッセージを保存する', () => {
+  it('createThread が未実装でも元メッセージを保存する', () => {
     const msg = makeMsg({ id: 'msg-no-create-thread' });
-    const handled = _maybeHandleUrlWatchMessage(chatJid, msg, [makeChannel()]);
+    const handled = _maybeHandleThreadPerMessageMessage(chatJid, msg, [
+      makeChannel(),
+    ]);
     expect(handled).toBe(true);
     expect(storeMessageMock).toHaveBeenCalledTimes(1);
     expect(storeMessageMock).toHaveBeenCalledWith(msg);
   });
 
-  it('url_watch 親配下の thread で URL あり: synthetic メッセージを保存する', () => {
+  it('thread_per_message 親配下の thread メッセージはそのまま保存する', () => {
     const threadJid = 'dc:thread-99';
     _setRegisteredGroups({
       [chatJid]: baseGroup,
@@ -378,103 +352,28 @@ describe('url_watch flow', () => {
         trigger: baseGroup.trigger,
         added_at: '2024-01-01T00:00:02.000Z',
         type: 'thread',
+        channel_mode: 'thread_per_message',
       },
     });
     const msg = makeMsg({
-      id: 'msg-thread-url',
+      id: 'msg-thread',
       chat_jid: threadJid,
       content: 'please summarize https://example.com/next',
       is_thread: true,
       parent_jid: chatJid,
     });
 
-    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [
-      makeChannel(),
-    ]);
-
-    expect(handled).toBe(true);
-    expect(storeMessageMock).toHaveBeenCalledTimes(1);
-    expect(storeMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'msg-thread-url_url',
-        chat_jid: threadJid,
-        content: 'https://example.com/next',
-        parent_jid: chatJid,
-        is_thread: true,
-      }),
-    );
-    expect(reserveSpawnedThreadMock).not.toHaveBeenCalled();
-  });
-
-  it('url_watch 親配下の thread で URL 複数: 最初の URL を保存する', () => {
-    const threadJid = 'dc:thread-99-multi';
-    _setRegisteredGroups({
-      [chatJid]: baseGroup,
-      [threadJid]: {
-        name: 'Thread',
-        folder: baseGroup.folder,
-        parent_folder: baseGroup.folder,
-        trigger: baseGroup.trigger,
-        added_at: '2024-01-01T00:00:02.500Z',
-        type: 'thread',
-      },
-    });
-    const msg = makeMsg({
-      id: 'msg-thread-url-multi',
-      chat_jid: threadJid,
-      content:
-        'first https://example.com/first then https://example.com/second',
-      is_thread: true,
-      parent_jid: chatJid,
-    });
-
-    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [
-      makeChannel(),
-    ]);
-
-    expect(handled).toBe(true);
-    expect(storeMessageMock).toHaveBeenCalledTimes(1);
-    expect(storeMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'msg-thread-url-multi_url',
-        chat_jid: threadJid,
-        content: 'https://example.com/first',
-      }),
-    );
-    expect(reserveSpawnedThreadMock).not.toHaveBeenCalled();
-  });
-
-  it('url_watch 親配下の thread で URL なし: 元メッセージを通常保存する', () => {
-    const threadJid = 'dc:thread-100';
-    _setRegisteredGroups({
-      [chatJid]: baseGroup,
-      [threadJid]: {
-        name: 'Thread',
-        folder: baseGroup.folder,
-        parent_folder: baseGroup.folder,
-        trigger: baseGroup.trigger,
-        added_at: '2024-01-01T00:00:03.000Z',
-        type: 'thread',
-      },
-    });
-    const msg = makeMsg({
-      id: 'msg-thread-no-url',
-      chat_jid: threadJid,
-      content: 'just chatting',
-      is_thread: true,
-      parent_jid: chatJid,
-    });
-
-    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [
+    const handled = _maybeHandleThreadPerMessageMessage(threadJid, msg, [
       makeChannel(),
     ]);
 
     expect(handled).toBe(true);
     expect(storeMessageMock).toHaveBeenCalledTimes(1);
     expect(storeMessageMock).toHaveBeenCalledWith(msg);
+    expect(reserveSpawnedThreadMock).not.toHaveBeenCalled();
   });
 
-  it('url_watch スレッド後続会話でも初回 URL をコンテキストに含める', async () => {
+  it('thread_per_message 後続会話では URL seed を自動挿入しない', async () => {
     const threadJid = 'dc:thread-context';
     const threadGroup: RegisteredGroup = {
       name: 'Thread',
@@ -484,15 +383,15 @@ describe('url_watch flow', () => {
       added_at: '2024-01-01T00:00:02.000Z',
       requiresTrigger: false,
       type: 'thread',
-      channel_mode: 'url_watch',
+      channel_mode: 'thread_per_message',
     };
     _setRegisteredGroups({
       [chatJid]: baseGroup,
       [threadJid]: threadGroup,
     });
 
-    const initialUrl = makeMsg({
-      id: 'msg-thread-seed',
+    const initial = makeMsg({
+      id: 'msg-thread-initial',
       chat_jid: threadJid,
       content: 'https://example.com/root',
       timestamp: '2024-01-01T00:00:10.000Z',
@@ -508,10 +407,10 @@ describe('url_watch flow', () => {
       parent_jid: chatJid,
     });
 
-    _maybeHandleUrlWatchMessage(threadJid, initialUrl, [makeChannel()]);
+    _maybeHandleThreadPerMessageMessage(threadJid, initial, [makeChannel()]);
     await _processMessagesForGroup(threadJid, threadGroup, makeChannel());
     runContainerAgentMock.mockClear();
-    _maybeHandleUrlWatchMessage(threadJid, followup, [makeChannel()]);
+    _maybeHandleThreadPerMessageMessage(threadJid, followup, [makeChannel()]);
     await _processMessagesForGroup(threadJid, threadGroup, makeChannel());
 
     expect(runContainerAgentMock).toHaveBeenCalledTimes(1);
@@ -520,12 +419,12 @@ describe('url_watch flow', () => {
       | undefined;
     const followupPrompt =
       (followupCall?.[1] as { prompt?: string } | undefined)?.prompt ?? '';
-    expect(followupPrompt).toContain('https://example.com/root');
     expect(followupPrompt).toContain('next question without url');
+    expect(followupPrompt).not.toContain('https://example.com/root');
   });
 
-  it('url_watch 以外の親配下 thread は処理せずスキップする', () => {
-    const parentJid = 'dc:parent-non-url-watch';
+  it('thread_per_message 以外の親配下 thread はこのハンドラで処理しない', () => {
+    const parentJid = 'dc:parent-non-thread-per-message';
     const threadJid = 'dc:thread-101';
     _setRegisteredGroups({
       [parentJid]: { ...baseGroup, channel_mode: 'chat' },
@@ -546,11 +445,34 @@ describe('url_watch flow', () => {
       parent_jid: parentJid,
     });
 
-    const handled = _maybeHandleUrlWatchMessage(threadJid, msg, [
+    const handled = _maybeHandleThreadPerMessageMessage(threadJid, msg, [
       makeChannel(),
     ]);
 
     expect(handled).toBe(false);
     expect(storeMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('初回直接起動が失敗したらエラーログを残す', async () => {
+    runContainerAgentMock.mockResolvedValueOnce({
+      status: 'error',
+    });
+    const createThread = vi.fn(async () => 'dc:thread-direct-fail');
+    const msg = makeMsg({ id: 'msg-direct-fail' });
+
+    const handled = _maybeHandleThreadPerMessageMessage(chatJid, msg, [
+      makeChannel(createThread),
+    ]);
+    expect(handled).toBe(true);
+    await flushAsyncWork();
+
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatJid,
+        threadJid: 'dc:thread-direct-fail',
+        sourceMessageId: 'msg-direct-fail',
+      }),
+      'Initial thread-per-message direct processing failed; re-enqueueing message check',
+    );
   });
 });

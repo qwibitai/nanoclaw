@@ -28,7 +28,7 @@ import {
 
 const VALID_CHANNEL_MODES = new Set<
   NonNullable<RegisteredGroup['channel_mode']>
->(['chat', 'url_watch', 'admin_control']);
+>(['chat', 'thread_per_message', 'admin_control']);
 
 function parseIpcGroupType(value: unknown): GroupType | null {
   if (typeof value === 'string' && VALID_GROUP_TYPES.has(value)) {

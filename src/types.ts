@@ -70,7 +70,7 @@ export interface RegisteredGroup {
   requiresTrigger?: boolean; // デフォルト: グループの場合は true、個人チャットの場合は false
   type?: GroupType; // 未指定時は 'chat' として扱う
   thread_defaults?: ThreadDefaults; // 設定時、thread message を受信した際に子 group を自動登録する
-  channel_mode?: 'chat' | 'url_watch' | 'admin_control';
+  channel_mode?: 'chat' | 'thread_per_message' | 'admin_control';
   chat_behavior?: 'ambient_room_chat' | 'directed_help_chat';
 }
 

@@ -886,7 +886,14 @@ function sanitizeParentFolder(
 
 /** channel_mode を DB 値から検証する */
 function parseChannelMode(raw: string | null): RegisteredGroup['channel_mode'] {
-  if (raw === 'chat' || raw === 'url_watch' || raw === 'admin_control') {
+  if (raw === 'url_watch') {
+    return 'thread_per_message';
+  }
+  if (
+    raw === 'chat' ||
+    raw === 'thread_per_message' ||
+    raw === 'admin_control'
+  ) {
     return raw;
   }
   return undefined;
