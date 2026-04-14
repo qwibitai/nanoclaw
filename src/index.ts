@@ -72,6 +72,12 @@ import {
   handlePotentialApprovalReply,
 } from './trust-approval-handler.js';
 import { parseTrustCommand, executeTrustCommand } from './trust-commands.js';
+import { initKnowledgeStore } from './memory/knowledge-store.js';
+import { initOutcomeStore, logOutcome } from './memory/outcome-store.js';
+import {
+  parseAssistantCommand,
+  executeAssistantCommand,
+} from './memory/cost-dashboard.js';
 import { startTrustGateway } from './trust-gateway.js';
 import { startDealWatchLoop } from './deal-watch-loop.js';
 import { startEmailSSE } from './email-sse.js';
@@ -722,6 +728,31 @@ async function startMessageLoop(): Promise<void> {
               }
             }
           }
+          // --- Assistant command interception ---
+          // Check for cost report, teach, and other assistant commands.
+          for (const msg of [...groupMessages]) {
+            const trimmedContent = msg.content.trim();
+            if (triggerPatternForCmd.test(trimmedContent)) {
+              const strippedText = trimmedContent
+                .replace(triggerPatternForCmd, '')
+                .trim();
+              const assistantCmd = parseAssistantCommand(strippedText);
+              if (assistantCmd) {
+                const response = executeAssistantCommand(assistantCmd);
+                channel
+                  .sendMessage(chatJid, response)
+                  .catch((err) =>
+                    logger.warn(
+                      { chatJid, err },
+                      'Failed to send assistant command response',
+                    ),
+                  );
+                const idx = groupMessages.indexOf(msg);
+                if (idx >= 0) groupMessages.splice(idx, 1);
+              }
+            }
+          }
+
           if (groupMessages.length === 0) continue;
 
           const isMainGroup = group.isMain === true;
@@ -825,6 +856,8 @@ function ensureContainerSystemRunning(): void {
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
+  initKnowledgeStore();
+  initOutcomeStore();
   logger.info('Database initialized');
   loadState();
 
@@ -1159,6 +1192,19 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   });
 
+  // Outcome logging: track task completion outcomes for learning
+  eventBus.on('task.complete', (event) => {
+    logOutcome({
+      actionClass: 'task.execution',
+      description: `Task ${event.payload.taskId}`,
+      method: 'container',
+      result: event.payload.status === 'success' ? 'success' : 'failure',
+      durationMs: event.payload.durationMs,
+      costUsd: event.payload.costUsd,
+      groupId: event.groupId || 'unknown',
+    });
+  });
+
   // Daily digest: schedule to run every day at 8:00 AM
   const DAILY_DIGEST_INTERVAL_MS = 60 * 60 * 1000; // Check every hour
   const digestDeps = {
@@ -1168,16 +1214,18 @@ async function main(): Promise<void> {
       await channel.sendMessage(jid, text);
     },
     getMainGroupJid: () =>
-      Object.keys(registeredGroups).find(
-        (jid) => registeredGroups[jid].isMain,
-      ),
+      Object.keys(registeredGroups).find((jid) => registeredGroups[jid].isMain),
   };
   let lastDigestDate = '';
   setInterval(async () => {
     const now = new Date();
     // Convert to configured timezone and check if it's 8 AM
     const localHour = parseInt(
-      now.toLocaleString('en-US', { timeZone: TIMEZONE, hour: 'numeric', hour12: false }),
+      now.toLocaleString('en-US', {
+        timeZone: TIMEZONE,
+        hour: 'numeric',
+        hour12: false,
+      }),
       10,
     );
     const todayKey = now.toISOString().slice(0, 10);
