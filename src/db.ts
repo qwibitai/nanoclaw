@@ -1314,9 +1314,9 @@ export function insertTrustApproval(approval: TrustApproval): void {
 }
 
 export function getTrustApproval(id: string): TrustApproval | undefined {
-  return db
-    .prepare(`SELECT * FROM trust_approvals WHERE id = ?`)
-    .get(id) as TrustApproval | undefined;
+  return db.prepare(`SELECT * FROM trust_approvals WHERE id = ?`).get(id) as
+    | TrustApproval
+    | undefined;
 }
 
 export function resolveTrustApproval(
@@ -1334,4 +1334,13 @@ export function getExpiredTrustApprovals(): TrustApproval[] {
       `SELECT * FROM trust_approvals WHERE status = 'pending' AND expires_at < ?`,
     )
     .all(new Date().toISOString()) as TrustApproval[];
+}
+
+export function getPendingTrustApprovalIds(chatJid: string): string[] {
+  const rows = db
+    .prepare(
+      `SELECT id FROM trust_approvals WHERE chat_jid = ? AND status = 'pending' AND expires_at > ?`,
+    )
+    .all(chatJid, new Date().toISOString()) as Array<{ id: string }>;
+  return rows.map((r) => r.id);
 }

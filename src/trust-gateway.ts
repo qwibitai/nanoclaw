@@ -13,7 +13,11 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { randomUUID } from 'crypto';
-import { evaluateTrust, classifyTool, recordTrustDecision } from './trust-engine.js';
+import {
+  evaluateTrust,
+  classifyTool,
+  recordTrustDecision,
+} from './trust-engine.js';
 import {
   insertTrustApproval,
   getTrustApproval,
@@ -24,7 +28,11 @@ import {
 } from './db.js';
 import { eventBus } from './event-bus.js';
 import { logger } from './logger.js';
-import type { TrustRequestEvent, TrustApprovedEvent, TrustDeniedEvent } from './events.js';
+import type {
+  TrustRequestEvent,
+  TrustApprovedEvent,
+  TrustDeniedEvent,
+} from './events.js';
 
 const APPROVAL_TIMEOUT_S = 1800; // 30 minutes
 const TIMEOUT_CHECK_INTERVAL_MS = 30_000; // check every 30s
@@ -80,6 +88,65 @@ export function checkExpiredApprovals(): void {
     };
     eventBus.emit('trust.denied', deniedEvent);
   }
+}
+
+/**
+ * Resolve a pending approval (called by the approval handler when a user
+ * replies "yes"/"no" in chat). Returns true if the approval existed and was
+ * still pending.
+ */
+export function resolveApproval(
+  approvalId: string,
+  decision: 'approved' | 'denied',
+): boolean {
+  const approval = getTrustApproval(approvalId);
+  if (!approval || approval.status !== 'pending') return false;
+
+  resolveTrustApproval(approvalId, decision);
+  recordTrustDecision(
+    approval.tool_name,
+    approval.group_id,
+    decision,
+    approval.description,
+  );
+
+  if (decision === 'approved') {
+    const approvedEvent: TrustApprovedEvent = {
+      type: 'trust.approved',
+      source: 'trust-gateway',
+      groupId: approval.group_id,
+      timestamp: Date.now(),
+      payload: {
+        approvalId,
+        actionClass: approval.action_class,
+        toolName: approval.tool_name,
+        groupId: approval.group_id,
+        auto: false,
+      },
+    };
+    eventBus.emit('trust.approved', approvedEvent);
+  } else {
+    const deniedEvent: TrustDeniedEvent = {
+      type: 'trust.denied',
+      source: 'trust-gateway',
+      groupId: approval.group_id,
+      timestamp: Date.now(),
+      payload: {
+        approvalId,
+        actionClass: approval.action_class,
+        toolName: approval.tool_name,
+        groupId: approval.group_id,
+        reason: 'user_denied',
+      },
+    };
+    eventBus.emit('trust.denied', deniedEvent);
+  }
+
+  logger.info(
+    { approvalId, decision, actionClass: approval.action_class },
+    'Trust approval resolved',
+  );
+  return true;
 }
 
 /** Handle POST /trust/evaluate */
@@ -141,7 +208,12 @@ async function handleEvaluate(
     eventBus.emit('trust.approved', approvedEvent);
 
     logger.info(
-      { toolName, groupId, actionClass: resolvedClass, confidence: result.confidence },
+      {
+        toolName,
+        groupId,
+        actionClass: resolvedClass,
+        confidence: result.confidence,
+      },
       'Trust auto-approved',
     );
 
@@ -202,10 +274,7 @@ async function handleEvaluate(
 }
 
 /** Handle GET /trust/approval/:id */
-function handleApprovalPoll(
-  res: ServerResponse,
-  approvalId: string,
-): void {
+function handleApprovalPoll(res: ServerResponse, approvalId: string): void {
   const approval = getTrustApproval(approvalId);
 
   if (!approval) {
@@ -217,7 +286,10 @@ function handleApprovalPoll(
 }
 
 /** Handle GET /trust/status */
-function handleStatus(res: ServerResponse, query: Record<string, string>): void {
+function handleStatus(
+  res: ServerResponse,
+  query: Record<string, string>,
+): void {
   const groupId = query.group_id || 'default';
   const levels = getAllTrustLevels(groupId);
   json(res, 200, { levels });
@@ -267,7 +339,10 @@ export function startTrustGateway(port: number = 10255): { close: () => void } {
   logger.info({ port }, 'Trust gateway started');
 
   // Background timeout checker
-  const timeoutChecker = setInterval(checkExpiredApprovals, TIMEOUT_CHECK_INTERVAL_MS);
+  const timeoutChecker = setInterval(
+    checkExpiredApprovals,
+    TIMEOUT_CHECK_INTERVAL_MS,
+  );
 
   return {
     close: () => {

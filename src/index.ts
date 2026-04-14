@@ -13,6 +13,7 @@ import {
   ONECLI_URL,
   POLL_INTERVAL,
   TIMEZONE,
+  TRUST_GATEWAY_PORT,
 } from './config.js';
 import './channels/index.js';
 import {
@@ -48,6 +49,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  getPendingTrustApprovalIds,
 } from './db.js';
 import { ExecutorPool } from './executor-pool.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -65,6 +67,15 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { isBudgetExceeded } from './budget.js';
+import {
+  formatApprovalPrompt,
+  handlePotentialApprovalReply,
+} from './trust-approval-handler.js';
+import {
+  parseTrustCommand,
+  executeTrustCommand,
+} from './trust-commands.js';
+import { startTrustGateway } from './trust-gateway.js';
 import { startDealWatchLoop } from './deal-watch-loop.js';
 import { startEmailSSE } from './email-sse.js';
 import {
@@ -670,6 +681,50 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
+          // --- Trust approval interception ---
+          // Check if any new message resolves a pending trust approval.
+          // If so, consume it (don't pass to agent).
+          const pendingIds = getPendingTrustApprovalIds(chatJid);
+          if (pendingIds.length > 0) {
+            for (const msg of groupMessages) {
+              if (
+                handlePotentialApprovalReply(msg.content, chatJid, pendingIds)
+              ) {
+                // Remove from batch so it doesn't trigger agent
+                const idx = groupMessages.indexOf(msg);
+                if (idx >= 0) groupMessages.splice(idx, 1);
+              }
+            }
+            if (groupMessages.length === 0) continue;
+          }
+
+          // --- Trust command interception ---
+          // Check if any trigger message is a trust command (e.g. "trust status").
+          const triggerPatternForCmd = getTriggerPattern(group.trigger);
+          for (const msg of groupMessages) {
+            const trimmedContent = msg.content.trim();
+            if (triggerPatternForCmd.test(trimmedContent)) {
+              const strippedText = trimmedContent
+                .replace(triggerPatternForCmd, '')
+                .trim();
+              const trustCmd = parseTrustCommand(strippedText);
+              if (trustCmd) {
+                const response = executeTrustCommand(trustCmd, group.folder);
+                channel
+                  .sendMessage(chatJid, response)
+                  .catch((err) =>
+                    logger.warn(
+                      { chatJid, err },
+                      'Failed to send trust command response',
+                    ),
+                  );
+                const idx = groupMessages.indexOf(msg);
+                if (idx >= 0) groupMessages.splice(idx, 1);
+              }
+            }
+          }
+          if (groupMessages.length === 0) continue;
+
           const isMainGroup = group.isMain === true;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
@@ -1078,6 +1133,9 @@ async function main(): Promise<void> {
       }
     },
   });
+  // Start trust gateway (containers call this before write/transact ops)
+  startTrustGateway(TRUST_GATEWAY_PORT);
+
   // Real-time email notifications via SSE (poll is fallback)
   startEmailSSE();
   // Deal-watch: real-time HubSpot + Gong signal layer → main group.
