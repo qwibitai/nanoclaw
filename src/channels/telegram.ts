@@ -23,6 +23,7 @@ import {
 import {
   setGroupModel,
   setGroupEffort,
+  setGroupThinkingBudget,
   getTaskById,
   getTasksForGroup,
   updateTask,
@@ -180,6 +181,78 @@ export class TelegramChannel implements Channel {
     });
 
     // Command to view/change the model for this group
+    // --- /model multi-step configuration flow ---
+    const VALID_EFFORTS = ['low', 'medium', 'high', 'max'] as const;
+    const VALID_THINKING_BUDGETS = [
+      'low',
+      'medium',
+      'high',
+      'adaptive',
+    ] as const;
+
+    const buildTargetKeyboard = () =>
+      new InlineKeyboard()
+        .text('This group', 'cfg:tgt:grp')
+        .text('Task', 'cfg:tgt:task');
+
+    const buildModelKeyboard = (
+      currentModel: string | undefined,
+      target: string,
+    ) => {
+      const aliases = loadModelAliases();
+      const kb = new InlineKeyboard();
+      const currentResolved = currentModel || DEFAULT_MODEL;
+      let col = 0;
+      for (const [alias, id] of Object.entries(aliases)) {
+        if (col > 0 && col % 3 === 0) kb.row();
+        const label = id === currentResolved ? `● ${alias}` : alias;
+        kb.text(label, `cfg:mod:${target}:${alias}`);
+        col++;
+      }
+      kb.row().text('Reset to default', `cfg:mod:${target}:reset`);
+      return kb;
+    };
+
+    const buildEffortKeyboard = (
+      current: string | undefined,
+      target: string,
+    ) => {
+      const kb = new InlineKeyboard();
+      for (const level of VALID_EFFORTS) {
+        const label = current === level ? `● ${level}` : level;
+        kb.text(label, `cfg:eff:${target}:${level}`);
+      }
+      kb.row()
+        .text('Reset', `cfg:eff:${target}:reset`)
+        .text('Back', `cfg:eff:${target}:back`);
+      return kb;
+    };
+
+    const buildThinkingBudgetKeyboard = (
+      current: string | undefined,
+      target: string,
+    ) => {
+      const kb = new InlineKeyboard();
+      for (const preset of VALID_THINKING_BUDGETS) {
+        const label = current === preset ? `● ${preset}` : preset;
+        kb.text(label, `cfg:tb:${target}:${preset}`);
+      }
+      kb.row().text('Back', `cfg:tb:${target}:back`);
+      return kb;
+    };
+
+    const buildTaskPicker = (
+      tasks: { id: string; model?: string | null }[],
+    ) => {
+      const kb = new InlineKeyboard();
+      for (const t of tasks) {
+        const label = `${t.id}${t.model ? ` [${t.model}]` : ''}`;
+        kb.text(label, `cfg:tpick:${t.id}`).row();
+      }
+      kb.text('Back', 'cfg:tgt:back');
+      return kb;
+    };
+
     this.bot.command('model', (ctx) => {
       const chatJid = `tg:${ctx.chat.id}`;
       const groups = this.opts.registeredGroups();
@@ -191,124 +264,85 @@ export class TelegramChannel implements Channel {
 
       const args = (ctx.message?.text || '').split(/\s+/).slice(1);
 
-      if (args.length === 0) {
-        const current = group.model || DEFAULT_MODEL;
-        ctx.reply(`Model: \`${current}\`${group.model ? '' : ' (default)'}`, {
-          parse_mode: 'Markdown',
-          reply_markup: buildModelKeyboard(group.model),
-        });
-        return;
-      }
+      // Text-arg shortcuts for backwards compat
+      if (args.length > 0) {
+        if (args[0] === 'task') {
+          if (args.length < 3) {
+            ctx.reply('Usage: `/model task <task-id> <model|reset>`', {
+              parse_mode: 'Markdown',
+            });
+            return;
+          }
+          const taskId = args[1];
+          const task = getTaskById(taskId);
+          if (!task) {
+            ctx.reply(`Task \`${taskId}\` not found.`, {
+              parse_mode: 'Markdown',
+            });
+            return;
+          }
+          if (args[2] === 'reset') {
+            updateTask(taskId, { model: null });
+            ctx.reply(`Task \`${taskId}\` model reset to default.`, {
+              parse_mode: 'Markdown',
+            });
+          } else {
+            const resolved = resolveModelAlias(args[2]);
+            updateTask(taskId, { model: resolved });
+            ctx.reply(`Task \`${taskId}\` model set to \`${resolved}\`.`, {
+              parse_mode: 'Markdown',
+            });
+          }
+          return;
+        }
 
-      if (args[0] === 'task') {
-        if (args.length < 3) {
-          ctx.reply('Usage: `/model task <task-id> <model|reset>`', {
+        if (args[0] === 'reset') {
+          const previous = group.model || DEFAULT_MODEL;
+          setGroupModel(chatJid, null);
+          group.model = undefined;
+          group.agentModelOverride = undefined;
+          group.agentModelOverrideSetAt = undefined;
+          if (previous !== DEFAULT_MODEL) {
+            group.pendingModelNotice = `[model has switched from ${previous} to ${DEFAULT_MODEL}]`;
+          }
+          ctx.reply(`Model reset to default (\`${DEFAULT_MODEL}\`).`, {
             parse_mode: 'Markdown',
           });
           return;
         }
-        const taskId = args[1];
-        const task = getTaskById(taskId);
-        if (!task) {
-          ctx.reply(`Task \`${taskId}\` not found.`, {
-            parse_mode: 'Markdown',
-          });
-          return;
-        }
-        if (args[2] === 'reset') {
-          updateTask(taskId, { model: null });
-          ctx.reply(`Task \`${taskId}\` model reset to default.`, {
-            parse_mode: 'Markdown',
-          });
-        } else {
-          const resolved = resolveModelAlias(args[2]);
-          updateTask(taskId, { model: resolved });
-          ctx.reply(`Task \`${taskId}\` model set to \`${resolved}\`.`, {
-            parse_mode: 'Markdown',
-          });
-        }
-        return;
-      }
 
-      if (args[0] === 'reset') {
+        const resolved = resolveModelAlias(args[0]);
         const previous = group.model || DEFAULT_MODEL;
-        setGroupModel(chatJid, null);
-        group.model = undefined;
-        if (previous !== DEFAULT_MODEL) {
-          group.pendingModelNotice = `[model has switched from ${previous} to ${DEFAULT_MODEL}]`;
+        setGroupModel(chatJid, resolved);
+        group.model = resolved;
+        group.agentModelOverride = undefined;
+        group.agentModelOverrideSetAt = undefined;
+        if (previous !== resolved) {
+          group.pendingModelNotice = `[model has switched from ${previous} to ${resolved}]`;
         }
-        ctx.reply(`Model reset to default (\`${DEFAULT_MODEL}\`).`, {
+        ctx.reply(`Model set to \`${resolved}\`.`, {
           parse_mode: 'Markdown',
         });
         return;
       }
 
-      const resolved = resolveModelAlias(args[0]);
-      const previous = group.model || DEFAULT_MODEL;
-      setGroupModel(chatJid, resolved);
-      group.model = resolved;
-      if (previous !== resolved) {
-        group.pendingModelNotice = `[model has switched from ${previous} to ${resolved}]`;
-      }
-      ctx.reply(`Model set to \`${resolved}\`.`, {
+      // Interactive flow: Step 1 — target selection
+      const current = group.model || DEFAULT_MODEL;
+      ctx.reply(`Model: \`${current}\`\nSelect target:`, {
         parse_mode: 'Markdown',
+        reply_markup: buildTargetKeyboard(),
       });
     });
 
-    // Command to view/change thinking effort via inline keyboard
-    const VALID_EFFORTS = ['low', 'medium', 'high', 'max'] as const;
-
-    const buildEffortTargetKeyboard = () =>
-      new InlineKeyboard()
-        .text('This group', 'effort:target:group')
-        .text('Task', 'effort:target:task');
-
-    const buildEffortLevelKeyboard = (
-      current: string | undefined,
-      prefix: string,
-    ) => {
-      const kb = new InlineKeyboard();
-      for (const level of VALID_EFFORTS) {
-        const label = current === level ? `${level}` : level;
-        kb.text(label, `${prefix}:${level}`);
-      }
-      kb.row().text('Reset', `${prefix}:reset`).text('Back', 'effort:back');
-      return kb;
-    };
-
-    const buildModelKeyboard = (currentModel: string | undefined) => {
-      const aliases = loadModelAliases();
-      const kb = new InlineKeyboard();
-      const currentResolved = currentModel || DEFAULT_MODEL;
-      let col = 0;
-      for (const [alias, id] of Object.entries(aliases)) {
-        if (col > 0 && col % 3 === 0) kb.row();
-        const label = id === currentResolved ? `● ${alias}` : alias;
-        kb.text(label, `model:set:${alias}`);
-        col++;
-      }
-      kb.row().text('Reset to default', 'model:reset');
-      return kb;
-    };
-
+    // /effort deprecated — redirect to /model
     this.bot.command('effort', (ctx) => {
-      const chatJid = `tg:${ctx.chat.id}`;
-      const groups = this.opts.registeredGroups();
-      const group = groups[chatJid];
-      if (!group) {
-        ctx.reply('This chat is not registered.');
-        return;
-      }
-
-      const current = group.effort || 'default';
-      ctx.reply(`Effort: \`${current}\`\nSelect target:`, {
-        parse_mode: 'Markdown',
-        reply_markup: buildEffortTargetKeyboard(),
-      });
+      ctx.reply(
+        'The /effort command has been merged into /model.\nUse /model to configure model, effort, and thinking budget.',
+      );
     });
 
-    // Handle all effort callback queries
-    this.bot.callbackQuery(/^effort:/, (ctx) => {
+    // Unified config callback handler (cfg:*)
+    this.bot.callbackQuery(/^cfg:/, (ctx) => {
       const data = ctx.callbackQuery.data;
       if (!ctx.chat) {
         ctx.answerCallbackQuery();
@@ -319,120 +353,119 @@ export class TelegramChannel implements Channel {
       const group = groups[chatJid];
 
       if (!group) {
-        ctx.answerCallbackQuery('This chat is not registered.');
+        ctx.answerCallbackQuery('Not registered.');
         return;
       }
 
-      // effort:back — return to target selection
-      if (data === 'effort:back') {
-        const current = group.effort || 'default';
-        ctx.editMessageText(`Effort: \`${current}\`\nSelect target:`, {
+      // --- Step 1: Target selection ---
+      if (data === 'cfg:tgt:grp') {
+        const current = group.model || DEFAULT_MODEL;
+        ctx.editMessageText(`Group model (current: \`${current}\`)`, {
           parse_mode: 'Markdown',
-          reply_markup: buildEffortTargetKeyboard(),
+          reply_markup: buildModelKeyboard(group.model, 'grp'),
         });
         ctx.answerCallbackQuery();
         return;
       }
 
-      // effort:target:group — show effort level picker for group
-      if (data === 'effort:target:group') {
-        const current = group.effort || 'default';
-        ctx.editMessageText(`Group effort (current: \`${current}\`)`, {
-          parse_mode: 'Markdown',
-          reply_markup: buildEffortLevelKeyboard(group.effort, 'effort:group'),
-        });
-        ctx.answerCallbackQuery();
-        return;
-      }
-
-      // effort:target:task — show task list
-      if (data === 'effort:target:task') {
+      if (data === 'cfg:tgt:task') {
         const tasks = getTasksForGroup(group.folder);
         if (tasks.length === 0) {
           ctx.editMessageText('No tasks for this group.', {
-            reply_markup: new InlineKeyboard().text('Back', 'effort:back'),
+            reply_markup: new InlineKeyboard().text('Back', 'cfg:tgt:back'),
           });
           ctx.answerCallbackQuery();
           return;
         }
-        const kb = new InlineKeyboard();
-        for (const t of tasks) {
-          const label = `${t.id}${t.effort ? ` [${t.effort}]` : ''}`;
-          kb.text(label, `effort:task:${t.id}`).row();
-        }
-        kb.text('Back', 'effort:back');
         ctx.editMessageText('Select a task:', {
-          reply_markup: kb,
+          reply_markup: buildTaskPicker(tasks),
         });
         ctx.answerCallbackQuery();
         return;
       }
 
-      // effort:group:<level|reset> — set group effort
-      const groupMatch = data.match(/^effort:group:([\w]+)$/);
-      if (groupMatch) {
-        const value = groupMatch[1];
-        if (value === 'reset') {
-          setGroupEffort(chatJid, null);
-          group.effort = undefined;
-          ctx.editMessageText('Effort reset to default.', {
-            parse_mode: 'Markdown',
-          });
-        } else {
-          setGroupEffort(chatJid, value);
-          group.effort = value;
-          ctx.editMessageText(`Effort set to \`${value}\`.`, {
-            parse_mode: 'Markdown',
-          });
-        }
+      if (data === 'cfg:tgt:back') {
+        const current = group.model || DEFAULT_MODEL;
+        ctx.editMessageText(`Model: \`${current}\`\nSelect target:`, {
+          parse_mode: 'Markdown',
+          reply_markup: buildTargetKeyboard(),
+        });
         ctx.answerCallbackQuery();
         return;
       }
 
-      // effort:task:<id> — show effort picker for a task
-      const taskSelectMatch = data.match(/^effort:task:([^:]+)$/);
-      if (taskSelectMatch) {
-        const taskId = taskSelectMatch[1];
+      // --- Step 1b: Task picker ---
+      const tpickMatch = data.match(/^cfg:tpick:(.+)$/);
+      if (tpickMatch) {
+        const taskId = tpickMatch[1];
         const task = getTaskById(taskId);
         if (!task) {
           ctx.answerCallbackQuery('Task not found.');
           return;
         }
-        const current = task.effort || 'default';
+        const current = task.model || '(default)';
+        const target = `t:${taskId}`;
         ctx.editMessageText(
-          `Task \`${taskId}\` effort (current: \`${current}\`)`,
+          `Task \`${taskId}\` model (current: \`${current}\`)`,
           {
             parse_mode: 'Markdown',
-            reply_markup: buildEffortLevelKeyboard(
-              task.effort || undefined,
-              `effort:tset:${taskId}`,
-            ),
+            reply_markup: buildModelKeyboard(task.model || undefined, target),
           },
         );
         ctx.answerCallbackQuery();
         return;
       }
 
-      // effort:tset:<id>:<level|reset> — set task effort
-      const taskSetMatch = data.match(/^effort:tset:([^:]+):([\w]+)$/);
-      if (taskSetMatch) {
-        const [, taskId, value] = taskSetMatch;
-        const task = getTaskById(taskId);
-        if (!task) {
-          ctx.answerCallbackQuery('Task not found.');
-          return;
-        }
-        if (value === 'reset') {
-          updateTask(taskId, { effort: null });
-          ctx.editMessageText(`Task \`${taskId}\` effort reset to default.`, {
-            parse_mode: 'Markdown',
-          });
-        } else {
-          updateTask(taskId, { effort: value });
+      // --- Step 2: Model selection ---
+      const modMatch = data.match(/^cfg:mod:(grp|t:[^:]+):(.+)$/);
+      if (modMatch) {
+        const [, target, value] = modMatch;
+        if (target === 'grp') {
+          if (value === 'reset') {
+            const previous = group.model || DEFAULT_MODEL;
+            setGroupModel(chatJid, null);
+            group.model = undefined;
+            group.agentModelOverride = undefined;
+            group.agentModelOverrideSetAt = undefined;
+            if (previous !== DEFAULT_MODEL) {
+              group.pendingModelNotice = `[model has switched from ${previous} to ${DEFAULT_MODEL}]`;
+            }
+          } else {
+            const resolved = resolveModelAlias(value);
+            const previous = group.model || DEFAULT_MODEL;
+            setGroupModel(chatJid, resolved);
+            group.model = resolved;
+            group.agentModelOverride = undefined;
+            group.agentModelOverrideSetAt = undefined;
+            if (previous !== resolved) {
+              group.pendingModelNotice = `[model has switched from ${previous} to ${resolved}]`;
+            }
+          }
+          const currentEffort = group.effort || 'default';
           ctx.editMessageText(
-            `Task \`${taskId}\` effort set to \`${value}\`.`,
+            `Model updated. Effort (current: \`${currentEffort}\`):`,
             {
               parse_mode: 'Markdown',
+              reply_markup: buildEffortKeyboard(group.effort, 'grp'),
+            },
+          );
+        } else {
+          const taskId = target.slice(2);
+          if (value === 'reset') {
+            updateTask(taskId, { model: null });
+          } else {
+            updateTask(taskId, { model: resolveModelAlias(value) });
+          }
+          const task = getTaskById(taskId);
+          const currentEffort = task?.effort || 'default';
+          ctx.editMessageText(
+            `Task model updated. Effort (current: \`${currentEffort}\`):`,
+            {
+              parse_mode: 'Markdown',
+              reply_markup: buildEffortKeyboard(
+                task?.effort || undefined,
+                target,
+              ),
             },
           );
         }
@@ -440,51 +473,126 @@ export class TelegramChannel implements Channel {
         return;
       }
 
-      ctx.answerCallbackQuery();
-    });
+      // --- Step 3: Effort selection ---
+      const effMatch = data.match(/^cfg:eff:(grp|t:[^:]+):(.+)$/);
+      if (effMatch) {
+        const [, target, value] = effMatch;
 
-    // Handle all model callback queries
-    this.bot.callbackQuery(/^model:/, (ctx) => {
-      const data = ctx.callbackQuery.data;
-      if (!ctx.chat) {
+        if (value === 'back') {
+          if (target === 'grp') {
+            ctx.editMessageText(
+              `Group model (current: \`${group.model || DEFAULT_MODEL}\`)`,
+              {
+                parse_mode: 'Markdown',
+                reply_markup: buildModelKeyboard(group.model, 'grp'),
+              },
+            );
+          } else {
+            const taskId = target.slice(2);
+            const task = getTaskById(taskId);
+            ctx.editMessageText(
+              `Task \`${taskId}\` model (current: \`${task?.model || '(default)'}\`)`,
+              {
+                parse_mode: 'Markdown',
+                reply_markup: buildModelKeyboard(
+                  task?.model || undefined,
+                  target,
+                ),
+              },
+            );
+          }
+          ctx.answerCallbackQuery();
+          return;
+        }
+
+        if (target === 'grp') {
+          if (value === 'reset') {
+            setGroupEffort(chatJid, null);
+            group.effort = undefined;
+          } else {
+            setGroupEffort(chatJid, value);
+            group.effort = value;
+          }
+          const currentTb = group.thinking_budget || 'default';
+          ctx.editMessageText(
+            `Effort updated. Thinking budget (current: \`${currentTb}\`):`,
+            {
+              parse_mode: 'Markdown',
+              reply_markup: buildThinkingBudgetKeyboard(
+                group.thinking_budget,
+                'grp',
+              ),
+            },
+          );
+        } else {
+          const taskId = target.slice(2);
+          if (value === 'reset') {
+            updateTask(taskId, { effort: null });
+          } else {
+            updateTask(taskId, { effort: value });
+          }
+          const task = getTaskById(taskId);
+          const currentTb = task?.thinking_budget || 'default';
+          ctx.editMessageText(
+            `Effort updated. Thinking budget (current: \`${currentTb}\`):`,
+            {
+              parse_mode: 'Markdown',
+              reply_markup: buildThinkingBudgetKeyboard(
+                task?.thinking_budget || undefined,
+                target,
+              ),
+            },
+          );
+        }
         ctx.answerCallbackQuery();
         return;
       }
-      const chatJid = `tg:${ctx.chat.id}`;
-      const groups = this.opts.registeredGroups();
-      const group = groups[chatJid];
 
-      if (!group) {
-        ctx.answerCallbackQuery('This chat is not registered.');
-        return;
-      }
+      // --- Step 4: Thinking budget selection ---
+      const tbMatch = data.match(/^cfg:tb:(grp|t:[^:]+):(.+)$/);
+      if (tbMatch) {
+        const [, target, value] = tbMatch;
 
-      if (data === 'model:reset') {
-        const previous = group.model || DEFAULT_MODEL;
-        setGroupModel(chatJid, null);
-        group.model = undefined;
-        if (previous !== DEFAULT_MODEL) {
-          group.pendingModelNotice = `[model has switched from ${previous} to ${DEFAULT_MODEL}]`;
+        if (value === 'back') {
+          if (target === 'grp') {
+            ctx.editMessageText(
+              `Effort (current: \`${group.effort || 'default'}\`):`,
+              {
+                parse_mode: 'Markdown',
+                reply_markup: buildEffortKeyboard(group.effort, 'grp'),
+              },
+            );
+          } else {
+            const taskId = target.slice(2);
+            const task = getTaskById(taskId);
+            ctx.editMessageText(
+              `Task \`${taskId}\` effort (current: \`${task?.effort || 'default'}\`):`,
+              {
+                parse_mode: 'Markdown',
+                reply_markup: buildEffortKeyboard(
+                  task?.effort || undefined,
+                  target,
+                ),
+              },
+            );
+          }
+          ctx.answerCallbackQuery();
+          return;
         }
-        ctx.editMessageText(`Model reset to default (\`${DEFAULT_MODEL}\`).`, {
-          parse_mode: 'Markdown',
-        });
-        ctx.answerCallbackQuery();
-        return;
-      }
 
-      const match = data.match(/^model:set:(.+)$/);
-      if (match) {
-        const resolved = resolveModelAlias(match[1]);
-        const previous = group.model || DEFAULT_MODEL;
-        setGroupModel(chatJid, resolved);
-        group.model = resolved;
-        if (previous !== resolved) {
-          group.pendingModelNotice = `[model has switched from ${previous} to ${resolved}]`;
+        if (target === 'grp') {
+          setGroupThinkingBudget(chatJid, value);
+          group.thinking_budget = value;
+          ctx.editMessageText('Configuration complete.', {
+            parse_mode: 'Markdown',
+          });
+        } else {
+          const taskId = target.slice(2);
+          updateTask(taskId, { thinking_budget: value });
+          ctx.editMessageText(`Task \`${taskId}\` configuration complete.`, {
+            parse_mode: 'Markdown',
+          });
         }
-        ctx.editMessageText(`Model set to \`${resolved}\`.`, {
-          parse_mode: 'Markdown',
-        });
         ctx.answerCallbackQuery();
         return;
       }
@@ -612,11 +720,13 @@ export class TelegramChannel implements Channel {
 
       const lines = tasks.map((t) => {
         const model = t.model ? `\`${t.model}\`` : '(default)';
+        const effort = t.effort ? `\`${t.effort}\`` : '(default)';
+        const tb = t.thinking_budget ? `\`${t.thinking_budget}\`` : '(default)';
         const prompt =
           t.prompt.length > 60 ? t.prompt.slice(0, 57) + '...' : t.prompt;
         return [
           `\`${t.id}\` | ${t.schedule_type} ${t.schedule_value} | ${t.status}`,
-          `  Model: ${model}`,
+          `  Model: ${model} | Effort: ${effort} | Thinking: ${tb}`,
           `  Last: ${fmtTime(t.last_run)} | Next: ${fmtTime(t.next_run)}`,
           `  Prompt: ${prompt}`,
         ].join('\n');
@@ -953,8 +1063,10 @@ export class TelegramChannel implements Channel {
     const commands = [
       { command: 'chatid', description: 'Show chat ID for registration' },
       { command: 'ping', description: 'Check bot status' },
-      { command: 'model', description: 'View or change the AI model' },
-      { command: 'effort', description: 'Set thinking effort level' },
+      {
+        command: 'model',
+        description: 'Configure model, effort, and thinking',
+      },
       { command: 'status', description: 'Show system status' },
       { command: 'compact', description: 'Compact conversation context' },
       { command: 'clear', description: 'Clear conversation session' },

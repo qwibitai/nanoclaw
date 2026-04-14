@@ -60,6 +60,7 @@ vi.mock('../live-location.js', () => {
 vi.mock('../db.js', () => ({
   setGroupModel: vi.fn(),
   setGroupEffort: vi.fn(),
+  setGroupThinkingBudget: vi.fn(),
 
   getTaskById: vi.fn((id: string) => {
     if (id === 'task-123') {
@@ -207,8 +208,12 @@ vi.mock('grammy', () => ({
 }));
 
 import fs from 'fs';
-import { setGroupModel, setGroupEffort, updateTask } from '../db.js';
-import { loadModelAliases } from '../config.js';
+import {
+  setGroupModel,
+  setGroupEffort,
+  setGroupThinkingBudget,
+  updateTask,
+} from '../db.js';
 import { getActiveLiveLocationContext } from '../live-location.js';
 import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
 import { RegisteredGroup } from '../types.js';
@@ -426,8 +431,10 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.setMyCommands).toHaveBeenCalledWith([
         { command: 'chatid', description: 'Show chat ID for registration' },
         { command: 'ping', description: 'Check bot status' },
-        { command: 'model', description: 'View or change the AI model' },
-        { command: 'effort', description: 'Set thinking effort level' },
+        {
+          command: 'model',
+          description: 'Configure model, effort, and thinking',
+        },
         { command: 'status', description: 'Show system status' },
         { command: 'compact', description: 'Compact conversation context' },
         { command: 'clear', description: 'Clear conversation session' },
@@ -1437,7 +1444,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().commandHandlers.has('model')).toBe(true);
     });
 
-    it('/model shows current model (default) when no per-group model set', async () => {
+    it('/model shows current model and target selection when no args', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
@@ -1456,7 +1463,7 @@ describe('TelegramChannel', () => {
         expect.objectContaining({ parse_mode: 'Markdown' }),
       );
       expect(ctx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('(default)'),
+        expect.stringContaining('Select target'),
         expect.any(Object),
       );
     });
@@ -1496,8 +1503,7 @@ describe('TelegramChannel', () => {
       );
     });
 
-    it('/model with empty aliases shows only Reset button', async () => {
-      vi.mocked(loadModelAliases).mockReturnValueOnce({});
+    it('/model with no args shows target selection keyboard', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
@@ -1517,35 +1523,11 @@ describe('TelegramChannel', () => {
         text: string;
         callback_data: string;
       }>;
-      expect(buttons).toHaveLength(1);
-      expect(buttons[0].text).toBe('Reset to default');
-      expect(buttons[0].callback_data).toBe('model:reset');
-    });
-
-    it('/model shows alias list as inline keyboard buttons', async () => {
-      const opts = createTestOpts();
-      const channel = new TelegramChannel('test-token', opts);
-      await channel.connect();
-
-      const handler = currentBot().commandHandlers.get('model')!;
-      const ctx = {
-        chat: { id: 100200300 },
-        message: { text: '/model' },
-        reply: vi.fn(),
-      };
-
-      await handler(ctx);
-
-      const replyOpts = ctx.reply.mock.calls[0][1];
-      expect(replyOpts.reply_markup).toBeDefined();
-      const buttons = replyOpts.reply_markup.buttons.flat() as Array<{
-        text: string;
-        callback_data: string;
-      }>;
-      const labels = buttons.map((b) => b.text);
-      expect(labels.some((l) => l.includes('opus'))).toBe(true);
-      expect(labels.some((l) => l.includes('sonnet'))).toBe(true);
-      expect(labels.some((l) => l.includes('haiku'))).toBe(true);
+      expect(buttons).toHaveLength(2);
+      expect(buttons[0].text).toBe('This group');
+      expect(buttons[0].callback_data).toBe('cfg:tgt:grp');
+      expect(buttons[1].text).toBe('Task');
+      expect(buttons[1].callback_data).toBe('cfg:tgt:task');
     });
 
     it('/model <alias> sets model and preserves session', async () => {
@@ -1675,25 +1657,24 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
-    describe('model: callback queries', () => {
-      function findModelCallbackHandler() {
+    describe('cfg: callback queries', () => {
+      function findCfgCallbackHandler() {
         const bot = currentBot();
         const entry = bot.callbackQueryHandlers.find(
           (h: { pattern: RegExp | string }) =>
-            h.pattern instanceof RegExp &&
-            h.pattern.source === /^model:/.source,
+            h.pattern instanceof RegExp && h.pattern.source === /^cfg:/.source,
         );
         return entry?.handler;
       }
 
-      it('registers the model: callback handler', async () => {
+      it('registers the cfg: callback handler', async () => {
         const channel = new TelegramChannel('test-token', createTestOpts());
         await channel.connect();
 
-        expect(findModelCallbackHandler()).toBeDefined();
+        expect(findCfgCallbackHandler()).toBeDefined();
       });
 
-      it('model:set:<alias> sets the model', async () => {
+      it('cfg:mod:grp:<alias> sets the model and advances to effort', async () => {
         const groups: Record<
           string,
           {
@@ -1717,9 +1698,9 @@ describe('TelegramChannel', () => {
         const channel = new TelegramChannel('test-token', opts);
         await channel.connect();
 
-        const handler = findModelCallbackHandler()!;
+        const handler = findCfgCallbackHandler()!;
         const ctx = {
-          callbackQuery: { data: 'model:set:opus' },
+          callbackQuery: { data: 'cfg:mod:grp:opus' },
           chat: { id: 100200300 },
           editMessageText: vi.fn(),
           answerCallbackQuery: vi.fn(),
@@ -1733,13 +1714,13 @@ describe('TelegramChannel', () => {
         );
         expect(groups['tg:100200300'].model).toBe('claude-opus-4-20250514');
         expect(ctx.editMessageText).toHaveBeenCalledWith(
-          expect.stringContaining('claude-opus-4-20250514'),
+          expect.stringContaining('Effort'),
           expect.any(Object),
         );
         expect(ctx.answerCallbackQuery).toHaveBeenCalled();
       });
 
-      it('model:reset clears the model', async () => {
+      it('cfg:mod:grp:reset clears the model', async () => {
         const groups: Record<
           string,
           {
@@ -1764,9 +1745,9 @@ describe('TelegramChannel', () => {
         const channel = new TelegramChannel('test-token', opts);
         await channel.connect();
 
-        const handler = findModelCallbackHandler()!;
+        const handler = findCfgCallbackHandler()!;
         const ctx = {
-          callbackQuery: { data: 'model:reset' },
+          callbackQuery: { data: 'cfg:mod:grp:reset' },
           chat: { id: 100200300 },
           editMessageText: vi.fn(),
           answerCallbackQuery: vi.fn(),
@@ -1777,22 +1758,22 @@ describe('TelegramChannel', () => {
         expect(setGroupModel).toHaveBeenCalledWith('tg:100200300', null);
         expect(groups['tg:100200300'].model).toBeUndefined();
         expect(ctx.editMessageText).toHaveBeenCalledWith(
-          expect.stringContaining('default'),
+          expect.stringContaining('Effort'),
           expect.any(Object),
         );
         expect(ctx.answerCallbackQuery).toHaveBeenCalled();
       });
 
-      it('model: callback for unregistered chat replies error', async () => {
+      it('cfg: callback for unregistered chat replies error', async () => {
         const opts = createTestOpts({
           registeredGroups: vi.fn(() => ({})),
         });
         const channel = new TelegramChannel('test-token', opts);
         await channel.connect();
 
-        const handler = findModelCallbackHandler()!;
+        const handler = findCfgCallbackHandler()!;
         const ctx = {
-          callbackQuery: { data: 'model:set:opus' },
+          callbackQuery: { data: 'cfg:mod:grp:opus' },
           chat: { id: 999999 },
           editMessageText: vi.fn(),
           answerCallbackQuery: vi.fn(),
@@ -1800,10 +1781,115 @@ describe('TelegramChannel', () => {
 
         await handler(ctx);
 
-        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith(
-          'This chat is not registered.',
-        );
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith('Not registered.');
         expect(setGroupModel).not.toHaveBeenCalled();
+      });
+
+      it('cfg:eff:grp:<level> sets group effort and advances to thinking budget', async () => {
+        const groups: Record<
+          string,
+          {
+            name: string;
+            folder: string;
+            trigger: string;
+            added_at: string;
+            effort?: string;
+          }
+        > = {
+          'tg:100200300': {
+            name: 'Test Group',
+            folder: 'test-group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+          },
+        };
+        const opts = createTestOpts({
+          registeredGroups: vi.fn(() => groups),
+        });
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+
+        const handler = findCfgCallbackHandler()!;
+        const ctx = {
+          callbackQuery: { data: 'cfg:eff:grp:high' },
+          chat: { id: 100200300 },
+          editMessageText: vi.fn(),
+          answerCallbackQuery: vi.fn(),
+        };
+
+        await handler(ctx);
+
+        expect(setGroupEffort).toHaveBeenCalledWith('tg:100200300', 'high');
+        expect(groups['tg:100200300'].effort).toBe('high');
+        expect(ctx.editMessageText).toHaveBeenCalledWith(
+          expect.stringContaining('Thinking budget'),
+          expect.any(Object),
+        );
+      });
+
+      it('cfg:tb:grp:<preset> sets thinking budget and completes', async () => {
+        const groups: Record<
+          string,
+          {
+            name: string;
+            folder: string;
+            trigger: string;
+            added_at: string;
+            thinking_budget?: string;
+          }
+        > = {
+          'tg:100200300': {
+            name: 'Test Group',
+            folder: 'test-group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+          },
+        };
+        const opts = createTestOpts({
+          registeredGroups: vi.fn(() => groups),
+        });
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+
+        const handler = findCfgCallbackHandler()!;
+        const ctx = {
+          callbackQuery: { data: 'cfg:tb:grp:adaptive' },
+          chat: { id: 100200300 },
+          editMessageText: vi.fn(),
+          answerCallbackQuery: vi.fn(),
+        };
+
+        await handler(ctx);
+
+        expect(setGroupThinkingBudget).toHaveBeenCalledWith(
+          'tg:100200300',
+          'adaptive',
+        );
+        expect(groups['tg:100200300'].thinking_budget).toBe('adaptive');
+        expect(ctx.editMessageText).toHaveBeenCalledWith(
+          'Configuration complete.',
+          expect.any(Object),
+        );
+      });
+
+      it('cfg:tgt:task shows task picker', async () => {
+        const channel = new TelegramChannel('test-token', createTestOpts());
+        await channel.connect();
+
+        const handler = findCfgCallbackHandler()!;
+        const ctx = {
+          callbackQuery: { data: 'cfg:tgt:task' },
+          chat: { id: 100200300 },
+          editMessageText: vi.fn(),
+          answerCallbackQuery: vi.fn(),
+        };
+
+        await handler(ctx);
+
+        expect(ctx.editMessageText).toHaveBeenCalledWith(
+          'Select a task:',
+          expect.objectContaining({ reply_markup: expect.anything() }),
+        );
       });
     });
 
@@ -1898,7 +1984,7 @@ describe('TelegramChannel', () => {
         );
       });
 
-      it('callback model:set sets pendingModelNotice', async () => {
+      it('callback cfg:mod:grp sets pendingModelNotice', async () => {
         const groups: Record<string, RegisteredGroup> = {
           'tg:100200300': {
             name: 'Test Group',
@@ -1915,12 +2001,11 @@ describe('TelegramChannel', () => {
 
         const entry = currentBot().callbackQueryHandlers.find(
           (h: { pattern: RegExp | string }) =>
-            h.pattern instanceof RegExp &&
-            h.pattern.source === /^model:/.source,
+            h.pattern instanceof RegExp && h.pattern.source === /^cfg:/.source,
         );
         const handler = entry!.handler;
         const ctx = {
-          callbackQuery: { data: 'model:set:opus' },
+          callbackQuery: { data: 'cfg:mod:grp:opus' },
           chat: { id: 100200300 },
           editMessageText: vi.fn(),
           answerCallbackQuery: vi.fn(),
@@ -1933,7 +2018,7 @@ describe('TelegramChannel', () => {
         );
       });
 
-      it('callback model:reset sets pendingModelNotice when model was non-default', async () => {
+      it('callback cfg:mod:grp:reset sets pendingModelNotice when model was non-default', async () => {
         const groups: Record<string, RegisteredGroup> = {
           'tg:100200300': {
             name: 'Test Group',
@@ -1951,12 +2036,11 @@ describe('TelegramChannel', () => {
 
         const entry = currentBot().callbackQueryHandlers.find(
           (h: { pattern: RegExp | string }) =>
-            h.pattern instanceof RegExp &&
-            h.pattern.source === /^model:/.source,
+            h.pattern instanceof RegExp && h.pattern.source === /^cfg:/.source,
         );
         const handler = entry!.handler;
         const ctx = {
-          callbackQuery: { data: 'model:reset' },
+          callbackQuery: { data: 'cfg:mod:grp:reset' },
           chat: { id: 100200300 },
           editMessageText: vi.fn(),
           answerCallbackQuery: vi.fn(),
@@ -2167,6 +2251,8 @@ describe('TelegramChannel', () => {
       expect(replyText).toContain('(default)');
       expect(replyText).toContain('Last:');
       expect(replyText).toContain('Next:');
+      expect(replyText).toContain('Effort:');
+      expect(replyText).toContain('Thinking:');
     });
 
     it('shows empty message when no tasks', async () => {
@@ -2294,27 +2380,17 @@ describe('TelegramChannel', () => {
     });
   });
 
-  // --- /effort command ---
+  // --- /effort command (deprecated) ---
 
-  describe('/effort command', () => {
-    function findCallbackHandler(pattern: RegExp) {
-      const bot = currentBot();
-      const entry = bot.callbackQueryHandlers.find(
-        (h: { pattern: RegExp | string }) =>
-          h.pattern instanceof RegExp && h.pattern.source === pattern.source,
-      );
-      return entry?.handler;
-    }
-
-    it('registers the effort command and callback handler', async () => {
+  describe('/effort command (deprecated)', () => {
+    it('registers the effort command', async () => {
       const channel = new TelegramChannel('test-token', createTestOpts());
       await channel.connect();
 
       expect(currentBot().commandHandlers.has('effort')).toBe(true);
-      expect(currentBot().callbackQueryHandlers.length).toBeGreaterThan(0);
     });
 
-    it('/effort shows current effort and target selection keyboard', async () => {
+    it('/effort shows deprecation message', async () => {
       const channel = new TelegramChannel('test-token', createTestOpts());
       await channel.connect();
 
@@ -2327,187 +2403,7 @@ describe('TelegramChannel', () => {
 
       await handler(ctx);
 
-      expect(ctx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('default'),
-        expect.objectContaining({
-          parse_mode: 'Markdown',
-          reply_markup: expect.anything(),
-        }),
-      );
-    });
-
-    it('effort:target:group shows effort level picker', async () => {
-      const channel = new TelegramChannel('test-token', createTestOpts());
-      await channel.connect();
-
-      const handler = findCallbackHandler(/^effort:/)!;
-      const ctx = {
-        callbackQuery: { data: 'effort:target:group' },
-        chat: { id: 100200300 },
-        editMessageText: vi.fn(),
-        answerCallbackQuery: vi.fn(),
-      };
-
-      await handler(ctx);
-
-      expect(ctx.editMessageText).toHaveBeenCalledWith(
-        expect.stringContaining('Group effort'),
-        expect.objectContaining({ reply_markup: expect.anything() }),
-      );
-      expect(ctx.answerCallbackQuery).toHaveBeenCalled();
-    });
-
-    it('effort:group:high sets group effort', async () => {
-      const groups: Record<
-        string,
-        {
-          name: string;
-          folder: string;
-          trigger: string;
-          added_at: string;
-          effort?: string;
-        }
-      > = {
-        'tg:100200300': {
-          name: 'Test Group',
-          folder: 'test-group',
-          trigger: '@Andy',
-          added_at: '2024-01-01T00:00:00.000Z',
-        },
-      };
-      const opts = createTestOpts({
-        registeredGroups: vi.fn(() => groups),
-      });
-      const channel = new TelegramChannel('test-token', opts);
-      await channel.connect();
-
-      const handler = findCallbackHandler(/^effort:/)!;
-      const ctx = {
-        callbackQuery: { data: 'effort:group:high' },
-        chat: { id: 100200300 },
-        editMessageText: vi.fn(),
-        answerCallbackQuery: vi.fn(),
-      };
-
-      await handler(ctx);
-
-      expect(setGroupEffort).toHaveBeenCalledWith('tg:100200300', 'high');
-      expect(groups['tg:100200300'].effort).toBe('high');
-      expect(ctx.editMessageText).toHaveBeenCalledWith(
-        expect.stringContaining('high'),
-        expect.any(Object),
-      );
-    });
-
-    it('effort:group:reset clears group effort', async () => {
-      const groups = {
-        'tg:100200300': {
-          name: 'Test Group',
-          folder: 'test-group',
-          trigger: '@Andy',
-          added_at: '2024-01-01T00:00:00.000Z',
-          effort: 'high',
-        },
-      };
-      const opts = createTestOpts({
-        registeredGroups: vi.fn(() => groups),
-      });
-      const channel = new TelegramChannel('test-token', opts);
-      await channel.connect();
-
-      const handler = findCallbackHandler(/^effort:/)!;
-      const ctx = {
-        callbackQuery: { data: 'effort:group:reset' },
-        chat: { id: 100200300 },
-        editMessageText: vi.fn(),
-        answerCallbackQuery: vi.fn(),
-      };
-
-      await handler(ctx);
-
-      expect(setGroupEffort).toHaveBeenCalledWith('tg:100200300', null);
-      expect(groups['tg:100200300'].effort).toBeUndefined();
-    });
-
-    it('effort:target:task shows task list', async () => {
-      const channel = new TelegramChannel('test-token', createTestOpts());
-      await channel.connect();
-
-      const handler = findCallbackHandler(/^effort:/)!;
-      const ctx = {
-        callbackQuery: { data: 'effort:target:task' },
-        chat: { id: 100200300 },
-        editMessageText: vi.fn(),
-        answerCallbackQuery: vi.fn(),
-      };
-
-      await handler(ctx);
-
-      expect(ctx.editMessageText).toHaveBeenCalledWith(
-        'Select a task:',
-        expect.objectContaining({ reply_markup: expect.anything() }),
-      );
-    });
-
-    it('effort:task:<id> shows effort picker for task', async () => {
-      const channel = new TelegramChannel('test-token', createTestOpts());
-      await channel.connect();
-
-      const handler = findCallbackHandler(/^effort:/)!;
-      const ctx = {
-        callbackQuery: { data: 'effort:task:task-123' },
-        chat: { id: 100200300 },
-        editMessageText: vi.fn(),
-        answerCallbackQuery: vi.fn(),
-      };
-
-      await handler(ctx);
-
-      expect(ctx.editMessageText).toHaveBeenCalledWith(
-        expect.stringContaining('task-123'),
-        expect.objectContaining({ reply_markup: expect.anything() }),
-      );
-    });
-
-    it('effort:tset:<id>:low sets task effort', async () => {
-      const channel = new TelegramChannel('test-token', createTestOpts());
-      await channel.connect();
-
-      const handler = findCallbackHandler(/^effort:/)!;
-      const ctx = {
-        callbackQuery: { data: 'effort:tset:task-123:low' },
-        chat: { id: 100200300 },
-        editMessageText: vi.fn(),
-        answerCallbackQuery: vi.fn(),
-      };
-
-      await handler(ctx);
-
-      expect(updateTask).toHaveBeenCalledWith('task-123', { effort: 'low' });
-      expect(ctx.editMessageText).toHaveBeenCalledWith(
-        expect.stringContaining('low'),
-        expect.any(Object),
-      );
-    });
-
-    it('effort:back returns to target selection', async () => {
-      const channel = new TelegramChannel('test-token', createTestOpts());
-      await channel.connect();
-
-      const handler = findCallbackHandler(/^effort:/)!;
-      const ctx = {
-        callbackQuery: { data: 'effort:back' },
-        chat: { id: 100200300 },
-        editMessageText: vi.fn(),
-        answerCallbackQuery: vi.fn(),
-      };
-
-      await handler(ctx);
-
-      expect(ctx.editMessageText).toHaveBeenCalledWith(
-        expect.stringContaining('Select target'),
-        expect.objectContaining({ reply_markup: expect.anything() }),
-      );
+      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('/model'));
     });
   });
 
