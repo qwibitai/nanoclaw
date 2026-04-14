@@ -17,6 +17,7 @@ import {
 } from './container-runner.js';
 import { runHostAgent } from './host-runner.js';
 import {
+  deleteTask,
   getAllTasks,
   getDueTasks,
   getTaskById,
@@ -205,6 +206,8 @@ async function runTask(
         script: task.script || undefined,
         model: task.model || group.model || DEFAULT_MODEL,
         effort: task.effort || group.effort || undefined,
+        thinking_budget:
+          task.thinking_budget || group.thinking_budget || undefined,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
@@ -213,7 +216,7 @@ async function runTask(
           result = streamedOutput.result;
           const raw = streamedOutput.result;
           const text = stripInternalTags(raw);
-          const isHeartbeatOk = text === HEARTBEAT_OK_MARKER;
+          const isHeartbeatOk = text.includes(HEARTBEAT_OK_MARKER);
 
           if (task.silent || isHeartbeatOk) {
             if (!streamedOutput.partial) scheduleClose();
@@ -281,6 +284,12 @@ async function runTask(
       ? result.slice(0, 200)
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
+
+  // Clean up completed tasks with no next run
+  if (nextRun === null) {
+    deleteTask(task.id);
+    logger.info({ taskId: task.id }, 'Deleted completed task');
+  }
 }
 
 let schedulerRunning = false;

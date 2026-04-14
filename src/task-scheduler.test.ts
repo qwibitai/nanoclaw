@@ -262,6 +262,54 @@ describe('task scheduler', () => {
     expect(deps.sendMessage).not.toHaveBeenCalled();
   });
 
+  it('HEARTBEAT_OK embedded in multi-turn text is suppressed', async () => {
+    // When the agent calls send_message and then outputs HEARTBEAT_OK,
+    // agent-runner accumulates text from all turns:
+    // "I sent the update.\n\nHEARTBEAT_OK"
+    // This must still be detected and suppressed.
+    const mock = await getRunHostAgentMock();
+    mock.mockImplementation(
+      async (
+        _group: RegisteredGroup,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        _input: any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        _onProcess: any,
+        onOutput?: (output: ContainerOutput) => Promise<void>,
+      ) => {
+        if (onOutput) {
+          await onOutput({
+            result: 'I sent the update.\n\nHEARTBEAT_OK',
+            status: 'success',
+          });
+        }
+        return {
+          result: 'I sent the update.\n\nHEARTBEAT_OK',
+          status: 'success' as const,
+        };
+      },
+    );
+
+    createTask({
+      id: 'heartbeat-multi-turn',
+      group_folder: 'test-group',
+      chat_jid: 'tg:999',
+      prompt: 'send update',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+    });
+
+    const deps = makeDeps();
+    startSchedulerLoop(deps);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(deps.sendMessage).not.toHaveBeenCalled();
+  });
+
   it('duplicate streaming output is sent only once', async () => {
     const mock = await getRunHostAgentMock();
     mock.mockImplementation(
@@ -554,6 +602,82 @@ describe('task scheduler', () => {
     expect(runHostAgentMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ prompt: 'do something' }),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('deletes completed one-shot task after execution', async () => {
+    const mock = await getRunHostAgentMock();
+    mock.mockImplementation(
+      async (
+        _group: unknown,
+        _opts: unknown,
+        _onProcess: unknown,
+        onOutput: (o: ContainerOutput) => Promise<void>,
+      ) => {
+        await onOutput({ result: 'done', status: 'success' });
+        return { result: 'done', status: 'success' as const };
+      },
+    );
+
+    createTask({
+      id: 'one-shot-delete',
+      group_folder: 'test-group',
+      chat_jid: 'tg:999',
+      prompt: 'run once',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+    });
+
+    expect(getTaskById('one-shot-delete')).toBeDefined();
+
+    const deps = makeDeps();
+    startSchedulerLoop(deps);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(getTaskById('one-shot-delete')).toBeUndefined();
+  });
+
+  it('passes thinking_budget through to the agent runner', async () => {
+    const mock = await getRunHostAgentMock();
+    mock.mockImplementation(
+      async (
+        _group: unknown,
+        _opts: unknown,
+        _onProcess: unknown,
+        onOutput: (o: ContainerOutput) => Promise<void>,
+      ) => {
+        await onOutput({ result: 'done', status: 'success' });
+        return { result: 'done', status: 'success' as const };
+      },
+    );
+
+    createTask({
+      id: 'tb-task',
+      group_folder: 'test-group',
+      chat_jid: 'tg:999',
+      prompt: 'think hard',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+      thinking_budget: 'high',
+    });
+
+    const deps = makeDeps();
+    startSchedulerLoop(deps);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(mock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ thinking_budget: 'high' }),
       expect.anything(),
       expect.anything(),
     );
