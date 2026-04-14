@@ -351,7 +351,7 @@ describe('url_watch flow', () => {
         threadJid: 'dc:thread-direct-fail',
         sourceMessageId: 'msg-direct-fail',
       }),
-      'Initial URL direct processing failed',
+      'Initial URL direct processing failed; re-enqueueing message check',
     );
   });
 
