@@ -230,38 +230,6 @@ function generateFallbackName(): string {
   return `conversation-${time.getHours().toString().padStart(2, '0')}${time.getMinutes().toString().padStart(2, '0')}`;
 }
 
-interface AnthropicIncident {
-  name: string;
-  status: string;
-  shortlink: string;
-}
-
-// Best-effort check of status.claude.com for an active incident.
-// Returns the most recent unresolved incident, or null on any failure.
-async function checkAnthropicStatus(): Promise<AnthropicIncident | null> {
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 4000);
-    const res = await fetch(
-      'https://status.claude.com/api/v2/incidents/unresolved.json',
-      { signal: ctrl.signal },
-    );
-    clearTimeout(t);
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      incidents?: Array<{ name: string; status: string; shortlink: string }>;
-    };
-    const incident = data.incidents?.[0];
-    if (!incident) return null;
-    return {
-      name: incident.name,
-      status: incident.status,
-      shortlink: incident.shortlink,
-    };
-  } catch {
-    return null;
-  }
-}
 
 interface ParsedMessage {
   role: 'user' | 'assistant';
@@ -454,8 +422,6 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
-  let apiRetryCount = 0;
-  let apiRetryReported = false;
   // Set when the agent calls `send_message` mid-turn. Suppresses the final
   // result text so we don't double-post (one from the tool call, one from
   // the orchestrator posting result.result).
@@ -709,26 +675,6 @@ async function runQuery(
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
       log(`Session initialized: ${newSessionId}`);
-    }
-
-    // Detect upstream Anthropic outages: the SDK swallows 429/529 and emits
-    // `api_retry` events. After 3 in a row, check status.claude.com and
-    // bail out with a user-facing message + incident link instead of hanging.
-    if (
-      message.type === 'system' &&
-      (message as { subtype?: string }).subtype === 'api_retry'
-    ) {
-      apiRetryCount++;
-      if (apiRetryCount >= 3 && !apiRetryReported) {
-        apiRetryReported = true;
-        const incident = await checkAnthropicStatus();
-        const msg = incident
-          ? `⚠️ Anthropic API outage: **${incident.name}** (${incident.status}). Details: ${incident.shortlink}`
-          : `⚠️ Anthropic API is failing repeatedly (3+ retries) but no public incident is listed. Check https://status.claude.com`;
-        log(`api_retry threshold hit — ${msg}`);
-        writeOutput({ status: 'success', result: msg, newSessionId });
-        return { newSessionId, lastAssistantUuid, closedDuringQuery };
-      }
     }
 
     if (
