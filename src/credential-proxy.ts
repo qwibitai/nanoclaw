@@ -48,8 +48,7 @@ export function startCredentialProxy(
     secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
 
   // Detect if upstream is an OpenAI-compatible endpoint
-  const upstreamRaw =
-    secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
+  const upstreamRaw = secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
   const isOpenAI =
     upstreamRaw.includes('openai.com') ||
     upstreamRaw.includes('localhost:11434') ||
@@ -81,7 +80,10 @@ export function startCredentialProxy(
           : '');
 
       if (isOpenAI) {
-        logger.debug({ method: req.method, path: upstreamPath }, 'Proxy request');
+        logger.debug(
+          { method: req.method, path: upstreamPath },
+          'Proxy request',
+        );
       }
 
       const chunks: Buffer[] = [];
@@ -101,17 +103,30 @@ export function startCredentialProxy(
           if (!upstreamPath.startsWith('/v1/messages')) {
             // Log what we're getting so we can debug
             const bodyPreview = rawBody.toString().slice(0, 500);
-            const looksLikeMessages = bodyPreview.includes('"messages"') && bodyPreview.includes('"model"');
+            const looksLikeMessages =
+              bodyPreview.includes('"messages"') &&
+              bodyPreview.includes('"model"');
             if (looksLikeMessages) {
-              logger.info({ path: upstreamPath }, 'OpenAI mode: treating as messages request (body contains messages+model)');
+              logger.info(
+                { path: upstreamPath },
+                'OpenAI mode: treating as messages request (body contains messages+model)',
+              );
               // Fall through to normal translation below
             } else {
-              logger.debug({ path: upstreamPath, bodyPreview }, 'OpenAI mode: stubbing non-messages request');
+              logger.debug(
+                { path: upstreamPath, bodyPreview },
+                'OpenAI mode: stubbing non-messages request',
+              );
               res.writeHead(404, { 'content-type': 'application/json' });
-              res.end(JSON.stringify({
-                type: 'error',
-                error: { type: 'not_found_error', message: 'Not available in OpenAI proxy mode' },
-              }));
+              res.end(
+                JSON.stringify({
+                  type: 'error',
+                  error: {
+                    type: 'not_found_error',
+                    message: 'Not available in OpenAI proxy mode',
+                  },
+                }),
+              );
               return;
             }
           }
@@ -144,7 +159,10 @@ export function startCredentialProxy(
               'Translated Anthropic → OpenAI request',
             );
           } catch (err) {
-            logger.error({ err }, 'Failed to translate request to OpenAI format');
+            logger.error(
+              { err },
+              'Failed to translate request to OpenAI format',
+            );
             res.writeHead(500);
             res.end('Translation error');
             return;
@@ -230,7 +248,10 @@ export function startCredentialProxy(
               upRes.on('end', () => {
                 // Process remaining buffer
                 if (buffer.trim()) {
-                  const anthropicEvents = translateSSEChunk(buffer.trim(), state);
+                  const anthropicEvents = translateSSEChunk(
+                    buffer.trim(),
+                    state,
+                  );
                   for (const event of anthropicEvents) {
                     res.write(event + '\n');
                   }
@@ -259,7 +280,10 @@ export function startCredentialProxy(
               upRes.on('end', () => {
                 const openaiResponse = Buffer.concat(jsonChunks).toString();
                 logger.debug(
-                  { statusCode: upRes.statusCode, responsePreview: openaiResponse.slice(0, 500) },
+                  {
+                    statusCode: upRes.statusCode,
+                    responsePreview: openaiResponse.slice(0, 500),
+                  },
                   'OpenAI JSON response received',
                 );
                 try {
@@ -281,10 +305,7 @@ export function startCredentialProxy(
                     // Never let token tracking break the proxy
                   }
                 } catch (err) {
-                  logger.error(
-                    { err },
-                    'Failed to translate OpenAI response',
-                  );
+                  logger.error({ err }, 'Failed to translate OpenAI response');
                   res.writeHead(502);
                   res.end('Translation error');
                 }
@@ -353,7 +374,13 @@ export function startCredentialProxy(
 
     server.listen(port, host, () => {
       logger.info(
-        { port, host, authMode, openaiMode: isOpenAI, upstream: upstreamUrl.hostname },
+        {
+          port,
+          host,
+          authMode,
+          openaiMode: isOpenAI,
+          upstream: upstreamUrl.hostname,
+        },
         'Credential proxy started',
       );
       resolve(server);

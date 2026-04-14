@@ -406,8 +406,11 @@ export function translateSSEChunk(
         }
 
         if (tc.function?.arguments) {
-          state.toolCalls[tcIndex] =
-            state.toolCalls[tcIndex] || { id: '', name: '', args: '' };
+          state.toolCalls[tcIndex] = state.toolCalls[tcIndex] || {
+            id: '',
+            name: '',
+            args: '',
+          };
           state.toolCalls[tcIndex].args += tc.function.arguments;
           events.push(
             `event: content_block_delta\ndata: ${JSON.stringify({
