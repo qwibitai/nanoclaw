@@ -141,6 +141,7 @@ class AgentLiteImpl implements AgentLite {
     if (persisted) {
       this.assertSerializableOptionsMatch(name, persisted, options);
       const agent = this.instantiateAgent(persisted, options);
+      this.syncMutableOptions(agent, options);
       this._agents.set(name, agent);
       return agent;
     }
@@ -249,6 +250,23 @@ class AgentLiteImpl implements AgentLite {
       throw new Error(
         `Agent "${name}" already exists with a different mount allowlist`,
       );
+    }
+  }
+
+  /**
+   * Push fresh mutable options (mcpServers, skills, instructions) into a
+   * restored agent so callers don't silently run with stale persisted values.
+   */
+  private syncMutableOptions(agent: Agent, options?: AgentOptions): void {
+    if (!options) return;
+    if (options.mcpServers !== undefined) {
+      agent.setMcpServers(options.mcpServers);
+    }
+    if (options.skills !== undefined) {
+      agent.setSkills(options.skills);
+    }
+    if (options.instructions !== undefined) {
+      agent.setInstructions(options.instructions);
     }
   }
 
