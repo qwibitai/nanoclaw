@@ -241,7 +241,7 @@ describe('index.ts — characterization tests', () => {
     mockRunContainerAgent.mockResolvedValue({
       status: 'success',
     } as any);
-    mockFindChannel.mockReturnValue(null);
+    mockFindChannel.mockReturnValue(undefined);
     mockGetAllTasks.mockReturnValue([]);
     mockGetAllChats.mockReturnValue([]);
     mockResolveGroupFolderPath.mockImplementation(
@@ -665,6 +665,7 @@ describe('index.ts — characterization tests', () => {
       mockIsBudgetExceeded.mockReturnValue(false);
       mockRunContainerAgent.mockResolvedValue({
         status: 'success',
+        result: 'test response',
         newSessionId: 'sess-1',
       });
 
@@ -686,6 +687,7 @@ describe('index.ts — characterization tests', () => {
       mockIsBudgetExceeded.mockReturnValue(false);
       mockRunContainerAgent.mockResolvedValue({
         status: 'error',
+        result: null,
         error: 'OOM killed',
       });
 
