@@ -1,0 +1,20 @@
+name: SBOM Generation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  sbom:
+    uses: Ai-road-4-You/enterprise-ci-cd/.github/workflows/sbom.yml@main
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
