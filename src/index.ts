@@ -275,16 +275,26 @@ async function spawnThreadForUrl(
 
     initStage = 'enqueue_initial_task';
     queue.enqueueTask(threadJid, `url-watch-initial:${msg.id}`, async () => {
-      const processed = await processMessagesForGroup(
-        threadJid,
-        childGroup,
-        channel,
-      );
-      if (!processed) {
-        logger.error(
-          { chatJid, threadJid, sourceMessageId: msg.id, url },
-          'Initial URL direct processing failed',
+      try {
+        const processed = await processMessagesForGroup(
+          threadJid,
+          childGroup,
+          channel,
         );
+        if (!processed) {
+          logger.error(
+            { chatJid, threadJid, sourceMessageId: msg.id, url },
+            'Initial URL direct processing failed; re-enqueueing message check',
+          );
+          queue.enqueueMessageCheck(threadJid);
+        }
+      } catch (err) {
+        logger.error(
+          { err, chatJid, threadJid, sourceMessageId: msg.id, url },
+          'Initial URL direct processing threw; re-enqueueing message check',
+        );
+        queue.enqueueMessageCheck(threadJid);
+        throw err;
       }
     });
 
