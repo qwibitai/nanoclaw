@@ -28,6 +28,7 @@ import http from 'http';
 import path from 'path';
 
 import {
+  GROUPS_DIR,
   STORE_DIR,
   WATCH_AUTH_TOKEN,
   WATCH_GROUP_FOLDER,
@@ -355,6 +356,24 @@ export class WatchChannel implements Channel {
       return;
     }
 
+    // Voice memo — tap + speak + send, the host transcribes and files
+    // the text to a daily memo without running the agent. Response is
+    // just a terse confirmation ("Saved (42 chars)"). The watch hands
+    // this off via the "Capture" grid tile.
+    if (req.method === 'POST' && url.pathname === '/api/watch/memo') {
+      await this.handleMemoPost(req, res);
+      return;
+    }
+
+    // Voice reminder — tap + "remind me in 10 minutes to call mom",
+    // host parses the time phrase and schedules a notification that
+    // fires via addNotification() at the parsed time. Response is a
+    // confirmation with the parsed time, or a "could not parse" error.
+    if (req.method === 'POST' && url.pathname === '/api/watch/reminder') {
+      await this.handleReminderPost(req, res);
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/watch/poll') {
       this.handlePoll(res);
       return;
@@ -366,6 +385,229 @@ export class WatchChannel implements Channel {
     }
 
     this.sendJson(res, 404, { error: 'not found' });
+  }
+
+  // -----------------------------------------------------------------------
+  // Voice memo — /api/watch/memo
+  // -----------------------------------------------------------------------
+
+  // Appends a transcribed voice memo to groups/<folder>/memos/YYYY-MM-DD.md.
+  // No agent round-trip — the intent is "capture, don't chat." Returns a
+  // terse confirmation so the watch can show "Saved" without waiting for
+  // a long response.
+  private async handleMemoPost(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    try {
+      const ct = String(req.headers['content-type'] || '').toLowerCase();
+      if (!ct.includes('audio/')) {
+        this.sendJson(res, 415, { error: `unsupported Content-Type: ${ct}` });
+        return;
+      }
+      const body = await this.readBody(req);
+      if (body.length === 0) {
+        this.sendJson(res, 400, { error: 'empty audio body' });
+        return;
+      }
+      const cleaned = await this.transcribeAndClean(body);
+      if (!cleaned) {
+        this.sendJson(res, 200, { reply: '(no speech detected)' });
+        return;
+      }
+
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+      const timeStr = now.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+      const memosDir = path.join(GROUPS_DIR, this.groupFolder, 'memos');
+      fs.mkdirSync(memosDir, { recursive: true });
+      const memoFile = path.join(memosDir, `${dateStr}.md`);
+
+      // Create the daily file with a date heading if it doesn't exist,
+      // then append each memo as a timestamped sub-entry.
+      if (!fs.existsSync(memoFile)) {
+        const header = `# Memos — ${dateStr}\n\n`;
+        fs.writeFileSync(memoFile, header);
+      }
+      const entry = `## ${timeStr}\n\n${cleaned}\n\n`;
+      fs.appendFileSync(memoFile, entry);
+
+      logger.info(
+        { file: memoFile, len: cleaned.length, preview: cleaned.slice(0, 60) },
+        'watch: memo saved',
+      );
+
+      // Mirror to Signal so Scott's phone conversation thread shows
+      // what was captured — helps him scan recent memos without
+      // opening the daily file.
+      this.mirrorSend(`[Memo] ${cleaned}`);
+
+      // Response must fit the watch's response screen without scrolling
+      // too far. Keep it short: confirmation + byte/char count + the
+      // memo itself echoed back so Scott can verify he was heard right.
+      const reply = `Saved (${cleaned.length} chars)\n\n${cleaned}`;
+      this.sendJson(res, 200, { reply });
+    } catch (err) {
+      logger.warn({ err }, 'watch: memo error');
+      if (!res.headersSent) this.sendJson(res, 500, { error: 'internal' });
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Voice reminder — /api/watch/reminder
+  // -----------------------------------------------------------------------
+
+  // Parses a "remind me in/at X to Y" phrase and schedules a notification
+  // to fire at the parsed time via this.addNotification(). The scheduling
+  // is in-memory (setTimeout) — reminders are lost on host restart. If
+  // that becomes a pain point in practice, persist to SQLite and re-hydrate
+  // on startup. For MVP, in-memory is fine — the host runs as a stable
+  // systemd service and restarts are rare.
+  private async handleReminderPost(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    try {
+      const ct = String(req.headers['content-type'] || '').toLowerCase();
+      if (!ct.includes('audio/')) {
+        this.sendJson(res, 415, { error: `unsupported Content-Type: ${ct}` });
+        return;
+      }
+      const body = await this.readBody(req);
+      if (body.length === 0) {
+        this.sendJson(res, 400, { error: 'empty audio body' });
+        return;
+      }
+      const cleaned = await this.transcribeAndClean(body);
+      if (!cleaned) {
+        this.sendJson(res, 200, { reply: '(no speech detected)' });
+        return;
+      }
+
+      const parsed = this.parseReminder(cleaned);
+      if (!parsed) {
+        this.sendJson(res, 200, {
+          reply:
+            `Could not parse time.\n\n` +
+            `Heard: "${cleaned}"\n\n` +
+            `Try: "in 10 minutes to call Mom" or "at 3pm to take out trash"`,
+        });
+        return;
+      }
+
+      const delta = parsed.when.getTime() - Date.now();
+      if (delta <= 0) {
+        this.sendJson(res, 200, {
+          reply: `That time is in the past (${parsed.when.toLocaleTimeString('en-US')}). Try again.`,
+        });
+        return;
+      }
+
+      // Schedule the haptic/visual reminder via the existing notification
+      // push pipeline. Using the 'signal' type so it renders with the
+      // generic notification styling (the only other type is 'email').
+      setTimeout(() => {
+        this.addNotification('signal', 'Reminder', parsed.what);
+        logger.info(
+          { what: parsed.what, at: parsed.when.toISOString() },
+          'watch: reminder fired',
+        );
+      }, delta);
+
+      const timeStr = parsed.when.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+      logger.info(
+        { at: parsed.when.toISOString(), deltaMs: delta, what: parsed.what },
+        'watch: reminder scheduled',
+      );
+
+      // Mirror to Signal so Scott can see it on his phone too.
+      this.mirrorSend(`[Reminder scheduled ${timeStr}] ${parsed.what}`);
+
+      const reply = `Reminder set for ${timeStr}:\n${parsed.what}`;
+      this.sendJson(res, 200, { reply });
+    } catch (err) {
+      logger.warn({ err }, 'watch: reminder error');
+      if (!res.headersSent) this.sendJson(res, 500, { error: 'internal' });
+    }
+  }
+
+  // Shared: transcribe a WAV body and strip Whisper's non-speech annotations.
+  // Returns the cleaned transcript, or empty string if there was no real
+  // speech. Extracted so memo + reminder handlers don't duplicate the
+  // cleanup regex from handleMessagePost.
+  private async transcribeAndClean(body: Buffer): Promise<string> {
+    const transcribed = await this.transcribe(body);
+    if (!transcribed) return '';
+    const cleaned = transcribed
+      .replace(/\([^)]*\)/g, ' ')
+      .replace(/\[[^\]]*\]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return cleaned;
+  }
+
+  // Minimal natural-language reminder parser. Handles the two phrasings
+  // we document in the user guide:
+  //   "in N minute(s)/hour(s) [to] <action>"
+  //   "at HH[:MM] (am|pm) [to] <action>"
+  // plus a lenient "tomorrow at HH[:MM] (am|pm) [to] <action>". Returns
+  // null if neither matches — the caller then returns a "could not parse"
+  // message to the user with examples.
+  //
+  // Deliberately dumb: no LLM round-trip, no chrono-node dependency. If
+  // a user's phrasing doesn't match, the error message tells them how
+  // to rephrase. That's an acceptable tradeoff for zero new dependencies
+  // and deterministic behavior.
+  private parseReminder(text: string): { when: Date; what: string } | null {
+    // Whisper sometimes inserts a leading "Remind me " which we can strip
+    // since it's implicit in the tile.
+    const stripped = text.replace(/^\s*(?:please\s+)?remind\s+me\s+/i, '');
+
+    // Pattern 1: "in N minute(s)/hour(s) [to] <action>"
+    const inMatch = stripped.match(
+      /^in\s+(\d+)\s+(minute|hour|min|hr)s?\s*(?:to\s+)?(.+)$/i,
+    );
+    if (inMatch) {
+      const n = parseInt(inMatch[1], 10);
+      const unit = inMatch[2].toLowerCase();
+      const ms =
+        unit.startsWith('min') ? n * 60_000 : n * 3_600_000;
+      const when = new Date(Date.now() + ms);
+      return { when, what: inMatch[3].trim() };
+    }
+
+    // Pattern 2: "[tomorrow] at HH[:MM] (am|pm) [to] <action>"
+    const atMatch = stripped.match(
+      /^(tomorrow\s+)?at\s+(\d+)(?::(\d+))?\s*(am|pm|a\.m\.|p\.m\.)\s*(?:to\s+)?(.+)$/i,
+    );
+    if (atMatch) {
+      const isTomorrow = !!atMatch[1];
+      let hour = parseInt(atMatch[2], 10);
+      const minute = atMatch[3] ? parseInt(atMatch[3], 10) : 0;
+      const ampm = atMatch[4].toLowerCase().replace(/\./g, '');
+      if (ampm === 'pm' && hour !== 12) hour += 12;
+      if (ampm === 'am' && hour === 12) hour = 0;
+
+      const when = new Date();
+      when.setHours(hour, minute, 0, 0);
+      if (isTomorrow) {
+        when.setDate(when.getDate() + 1);
+      } else if (when.getTime() <= Date.now()) {
+        // "at 3pm" when it's already 4pm → roll over to tomorrow
+        when.setDate(when.getDate() + 1);
+      }
+      return { when, what: atMatch[5].trim() };
+    }
+
+    return null;
   }
 
   private async handleMessagePost(
