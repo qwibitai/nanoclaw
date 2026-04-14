@@ -26,6 +26,44 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Safe Gmail MCP tool suffixes — destructive tools (delete_email,
+ * batch_delete_emails, delete_label, delete_filter) are intentionally
+ * excluded so the agent cannot permanently destroy emails.
+ */
+const SAFE_GMAIL_TOOL_SUFFIXES = [
+  'search_emails',
+  'read_email',
+  'draft_email',
+  'send_email',
+  'modify_email',
+  'batch_modify_emails',
+  'list_email_labels',
+  'download_attachment',
+  'create_label',
+  'update_label',
+  'create_filter',
+  'create_filter_from_template',
+  'get_filter',
+  'get_or_create_label',
+  'list_filters',
+] as const;
+
+const GMAIL_ACCOUNT_NAMES = [
+  'gmail',
+  'gmail-personal',
+  'gmail-whoisxml',
+  'gmail-attaxion',
+  'gmail-dev',
+] as const;
+
+/** Expand safe Gmail tools for all accounts into allowedTools entries */
+function safeGmailTools(): string[] {
+  return GMAIL_ACCOUNT_NAMES.flatMap((acct) =>
+    SAFE_GMAIL_TOOL_SUFFIXES.map((suffix) => `mcp__${acct}__${suffix}`),
+  );
+}
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -620,11 +658,7 @@ Only use ✓ for KNOWN facts with a named source. Use ~ for REMEMBERED claims. U
         'mcp__nanoclaw__*',
         'mcp__notion__*',
         'mcp__superpilot__*',
-        'mcp__gmail__*',
-        'mcp__gmail-personal__*',
-        'mcp__gmail-whoisxml__*',
-        'mcp__gmail-attaxion__*',
-        'mcp__gmail-dev__*',
+        ...safeGmailTools(),
       ],
       agents: {
         'deep-work': {
@@ -644,11 +678,7 @@ Only use ✓ for KNOWN facts with a named source. Use ~ for REMEMBERED claims. U
             'mcp__nanoclaw__*',
             'mcp__notion__*',
             'mcp__superpilot__*',
-            'mcp__gmail__*',
-            'mcp__gmail-personal__*',
-            'mcp__gmail-whoisxml__*',
-            'mcp__gmail-attaxion__*',
-            'mcp__gmail-dev__*',
+            ...safeGmailTools(),
           ],
           prompt:
             'You are a deep reasoning agent handling complex development and analysis tasks. Think through problems carefully — check cross-file impacts, consider edge cases, verify assumptions. Your output will be relayed to the user. Write your response as if speaking directly to them.',

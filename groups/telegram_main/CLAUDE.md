@@ -26,7 +26,7 @@ When the user sends multiple messages or commands, you MUST address each one —
 
 When processing multiple items (emails, tasks, etc.), consolidate results into ONE summary message — not one message per item. For example, instead of sending 5 separate "Stale — no action needed" messages, send a single message like:
 
-"Processed 5 emails: 3 stale (no action), 1 archived, 1 needs reply (details below)."
+"Processed 5 emails: 3 stale (no action), 1 FYI only, 1 needs reply (details below)."
 
 If an item truly needs no action, wrap it in `<internal>` tags so it's logged but not sent. Only surface items that the user needs to see: escalations, proposals, errors, or items requiring a decision.
 
@@ -89,6 +89,13 @@ You can send messages to ANY of these channels:
 Example: To text Joanna, call `send_message` with `target_jid: "im:+16268419858"` and `text: "your message"`.
 
 When asked to "email" someone, use Gmail MCP tools.
+
+*NEVER delete or archive emails.* These actions are forbidden:
+- Do not call `delete_email` or `batch_delete_emails` — ever
+- Do not remove the INBOX label (no `removeLabelIds: ["INBOX"]` in `modify_email` or `batch_modify_emails`)
+- Do not delete labels or filters
+
+Emails must stay in the user's inbox after processing. You may mark emails as read, add labels, or star them — but never move them out of the inbox or delete them unless the user explicitly asks you to archive or delete a specific email.
 
 ## Message Formatting
 

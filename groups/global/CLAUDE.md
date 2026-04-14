@@ -47,6 +47,15 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+## Email Rules
+
+*NEVER delete or archive emails.* These actions are forbidden:
+- Do not call `delete_email` or `batch_delete_emails` — ever
+- Do not remove the INBOX label (no `removeLabelIds: ["INBOX"]` in `modify_email` or `batch_modify_emails`)
+- Do not delete labels or filters
+
+Emails must stay in the user's inbox after processing. You may mark emails as read, add labels, or star them — but never move them out of the inbox or delete them unless the user explicitly asks you to archive or delete a specific email.
+
 ## Message Formatting
 
 Format messages based on the channel you're responding to. Check your group folder name:
