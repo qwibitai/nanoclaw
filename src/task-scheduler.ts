@@ -141,6 +141,13 @@ export async function runGateScript(
             TZ: TIMEZONE,
             GOOGLE_OAUTH_CREDENTIALS: gcalCredsPath,
             GOOGLE_CALENDAR_MCP_TOKEN_PATH: gcalTokenPath,
+            // External gate scripts (e.g. node /workspace/group/foo.mjs) can't
+            // benefit from the inline path rewrites above. They should honor
+            // WORKSPACE_GROUP / WORKSPACE_GLOBAL / WORKSPACE_PROJECT instead,
+            // falling back to /workspace/* defaults when run inside containers.
+            WORKSPACE_GROUP: groupDir,
+            WORKSPACE_GLOBAL: globalDir,
+            WORKSPACE_PROJECT: projectRoot,
           },
           cwd: groupDir,
         },

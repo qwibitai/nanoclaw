@@ -179,7 +179,7 @@ Cron: every 5 minutes, America/Chicago. Script does:
    - If first nag or `now - last_nag_ts >= nag_interval_min`: queue a nag
 6. Output `{ wakeAgent: true, data: { nags, updates } }` only if there's something to send. Else `{ wakeAgent: false }`.
 
-Use the ADC token at `/home/node/.config/gcloud/application_default_credentials.json` to mint access tokens and call the Sheets API directly from bash/node. Mirror the pattern of your existing script-gated tasks in #emilio-care.
+Mint Sheets API access tokens from the calendar-mcp OAuth credentials at `/home/node/.config/google-calendar-mcp/{gcp-oauth.keys.json,tokens.json}` — see `/workspace/global/task_scripts.md` "Sheets API auth in scripts" for the exact snippet. Mirror the pattern of your existing script-gated tasks in #emilio-care.
 
 When woken, agent:
 - Composes nag per chore, voiced through the assigned owner's pet ("Milo's dinner bowl is empty — Eni is waiting")
