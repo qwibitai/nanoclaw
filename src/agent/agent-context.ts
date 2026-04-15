@@ -26,6 +26,7 @@ export interface AgentContext {
   // ─── Core subsystems ────────────────────────────────────────────
   readonly db: AgentDb;
   readonly queue: GroupQueue;
+  readonly actionsHttp: import('./actions-http.js').ActionsHttp;
 
   // ─── Mutable shared state (reference types, mutated in place) ──
   readonly sessions: Record<string, string>;

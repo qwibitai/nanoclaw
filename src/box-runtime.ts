@@ -167,6 +167,7 @@ export async function spawnBox(
         env: envArray,
         workingDir: '/workspace/group',
         user: userStr,
+        security: { networkEnabled: true },
       },
       containerName,
     );
