@@ -38,14 +38,19 @@ class NewsBriefingOrchestrator:
         if not memory_file.exists():
             return {
                 "last_briefing_date": None,
-                "seen_articles": [],
+                "seen_articles": {},
                 "topic_history": {},
                 "user_feedback": [],
                 "ongoing_situations": {}
             }
 
         memory = json.load(open(memory_file, 'r'))
-        # Ensure ongoing_situations exists in older memory files
+
+        # Migrate seen_articles from old list format to {hash: date} dict
+        if isinstance(memory.get("seen_articles"), list):
+            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            memory["seen_articles"] = {h: yesterday for h in memory["seen_articles"]}
+
         if "ongoing_situations" not in memory:
             memory["ongoing_situations"] = {}
         return memory
@@ -285,8 +290,14 @@ Start your research now. Return ONLY the JSON, no other text.
 
     def update_memory_with_briefing(self, briefing: Dict[str, Any], memory: Dict[str, Any]):
         """Update memory with new briefing data"""
-        # Track seen articles
-        seen_hashes = memory.get("seen_articles", [])
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # seen_articles is now {hash: date} — prune entries older than 7 days
+        seen = memory.get("seen_articles", {})
+        if not isinstance(seen, dict):
+            seen = {}
+        cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        seen = {h: d for h, d in seen.items() if d >= cutoff}
 
         for section in briefing.get("sections", []):
             for article in section.get("articles", []):
@@ -294,10 +305,9 @@ Start your research now. Return ONLY the JSON, no other text.
                     article.get("title", ""),
                     article.get("url", "")
                 )
-                if article_hash not in seen_hashes:
-                    seen_hashes.append(article_hash)
+                seen[article_hash] = today
 
-        memory["seen_articles"] = seen_hashes[-500:]
+        memory["seen_articles"] = seen
         memory["last_briefing_date"] = briefing.get("metadata", {}).get("date", datetime.now().strftime("%Y-%m-%d"))
 
         # Persist the updated ongoing situations from this briefing

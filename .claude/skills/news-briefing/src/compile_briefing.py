@@ -43,10 +43,18 @@ class BriefingCompiler:
         return results
 
     def deduplicate_articles(self, results: List[Dict[str, Any]], memory: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Remove duplicate articles using memory system"""
+        """Remove articles already seen on a previous day.
+        Articles seen today are allowed through so re-running the briefing works correctly."""
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # seen_articles is {hash: date}; only block articles seen before today
+        seen = memory.get("seen_articles", {})
+        if not isinstance(seen, dict):
+            seen = {}
+        previous_hashes = {h for h, d in seen.items() if d < today}
+
         deduplicated_results = []
-        seen_hashes = set(memory.get("seen_articles", []))
-        new_seen_hashes = []
+        within_run_seen = set()  # prevent duplicates within this single run
         total_before = 0
         total_after = 0
 
@@ -55,22 +63,17 @@ class BriefingCompiler:
             total_before += len(articles)
 
             unique_articles = []
-
             for article in articles:
-                # Generate hash for deduplication
                 article_hash = self.orchestrator.generate_article_hash(
                     article.get("title", ""),
                     article.get("url", "")
                 )
-
-                if article_hash not in seen_hashes:
+                if article_hash not in previous_hashes and article_hash not in within_run_seen:
                     unique_articles.append(article)
-                    seen_hashes.add(article_hash)
-                    new_seen_hashes.append(article_hash)
+                    within_run_seen.add(article_hash)
 
             total_after += len(unique_articles)
 
-            # Create deduplicated result
             deduplicated_result = result.copy()
             deduplicated_result["articles"] = unique_articles
             deduplicated_result["original_count"] = len(articles)
@@ -78,9 +81,6 @@ class BriefingCompiler:
             deduplicated_results.append(deduplicated_result)
 
         print(f"   📊 Deduplication: {total_before} articles → {total_after} unique ({total_before - total_after} duplicates removed)")
-
-        # Update memory with new articles
-        memory["seen_articles"] = list(seen_hashes)[-500:]  # Keep last 500
 
         return deduplicated_results
 
