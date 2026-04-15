@@ -1,3 +1,5 @@
+<!-- I want to review in Japanese. -->
+
 ## Type of Change
 
 - [ ] **Skill** - adds a new skill in `.claude/skills/`
@@ -12,3 +14,5 @@
 - [ ] I have not made any changes to source code
 - [ ] My skill contains instructions for Claude to follow (not pre-built code)
 - [ ] I tested this skill on a fresh clone
+
+<!-- I want to review in Japanese. -->
