@@ -90,8 +90,21 @@ export function startCredentialProxy(
           (upRes) => {
             res.writeHead(upRes.statusCode!, upRes.headers);
             upRes.pipe(res);
+            // ストリーミング中の接続断を適切に処理
+            upRes.on('error', (err) => {
+              logger.error(
+                { err, url: req.url },
+                'Credential proxy upstream response error',
+              );
+              if (!res.destroyed) res.destroy();
+            });
           },
         );
+
+        // TCPキープアライブを有効化 — 長いストリーミング中の ETIMEDOUT を防ぐ
+        upstream.on('socket', (socket) => {
+          socket.setKeepAlive(true, 30_000);
+        });
 
         upstream.on('error', (err) => {
           logger.error(
@@ -101,7 +114,14 @@ export function startCredentialProxy(
           if (!res.headersSent) {
             res.writeHead(502);
             res.end('Bad Gateway');
+          } else if (!res.destroyed) {
+            res.destroy();
           }
+        });
+
+        // クライアント（コンテナ）が切断したら upstream も中止
+        req.on('close', () => {
+          if (!upstream.destroyed) upstream.destroy();
         });
 
         upstream.write(body);
