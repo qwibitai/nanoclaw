@@ -134,6 +134,8 @@ export async function runVercelQuery(
 
   log(`Provider: ${provider}, Model: ${modelId}`);
 
+  let mcpConnection: Awaited<ReturnType<typeof connectMcpServers>> | undefined;
+
   try {
     const factory = createProviderFactory(provider, input.providerBaseUrl);
     const model = factory(modelId);
@@ -164,7 +166,7 @@ export async function runVercelQuery(
       groupFolder: input.groupFolder,
       isMain: input.isMain,
     });
-    const mcpConnection = await connectMcpServers(mcpConfigs);
+    mcpConnection = await connectMcpServers(mcpConfigs);
 
     // MCP tools (already in AI SDK format from createMCPClient)
     for (const [name, def] of Object.entries(mcpConnection.tools)) {
@@ -225,6 +227,7 @@ export async function runVercelQuery(
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     log(`Error: ${errorMsg}`);
+    try { await mcpConnection?.cleanup(); } catch { /* best-effort */ }
     return {
       status: 'error',
       result: null,
