@@ -24,7 +24,7 @@ services:
     volumes:
       - browser-data:/data
     restart: unless-stopped
-    mem_limit: 512m
+    mem_limit: 1536m
     networks:
       - nanoclaw
 
