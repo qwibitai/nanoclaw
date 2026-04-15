@@ -260,6 +260,56 @@ export interface WebhookReceivedEvent extends NanoClawEvent {
   };
 }
 
+// --- Browser events ---
+
+export interface BrowserContextCreatedEvent extends NanoClawEvent {
+  type: 'browser.context.created';
+  source: 'browser';
+  payload: {
+    groupId: string;
+    contextId: string;
+  };
+}
+
+export interface BrowserContextClosedEvent extends NanoClawEvent {
+  type: 'browser.context.closed';
+  source: 'browser';
+  payload: {
+    groupId: string;
+    contextId: string;
+    profileSaved: boolean;
+  };
+}
+
+export interface BrowserSidecarDownEvent extends NanoClawEvent {
+  type: 'browser.sidecar.down';
+  source: 'browser';
+  payload: {
+    error: string;
+    activeContexts: number;
+  };
+}
+
+export interface BrowserProfileCorruptEvent extends NanoClawEvent {
+  type: 'browser.profile.corrupt';
+  source: 'browser';
+  payload: {
+    groupId: string;
+    error: string;
+  };
+}
+
+export interface BrowserVisualChangedEvent extends NanoClawEvent {
+  type: 'browser.visual.changed';
+  source: 'browser';
+  payload: {
+    groupId: string;
+    label: string;
+    diffPercentage: number;
+    threshold: number;
+  };
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -284,6 +334,11 @@ export interface EventMap {
   'system.shutdown': SystemShutdownEvent;
   'email.received': EmailReceivedEvent;
   'webhook.received': WebhookReceivedEvent;
+  'browser.context.created': BrowserContextCreatedEvent;
+  'browser.context.closed': BrowserContextClosedEvent;
+  'browser.sidecar.down': BrowserSidecarDownEvent;
+  'browser.profile.corrupt': BrowserProfileCorruptEvent;
+  'browser.visual.changed': BrowserVisualChangedEvent;
 }
 
 export type EventType = keyof EventMap;
