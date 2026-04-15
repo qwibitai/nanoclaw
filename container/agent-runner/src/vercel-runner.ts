@@ -160,10 +160,7 @@ export async function runVercelQuery(
     const sessionMessages = loadSession(sessionDir, input.sessionId);
 
     const messages: ModelMessage[] = [
-      ...sessionMessages.map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: String(m.content),
-      })),
+      ...(sessionMessages as ModelMessage[]),
       { role: 'user' as const, content: prompt },
     ];
 
@@ -188,20 +185,12 @@ export async function runVercelQuery(
       },
     });
 
-    const allMessages = [
-      ...messages.map((m) => ({
-        role: m.role,
-        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-      })),
-      ...result.response.messages.map((m) => ({
-        role: m.role,
-        content:
-          typeof m.content === 'string'
-            ? m.content
-            : JSON.stringify(m.content),
-      })),
-    ];
-    const newSessionId = saveSession(sessionDir, input.sessionId, allMessages);
+    const allMessages = [...messages, ...result.response.messages];
+    const newSessionId = saveSession(
+      sessionDir,
+      input.sessionId,
+      allMessages as unknown as import('./session-store.js').SessionMessage[],
+    );
 
     return {
       status: 'success',

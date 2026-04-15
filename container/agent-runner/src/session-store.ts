@@ -4,7 +4,7 @@ import crypto from 'crypto';
 
 export interface SessionMessage {
   role: string;
-  content: string;
+  content: string | unknown[];
   [key: string]: unknown;
 }
 
