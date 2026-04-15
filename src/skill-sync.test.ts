@@ -105,6 +105,53 @@ describe('syncSkills', () => {
     expect(() => syncSkills(src, dst)).toThrow();
   });
 
+  it('dereferences symlinked skill directories into real copies', () => {
+    const src = path.join(tmpDir, 'src');
+    const dst = path.join(tmpDir, 'dst');
+    const realSkill = path.join(tmpDir, 'real-skill');
+
+    // Create a real skill directory and symlink to it from src
+    fs.mkdirSync(realSkill, { recursive: true });
+    fs.writeFileSync(path.join(realSkill, 'SKILL.md'), 'symlinked');
+    fs.mkdirSync(src, { recursive: true });
+    fs.symlinkSync(realSkill, path.join(src, 'my-skill'));
+
+    syncSkills(src, dst);
+
+    // Destination should be a real directory, not a symlink
+    const dstSkill = path.join(dst, 'my-skill');
+    expect(fs.lstatSync(dstSkill).isSymbolicLink()).toBe(false);
+    expect(fs.lstatSync(dstSkill).isDirectory()).toBe(true);
+    expect(fs.readFileSync(path.join(dstSkill, 'SKILL.md'), 'utf8')).toBe(
+      'symlinked',
+    );
+  });
+
+  it('re-syncs symlinked skill without error when dst symlink already exists', () => {
+    const src = path.join(tmpDir, 'src');
+    const dst = path.join(tmpDir, 'dst');
+    const realSkill = path.join(tmpDir, 'real-skill');
+
+    fs.mkdirSync(realSkill, { recursive: true });
+    fs.writeFileSync(path.join(realSkill, 'SKILL.md'), 'v1');
+    fs.mkdirSync(src, { recursive: true });
+    fs.symlinkSync(realSkill, path.join(src, 'my-skill'));
+
+    // First sync — creates a pre-existing symlink at dst (simulates old behavior)
+    fs.mkdirSync(dst, { recursive: true });
+    fs.symlinkSync(realSkill, path.join(dst, 'my-skill'));
+
+    // Second sync should not throw "src and dest cannot be the same"
+    fs.writeFileSync(path.join(realSkill, 'SKILL.md'), 'v2');
+    syncSkills(src, dst);
+
+    const dstSkill = path.join(dst, 'my-skill');
+    expect(fs.lstatSync(dstSkill).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(path.join(dstSkill, 'SKILL.md'), 'utf8')).toBe(
+      'v2',
+    );
+  });
+
   it('copies multiple skill directories', () => {
     const src = path.join(tmpDir, 'src');
     const dst = path.join(tmpDir, 'dst');
