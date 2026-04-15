@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Run a single Codex attempt. Stream JSONL to log file. Parse the final status
+# code from the last message. Print just the status code (DONE/BLOCKED/etc) on stdout.
+#
+# Options:
+#   --worktree <dir>        working root for codex
+#   --log <file>            JSONL output log
+#   --prompt-file <file>    rendered prompt (plain text)
+#   --reasoning <lvl>       low|medium|high|xhigh
+#   --session-file <file>   path; if exists, we resume the session id written
+#                           there; in any case we write the new session id
+#                           (or a synthesized one if codex didn't expose it).
+#   --timeout <sec>         optional, default 1800
+set -euo pipefail
+
+CODEX="${CODEX_BIN:-codex}"
+
+WT=""; LOG=""; PROMPT_FILE=""; REASONING="high"; SID_FILE=""; TO=1800
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --worktree)     WT="$2"; shift 2 ;;
+    --log)          LOG="$2"; shift 2 ;;
+    --prompt-file)  PROMPT_FILE="$2"; shift 2 ;;
+    --reasoning)    REASONING="$2"; shift 2 ;;
+    --session-file) SID_FILE="$2"; shift 2 ;;
+    --timeout)      TO="$2"; shift 2 ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+: "${WT:?--worktree required}"
+: "${LOG:?--log required}"
+: "${PROMPT_FILE:?--prompt-file required}"
+: "${SID_FILE:?--session-file required}"
+
+prompt="$(cat "$PROMPT_FILE")"
+
+mkdir -p "$(dirname "$LOG")"
+
+args=(exec
+  -s workspace-write
+  -C "$WT"
+  -c "model_reasoning_effort=\"$REASONING\""
+  --enable web_search_cached
+  --json)
+
+if [ -s "$SID_FILE" ]; then
+  args=(exec resume "$(cat "$SID_FILE")"
+    -C "$WT"
+    -c "model_reasoning_effort=\"$REASONING\""
+    --enable web_search_cached
+    --json)
+fi
+
+if command -v timeout >/dev/null 2>&1; then
+  TO_CMD=(timeout "$TO")
+elif command -v gtimeout >/dev/null 2>&1; then
+  TO_CMD=(gtimeout "$TO")
+else
+  TO_CMD=()
+fi
+
+tmp_out="$(mktemp)"
+trap 'rm -f "$tmp_out"' EXIT
+
+set +e
+"${TO_CMD[@]}" "$CODEX" "${args[@]}" "$prompt" > "$tmp_out" 2>&1
+rc=$?
+set -e
+
+cat "$tmp_out" >> "$LOG"
+
+jq -r 'select(.session_id != null) | .session_id' "$tmp_out" 2>/dev/null | tail -n1 > "$SID_FILE.new" || true
+if [ -s "$SID_FILE.new" ]; then mv "$SID_FILE.new" "$SID_FILE"; else rm -f "$SID_FILE.new"; fi
+
+final_text="$(jq -r 'select(.text != null) | .text' "$tmp_out" 2>/dev/null | tail -n1)"
+if [ -z "$final_text" ]; then
+  final_text="$(tail -n 5 "$tmp_out")"
+fi
+
+case "$final_text" in
+  *DONE_WITH_CONCERNS*) echo "DONE_WITH_CONCERNS" ;;
+  *DONE*)                echo "DONE" ;;
+  *NEEDS_CONTEXT*)       echo "NEEDS_CONTEXT" ;;
+  *BLOCKED*)             echo "BLOCKED" ;;
+  *)
+    if [ "$rc" -eq 124 ]; then
+      echo "BLOCKED"
+    elif [ "$rc" -ne 0 ]; then
+      echo "BLOCKED"
+    else
+      echo "DONE_WITH_CONCERNS"
+    fi
+    ;;
+esac
+
+exit 0
