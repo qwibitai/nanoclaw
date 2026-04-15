@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Worktree lifecycle helpers for /codex implement.
+# Commands:
+#   setup    <plan-work-dir> <task-slug> <base-ref>
+#   teardown <plan-work-dir> <task-slug>
+#   list     <plan-work-dir>
+set -euo pipefail
+
+cmd="${1:-}"; shift || { echo "usage: codex-worktree <cmd> ..." >&2; exit 2; }
+
+case "$cmd" in
+  setup)
+    work_dir="${1:?}" slug="${2:?}" base="${3:?}"
+    dest="$work_dir/$slug"
+    branch="codex/$(basename "$work_dir")/$slug"
+    mkdir -p "$work_dir"
+    if [ -e "$dest" ]; then
+      echo "ERROR: $dest already exists — use teardown first" >&2; exit 2
+    fi
+    repo_root="$(git rev-parse --show-toplevel)"
+    cd "$repo_root"
+    git worktree add -b "$branch" "$dest" "$base" >&2
+    echo "$dest"
+    ;;
+
+  teardown)
+    work_dir="${1:?}" slug="${2:?}"
+    dest="$work_dir/$slug"
+    branch="codex/$(basename "$work_dir")/$slug"
+    repo_root="$(git rev-parse --show-toplevel)"
+    cd "$repo_root"
+    if [ -d "$dest" ]; then
+      git worktree remove --force "$dest" >&2 || true
+    fi
+    if git show-ref --verify --quiet "refs/heads/$branch"; then
+      git branch -D "$branch" >&2 || true
+    fi
+    rm -rf "$dest"
+    ;;
+
+  list)
+    work_dir="${1:?}"
+    ls -1 "$work_dir" 2>/dev/null | grep -v '^state\.json$' | grep -v '^\.' || true
+    ;;
+
+  *)
+    echo "usage: codex-worktree setup|teardown|list ..." >&2; exit 2
+    ;;
+esac
