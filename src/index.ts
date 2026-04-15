@@ -16,6 +16,8 @@ import {
   POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
+import { shouldCompact, compactSession } from './compaction.js';
+import { readEnvFile } from './env.js';
 import './channels/index.js';
 import {
   ChannelOpts,
@@ -86,6 +88,19 @@ const channels: Channel[] = [];
 const queue = new GroupQueue();
 
 const onecli = new OneCLI({ url: ONECLI_URL });
+
+/** Resolve the effective model for a group (same logic as container-runner). */
+function resolveGroupModel(groupFolder: string): string | undefined {
+  let model =
+    process.env.ANTHROPIC_MODEL ||
+    readEnvFile(['ANTHROPIC_MODEL']).ANTHROPIC_MODEL;
+  const modelFile = path.join(resolveGroupFolderPath(groupFolder), '.model');
+  if (fs.existsSync(modelFile)) {
+    const v = fs.readFileSync(modelFile, 'utf8').trim();
+    if (v) model = v;
+  }
+  return model;
+}
 
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
   if (group.isMain) return;
@@ -394,6 +409,9 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
+  // Track peak input_tokens across streaming callbacks for compaction decisions
+  let peakInputTokens = 0;
+
   // Wrap onOutput to track session ID and log token usage from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
@@ -402,6 +420,9 @@ async function runAgent(
           setSession(group.folder, output.newSessionId);
         }
         if (output.usage && output.usage.input_tokens > 0) {
+          if (output.usage.input_tokens > peakInputTokens) {
+            peakInputTokens = output.usage.input_tokens;
+          }
           logTokenUsage({
             group_folder: group.folder,
             input_tokens: output.usage.input_tokens,
@@ -521,6 +542,22 @@ async function runAgent(
         'Container agent error',
       );
       return 'error';
+    }
+
+    // Compaction: for non-Claude models, summarize and reset when session
+    // context grows too large. The SDK's built-in auto-compact only fires
+    // for Claude models, so Ollama sessions balloon without this.
+    const model = resolveGroupModel(group.folder);
+    const isNonClaude = model && !model.startsWith('claude-');
+    if (isNonClaude && peakInputTokens > 0 && shouldCompact(peakInputTokens)) {
+      logger.info(
+        { group: group.name, peakInputTokens },
+        'Session exceeds compaction threshold, summarizing',
+      );
+      const compacted = await compactSession(group.folder, chatJid);
+      if (compacted) {
+        delete sessions[group.folder];
+      }
     }
 
     return 'success';

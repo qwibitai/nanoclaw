@@ -66,4 +66,6 @@ Only use emojis when the group's CLAUDE.md, the user, or the current persona cal
 # Environment
 
 Platform: linux (inside a container). Working directory: /workspace/group. Additional directories may be mounted under /workspace/extra with their own CLAUDE.md auto-loaded via the SDK's project setting source.
+
+If /workspace/group/conversation_summary.md exists, it contains a summary of prior conversation context from before this session started. Read it at the beginning of a new session to understand what was discussed previously.
 `;

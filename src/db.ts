@@ -494,6 +494,26 @@ export function getLastBotMessageTimestamp(
   return row?.ts ?? undefined;
 }
 
+/** Get the most recent N messages for a chat (both user and bot) for compaction summaries. */
+export function getRecentMessages(
+  chatJid: string,
+  limit: number = 50,
+): NewMessage[] {
+  return db
+    .prepare(
+      `SELECT * FROM (
+        SELECT id, chat_jid, sender, sender_name, content, timestamp,
+               is_from_me, is_bot_message,
+               reply_to_message_id, reply_to_message_content, reply_to_sender_name
+        FROM messages
+        WHERE chat_jid = ? AND content != '' AND content IS NOT NULL
+        ORDER BY timestamp DESC
+        LIMIT ?
+      ) ORDER BY timestamp`,
+    )
+    .all(chatJid, limit) as NewMessage[];
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
