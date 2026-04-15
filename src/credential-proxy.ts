@@ -101,9 +101,24 @@ export function startCredentialProxy(
           },
         );
 
-        // TCPキープアライブを有効化 — 長いストリーミング中の ETIMEDOUT を防ぐ
-        upstream.on('socket', (socket) => {
-          socket.setKeepAlive(true, 30_000);
+        // TCPキープアライブを有効化して長いストリーミング中の ETIMEDOUT を防ぐ。
+        // 30_000 は最初の keepalive probe までの初期遅延（ms）で、以降の間隔は OS 依存。
+        const applyKeepAlive = () => {
+          if (!upstream.socket) return false;
+          upstream.socket.setKeepAlive(true, 30_000);
+          return true;
+        };
+        if (!applyKeepAlive()) {
+          upstream.once('socket', () => {
+            applyKeepAlive();
+          });
+        }
+
+        // 下流（コンテナ側）が切断したら upstream を即時中止する。
+        res.on('close', () => {
+          if (!res.writableEnded && !upstream.destroyed) {
+            upstream.destroy();
+          }
         });
 
         upstream.on('error', (err) => {
