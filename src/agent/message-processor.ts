@@ -400,6 +400,10 @@ export class MessageProcessor {
       : undefined;
 
     try {
+      const actionAuth = this.ctx.actionsHttp.mintContainerToken(
+        group.folder,
+        isMain,
+      );
       const output = await runContainerAgent(
         group,
         {
@@ -416,6 +420,8 @@ export class MessageProcessor {
           credentialResolver: this.ctx.credentialResolver ?? undefined,
           mountAllowlist: this.ctx.resolvedMountAllowlist,
           mcpServers: buildMcpRuntimeConfig(this.ctx.config.mcpServers),
+          actionsUrl: actionAuth?.url,
+          actionsToken: actionAuth?.token,
         },
         this.ctx.runtimeConfig,
         (boxName, _containerName) =>

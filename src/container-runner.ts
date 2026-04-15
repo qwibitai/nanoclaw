@@ -59,6 +59,10 @@ export interface ContainerInput {
     string,
     { command: string; args?: string[]; env?: Record<string, string> }
   > | null;
+  /** Action HTTP server URL (host-side) for the container MCP shim to reach. */
+  actionsUrl?: string;
+  /** Per-spawn bearer token authorizing /search and /call on the actions server. */
+  actionsToken?: string;
 }
 
 export type ContainerState = 'active' | 'idle' | 'stopped';
@@ -483,6 +487,11 @@ export async function runContainerAgent(
     agentIdentifier,
     input.credentialResolver,
   );
+
+  if (input.actionsUrl && input.actionsToken) {
+    boxEnv.AGENTLITE_ACTIONS_URL = input.actionsUrl;
+    boxEnv.AGENTLITE_ACTIONS_TOKEN = input.actionsToken;
+  }
 
   const boxOptions = {
     image: rc.boxImage,

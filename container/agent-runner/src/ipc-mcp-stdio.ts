@@ -333,6 +333,134 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+
+// ─── Custom actions (HTTP transport) ────────────────────────────
+
+/**
+ * POST to the host's action HTTP server with bearer auth. The server
+ * runs in the AgentLite host process bound to the host's LAN IP; we
+ * reach it through gvproxy NAT. See src/agent/actions-http.ts.
+ */
+async function callActionsHttp(
+  endpoint: '/search' | '/call',
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const url = process.env.AGENTLITE_ACTIONS_URL;
+  const token = process.env.AGENTLITE_ACTIONS_TOKEN;
+  if (!url || !token) {
+    throw new Error(
+      'Actions HTTP server not configured — AGENTLITE_ACTIONS_URL / TOKEN missing',
+    );
+  }
+  const res = await fetch(`${url}${endpoint}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    const msg =
+      typeof json.error === 'string' ? json.error : `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return json;
+}
+
+server.tool(
+  'search_actions',
+  `Discover custom actions registered on the AgentLite host. Mirrors Claude Code's ToolSearch pattern — use this first to find what actions exist, then invoke with call_action.
+
+Query modes (same grammar as ToolSearch):
+• "select:name1,name2"  — fetch exact actions by name (returns full schemas)
+• "+required rest"       — "required" must appear in action name; rank by remaining terms
+• "keyword1 keyword2"    — rank by substring matches in name/description
+
+Each returned action has name, description, and (in select mode) an input schema describing its expected payload.`,
+  {
+    query: z
+      .string()
+      .describe(
+        'ToolSearch-style query. Examples: "select:search_crm,post_invoice", "+invoice", "customer lookup"',
+      ),
+    max_results: z
+      .number()
+      .optional()
+      .describe('Maximum number of actions to return (default 5)'),
+  },
+  async (args) => {
+    try {
+      const result = await callActionsHttp('/search', {
+        query: args.query,
+        max_results: args.max_results ?? 5,
+      });
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(result.actions ?? [], null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: err instanceof Error ? err.message : String(err),
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'call_action',
+  `Invoke a custom action registered on the AgentLite host. Use search_actions first to discover the action name and its expected payload schema.
+
+The payload is passed verbatim to the action's handler. The action's return value is returned as this tool's result. Execution is synchronous — this call blocks until the host handler completes or times out.`,
+  {
+    name: z
+      .string()
+      .describe(
+        'The action name (obtain from search_actions). Must not be a reserved built-in type.',
+      ),
+    payload: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe(
+        "Arguments passed to the handler. Shape is determined by the action's input schema — check search_actions with select: to see it.",
+      ),
+  },
+  async (args) => {
+    try {
+      const response = await callActionsHttp('/call', {
+        name: args.name,
+        payload: args.payload ?? {},
+        chatJid,
+      });
+      const result = response.result;
+      const text =
+        typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+      return { content: [{ type: 'text' as const, text }] };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: err instanceof Error ? err.message : String(err),
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

@@ -38,7 +38,15 @@ import { AgentDb, initDatabase } from '../db.js';
 import { resolveMountAllowlist } from '../mount-security.js';
 import { GroupQueue } from '../group-queue.js';
 import { writeGroupsSnapshot } from '../container-runner.js';
+import type { ZodRawShape } from 'zod';
+
 import { startIpcWatcher } from '../ipc.js';
+import { ActionsHttp } from './actions-http.js';
+import {
+  assertCustomActionName,
+  type ActionCallback,
+  type RegisteredAction,
+} from '../api/action.js';
 import { startSchedulerLoop } from '../task-scheduler.js';
 
 import path from 'path';
@@ -89,6 +97,8 @@ export class AgentImpl
   private _registry: AgentRegistryDb | null = null;
   private ipcHandle: { stop(): void } | null = null;
   private schedulerHandle: { stop(): void } | null = null;
+  private actions = new Map<string, RegisteredAction>();
+  readonly actionsHttp = new ActionsHttp(() => this.actions);
 
   // ─── Managers ───────────────────────────────────────────────────
   private channelMgr: ChannelManager;
@@ -142,7 +152,7 @@ export class AgentImpl
     this.credentialResolver = opts.credentials ?? this.credentialResolver;
   }
 
-  // ─── Public API (delegated) ─────────────────────────────────────
+  // ─── Channels ───────────────────────────────────────────────────
 
   async addChannel(key: string, factory: ChannelDriverFactory): Promise<void> {
     return this.channelMgr.addChannel(key, factory);
@@ -152,9 +162,7 @@ export class AgentImpl
     return this.channelMgr.removeChannel(key);
   }
 
-  getRegisteredGroups(): PublicRegisteredGroup[] {
-    return this.groupMgr.getRegisteredGroups();
-  }
+  // ─── Groups ─────────────────────────────────────────────────────
 
   async registerGroup(
     jid: string,
@@ -163,9 +171,26 @@ export class AgentImpl
     return this.groupMgr.registerGroup(jid, options);
   }
 
+  getRegisteredGroups(): PublicRegisteredGroup[] {
+    return this.groupMgr.getRegisteredGroups();
+  }
+
+  getGroup(jid: string): PublicRegisteredGroup | undefined {
+    return this.groupMgr.getRegisteredGroups().find((g) => g.jid === jid);
+  }
+
   getAvailableGroups(): AvailableGroup[] {
     return this.groupMgr.getAvailableGroups();
   }
+
+  // ─── Messaging ──────────────────────────────────────────────────
+
+  async sendMessage(jid: string, text: string): Promise<void> {
+    const sent = await this.channelMgr.sendOutboundMessage(jid, text);
+    if (!sent) throw new Error(`No channel for JID: ${jid}`);
+  }
+
+  // ─── Scheduled tasks ────────────────────────────────────────────
 
   async scheduleTask(options: ScheduleTaskOptions): Promise<Task> {
     return this.taskMgr.scheduleTask(options);
@@ -195,35 +220,72 @@ export class AgentImpl
     return this.taskMgr.cancelTask(taskId);
   }
 
-  // ─── MCP Server Management ──────────────────────────────────────
+  // ─── Custom actions ─────────────────────────────────────────────
 
-  setMcpServers(servers: Record<string, McpServerConfig>): void {
-    const resolved =
-      Object.keys(servers).length > 0
-        ? Object.fromEntries(
-            Object.entries(servers).map(([name, cfg]) => [
-              name,
-              { ...cfg, source: path.resolve(cfg.source) },
-            ]),
-          )
-        : null;
-    (this.config as { mcpServers: typeof resolved }).mcpServers = resolved;
-    this.persistAndSync({ mcpServers: resolved });
+  action(name: string, cb: ActionCallback): this;
+  action(name: string, description: string, cb: ActionCallback): this;
+  action<Args extends ZodRawShape>(
+    name: string,
+    inputSchema: Args,
+    cb: ActionCallback<Args>,
+  ): this;
+  action<Args extends ZodRawShape>(
+    name: string,
+    description: string,
+    inputSchema: Args,
+    cb: ActionCallback<Args>,
+  ): this;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  action(name: string, ...args: any[]): this {
+    assertCustomActionName(name);
+
+    let description: string | undefined;
+    let inputSchema: ZodRawShape | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let cb: ((...a: any[]) => unknown) | undefined;
+
+    // Walk the remaining args left-to-right matching each overload shape.
+    let i = 0;
+    if (typeof args[i] === 'string') {
+      description = args[i] as string;
+      i++;
+    }
+    if (args[i] !== undefined && typeof args[i] === 'object') {
+      inputSchema = args[i] as ZodRawShape;
+      i++;
+    }
+    if (typeof args[i] === 'function') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      cb = args[i] as (...a: any[]) => unknown;
+      i++;
+    }
+
+    if (!cb) {
+      throw new Error(`action("${name}"): missing callback`);
+    }
+
+    const handler: RegisteredAction['handler'] = inputSchema
+      ? (validatedArgs, ctx) => cb!(validatedArgs, ctx)
+      : (_args, ctx) => cb!(ctx);
+
+    const entry: RegisteredAction = { handler };
+    if (description !== undefined) entry.description = description;
+    if (inputSchema !== undefined) entry.inputSchema = inputSchema;
+
+    this.actions.set(name, entry);
+    return this;
   }
 
-  addMcpServer(name: string, config: McpServerConfig): void {
-    const current = this.config.mcpServers ?? {};
-    this.setMcpServers({ ...current, [name]: config });
+  // ─── Instructions Management ──────────────────────────────────
+
+  setInstructions(instructions: string | null): void {
+    (this.config as { instructions: string | null }).instructions =
+      instructions;
+    this.persistAndSync({ instructions });
   }
 
-  removeMcpServer(name: string): void {
-    const current = { ...(this.config.mcpServers ?? {}) };
-    delete current[name];
-    this.setMcpServers(current);
-  }
-
-  getMcpServers(): Record<string, McpServerConfig> {
-    return { ...(this.config.mcpServers ?? {}) };
+  getInstructions(): string | null {
+    return this.config.instructions;
   }
 
   // ─── Skill Management ─────────────────────────────────────────
@@ -259,16 +321,35 @@ export class AgentImpl
     return [...(this.config.skillsSources ?? [])];
   }
 
-  // ─── Instructions Management ──────────────────────────────────
+  // ─── MCP Server Management ──────────────────────────────────────
 
-  setInstructions(instructions: string | null): void {
-    (this.config as { instructions: string | null }).instructions =
-      instructions;
-    this.persistAndSync({ instructions });
+  setMcpServers(servers: Record<string, McpServerConfig>): void {
+    const resolved =
+      Object.keys(servers).length > 0
+        ? Object.fromEntries(
+            Object.entries(servers).map(([name, cfg]) => [
+              name,
+              { ...cfg, source: path.resolve(cfg.source) },
+            ]),
+          )
+        : null;
+    (this.config as { mcpServers: typeof resolved }).mcpServers = resolved;
+    this.persistAndSync({ mcpServers: resolved });
   }
 
-  getInstructions(): string | null {
-    return this.config.instructions;
+  addMcpServer(name: string, config: McpServerConfig): void {
+    const current = this.config.mcpServers ?? {};
+    this.setMcpServers({ ...current, [name]: config });
+  }
+
+  removeMcpServer(name: string): void {
+    const current = { ...(this.config.mcpServers ?? {}) };
+    delete current[name];
+    this.setMcpServers(current);
+  }
+
+  getMcpServers(): Record<string, McpServerConfig> {
+    return { ...(this.config.mcpServers ?? {}) };
   }
 
   // ─── Persist + sync helper ────────────────────────────────────
@@ -335,6 +416,7 @@ export class AgentImpl
       );
     }
 
+    await this.actionsHttp.start();
     this.startSubsystems();
     this.emit('started');
   }
@@ -343,6 +425,7 @@ export class AgentImpl
     this._stopping = true;
     this.ipcHandle?.stop();
     this.schedulerHandle?.stop();
+    await this.actionsHttp.stop();
     await this.messageMgr.waitForStop();
     await this.queue.shutdown(10000);
     for (const [, channel] of this.channels) {
