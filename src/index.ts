@@ -98,6 +98,27 @@ import { handleMessageWithProcedureCheck } from './learning/procedure-match-inte
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { eventBus } from './event-bus.js';
+import { shouldFireDigest, generateSmartDigest } from './digest-engine.js';
+/* eslint-disable @typescript-eslint/no-unused-vars -- scaffolding: callback/push/classification wiring */
+import {
+  parseCallbackData,
+  resolveItemByCallback,
+  getTrackedItemById,
+  insertTrackedItem,
+  getTrackedItemBySourceId,
+  updateDigestState,
+  getDigestState,
+  transitionItemState,
+} from './tracked-items.js';
+import { recordBehavior } from './classification-adjustments.js';
+import { PushBuffer } from './push-buffer.js';
+import {
+  formatPushMessage,
+  getPushActions,
+  PushRateLimiter,
+} from './push-manager.js';
+import { classify } from './classification.js';
+/* eslint-enable @typescript-eslint/no-unused-vars */
 import type {
   MessageInboundEvent,
   MessageOutboundEvent,
@@ -948,6 +969,34 @@ function ensureContainerSystemRunning(): void {
   ensureDockerNetwork('nanoclaw');
   ensureBrowserSidecar();
   cleanupOrphans();
+}
+
+// Smart digest check — runs every 15 minutes
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- wired into startup when full integration is ready
+function startSmartDigestCheck(
+  sendMessage: (jid: string, text: string) => Promise<void>,
+  getMainGroupJid: () => string | undefined,
+): void {
+  setInterval(() => {
+    const jid = getMainGroupJid();
+    if (!jid) return;
+
+    const groupName = 'main';
+    if (shouldFireDigest(groupName)) {
+      const digest = generateSmartDigest(groupName);
+      if (digest) {
+        sendMessage(jid, digest).catch(err => {
+          logger.error({ err }, 'Failed to send smart digest');
+        });
+        eventBus.emit('digest.sent', {
+          type: 'digest.sent',
+          source: 'digest-engine',
+          timestamp: Date.now(),
+          payload: { groupName, itemCount: 0, digestType: 'smart' },
+        });
+      }
+    }
+  }, 15 * 60 * 1000);
 }
 
 async function main(): Promise<void> {

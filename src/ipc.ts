@@ -20,6 +20,9 @@ import { RegisteredGroup } from './types.js';
 import { addRule } from './learning/rules-engine.js';
 import { addTrace } from './learning/procedure-recorder.js';
 import { inferActionClasses } from './learning/outcome-enricher.js';
+import { classify } from './classification.js';
+import { insertTrackedItem, getTrackedItemBySourceId } from './tracked-items.js';
+import { eventBus } from './event-bus.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -529,6 +532,59 @@ export async function processTaskIpc(
       if (emailCount === 0) {
         logger.debug('Email trigger with no emails, skipping');
         break;
+      }
+
+      // Classify each email and insert as tracked items
+      for (const email of data.emails ?? []) {
+        const sourceId = `gmail:${email.thread_id}`;
+        const existing = getTrackedItemBySourceId('gmail', sourceId);
+        if (existing) continue;
+
+        const result = classify({
+          source: 'gmail',
+          sourceId,
+          superpilotLabel: null,
+          trustTier: null,
+          senderPattern: email.sender || 'unknown',
+          title: email.subject || '(no subject)',
+          summary: null,
+          userActed: false,
+          metadata: { account: email.account, threadId: email.thread_id },
+        });
+
+        const itemId = `item-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        insertTrackedItem({
+          id: itemId,
+          source: 'gmail',
+          source_id: sourceId,
+          group_name: 'main',
+          state: 'pending',
+          classification: result.decision,
+          superpilot_label: null,
+          trust_tier: null,
+          title: email.subject || '(no subject)',
+          summary: null,
+          thread_id: email.thread_id,
+          detected_at: Date.now(),
+          pushed_at: null,
+          resolved_at: null,
+          resolution_method: null,
+          digest_count: 0,
+          telegram_message_id: null,
+          classification_reason: result.reason,
+          metadata: { account: email.account, sender: email.sender },
+        });
+        eventBus.emit('item.classified', {
+          type: 'item.classified',
+          source: 'classification',
+          timestamp: Date.now(),
+          payload: {
+            itemId,
+            decision: result.decision,
+            source: 'gmail',
+            reason: result.reason as unknown as Record<string, unknown>,
+          },
+        });
       }
 
       const emailSummaries = (data.emails ?? [])
