@@ -50,7 +50,7 @@ class NewsBriefingSystem:
             print("-" * 70)
             preferences = self.orchestrator.load_user_preferences()
             memory = self.orchestrator.load_memory()
-            tasks = self.orchestrator.create_research_tasks(preferences)
+            tasks = self.orchestrator.create_research_tasks(preferences, memory)
 
             print(f"✓ Loaded {len(preferences['categories'])} categories")
             print(f"✓ Tracking {len(memory.get('seen_articles', []))} seen articles")
@@ -81,7 +81,7 @@ class NewsBriefingSystem:
             print("-" * 70)
             results = self.compiler.load_all_research_results()
             deduplicated_results = self.compiler.deduplicate_articles(results, memory)
-            briefing = self.compiler.compile_final_briefing(deduplicated_results)
+            briefing = self.compiler.compile_final_briefing(deduplicated_results, memory)
 
             briefing_file = self.compiler.save_briefing(briefing)
             self.orchestrator.update_memory_with_briefing(briefing, memory)

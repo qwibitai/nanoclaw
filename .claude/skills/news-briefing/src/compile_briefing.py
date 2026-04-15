@@ -84,7 +84,7 @@ class BriefingCompiler:
 
         return deduplicated_results
 
-    def compile_final_briefing(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def compile_final_briefing(self, results: List[Dict[str, Any]], memory: Dict[str, Any] = None) -> Dict[str, Any]:
         """Compile all results into final briefing structure"""
         briefing = {
             "metadata": {
@@ -97,10 +97,27 @@ class BriefingCompiler:
                 "total_articles": sum(len(r.get("articles", [])) for r in results),
                 "sources": []
             },
-            "sections": []
+            "sections": [],
+            "current_status": {},
+            "situation_updates": []
         }
 
         all_sources = set()
+
+        # Collect all situation_updates from research results
+        all_situation_updates = []
+        for result in results:
+            for update in result.get("situation_updates", []):
+                if isinstance(update, dict) and update.get("situation_key"):
+                    all_situation_updates.append(update)
+
+        briefing["situation_updates"] = all_situation_updates
+
+        # Build current_status by applying today's updates to existing situations
+        existing_situations = (memory or {}).get("ongoing_situations", {}) if memory else {}
+        briefing["current_status"] = self.orchestrator.apply_situation_updates(
+            existing_situations, all_situation_updates
+        )
 
         for result in results:
             articles = result.get("articles", [])
@@ -124,12 +141,14 @@ class BriefingCompiler:
 
         briefing["summary"]["sources"] = sorted(list(all_sources))
 
-        # Sort sections by priority (world → tech → finance → custom)
+        # Sort sections by priority
         priority_order = {
             "world_highlights": 1,
             "technology": 2,
-            "economy_finance": 3,
-            "custom_tracking": 4
+            "cybersecurity": 3,
+            "economy_finance": 4,
+            "culture": 5,
+            "custom_tracking": 6
         }
 
         briefing["sections"].sort(key=lambda x: priority_order.get(x["category"], 99))
@@ -141,7 +160,9 @@ class BriefingCompiler:
         titles = {
             "world_highlights": "🌍 World Highlights",
             "technology": "💻 Technology",
+            "cybersecurity": "🔒 Cybersecurity",
             "economy_finance": "💰 Economy & Finance",
+            "culture": "🎭 Culture",
             "custom_tracking": "🔍 Custom Tracking"
         }
         return titles.get(category, category.replace("_", " ").title())

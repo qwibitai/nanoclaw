@@ -91,8 +91,122 @@
 
         .section-header.world { border-color: #3b82f6; }
         .section-header.tech { border-color: #8b5cf6; }
+        .section-header.cyber { border-color: #ef4444; }
         .section-header.finance { border-color: #10b981; }
         .section-header.custom { border-color: #f59e0b; }
+
+        /* ── Current Status Section ── */
+        .current-status-section {
+            margin-bottom: 40px;
+        }
+
+        .current-status-header {
+            background: linear-gradient(135deg, #1e3a5f 0%, #2d5986 100%);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .current-status-title {
+            font-size: 22px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .current-status-subtitle {
+            font-size: 13px;
+            opacity: 0.8;
+        }
+
+        .situation-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+            gap: 14px;
+            padding: 16px;
+            background: #f0f4f8;
+            border: 1px solid #d1dbe8;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+        }
+
+        .situation-card {
+            background: white;
+            border-radius: 8px;
+            padding: 14px 16px;
+            border-left: 5px solid #94a3b8;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+            page-break-inside: avoid;
+        }
+
+        .situation-card.severity-high  { border-left-color: #ef4444; }
+        .situation-card.severity-medium { border-left-color: #f59e0b; }
+        .situation-card.severity-low   { border-left-color: #22c55e; }
+
+        .situation-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 6px;
+            gap: 10px;
+        }
+
+        .situation-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #1e293b;
+            flex: 1;
+            line-height: 1.3;
+        }
+
+        .situation-severity {
+            font-size: 11px;
+            font-weight: 700;
+            white-space: nowrap;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: #f1f5f9;
+            color: #475569;
+        }
+
+        .situation-status {
+            font-size: 13px;
+            color: #374151;
+            font-weight: 500;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+
+        .situation-timeline {
+            border-top: 1px solid #e5e7eb;
+            padding-top: 7px;
+            margin-top: 4px;
+        }
+
+        .timeline-event {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 4px;
+            font-size: 11px;
+            line-height: 1.4;
+        }
+
+        .timeline-date {
+            color: #6b7280;
+            white-space: nowrap;
+            font-weight: 600;
+            min-width: 75px;
+        }
+
+        .timeline-summary {
+            color: #4b5563;
+        }
+
+        .situation-updated {
+            font-size: 10px;
+            color: #9ca3af;
+            margin-top: 7px;
+            text-align: right;
+        }
 
         .section-title {
             font-size: 24px;
@@ -282,6 +396,8 @@
             </div>
         </div>
     </div>
+
+    {{current_status}}
 
     {{sections}}
 

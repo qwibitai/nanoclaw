@@ -8,7 +8,7 @@ import json
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import hashlib
 
 class NewsBriefingOrchestrator:
@@ -32,7 +32,7 @@ class NewsBriefingOrchestrator:
             return json.load(f)
 
     def load_memory(self) -> Dict[str, Any]:
-        """Load system memory (previous briefings, seen articles)"""
+        """Load system memory (previous briefings, seen articles, ongoing situations)"""
         memory_file = self.memory_dir / "briefing_memory.json"
 
         if not memory_file.exists():
@@ -40,11 +40,15 @@ class NewsBriefingOrchestrator:
                 "last_briefing_date": None,
                 "seen_articles": [],
                 "topic_history": {},
-                "user_feedback": []
+                "user_feedback": [],
+                "ongoing_situations": {}
             }
 
-        with open(memory_file, 'r') as f:
-            return json.load(f)
+        memory = json.load(open(memory_file, 'r'))
+        # Ensure ongoing_situations exists in older memory files
+        if "ongoing_situations" not in memory:
+            memory["ongoing_situations"] = {}
+        return memory
 
     def save_memory(self, memory: Dict[str, Any]):
         """Save system memory"""
@@ -73,9 +77,10 @@ class NewsBriefingOrchestrator:
 
         return filtered
 
-    def create_research_tasks(self, preferences: Dict) -> List[Dict[str, Any]]:
+    def create_research_tasks(self, preferences: Dict, memory: Optional[Dict] = None) -> List[Dict[str, Any]]:
         """Create research tasks for agent swarm"""
         tasks = []
+        ongoing_situations = (memory or {}).get("ongoing_situations", {})
 
         for category_name, category_data in preferences["categories"].items():
             if not category_data.get("enabled", False):
@@ -87,7 +92,7 @@ class NewsBriefingOrchestrator:
                 "priority": category_data.get("priority", 99),
                 "topics": category_data.get("topics", []),
                 "max_articles": preferences["preferences"].get("max_articles_per_category", 5),
-                "agent_prompt": self._generate_agent_prompt(category_name, category_data)
+                "agent_prompt": self._generate_agent_prompt(category_name, category_data, ongoing_situations)
             }
             tasks.append(task)
 
@@ -95,61 +100,150 @@ class NewsBriefingOrchestrator:
         tasks.sort(key=lambda x: x["priority"])
         return tasks
 
-    def _generate_agent_prompt(self, category: str, category_data: Dict) -> str:
+    def _generate_agent_prompt(self, category: str, category_data: Dict, ongoing_situations: Dict = None) -> str:
         """Generate detailed prompt for research agent"""
         topics = category_data.get("topics", [])
+        sources = category_data.get("sources", [])
+        today = datetime.now().strftime("%Y-%m-%d")
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
         prompt = f"""You are a specialized news research agent focused on: {category.replace('_', ' ').title()}
 
-Your mission: Research and summarize the most important developments in the following topics from the last 24 hours:
+TODAY'S DATE: {today}
+Your mission: Find the most important developments from the LAST 24 HOURS only (published {yesterday} or {today}).
 
+Topics to research:
 """
         for i, topic in enumerate(topics, 1):
             prompt += f"{i}. {topic}\n"
 
+        if sources:
+            prompt += f"""
+PRIORITY SOURCES — check these specific sites first using WebFetch:
+"""
+            for src in sources:
+                prompt += f"- https://{src}\n"
+            prompt += "\nAlso search broadly beyond these sources.\n"
+
+        style = category_data.get("style_instructions", "").strip()
+        if style:
+            prompt += f"""
+EDITORIAL FOCUS FOR THIS CATEGORY:
+{style}
+
+Apply this focus when selecting which articles to include and how to summarize them.
+"""
+
         prompt += f"""
+CRITICAL DATE REQUIREMENTS:
+- ONLY include articles published on {today} or {yesterday}
+- Use search queries with date filters: e.g., WebSearch("{topics[0] if topics else 'news'} after:{yesterday}")
+- Reject any article that doesn't have a publication date of {yesterday} or {today}
+- If you can't find enough recent articles, note the shortage — do NOT pad with older stories
 
-Requirements:
-- Focus on NEWS from the last 24 hours (published within the last day)
-- Find the top 3-5 most important stories for these topics
-- For each story, provide:
-  * Clear, concise headline
-  * 2-3 sentence summary of what happened
-  * Why it matters / impact
-  * Source URL
-  * Publication timestamp
+Requirements per article:
+- Clear, concise headline
+- 2-3 sentence summary of what happened
+- Why it matters / impact
+- Source URL
+- Publication timestamp (must be {yesterday} or {today})
+- Relevance score 1-10
+"""
 
-- Prioritize:
-  * Credible sources (major news outlets, official announcements, respected tech blogs)
-  * Factual reporting over opinion pieces
-  * Stories with broad impact or significance
-  * NEW information (avoid old news)
+        # Add ongoing situations context if relevant
+        if ongoing_situations:
+            prompt += f"""
+ONGOING SITUATIONS TO WATCH:
+These are developing stories tracked across multiple days. Check for updates today:
+"""
+            for key, situation in ongoing_situations.items():
+                prompt += f"""- [{key}] {situation['title']}
+  Current status: {situation.get('current_status', 'Unknown')}
+  Last updated: {situation.get('last_updated', 'Unknown')}
+"""
+            prompt += """
+For any of these situations you find updates on, include them in "situation_updates".
+Also identify any NEW major ongoing situations that should be tracked going forward.
+"""
 
-- Use WebSearch to find recent articles
-- If a story is particularly important, use WebFetch to get full details
-- Format your response as JSON with this structure:
+        prompt += f"""
+Return your response as JSON with this exact structure:
 
 {{
   "category": "{category}",
-  "research_date": "YYYY-MM-DD",
+  "research_date": "{today}",
   "articles": [
     {{
       "title": "Article headline",
       "summary": "2-3 sentence summary",
       "impact": "Why this matters",
       "url": "source URL",
-      "published": "YYYY-MM-DD HH:MM",
+      "published": "{today} HH:MM",
       "source": "Publication name",
-      "relevance_score": 1-10
+      "relevance_score": 8
     }}
   ],
   "key_trends": ["trend 1", "trend 2"],
-  "notable_absence": "Any expected news that didn't happen"
+  "notable_absence": "Any expected news that didn't happen",
+  "situation_updates": [
+    {{
+      "situation_key": "snake_case_key",
+      "title": "Human-readable situation title",
+      "is_new": false,
+      "current_status": "One sentence describing the current state right now",
+      "today_summary": "What specifically happened today in this situation",
+      "severity": "high"
+    }}
+  ]
 }}
+
+Notes:
+- situation_updates should only include situations you actually found news about today
+- severity values: "high", "medium", "low"
+- is_new: true only for brand-new ongoing situations not in the list above
 
 Start your research now. Return ONLY the JSON, no other text.
 """
         return prompt
+
+    def apply_situation_updates(self, existing_situations: Dict, updates: List[Dict]) -> Dict:
+        """Apply situation updates from today's research to build current state"""
+        situations = {k: dict(v) for k, v in existing_situations.items()}
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        for update in updates:
+            key = update.get("situation_key", "").strip()
+            if not key:
+                continue
+
+            if key not in situations:
+                situations[key] = {
+                    "title": update.get("title", key.replace("_", " ").title()),
+                    "current_status": update.get("current_status", ""),
+                    "severity": update.get("severity", "medium"),
+                    "first_seen": today,
+                    "last_updated": today,
+                    "events": []
+                }
+
+            # Update current status and severity
+            if update.get("current_status"):
+                situations[key]["current_status"] = update["current_status"]
+            if update.get("severity"):
+                situations[key]["severity"] = update["severity"]
+            situations[key]["last_updated"] = today
+            if update.get("title"):
+                situations[key]["title"] = update["title"]
+
+            # Add today's event if there's a summary and it's not a duplicate
+            today_summary = update.get("today_summary", "").strip()
+            if today_summary:
+                events = situations[key].get("events", [])
+                if not any(e.get("date") == today for e in events):
+                    events.append({"date": today, "summary": today_summary})
+                situations[key]["events"] = events[-10:]  # Keep last 10
+
+        return situations
 
     def compile_briefing(self, research_results: List[Dict]) -> Dict[str, Any]:
         """Compile all research into a structured briefing"""
@@ -203,9 +297,12 @@ Start your research now. Return ONLY the JSON, no other text.
                 if article_hash not in seen_hashes:
                     seen_hashes.append(article_hash)
 
-        # Keep only last 7 days of seen articles (avoid memory bloat)
-        memory["seen_articles"] = seen_hashes[-500:]  # Keep last 500 articles
+        memory["seen_articles"] = seen_hashes[-500:]
         memory["last_briefing_date"] = briefing.get("metadata", {}).get("date", datetime.now().strftime("%Y-%m-%d"))
+
+        # Persist the updated ongoing situations from this briefing
+        if "current_status" in briefing:
+            memory["ongoing_situations"] = briefing["current_status"]
 
         # Track topic coverage
         topic_history = memory.get("topic_history", {})
@@ -246,10 +343,11 @@ def main():
     last_briefing = memory.get("last_briefing_date", "Never")
     print(f"   ✓ Last briefing: {last_briefing}")
     print(f"   ✓ Tracking {len(memory.get('seen_articles', []))} seen articles")
+    print(f"   ✓ Tracking {len(memory.get('ongoing_situations', {}))} ongoing situations")
 
     # Create research tasks
     print("\n📝 Creating research tasks...")
-    tasks = orchestrator.create_research_tasks(preferences)
+    tasks = orchestrator.create_research_tasks(preferences, memory)
     print(f"   ✓ Created {len(tasks)} research tasks")
 
     for task in tasks:

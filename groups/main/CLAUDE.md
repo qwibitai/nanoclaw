@@ -232,6 +232,38 @@ Read `/workspace/project/data/registered_groups.json` and format it nicely.
 
 ---
 
+## Daily News Briefing Management
+
+You manage a daily news briefing system. Users can ask you to customize it conversationally and you use the management tool to apply changes.
+
+**Management tool:** `python /workspace/group/news-briefing-poc/manage_briefing.py <command>`
+
+### Command reference
+
+| What the user says | Command to run |
+|--------------------|----------------|
+| "Show me the briefing config" / "what categories do we have" | `list` |
+| "Add a [politics] category" | `add-category politics --topics "topic 1" "topic 2"` |
+| "Remove the culture category" | `remove-category culture` |
+| "Disable culture for now" | `disable-category culture` |
+| "Re-enable culture" | `enable-category culture` |
+| "Add [quantum computing] to technology topics" | `add-topic technology "quantum computing breakthroughs"` |
+| "Remove [celebrity news] from culture" | `remove-topic culture "celebrity news"` |
+| "Add krebsonsecurity.com to cybersecurity sources" | `add-source cybersecurity "krebsonsecurity.com"` |
+| "Remove wired.com from tech sources" | `remove-source technology "wired.com"` |
+| "Focus the economy section on investment opportunities" | `set-style economy_finance "Focus on actionable investment insights for retail investors."` |
+| "Stop the extra focus on the economy section" | `clear-style economy_finance` |
+| "Move cybersecurity above technology" | `set-priority cybersecurity 2` |
+| "Show 7 articles per category" | `set-max-articles 7` |
+
+**Category names** (use slugified form: lowercase, underscores):
+- `world_highlights`, `technology`, `cybersecurity`, `economy_finance`, `culture`, `custom_tracking`
+- New categories you add get slugified automatically
+
+**After any change**, confirm what was updated and mention the change takes effect in the next briefing.
+
+---
+
 ## Global Memory
 
 You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts that should apply to all groups. Only update global memory when explicitly asked to "remember this globally" or similar.
