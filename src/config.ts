@@ -5,11 +5,14 @@ import { readEnvFile } from './env.js';
 import { isValidTimezone } from './timezone.js';
 
 // Read config values from .env (falls back to process.env).
+// Secrets (API keys, tokens) are NOT read here — they are loaded only
+// by the credential proxy (credential-proxy.ts), never exposed to containers.
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
-  'ONECLI_URL',
   'TZ',
+  'WHISPER_BIN',
+  'WHISPER_MODEL',
 ]);
 
 export const ASSISTANT_NAME =
@@ -41,6 +44,13 @@ export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
+export const WHISPER_BIN =
+  process.env.WHISPER_BIN || envConfig.WHISPER_BIN || 'whisper-cli';
+export const WHISPER_MODEL =
+  process.env.WHISPER_MODEL ||
+  envConfig.WHISPER_MODEL ||
+  path.resolve(PROJECT_ROOT, 'data', 'models', 'ggml-base.bin');
+
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
 export const CONTAINER_TIMEOUT = parseInt(
@@ -51,12 +61,21 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
 ); // 10MB default
+export const CREDENTIAL_PROXY_PORT = parseInt(
+  process.env.CREDENTIAL_PROXY_PORT || '3001',
+  10,
+);
+export const STATS_API_PORT = parseInt(
+  process.env.STATS_API_PORT || '3002',
+  10,
+);
 export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
 );
 export const IPC_POLL_INTERVAL = 1000;
+export const MAX_SESSION_SIZE_BYTES = 2 * 1024 * 1024; // 2MB — rotate session above this to prevent context bloat
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,

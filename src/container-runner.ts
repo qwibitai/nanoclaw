@@ -4,31 +4,41 @@
  */
 import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
+  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
-  ONECLI_URL,
   TIMEZONE,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
   hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { OneCLI } from '@onecli-sh/sdk';
+import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
-const onecli = new OneCLI({ url: ONECLI_URL });
+const vossEnv = readEnvFile([
+  'VOSS_API_URL',
+  'VOSS_API_KEY',
+  'NOTION_TOKEN',
+  'MOLTBOOK_API_KEY',
+  'OPENAI_MODEL',
+  'OPENAI_API_KEY',
+]);
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -43,6 +53,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  model?: string;
 }
 
 export interface ContainerOutput {
@@ -78,16 +89,8 @@ function buildVolumeMounts(
       readonly: true,
     });
 
-    // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the OneCLI gateway, never exposed to containers.
-    const envFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(envFile)) {
-      mounts.push({
-        hostPath: '/dev/null',
-        containerPath: '/workspace/project/.env',
-        readonly: true,
-      });
-    }
+    // .env shadowing is handled inside the container entrypoint (mount --bind
+    // /dev/null) since Apple Container only supports directory mounts on the host.
 
     // Main gets writable access to the store (SQLite DB) so it can
     // query and write to the database directly.
@@ -184,6 +187,37 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Gmail credentials directory (for Gmail MCP inside the container)
+  const homeDir = os.homedir();
+  const gmailDir = path.join(homeDir, '.gmail-mcp');
+  if (fs.existsSync(gmailDir)) {
+    mounts.push({
+      hostPath: gmailDir,
+      containerPath: '/home/node/.gmail-mcp',
+      readonly: false, // MCP may need to refresh OAuth tokens
+    });
+  }
+
+  // Google Calendar MCP credentials directory
+  const calendarDir = path.join(homeDir, '.config', 'google-calendar-mcp');
+  if (fs.existsSync(calendarDir)) {
+    mounts.push({
+      hostPath: calendarDir,
+      containerPath: '/home/node/.config/google-calendar-mcp',
+      readonly: false, // MCP may need to refresh OAuth tokens
+    });
+  }
+
+  // Moltbook MCP server (writable — server writes status/health files to its own directory)
+  const moltbookMcpDir = path.join(homeDir, 'Development', 'moltbook-mcp');
+  if (fs.existsSync(moltbookMcpDir)) {
+    mounts.push({
+      hostPath: moltbookMcpDir,
+      containerPath: '/opt/moltbook-mcp',
+      readonly: false,
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -242,30 +276,51 @@ function buildVolumeMounts(
   return mounts;
 }
 
-async function buildContainerArgs(
+function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
-  agentIdentifier?: string,
-): Promise<string[]> {
+  groupFolder: string,
+  isMain: boolean,
+  model?: string,
+): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // OneCLI gateway handles credential injection — containers never see real secrets.
-  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
-  if (onecliApplied) {
-    logger.info({ containerName }, 'OneCLI gateway config applied');
+  // Route API traffic through the credential proxy (containers never see real secrets)
+  // Query params provide attribution for token usage tracking
+  args.push(
+    '-e',
+    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}?container=${encodeURIComponent(containerName)}&group=${encodeURIComponent(groupFolder)}`,
+  );
+
+  // Mirror the host's auth method with a placeholder value.
+  // API key mode: SDK sends x-api-key, proxy replaces with real key.
+  // OAuth mode:   SDK exchanges placeholder token for temp API key,
+  //               proxy injects real OAuth token on that exchange request.
+  const authMode = detectAuthMode();
+  if (authMode === 'api-key') {
+    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
-    logger.warn(
-      { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
-    );
+    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
+
+  // Forward service credentials into the container
+  if (vossEnv.VOSS_API_URL)
+    args.push('-e', `VOSS_API_URL=${vossEnv.VOSS_API_URL}`);
+  if (vossEnv.VOSS_API_KEY)
+    args.push('-e', `VOSS_API_KEY=${vossEnv.VOSS_API_KEY}`);
+  if (vossEnv.NOTION_TOKEN)
+    args.push('-e', `NOTION_TOKEN=${vossEnv.NOTION_TOKEN}`);
+  if (vossEnv.MOLTBOOK_API_KEY)
+    args.push('-e', `MOLTBOOK_API_KEY=${vossEnv.MOLTBOOK_API_KEY}`);
+  // Pass model to container. If OPENAI_MODEL is set, use it — the OpenAI runner
+  // detects non-claude- model names and calls OpenAI directly instead of the Claude SDK.
+  const effectiveModel = model || vossEnv.OPENAI_MODEL;
+  if (effectiveModel) args.push('-e', `CLAUDE_MODEL=${effectiveModel}`);
+  if (vossEnv.OPENAI_API_KEY)
+    args.push('-e', `OPENAI_API_KEY=${vossEnv.OPENAI_API_KEY}`);
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
@@ -276,7 +331,14 @@ async function buildContainerArgs(
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
-    args.push('--user', `${hostUid}:${hostGid}`);
+    if (isMain) {
+      // Main containers start as root so the entrypoint can mount --bind
+      // to shadow .env. Privileges are dropped via setpriv in entrypoint.sh.
+      args.push('-e', `RUN_UID=${hostUid}`);
+      args.push('-e', `RUN_GID=${hostGid}`);
+    } else {
+      args.push('--user', `${hostUid}:${hostGid}`);
+    }
     args.push('-e', 'HOME=/home/node');
   }
 
@@ -307,14 +369,12 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  // Main group uses the default OneCLI agent; others use their own agent.
-  const agentIdentifier = input.isMain
-    ? undefined
-    : group.folder.toLowerCase().replace(/_/g, '-');
-  const containerArgs = await buildContainerArgs(
+  const containerArgs = buildContainerArgs(
     mounts,
     containerName,
-    agentIdentifier,
+    group.folder,
+    input.isMain,
+    input.model,
   );
 
   logger.debug(

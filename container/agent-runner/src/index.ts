@@ -22,6 +22,7 @@ import {
   HookCallback,
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
+import { runOpenAIAgent } from './openai-runner.js';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -435,11 +436,15 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  const modelOverride = process.env.CLAUDE_MODEL || undefined;
+  if (modelOverride) log(`Model override: ${modelOverride}`);
+
   for await (const message of query({
     prompt: stream,
     options: {
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+      model: modelOverride,
       resume: sessionId,
       resumeSessionAt: resumeAt,
       systemPrompt: globalClaudeMd
@@ -482,6 +487,43 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+          },
+        },
+        gmail: {
+          command: 'npx',
+          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+        },
+        calendar: {
+          command: 'npx',
+          args: ['-y', '@cocal/google-calendar-mcp'],
+          env: {
+            GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+            GOOGLE_CALENDAR_MCP_TOKEN_PATH: '/home/node/.config/google-calendar-mcp/tokens.json',
+          },
+        },
+        'voss-crm': {
+          command: 'node',
+          args: [path.join(path.dirname(mcpServerPath), 'voss-mcp.js')],
+          env: {
+            VOSS_API_URL: process.env.VOSS_API_URL || '',
+            VOSS_API_KEY: process.env.VOSS_API_KEY || '',
+          },
+        },
+        notion: {
+          command: 'npx',
+          args: ['-y', '@notionhq/notion-mcp-server'],
+          env: {
+            OPENAPI_MCP_HEADERS: JSON.stringify({
+              Authorization: `Bearer ${process.env.NOTION_TOKEN || ''}`,
+              'Notion-Version': '2022-06-28',
+            }),
+          },
+        },
+        moltbook: {
+          command: 'node',
+          args: ['/opt/moltbook-mcp/index.js'],
+          env: {
+            MOLTBOOK_API_KEY: process.env.MOLTBOOK_API_KEY || '',
           },
         },
       },
@@ -672,6 +714,177 @@ async function main(): Promise<void> {
     // Script says wake agent — enrich prompt with script data
     log(`Script wakeAgent=true, enriching prompt with data`);
     prompt = `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}\n\nInstructions:\n${containerInput.prompt}`;
+  }
+
+  // Check if we should use OpenAI runner instead of Claude SDK
+  const modelOverride2 = process.env.CLAUDE_MODEL || '';
+  const useOpenAI = modelOverride2 && !modelOverride2.startsWith('claude-');
+
+  if (useOpenAI) {
+    log(`Using OpenAI runner with model: ${modelOverride2}`);
+
+    // Build system prompt: personality.md first, then CLAUDE.md for capabilities
+    let systemPrompt = 'You are a helpful assistant.';
+    const personalityPath = '/workspace/group/personality.md';
+    // Support AGENT.md (model-agnostic) with CLAUDE.md fallback
+    const groupAgentMd = '/workspace/group/AGENT.md';
+    const groupClaudeMdPath2 = '/workspace/group/CLAUDE.md';
+    const groupConfigPath = fs.existsSync(groupAgentMd) ? groupAgentMd : groupClaudeMdPath2;
+    const globalAgentMd = '/workspace/global/AGENT.md';
+    const globalClaudeMdPath2 = '/workspace/global/CLAUDE.md';
+    const globalConfigPath = fs.existsSync(globalAgentMd) ? globalAgentMd : globalClaudeMdPath2;
+
+    const parts: string[] = [];
+    if (fs.existsSync(personalityPath)) {
+      parts.push(fs.readFileSync(personalityPath, 'utf-8'));
+      log(`Loaded personality.md (${parts[parts.length - 1].length} chars)`);
+    }
+    if (fs.existsSync(globalConfigPath)) {
+      parts.push(fs.readFileSync(globalConfigPath, 'utf-8'));
+    }
+    if (fs.existsSync(groupConfigPath)) {
+      parts.push(fs.readFileSync(groupConfigPath, 'utf-8'));
+    }
+    if (parts.length > 0) {
+      systemPrompt = parts.join('\n\n---\n\n');
+    }
+
+    // MCP server configs — only start what's needed for this group
+    const mcpConfigs: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {
+      nanoclaw: {
+        command: 'node',
+        args: [mcpServerPath],
+        env: {
+          NANOCLAW_CHAT_JID: containerInput.chatJid,
+          NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+          NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+        },
+      },
+    };
+    // Add MCP servers based on group context.
+    // Moltbook has 200+ tools so only load it for its own group.
+    // Gmail, calendar, notion, voss-crm are lightweight (~10-15 tools each).
+    if (containerInput.isMain) {
+      mcpConfigs.gmail = {
+        command: 'npx',
+        args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+      };
+      mcpConfigs.calendar = {
+        command: 'npx',
+        args: ['-y', '@cocal/google-calendar-mcp'],
+        env: {
+          GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+          GOOGLE_CALENDAR_MCP_TOKEN_PATH: '/home/node/.config/google-calendar-mcp/tokens.json',
+        },
+      };
+      if (process.env.NOTION_TOKEN) {
+        mcpConfigs.notion = {
+          command: 'npx',
+          args: ['-y', '@notionhq/notion-mcp-server'],
+          env: {
+            OPENAPI_MCP_HEADERS: JSON.stringify({
+              Authorization: `Bearer ${process.env.NOTION_TOKEN}`,
+              'Notion-Version': '2022-06-28',
+            }),
+          },
+        };
+      }
+      if (process.env.VOSS_API_URL) {
+        mcpConfigs['voss-crm'] = {
+          command: 'node',
+          args: [path.join(path.dirname(mcpServerPath), 'voss-mcp.js')],
+          env: {
+            VOSS_API_URL: process.env.VOSS_API_URL || '',
+            VOSS_API_KEY: process.env.VOSS_API_KEY || '',
+          },
+        };
+      }
+    }
+    if (process.env.MOLTBOOK_API_KEY && containerInput.groupFolder.includes('moltbook')) {
+      mcpConfigs.moltbook = {
+        command: 'node',
+        args: ['/opt/moltbook-mcp/index.js'],
+        env: { MOLTBOOK_API_KEY: process.env.MOLTBOOK_API_KEY },
+      };
+    }
+
+    // Load recent conversation for cross-session context
+    const convDir = '/workspace/group/conversations';
+    if (fs.existsSync(convDir)) {
+      const convFiles = fs.readdirSync(convDir)
+        .filter(f => f.endsWith('.md'))
+        .sort()
+        .reverse();
+      if (convFiles.length > 0) {
+        try {
+          const lastConv = fs.readFileSync(path.join(convDir, convFiles[0]), 'utf-8');
+          // Extract just the last ~2000 chars for context (avoid bloating the prompt)
+          const tail = lastConv.length > 2000 ? '...\n' + lastConv.slice(-2000) : lastConv;
+          systemPrompt += `\n\n---\n\n## Recent conversation context\n\nHere is the tail of your most recent conversation session (${convFiles[0]}). Use this for context if Mark references something from a previous chat:\n\n${tail}`;
+          log(`Loaded recent conversation context: ${convFiles[0]} (${tail.length} chars)`);
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    try {
+      // Run loop: process prompt → wait for IPC follow-up → repeat
+      // Conversation history is carried across iterations so North remembers context
+      let history: Array<{ role: string; content: string | null; tool_calls?: unknown[]; tool_call_id?: string }> | undefined;
+      while (true) {
+        const result = await runOpenAIAgent(prompt, systemPrompt, modelOverride2, mcpConfigs, history as never);
+        history = result.history;
+        writeOutput({
+          status: result.error ? 'error' : 'success',
+          result: result.result,
+          error: result.error,
+        });
+
+        if (result.error) break;
+
+        // Check if close sentinel already exists
+        if (shouldClose()) {
+          log('Close sentinel detected after response, exiting');
+          break;
+        }
+
+        log('Waiting for next IPC message...');
+        const nextMessage = await waitForIpcMessage();
+        if (nextMessage === null) {
+          log('Close sentinel received, exiting');
+          break;
+        }
+
+        log(`Got follow-up message (${nextMessage.length} chars)`);
+        prompt = nextMessage;
+      }
+      // Save conversation to conversations/ for cross-session memory
+      if (history && history.length > 2) {
+        try {
+          const convDir2 = '/workspace/group/conversations';
+          fs.mkdirSync(convDir2, { recursive: true });
+          const now = new Date();
+          const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          const convContent = history
+            .filter(m => m.role === 'user' || (m.role === 'assistant' && m.content))
+            .map(m => `**${m.role}**: ${m.content || '(tool call)'}`)
+            .join('\n\n');
+          fs.writeFileSync(
+            path.join(convDir2, `${ts}-openai-session.md`),
+            `# Conversation ${now.toISOString()}\n\n${convContent}`,
+          );
+          log(`Saved conversation (${history.length} messages)`);
+        } catch {
+          // ignore
+        }
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log(`OpenAI agent error: ${errorMessage}`);
+      writeOutput({ status: 'error', result: null, error: errorMessage });
+    }
+    return;
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat

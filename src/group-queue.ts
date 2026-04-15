@@ -13,6 +13,7 @@ interface QueuedTask {
 
 const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 5000;
+const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
 interface GroupState {
   active: boolean;
@@ -25,6 +26,7 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  circuitOpenUntil: number; // timestamp — 0 means circuit closed
 }
 
 export class GroupQueue {
@@ -49,6 +51,7 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        circuitOpenUntil: 0,
       };
       this.groups.set(groupJid, state);
     }
@@ -59,10 +62,26 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
+  getStatus(): { activeCount: number; maxConcurrent: number } {
+    return {
+      activeCount: this.activeCount,
+      maxConcurrent: MAX_CONCURRENT_CONTAINERS,
+    };
+  }
+
   enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
+
+    if (state.circuitOpenUntil > Date.now()) {
+      state.pendingMessages = true;
+      logger.debug(
+        { groupJid, cooldownRemaining: state.circuitOpenUntil - Date.now() },
+        'Circuit breaker open, message queued for later',
+      );
+      return;
+    }
 
     if (state.active) {
       state.pendingMessages = true;
@@ -263,11 +282,23 @@ export class GroupQueue {
   private scheduleRetry(groupJid: string, state: GroupState): void {
     state.retryCount++;
     if (state.retryCount > MAX_RETRIES) {
-      logger.error(
-        { groupJid, retryCount: state.retryCount },
-        'Max retries exceeded, dropping messages (will retry on next incoming message)',
-      );
       state.retryCount = 0;
+      state.circuitOpenUntil = Date.now() + CIRCUIT_BREAKER_COOLDOWN_MS;
+      logger.error(
+        { groupJid, cooldownMs: CIRCUIT_BREAKER_COOLDOWN_MS },
+        'Max retries exceeded, circuit breaker open — no new containers for this group until cooldown',
+      );
+      // Schedule a drain after cooldown to pick up any queued messages
+      setTimeout(() => {
+        if (!this.shuttingDown) {
+          state.circuitOpenUntil = 0;
+          logger.info(
+            { groupJid },
+            'Circuit breaker closed, draining queued messages',
+          );
+          this.drainGroup(groupJid);
+        }
+      }, CIRCUIT_BREAKER_COOLDOWN_MS);
       return;
     }
 

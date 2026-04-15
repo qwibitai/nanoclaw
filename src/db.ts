@@ -65,6 +65,20 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_task_run_logs ON task_run_logs(task_id, run_at);
 
+    CREATE TABLE IF NOT EXISTS token_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      container_name TEXT NOT NULL,
+      group_folder TEXT NOT NULL,
+      model TEXT,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+      recorded_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_token_usage_group ON token_usage(group_folder, recorded_at);
+    CREATE INDEX IF NOT EXISTS idx_token_usage_time ON token_usage(recorded_at);
+
     CREATE TABLE IF NOT EXISTS router_state (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -96,6 +110,13 @@ function createSchema(database: Database.Database): void {
   // Add script column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN script TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Add model column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN model TEXT`);
   } catch {
     /* column already exists */
   }
@@ -687,6 +708,180 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Token usage tracking ---
+
+export interface TokenUsageRecord {
+  container_name: string;
+  group_folder: string;
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+}
+
+export function recordTokenUsage(record: TokenUsageRecord): void {
+  db.prepare(
+    `INSERT INTO token_usage (container_name, group_folder, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, recorded_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    record.container_name,
+    record.group_folder,
+    record.model,
+    record.input_tokens,
+    record.output_tokens,
+    record.cache_read_input_tokens,
+    record.cache_creation_input_tokens,
+    new Date().toISOString(),
+  );
+}
+
+export interface TokenUsageSummary {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+  request_count: number;
+}
+
+export function getTokenUsageSummary(opts: {
+  since?: string;
+  groupFolder?: string;
+}): TokenUsageSummary {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (opts.since) {
+    conditions.push('recorded_at >= ?');
+    params.push(opts.since);
+  }
+  if (opts.groupFolder) {
+    conditions.push('group_folder = ?');
+    params.push(opts.groupFolder);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const row = db
+    .prepare(
+      `SELECT
+        COALESCE(SUM(input_tokens), 0) as input_tokens,
+        COALESCE(SUM(output_tokens), 0) as output_tokens,
+        COALESCE(SUM(cache_read_input_tokens), 0) as cache_read_input_tokens,
+        COALESCE(SUM(cache_creation_input_tokens), 0) as cache_creation_input_tokens,
+        COUNT(*) as request_count
+      FROM token_usage ${where}`,
+    )
+    .get(...params) as TokenUsageSummary;
+  return row;
+}
+
+export interface TokenUsageByGroup {
+  group_folder: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+  request_count: number;
+}
+
+export function getTokenUsageByGroup(since?: string): TokenUsageByGroup[] {
+  const where = since ? 'WHERE recorded_at >= ?' : '';
+  const params = since ? [since] : [];
+  return db
+    .prepare(
+      `SELECT group_folder,
+        COALESCE(SUM(input_tokens), 0) as input_tokens,
+        COALESCE(SUM(output_tokens), 0) as output_tokens,
+        COALESCE(SUM(cache_read_input_tokens), 0) as cache_read_input_tokens,
+        COALESCE(SUM(cache_creation_input_tokens), 0) as cache_creation_input_tokens,
+        COUNT(*) as request_count
+      FROM token_usage ${where}
+      GROUP BY group_folder
+      ORDER BY input_tokens + output_tokens DESC`,
+    )
+    .all(...params) as TokenUsageByGroup[];
+}
+
+export interface TokenUsageTimeBucket {
+  bucket: string;
+  input_tokens: number;
+  output_tokens: number;
+  request_count: number;
+}
+
+export function getTokenUsageTimeSeries(opts: {
+  since?: string;
+  groupFolder?: string;
+  bucket?: 'hour' | 'day';
+}): TokenUsageTimeBucket[] {
+  const bucketSize =
+    opts.bucket === 'day' ? '%Y-%m-%dT00:00:00' : '%Y-%m-%dT%H:00:00';
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (opts.since) {
+    conditions.push('recorded_at >= ?');
+    params.push(opts.since);
+  }
+  if (opts.groupFolder) {
+    conditions.push('group_folder = ?');
+    params.push(opts.groupFolder);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return db
+    .prepare(
+      `SELECT strftime('${bucketSize}', recorded_at) as bucket,
+        COALESCE(SUM(input_tokens), 0) as input_tokens,
+        COALESCE(SUM(output_tokens), 0) as output_tokens,
+        COUNT(*) as request_count
+      FROM token_usage ${where}
+      GROUP BY bucket
+      ORDER BY bucket`,
+    )
+    .all(...params) as TokenUsageTimeBucket[];
+}
+
+export interface TokenUsageByContainer {
+  container_name: string;
+  group_folder: string;
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  request_count: number;
+  first_request: string;
+  last_request: string;
+}
+
+export function getTokenUsageByContainer(opts: {
+  since?: string;
+  groupFolder?: string;
+  limit?: number;
+}): TokenUsageByContainer[] {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (opts.since) {
+    conditions.push('recorded_at >= ?');
+    params.push(opts.since);
+  }
+  if (opts.groupFolder) {
+    conditions.push('group_folder = ?');
+    params.push(opts.groupFolder);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limit = opts.limit || 20;
+  return db
+    .prepare(
+      `SELECT container_name, group_folder, model,
+        COALESCE(SUM(input_tokens), 0) as input_tokens,
+        COALESCE(SUM(output_tokens), 0) as output_tokens,
+        COUNT(*) as request_count,
+        MIN(recorded_at) as first_request,
+        MAX(recorded_at) as last_request
+      FROM token_usage ${where}
+      GROUP BY container_name
+      ORDER BY last_request DESC
+      LIMIT ?`,
+    )
+    .all(...params, limit) as TokenUsageByContainer[];
 }
 
 // --- JSON migration ---
