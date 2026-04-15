@@ -267,6 +267,12 @@ You manage a daily news briefing system. Users can ask you to customize it conve
 | What the user says | Command to run |
 |--------------------|----------------|
 | "Show me the briefing config" / "what categories do we have" | `list` |
+| "What ongoing situations are we tracking" | `list-situations` |
+| "Seed situations from past reports" / "populate from history" | `summarize-reports 14` then read output and call `add-situation` + `add-event` for each story |
+| "Add [U.S.-Iran war] as an ongoing story" | `add-situation us_iran_war "U.S.-Iran War" --status "Ceasefire in effect" --severity high` |
+| "Update the Iran situation status" | `update-situation us_iran_war --status "New status here"` |
+| "Add an event to the Iran situation on April 10" | `add-event us_iran_war 2026-04-10 "What happened"` |
+| "Stop tracking the Iran situation" | `remove-situation us_iran_war` |
 | "Add a [politics] category" | `add-category politics --topics "topic 1" "topic 2"` |
 | "Remove the culture category" | `remove-category culture` |
 | "Disable culture for now" | `disable-category culture` |

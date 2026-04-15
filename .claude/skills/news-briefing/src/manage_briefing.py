@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 News Briefing Management CLI
-Allows the agent to manage categories, topics, sources, and style instructions
-through simple commands in response to user requests.
+Allows the agent to manage categories, topics, sources, style instructions,
+and ongoing situations through simple commands.
 
 Usage examples:
   python manage_briefing.py list
@@ -14,10 +14,18 @@ Usage examples:
   python manage_briefing.py remove-topic technology "cybersecurity threats and developments"
   python manage_briefing.py add-source cybersecurity "threatpost.com"
   python manage_briefing.py remove-source cybersecurity "securityweek.com"
-  python manage_briefing.py set-style economy_finance "Focus on actionable investment insights for retail investors. Flag any unusual market movements."
+  python manage_briefing.py set-style economy_finance "Focus on actionable investment insights."
   python manage_briefing.py clear-style economy_finance
   python manage_briefing.py set-priority technology 2
   python manage_briefing.py set-max-articles 7
+
+  # Ongoing situations (current status panel)
+  python manage_briefing.py list-situations
+  python manage_briefing.py add-situation us_iran_war "U.S.-Iran War" --status "Ceasefire in effect" --severity high
+  python manage_briefing.py update-situation us_iran_war --status "Talks ongoing" --event "UN envoys met in Geneva"
+  python manage_briefing.py add-event us_iran_war "2026-04-10" "U.S. launched airstrikes on Iranian nuclear facilities"
+  python manage_briefing.py remove-situation us_iran_war
+  python manage_briefing.py summarize-reports 7
 """
 
 import json
@@ -27,6 +35,8 @@ from pathlib import Path
 from datetime import datetime
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "user_preferences.json"
+MEMORY_PATH = Path(__file__).parent.parent / "memory" / "briefing_memory.json"
+REPORTS_PATH = Path(__file__).parent.parent / "reports"
 
 CATEGORY_ICONS = {
     "world_highlights": "🌍",
@@ -326,6 +336,202 @@ def cmd_set_max_articles(args):
     print(f"✓ Max articles per category set to {args.count}")
 
 
+# ── Memory helpers ─────────────────────────────────────────────────────────────
+
+def load_memory():
+    if not MEMORY_PATH.exists():
+        return {"seen_articles": {}, "ongoing_situations": {}, "topic_history": {}}
+    with open(MEMORY_PATH, 'r') as f:
+        m = json.load(f)
+    if "ongoing_situations" not in m:
+        m["ongoing_situations"] = {}
+    return m
+
+def save_memory(memory):
+    with open(MEMORY_PATH, 'w') as f:
+        json.dump(memory, f, indent=2)
+    print(f"✓ Memory saved to {MEMORY_PATH}")
+
+
+# ── Situation commands ─────────────────────────────────────────────────────────
+
+def cmd_list_situations(args):
+    """List all tracked ongoing situations"""
+    memory = load_memory()
+    situations = memory.get("ongoing_situations", {})
+
+    if not situations:
+        print("No ongoing situations tracked yet.")
+        print("Use 'add-situation' to add one, or 'summarize-reports' to review past briefings.")
+        return
+
+    severity_order = {"high": 0, "medium": 1, "low": 2}
+    sorted_sits = sorted(situations.items(), key=lambda x: severity_order.get(x[1].get("severity", "medium"), 1))
+
+    print(f"\n🔭 ONGOING SITUATIONS ({len(situations)} tracked)")
+    print("=" * 60)
+    for key, sit in sorted_sits:
+        sev = sit.get("severity", "medium")
+        icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(sev, "🟡")
+        print(f"\n{icon} [{key}] {sit.get('title', key)}")
+        print(f"   Status: {sit.get('current_status', 'Unknown')}")
+        print(f"   Severity: {sev}  |  Last updated: {sit.get('last_updated', '?')}")
+        events = sit.get("events", [])
+        if events:
+            print(f"   Events ({len(events)}):")
+            for e in sorted(events, key=lambda x: x.get("date", ""), reverse=True)[:5]:
+                print(f"     {e.get('date', '?')}  {e.get('summary', '')}")
+    print()
+
+
+def cmd_add_situation(args):
+    """Add a new ongoing situation"""
+    memory = load_memory()
+    key = slugify(args.key)
+    situations = memory.setdefault("ongoing_situations", {})
+
+    if key in situations:
+        print(f"⚠️  Situation '{key}' already exists. Use update-situation instead.")
+        sys.exit(1)
+
+    situations[key] = {
+        "title": args.title,
+        "current_status": args.status or "",
+        "severity": args.severity or "medium",
+        "first_seen": args.date or datetime.now().strftime("%Y-%m-%d"),
+        "last_updated": args.date or datetime.now().strftime("%Y-%m-%d"),
+        "events": []
+    }
+
+    if args.event:
+        situations[key]["events"].append({
+            "date": args.date or datetime.now().strftime("%Y-%m-%d"),
+            "summary": args.event
+        })
+
+    save_memory(memory)
+    print(f"✓ Added situation '{key}': {args.title}")
+    print(f"  Status: {args.status}")
+    print(f"  Severity: {situations[key]['severity']}")
+
+
+def cmd_update_situation(args):
+    """Update status or add a note to an existing situation"""
+    memory = load_memory()
+    key = slugify(args.key)
+    situations = memory.get("ongoing_situations", {})
+
+    if key not in situations:
+        print(f"❌ Situation '{key}' not found. Use list-situations to see existing ones.")
+        sys.exit(1)
+
+    today = args.date or datetime.now().strftime("%Y-%m-%d")
+
+    if args.status:
+        situations[key]["current_status"] = args.status
+        situations[key]["last_updated"] = today
+        print(f"✓ Updated status: {args.status}")
+
+    if args.severity:
+        situations[key]["severity"] = args.severity
+        print(f"✓ Updated severity: {args.severity}")
+
+    if args.title:
+        situations[key]["title"] = args.title
+        print(f"✓ Updated title: {args.title}")
+
+    if args.event:
+        events = situations[key].setdefault("events", [])
+        events.append({"date": today, "summary": args.event})
+        situations[key]["events"] = events[-10:]
+        situations[key]["last_updated"] = today
+        print(f"✓ Added event ({today}): {args.event}")
+
+    save_memory(memory)
+
+
+def cmd_add_event(args):
+    """Add a historical event to a situation"""
+    memory = load_memory()
+    key = slugify(args.key)
+    situations = memory.get("ongoing_situations", {})
+
+    if key not in situations:
+        print(f"❌ Situation '{key}' not found.")
+        sys.exit(1)
+
+    events = situations[key].setdefault("events", [])
+    events.append({"date": args.date, "summary": args.summary})
+    # Sort by date
+    events.sort(key=lambda e: e.get("date", ""))
+    situations[key]["events"] = events[-10:]
+
+    save_memory(memory)
+    print(f"✓ Added event to '{key}' on {args.date}: {args.summary}")
+
+
+def cmd_remove_situation(args):
+    """Remove a tracked situation"""
+    memory = load_memory()
+    key = slugify(args.key)
+    situations = memory.get("ongoing_situations", {})
+
+    if key not in situations:
+        print(f"❌ Situation '{key}' not found.")
+        sys.exit(1)
+
+    title = situations[key].get("title", key)
+    del situations[key]
+    save_memory(memory)
+    print(f"✓ Removed situation '{key}' ({title})")
+
+
+def cmd_summarize_reports(args):
+    """Print a compact summary of recent briefings for seeding situations"""
+    days = args.days or 7
+    report_files = sorted(REPORTS_PATH.glob("briefing_*.json"), reverse=True)[:days]
+
+    if not report_files:
+        print("❌ No report files found.")
+        return
+
+    print(f"\n📚 SUMMARY OF LAST {len(report_files)} BRIEFINGS")
+    print("(Use this to identify ongoing situations to track)")
+    print("=" * 70)
+
+    for report_file in reversed(report_files):  # oldest first
+        try:
+            with open(report_file, 'r') as f:
+                report = json.load(f)
+        except Exception:
+            continue
+
+        date = report.get("metadata", {}).get("date") or report_file.stem.replace("briefing_", "")
+        sections = report.get("sections", [])
+
+        print(f"\n📅 {date}")
+        print("-" * 50)
+
+        for section in sections:
+            cat = section.get("category_title") or section.get("category", "")
+            articles = section.get("articles", [])
+            if not articles:
+                continue
+            print(f"  {cat}:")
+            for a in articles[:3]:  # top 3 per category
+                title = a.get("title", "")
+                impact = a.get("impact", "")
+                print(f"    • {title}")
+                if impact:
+                    print(f"      → {impact[:100]}")
+
+    print()
+    print("─" * 70)
+    print("To add a situation based on the above:")
+    print('  python manage_briefing.py add-situation KEY "Title" --status "Current state" --severity high')
+    print('  python manage_briefing.py add-event KEY 2026-04-10 "What happened that day"')
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _normalize_priorities(config, bump_from=None, except_key=None):
@@ -395,6 +601,36 @@ def build_parser():
     p = sub.add_parser("set-max-articles", help="Set max articles per category per briefing")
     p.add_argument("count", type=int)
 
+    # Situation management
+    sub.add_parser("list-situations", help="List all tracked ongoing situations")
+
+    p = sub.add_parser("add-situation", help="Add a new ongoing situation to track")
+    p.add_argument("key", help="Snake_case key (e.g. us_iran_war)")
+    p.add_argument("title", help="Human-readable title")
+    p.add_argument("--status", default="", help="Current one-sentence status")
+    p.add_argument("--severity", choices=["high", "medium", "low"], default="medium")
+    p.add_argument("--event", default="", help="Initial event summary")
+    p.add_argument("--date", default=None, help="Date for first_seen/event (YYYY-MM-DD, default today)")
+
+    p = sub.add_parser("update-situation", help="Update status or add a note to a situation")
+    p.add_argument("key")
+    p.add_argument("--status", default=None)
+    p.add_argument("--severity", choices=["high", "medium", "low"], default=None)
+    p.add_argument("--title", default=None)
+    p.add_argument("--event", default=None, help="Add an event note for today")
+    p.add_argument("--date", default=None, help="Date for the event (YYYY-MM-DD, default today)")
+
+    p = sub.add_parser("add-event", help="Add a historical event entry to a situation")
+    p.add_argument("key")
+    p.add_argument("date", help="Date of the event (YYYY-MM-DD)")
+    p.add_argument("summary", help="What happened")
+
+    p = sub.add_parser("remove-situation", help="Stop tracking a situation")
+    p.add_argument("key")
+
+    p = sub.add_parser("summarize-reports", help="Print compact summary of recent briefings to help seed situations")
+    p.add_argument("days", type=int, nargs="?", default=7, help="How many past reports to summarize (default 7)")
+
     return parser
 
 
@@ -412,6 +648,12 @@ COMMANDS = {
     "clear-style": cmd_clear_style,
     "set-priority": cmd_set_priority,
     "set-max-articles": cmd_set_max_articles,
+    "list-situations": cmd_list_situations,
+    "add-situation": cmd_add_situation,
+    "update-situation": cmd_update_situation,
+    "add-event": cmd_add_event,
+    "remove-situation": cmd_remove_situation,
+    "summarize-reports": cmd_summarize_reports,
 }
 
 
