@@ -310,6 +310,82 @@ export interface BrowserVisualChangedEvent extends NanoClawEvent {
   };
 }
 
+// --- Learn events ---
+
+export interface LearnRuleCreatedEvent extends NanoClawEvent {
+  type: 'learn.rule_created';
+  source: 'learning';
+  payload: {
+    ruleId: string;
+    rule: string;
+    source: 'outcome_pattern' | 'user_feedback' | 'agent_reported';
+    groupId: string | null;
+  };
+}
+
+export interface LearnRuleAppliedEvent extends NanoClawEvent {
+  type: 'learn.rule_applied';
+  source: 'learning';
+  payload: {
+    ruleId: string;
+    groupId: string;
+    taskId: string;
+  };
+}
+
+export interface LearnProcedureSavedEvent extends NanoClawEvent {
+  type: 'learn.procedure_saved';
+  source: 'learning';
+  payload: {
+    name: string;
+    trigger: string;
+    groupId: string;
+    stepCount: number;
+  };
+}
+
+export interface LearnProcedureMatchedEvent extends NanoClawEvent {
+  type: 'learn.procedure_matched';
+  source: 'learning';
+  payload: {
+    name: string;
+    trigger: string;
+    groupId: string;
+    autoExecute: boolean;
+  };
+}
+
+export interface LearnProcedureExecutedEvent extends NanoClawEvent {
+  type: 'learn.procedure_executed';
+  source: 'learning';
+  payload: {
+    name: string;
+    groupId: string;
+    success: boolean;
+    durationMs: number;
+  };
+}
+
+export interface LearnProcedurePromotedEvent extends NanoClawEvent {
+  type: 'learn.procedure_promoted';
+  source: 'learning';
+  payload: {
+    name: string;
+    fromGroups: string[];
+    stepCount: number;
+  };
+}
+
+export interface LearnFeedbackReceivedEvent extends NanoClawEvent {
+  type: 'learn.feedback_received';
+  source: 'learning';
+  payload: {
+    ruleId: string;
+    feedback: string;
+    groupId: string;
+  };
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -339,6 +415,13 @@ export interface EventMap {
   'browser.sidecar.down': BrowserSidecarDownEvent;
   'browser.profile.corrupt': BrowserProfileCorruptEvent;
   'browser.visual.changed': BrowserVisualChangedEvent;
+  'learn.rule_created': LearnRuleCreatedEvent;
+  'learn.rule_applied': LearnRuleAppliedEvent;
+  'learn.procedure_saved': LearnProcedureSavedEvent;
+  'learn.procedure_matched': LearnProcedureMatchedEvent;
+  'learn.procedure_executed': LearnProcedureExecutedEvent;
+  'learn.procedure_promoted': LearnProcedurePromotedEvent;
+  'learn.feedback_received': LearnFeedbackReceivedEvent;
 }
 
 export type EventType = keyof EventMap;
