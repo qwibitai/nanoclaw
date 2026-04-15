@@ -94,6 +94,7 @@ import { runDailyDigest } from './daily-digest.js';
 import { startEventRouter } from './event-router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { initLearningSystem, buildRulesBlock } from './learning/index.js';
+import { handleMessageWithProcedureCheck } from './learning/procedure-match-integration.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { eventBus } from './event-bus.js';
@@ -321,6 +322,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
+
+  // Check for matching learned procedures before full agent run
+  const procedureHandled = await handleMessageWithProcedureCheck(
+    prompt,
+    chatJid,
+    (p) => runAgent(group, p, chatJid),
+    async (jid, text) => {
+      const ch = findChannel(channels, jid);
+      if (ch) await ch.sendMessage(jid, text);
+    },
+    (fn) => queue.enqueueTask(chatJid, `proc-${Date.now()}`, fn),
+  );
+  if (procedureHandled) {
+    // Advance cursor past these messages since procedure handled them
+    lastAgentTimestamp[chatJid] =
+      missedMessages[missedMessages.length - 1].timestamp;
+    saveState();
+    deleteRouterState(`pending_cursor:${chatJid}`);
+    return true;
+  }
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -635,10 +656,13 @@ async function runAgent(
 
     // Parse agent lesson for learning system
     if (output.result) {
-      const lessonMatch = output.result.match(/"_lesson"\s*:\s*"([^"]{1,400})"/);
+      const lessonMatch = output.result.match(
+        /"_lesson"\s*:\s*"([^"]{1,400})"/,
+      );
       if (lessonMatch) {
         const { addRule } = await import('./learning/rules-engine.js');
-        const { inferActionClasses } = await import('./learning/outcome-enricher.js');
+        const { inferActionClasses } =
+          await import('./learning/outcome-enricher.js');
         const lessonText = lessonMatch[1];
         addRule({
           rule: lessonText,
@@ -653,14 +677,27 @@ async function runAgent(
 
     // Parse agent procedure for learning system
     if (output.result) {
-      const procMatch = output.result.match(/"_procedure"\s*:\s*(\{[\s\S]*?\})\s*\}/);
+      const procMatch = output.result.match(
+        /"_procedure"\s*:\s*(\{[\s\S]*?\})\s*\}/,
+      );
       if (procMatch) {
         try {
-          const agentProc = JSON.parse(`{${procMatch[1]}}`) as import('./learning/procedure-recorder.js').AgentProcedure;
-          const { finalizeTrace } = await import('./learning/procedure-recorder.js');
-          finalizeTrace(group.folder, `agent-${group.folder}-${startMs}`, true, agentProc);
+          const agentProc = JSON.parse(
+            `{${procMatch[1]}}`,
+          ) as import('./learning/procedure-recorder.js').AgentProcedure;
+          const { finalizeTrace } =
+            await import('./learning/procedure-recorder.js');
+          finalizeTrace(
+            group.folder,
+            `agent-${group.folder}-${startMs}`,
+            true,
+            agentProc,
+          );
         } catch {
-          logger.debug({ groupId: group.folder }, 'Failed to parse _procedure block');
+          logger.debug(
+            { groupId: group.folder },
+            'Failed to parse _procedure block',
+          );
         }
       }
     }

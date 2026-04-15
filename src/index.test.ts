@@ -130,6 +130,11 @@ vi.mock('./budget.js', () => ({
   isBudgetExceeded: vi.fn().mockReturnValue(false),
 }));
 
+// Learning — procedure match integration (returns false so normal flow runs)
+vi.mock('./learning/procedure-match-integration.js', () => ({
+  handleMessageWithProcedureCheck: vi.fn().mockResolvedValue(false),
+}));
+
 // Other side-effect modules
 vi.mock('./deal-watch-loop.js', () => ({ startDealWatchLoop: vi.fn() }));
 vi.mock('./email-sse.js', () => ({ startEmailSSE: vi.fn() }));
