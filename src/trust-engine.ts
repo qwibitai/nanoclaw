@@ -11,6 +11,7 @@
 
 import { getTrustLevel, upsertTrustLevel, insertTrustAction } from './db.js';
 import { eventBus } from './event-bus.js';
+import { logger } from './logger.js';
 import type { TrustGraduatedEvent } from './events.js';
 
 // --- Action taxonomy ---
@@ -123,6 +124,13 @@ export function classifyTool(
   }
 
   // Default: highest risk
+  logger.warn({ toolName }, 'Unknown tool name, defaulting to services.transact');
+  eventBus.emit('trust.unknown_tool', {
+    type: 'trust.unknown_tool',
+    source: 'trust-engine',
+    timestamp: Date.now(),
+    payload: { toolName },
+  });
   return 'services.transact';
 }
 

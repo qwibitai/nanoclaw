@@ -34,6 +34,16 @@ describe('classifyTool', () => {
     expect(classifyTool('totally_unknown_tool')).toBe('services.transact');
   });
 
+  it('emits trust.unknown_tool event for unknown tools', () => {
+    const events: any[] = [];
+    eventBus.on('trust.unknown_tool', (e: any) => events.push(e));
+
+    classifyTool('completely_unknown_tool_xyz');
+
+    expect(events).toHaveLength(1);
+    expect(events[0].payload.toolName).toBe('completely_unknown_tool_xyz');
+  });
+
   it('rejects invalid self-reported class', () => {
     expect(classifyTool('my_tool', 'invalid.class')).toBe('services.transact');
     expect(classifyTool('my_tool', 'health.hack')).toBe('services.transact');
