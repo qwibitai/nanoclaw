@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# Parse a superpowers-format implementation plan.
+# Emits a JSON object on stdout describing goal, architecture, test_command,
+# tasks (with slug + files + body), and waves.
+# Hard-errors (exit 2) on: duplicate task ref, missing task ref, overlapping
+# file claims within a wave, malformed task heading.
+# Soft-warns (stderr) + serial fallback when ## Parallelization is missing.
+set -euo pipefail
+
+if [ $# -lt 1 ] || [ ! -r "$1" ]; then
+  echo "usage: codex-parse-plan <plan.md>" >&2
+  exit 2
+fi
+PLAN="$1"
+
+# Delegate all parsing + validation to a single Python3 invocation.
+# Python script is written to a temp file to avoid heredoc-in-subshell issues.
+_PY_SCRIPT="$(mktemp /tmp/codex-parse-plan.XXXXXX.py)"
+trap 'rm -f "$_PY_SCRIPT"' EXIT
+
+cat > "$_PY_SCRIPT" << 'PYEOF'
+#!/usr/bin/env python3
+"""
+Parse a superpowers-format implementation plan and emit JSON.
+Exit 2 on hard errors; print WARNING to stderr for soft issues.
+"""
+import sys
+import json
+import re
+
+plan_file = sys.argv[1]
+with open(plan_file) as f:
+    content = f.read()
+
+def extract_header(label):
+    """Extract the value from a **Label:** line (case-insensitive).
+    Strips surrounding backticks from inline code spans."""
+    pattern = re.compile(
+        r'^\*\*' + re.escape(label) + r':\*\*\s*(.+)$',
+        re.MULTILINE | re.IGNORECASE
+    )
+    m = pattern.search(content)
+    if not m:
+        return ""
+    val = m.group(1).strip()
+    # strip surrounding backticks: `value` -> value
+    if val.startswith('`') and val.endswith('`') and len(val) >= 2:
+        val = val[1:-1]
+    return val
+
+goal = extract_header("Goal")
+architecture = extract_header("Architecture")
+test_command = extract_header("Test command")
+
+# ---- extract tasks ----
+task_header_re = re.compile(r'^### Task (\d+):\s*(.*?)$', re.MULTILINE)
+task_matches = list(task_header_re.finditer(content))
+
+def slugify(s):
+    s = s.lower()
+    s = re.sub(r'[^a-z0-9]+', '-', s)
+    return s.strip('-')
+
+file_re = re.compile(
+    r'^[-*]\s+(?:Create|Modify|Test):\s+`?([^`\s\n]+)`?',
+    re.IGNORECASE | re.MULTILINE
+)
+
+tasks = []
+for i, m in enumerate(task_matches):
+    num = int(m.group(1))
+    heading = m.group(2).strip()
+    body_start = m.end()
+    body_end = task_matches[i + 1].start() if i + 1 < len(task_matches) else len(content)
+    body = content[body_start:body_end]
+
+    files = file_re.findall(body)
+    run_matches = re.findall(r'(?m)^Run:\s+`?([^`\n]+)`?\s*$', body)
+    task_test_cmd = run_matches[-1].strip() if run_matches else None
+
+    tasks.append({
+        "num": num,
+        "heading": heading,
+        "slug": slugify(heading),
+        "files": files,
+        "test_command": task_test_cmd,
+        "body": body,
+    })
+
+# ---- parse Parallelization section ----
+para_re = re.compile(
+    r'^## Parallelization\s*$(.*?)(?=^## |\Z)',
+    re.MULTILINE | re.DOTALL
+)
+para_match = para_re.search(content)
+
+waves = []
+if para_match:
+    wave_line_re = re.compile(
+        r'^-\s+Wave\s+(\d+):\s*Tasks?\s+(.+)$',
+        re.IGNORECASE
+    )
+    for line in para_match.group(1).splitlines():
+        wm = wave_line_re.match(line.strip())
+        if wm:
+            wave_num = int(wm.group(1))
+            task_nums = [int(x) for x in re.findall(r'\d+', wm.group(2))]
+            waves.append({"wave": wave_num, "tasks": task_nums})
+
+if not waves:
+    print(
+        "WARNING: plan has no ## Parallelization section; running fully serial",
+        file=sys.stderr
+    )
+    nums = sorted(t['num'] for t in tasks)
+    waves = [{"wave": i + 1, "tasks": [n]} for i, n in enumerate(nums)]
+
+# ---- validation ----
+errors = []
+
+# duplicate refs
+all_refs = [n for w in waves for n in w['tasks']]
+seen = set()
+dups = []
+for n in all_refs:
+    if n in seen and n not in dups:
+        dups.append(n)
+    seen.add(n)
+if dups:
+    errors.append(f"ERROR: duplicate task references in Parallelization: {' '.join(str(d) for d in dups)}")
+
+declared = {t['num'] for t in tasks}
+referenced = set(all_refs)
+
+missing = sorted(declared - referenced)
+if missing:
+    errors.append(f"ERROR: tasks declared but not referenced in Parallelization: {' '.join(str(n) for n in missing)}")
+
+extra = sorted(referenced - declared)
+if extra:
+    errors.append(f"ERROR: Parallelization references unknown task numbers: {' '.join(str(n) for n in extra)}")
+
+# overlapping files within a wave
+task_map = {t['num']: t for t in tasks}
+for w in waves:
+    wave_tasks = [task_map[n] for n in w['tasks'] if n in task_map]
+    for i in range(len(wave_tasks)):
+        for j in range(i + 1, len(wave_tasks)):
+            ti = wave_tasks[i]
+            tj = wave_tasks[j]
+            shared = sorted(set(ti['files']) & set(tj['files']))
+            if shared:
+                errors.append(
+                    f"ERROR: overlapping file claims within wave:\n"
+                    f"  wave={w['wave']} task={ti['num']} task={tj['num']} "
+                    f"files={','.join(shared)}"
+                )
+
+if errors:
+    for e in errors:
+        print(e, file=sys.stderr)
+    sys.exit(2)
+
+# ---- emit JSON ----
+print(json.dumps({
+    "goal": goal,
+    "architecture": architecture,
+    "test_command": test_command,
+    "tasks": tasks,
+    "waves": waves,
+}, indent=2))
+PYEOF
+
+python3 "$_PY_SCRIPT" "$PLAN"
