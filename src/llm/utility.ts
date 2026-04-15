@@ -92,8 +92,12 @@ export async function embedText(
   const spec = options?.model ?? 'openai:text-embedding-3-small';
   const [providerName, ...modelParts] = spec.split(':');
   const modelId = modelParts.join(':');
-  const factory = getFactory(providerName);
-  const embeddingModel = (factory as any).embedding(modelId);
+
+  const provider = createOpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '' });
+  if (providerName !== 'openai') {
+    throw new Error(`Embedding only supported for openai, got: ${providerName}`);
+  }
+  const embeddingModel = provider.textEmbeddingModel(modelId);
 
   const result = await embed({
     model: embeddingModel,

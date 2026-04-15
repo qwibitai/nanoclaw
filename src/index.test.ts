@@ -146,6 +146,7 @@ vi.mock('./llm/provider.js', () => ({
     model: null,
     providerBaseUrl: null,
   }),
+  getEscalationModel: vi.fn().mockReturnValue(null),
 }));
 
 vi.mock('./llm/escalation.js', () => ({

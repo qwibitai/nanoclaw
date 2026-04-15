@@ -1053,7 +1053,7 @@ async function main(): Promise<void> {
 
   if (provider !== 'anthropic') {
     log(`Using Vercel AI SDK (provider: ${provider}, model: ${containerInput.model ?? 'default'})`);
-    const result = await runVercelQuery(containerInput.prompt, containerInput);
+    const result = await runVercelQuery(prompt, containerInput);
     writeOutput(result);
     process.exit(0);
   }
