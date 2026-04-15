@@ -113,14 +113,21 @@ describe('AgentLite platform registry', () => {
     const channelFactory = vi.fn(async () => {
       throw new Error('channel factory should not run before start');
     });
+    const acpPeer = {
+      name: 'codex',
+      command: 'echo',
+      args: ['noop'],
+    };
 
     const restored = secondPlatform.getOrCreateAgent('alice', {
+      acp: { peers: [acpPeer] },
       channels: { mock: channelFactory },
       credentials,
     });
 
     const runtimeOptions = (restored as unknown as { _options: AgentOptions })
       ._options;
+    expect(runtimeOptions.acp?.peers).toEqual([acpPeer]);
     expect(runtimeOptions.credentials).toBe(credentials);
     expect(runtimeOptions.channels?.mock).toBe(channelFactory);
 
