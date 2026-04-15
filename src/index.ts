@@ -93,6 +93,7 @@ import {
 import { runDailyDigest } from './daily-digest.js';
 import { startEventRouter } from './event-router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { initLearningSystem, buildRulesBlock } from './learning/index.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { eventBus } from './event-bus.js';
@@ -559,10 +560,13 @@ async function runAgent(
   };
 
   try {
+    const rulesBlock = buildRulesBlock(prompt, group.folder);
+    const enrichedPrompt = rulesBlock ? `${prompt}\n\n${rulesBlock}` : prompt;
+
     const output = await runContainerAgent(
       group,
       {
-        prompt,
+        prompt: enrichedPrompt,
         sessionId,
         groupFolder: group.folder,
         chatJid,
@@ -628,6 +632,39 @@ async function runAgent(
         ? realCostUsd
         : (durationMs / 10_000) * 0.01,
     });
+
+    // Parse agent lesson for learning system
+    if (output.result) {
+      const lessonMatch = output.result.match(/"_lesson"\s*:\s*"([^"]{1,400})"/);
+      if (lessonMatch) {
+        const { addRule } = await import('./learning/rules-engine.js');
+        const { inferActionClasses } = await import('./learning/outcome-enricher.js');
+        const lessonText = lessonMatch[1];
+        addRule({
+          rule: lessonText,
+          source: 'agent_reported',
+          actionClasses: inferActionClasses(lessonText),
+          groupId: group.folder,
+          confidence: 0.3,
+          evidenceCount: 1,
+        });
+      }
+    }
+
+    // Parse agent procedure for learning system
+    if (output.result) {
+      const procMatch = output.result.match(/"_procedure"\s*:\s*(\{[\s\S]*?\})\s*\}/);
+      if (procMatch) {
+        try {
+          const agentProc = JSON.parse(`{${procMatch[1]}}`) as import('./learning/procedure-recorder.js').AgentProcedure;
+          const { finalizeTrace } = await import('./learning/procedure-recorder.js');
+          finalizeTrace(group.folder, `agent-${group.folder}-${startMs}`, true, agentProc);
+        } catch {
+          logger.debug({ groupId: group.folder }, 'Failed to parse _procedure block');
+        }
+      }
+    }
+
     return 'success';
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
@@ -894,7 +931,11 @@ async function main(): Promise<void> {
 
   const browserSessionManager = new BrowserSessionManager();
   const stagehandBridge = new StagehandBridge(browserSessionManager);
-  const browserTrustState = { readGranted: false, readGrantedAt: 0, groupId: '' };
+  const browserTrustState = {
+    readGranted: false,
+    readGrantedAt: 0,
+    groupId: '',
+  };
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
@@ -1221,6 +1262,17 @@ async function main(): Promise<void> {
       });
     },
     registeredGroups: () => registeredGroups,
+  });
+
+  // Learning system: rules engine + procedure recorder
+  initLearningSystem(eventBus, {
+    getRegisteredGroups: () => registeredGroups,
+    sendMessage: async (jid, text) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) return;
+      await channel.sendMessage(jid, text);
+    },
+    enqueueTask: (jid, taskId, fn) => queue.enqueueTask(jid, taskId, fn),
   });
 
   // Outcome logging: track task completion outcomes for learning

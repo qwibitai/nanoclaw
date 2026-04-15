@@ -17,6 +17,9 @@ import {
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
+import { addRule } from './learning/rules-engine.js';
+import { addTrace } from './learning/procedure-recorder.js';
+import { inferActionClasses } from './learning/outcome-enricher.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -738,7 +741,40 @@ export async function processTaskIpc(
       break;
     }
 
+    case 'learn_feedback': {
+      const feedbackData = data as typeof data & { feedback?: string; groupId?: string };
+      if (feedbackData.feedback) {
+        const actionClasses = inferActionClasses(feedbackData.feedback);
+        addRule({
+          rule: feedbackData.feedback,
+          source: 'user_feedback',
+          actionClasses: actionClasses.length > 0 ? actionClasses : ['general'],
+          groupId: feedbackData.groupId ?? sourceGroup,
+          confidence: 0.9,
+          evidenceCount: 1,
+        });
+        logger.info({ groupId: feedbackData.groupId ?? sourceGroup }, 'learn_feedback IPC processed');
+      }
+      break;
+    }
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
+  }
+
+  // Trace IPC actions for procedure recording
+  if (data.taskId) {
+    const traceableTypes = new Set([
+      'browser_navigate', 'browser_act', 'browser_extract', 'browser_observe',
+      'schedule_task', 'cancel_task', 'relay_message', 'email_trigger',
+    ]);
+    if (traceableTypes.has(data.type)) {
+      addTrace(sourceGroup, data.taskId, {
+        type: data.type,
+        timestamp: Date.now(),
+        inputSummary: (data.instruction ?? data.prompt ?? data.text ?? data.type).slice(0, 200),
+        result: 'success',
+      });
+    }
   }
 }
