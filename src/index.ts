@@ -86,6 +86,8 @@ import {
 import { startTrustGateway } from './trust-gateway.js';
 import { startDealWatchLoop } from './deal-watch-loop.js';
 import { startEmailSSE } from './email-sse.js';
+import { startCalendarPoller, stopCalendarPoller } from './calendar-poller.js';
+import { correlateByAttendee, correlateBySubject } from './thread-correlator.js';
 import {
   refreshGmailTokens,
   startGmailRefreshLoop,
@@ -1033,6 +1035,7 @@ async function main(): Promise<void> {
     await browserSessionManager.shutdown();
     for (const ch of channels) await ch.disconnect();
     stopBrowserSidecar();
+    stopCalendarPoller();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -1331,6 +1334,7 @@ async function main(): Promise<void> {
 
   // Real-time email notifications via SSE (poll is fallback)
   startEmailSSE();
+  startCalendarPoller();
 
   // Event router: processes events against per-group rules
   startEventRouter({
@@ -1375,6 +1379,18 @@ async function main(): Promise<void> {
       costUsd: event.payload.costUsd,
       groupId: event.groupId || 'unknown',
     });
+  });
+
+  // Thread correlation: correlate items by attendee and subject on classification
+  eventBus.on('item.classified', (event) => {
+    try {
+      const item = getTrackedItemById(event.payload.itemId);
+      if (!item) return;
+      correlateByAttendee(item);
+      correlateBySubject(item, item.group_name);
+    } catch (err) {
+      logger.warn({ err: String(err), itemId: event.payload.itemId }, 'Thread correlation failed');
+    }
   });
 
   // Daily digest: schedule to run every day at 8:00 AM
