@@ -161,5 +161,37 @@ export function buildIpcTools(
         return { success: true };
       },
     },
+
+    switch_model: {
+      description:
+        'Switch the LLM model for this group. Use this to escalate to a stronger model for complex tasks, or switch to a cheaper model for simple follow-ups. The change takes effect on the next message.',
+      parameters: z.object({
+        provider: z
+          .enum(['anthropic', 'openai', 'google', 'ollama', 'groq', 'together'])
+          .describe('The LLM provider to switch to'),
+        model: z
+          .string()
+          .optional()
+          .describe(
+            'Model identifier (e.g. "gpt-4o", "gemini-2.5-pro"). If omitted, uses provider default.',
+          ),
+      }),
+      execute: async ({
+        provider,
+        model,
+      }: {
+        provider: string;
+        model?: string;
+      }) => {
+        writeIpcFile(messagesDir, {
+          type: 'switch_model',
+          chatJid,
+          groupFolder,
+          provider,
+          model,
+        });
+        return { success: true };
+      },
+    },
   };
 }

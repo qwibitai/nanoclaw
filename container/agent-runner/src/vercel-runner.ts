@@ -113,6 +113,7 @@ function formatToolLabel(toolName: string): string {
   if (toolName === 'schedule') return 'Scheduling task';
   if (toolName === 'relay_message') return 'Relaying message';
   if (toolName === 'learn_feedback') return 'Recording lesson';
+  if (toolName === 'switch_model') return 'Switching model';
   const words = toolName
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/_/g, ' ')
