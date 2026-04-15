@@ -5,6 +5,7 @@ import {
   initKnowledgeStore,
   storeFact,
   queryFacts,
+  queryFactsSemantic,
   deleteFact,
   getAllFacts,
 } from './knowledge-store.js';
@@ -123,5 +124,14 @@ describe('Knowledge Store', () => {
     const results = queryFacts('Python', { domain: 'tech' });
     expect(results).toHaveLength(1);
     expect(results[0].domain).toBe('tech');
+  });
+});
+
+describe('vector search fallback', () => {
+  it('falls back to FTS5 when Qdrant is unavailable', async () => {
+    storeFact({ text: 'User prefers morning meetings', source: 'conversation', domain: 'preferences' });
+    const results = await queryFactsSemantic('morning meeting preferences');
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].text).toContain('morning');
   });
 });

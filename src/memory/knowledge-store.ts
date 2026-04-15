@@ -9,6 +9,7 @@
  * semantic vector search.
  */
 
+import { QdrantClient } from '@qdrant/js-client-rest';
 import { getDb } from '../db.js';
 import { logger } from '../logger.js';
 
@@ -194,4 +195,77 @@ export function getAllFacts(opts?: {
   sql += ' ORDER BY rowid DESC';
 
   return db.prepare(sql).all(...params) as Fact[];
+}
+
+const QDRANT_URL = process.env.QDRANT_URL || '';
+const COLLECTION_NAME = 'nanoclaw_knowledge';
+
+let qdrantClient: QdrantClient | null = null;
+
+function getQdrant(): QdrantClient | null {
+  if (!QDRANT_URL) return null;
+  if (!qdrantClient) {
+    qdrantClient = new QdrantClient({ url: QDRANT_URL });
+  }
+  return qdrantClient;
+}
+
+export async function storeFactWithVector(input: StoreFactInput): Promise<void> {
+  storeFact(input);
+
+  const client = getQdrant();
+  if (!client) return;
+
+  try {
+    const { embedText } = await import('../llm/utility.js');
+    const vector = await embedText(input.text);
+    const { randomUUID } = await import('crypto');
+    await client.upsert(COLLECTION_NAME, {
+      points: [{
+        id: randomUUID(),
+        vector,
+        payload: {
+          text: input.text,
+          domain: input.domain ?? 'general',
+          group_id: input.groupId ?? 'global',
+          source: input.source,
+          created_at: new Date().toISOString(),
+        },
+      }],
+    });
+  } catch (err) {
+    logger.warn({ err }, 'Qdrant store failed, FTS5 fallback retained');
+  }
+}
+
+export async function queryFactsSemantic(
+  query: string,
+  opts?: QueryFactsOpts,
+): Promise<Fact[]> {
+  const client = getQdrant();
+  if (!client) {
+    return queryFacts(query, opts);
+  }
+
+  try {
+    const { embedText } = await import('../llm/utility.js');
+    const vector = await embedText(query);
+    const results = await client.search(COLLECTION_NAME, {
+      vector,
+      limit: opts?.limit ?? 10,
+      filter: opts?.domain ? { must: [{ key: 'domain', match: { value: opts.domain } }] } : undefined,
+    });
+
+    return results.map((r, i) => ({
+      rowid: i,
+      text: (r.payload as Record<string, string>).text,
+      domain: (r.payload as Record<string, string>).domain,
+      group_id: (r.payload as Record<string, string>).group_id,
+      source: (r.payload as Record<string, string>).source,
+      created_at: (r.payload as Record<string, string>).created_at,
+    }));
+  } catch (err) {
+    logger.warn({ err }, 'Qdrant query failed, falling back to FTS5');
+    return queryFacts(query, opts);
+  }
 }
