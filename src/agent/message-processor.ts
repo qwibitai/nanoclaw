@@ -16,6 +16,7 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from '../sender-allowlist.js';
+import { isAcpNoticeMessage } from '../acp/notice.js';
 import type { AgentContext } from './agent-context.js';
 import type { ChannelManager } from './channel-manager.js';
 import type { GroupManager } from './group-manager.js';
@@ -25,6 +26,20 @@ import type { TaskManager } from './task-manager.js';
 // A host-created symlink node_modules → /app/node_modules resolves inside
 // the container for ESM import resolution. Verified by e2e test.
 const CONTAINER_MCP_DIR = '/home/node/.claude/mcp';
+
+function hasWakeTrigger(
+  messages: Array<{ content: string; sender: string; is_from_me?: boolean }>,
+  chatJid: string,
+  triggerPattern: RegExp,
+): boolean {
+  const allowlistCfg = loadSenderAllowlist();
+  return messages.some(
+    (m) =>
+      isAcpNoticeMessage(m) ||
+      (triggerPattern.test(m.content.trim()) &&
+        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg))),
+  );
+}
 
 /**
  * Build the runtime MCP server configs for ContainerInput.
@@ -150,11 +165,10 @@ export class MessageProcessor {
     if (missedMessages.length === 0) return true;
 
     if (!isMainGroup && group.requiresTrigger !== false) {
-      const allowlistCfg = loadSenderAllowlist();
-      const hasTrigger = missedMessages.some(
-        (m) =>
-          this.ctx.config.triggerPattern.test(m.content.trim()) &&
-          (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+      const hasTrigger = hasWakeTrigger(
+        missedMessages,
+        chatJid,
+        this.ctx.config.triggerPattern,
       );
       if (!hasTrigger) return true;
     }
@@ -496,12 +510,10 @@ export class MessageProcessor {
             const needsTrigger =
               !group.isMain && group.requiresTrigger !== false;
             if (needsTrigger) {
-              const allowlistCfg = loadSenderAllowlist();
-              const hasTrigger = groupMessages.some(
-                (m) =>
-                  this.ctx.config.triggerPattern.test(m.content.trim()) &&
-                  (m.is_from_me ||
-                    isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+              const hasTrigger = hasWakeTrigger(
+                groupMessages,
+                chatJid,
+                this.ctx.config.triggerPattern,
               );
               if (!hasTrigger) continue;
             }

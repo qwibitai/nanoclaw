@@ -10,16 +10,17 @@
 //
 //   acp_list_remote_agents — directory snapshot
 //   acp_new_session        — create a session on a peer
-//   acp_prompt             — send PromptRequest, block on PromptResponse
+//   acp_prompt             — send PromptRequest in the background
 //   acp_cancel             — session/cancel notification
 //   acp_close_session      — drop local session tracking
 //
 // Peer child processes are lazy-spawned on first use, reused across sessions,
-// and killed on agent.stop(). The host holds session accumulators in-memory;
-// `session/update` notifications from peers land in the current prompt's
-// accumulator and are returned as part of the acp_prompt response.
+// and killed on agent.stop(). The host holds session accumulators in-memory,
+// writes per-prompt result artifacts into the caller's group IPC mount, and
+// injects a compact completion notice back into the caller chat.
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -42,7 +43,7 @@ import {
 import type { Agent } from '../api/agent.js';
 import type { ActionContext } from '../api/action.js';
 import { logger } from '../logger.js';
-import { resolveGroupFolderPath } from '../group-folder.js';
+import { resolveGroupFolderPath, resolveGroupIpcPath } from '../group-folder.js';
 
 import type { AcpPeerConfig, AcpPeerDirectoryEntry } from './types.js';
 
@@ -50,6 +51,9 @@ import type { AcpPeerConfig, AcpPeerDirectoryEntry } from './types.js';
 export interface AcpOutboundDeps {
   peers: AcpPeerConfig[];
   groupsDir: string;
+  dataDir: string;
+  resolveCallerChatJid: (ctx: ActionContext) => string;
+  injectNotice: (chatJid: string, text: string) => Promise<void> | void;
 }
 
 /** Internal per-peer state. */
@@ -75,10 +79,41 @@ interface SessionAccumulator {
 interface SessionState {
   peer: string;
   callerGroupFolder: string;
+  callerChatJid: string;
   createdAt: number;
   /** Set during an in-flight acp_prompt; null otherwise. */
   accumulator: SessionAccumulator | null;
+  activeRunId: string | null;
 }
+
+type RunStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+
+interface PendingRun {
+  id: string;
+  sessionId: string;
+  peer: string;
+  callerGroupFolder: string;
+  callerChatJid: string;
+  startedAt: string;
+  hostPath: string;
+  containerPath: string;
+}
+
+interface AcpRunArtifact {
+  session_id: string;
+  peer: string;
+  status: RunStatus;
+  stop_reason?: string;
+  started_at: string;
+  completed_at?: string;
+  text: string;
+  tool_calls: unknown[];
+  text_bytes: number;
+  tool_call_count: number;
+  error?: string;
+}
+
+const ACP_RUN_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 // ACP ContentBlock — inline discriminated union matching the spec.
 // We accept the full shape; the peer errors if a kind exceeds its advertised
@@ -106,6 +141,8 @@ export class AcpOutboundClient {
   private readonly peers = new Map<string, PeerState>();
   /** Active sessions keyed by Zed sessionId. */
   private readonly sessions = new Map<string, SessionState>();
+  /** Active background prompts keyed by internal run id. */
+  private readonly pendingRuns = new Map<string, PendingRun>();
 
   constructor(private readonly deps: AcpOutboundDeps) {
     for (const peer of deps.peers) {
@@ -117,6 +154,8 @@ export class AcpOutboundClient {
         spawnPromise: null,
       });
     }
+    this.recoverAbandonedArtifacts();
+    this.sweepExpiredArtifacts();
   }
 
   /** Public peer directory snapshot. */
@@ -160,7 +199,7 @@ export class AcpOutboundClient {
 
     agent.action(
       'acp_prompt',
-      'Send an ACP PromptRequest to an active session. BLOCKS until the peer emits PromptResponse with a stopReason. Returns { stop_reason, text, tool_calls } — `text` is the accumulated agent_message_chunk output; `tool_calls` is the accumulated tool_call_update notifications.\n\nThe prompt is an array of ACP ContentBlocks — the spec shape. For a plain text task: [{"type":"text","text":"your task here"}]. Image/audio/resource_link blocks are supported if the peer advertised the matching promptCapabilities.',
+      'Send an ACP PromptRequest to an active session in the background. Returns immediately with { ok: true }. When the peer finishes, AgentLite injects a notice back into the caller chat containing the terminal status and the result artifact path. Do not poll for the result.\n\nThe prompt is an array of ACP ContentBlocks — the spec shape. For a plain text task: [{"type":"text","text":"your task here"}]. Image/audio/resource_link blocks are supported if the peer advertised the matching promptCapabilities.',
       {
         session_id: z
           .string()
@@ -175,7 +214,7 @@ export class AcpOutboundClient {
 
     agent.action(
       'acp_cancel',
-      'Cancel an in-flight ACP prompt by session_id. Sends a session/cancel notification to the peer. The in-flight acp_prompt call resolves with stop_reason "cancelled".',
+      'Cancel the active background ACP prompt for a session_id. Sends a session/cancel notification to the peer. AgentLite still writes a terminal artifact and injects a completion notice with stop_reason "cancelled".',
       {
         session_id: z
           .string()
@@ -202,6 +241,7 @@ export class AcpOutboundClient {
   ): Promise<{ session_id: string }> {
     const peer = this.requirePeer(args.peer);
     await this.ensurePeerReady(peer);
+    const callerChatJid = this.deps.resolveCallerChatJid(ctx);
     const cwd =
       args.cwd ?? resolveGroupFolderPath(ctx.sourceGroup, this.deps.groupsDir);
     // Peer may require the directory to exist on disk.
@@ -210,11 +250,17 @@ export class AcpOutboundClient {
     this.sessions.set(resp.sessionId, {
       peer: peer.config.name,
       callerGroupFolder: ctx.sourceGroup,
+      callerChatJid,
       createdAt: Date.now(),
       accumulator: null,
+      activeRunId: null,
     });
     ctx.log.info(
-      { session_id: resp.sessionId, peer: peer.config.name },
+      {
+        session_id: resp.sessionId,
+        peer: peer.config.name,
+        caller_chat_jid: callerChatJid,
+      },
       'acp: new session',
     );
     return { session_id: resp.sessionId };
@@ -226,33 +272,36 @@ export class AcpOutboundClient {
       prompt: z.infer<typeof contentBlockSchema>[];
     },
     ctx: ActionContext,
-  ): Promise<{
-    stop_reason: string;
-    text: string;
-    tool_calls: unknown[];
-  }> {
+  ): Promise<{ ok: true }> {
     const session = this.requireSession(args.session_id, ctx);
     const peer = this.requirePeer(session.peer);
     if (!peer.connection) {
       throw new Error(`peer ${peer.config.name} is not connected`);
     }
-
-    // Set up the accumulator so sessionUpdate notifications land here.
-    const acc: SessionAccumulator = { text: [], toolCalls: [] };
-    session.accumulator = acc;
-    try {
-      const response = await peer.connection.prompt({
-        sessionId: args.session_id,
-        prompt: args.prompt,
-      });
-      return {
-        stop_reason: response.stopReason,
-        text: acc.text.join(''),
-        tool_calls: acc.toolCalls,
-      };
-    } finally {
-      session.accumulator = null;
+    if (session.activeRunId) {
+      throw new Error(
+        `acp session ${args.session_id} already has an in-flight prompt`,
+      );
     }
+
+    const acc: SessionAccumulator = { text: [], toolCalls: [] };
+    const run = this.createPendingRun(session, args.session_id);
+    await this.writeArtifact(run.hostPath, {
+      session_id: run.sessionId,
+      peer: run.peer,
+      status: 'running',
+      started_at: run.startedAt,
+      text: '',
+      tool_calls: [],
+      text_bytes: 0,
+      tool_call_count: 0,
+    });
+
+    this.pendingRuns.set(run.id, run);
+    session.accumulator = acc;
+    session.activeRunId = run.id;
+    void this.runPromptInBackground(run, peer, args.prompt, acc);
+    return { ok: true };
   }
 
   private async handleCancel(
@@ -261,7 +310,7 @@ export class AcpOutboundClient {
   ): Promise<{ ok: true }> {
     const session = this.requireSession(args.session_id, ctx);
     const peer = this.requirePeer(session.peer);
-    if (peer.connection) {
+    if (session.activeRunId && peer.connection) {
       await peer.connection.cancel({ sessionId: args.session_id });
     }
     return { ok: true };
@@ -271,7 +320,12 @@ export class AcpOutboundClient {
     args: { session_id: string },
     ctx: ActionContext,
   ): Promise<{ ok: true }> {
-    this.requireSession(args.session_id, ctx);
+    const session = this.requireSession(args.session_id, ctx);
+    if (session.activeRunId) {
+      throw new Error(
+        `cannot close acp session ${args.session_id} while a prompt is in flight`,
+      );
+    }
     this.sessions.delete(args.session_id);
     // Zed ACP has no mandatory closeSession method; peer retains its own
     // session state until it decides to release it. We just drop our
@@ -314,6 +368,191 @@ export class AcpOutboundClient {
 
   private findCallerForSession(sessionId: string): string | null {
     return this.sessions.get(sessionId)?.callerGroupFolder ?? null;
+  }
+
+  private createPendingRun(
+    session: SessionState,
+    sessionId: string,
+  ): PendingRun {
+    const runId = `acp-run-${randomUUID()}`;
+    const groupIpcDir = resolveGroupIpcPath(
+      session.callerGroupFolder,
+      this.deps.dataDir,
+    );
+    const runsDir = path.join(groupIpcDir, 'acp', 'runs');
+    fs.mkdirSync(runsDir, { recursive: true });
+    return {
+      id: runId,
+      sessionId,
+      peer: session.peer,
+      callerGroupFolder: session.callerGroupFolder,
+      callerChatJid: session.callerChatJid,
+      startedAt: new Date().toISOString(),
+      hostPath: path.join(runsDir, `${runId}.json`),
+      containerPath: path.posix.join('/workspace/ipc', 'acp', 'runs', `${runId}.json`),
+    };
+  }
+
+  private async runPromptInBackground(
+    run: PendingRun,
+    peer: PeerState,
+    prompt: z.infer<typeof contentBlockSchema>[],
+    acc: SessionAccumulator,
+  ): Promise<void> {
+    let status: RunStatus = 'failed';
+    let stopReason = 'failed';
+    let error: string | undefined;
+
+    try {
+      if (!peer.connection) {
+        throw new Error(`peer ${peer.config.name} is not connected`);
+      }
+      const response = await peer.connection.prompt({
+        sessionId: run.sessionId,
+        prompt,
+      });
+      stopReason = response.stopReason;
+      status = response.stopReason === 'cancelled' ? 'cancelled' : 'completed';
+    } catch (err) {
+      error = errMsg(err);
+      logger.warn(
+        { session_id: run.sessionId, peer: run.peer, err: error },
+        'acp: background prompt failed',
+      );
+    }
+
+    const text = acc.text.join('');
+    const toolCalls = [...acc.toolCalls];
+    const artifact: AcpRunArtifact = {
+      session_id: run.sessionId,
+      peer: run.peer,
+      status,
+      stop_reason: stopReason,
+      started_at: run.startedAt,
+      completed_at: new Date().toISOString(),
+      text,
+      tool_calls: toolCalls,
+      text_bytes: Buffer.byteLength(text, 'utf-8'),
+      tool_call_count: toolCalls.length,
+      ...(error ? { error } : {}),
+    };
+
+    const session = this.sessions.get(run.sessionId);
+    if (session?.activeRunId === run.id) {
+      session.activeRunId = null;
+      session.accumulator = null;
+    }
+    this.pendingRuns.delete(run.id);
+
+    try {
+      await this.writeArtifact(run.hostPath, artifact);
+    } catch (err) {
+      logger.error(
+        { session_id: run.sessionId, path: run.hostPath, err },
+        'acp: failed to write result artifact',
+      );
+      return;
+    }
+
+    const notice = this.formatCompletionNotice(run, artifact);
+    try {
+      await this.deps.injectNotice(run.callerChatJid, notice);
+    } catch (err) {
+      logger.error(
+        { session_id: run.sessionId, chat_jid: run.callerChatJid, err },
+        'acp: failed to inject completion notice',
+      );
+    }
+  }
+
+  private formatCompletionNotice(
+    run: PendingRun,
+    artifact: AcpRunArtifact,
+  ): string {
+    if (artifact.status === 'failed') {
+      return `ACP prompt finished for session ${run.sessionId}: failed. Result file: ${run.containerPath}`;
+    }
+    return `ACP prompt finished for session ${run.sessionId}: ${artifact.status} (${artifact.stop_reason}). Result file: ${run.containerPath}`;
+  }
+
+  private async writeArtifact(
+    filePath: string,
+    artifact: AcpRunArtifact,
+  ): Promise<void> {
+    await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.promises.writeFile(
+      filePath,
+      JSON.stringify(artifact, null, 2),
+      'utf-8',
+    );
+  }
+
+  private recoverAbandonedArtifacts(): void {
+    const recoveredAt = new Date().toISOString();
+    for (const filePath of this.listArtifactPaths()) {
+      try {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        const artifact = JSON.parse(raw) as Partial<AcpRunArtifact>;
+        if (artifact.status !== 'running') continue;
+        const recovered: AcpRunArtifact = {
+          session_id: artifact.session_id ?? 'unknown',
+          peer: artifact.peer ?? 'unknown',
+          status: 'failed',
+          stop_reason: 'abandoned',
+          started_at: artifact.started_at ?? recoveredAt,
+          completed_at: recoveredAt,
+          text: artifact.text ?? '',
+          tool_calls: artifact.tool_calls ?? [],
+          text_bytes:
+            typeof artifact.text_bytes === 'number'
+              ? artifact.text_bytes
+              : Buffer.byteLength(artifact.text ?? '', 'utf-8'),
+          tool_call_count:
+            typeof artifact.tool_call_count === 'number'
+              ? artifact.tool_call_count
+              : (artifact.tool_calls ?? []).length,
+          error:
+            artifact.error ?? 'Host restarted before ACP prompt completed',
+        };
+        fs.writeFileSync(filePath, JSON.stringify(recovered, null, 2), 'utf-8');
+      } catch (err) {
+        logger.warn(
+          { filePath, err },
+          'acp: failed to recover abandoned artifact',
+        );
+      }
+    }
+  }
+
+  private sweepExpiredArtifacts(): void {
+    const cutoff = Date.now() - ACP_RUN_RETENTION_MS;
+    for (const filePath of this.listArtifactPaths()) {
+      try {
+        const stat = fs.statSync(filePath);
+        if (stat.mtimeMs < cutoff) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (err) {
+        logger.warn({ filePath, err }, 'acp: failed to sweep old artifact');
+      }
+    }
+  }
+
+  private listArtifactPaths(): string[] {
+    const ipcBaseDir = path.join(this.deps.dataDir, 'ipc');
+    if (!fs.existsSync(ipcBaseDir)) return [];
+
+    const out: string[] = [];
+    for (const entry of fs.readdirSync(ipcBaseDir)) {
+      const runsDir = path.join(ipcBaseDir, entry, 'acp', 'runs');
+      if (!fs.existsSync(runsDir)) continue;
+      for (const file of fs.readdirSync(runsDir)) {
+        if (file.endsWith('.json')) {
+          out.push(path.join(runsDir, file));
+        }
+      }
+    }
+    return out;
   }
 
   // ─── Peer lifecycle (lazy spawn + crash recovery) ─────────────────
