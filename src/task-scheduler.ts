@@ -4,6 +4,8 @@ import fs from 'fs';
 
 import { isBudgetExceeded } from './budget.js';
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { generateMorningDashboard } from './digest-engine.js';
+import { eventBus } from './event-bus.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -126,6 +128,34 @@ async function runTask(
     { taskId: task.id, group: task.group_folder },
     'Running scheduled task',
   );
+
+  // If this is the morning briefing task, send the orchestrator's dashboard first
+  const isMorningBriefing =
+    task.prompt.toLowerCase().includes('morning briefing') ||
+    task.prompt.toLowerCase().includes('morning dashboard');
+
+  if (isMorningBriefing) {
+    try {
+      const dashboard = generateMorningDashboard(task.group_folder);
+      await deps.sendMessage(task.chat_jid, dashboard);
+      logger.info({ taskId: task.id }, 'Sent orchestrator morning dashboard');
+      eventBus.emit('digest.sent', {
+        type: 'digest.sent',
+        source: 'digest-engine',
+        timestamp: Date.now(),
+        payload: {
+          groupName: task.group_folder,
+          itemCount: 0,
+          digestType: 'morning',
+        },
+      });
+    } catch (err) {
+      logger.error(
+        { err, taskId: task.id },
+        'Failed to generate morning dashboard, falling back to container briefing',
+      );
+    }
+  }
 
   // Pre-refresh Gmail tokens for tasks that may touch email (morning
   // briefing, weekly review). Cheap and harmless for tasks that don't

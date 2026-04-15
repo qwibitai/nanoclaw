@@ -10,6 +10,8 @@ import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
+  Action,
+  CallbackQuery,
   Channel,
   OnChatMetadata,
   OnInboundMessage,
@@ -23,11 +25,6 @@ export interface TelegramChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
-/**
- * Send a message with Telegram Markdown parse mode, falling back to plain text.
- * Claude's output naturally matches Telegram's Markdown v1 format:
- *   *bold*, _italic_, `code`, ```code blocks```, [links](url)
- */
 async function sendTelegramMessage(
   api: { sendMessage: Api['sendMessage'] },
   chatId: string | number,
@@ -37,11 +34,10 @@ async function sendTelegramMessage(
   try {
     await api.sendMessage(chatId, text, {
       ...options,
-      parse_mode: 'Markdown',
+      parse_mode: 'HTML',
     });
   } catch (err) {
-    // Fallback: send as plain text if Markdown parsing fails
-    logger.debug({ err }, 'Markdown send failed, falling back to plain text');
+    logger.debug({ err }, 'HTML send failed, falling back to plain text');
     await api.sendMessage(chatId, text, options);
   }
 }
@@ -416,6 +412,62 @@ export class TelegramChannel implements Channel {
       this.bot = null;
       logger.info('Telegram bot stopped');
     }
+  }
+
+  async sendMessageWithActions(
+    jid: string,
+    text: string,
+    actions: Action[],
+  ): Promise<number> {
+    if (!this.bot) throw new Error('Telegram bot not connected');
+
+    const chatId = jid.replace(/^tg:/, '');
+    const keyboard = {
+      inline_keyboard: [
+        actions.map((a) => ({ text: a.label, callback_data: a.callbackData })),
+      ],
+    };
+
+    try {
+      const msg = await this.bot.api.sendMessage(chatId, text, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard,
+      });
+      return msg.message_id;
+    } catch (err) {
+      logger.warn({ err, jid }, 'HTML send with keyboard failed, falling back');
+      const msg = await this.bot.api.sendMessage(chatId, text, {
+        reply_markup: keyboard,
+      });
+      return msg.message_id;
+    }
+  }
+
+  onCallbackQuery(handler: (query: CallbackQuery) => void): void {
+    if (!this.bot) {
+      logger.warn('Cannot register callback query handler — bot not connected');
+      return;
+    }
+
+    this.bot.on('callback_query:data', async (ctx) => {
+      const chatJid = `tg:${ctx.callbackQuery.message?.chat.id}`;
+      const messageId = ctx.callbackQuery.message?.message_id ?? 0;
+      const data = ctx.callbackQuery.data;
+      const senderName =
+        ctx.callbackQuery.from.first_name ||
+        ctx.callbackQuery.from.username ||
+        ctx.callbackQuery.from.id.toString();
+
+      handler({
+        id: ctx.callbackQuery.id,
+        chatJid,
+        messageId,
+        data,
+        senderName,
+      });
+
+      await ctx.answerCallbackQuery();
+    });
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {

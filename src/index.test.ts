@@ -157,6 +157,14 @@ vi.mock('./llm/escalation.js', () => ({
 }));
 
 // Other side-effect modules
+vi.mock('./browser/session-manager.js', () => ({
+  BrowserSessionManager: vi.fn().mockImplementation(() => ({
+    shutdown: vi.fn().mockResolvedValue(undefined),
+  })),
+}));
+vi.mock('./browser/stagehand-bridge.js', () => ({
+  StagehandBridge: vi.fn().mockImplementation(() => ({})),
+}));
 vi.mock('./deal-watch-loop.js', () => ({ startDealWatchLoop: vi.fn() }));
 vi.mock('./email-sse.js', () => ({ startEmailSSE: vi.fn() }));
 vi.mock('./gmail-token-refresh.js', () => ({

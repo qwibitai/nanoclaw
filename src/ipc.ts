@@ -531,6 +531,10 @@ export async function processTaskIpc(
         break;
       }
 
+      // Classification is handled inline by sse-classifier.ts when
+      // email.received fires. Items are already tracked by the time
+      // this IPC handler runs — we only need to build the agent prompt.
+
       const emailSummaries = (data.emails ?? [])
         .map((e) => {
           const from = e.sender || 'unknown sender';

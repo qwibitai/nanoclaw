@@ -5,20 +5,23 @@
 
 import {
   getAllTrustLevels,
-  getPendingTrustApprovalIds,
+  getDb,
   resetTrustLevels,
   setTrustAutoExecute,
 } from './db.js';
-import { queryEvents } from './event-log.js';
-import { TIMEZONE } from './config.js';
-import { formatLocalTime } from './timezone.js';
+import { generateOnDemandDigest } from './digest-engine.js';
+import { resetAdjustments } from './classification-adjustments.js';
+import { DELEGATION_GUARDRAIL_COUNT } from './config.js';
 import type { ActionClass } from './trust-engine.js';
 
 export type TrustCommand =
   | { type: 'status' }
   | { type: 'never_auto'; actionClass: ActionClass }
   | { type: 'reset' }
-  | { type: 'what_did_i_miss' };
+  | { type: 'what_did_i_miss' }
+  | { type: 'dismiss_item'; itemId: string }
+  | { type: 'reset_learning' }
+  | { type: 'delegation_status' };
 
 /** Parse a trigger-stripped message into a trust command, or null. */
 export function parseTrustCommand(text: string): TrustCommand | null {
@@ -48,6 +51,19 @@ export function parseTrustCommand(text: string): TrustCommand | null {
     /^what['']?s\s+new/i.test(lower)
   ) {
     return { type: 'what_did_i_miss' };
+  }
+
+  if (lower === 'reset learning') {
+    return { type: 'reset_learning' };
+  }
+
+  const dismissMatch = lower.match(/^dismiss\s+(.+)$/);
+  if (dismissMatch) {
+    return { type: 'dismiss_item', itemId: dismissMatch[1].trim() };
+  }
+
+  if (lower === 'delegation status') {
+    return { type: 'delegation_status' };
   }
 
   return null;
@@ -98,78 +114,44 @@ export function executeTrustCommand(
     }
 
     case 'what_did_i_miss': {
-      return generateCatchUpSummary(groupId);
+      return generateOnDemandDigest(groupId);
+    }
+
+    case 'dismiss_item': {
+      markProcessedItemDismissed(command.itemId);
+      return `✅ Dismissed: \`${command.itemId}\``;
+    }
+
+    case 'reset_learning': {
+      resetAdjustments();
+      return '🔄 Classification learning reset. All adjustments cleared — back to default rules.';
+    }
+
+    case 'delegation_status': {
+      const db = getDb();
+      const rows = db
+        .prepare('SELECT action_class, count, last_delegated_at FROM delegation_counters WHERE group_name = ? ORDER BY count DESC')
+        .all(groupId) as Array<{ action_class: string; count: number; last_delegated_at: number | null }>;
+
+      if (rows.length === 0) {
+        return '📊 DELEGATION STATUS\n\nNo delegations recorded yet. Use "Handle It" on push notifications to start building delegation trust.';
+      }
+
+      let output = '📊 DELEGATION STATUS\n\n';
+      for (const row of rows) {
+        const guardrailMet = row.count >= DELEGATION_GUARDRAIL_COUNT;
+        const status = guardrailMet ? '✅ Auto' : `🔒 ${row.count}/${DELEGATION_GUARDRAIL_COUNT}`;
+        output += `${row.action_class}: ${status}\n`;
+      }
+      return output;
     }
   }
 }
 
-/**
- * Default lookback window for "what did I miss" (6 hours).
- * In the future this could use the actual last user message timestamp.
- */
-const CATCH_UP_WINDOW_MS = 6 * 60 * 60 * 1000;
-
-/**
- * Human-readable label for event types in the catch-up summary.
- */
-function eventTypeLabel(type: string): string {
-  const labels: Record<string, string> = {
-    'message.inbound': 'Messages received',
-    'message.outbound': 'Messages sent',
-    'task.complete': 'Tasks completed',
-    'task.queued': 'Tasks queued',
-    'trust.request': 'Trust approvals requested',
-    'trust.approved': 'Trust actions approved',
-    'trust.denied': 'Trust actions denied',
-    'email.received': 'Emails processed',
-    'webhook.received': 'Webhooks received',
-    'system.error': 'System errors',
-  };
-  return labels[type] || type;
-}
-
-/**
- * Generate a catch-up summary of events since the last interaction.
- */
-function generateCatchUpSummary(groupId: string): string {
-  const since = Date.now() - CATCH_UP_WINDOW_MS;
-  const events = queryEvents({ since, limit: 500 });
-
-  const header = `\u{1F4DD} *What you missed*\n_Since ${formatLocalTime(new Date(since).toISOString(), TIMEZONE)}_\n`;
-
-  if (events.length === 0) {
-    return `${header}\nAll quiet \u2014 nothing happened while you were away.`;
-  }
-
-  // Count by type
-  const byType = new Map<string, number>();
-  for (const e of events) {
-    byType.set(e.event_type, (byType.get(e.event_type) || 0) + 1);
-  }
-
-  const lines: string[] = [header];
-
-  for (const [type, count] of byType) {
-    lines.push(`  \u{2022} ${eventTypeLabel(type)}: ${count}`);
-  }
-
-  // Highlight errors
-  const errors = events.filter((e) => e.event_type === 'system.error');
-  if (errors.length > 0) {
-    lines.push('');
-    lines.push(
-      `\u{26A0}\u{FE0F} *${errors.length} error(s)* \u2014 check logs.`,
-    );
-  }
-
-  // Pending approvals
-  const pendingApprovals = getPendingTrustApprovalIds(groupId);
-  if (pendingApprovals.length > 0) {
-    lines.push('');
-    lines.push(
-      `\u{1F510} *${pendingApprovals.length} pending approval(s)* awaiting your decision.`,
-    );
-  }
-
-  return lines.join('\n').trim();
+function markProcessedItemDismissed(itemId: string): void {
+  const db = getDb();
+  db.prepare(
+    `INSERT OR REPLACE INTO processed_items (item_id, source, processed_at, action_taken)
+     VALUES (?, 'dismiss', ?, 'dismissed')`,
+  ).run(itemId, new Date().toISOString());
 }

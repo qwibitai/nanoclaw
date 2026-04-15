@@ -24,6 +24,10 @@ Every 5 minutes via cron: `*/5 * * * *`
 
 3. For each email returned:
    - Skip if already in processed_items (idempotency check)
+   - Before classifying, check if the user already replied:
+     - Call get_triaged_emails for the thread and check if any message has `from:me`
+     - If `from:me` exists in the thread, skip this email (already handled)
+     - If the email is no longer in inbox (archived), skip it
    - Follow the Email Intelligence processing flow from CLAUDE.md
    - Classify as AUTO / PROPOSE / ESCALATE
    - Act accordingly
@@ -60,3 +64,19 @@ else
   echo "{\"wakeAgent\": false}"
 fi
 ```
+
+## Data Bridge (ARCH-5, TENSION-1)
+
+This container skill writes raw SuperPilot labels and email metadata to the
+`tracked_items` table in the shared SQLite DB. The orchestrator process owns
+all classification decisions (push/digest/resolved).
+
+When writing to tracked_items, include:
+- source: 'gmail'
+- source_id: the Gmail thread_id
+- superpilot_label: the raw SuperPilot classification ('needs-attention', 'fyi', 'newsletter', 'transactional')
+- title: "{sender_name} — {subject}"
+- summary: first 200 chars of email body
+- metadata: JSON with sender email, account label, thread_id
+
+Do NOT make push/digest/resolved decisions. Write the raw data and let the orchestrator classify.

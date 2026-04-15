@@ -84,6 +84,17 @@ const TOOL_CLASS_MAP: Record<string, ActionClass> = {
   browser_file_upload: 'services.write',
   browser_press_key: 'services.write',
   browser_act: 'services.write',
+  // Delegation — "Handle It" actions from email intelligence
+  handle_email_reply: 'comms.write',
+  handle_email_send: 'comms.transact',
+  handle_email_forward: 'comms.write',
+  handle_calendar_accept: 'services.write',
+  handle_calendar_decline: 'services.write',
+  handle_calendar_reschedule: 'services.write',
+  handle_archive: 'comms.read',
+  handle_label: 'comms.write',
+  handle_snooze: 'services.write',
+  handle_dismiss: 'comms.read',
 };
 
 /** Parse an ActionClass string into domain and operation. */

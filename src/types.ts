@@ -93,6 +93,19 @@ export interface TaskRunLog {
 
 // --- Channel abstraction ---
 
+export interface Action {
+  label: string;
+  callbackData: string;
+}
+
+export interface CallbackQuery {
+  id: string;
+  chatJid: string;
+  messageId: number;
+  data: string;
+  senderName: string;
+}
+
 /**
  * Opaque handle to an in-flight progress message. Returned by
  * `Channel.sendProgress`. Callers use it to update or remove the message
@@ -123,6 +136,12 @@ export interface Channel {
    * fall back to sendMessage.
    */
   sendProgress?(jid: string, text: string): Promise<ProgressHandle>;
+  sendMessageWithActions?(
+    jid: string,
+    text: string,
+    actions: Action[],
+  ): Promise<number>;
+  onCallbackQuery?(handler: (query: CallbackQuery) => void): void;
 }
 
 // Callback type that channels use to deliver inbound messages

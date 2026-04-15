@@ -194,6 +194,109 @@ function createSchema(database: Database.Database): void {
       expires_at DATETIME NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_trust_approvals_status ON trust_approvals(status, expires_at);
+
+    CREATE TABLE IF NOT EXISTS tracked_items (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      group_name TEXT NOT NULL,
+      state TEXT NOT NULL,
+      classification TEXT,
+      superpilot_label TEXT,
+      trust_tier TEXT,
+      title TEXT NOT NULL,
+      summary TEXT,
+      thread_id TEXT,
+      detected_at INTEGER NOT NULL,
+      pushed_at INTEGER,
+      resolved_at INTEGER,
+      resolution_method TEXT,
+      digest_count INTEGER NOT NULL DEFAULT 0,
+      telegram_message_id INTEGER,
+      classification_reason TEXT,
+      metadata TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_tracked_state ON tracked_items(group_name, state);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tracked_source ON tracked_items(source, source_id);
+    CREATE INDEX IF NOT EXISTS idx_tracked_dashboard ON tracked_items(group_name, state, detected_at); -- PERF-1
+
+    CREATE TABLE IF NOT EXISTS threads (
+      id TEXT PRIMARY KEY,
+      group_name TEXT NOT NULL,
+      title TEXT NOT NULL,
+      source_hint TEXT,
+      created_at INTEGER NOT NULL,
+      resolved_at INTEGER,
+      item_count INTEGER NOT NULL DEFAULT 0,
+      state TEXT NOT NULL DEFAULT 'active'
+    );
+    CREATE INDEX IF NOT EXISTS idx_threads_group ON threads(group_name, state);
+
+    CREATE TABLE IF NOT EXISTS calendar_events (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      start_time INTEGER NOT NULL,
+      end_time INTEGER NOT NULL,
+      attendees TEXT NOT NULL DEFAULT '[]',
+      location TEXT,
+      source_account TEXT,
+      fetched_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_calendar_events_time ON calendar_events(start_time, end_time);
+
+    CREATE TABLE IF NOT EXISTS thread_links (
+      thread_id TEXT NOT NULL,
+      item_id TEXT NOT NULL,
+      link_type TEXT NOT NULL,
+      confidence REAL NOT NULL DEFAULT 0.0,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (thread_id, item_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_thread_links_item ON thread_links(item_id);
+
+    CREATE INDEX IF NOT EXISTS idx_tracked_thread ON tracked_items(thread_id);
+
+    CREATE TABLE IF NOT EXISTS digest_state (
+      group_name TEXT PRIMARY KEY,
+      last_digest_at INTEGER,
+      last_dashboard_at INTEGER,
+      queued_count INTEGER NOT NULL DEFAULT 0,
+      last_user_interaction INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS classification_adjustments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      original_classification TEXT NOT NULL,
+      adjusted_classification TEXT NOT NULL,
+      reason TEXT,
+      adjusted_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_class_adj_source ON classification_adjustments(source, source_id);
+
+    CREATE TABLE IF NOT EXISTS classification_behaviors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      sender_pattern TEXT NOT NULL,
+      subject_pattern TEXT,
+      original_classification TEXT NOT NULL,
+      observed_behavior TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 1,
+      adjustment TEXT NOT NULL DEFAULT 'none',
+      confidence REAL NOT NULL DEFAULT 0.0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_class_beh_source ON classification_behaviors(source, sender_pattern);
+
+    CREATE TABLE IF NOT EXISTS delegation_counters (
+      group_name TEXT NOT NULL,
+      action_class TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      last_delegated_at INTEGER,
+      PRIMARY KEY (group_name, action_class)
+    );
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)

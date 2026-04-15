@@ -1,3 +1,7 @@
+<!-- DEPRECATED: Morning dashboard is migrating to orchestrator's digest-engine.ts (TENSION-2).
+     This container skill continues running during the transition period.
+     When fully migrated, this skill will be removed. -->
+
 # Morning Briefing
 
 Generate a comprehensive morning briefing and send to the user via send_message.
@@ -18,6 +22,10 @@ Daily at 7:30 AM CST. Scheduled as a cron task: `30 7 * * *`
 - Call `get_triaged_emails(since=yesterday)` for recent arrivals
 - Show [account] tag, sender, subject, and age for each
 - Highlight any marked as high priority or needs_reply
+- Filter out emails where:
+  - The user already replied (from:me in thread)
+  - The email is no longer in inbox (user archived it)
+  - The item_id appears in processed_items with action_taken='dismissed'
 - **If superpilot or gmail tools become unavailable mid-section** (the
   classifier is the canary — if it returns "tool error" or "no such tool",
   the connection has dropped):

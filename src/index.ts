@@ -14,7 +14,9 @@ import {
   POLL_INTERVAL,
   TIMEZONE,
   TRUST_GATEWAY_PORT,
+  PROACTIVE_SUGGESTION_INTERVAL,
 } from './config.js';
+import { generateSuggestion } from './proactive-suggestions.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -86,6 +88,12 @@ import {
 import { startTrustGateway } from './trust-gateway.js';
 import { startDealWatchLoop } from './deal-watch-loop.js';
 import { startEmailSSE } from './email-sse.js';
+import { startCalendarPoller, stopCalendarPoller } from './calendar-poller.js';
+import {
+  correlateByAttendee,
+  correlateBySubject,
+} from './thread-correlator.js';
+import { classifyFromSSE } from './sse-classifier.js';
 import {
   refreshGmailTokens,
   startGmailRefreshLoop,
@@ -100,10 +108,32 @@ import { scoreComplexity } from './llm/escalation.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { eventBus } from './event-bus.js';
+import { shouldFireDigest, generateSmartDigest } from './digest-engine.js';
+/* eslint-disable @typescript-eslint/no-unused-vars -- scaffolding: callback/push/classification wiring */
+import {
+  parseCallbackData,
+  resolveItemByCallback,
+  getTrackedItemById,
+  insertTrackedItem,
+  getTrackedItemBySourceId,
+  updateDigestState,
+  getDigestState,
+  transitionItemState,
+} from './tracked-items.js';
+import { recordBehavior } from './classification-adjustments.js';
+import { PushBuffer } from './push-buffer.js';
+import {
+  formatPushMessage,
+  getPushActions,
+  PushRateLimiter,
+} from './push-manager.js';
+import { classify } from './classification.js';
+/* eslint-enable @typescript-eslint/no-unused-vars */
 import type {
   MessageInboundEvent,
   MessageOutboundEvent,
   SystemStartupEvent,
+  ProactiveSuggestionEvent,
 } from './events.js';
 
 // Re-export for backwards compatibility during refactor
@@ -114,6 +144,8 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+let proactiveSuggestionTimer: ReturnType<typeof setInterval> | null = null;
+let lastSuggestionAt = 0;
 
 const channels: Channel[] = [];
 const queue = new ExecutorPool();
@@ -981,6 +1013,37 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+// Smart digest check — runs every 15 minutes
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- wired into startup when full integration is ready
+function startSmartDigestCheck(
+  sendMessage: (jid: string, text: string) => Promise<void>,
+  getMainGroupJid: () => string | undefined,
+): void {
+  setInterval(
+    () => {
+      const jid = getMainGroupJid();
+      if (!jid) return;
+
+      const groupName = 'main';
+      if (shouldFireDigest(groupName)) {
+        const digest = generateSmartDigest(groupName);
+        if (digest) {
+          sendMessage(jid, digest).catch((err) => {
+            logger.error({ err }, 'Failed to send smart digest');
+          });
+          eventBus.emit('digest.sent', {
+            type: 'digest.sent',
+            source: 'digest-engine',
+            timestamp: Date.now(),
+            payload: { groupName, itemCount: 0, digestType: 'smart' },
+          });
+        }
+      }
+    },
+    15 * 60 * 1000,
+  );
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
@@ -1012,6 +1075,11 @@ async function main(): Promise<void> {
     await browserSessionManager.shutdown();
     for (const ch of channels) await ch.disconnect();
     stopBrowserSidecar();
+    stopCalendarPoller();
+    if (proactiveSuggestionTimer) {
+      clearInterval(proactiveSuggestionTimer);
+      proactiveSuggestionTimer = null;
+    }
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -1310,6 +1378,7 @@ async function main(): Promise<void> {
 
   // Real-time email notifications via SSE (poll is fallback)
   startEmailSSE();
+  startCalendarPoller();
 
   // Event router: processes events against per-group rules
   startEventRouter({
@@ -1343,6 +1412,51 @@ async function main(): Promise<void> {
     enqueueTask: (jid, taskId, fn) => queue.enqueueTask(jid, taskId, fn),
   });
 
+  // Proactive scheduling suggestions
+  function startProactiveSuggestionCheck(): void {
+    proactiveSuggestionTimer = setInterval(() => {
+      try {
+        const now = Date.now();
+        if (now - lastSuggestionAt < PROACTIVE_SUGGESTION_INTERVAL) return;
+
+        const suggestion = generateSuggestion('main', now);
+        if (!suggestion) return;
+
+        lastSuggestionAt = now;
+
+        const telegramJid = Object.keys(registeredGroups).find((jid) =>
+          jid.startsWith('tg:'),
+        );
+        if (telegramJid) {
+          const channel = findChannel(channels, telegramJid);
+          if (channel) {
+            channel.sendMessage(telegramJid, suggestion.message).catch((err) => {
+              logger.warn({ err: String(err) }, 'Failed to send proactive suggestion');
+            });
+          }
+        }
+
+        const event: ProactiveSuggestionEvent = {
+          type: 'proactive.suggestion',
+          source: 'scheduling-advisor',
+          timestamp: now,
+          payload: {
+            groupName: 'main',
+            suggestion: suggestion.message,
+            pendingCount: suggestion.pendingCount,
+            nextGapAt: suggestion.nextGapAt,
+            urgencyScore: suggestion.urgencyScore,
+          },
+        };
+        eventBus.emit('proactive.suggestion', event);
+      } catch (err) {
+        logger.warn({ err: String(err) }, 'Proactive suggestion check failed');
+      }
+    }, 60000);
+  }
+
+  startProactiveSuggestionCheck();
+
   // Outcome logging: track task completion outcomes for learning
   eventBus.on('task.complete', (event) => {
     logOutcome({
@@ -1354,6 +1468,70 @@ async function main(): Promise<void> {
       costUsd: event.payload.costUsd,
       groupId: event.groupId || 'unknown',
     });
+  });
+
+  // Thread correlation: correlate items by attendee and subject on classification
+  eventBus.on('item.classified', (event) => {
+    try {
+      const item = getTrackedItemById(event.payload.itemId);
+      if (!item) return;
+      correlateByAttendee(item);
+      correlateBySubject(item, item.group_name);
+    } catch (err) {
+      logger.warn(
+        { err: String(err), itemId: event.payload.itemId },
+        'Thread correlation failed',
+      );
+    }
+  });
+
+  // SSE-triggered classification: classify emails inline without container
+  eventBus.on('email.received', (event) => {
+    try {
+      const emails = event.payload.emails as Array<{
+        thread_id: string;
+        account: string;
+        subject?: string;
+        sender?: string;
+      }>;
+
+      const results = classifyFromSSE(emails);
+
+      const pushItems = results.filter((r) => r.decision === 'push');
+      if (pushItems.length > 0) {
+        const telegramJid = Object.keys(registeredGroups).find((jid) =>
+          jid.startsWith('tg:'),
+        );
+        const notifyJid = telegramJid || Object.keys(registeredGroups)[0];
+
+        if (notifyJid) {
+          const channel = findChannel(channels, notifyJid);
+          if (channel) {
+            for (const item of pushItems) {
+              const message = formatPushMessage({
+                source: 'gmail',
+                title: item.subject,
+                sender: item.sender,
+                summary: null,
+              });
+              channel.sendMessage(notifyJid, message).catch((err) => {
+                logger.warn(
+                  { err: String(err), itemId: item.itemId },
+                  'Failed to send push',
+                );
+              });
+            }
+          }
+        }
+      }
+
+      logger.info(
+        { total: results.length, pushed: pushItems.length },
+        'SSE emails classified inline',
+      );
+    } catch (err) {
+      logger.warn({ err: String(err) }, 'SSE inline classification failed');
+    }
   });
 
   // Daily digest: schedule to run every day at 8:00 AM

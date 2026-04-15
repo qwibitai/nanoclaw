@@ -1,0 +1,112 @@
+import { classify } from './classification.js';
+import { eventBus } from './event-bus.js';
+import { logger } from './logger.js';
+import {
+  getTrackedItemBySourceId,
+  insertTrackedItem,
+  updateDigestState,
+  getDigestState,
+} from './tracked-items.js';
+import type { ItemClassifiedEvent } from './events.js';
+
+export interface SSEEmail {
+  thread_id: string;
+  account: string;
+  subject?: string;
+  sender?: string;
+  superpilot_label?: string;
+}
+
+export interface ClassifyResult {
+  itemId: string;
+  threadId: string;
+  decision: 'push' | 'digest' | 'resolved';
+  subject: string;
+  sender: string;
+}
+
+export function classifyFromSSE(emails: SSEEmail[]): ClassifyResult[] {
+  const results: ClassifyResult[] = [];
+
+  for (const email of emails) {
+    const sourceId = `gmail:${email.thread_id}`;
+    const existing = getTrackedItemBySourceId('gmail', sourceId);
+    if (existing) {
+      logger.debug({ threadId: email.thread_id }, 'SSE: already tracked, skipping');
+      continue;
+    }
+
+    const subject = email.subject || '(no subject)';
+    const sender = email.sender || 'unknown';
+
+    const result = classify({
+      source: 'gmail',
+      sourceId,
+      superpilotLabel: email.superpilot_label ?? null,
+      trustTier: null,
+      senderPattern: sender,
+      title: subject,
+      summary: null,
+      userActed: false,
+      metadata: { account: email.account, threadId: email.thread_id },
+    });
+
+    const itemId = `sse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const now = Date.now();
+
+    insertTrackedItem({
+      id: itemId,
+      source: 'gmail',
+      source_id: sourceId,
+      group_name: 'main',
+      state: result.decision === 'push' ? 'pending' : 'queued',
+      classification: result.decision,
+      superpilot_label: email.superpilot_label ?? null,
+      trust_tier: null,
+      title: subject,
+      summary: null,
+      thread_id: email.thread_id,
+      detected_at: now,
+      pushed_at: result.decision === 'push' ? now : null,
+      resolved_at: null,
+      resolution_method: null,
+      digest_count: 0,
+      telegram_message_id: null,
+      classification_reason: result.reason,
+      metadata: { account: email.account, sender },
+    });
+
+    if (result.decision === 'digest') {
+      const state = getDigestState('main');
+      updateDigestState('main', { queued_count: state.queued_count + 1 });
+    }
+
+    const event: ItemClassifiedEvent = {
+      type: 'item.classified',
+      source: 'sse-classifier',
+      timestamp: now,
+      payload: {
+        itemId,
+        decision: result.decision,
+        source: 'gmail',
+        reason: result.reason as unknown as Record<string, unknown>,
+      },
+    };
+    eventBus.emit('item.classified', event);
+
+    results.push({
+      itemId,
+      threadId: email.thread_id,
+      decision: result.decision,
+      subject,
+      sender,
+    });
+
+    logger.info(
+      { threadId: email.thread_id, decision: result.decision, itemId },
+      'SSE email classified inline',
+    );
+  }
+
+  return results;
+}

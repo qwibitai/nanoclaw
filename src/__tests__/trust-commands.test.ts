@@ -15,7 +15,7 @@ vi.mock('../config.js', () => ({
 }));
 
 import { _initTestDatabase, _closeDatabase, upsertTrustLevel } from '../db.js';
-import { logEvent } from '../event-log.js';
+import { insertTrackedItem } from '../tracked-items.js';
 import { parseTrustCommand, executeTrustCommand } from '../trust-commands.js';
 
 beforeEach(() => _initTestDatabase());
@@ -48,6 +48,13 @@ describe('parseTrustCommand', () => {
     expect(parseTrustCommand('hello')).toBeNull();
   });
 
+  it('parses "dismiss" command', () => {
+    expect(parseTrustCommand('dismiss email:thread_abc')).toEqual({
+      type: 'dismiss_item',
+      itemId: 'email:thread_abc',
+    });
+  });
+
   it('parses "what did I miss"', () => {
     expect(parseTrustCommand('what did I miss')).toEqual({
       type: 'what_did_i_miss',
@@ -66,6 +73,12 @@ describe('parseTrustCommand', () => {
     });
     expect(parseTrustCommand("what's new")).toEqual({
       type: 'what_did_i_miss',
+    });
+  });
+
+  it('parses "reset learning"', () => {
+    expect(parseTrustCommand('reset learning')).toEqual({
+      type: 'reset_learning',
     });
   });
 });
@@ -116,30 +129,51 @@ describe('executeTrustCommand', () => {
     expect(statusResult).toContain('cold start');
   });
 
-  it('what_did_i_miss returns quiet message when no events', () => {
-    const result = executeTrustCommand({ type: 'what_did_i_miss' }, 'group1');
-    expect(result).toContain('What you missed');
-    expect(result).toContain('All quiet');
+  it('dismiss_item marks item as dismissed in processed_items', () => {
+    const result = executeTrustCommand(
+      { type: 'dismiss_item', itemId: 'email:thread_123' },
+      'group1',
+    );
+    expect(result).toContain('Dismissed');
+    expect(result).toContain('email:thread_123');
   });
 
-  it('what_did_i_miss includes event counts', () => {
-    const now = Date.now();
-    logEvent({
-      type: 'message.inbound',
-      source: 'channel',
-      timestamp: now - 1000,
-      payload: {},
-    });
-    logEvent({
-      type: 'task.complete',
-      source: 'executor',
-      timestamp: now - 2000,
-      payload: {},
+  it('what_did_i_miss returns on-demand digest from tracked_items', () => {
+    const result = executeTrustCommand({ type: 'what_did_i_miss' }, 'group1');
+    expect(result).toContain('All clear');
+  });
+
+  it('reset_learning clears all adjustments', () => {
+    const result = executeTrustCommand({ type: 'reset_learning' }, 'group1');
+    expect(result).toContain('Classification learning reset');
+  });
+
+  it('what_did_i_miss shows pending items', () => {
+    insertTrackedItem({
+      id: 'test:wdim1',
+      source: 'gmail',
+      source_id: 'wdim1',
+      group_name: 'group1',
+      state: 'pending',
+      classification: 'push',
+      superpilot_label: 'needs-attention',
+      trust_tier: 'escalate',
+      title: 'Test pending item',
+      summary: null,
+      thread_id: null,
+      detected_at: Date.now() - 1000,
+      pushed_at: Date.now() - 1000,
+      resolved_at: null,
+      resolution_method: null,
+      digest_count: 0,
+      telegram_message_id: null,
+      classification_reason: { final: 'push' },
+      metadata: null,
     });
 
     const result = executeTrustCommand({ type: 'what_did_i_miss' }, 'group1');
-    expect(result).toContain('What you missed');
-    expect(result).toContain('Messages received: 1');
-    expect(result).toContain('Tasks completed: 1');
+    expect(result).toContain('CATCH-UP');
+    expect(result).toContain('ACTION REQUIRED');
+    expect(result).toContain('Test pending item');
   });
 });

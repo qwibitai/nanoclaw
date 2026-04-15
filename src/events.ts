@@ -310,6 +310,56 @@ export interface BrowserVisualChangedEvent extends NanoClawEvent {
   };
 }
 
+// --- Item lifecycle events ---
+
+export interface ItemClassifiedEvent extends NanoClawEvent {
+  type: 'item.classified';
+  source: 'classification' | 'sse-classifier';
+  payload: {
+    itemId: string;
+    decision: 'push' | 'digest' | 'resolved';
+    source: string;
+    reason: Record<string, unknown>;
+  };
+}
+
+export interface ItemPushedEvent extends NanoClawEvent {
+  type: 'item.pushed';
+  source: 'push-manager';
+  payload: {
+    itemId: string;
+    telegramMessageId: number;
+  };
+}
+
+export interface ItemResolvedEvent extends NanoClawEvent {
+  type: 'item.resolved';
+  source: 'resolution-detector';
+  payload: {
+    itemId: string;
+    method: string;
+  };
+}
+
+export interface ItemStaleEvent extends NanoClawEvent {
+  type: 'item.stale';
+  source: 'digest-engine';
+  payload: {
+    itemId: string;
+    digestCycles: number;
+  };
+}
+
+export interface DigestSentEvent extends NanoClawEvent {
+  type: 'digest.sent';
+  source: 'digest-engine';
+  payload: {
+    groupName: string;
+    itemCount: number;
+    digestType: 'smart' | 'morning' | 'ondemand';
+  };
+}
+
 // --- Learn events ---
 
 export interface LearnRuleCreatedEvent extends NanoClawEvent {
@@ -386,6 +436,42 @@ export interface LearnFeedbackReceivedEvent extends NanoClawEvent {
   };
 }
 
+// --- Calendar events ---
+
+export interface CalendarSyncedEvent extends NanoClawEvent {
+  type: 'calendar.synced';
+  source: 'calendar-poller';
+  payload: {
+    eventsFound: number;
+    lookaheadMs: number;
+  };
+}
+
+export interface ThreadCorrelatedEvent extends NanoClawEvent {
+  type: 'thread.correlated';
+  source: 'thread-correlator';
+  payload: {
+    threadId: string;
+    itemId: string;
+    linkType: string;
+    confidence: number;
+  };
+}
+
+// --- Proactive scheduling events ---
+
+export interface ProactiveSuggestionEvent extends NanoClawEvent {
+  type: 'proactive.suggestion';
+  source: 'scheduling-advisor';
+  payload: {
+    groupName: string;
+    suggestion: string;
+    pendingCount: number;
+    nextGapAt: number | null;
+    urgencyScore: number;
+  };
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -422,6 +508,14 @@ export interface EventMap {
   'learn.procedure_executed': LearnProcedureExecutedEvent;
   'learn.procedure_promoted': LearnProcedurePromotedEvent;
   'learn.feedback_received': LearnFeedbackReceivedEvent;
+  'item.classified': ItemClassifiedEvent;
+  'item.pushed': ItemPushedEvent;
+  'item.resolved': ItemResolvedEvent;
+  'item.stale': ItemStaleEvent;
+  'digest.sent': DigestSentEvent;
+  'calendar.synced': CalendarSyncedEvent;
+  'thread.correlated': ThreadCorrelatedEvent;
+  'proactive.suggestion': ProactiveSuggestionEvent;
 }
 
 export type EventType = keyof EventMap;

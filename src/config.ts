@@ -175,3 +175,82 @@ export const BROWSER_IDLE_TIMEOUT_MS =
 export const BROWSER_ACQUIRE_TIMEOUT_MS =
   parseInt(process.env.BROWSER_ACQUIRE_TIMEOUT || '30000', 10) || 30_000;
 export const BROWSER_PROFILE_DIR = 'browser';
+
+// Calendar poller settings
+export const CALENDAR_POLL_INTERVAL = parseInt(
+  process.env.CALENDAR_POLL_INTERVAL || '300000',
+  10,
+);
+export const CALENDAR_LOOKAHEAD_MS = parseInt(
+  process.env.CALENDAR_LOOKAHEAD_MS || '86400000',
+  10,
+);
+export const CALENDAR_HOLD_BUFFER_MS = parseInt(
+  process.env.CALENDAR_HOLD_BUFFER_MS || '300000',
+  10,
+);
+export const DELEGATION_GUARDRAIL_COUNT = parseInt(
+  process.env.DELEGATION_GUARDRAIL_COUNT || '10',
+  10,
+);
+export const PROACTIVE_SUGGESTION_INTERVAL = parseInt(
+  process.env.PROACTIVE_SUGGESTION_INTERVAL || '900000',
+  10,
+);
+
+export interface QuietHoursConfig {
+  enabled: boolean;
+  start: string;
+  end: string;
+  weekendMode: boolean;
+  escalateOverride: boolean;
+}
+
+export interface ChatInterfaceConfig {
+  morningDashboardTime: string;
+  digestThreshold: number;
+  digestMinIntervalMs: number;
+  staleAfterDigestCycles: number;
+  pushRateLimit: number;
+  pushRateWindowMs: number;
+  vipList: string[];
+  urgencyKeywords: string[];
+  holdPushDuringMeetings: boolean;
+  microBriefingDelayMs: number;
+  quietHours: QuietHoursConfig;
+}
+
+export const CHAT_INTERFACE_CONFIG: ChatInterfaceConfig = {
+  morningDashboardTime: process.env.MORNING_DASHBOARD_TIME || '07:30',
+  digestThreshold: parseInt(process.env.DIGEST_THRESHOLD || '5', 10),
+  digestMinIntervalMs: parseInt(
+    process.env.DIGEST_MIN_INTERVAL_MS || '7200000',
+    10,
+  ),
+  staleAfterDigestCycles: parseInt(
+    process.env.STALE_AFTER_DIGEST_CYCLES || '2',
+    10,
+  ),
+  pushRateLimit: parseInt(process.env.PUSH_RATE_LIMIT || '3', 10),
+  pushRateWindowMs: parseInt(process.env.PUSH_RATE_WINDOW_MS || '1800000', 10),
+  vipList: process.env.VIP_LIST
+    ? process.env.VIP_LIST.split(',').map((s) => s.trim())
+    : [],
+  urgencyKeywords: (
+    process.env.URGENCY_KEYWORDS || 'urgent,deadline,asap,blocking'
+  )
+    .split(',')
+    .map((s) => s.trim()),
+  holdPushDuringMeetings: process.env.HOLD_PUSH_DURING_MEETINGS !== 'false',
+  microBriefingDelayMs: parseInt(
+    process.env.MICRO_BRIEFING_DELAY_MS || '60000',
+    10,
+  ),
+  quietHours: {
+    enabled: process.env.QUIET_HOURS_ENABLED !== 'false',
+    start: process.env.QUIET_HOURS_START || '22:00',
+    end: process.env.QUIET_HOURS_END || '07:00',
+    weekendMode: process.env.QUIET_HOURS_WEEKEND !== 'false',
+    escalateOverride: process.env.QUIET_HOURS_ESCALATE_OVERRIDE !== 'false',
+  },
+};

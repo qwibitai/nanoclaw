@@ -1,4 +1,11 @@
 /**
+ * @deprecated Replaced by src/digest-engine.ts (TENSION-4).
+ * This module remains during the migration period. Once digest-engine.ts
+ * handles morning dashboard + smart digest + on-demand digest, remove this file
+ * and update any imports in src/index.ts.
+ */
+
+/**
  * Daily Digest — Morning Brief
  *
  * Synthesizes overnight events into a concise digest message.
