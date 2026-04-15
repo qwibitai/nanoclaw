@@ -210,7 +210,7 @@ pub fn build_config(
         }
     }
 
-    let ipc_dir = project_root.join("data").join("cli-ipc").join(&group_folder);
+    let ipc_dir = project_root.join("data").join("ipc").join(&group_folder);
     let group_dir = project_root.join("groups").join(&group_folder);
     let global_dir = project_root.join("groups").join("global");
     let extra_dir = project_root
@@ -480,7 +480,7 @@ mod tests {
 
         assert_eq!(config.assistant_name, "TestBot");
         assert_eq!(config.timezone, "Asia/Tokyo");
-        assert_eq!(config.ipc_dir, root.join("data/cli-ipc/telegram_main"));
+        assert_eq!(config.ipc_dir, root.join("data/ipc/telegram_main"));
         assert_eq!(config.group_dir, root.join("groups/telegram_main"));
         assert_eq!(config.global_dir, root.join("groups/global"));
         assert!(config.is_main);

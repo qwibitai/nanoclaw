@@ -636,6 +636,8 @@ async function runQuery(
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
             NANOCLAW_IPC_DIR: process.env.NANOCLAW_IPC_DIR || '/workspace/ipc',
+            NANOCLAW_GROUP_DIR:
+              process.env.NANOCLAW_GROUP_DIR || '/workspace',
           },
         },
         ...additionalMcpServers,

@@ -33,10 +33,12 @@ pub struct MessageRow {
 #[allow(dead_code)]
 pub struct TaskRow {
     pub id: String,
+    pub name: Option<String>,
     pub group_folder: String,
     pub prompt: String,
     pub schedule_type: String,
     pub schedule_value: String,
+    pub context_mode: Option<String>,
     pub status: String,
     pub model: Option<String>,
     pub next_run: Option<String>,
@@ -173,32 +175,52 @@ pub fn delete_session(db_path: &Path, group_folder: &str) -> Result<(), String> 
 }
 
 /// Get scheduled tasks for a group folder.
+fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRow> {
+    Ok(TaskRow {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        group_folder: row.get(2)?,
+        prompt: row.get(3)?,
+        schedule_type: row.get(4)?,
+        schedule_value: row.get(5)?,
+        context_mode: row.get(6)?,
+        status: row.get(7)?,
+        model: row.get(8)?,
+        next_run: row.get(9)?,
+        last_run: row.get(10)?,
+    })
+}
+
+const TASK_COLUMNS: &str =
+    "id, name, group_folder, prompt, schedule_type, schedule_value, \
+     context_mode, status, model, next_run, last_run";
+
 pub fn get_tasks(conn: &Connection, group_folder: &str) -> Vec<TaskRow> {
-    let mut stmt = match conn.prepare(
-        "SELECT id, group_folder, prompt, schedule_type, schedule_value,
-                status, model, next_run, last_run
-         FROM scheduled_tasks WHERE group_folder = ?1 ORDER BY created_at",
-    ) {
+    let sql = format!(
+        "SELECT {TASK_COLUMNS} FROM scheduled_tasks WHERE group_folder = ?1 ORDER BY created_at"
+    );
+    let mut stmt = match conn.prepare(&sql) {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
 
-    stmt.query_map([group_folder], |row| {
-        Ok(TaskRow {
-            id: row.get(0)?,
-            group_folder: row.get(1)?,
-            prompt: row.get(2)?,
-            schedule_type: row.get(3)?,
-            schedule_value: row.get(4)?,
-            status: row.get(5)?,
-            model: row.get(6)?,
-            next_run: row.get(7)?,
-            last_run: row.get(8)?,
-        })
-    })
-    .ok()
-    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-    .unwrap_or_default()
+    stmt.query_map([group_folder], task_from_row)
+        .ok()
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+}
+
+pub fn get_all_tasks(conn: &Connection) -> Vec<TaskRow> {
+    let sql = format!("SELECT {TASK_COLUMNS} FROM scheduled_tasks ORDER BY created_at");
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+
+    stmt.query_map([], task_from_row)
+        .ok()
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
 }
 
 /// Get recent messages from the database for history display.
@@ -330,6 +352,7 @@ mod tests {
             );
             CREATE TABLE scheduled_tasks (
                 id TEXT PRIMARY KEY,
+                name TEXT,
                 group_folder TEXT NOT NULL,
                 chat_jid TEXT NOT NULL,
                 prompt TEXT NOT NULL,

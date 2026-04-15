@@ -12,6 +12,7 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 const IPC_DIR = process.env.NANOCLAW_IPC_DIR || '/workspace/ipc';
+const GROUP_DIR = process.env.NANOCLAW_GROUP_DIR || '/workspace';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 
@@ -91,6 +92,12 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 \u2022 interval: Milliseconds between runs (e.g., "300000" for 5 minutes, "3600000" for 1 hour)
 \u2022 once: Local time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00"). Do NOT use UTC/Z suffix.`,
   {
+    name: z
+      .string()
+      .optional()
+      .describe(
+        'Optional human-readable name for this task (e.g. "daily-report", "heartbeat")',
+      ),
     prompt: z
       .string()
       .describe(
@@ -198,6 +205,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     const data = {
       type: 'schedule_task',
       taskId,
+      taskName: args.name || undefined,
       prompt: args.prompt,
       script: args.script || undefined,
       schedule_type: args.schedule_type,
@@ -227,13 +235,16 @@ server.tool(
   "List all scheduled tasks. From main: shows all tasks. From other groups: shows only that group's tasks.",
   {},
   async () => {
-    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+    const tasksFile = path.join(GROUP_DIR, 'current_tasks.json');
 
     try {
       if (!fs.existsSync(tasksFile)) {
         return {
           content: [
-            { type: 'text' as const, text: 'No scheduled tasks found.' },
+            {
+              type: 'text' as const,
+              text: `No scheduled tasks found. (file not found: ${tasksFile})`,
+            },
           ],
         };
       }
@@ -249,7 +260,10 @@ server.tool(
       if (tasks.length === 0) {
         return {
           content: [
-            { type: 'text' as const, text: 'No scheduled tasks found.' },
+            {
+              type: 'text' as const,
+              text: `No scheduled tasks found. (${allTasks.length} total, 0 for ${groupFolder}, isMain=${isMain})`,
+            },
           ],
         };
       }
@@ -258,13 +272,15 @@ server.tool(
         .map(
           (t: {
             id: string;
+            name?: string;
             prompt: string;
             schedule_type: string;
             schedule_value: string;
+            context_mode?: string;
             status: string;
             next_run: string;
           }) =>
-            `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
+            `- [${t.id}]${t.name ? ` "${t.name}"` : ''} ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}, ${t.context_mode || 'isolated'}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
         )
         .join('\n');
 
@@ -369,6 +385,12 @@ server.tool(
   'Update an existing scheduled task. Only provided fields are changed; omitted fields stay the same.',
   {
     task_id: z.string().describe('The task ID to update'),
+    name: z
+      .string()
+      .optional()
+      .describe(
+        'New name for the task. Set to empty string to clear the name.',
+      ),
     prompt: z.string().optional().describe('New prompt for the task'),
     schedule_type: z
       .enum(['cron', 'interval', 'once'])
@@ -435,6 +457,7 @@ server.tool(
       isMain: String(isMain),
       timestamp: new Date().toISOString(),
     };
+    if (args.name !== undefined) data.taskName = args.name;
     if (args.prompt !== undefined) data.prompt = args.prompt;
     if (args.script !== undefined) data.script = args.script;
     if (args.model !== undefined) data.model = args.model;

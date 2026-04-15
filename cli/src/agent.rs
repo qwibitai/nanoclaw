@@ -9,6 +9,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 
 use crate::config::NanoClawConfig;
+use crate::db;
 use crate::event::AppEvent;
 
 const OUTPUT_START_MARKER: &str = "---NANOCLAW_OUTPUT_START---";
@@ -77,6 +78,9 @@ impl AgentHandle {
 
         // Ensure required directories exist
         ensure_dirs(config)?;
+
+        // Write tasks snapshot so the MCP server can read it
+        write_tasks_snapshot(config);
 
         // Build environment
         let env = build_env(config);
@@ -264,6 +268,46 @@ async fn parse_agent_stdout(
             }
         }
     }
+}
+
+/// Write tasks snapshot to the group directory so `list_tasks` MCP tool can read it.
+fn write_tasks_snapshot(config: &NanoClawConfig) {
+    let conn = match db::open_readonly(&config.db_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let tasks = if config.is_main {
+        db::get_all_tasks(&conn)
+    } else {
+        db::get_tasks(&conn, &config.group_folder)
+    };
+
+    // Serialize with camelCase keys to match the TypeScript snapshot format
+    let snapshot: Vec<serde_json::Value> = tasks
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "id": t.id,
+                "name": t.name,
+                "groupFolder": t.group_folder,
+                "prompt": t.prompt,
+                "schedule_type": t.schedule_type,
+                "schedule_value": t.schedule_value,
+                "context_mode": t.context_mode.as_deref().unwrap_or("isolated"),
+                "status": t.status,
+                "model": t.model,
+                "next_run": t.next_run,
+            })
+        })
+        .collect();
+
+    let json = match serde_json::to_string_pretty(&snapshot) {
+        Ok(j) => j,
+        Err(_) => return,
+    };
+
+    let _ = fs::write(config.group_dir.join("current_tasks.json"), json);
 }
 
 /// Ensure required IPC and group directories exist.
@@ -914,5 +958,178 @@ mod tests {
             .filter(|e| e.path().extension().map_or(false, |ext| ext == "tmp"))
             .collect();
         assert!(tmp_files.is_empty());
+    }
+
+    // --- write_tasks_snapshot ---
+
+    fn create_snapshot_test_db(dir: &std::path::Path) -> std::path::PathBuf {
+        let db_path = dir.join("messages.db");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scheduled_tasks (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                group_folder TEXT NOT NULL,
+                chat_jid TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                script TEXT,
+                schedule_type TEXT NOT NULL,
+                schedule_value TEXT NOT NULL,
+                context_mode TEXT DEFAULT 'isolated',
+                silent INTEGER DEFAULT 0,
+                model TEXT,
+                effort TEXT,
+                next_run TEXT,
+                last_run TEXT,
+                last_result TEXT,
+                status TEXT DEFAULT 'active',
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO scheduled_tasks (id, name, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, status, model, created_at)
+            VALUES ('cron-diary', 'Diary', 'telegram_main', 'tg:123', 'Write diary', 'cron', '0 23 * * *', 'group', 'active', 'claude-opus-4-6', '2025-01-01');
+            INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, status, created_at)
+            VALUES ('task-abc', 'telegram_other', 'tg:456', 'Other task', 'interval', '60000', 'active', '2025-01-01');",
+        )
+        .unwrap();
+        db_path
+    }
+
+    #[test]
+    fn test_write_tasks_snapshot_main_sees_all() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let group_dir = dir.path().join("groups").join("telegram_main");
+        fs::create_dir_all(&group_dir).unwrap();
+        let db_path = create_snapshot_test_db(dir.path());
+
+        let config = NanoClawConfig {
+            project_root: dir.path().to_path_buf(),
+            group_folder: "telegram_main".to_string(),
+            group_jid: "tg:123".to_string(),
+            group_name: "Main".to_string(),
+            is_main: true,
+            model: None,
+            effort: None,
+            assistant_name: "Andy".to_string(),
+            timezone: "UTC".to_string(),
+            default_model: "claude-sonnet-4-20250514".to_string(),
+            ipc_dir: dir.path().join("ipc"),
+            group_dir: group_dir.clone(),
+            global_dir: dir.path().join("global"),
+            extra_dir: dir.path().join("extra"),
+            claude_home: dir.path().join("claude"),
+            agent_runner_entry: dir.path().to_path_buf(),
+            db_path,
+            env_vars: HashMap::new(),
+            model_aliases: HashMap::new(),
+        };
+
+        write_tasks_snapshot(&config);
+
+        let snapshot_path = group_dir.join("current_tasks.json");
+        assert!(snapshot_path.exists());
+
+        let content: Vec<serde_json::Value> =
+            serde_json::from_str(&fs::read_to_string(&snapshot_path).unwrap()).unwrap();
+        assert_eq!(content.len(), 2); // main sees all tasks
+        assert_eq!(content[0]["id"], "cron-diary");
+        assert_eq!(content[0]["name"], "Diary");
+        assert_eq!(content[0]["groupFolder"], "telegram_main");
+        assert_eq!(content[0]["context_mode"], "group");
+        assert_eq!(content[0]["model"], "claude-opus-4-6");
+        assert_eq!(content[1]["id"], "task-abc");
+        assert_eq!(content[1]["groupFolder"], "telegram_other");
+    }
+
+    #[test]
+    fn test_write_tasks_snapshot_non_main_filtered() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let group_dir = dir.path().join("groups").join("telegram_other");
+        fs::create_dir_all(&group_dir).unwrap();
+        let db_path = create_snapshot_test_db(dir.path());
+
+        let config = NanoClawConfig {
+            project_root: dir.path().to_path_buf(),
+            group_folder: "telegram_other".to_string(),
+            group_jid: "tg:456".to_string(),
+            group_name: "Other".to_string(),
+            is_main: false,
+            model: None,
+            effort: None,
+            assistant_name: "Andy".to_string(),
+            timezone: "UTC".to_string(),
+            default_model: "claude-sonnet-4-20250514".to_string(),
+            ipc_dir: dir.path().join("ipc"),
+            group_dir: group_dir.clone(),
+            global_dir: dir.path().join("global"),
+            extra_dir: dir.path().join("extra"),
+            claude_home: dir.path().join("claude"),
+            agent_runner_entry: dir.path().to_path_buf(),
+            db_path,
+            env_vars: HashMap::new(),
+            model_aliases: HashMap::new(),
+        };
+
+        write_tasks_snapshot(&config);
+
+        let content: Vec<serde_json::Value> =
+            serde_json::from_str(
+                &fs::read_to_string(group_dir.join("current_tasks.json")).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(content.len(), 1); // non-main only sees own tasks
+        assert_eq!(content[0]["id"], "task-abc");
+    }
+
+    #[test]
+    fn test_write_tasks_snapshot_empty_db() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let group_dir = dir.path().join("groups").join("telegram_main");
+        fs::create_dir_all(&group_dir).unwrap();
+
+        // DB without the scheduled_tasks table
+        let db_path = dir.path().join("messages.db");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE scheduled_tasks (
+                id TEXT PRIMARY KEY, name TEXT, group_folder TEXT NOT NULL,
+                chat_jid TEXT NOT NULL, prompt TEXT NOT NULL, script TEXT,
+                schedule_type TEXT NOT NULL, schedule_value TEXT NOT NULL,
+                context_mode TEXT DEFAULT 'isolated', silent INTEGER DEFAULT 0,
+                model TEXT, effort TEXT, next_run TEXT, last_run TEXT,
+                last_result TEXT, status TEXT DEFAULT 'active', created_at TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+
+        let config = NanoClawConfig {
+            project_root: dir.path().to_path_buf(),
+            group_folder: "telegram_main".to_string(),
+            group_jid: "tg:123".to_string(),
+            group_name: "Main".to_string(),
+            is_main: true,
+            model: None,
+            effort: None,
+            assistant_name: "Andy".to_string(),
+            timezone: "UTC".to_string(),
+            default_model: "claude-sonnet-4-20250514".to_string(),
+            ipc_dir: dir.path().join("ipc"),
+            group_dir: group_dir.clone(),
+            global_dir: dir.path().join("global"),
+            extra_dir: dir.path().join("extra"),
+            claude_home: dir.path().join("claude"),
+            agent_runner_entry: dir.path().to_path_buf(),
+            db_path,
+            env_vars: HashMap::new(),
+            model_aliases: HashMap::new(),
+        };
+
+        write_tasks_snapshot(&config);
+
+        let content: Vec<serde_json::Value> =
+            serde_json::from_str(
+                &fs::read_to_string(group_dir.join("current_tasks.json")).unwrap(),
+            )
+            .unwrap();
+        assert!(content.is_empty());
     }
 }

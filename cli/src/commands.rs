@@ -284,6 +284,7 @@ mod tests {
             );
             CREATE TABLE scheduled_tasks (
                 id TEXT PRIMARY KEY,
+                name TEXT,
                 group_folder TEXT NOT NULL,
                 chat_jid TEXT NOT NULL,
                 prompt TEXT NOT NULL,

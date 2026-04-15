@@ -184,6 +184,7 @@ export async function processTaskIpc(
     model?: string;
     effort?: string;
     thinking_budget?: string;
+    taskName?: string;
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
@@ -281,6 +282,7 @@ export async function processTaskIpc(
         const taskModel = data.model ? resolveModelAlias(data.model) : null;
         createTask({
           id: taskId,
+          name: data.taskName || null,
           group_folder: targetFolder,
           chat_jid: targetJid,
           prompt: data.prompt,
@@ -377,6 +379,7 @@ export async function processTaskIpc(
         }
 
         const updates: Parameters<typeof updateTask>[1] = {};
+        if (data.taskName !== undefined) updates.name = data.taskName;
         if (data.prompt !== undefined) updates.prompt = data.prompt;
         if (data.script !== undefined) updates.script = data.script || null;
         if (data.model !== undefined) {

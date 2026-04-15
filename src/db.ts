@@ -94,6 +94,18 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add name column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN name TEXT`);
+    // Backfill: copy custom IDs as names for human-readable task IDs
+    database.exec(
+      `UPDATE scheduled_tasks SET name = id WHERE id NOT LIKE 'task-%'`,
+    );
+    // eslint-disable-next-line no-catch-all/no-catch-all
+  } catch {
+    /* column already exists */
+  }
+
   // Add script column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN script TEXT`);
@@ -486,11 +498,12 @@ export function createTask(
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, silent, model, effort, thinking_budget, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, name, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, silent, model, effort, thinking_budget, next_run, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
+    task.name || null,
     task.group_folder,
     task.chat_jid,
     task.prompt,
@@ -533,6 +546,7 @@ export function updateTask(
   updates: Partial<
     Pick<
       ScheduledTask,
+      | 'name'
       | 'prompt'
       | 'script'
       | 'schedule_type'
@@ -548,6 +562,10 @@ export function updateTask(
   const fields: string[] = [];
   const values: unknown[] = [];
 
+  if (updates.name !== undefined) {
+    fields.push('name = ?');
+    values.push(updates.name || null);
+  }
   if (updates.prompt !== undefined) {
     fields.push('prompt = ?');
     values.push(updates.prompt);

@@ -725,8 +725,8 @@ export class TelegramChannel implements Channel {
         const prompt =
           t.prompt.length > 60 ? t.prompt.slice(0, 57) + '...' : t.prompt;
         return [
-          `\`${t.id}\` | ${t.schedule_type} ${t.schedule_value} | ${t.status}`,
-          `  Model: ${model} | Effort: ${effort} | Thinking: ${tb}`,
+          `\`${t.id}\` | ${t.schedule_type} ${t.schedule_value} | ${t.status} | ${t.context_mode || 'isolated'}`,
+          `  ${t.name ? `Name: ${t.name} | ` : ''}Model: ${model} | Effort: ${effort} | Thinking: ${tb}`,
           `  Last: ${fmtTime(t.last_run)} | Next: ${fmtTime(t.next_run)}`,
           `  Prompt: ${prompt}`,
         ].join('\n');
