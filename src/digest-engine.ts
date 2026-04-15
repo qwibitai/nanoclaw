@@ -1,9 +1,12 @@
-import { TIMEZONE } from './config.js';
+import { TIMEZONE, CHAT_INTERFACE_CONFIG } from './config.js';
 import { formatLocalTime } from './timezone.js';
 import { logger } from './logger.js';
 import {
   getTrackedItemsByState,
+  getDigestState,
   updateDigestState,
+  transitionItemState,
+  incrementDigestCount,
   type TrackedItem,
 } from './tracked-items.js';
 
@@ -17,7 +20,10 @@ export function generateMorningDashboard(groupName: string): string {
       day: 'numeric',
     });
 
-  const actionRequired = getTrackedItemsByState(groupName, ['pending', 'pushed']);
+  const actionRequired = getTrackedItemsByState(groupName, [
+    'pending',
+    'pushed',
+  ]);
   const queued = getTrackedItemsByState(groupName, ['queued', 'digested']);
   const resolved = getRecentlyResolved(groupName, now);
 
@@ -52,9 +58,8 @@ export function generateMorningDashboard(groupName: string): string {
     );
     for (const item of resolved.slice(0, 5)) {
       const method =
-        item.resolution_method
-          ?.replace('auto:', '')
-          .replace('manual:', '') || 'resolved';
+        item.resolution_method?.replace('auto:', '').replace('manual:', '') ||
+        'resolved';
       lines.push(`  • ${item.title} (${method})`);
     }
   } else {
@@ -94,7 +99,9 @@ export function generateMorningDashboard(groupName: string): string {
 function getRecentlyResolved(groupName: string, now: number): TrackedItem[] {
   const resolved = getTrackedItemsByState(groupName, ['resolved']);
   const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
-  return resolved.filter(item => (item.resolved_at ?? 0) > twentyFourHoursAgo);
+  return resolved.filter(
+    (item) => (item.resolved_at ?? 0) > twentyFourHoursAgo,
+  );
 }
 
 function formatAge(ms: number): string {
@@ -103,4 +110,87 @@ function formatAge(ms: number): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+export function shouldFireDigest(groupName: string): boolean {
+  const state = getDigestState(groupName);
+  const { digestThreshold, digestMinIntervalMs } = CHAT_INTERFACE_CONFIG;
+
+  if (state.queued_count < digestThreshold) return false;
+
+  if (state.last_digest_at) {
+    const elapsed = Date.now() - state.last_digest_at;
+    if (elapsed < digestMinIntervalMs) return false;
+  }
+
+  return true;
+}
+
+export function generateSmartDigest(groupName: string): string | null {
+  const now = Date.now();
+  const state = getDigestState(groupName);
+  const since = state.last_digest_at ?? state.last_dashboard_at ?? (now - 24 * 60 * 60 * 1000);
+
+  const resolved = getTrackedItemsByState(groupName, ['resolved'])
+    .filter(i => (i.resolved_at ?? 0) > since);
+  const pending = getTrackedItemsByState(groupName, ['pending', 'pushed'])
+    .filter(i => i.detected_at < since || (now - i.detected_at) > 14400000);
+  const fyi = getTrackedItemsByState(groupName, ['queued', 'digested']);
+
+  if (resolved.length === 0 && pending.length === 0 && fyi.length === 0) {
+    return null;
+  }
+
+  const timeStr = formatLocalTime(new Date(now).toISOString(), TIMEZONE).split(',').pop()?.trim() || '';
+  const lines: string[] = [];
+  lines.push(`📊 <b>DIGEST</b> — ${timeStr}`);
+  lines.push('');
+
+  if (resolved.length > 0) {
+    lines.push('<b>━━ RESOLVED SINCE LAST CHECK ━━</b>');
+    for (const item of resolved) {
+      const method = item.resolution_method?.replace('auto:', '').replace('manual:', '') || '';
+      lines.push(`✅ ${item.title}${method ? ` — ${method}` : ''}`);
+    }
+    lines.push('');
+  }
+
+  if (fyi.length > 0) {
+    lines.push('<b>━━ FYI ━━</b>');
+    const bySource = new Map<string, number>();
+    for (const item of fyi) {
+      bySource.set(item.source, (bySource.get(item.source) || 0) + 1);
+    }
+    for (const [source, count] of bySource) {
+      lines.push(`📬 ${count} ${source} item${count > 1 ? 's' : ''}`);
+    }
+    lines.push('');
+
+    const fyiIds = fyi.filter(i => i.state === 'queued').map(i => i.id);
+    for (const id of fyiIds) {
+      try {
+        transitionItemState(id, 'queued', 'digested');
+      } catch { /* already transitioned */ }
+    }
+    incrementDigestCount(fyi.map(i => i.id));
+  }
+
+  if (pending.length > 0) {
+    lines.push('<b>━━ STILL PENDING ━━</b>');
+    for (const item of pending) {
+      const age = formatAge(now - item.detected_at);
+      lines.push(`⏳ ${item.title} — pushed ${age}`);
+    }
+    lines.push('');
+  }
+
+  lines.push('━━━━━━━━━━━━━━━━━━━━━━');
+  lines.push('Next digest when 5+ items accumulate.');
+
+  updateDigestState(groupName, {
+    last_digest_at: now,
+    queued_count: 0,
+  });
+
+  return lines.join('\n');
 }
