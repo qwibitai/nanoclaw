@@ -42,6 +42,7 @@ function toRuntimeOptions(
   options?: AgentOptions,
 ): AgentOptions {
   return {
+    acp: options?.acp,
     workdir: record.workDir,
     name: record.assistantName,
     mountAllowlist: record.mountAllowlist ?? undefined,
