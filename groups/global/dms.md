@@ -16,7 +16,7 @@ Each per-person CLAUDE.md hardcodes the Discord user ID and display name. Trust 
 
 When the user sends a 5-letter guess in a DM:
 
-1. Run `node /workspace/global/scripts/score-guess.mjs <player> <guess>` — it handles everything: reads the answer from the sheet, validates against the wordlist, scores, and appends the row.
+1. **ALWAYS run the script first** — `node /workspace/global/scripts/score-guess.mjs <player> <guess>`. NEVER validate the guess yourself. The script has its own wordlist and handles everything: validation, scoring, and appending the row. Words you think are invalid may be in the wordlist — you are not the dictionary.
 2. Use the JSON output to compose your reply. Key fields: `status`, `grid`, `solved`, `guess_num`, `budget`, `history`, `word` (only present on budget-exhausted reveal).
 3. If solved or guess_num equals budget, also append to `Wordle Submissions` per the family-fun flow.
 

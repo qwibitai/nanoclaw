@@ -96,7 +96,7 @@ export async function resolveDay(deps = {}) {
   // 4. Build per-player entries
   const entries = PLAYERS.map(({ player, pet }) => {
     const mine = todays
-      .filter((r) => r[1] === player)
+      .filter((r) => String(r[1]).toLowerCase() === player.toLowerCase())
       .sort((a, b) => Number(a[2]) - Number(b[2]));
     const solvedRow = mine.find((r) => String(r[5]).toLowerCase() === 'true');
     const budget = budgets[player] || 6;

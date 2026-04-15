@@ -99,7 +99,7 @@ export async function scoreGuessForPlayer(player, rawGuess, deps = {}) {
     'Wordle State!A2:F10000',
     { token: deps._token },
   );
-  const mine = (stateRows || []).filter((r) => r[0] === today && r[1] === player);
+  const mine = (stateRows || []).filter((r) => r[0] === today && String(r[1]).toLowerCase() === player.toLowerCase());
   const usedCount = mine.length;
   const alreadySolved = mine.some((r) => String(r[5]).toLowerCase() === 'true');
 
