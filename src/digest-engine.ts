@@ -295,10 +295,12 @@ export function detectAndArchiveStale(
   staleThreshold: number,
 ): TrackedItem[] {
   const db = getDb();
-  const staleRows = db.prepare(
-    `SELECT * FROM tracked_items
-     WHERE group_name = ? AND state IN ('digested', 'pending') AND digest_count >= ?`
-  ).all(groupName, staleThreshold) as Array<Record<string, unknown>>;
+  const staleRows = db
+    .prepare(
+      `SELECT * FROM tracked_items
+     WHERE group_name = ? AND state IN ('digested', 'pending') AND digest_count >= ?`,
+    )
+    .all(groupName, staleThreshold) as Array<Record<string, unknown>>;
 
   const staleItems: TrackedItem[] = [];
 
@@ -331,8 +333,6 @@ function deserializeStaleItem(row: Record<string, unknown>): TrackedItem {
     classification_reason: row.classification_reason
       ? JSON.parse(row.classification_reason as string)
       : null,
-    metadata: row.metadata
-      ? JSON.parse(row.metadata as string)
-      : null,
+    metadata: row.metadata ? JSON.parse(row.metadata as string) : null,
   } as TrackedItem;
 }

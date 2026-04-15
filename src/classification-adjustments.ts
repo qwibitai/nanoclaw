@@ -1,6 +1,10 @@
 import { getDb } from './db.js';
 
-export type ObservedBehavior = 'immediate_action' | 'snooze' | 'dismiss' | 'ignore';
+export type ObservedBehavior =
+  | 'immediate_action'
+  | 'snooze'
+  | 'dismiss'
+  | 'ignore';
 export type AdjustmentType = 'promote' | 'demote' | 'none';
 
 export function recordBehavior(
@@ -59,12 +63,16 @@ export function getAdjustment(
        WHERE source = ? AND sender_pattern = ?
        GROUP BY observed_behavior`,
     )
-    .all(source, senderPattern) as Array<{ observed_behavior: string; total: number }>;
+    .all(source, senderPattern) as Array<{
+    observed_behavior: string;
+    total: number;
+  }>;
 
   const totalAll = rows.reduce((sum, r) => sum + r.total, 0);
   if (totalAll < minPoints) return 'none';
 
-  const dismissals = rows.find((r) => r.observed_behavior === 'dismiss')?.total ?? 0;
+  const dismissals =
+    rows.find((r) => r.observed_behavior === 'dismiss')?.total ?? 0;
   const immediateActions =
     rows.find((r) => r.observed_behavior === 'immediate_action')?.total ?? 0;
 

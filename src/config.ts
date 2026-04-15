@@ -201,14 +201,29 @@ export interface ChatInterfaceConfig {
 export const CHAT_INTERFACE_CONFIG: ChatInterfaceConfig = {
   morningDashboardTime: process.env.MORNING_DASHBOARD_TIME || '07:30',
   digestThreshold: parseInt(process.env.DIGEST_THRESHOLD || '5', 10),
-  digestMinIntervalMs: parseInt(process.env.DIGEST_MIN_INTERVAL_MS || '7200000', 10),
-  staleAfterDigestCycles: parseInt(process.env.STALE_AFTER_DIGEST_CYCLES || '2', 10),
+  digestMinIntervalMs: parseInt(
+    process.env.DIGEST_MIN_INTERVAL_MS || '7200000',
+    10,
+  ),
+  staleAfterDigestCycles: parseInt(
+    process.env.STALE_AFTER_DIGEST_CYCLES || '2',
+    10,
+  ),
   pushRateLimit: parseInt(process.env.PUSH_RATE_LIMIT || '3', 10),
   pushRateWindowMs: parseInt(process.env.PUSH_RATE_WINDOW_MS || '1800000', 10),
-  vipList: process.env.VIP_LIST ? process.env.VIP_LIST.split(',').map(s => s.trim()) : [],
-  urgencyKeywords: (process.env.URGENCY_KEYWORDS || 'urgent,deadline,asap,blocking').split(',').map(s => s.trim()),
+  vipList: process.env.VIP_LIST
+    ? process.env.VIP_LIST.split(',').map((s) => s.trim())
+    : [],
+  urgencyKeywords: (
+    process.env.URGENCY_KEYWORDS || 'urgent,deadline,asap,blocking'
+  )
+    .split(',')
+    .map((s) => s.trim()),
   holdPushDuringMeetings: process.env.HOLD_PUSH_DURING_MEETINGS !== 'false',
-  microBriefingDelayMs: parseInt(process.env.MICRO_BRIEFING_DELAY_MS || '60000', 10),
+  microBriefingDelayMs: parseInt(
+    process.env.MICRO_BRIEFING_DELAY_MS || '60000',
+    10,
+  ),
   quietHours: {
     enabled: process.env.QUIET_HOURS_ENABLED !== 'false',
     start: process.env.QUIET_HOURS_START || '22:00',

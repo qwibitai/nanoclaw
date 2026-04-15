@@ -977,26 +977,29 @@ function startSmartDigestCheck(
   sendMessage: (jid: string, text: string) => Promise<void>,
   getMainGroupJid: () => string | undefined,
 ): void {
-  setInterval(() => {
-    const jid = getMainGroupJid();
-    if (!jid) return;
+  setInterval(
+    () => {
+      const jid = getMainGroupJid();
+      if (!jid) return;
 
-    const groupName = 'main';
-    if (shouldFireDigest(groupName)) {
-      const digest = generateSmartDigest(groupName);
-      if (digest) {
-        sendMessage(jid, digest).catch(err => {
-          logger.error({ err }, 'Failed to send smart digest');
-        });
-        eventBus.emit('digest.sent', {
-          type: 'digest.sent',
-          source: 'digest-engine',
-          timestamp: Date.now(),
-          payload: { groupName, itemCount: 0, digestType: 'smart' },
-        });
+      const groupName = 'main';
+      if (shouldFireDigest(groupName)) {
+        const digest = generateSmartDigest(groupName);
+        if (digest) {
+          sendMessage(jid, digest).catch((err) => {
+            logger.error({ err }, 'Failed to send smart digest');
+          });
+          eventBus.emit('digest.sent', {
+            type: 'digest.sent',
+            source: 'digest-engine',
+            timestamp: Date.now(),
+            payload: { groupName, itemCount: 0, digestType: 'smart' },
+          });
+        }
       }
-    }
-  }, 15 * 60 * 1000);
+    },
+    15 * 60 * 1000,
+  );
 }
 
 async function main(): Promise<void> {

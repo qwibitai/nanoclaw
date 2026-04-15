@@ -21,7 +21,10 @@ import { addRule } from './learning/rules-engine.js';
 import { addTrace } from './learning/procedure-recorder.js';
 import { inferActionClasses } from './learning/outcome-enricher.js';
 import { classify } from './classification.js';
-import { insertTrackedItem, getTrackedItemBySourceId } from './tracked-items.js';
+import {
+  insertTrackedItem,
+  getTrackedItemBySourceId,
+} from './tracked-items.js';
 import { eventBus } from './event-bus.js';
 
 export interface IpcDeps {

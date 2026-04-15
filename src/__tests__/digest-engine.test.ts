@@ -36,7 +36,11 @@ vi.mock('../config.js', () => ({
 }));
 
 import { _initTestDatabase, _closeDatabase, getDb } from '../db.js';
-import { insertTrackedItem, updateDigestState, getTrackedItemById } from '../tracked-items.js';
+import {
+  insertTrackedItem,
+  updateDigestState,
+  getTrackedItemById,
+} from '../tracked-items.js';
 import {
   generateMorningDashboard,
   shouldFireDigest,
@@ -301,7 +305,9 @@ describe('staleness detection', () => {
       telegram_message_id: null,
     });
 
-    getDb().prepare('UPDATE tracked_items SET digest_count = 2 WHERE id = ?').run('stale:t1');
+    getDb()
+      .prepare('UPDATE tracked_items SET digest_count = 2 WHERE id = ?')
+      .run('stale:t1');
 
     const staleItems = detectAndArchiveStale('main', 2);
     expect(staleItems).toHaveLength(1);

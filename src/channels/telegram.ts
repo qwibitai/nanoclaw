@@ -424,7 +424,7 @@ export class TelegramChannel implements Channel {
     const chatId = jid.replace(/^tg:/, '');
     const keyboard = {
       inline_keyboard: [
-        actions.map(a => ({ text: a.label, callback_data: a.callbackData })),
+        actions.map((a) => ({ text: a.label, callback_data: a.callbackData })),
       ],
     };
 
@@ -458,7 +458,13 @@ export class TelegramChannel implements Channel {
         ctx.callbackQuery.from.username ||
         ctx.callbackQuery.from.id.toString();
 
-      handler({ id: ctx.callbackQuery.id, chatJid, messageId, data, senderName });
+      handler({
+        id: ctx.callbackQuery.id,
+        chatJid,
+        messageId,
+        data,
+        senderName,
+      });
 
       await ctx.answerCallbackQuery();
     });

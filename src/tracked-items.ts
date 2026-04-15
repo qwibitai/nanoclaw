@@ -423,19 +423,28 @@ export function detectResolution(signal: ResolutionSignal): ResolutionResult {
 
 export type CallbackAction = 'approve' | 'dismiss' | 'snooze' | 'handle';
 
-export function parseCallbackData(data: string): { action: CallbackAction; itemId: string } | null {
+export function parseCallbackData(
+  data: string,
+): { action: CallbackAction; itemId: string } | null {
   const match = data.match(/^(approve|dismiss|snooze|handle):(.+)$/);
   if (!match) return null;
   return { action: match[1] as CallbackAction, itemId: match[2] };
 }
 
-export function resolveItemByCallback(itemId: string, action: CallbackAction): void {
+export function resolveItemByCallback(
+  itemId: string,
+  action: CallbackAction,
+): void {
   const item = getTrackedItemById(itemId);
   if (!item) return;
 
   const now = Date.now();
   if (action === 'approve' || action === 'dismiss') {
-    if (item.state === 'pending' || item.state === 'pushed' || item.state === 'held') {
+    if (
+      item.state === 'pending' ||
+      item.state === 'pushed' ||
+      item.state === 'held'
+    ) {
       const fromState = item.state;
       transitionItemState(itemId, fromState, 'resolved', {
         resolved_at: now,
@@ -447,6 +456,8 @@ export function resolveItemByCallback(itemId: string, action: CallbackAction): v
 
 export function getTrackedItemById(itemId: string): TrackedItem | null {
   const db = getDb();
-  const row = db.prepare('SELECT * FROM tracked_items WHERE id = ?').get(itemId) as Record<string, unknown> | undefined;
+  const row = db
+    .prepare('SELECT * FROM tracked_items WHERE id = ?')
+    .get(itemId) as Record<string, unknown> | undefined;
   return row ? deserializeItem(row) : null;
 }

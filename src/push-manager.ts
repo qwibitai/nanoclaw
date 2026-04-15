@@ -13,9 +13,16 @@ export function formatPushMessage(input: PushMessageInput): string {
   const lines: string[] = [];
 
   const icon = input.source === 'calendar' ? '🟡' : '🔴';
-  const sourceLabel = input.source === 'gmail' ? 'Email' : input.source === 'calendar' ? 'Calendar' : input.source;
+  const sourceLabel =
+    input.source === 'gmail'
+      ? 'Email'
+      : input.source === 'calendar'
+        ? 'Calendar'
+        : input.source;
 
-  lines.push(`${icon} <b>ACTION: ${sourceLabel}${input.sender ? ` from ${input.sender}` : ''}</b>`);
+  lines.push(
+    `${icon} <b>ACTION: ${sourceLabel}${input.sender ? ` from ${input.sender}` : ''}</b>`,
+  );
   lines.push(`Re: ${input.title}`);
 
   if (input.summary) {
@@ -25,7 +32,9 @@ export function formatPushMessage(input: PushMessageInput): string {
 
   if (input.lastReply) {
     lines.push('');
-    lines.push(`📝 <b>Your last reply</b> (${input.lastReplyAge ?? 'earlier'}):`);
+    lines.push(
+      `📝 <b>Your last reply</b> (${input.lastReplyAge ?? 'earlier'}):`,
+    );
     lines.push(`<i>"${truncate(input.lastReply, 140)}"</i>`);
   }
 
@@ -67,7 +76,7 @@ export class PushRateLimiter {
 
   private prune(): void {
     const cutoff = Date.now() - this.windowMs;
-    this.timestamps = this.timestamps.filter(t => t > cutoff);
+    this.timestamps = this.timestamps.filter((t) => t > cutoff);
   }
 
   getCount(): number {

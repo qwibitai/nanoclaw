@@ -10,7 +10,10 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
-import { PushBuffer, type HoldCondition as _HoldCondition } from '../push-buffer.js';
+import {
+  PushBuffer,
+  type HoldCondition as _HoldCondition,
+} from '../push-buffer.js';
 
 describe('PushBuffer', () => {
   let buffer: PushBuffer;

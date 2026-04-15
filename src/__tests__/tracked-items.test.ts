@@ -405,15 +405,31 @@ describe('callback handling', () => {
     resolution_method: null,
     digest_count: 0,
     telegram_message_id: null,
-    classification_reason: { superpilot: 'needs-attention', trust: 'escalate', final: 'push' as const },
+    classification_reason: {
+      superpilot: 'needs-attention',
+      trust: 'escalate',
+      final: 'push' as const,
+    },
     metadata: { sender: 'sarah@example.com' },
   };
 
   it('parses callback data correctly', () => {
-    expect(parseCallbackData('approve:email:t1')).toEqual({ action: 'approve', itemId: 'email:t1' });
-    expect(parseCallbackData('dismiss:cal:e1')).toEqual({ action: 'dismiss', itemId: 'cal:e1' });
-    expect(parseCallbackData('snooze:email:t1')).toEqual({ action: 'snooze', itemId: 'email:t1' });
-    expect(parseCallbackData('handle:email:t1')).toEqual({ action: 'handle', itemId: 'email:t1' });
+    expect(parseCallbackData('approve:email:t1')).toEqual({
+      action: 'approve',
+      itemId: 'email:t1',
+    });
+    expect(parseCallbackData('dismiss:cal:e1')).toEqual({
+      action: 'dismiss',
+      itemId: 'cal:e1',
+    });
+    expect(parseCallbackData('snooze:email:t1')).toEqual({
+      action: 'snooze',
+      itemId: 'email:t1',
+    });
+    expect(parseCallbackData('handle:email:t1')).toEqual({
+      action: 'handle',
+      itemId: 'email:t1',
+    });
     expect(parseCallbackData('invalid')).toBeNull();
   });
 

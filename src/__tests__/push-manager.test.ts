@@ -1,7 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('../logger.js', () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
 }));
 vi.mock('../config.js', () => ({
   TIMEZONE: 'America/Los_Angeles',
@@ -10,7 +16,13 @@ vi.mock('../config.js', () => ({
     pushRateWindowMs: 1800000,
     holdPushDuringMeetings: true,
     microBriefingDelayMs: 60000,
-    quietHours: { enabled: false, start: '22:00', end: '07:00', weekendMode: false, escalateOverride: true },
+    quietHours: {
+      enabled: false,
+      start: '22:00',
+      end: '07:00',
+      weekendMode: false,
+      escalateOverride: true,
+    },
   },
 }));
 
@@ -63,7 +75,7 @@ describe('getPushActions', () => {
     const { getPushActions } = await import('../push-manager.js');
     const actions = getPushActions('email:t1');
     expect(actions).toHaveLength(4);
-    expect(actions.map(a => a.callbackData)).toEqual([
+    expect(actions.map((a) => a.callbackData)).toEqual([
       'approve:email:t1',
       'dismiss:email:t1',
       'snooze:email:t1',
