@@ -30,9 +30,7 @@ function mk(
   return map;
 }
 
-function names(
-  results: Array<{ name: string }>,
-): string[] {
+function names(results: Array<{ name: string }>): string[] {
   return results.map((r) => r.name);
 }
 
@@ -82,9 +80,9 @@ describe('searchActions — select mode', () => {
       'gamma',
       'alpha',
     ]);
-    expect(names(searchActions(actions, 'select:beta,alpha,gamma', 10))).toEqual(
-      ['beta', 'alpha', 'gamma'],
-    );
+    expect(
+      names(searchActions(actions, 'select:beta,alpha,gamma', 10)),
+    ).toEqual(['beta', 'alpha', 'gamma']);
   });
 
   it('silently drops unknown names in the list', () => {
@@ -111,9 +109,9 @@ describe('searchActions — select mode', () => {
   });
 
   it('caps at maxResults', () => {
-    expect(
-      names(searchActions(actions, 'select:alpha,beta,gamma', 2)),
-    ).toEqual(['alpha', 'beta']);
+    expect(names(searchActions(actions, 'select:alpha,beta,gamma', 2))).toEqual(
+      ['alpha', 'beta'],
+    );
   });
 
   it('select with max_results=1 returns single result even if many named', () => {
@@ -329,7 +327,11 @@ describe('searchActions — + required mode', () => {
     });
     // +invoice, no ranking → all tie at score 2 → alpha order
     const r = searchActions(m, '+invoice', 10);
-    expect(names(r)).toEqual(['invoice_alpha', 'invoice_mike', 'invoice_zebra']);
+    expect(names(r)).toEqual([
+      'invoice_alpha',
+      'invoice_mike',
+      'invoice_zebra',
+    ]);
   });
 });
 

@@ -2,10 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
 
 import { ActionsHttp } from './actions-http.js';
-import type {
-  ActionContext,
-  RegisteredAction,
-} from '../api/action.js';
+import type { ActionContext, RegisteredAction } from '../api/action.js';
 
 // ─── Test helpers ──────────────────────────────────────────────────
 
@@ -164,12 +161,7 @@ describe('ActionsHttp', () => {
     });
 
     it('keyword mode ranks by substring hits (name weighted 2x description)', async () => {
-      const res = await post(
-        baseUrl,
-        '/search',
-        { query: 'invoice' },
-        token,
-      );
+      const res = await post(baseUrl, '/search', { query: 'invoice' }, token);
       const list = res.json.actions as Array<{ name: string }>;
       // "post_invoice" has "invoice" in name (score 2); "search_crm" has 0
       expect(list[0].name).toBe('post_invoice');
@@ -227,7 +219,12 @@ describe('ActionsHttp', () => {
     });
 
     it('omits inputSchema when the action has no zod shape', async () => {
-      const res = await post(baseUrl, '/search', { query: 'select:ping' }, token);
+      const res = await post(
+        baseUrl,
+        '/search',
+        { query: 'select:ping' },
+        token,
+      );
       const action = (res.json.actions as Array<Record<string, unknown>>)[0];
       expect(action.name).toBe('ping');
       expect(action.inputSchema).toBeUndefined();

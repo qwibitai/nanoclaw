@@ -59,7 +59,10 @@ export type BaseActionCallback<
   Extra,
   Args extends undefined | ZodRawShape,
 > = Args extends ZodRawShape
-  ? (args: z.output<z.ZodObject<Args>>, extra: Extra) => ResultT | Promise<ResultT>
+  ? (
+      args: z.output<z.ZodObject<Args>>,
+      extra: Extra,
+    ) => ResultT | Promise<ResultT>
   : (extra: Extra) => ResultT | Promise<ResultT>;
 
 /**
@@ -69,9 +72,8 @@ export type BaseActionCallback<
  * `ZodRawShape` yields a typed callback whose first argument is the parsed
  * payload, and whose second is the `ActionContext`.
  */
-export type ActionCallback<
-  Args extends undefined | ZodRawShape = undefined,
-> = BaseActionCallback<unknown, ActionContext, Args>;
+export type ActionCallback<Args extends undefined | ZodRawShape = undefined> =
+  BaseActionCallback<unknown, ActionContext, Args>;
 
 /**
  * Metadata describing a registered action, surfaced to container agents via

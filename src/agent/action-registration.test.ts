@@ -53,7 +53,10 @@ describe('agent.action() registration', () => {
       },
       body: JSON.stringify({ name, payload }),
     });
-    const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    const json = (await res.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
     return { status: res.status, json };
   }
 
@@ -66,7 +69,9 @@ describe('agent.action() registration', () => {
       },
       body: JSON.stringify({ query, max_results: maxResults }),
     });
-    const json = (await res.json()) as { actions: Array<Record<string, unknown>> };
+    const json = (await res.json()) as {
+      actions: Array<Record<string, unknown>>;
+    };
     return json.actions;
   }
 
@@ -107,11 +112,9 @@ describe('agent.action() registration', () => {
 
   describe('overload (name, inputSchema, cb) — schema, no description', () => {
     it('infers args from the zod shape and validates', async () => {
-      agent.action(
-        'greet',
-        { name: z.string() },
-        (args) => ({ greeting: `hello ${args.name}` }),
-      );
+      agent.action('greet', { name: z.string() }, (args) => ({
+        greeting: `hello ${args.name}`,
+      }));
       const ok = await call('greet', { name: 'Alice' });
       expect(ok.status).toBe(200);
       expect(ok.json.result).toEqual({ greeting: 'hello Alice' });

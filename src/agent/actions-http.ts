@@ -182,9 +182,7 @@ export class ActionsHttp {
       }
       // Validate against the zod shape if one was registered
       if (entry.inputSchema) {
-        const parsed = z
-          .object(entry.inputSchema)
-          .safeParse(actionPayload);
+        const parsed = z.object(entry.inputSchema).safeParse(actionPayload);
         if (!parsed.success) {
           res.writeHead(400, { 'content-type': 'application/json' });
           res.end(
@@ -251,8 +249,7 @@ interface ActionSearchResult {
 
 function emitAction(name: string, entry: RegisteredAction): ActionSearchResult {
   const out: ActionSearchResult = { name };
-  if (entry.description !== undefined)
-    out.description = entry.description;
+  if (entry.description !== undefined) out.description = entry.description;
   if (entry.inputSchema !== undefined) {
     try {
       out.inputSchema = z.toJSONSchema(z.object(entry.inputSchema));
@@ -323,8 +320,11 @@ export function searchActions(
   }
 
   const rankTerms = ranking.length > 0 ? ranking : required;
-  const scored: Array<{ name: string; entry: RegisteredAction; score: number }> =
-    [];
+  const scored: Array<{
+    name: string;
+    entry: RegisteredAction;
+    score: number;
+  }> = [];
   for (const [name, entry] of actions) {
     const lowerName = name.toLowerCase();
     if (required.length > 0 && !required.every((r) => lowerName.includes(r))) {
