@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# State management for /codex implement.
+# Commands:
+#   init <state-dir> --plan-path P --plan-sha S --base-ref R --base-sha X
+#                    --waves JSON --tasks JSON
+#   set-status <state-dir> --wave W --task T --status S
+#   get-status <state-dir> --wave W --task T
+#   append-attempt <state-dir> --wave W --task T --impl I --session-id S --result R
+#   set-wave-status <state-dir> --wave W --status S
+#   set-task-commit <state-dir> --wave W --task T --sha X
+#
+# All writes are flock-guarded and atomic (tmpfile → rename).
+set -euo pipefail
+
+usage() {
+  grep -E '^# ' "$0" | sed 's/^# //; s/^#$//'
+  exit 2
+}
+
+STATE_DIR=""
+cmd="${1:-}"; shift || usage
+STATE_DIR="${1:-}"; shift || usage
+[ -d "$STATE_DIR" ] || { mkdir -p "$STATE_DIR"; }
+
+STATE_FILE="$STATE_DIR/state.json"
+LOCK_FILE="$STATE_DIR/.state.lock"
+
+# parse --key value pairs; store as ARG_<normalized-key> variables
+# key normalization: hyphens → underscores, all lowercase
+while [ $# -gt 0 ]; do
+  k="${1#--}"; v="${2:-}"
+  vname="ARG_$(printf '%s' "$k" | tr '-' '_')"
+  eval "${vname}=\$v"
+  shift 2 || { echo "missing value for --$k" >&2; exit 2; }
+done
+
+arg() {
+  local vname="ARG_$(printf '%s' "$1" | tr '-' '_')"
+  eval "printf '%s' \"\${${vname}:-}\""
+}
+
+with_lock() {
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$LOCK_FILE"
+    flock 9
+    "$@"
+    flock -u 9
+  else
+    for _ in $(seq 1 50); do
+      if (set -C; echo $$ > "$LOCK_FILE") 2>/dev/null; then
+        trap 'rm -f "$LOCK_FILE"' EXIT
+        "$@"
+        rm -f "$LOCK_FILE"; trap - EXIT
+        return 0
+      fi
+      sleep 0.1
+    done
+    echo "ERROR: could not acquire state lock" >&2; return 2
+  fi
+}
+
+write_atomic() {
+  local tmp; tmp="$(mktemp "$STATE_DIR/.state.XXXXXX")"
+  cat > "$tmp"
+  if ! jq . "$tmp" > /dev/null 2>&1; then
+    rm -f "$tmp"; echo "ERROR: refusing to write invalid JSON" >&2; return 2
+  fi
+  mv "$tmp" "$STATE_FILE"
+}
+
+stamp_updated() {
+  date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
+case "$cmd" in
+  init)
+    do_init() {
+      if [ -r "$STATE_FILE" ]; then
+        echo "ERROR: state already exists at $STATE_FILE" >&2; return 2
+      fi
+      tasks_by_num="$(jq 'map({(.num|tostring): .}) | add' <<<"$(arg tasks)")"
+      jq -n \
+        --arg plan_path "$(arg plan-path)" \
+        --arg plan_sha  "$(arg plan-sha)" \
+        --arg base_ref  "$(arg base-ref)" \
+        --arg base_sha  "$(arg base-sha)" \
+        --arg started   "$(stamp_updated)" \
+        --argjson waves "$(arg waves)" \
+        --argjson by_num "$tasks_by_num" \
+        '{
+          plan_path: $plan_path,
+          plan_sha:  $plan_sha,
+          base_ref:  $base_ref,
+          base_sha_at_start: $base_sha,
+          started_at: $started,
+          last_updated_at: $started,
+          waves: ($waves | map(
+            . + {
+              status: "pending",
+              tasks: (.tasks | map(
+                . as $num
+                | $by_num[($num|tostring)] as $t
+                | {
+                    num: $t.num, slug: $t.slug,
+                    status: "pending", attempts: [],
+                    worktree_path: null, branch: null,
+                    final_commit_on_base: null
+                  }
+              ))
+            }
+          ))
+        }' | write_atomic
+    }
+    with_lock do_init
+    ;;
+
+  set-status)
+    do_set_status() {
+      local w; w="$(arg wave)"
+      local t; t="$(arg task)"
+      local s; s="$(arg status)"
+      jq --argjson w "$w" --argjson t "$t" --arg s "$s" \
+         --arg now "$(stamp_updated)" '
+        .last_updated_at = $now
+        | (.waves[] | select(.wave == $w) | .tasks[] | select(.num == $t) | .status) = $s
+      ' "$STATE_FILE" | write_atomic
+    }
+    with_lock do_set_status
+    ;;
+
+  get-status)
+    local_get() {
+      jq -r --argjson w "$(arg wave)" --argjson t "$(arg task)" \
+        '.waves[] | select(.wave == $w) | .tasks[] | select(.num == $t) | .status' \
+        "$STATE_FILE"
+    }
+    with_lock local_get
+    ;;
+
+  append-attempt)
+    do_append() {
+      local w; w="$(arg wave)"
+      local t; t="$(arg task)"
+      local impl; impl="$(arg impl)"
+      local sid; sid="$(arg session-id)"
+      local res; res="$(arg result)"
+      jq --argjson w "$w" --argjson t "$t" \
+         --arg impl "$impl" --arg sid "$sid" --arg res "$res" \
+         --arg now "$(stamp_updated)" '
+        .last_updated_at = $now
+        | (.waves[] | select(.wave == $w) | .tasks[] | select(.num == $t) | .attempts) as $a
+        | (.waves[] | select(.wave == $w) | .tasks[] | select(.num == $t) | .attempts) |=
+            (. + [{attempt: (($a | length) + 1), impl: $impl, session_id: $sid, result: $res}])
+      ' "$STATE_FILE" | write_atomic
+    }
+    with_lock do_append
+    ;;
+
+  set-wave-status)
+    do_ws() {
+      local w; w="$(arg wave)"
+      local s; s="$(arg status)"
+      jq --argjson w "$w" --arg s "$s" --arg now "$(stamp_updated)" '
+        .last_updated_at = $now
+        | (.waves[] | select(.wave == $w) | .status) = $s
+      ' "$STATE_FILE" | write_atomic
+    }
+    with_lock do_ws
+    ;;
+
+  set-task-commit)
+    do_sc() {
+      local w; w="$(arg wave)"
+      local t; t="$(arg task)"
+      local sha; sha="$(arg sha)"
+      jq --argjson w "$w" --argjson t "$t" --arg sha "$sha" \
+         --arg now "$(stamp_updated)" '
+        .last_updated_at = $now
+        | (.waves[] | select(.wave == $w) | .tasks[] | select(.num == $t) | .final_commit_on_base) = $sha
+      ' "$STATE_FILE" | write_atomic
+    }
+    with_lock do_sc
+    ;;
+
+  *)
+    usage
+    ;;
+esac
