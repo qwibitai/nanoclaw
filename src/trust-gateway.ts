@@ -209,6 +209,30 @@ function validateActionIntent(
   return null;
 }
 
+export async function validatePreAction(
+  userRequest: string,
+  actionClass: string,
+  proposedAction: string,
+): Promise<{ approved: boolean; reason?: string }> {
+  try {
+    const { generateShort } = await import('./llm/utility.js');
+    const result = await generateShort(
+      `The user asked: "${userRequest}"\nThe system is about to execute action class "${actionClass}": "${proposedAction}"\n\nDoes the proposed action match what the user requested? Respond with exactly "MATCH" if yes, or "MISMATCH: <reason>" if no.`,
+      { maxOutputTokens: 50 },
+    );
+
+    const trimmed = result.trim();
+    if (trimmed.startsWith('MISMATCH')) {
+      logger.warn({ actionClass, reason: trimmed }, 'Pre-action validation rejected');
+      return { approved: false, reason: trimmed };
+    }
+    return { approved: true };
+  } catch (err) {
+    logger.warn({ err }, 'Pre-action validation LLM call failed, allowing action');
+    return { approved: true };
+  }
+}
+
 /** Handle POST /trust/evaluate */
 async function handleEvaluate(
   req: IncomingMessage,
