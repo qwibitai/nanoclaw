@@ -95,6 +95,8 @@ import { startEventRouter } from './event-router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { initLearningSystem, buildRulesBlock } from './learning/index.js';
 import { handleMessageWithProcedureCheck } from './learning/procedure-match-integration.js';
+import { resolveModel } from './llm/provider.js';
+import { scoreComplexity } from './llm/escalation.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { eventBus } from './event-bus.js';
@@ -584,6 +586,28 @@ async function runAgent(
     const rulesBlock = buildRulesBlock(prompt, group.folder);
     const enrichedPrompt = rulesBlock ? `${prompt}\n\n${rulesBlock}` : prompt;
 
+    // Resolve LLM provider/model for this group
+    const resolved = resolveModel(
+      { llm: group.containerConfig?.llm },
+    );
+
+    // Auto-escalate if message is complex and escalation model is configured
+    let finalModel = resolved.model;
+    if (resolved.provider !== 'anthropic') {
+      const complexity = scoreComplexity(prompt);
+      if (complexity.shouldEscalate) {
+        const llmConfig = group.containerConfig?.llm;
+        const escalationModel = llmConfig?.escalationModel;
+        if (escalationModel) {
+          finalModel = escalationModel;
+          logger.info(
+            { group: group.name, score: complexity.score, reason: complexity.reason, model: escalationModel },
+            'Auto-escalated model',
+          );
+        }
+      }
+    }
+
     const output = await runContainerAgent(
       group,
       {
@@ -594,6 +618,9 @@ async function runAgent(
         isMain,
         assistantName: ASSISTANT_NAME,
         verbose: group.verbose,
+        provider: resolved.provider as any,
+        model: finalModel ?? undefined,
+        providerBaseUrl: resolved.providerBaseUrl ?? undefined,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),

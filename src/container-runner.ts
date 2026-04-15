@@ -56,6 +56,9 @@ export interface ContainerInput {
   assistantName?: string;
   script?: string;
   verbose?: boolean;
+  provider?: 'anthropic' | 'openai' | 'google' | 'ollama' | 'groq' | 'together';
+  model?: string;
+  providerBaseUrl?: string;
 }
 
 export interface ContainerOutput {
@@ -577,6 +580,24 @@ async function buildContainerArgs(
     args.push('-e', `NOTION_TOKEN=${notionToken}`);
   }
 
+  // Non-Anthropic LLM provider keys
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey) {
+    args.push('-e', `OPENAI_API_KEY=${openaiKey}`);
+  }
+  const googleKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  if (googleKey) {
+    args.push('-e', `GOOGLE_GENERATIVE_AI_API_KEY=${googleKey}`);
+  }
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
+    args.push('-e', `GROQ_API_KEY=${groqKey}`);
+  }
+  const togetherKey = process.env.TOGETHER_AI_API_KEY;
+  if (togetherKey) {
+    args.push('-e', `TOGETHER_AI_API_KEY=${togetherKey}`);
+  }
+
   // OneCLI gateway handles credential injection for non-Anthropic services
   // (GitHub, Gmail, etc.) and as fallback for Anthropic if no OAuth token.
   const onecliApplied = await onecli.applyContainerConfig(args, {
@@ -649,6 +670,10 @@ async function buildContainerArgs(
     'https_proxy=',
     'http_proxy=',
     'ANTHROPIC_API_KEY=',
+    'OPENAI_API_KEY=',
+    'GOOGLE_GENERATIVE_AI_API_KEY=',
+    'GROQ_API_KEY=',
+    'TOGETHER_AI_API_KEY=',
   ];
 
   const secretEnvLines: string[] = [];
