@@ -90,7 +90,10 @@ describe('credential-proxy', () => {
   let proxyPort: number;
   let upstreamPort: number;
   let lastUpstreamHeaders: http.IncomingHttpHeaders;
-  let upstreamHandler: (req: http.IncomingMessage, res: http.ServerResponse) => void;
+  let upstreamHandler: (
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ) => void;
 
   beforeEach(async () => {
     lastUpstreamHeaders = {};
