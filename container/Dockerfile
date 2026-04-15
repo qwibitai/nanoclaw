@@ -45,8 +45,8 @@ WORKDIR /app
 # Copy package files first for better caching
 COPY agent-runner/package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies (--legacy-peer-deps: zod v4 vs AI SDK's zod v3 peer dep)
+RUN npm install --legacy-peer-deps
 
 # Copy source code
 COPY agent-runner/ ./
