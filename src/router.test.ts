@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeConfidenceMarkers } from './router.js';
+import { normalizeConfidenceMarkers, addConfidenceMarkers } from './router.js';
 
 describe('normalizeConfidenceMarkers', () => {
   it('passes markers through unchanged in rich-text mode', () => {
@@ -25,5 +25,21 @@ describe('normalizeConfidenceMarkers', () => {
     const text = 'Hello, how are you?';
     expect(normalizeConfidenceMarkers(text, true)).toBe(text);
     expect(normalizeConfidenceMarkers(text, false)).toBe(text);
+  });
+});
+
+describe('confidence markers', () => {
+  it('annotates verified claims with source', () => {
+    const formatted = addConfidenceMarkers(
+      'Your refill is ready.',
+      [{ claim: 'refill is ready', confidence: 'verified', source: 'alto.com check, 2min ago' }],
+    );
+    expect(formatted).toContain('✓');
+    expect(formatted).toContain('alto.com');
+  });
+
+  it('passes through text with no claims to annotate', () => {
+    const formatted = addConfidenceMarkers('Hello, how can I help?', []);
+    expect(formatted).toBe('Hello, how can I help?');
   });
 });
