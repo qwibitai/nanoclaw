@@ -250,6 +250,21 @@ function createSchema(database: Database.Database): void {
       adjusted_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_class_adj_source ON classification_adjustments(source, source_id);
+
+    CREATE TABLE IF NOT EXISTS classification_behaviors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      sender_pattern TEXT NOT NULL,
+      subject_pattern TEXT,
+      original_classification TEXT NOT NULL,
+      observed_behavior TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 1,
+      adjustment TEXT NOT NULL DEFAULT 'none',
+      confidence REAL NOT NULL DEFAULT 0.0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_class_beh_source ON classification_behaviors(source, sender_pattern);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
