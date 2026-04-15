@@ -5,9 +5,10 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../box-runtime.js', async () => {
-  const actual = await vi.importActual<typeof import('../box-runtime.js')>(
-    '../box-runtime.js',
-  );
+  const actual =
+    await vi.importActual<typeof import('../box-runtime.js')>(
+      '../box-runtime.js',
+    );
   return {
     ...actual,
     cleanupOrphans: vi.fn(async () => {}),
@@ -225,9 +226,8 @@ describe('AcpOutboundClient integration', () => {
       'team@g.us',
     );
     expect(newSession.status).toBe(200);
-    const sessionId = (
-      newSession.json.result as { session_id: string }
-    ).session_id;
+    const sessionId = (newSession.json.result as { session_id: string })
+      .session_id;
 
     const prompt = await callAction(
       agent,
@@ -295,9 +295,8 @@ describe('AcpOutboundClient integration', () => {
       { peer: 'fake-peer' },
       'team@g.us',
     );
-    const sessionId = (
-      newSession.json.result as { session_id: string }
-    ).session_id;
+    const sessionId = (newSession.json.result as { session_id: string })
+      .session_id;
 
     const firstPrompt = await callAction(
       agent,
@@ -322,7 +321,9 @@ describe('AcpOutboundClient integration', () => {
       'team@g.us',
     );
     expect(secondPrompt.status).toBe(500);
-    expect(secondPrompt.json.error).toContain('already has an in-flight prompt');
+    expect(secondPrompt.json.error).toContain(
+      'already has an in-flight prompt',
+    );
 
     promptDeferred.resolve({ stopReason: 'cancelled' });
     await vi.waitFor(() => {
@@ -347,9 +348,8 @@ describe('AcpOutboundClient integration', () => {
       { peer: 'fake-peer' },
       'team@g.us',
     );
-    const sessionId = (
-      newSession.json.result as { session_id: string }
-    ).session_id;
+    const sessionId = (newSession.json.result as { session_id: string })
+      .session_id;
 
     const prompt = await callAction(
       agent,
@@ -436,7 +436,11 @@ describe('AcpOutboundClient integration', () => {
   it('marks abandoned artifacts failed on startup and sweeps old artifacts', () => {
     const dataDir = path.join(tmpDir, 'data');
     const groupsDir = path.join(tmpDir, 'groups');
-    const runsDir = path.join(resolveGroupIpcPath('team', dataDir), 'acp', 'runs');
+    const runsDir = path.join(
+      resolveGroupIpcPath('team', dataDir),
+      'acp',
+      'runs',
+    );
     fs.mkdirSync(runsDir, { recursive: true });
 
     const abandonedPath = path.join(runsDir, 'abandoned.json');

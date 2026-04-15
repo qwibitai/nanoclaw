@@ -5,9 +5,9 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../container-runner.js', async () => {
-  const actual = await vi.importActual<
-    typeof import('../container-runner.js')
-  >('../container-runner.js');
+  const actual = await vi.importActual<typeof import('../container-runner.js')>(
+    '../container-runner.js',
+  );
   return {
     ...actual,
     runContainerAgent: vi.fn(),

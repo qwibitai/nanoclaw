@@ -6,9 +6,10 @@ import { fileURLToPath } from 'url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../box-runtime.js', async () => {
-  const actual = await vi.importActual<typeof import('../box-runtime.js')>(
-    '../box-runtime.js',
-  );
+  const actual =
+    await vi.importActual<typeof import('../box-runtime.js')>(
+      '../box-runtime.js',
+    );
   return {
     ...actual,
     cleanupOrphans: vi.fn(async () => {}),
@@ -134,9 +135,8 @@ describe('ACP background prompt e2e', () => {
       'team@g.us',
     );
     expect(sessionResp.status).toBe(200);
-    const sessionId = (
-      sessionResp.json.result as { session_id: string }
-    ).session_id;
+    const sessionId = (sessionResp.json.result as { session_id: string })
+      .session_id;
 
     const startedAt = Date.now();
     const promptResp = await callAction(

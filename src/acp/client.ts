@@ -43,7 +43,10 @@ import {
 import type { Agent } from '../api/agent.js';
 import type { ActionContext } from '../api/action.js';
 import { logger } from '../logger.js';
-import { resolveGroupFolderPath, resolveGroupIpcPath } from '../group-folder.js';
+import {
+  resolveGroupFolderPath,
+  resolveGroupIpcPath,
+} from '../group-folder.js';
 
 import type { AcpPeerConfig, AcpPeerDirectoryEntry } from './types.js';
 
@@ -184,9 +187,7 @@ export class AcpOutboundClient {
       'acp_new_session',
       'Create a new ACP conversation session with a remote peer. Returns a session_id that subsequent acp_prompt / acp_cancel / acp_close_session calls must reference. The peer sees this as the start of a fresh conversation.',
       {
-        peer: z
-          .string()
-          .describe('Peer name from acp_list_remote_agents'),
+        peer: z.string().describe('Peer name from acp_list_remote_agents'),
         cwd: z
           .string()
           .optional()
@@ -350,18 +351,13 @@ export class AcpOutboundClient {
    * Main group can touch any session; non-main groups can only touch
    * sessions they created.
    */
-  private requireSession(
-    sessionId: string,
-    ctx: ActionContext,
-  ): SessionState {
+  private requireSession(sessionId: string, ctx: ActionContext): SessionState {
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`unknown acp session: ${sessionId}`);
     }
     if (!ctx.isMain && session.callerGroupFolder !== ctx.sourceGroup) {
-      throw new Error(
-        `acp session ${sessionId} is owned by a different group`,
-      );
+      throw new Error(`acp session ${sessionId} is owned by a different group`);
     }
     return session;
   }
@@ -389,7 +385,12 @@ export class AcpOutboundClient {
       callerChatJid: session.callerChatJid,
       startedAt: new Date().toISOString(),
       hostPath: path.join(runsDir, `${runId}.json`),
-      containerPath: path.posix.join('/workspace/ipc', 'acp', 'runs', `${runId}.json`),
+      containerPath: path.posix.join(
+        '/workspace/ipc',
+        'acp',
+        'runs',
+        `${runId}.json`,
+      ),
     };
   }
 
@@ -511,8 +512,7 @@ export class AcpOutboundClient {
             typeof artifact.tool_call_count === 'number'
               ? artifact.tool_call_count
               : (artifact.tool_calls ?? []).length,
-          error:
-            artifact.error ?? 'Host restarted before ACP prompt completed',
+          error: artifact.error ?? 'Host restarted before ACP prompt completed',
         };
         fs.writeFileSync(filePath, JSON.stringify(recovered, null, 2), 'utf-8');
       } catch (err) {

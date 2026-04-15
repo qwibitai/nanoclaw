@@ -49,10 +49,7 @@ import {
   type RegisteredAction,
 } from '../api/action.js';
 import { AcpOutboundClient } from '../acp/client.js';
-import {
-  ACP_NOTICE_SENDER,
-  ACP_NOTICE_SENDER_NAME,
-} from '../acp/notice.js';
+import { ACP_NOTICE_SENDER, ACP_NOTICE_SENDER_NAME } from '../acp/notice.js';
 import { startSchedulerLoop } from '../task-scheduler.js';
 
 import path from 'path';
