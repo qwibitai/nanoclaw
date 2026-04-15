@@ -1,3 +1,4 @@
+import type { LanguageModel } from 'ai';
 import { generateText, embed } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
@@ -7,7 +8,7 @@ type ProviderFactory = ReturnType<
   typeof createOpenAI | typeof createGoogleGenerativeAI | typeof createAnthropic
 >;
 
-export function resolveUtilityModel(explicit?: string) {
+export function resolveUtilityModel(explicit?: string): LanguageModel {
   const spec = explicit ?? process.env.UTILITY_LLM_MODEL;
   if (spec) {
     const [providerName, ...modelParts] = spec.split(':');
@@ -61,7 +62,7 @@ export async function classify(
     model,
     system: `You are a classifier. Respond with exactly one of these categories: ${categories.join(', ')}. No explanation, just the category.`,
     messages: [{ role: 'user', content: text }],
-    maxTokens: 50,
+    maxOutputTokens: 50,
   });
 
   const output = result.text.trim().toLowerCase();
@@ -71,14 +72,14 @@ export async function classify(
 
 export async function generateShort(
   prompt: string,
-  options?: { model?: string; maxTokens?: number },
+  options?: { model?: string; maxOutputTokens?: number },
 ): Promise<string> {
   const model = resolveUtilityModel(options?.model);
 
   const result = await generateText({
     model,
     messages: [{ role: 'user', content: prompt }],
-    maxTokens: options?.maxTokens ?? 200,
+    maxOutputTokens: options?.maxOutputTokens ?? 200,
   });
 
   return result.text;
