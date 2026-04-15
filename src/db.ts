@@ -194,6 +194,62 @@ function createSchema(database: Database.Database): void {
       expires_at DATETIME NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_trust_approvals_status ON trust_approvals(status, expires_at);
+
+    CREATE TABLE IF NOT EXISTS tracked_items (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      group_name TEXT NOT NULL,
+      state TEXT NOT NULL,
+      classification TEXT,
+      superpilot_label TEXT,
+      trust_tier TEXT,
+      title TEXT NOT NULL,
+      summary TEXT,
+      thread_id TEXT,
+      detected_at INTEGER NOT NULL,
+      pushed_at INTEGER,
+      resolved_at INTEGER,
+      resolution_method TEXT,
+      digest_count INTEGER NOT NULL DEFAULT 0,
+      telegram_message_id INTEGER,
+      classification_reason TEXT,
+      metadata TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_tracked_state ON tracked_items(group_name, state);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tracked_source ON tracked_items(source, source_id);
+    CREATE INDEX IF NOT EXISTS idx_tracked_dashboard ON tracked_items(group_name, state, detected_at); -- PERF-1
+
+    CREATE TABLE IF NOT EXISTS threads (
+      id TEXT PRIMARY KEY,
+      group_name TEXT NOT NULL,
+      title TEXT NOT NULL,
+      source_hint TEXT,
+      created_at INTEGER NOT NULL,
+      resolved_at INTEGER,
+      item_count INTEGER NOT NULL DEFAULT 0,
+      state TEXT NOT NULL DEFAULT 'active'
+    );
+    CREATE INDEX IF NOT EXISTS idx_threads_group ON threads(group_name, state);
+
+    CREATE TABLE IF NOT EXISTS digest_state (
+      group_name TEXT PRIMARY KEY,
+      last_digest_at INTEGER,
+      last_dashboard_at INTEGER,
+      queued_count INTEGER NOT NULL DEFAULT 0,
+      last_user_interaction INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS classification_adjustments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      original_classification TEXT NOT NULL,
+      adjusted_classification TEXT NOT NULL,
+      reason TEXT,
+      adjusted_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_class_adj_source ON classification_adjustments(source, source_id);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
