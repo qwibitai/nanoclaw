@@ -461,3 +461,23 @@ export function getTrackedItemById(itemId: string): TrackedItem | null {
     .get(itemId) as Record<string, unknown> | undefined;
   return row ? deserializeItem(row) : null;
 }
+
+export function getItemsByThreadId(threadId: string): TrackedItem[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      'SELECT * FROM tracked_items WHERE thread_id = ? ORDER BY detected_at ASC',
+    )
+    .all(threadId) as Record<string, unknown>[];
+  return rows.map(deserializeItem);
+}
+
+export function mergeThreads(
+  sourceThreadId: string,
+  targetThreadId: string,
+): void {
+  const db = getDb();
+  db.prepare(
+    'UPDATE tracked_items SET thread_id = ? WHERE thread_id = ?',
+  ).run(targetThreadId, sourceThreadId);
+}

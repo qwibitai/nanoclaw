@@ -33,6 +33,8 @@ import {
   parseCallbackData,
   resolveItemByCallback,
   getTrackedItemById,
+  getItemsByThreadId,
+  mergeThreads,
   type TrackedItem,
   type Thread,
   type ResolutionSignal,
@@ -454,5 +456,59 @@ describe('callback handling', () => {
     resolveItemByCallback('cb:t2', 'dismiss');
     const item = getTrackedItemById('cb:t2');
     expect(item?.state).toBe('resolved');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Thread query helpers
+// ---------------------------------------------------------------------------
+
+describe('getItemsByThreadId', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('returns all items sharing a thread_id', () => {
+    insertTrackedItem(
+      makeItem({ id: 'ti-1', thread_id: 'thread_A', source_id: 'gmail:1' }),
+    );
+    insertTrackedItem(
+      makeItem({ id: 'ti-2', thread_id: 'thread_A', source_id: 'gmail:2' }),
+    );
+    insertTrackedItem(
+      makeItem({ id: 'ti-3', thread_id: 'thread_B', source_id: 'gmail:3' }),
+    );
+
+    const items = getItemsByThreadId('thread_A');
+    expect(items).toHaveLength(2);
+    expect(items.map((i) => i.id).sort()).toEqual(['ti-1', 'ti-2']);
+  });
+
+  it('returns empty for unknown thread', () => {
+    const items = getItemsByThreadId('nonexistent');
+    expect(items).toHaveLength(0);
+  });
+});
+
+describe('mergeThreads', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('moves items from source thread to target thread', () => {
+    insertTrackedItem(
+      makeItem({ id: 'mt-1', thread_id: 'thread_old', source_id: 'gmail:m1' }),
+    );
+    insertTrackedItem(
+      makeItem({ id: 'mt-2', thread_id: 'thread_old', source_id: 'gmail:m2' }),
+    );
+    insertTrackedItem(
+      makeItem({ id: 'mt-3', thread_id: 'thread_new', source_id: 'gmail:m3' }),
+    );
+
+    mergeThreads('thread_old', 'thread_new');
+
+    const oldItems = getItemsByThreadId('thread_old');
+    const newItems = getItemsByThreadId('thread_new');
+    expect(oldItems).toHaveLength(0);
+    expect(newItems).toHaveLength(3);
   });
 });
