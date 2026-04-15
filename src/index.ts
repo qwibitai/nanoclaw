@@ -29,6 +29,9 @@ import {
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
+  ensureDockerNetwork,
+  ensureBrowserSidecar,
+  stopBrowserSidecar,
 } from './container-runtime.js';
 import {
   deleteRouterState,
@@ -866,6 +869,8 @@ function recoverPendingMessages(): void {
 
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
+  ensureDockerNetwork('nanoclaw');
+  ensureBrowserSidecar();
   cleanupOrphans();
 }
 
@@ -890,6 +895,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    stopBrowserSidecar();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
