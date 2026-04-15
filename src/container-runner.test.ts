@@ -38,6 +38,7 @@ vi.mock('fs', async () => {
       ...actual,
       existsSync: vi.fn(() => false),
       mkdirSync: vi.fn(),
+      mkdtempSync: vi.fn((prefix: string) => prefix + 'test123'),
       writeFileSync: vi.fn(),
       readFileSync: vi.fn(() => ''),
       readdirSync: vi.fn(() => []),
@@ -69,6 +70,23 @@ vi.mock('@onecli-sh/sdk', () => ({
       .fn()
       .mockResolvedValue({ name: 'test', identifier: 'test', created: true });
   },
+}));
+
+// Mock env reader (used by plugin hooks)
+vi.mock('./env.js', () => ({
+  readEnvFile: vi.fn(() => ({})),
+}));
+
+// Mock plugin barrel (side-effect import — no-op in tests)
+vi.mock('./plugins/index.js', () => ({}));
+
+// Mock plugin registry
+const mockGetPluginContainerEnvKeys = vi.fn(() => [] as string[]);
+const mockGetPluginContainerEnv = vi.fn((env: Record<string, string>) => env);
+vi.mock('./plugins/registry.js', () => ({
+  getPluginContainerEnvKeys: () => mockGetPluginContainerEnvKeys(),
+  getPluginContainerEnv: (env: Record<string, string>) =>
+    mockGetPluginContainerEnv(env),
 }));
 
 // Create a controllable fake ChildProcess
@@ -106,8 +124,10 @@ vi.mock('child_process', async () => {
   };
 });
 
+import { spawn } from 'child_process';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
+import { readEnvFile } from './env.js';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -226,5 +246,108 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('container-runner plugin env injection', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    mockGetPluginContainerEnvKeys.mockClear();
+    mockGetPluginContainerEnv.mockClear();
+    vi.mocked(readEnvFile).mockClear();
+    vi.mocked(spawn).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('reads plugin env keys and passes them to readEnvFile', async () => {
+    mockGetPluginContainerEnvKeys.mockReturnValue(['PLUGIN_KEY']);
+    vi.mocked(readEnvFile).mockReturnValue({ PLUGIN_KEY: 'secret' });
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    expect(mockGetPluginContainerEnvKeys).toHaveBeenCalled();
+    expect(vi.mocked(readEnvFile)).toHaveBeenCalledWith(['PLUGIN_KEY']);
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it('injects plugin env vars via --env-file in container spawn args', async () => {
+    mockGetPluginContainerEnv.mockReturnValue({ PLUGIN_KEY: 'secret' });
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    // Let microtasks settle so buildContainerArgs (async) completes and spawn is called
+    await vi.advanceTimersByTimeAsync(1);
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    // Ensure plugin env vars are injected via --env-file (values never exposed in argv)
+    expect(spawnArgs).toContain('--env-file');
+    expect(spawnArgs).not.toContain('secret');
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it('passes env from readEnvFile through getPluginContainerEnv', async () => {
+    const rawEnv = { MY_TOKEN: 'abc123', UNRELATED: 'ignored' };
+    mockGetPluginContainerEnvKeys.mockReturnValue(['MY_TOKEN']);
+    vi.mocked(readEnvFile).mockReturnValue(rawEnv);
+    mockGetPluginContainerEnv.mockImplementation((env) => ({
+      MY_TOKEN: env['MY_TOKEN'] ?? '',
+    }));
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    expect(mockGetPluginContainerEnv).toHaveBeenCalledWith(rawEnv);
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it('succeeds with no plugin env when registry returns empty', async () => {
+    mockGetPluginContainerEnv.mockReturnValue({});
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
   });
 });

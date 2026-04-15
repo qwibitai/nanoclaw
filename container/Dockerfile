@@ -48,14 +48,64 @@ COPY agent-runner/ ./
 # Build TypeScript
 RUN npm run build
 
+# Install plugin binaries declared in plugins/binaries.json.
+# Each entry is either a direct URL download or a .tgz archive with named binaries to extract.
+# This step is a no-op when the array is empty.
+COPY plugins/binaries.json /tmp/plugins.json
+RUN node -e "\
+const fs = require('fs');\
+const { execFileSync } = require('child_process');\
+const plugins = JSON.parse(fs.readFileSync('/tmp/plugins.json'));\
+plugins.forEach((p, index) => {\
+  if (!p || !p.name) {\
+    throw new Error('Invalid plugin entry: missing name');\
+  }\
+  if (p.url) {\
+    if (!p.dest) {\
+      throw new Error('Plugin ' + p.name + ' missing dest for direct download');\
+    }\
+    console.log('Installing plugin binary: ' + p.name);\
+    execFileSync('curl', ['-fsSL', '-o', p.dest, p.url], { stdio: 'inherit' });\
+    execFileSync('chmod', ['+x', p.dest], { stdio: 'inherit' });\
+  } else if (p.archive) {\
+    if (!Array.isArray(p.extract) || p.extract.length === 0) {\
+      throw new Error('Plugin ' + p.name + ' missing extract file list for archive');\
+    }\
+    console.log('Installing plugin archive: ' + p.name);\
+    const archivePath = '/tmp/plugin-archive-' + index + '.tgz';\
+    execFileSync('curl', ['-fsSL', '-o', archivePath, p.archive], { stdio: 'inherit' });\
+    const stripComponents = p.stripComponents ?? 0;\
+    const tarArgs = ['xzf', archivePath, '--strip-components=' + stripComponents, '-C', '/usr/local/bin/'];\
+    if (stripComponents === 0) { for (const f of p.extract) { tarArgs.push(f); } }\
+    execFileSync('tar', tarArgs, { stdio: 'inherit' });\
+    const destPaths = p.extract.map(f => '/usr/local/bin/' + f);\
+    execFileSync('chmod', ['+x', ...destPaths], { stdio: 'inherit' });\
+  }\
+});\
+"
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
-# Create entrypoint script
-# Container input (prompt, group info) is passed via stdin JSON.
-# Credentials are injected by the host's credential proxy — never passed here.
-# Follow-up messages arrive via IPC files in /workspace/ipc/input/
-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# Pre-create directories that plugin init scripts need (must exist and be writable by node user)
+COPY plugins/directories.json /tmp/plugins-dirs.json
+RUN node -e "\
+const fs = require('fs');\
+const { execFileSync } = require('child_process');\
+const dirs = JSON.parse(fs.readFileSync('/tmp/plugins-dirs.json'));\
+dirs.forEach(dir => {\
+  console.log('Creating plugin directory: ' + dir);\
+  execFileSync('mkdir', ['-p', dir], { stdio: 'inherit' });\
+  execFileSync('chown', ['node:node', dir], { stdio: 'inherit' });\
+});\
+"
+
+# Plugin container-init scripts (sourced at container startup before the agent runs)
+COPY plugins/ /app/plugins/
+
+# Copy entrypoint script
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
