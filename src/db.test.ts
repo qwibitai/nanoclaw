@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
   _initTestDatabase,
+  coerceScript,
   createTask,
   deleteTask,
   getAllChats,
@@ -590,6 +591,53 @@ describe('task CRUD', () => {
 
     deleteTask('task-3');
     expect(getTaskById('task-3')).toBeUndefined();
+  });
+
+  it('coerces Buffer script to text on createTask so future .trim() calls do not throw', () => {
+    // A Buffer sneaking into the script column is the exact corruption that
+    // caused task-1775619472081-ja2ron to hot-loop silently. coerceScript
+    // must convert it to a plain string before insert.
+    createTask({
+      id: 'task-buf',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'test',
+      script: Buffer.from('echo hi') as unknown as string,
+      schedule_type: 'once',
+      schedule_value: '2024-06-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: null,
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const task = getTaskById('task-buf')!;
+    expect(typeof task.script).toBe('string');
+    expect(task.script).toBe('echo hi');
+    // The value round-trips cleanly through .trim() — this is what was
+    // throwing TypeError before the coercion was added.
+    expect(() => (task.script as string).trim()).not.toThrow();
+  });
+});
+
+// --- coerceScript ---
+
+describe('coerceScript', () => {
+  it('returns null for null and undefined', () => {
+    expect(coerceScript(null)).toBeNull();
+    expect(coerceScript(undefined)).toBeNull();
+  });
+
+  it('returns null for empty string (normalizes "no script")', () => {
+    expect(coerceScript('')).toBeNull();
+  });
+
+  it('passes through non-empty strings unchanged', () => {
+    expect(coerceScript('echo hi')).toBe('echo hi');
+  });
+
+  it('stringifies Buffers', () => {
+    expect(coerceScript(Buffer.from('echo hi'))).toBe('echo hi');
   });
 });
 

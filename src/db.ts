@@ -514,6 +514,19 @@ export function getRecentMessages(
     .all(chatJid, limit) as NewMessage[];
 }
 
+/**
+ * Coerce a script value to a plain string for DB storage, or null if empty.
+ * Buffers, numbers, and other non-string values can leak in from MCP/IPC
+ * boundaries; if they reach better-sqlite3 as a Buffer, the column is
+ * stored as a BLOB and future `script.trim()` calls throw TypeError.
+ * This guard keeps the script column strictly `text | null`.
+ */
+export function coerceScript(value: unknown): string | null {
+  if (value == null) return null;
+  const str = typeof value === 'string' ? value : String(value);
+  return str.length === 0 ? null : str;
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
@@ -527,7 +540,7 @@ export function createTask(
     task.group_folder,
     task.chat_jid,
     task.prompt,
-    task.script || null,
+    coerceScript(task.script),
     task.schedule_type,
     task.schedule_value,
     task.context_mode || 'isolated',
@@ -580,7 +593,7 @@ export function updateTask(
   }
   if (updates.script !== undefined) {
     fields.push('script = ?');
-    values.push(updates.script || null);
+    values.push(coerceScript(updates.script));
   }
   if (updates.schedule_type !== undefined) {
     fields.push('schedule_type = ?');
@@ -611,6 +624,33 @@ export function deleteTask(id: string): void {
   // Delete child records first (FK constraint)
   db.prepare('DELETE FROM task_run_logs WHERE task_id = ?').run(id);
   db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
+}
+
+/**
+ * Repair scheduled_tasks rows whose `script` column isn't text or null.
+ * Returns the IDs that were fixed so callers can log them loudly.
+ *
+ * Scripts are expected to be `text | null`. A BLOB here means a Buffer
+ * leaked past the write-time coercion (bug or manual SQL) — the next
+ * `task.script.trim()` call will throw TypeError and the task will
+ * hot-loop silently. Auto-CAST on startup eliminates that failure mode.
+ */
+export function castNonTextScripts(): string[] {
+  const rows = db
+    .prepare(
+      `SELECT id FROM scheduled_tasks WHERE typeof(script) NOT IN ('text', 'null')`,
+    )
+    .all() as { id: string }[];
+  if (rows.length === 0) return [];
+  const update = db.prepare(
+    `UPDATE scheduled_tasks SET script = CAST(script AS TEXT) WHERE id = ?`,
+  );
+  const tx = db.transaction((ids: string[]) => {
+    for (const id of ids) update.run(id);
+  });
+  const ids = rows.map((r) => r.id);
+  tx(ids);
+  return ids;
 }
 
 export function getDueTasks(): ScheduledTask[] {

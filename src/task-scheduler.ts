@@ -17,6 +17,7 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  castNonTextScripts,
   getAllTasks,
   getDueTasks,
   getTaskById,
@@ -238,22 +239,216 @@ async function runTask(
     });
     return;
   }
-  fs.mkdirSync(groupDir, { recursive: true });
 
-  logger.info(
-    { taskId: task.id, group: task.group_folder },
-    'Running scheduled task',
-  );
+  // Outer guard: any unexpected throw between here and the normal exit paths
+  // (e.g. a non-text script column, a filesystem error on the snapshot write,
+  // a cron parse explosion) must still record the failure AND advance
+  // next_run. Without this the task pegs the scheduler on every poll tick
+  // and the error is only visible in the stderr stream, not task_run_logs.
+  try {
+    fs.mkdirSync(groupDir, { recursive: true });
 
-  const groups = deps.registeredGroups();
-  const group = Object.values(groups).find(
-    (g) => g.folder === task.group_folder,
-  );
+    logger.info(
+      { taskId: task.id, group: task.group_folder },
+      'Running scheduled task',
+    );
 
-  if (!group) {
+    const groups = deps.registeredGroups();
+    const group = Object.values(groups).find(
+      (g) => g.folder === task.group_folder,
+    );
+
+    if (!group) {
+      logger.error(
+        { taskId: task.id, groupFolder: task.group_folder },
+        'Group not found for task',
+      );
+      logTaskRun({
+        task_id: task.id,
+        run_at: new Date().toISOString(),
+        duration_ms: Date.now() - startTime,
+        status: 'error',
+        result: null,
+        error: `Group not found: ${task.group_folder}`,
+      });
+      return;
+    }
+
+    // Update tasks snapshot for container to read (filtered by group)
+    const isMain = group.isMain === true;
+    const tasks = getAllTasks();
+    writeTasksSnapshot(
+      task.group_folder,
+      isMain,
+      tasks.map((t) => ({
+        id: t.id,
+        groupFolder: t.group_folder,
+        prompt: t.prompt,
+        script: t.script,
+        schedule_type: t.schedule_type,
+        schedule_value: t.schedule_value,
+        status: t.status,
+        next_run: t.next_run,
+      })),
+    );
+
+    // Run gate script on the host — skip the container entirely if wakeAgent is false.
+    let gateData: unknown = undefined;
+    if (task.script && task.script.trim()) {
+      logger.info({ taskId: task.id }, 'Running gate script on host');
+      const gateResult = await runGateScript(task.script, task.group_folder);
+
+      if (!gateResult || !gateResult.wakeAgent) {
+        const reason = gateResult
+          ? 'wakeAgent=false'
+          : 'script error/no output';
+        logger.debug({ taskId: task.id, reason }, 'Gate script skipped agent');
+        logTaskRun({
+          task_id: task.id,
+          run_at: new Date().toISOString(),
+          duration_ms: Date.now() - startTime,
+          status: 'success',
+          result: null,
+          error: null,
+        });
+        const nextRun = computeNextRun(task);
+        updateTaskAfterRun(task.id, nextRun, `Gate: ${reason}`);
+        return;
+      }
+
+      logger.info({ taskId: task.id }, 'Gate script passed, spawning agent');
+      gateData = gateResult.data;
+    }
+
+    let result: string | null = null;
+    let error: string | null = null;
+
+    // For group context mode, use the group's current session
+    const sessions = deps.getSessions();
+    const sessionId =
+      task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+
+    // After the task produces a result, close the container promptly.
+    // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
+    // query loop to time out. A short delay handles any final MCP calls.
+    const TASK_CLOSE_DELAY_MS = 10000;
+    let closeTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleClose = () => {
+      if (closeTimer) return; // already scheduled
+      closeTimer = setTimeout(() => {
+        logger.debug(
+          { taskId: task.id },
+          'Closing task container after result',
+        );
+        deps.queue.closeStdin(task.chat_jid);
+      }, TASK_CLOSE_DELAY_MS);
+    };
+
+    try {
+      // If the gate script ran on the host, enrich the prompt with its data
+      // and don't pass the script to the container (already resolved).
+      const prompt =
+        gateData !== undefined
+          ? `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(gateData, null, 2)}\n\nInstructions:\n${task.prompt}`
+          : task.prompt;
+
+      const output = await runContainerAgent(
+        group,
+        {
+          prompt,
+          sessionId,
+          groupFolder: task.group_folder,
+          chatJid: task.chat_jid,
+          isMain,
+          isScheduledTask: true,
+          assistantName: ASSISTANT_NAME,
+          script: gateData !== undefined ? undefined : task.script || undefined,
+        },
+        (proc, containerName) =>
+          deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+        async (streamedOutput: ContainerOutput) => {
+          if (streamedOutput.result) {
+            result = streamedOutput.result;
+            // Strip <internal>...</internal> blocks and filter [no-reply] —
+            // scheduled tasks routinely fire during quiet windows where the
+            // agent correctly chooses silence. Without this filter the literal
+            // sentinel gets posted to the channel.
+            const filtered = streamedOutput.result
+              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+              .trim();
+            if (filtered && filtered !== '[no-reply]') {
+              await deps.sendMessage(task.chat_jid, filtered);
+            }
+            scheduleClose();
+          }
+          if (streamedOutput.usage && streamedOutput.usage.input_tokens > 0) {
+            logTokenUsage({
+              group_folder: task.group_folder,
+              input_tokens: streamedOutput.usage.input_tokens,
+              output_tokens: streamedOutput.usage.output_tokens,
+              cache_read_input_tokens:
+                streamedOutput.usage.cache_read_input_tokens,
+              cache_creation_input_tokens:
+                streamedOutput.usage.cache_creation_input_tokens,
+              cost_usd: streamedOutput.usage.cost_usd,
+              timestamp: new Date().toISOString(),
+            });
+          }
+          if (streamedOutput.status === 'success') {
+            deps.queue.notifyIdle(task.chat_jid);
+            scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
+          }
+          if (streamedOutput.status === 'error') {
+            error = streamedOutput.error || 'Unknown error';
+          }
+        },
+      );
+
+      if (closeTimer) clearTimeout(closeTimer);
+
+      if (output.status === 'error') {
+        error = output.error || 'Unknown error';
+      } else if (output.result) {
+        // Result was already forwarded to the user via the streaming callback above
+        result = output.result;
+      }
+
+      logger.info(
+        { taskId: task.id, durationMs: Date.now() - startTime },
+        'Task completed',
+      );
+    } catch (err) {
+      if (closeTimer) clearTimeout(closeTimer);
+      error = err instanceof Error ? err.message : String(err);
+      logger.error({ taskId: task.id, error }, 'Task failed');
+    }
+
+    const durationMs = Date.now() - startTime;
+
+    logTaskRun({
+      task_id: task.id,
+      run_at: new Date().toISOString(),
+      duration_ms: durationMs,
+      status: error ? 'error' : 'success',
+      result,
+      error,
+    });
+
+    const nextRun = computeNextRun(task);
+    const resultSummary = error
+      ? `Error: ${error}`
+      : result
+        ? result.slice(0, 200)
+        : 'Completed';
+    updateTaskAfterRun(task.id, nextRun, resultSummary);
+  } catch (err) {
+    // Unhandled throw outside the inner container block — record and advance
+    // so the task doesn't hot-loop on the next scheduler tick.
+    const error = err instanceof Error ? err.message : String(err);
     logger.error(
-      { taskId: task.id, groupFolder: task.group_folder },
-      'Group not found for task',
+      { taskId: task.id, err, error },
+      'Unhandled error in runTask — recording and advancing next_run',
     );
     logTaskRun({
       task_id: task.id,
@@ -261,174 +456,18 @@ async function runTask(
       duration_ms: Date.now() - startTime,
       status: 'error',
       result: null,
-      error: `Group not found: ${task.group_folder}`,
+      error,
     });
-    return;
-  }
-
-  // Update tasks snapshot for container to read (filtered by group)
-  const isMain = group.isMain === true;
-  const tasks = getAllTasks();
-  writeTasksSnapshot(
-    task.group_folder,
-    isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      script: t.script,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
-  );
-
-  // Run gate script on the host — skip the container entirely if wakeAgent is false.
-  let gateData: unknown = undefined;
-  if (task.script && task.script.trim()) {
-    logger.info({ taskId: task.id }, 'Running gate script on host');
-    const gateResult = await runGateScript(task.script, task.group_folder);
-
-    if (!gateResult || !gateResult.wakeAgent) {
-      const reason = gateResult ? 'wakeAgent=false' : 'script error/no output';
-      logger.debug({ taskId: task.id, reason }, 'Gate script skipped agent');
-      logTaskRun({
-        task_id: task.id,
-        run_at: new Date().toISOString(),
-        duration_ms: Date.now() - startTime,
-        status: 'success',
-        result: null,
-        error: null,
-      });
-      const nextRun = computeNextRun(task);
-      updateTaskAfterRun(task.id, nextRun, `Gate: ${reason}`);
-      return;
+    // computeNextRun can itself throw on a malformed cron/interval; if so,
+    // fall back to +5 minutes so the task still advances instead of pegging.
+    let nextRun: string | null;
+    try {
+      nextRun = computeNextRun(task);
+    } catch {
+      nextRun = new Date(Date.now() + 5 * 60_000).toISOString();
     }
-
-    logger.info({ taskId: task.id }, 'Gate script passed, spawning agent');
-    gateData = gateResult.data;
+    updateTaskAfterRun(task.id, nextRun, `Error: ${error}`);
   }
-
-  let result: string | null = null;
-  let error: string | null = null;
-
-  // For group context mode, use the group's current session
-  const sessions = deps.getSessions();
-  const sessionId =
-    task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
-
-  // After the task produces a result, close the container promptly.
-  // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
-  // query loop to time out. A short delay handles any final MCP calls.
-  const TASK_CLOSE_DELAY_MS = 10000;
-  let closeTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const scheduleClose = () => {
-    if (closeTimer) return; // already scheduled
-    closeTimer = setTimeout(() => {
-      logger.debug({ taskId: task.id }, 'Closing task container after result');
-      deps.queue.closeStdin(task.chat_jid);
-    }, TASK_CLOSE_DELAY_MS);
-  };
-
-  try {
-    // If the gate script ran on the host, enrich the prompt with its data
-    // and don't pass the script to the container (already resolved).
-    const prompt =
-      gateData !== undefined
-        ? `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(gateData, null, 2)}\n\nInstructions:\n${task.prompt}`
-        : task.prompt;
-
-    const output = await runContainerAgent(
-      group,
-      {
-        prompt,
-        sessionId,
-        groupFolder: task.group_folder,
-        chatJid: task.chat_jid,
-        isMain,
-        isScheduledTask: true,
-        assistantName: ASSISTANT_NAME,
-        script: gateData !== undefined ? undefined : task.script || undefined,
-      },
-      (proc, containerName) =>
-        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
-      async (streamedOutput: ContainerOutput) => {
-        if (streamedOutput.result) {
-          result = streamedOutput.result;
-          // Strip <internal>...</internal> blocks and filter [no-reply] —
-          // scheduled tasks routinely fire during quiet windows where the
-          // agent correctly chooses silence. Without this filter the literal
-          // sentinel gets posted to the channel.
-          const filtered = streamedOutput.result
-            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-            .trim();
-          if (filtered && filtered !== '[no-reply]') {
-            await deps.sendMessage(task.chat_jid, filtered);
-          }
-          scheduleClose();
-        }
-        if (streamedOutput.usage && streamedOutput.usage.input_tokens > 0) {
-          logTokenUsage({
-            group_folder: task.group_folder,
-            input_tokens: streamedOutput.usage.input_tokens,
-            output_tokens: streamedOutput.usage.output_tokens,
-            cache_read_input_tokens:
-              streamedOutput.usage.cache_read_input_tokens,
-            cache_creation_input_tokens:
-              streamedOutput.usage.cache_creation_input_tokens,
-            cost_usd: streamedOutput.usage.cost_usd,
-            timestamp: new Date().toISOString(),
-          });
-        }
-        if (streamedOutput.status === 'success') {
-          deps.queue.notifyIdle(task.chat_jid);
-          scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
-        }
-        if (streamedOutput.status === 'error') {
-          error = streamedOutput.error || 'Unknown error';
-        }
-      },
-    );
-
-    if (closeTimer) clearTimeout(closeTimer);
-
-    if (output.status === 'error') {
-      error = output.error || 'Unknown error';
-    } else if (output.result) {
-      // Result was already forwarded to the user via the streaming callback above
-      result = output.result;
-    }
-
-    logger.info(
-      { taskId: task.id, durationMs: Date.now() - startTime },
-      'Task completed',
-    );
-  } catch (err) {
-    if (closeTimer) clearTimeout(closeTimer);
-    error = err instanceof Error ? err.message : String(err);
-    logger.error({ taskId: task.id, error }, 'Task failed');
-  }
-
-  const durationMs = Date.now() - startTime;
-
-  logTaskRun({
-    task_id: task.id,
-    run_at: new Date().toISOString(),
-    duration_ms: durationMs,
-    status: error ? 'error' : 'success',
-    result,
-    error,
-  });
-
-  const nextRun = computeNextRun(task);
-  const resultSummary = error
-    ? `Error: ${error}`
-    : result
-      ? result.slice(0, 200)
-      : 'Completed';
-  updateTaskAfterRun(task.id, nextRun, resultSummary);
 }
 
 let schedulerRunning = false;
@@ -449,6 +488,16 @@ export function lintScheduledTasks(): void {
     logger.error(
       'Script-gate lint: `node` not found on PATH — all gate scripts will fail. ' +
         'Add the node bin directory to the service environment (e.g. launchd plist PATH).',
+    );
+  }
+
+  // Repair any rows where script was stored as a non-text type (e.g. BLOB).
+  // Leaving them would crash runTask on `.trim()` and hot-loop the task.
+  const fixedIds = castNonTextScripts();
+  for (const id of fixedIds) {
+    logger.warn(
+      { taskId: id },
+      'Script-gate lint: coerced non-text script column to TEXT',
     );
   }
 
@@ -536,3 +585,6 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
 export function _resetSchedulerLoopForTests(): void {
   schedulerRunning = false;
 }
+
+/** @internal - for tests only. */
+export const _runTaskForTests = runTask;

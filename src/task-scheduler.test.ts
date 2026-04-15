@@ -6,6 +6,7 @@ import { GROUPS_DIR } from './config.js';
 import { _initTestDatabase, createTask, getTaskById } from './db.js';
 import {
   _resetSchedulerLoopForTests,
+  _runTaskForTests,
   computeNextRun,
   runGateScript,
   startSchedulerLoop,
@@ -139,6 +140,55 @@ describe('task scheduler', () => {
       const script = 'exit 1';
       const result = await runGateScript(script, 'discord_test-gate');
       expect(result).toBeNull();
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('runTask records error and advances next_run when body throws unexpectedly', async () => {
+    vi.useRealTimers();
+    const testFolder = 'discord_throw-recovery';
+    const testDir = path.join(GROUPS_DIR, testFolder);
+    try {
+      // Originally due a second ago — a hot-loop would keep it in the
+      // past; the outer catch should push it into the future.
+      const originalNextRun = new Date(Date.now() - 1000).toISOString();
+      createTask({
+        id: 'task-throw-recovery',
+        group_folder: testFolder,
+        chat_jid: 'test@g.us',
+        prompt: 'test',
+        schedule_type: 'interval',
+        schedule_value: '60000',
+        context_mode: 'isolated',
+        next_run: originalNextRun,
+        status: 'active',
+        created_at: '2026-01-01T00:00:00.000Z',
+      });
+
+      const task = getTaskById('task-throw-recovery')!;
+      const boom = new Error('synthetic runTask failure');
+      await _runTaskForTests(task, {
+        // Throwing here exercises the outer guard — no prior early-return
+        // path has fired, and no inner try/catch would see this throw.
+        registeredGroups: () => {
+          throw boom;
+        },
+        getSessions: () => ({}),
+        queue: {
+          enqueueTask: vi.fn(),
+          closeStdin: vi.fn(),
+          notifyIdle: vi.fn(),
+        } as any,
+        onProcess: () => {},
+        sendMessage: async () => {},
+      });
+
+      const after = getTaskById('task-throw-recovery')!;
+      expect(after.last_result).toMatch(/^Error: synthetic runTask failure/);
+      // next_run must have advanced into the future so the scheduler
+      // doesn't pick this task up again on the next poll tick.
+      expect(new Date(after.next_run!).getTime()).toBeGreaterThan(Date.now());
     } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
