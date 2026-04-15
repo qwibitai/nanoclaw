@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { generateText, type CoreMessage } from 'ai';
+import { generateText, stepCountIs, type ModelMessage } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { buildIpcTools } from './tool-bridge.js';
@@ -159,7 +159,7 @@ export async function runVercelQuery(
     const sessionDir = '/workspace/group/sessions/vercel';
     const sessionMessages = loadSession(sessionDir, input.sessionId);
 
-    const messages: CoreMessage[] = [
+    const messages: ModelMessage[] = [
       ...sessionMessages.map((m) => ({
         role: m.role as 'user' | 'assistant',
         content: String(m.content),
@@ -175,7 +175,7 @@ export async function runVercelQuery(
       messages,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools: tools as any,
-      maxSteps: 50,
+      stopWhen: stepCountIs(50),
       onStepFinish: ({ toolCalls }) => {
         for (const tc of toolCalls ?? []) {
           const label = formatToolLabel(tc.toolName);
@@ -208,8 +208,8 @@ export async function runVercelQuery(
       result: result.text,
       newSessionId,
       usage: {
-        input_tokens: result.usage?.promptTokens,
-        output_tokens: result.usage?.completionTokens,
+        input_tokens: result.usage?.inputTokens,
+        output_tokens: result.usage?.outputTokens,
       },
       numTurns: result.steps.length,
     };
