@@ -47,6 +47,7 @@ import {
   type ActionCallback,
   type RegisteredAction,
 } from '../api/action.js';
+import { AcpOutboundClient } from '../acp/client.js';
 import { startSchedulerLoop } from '../task-scheduler.js';
 
 import path from 'path';
@@ -99,6 +100,8 @@ export class AgentImpl
   private schedulerHandle: { stop(): void } | null = null;
   private actions = new Map<string, RegisteredAction>();
   readonly actionsHttp = new ActionsHttp(() => this.actions);
+  /** Outbound ACP (Zed Agent Client Protocol) client; null unless opts.acp.peers is set. */
+  acpClient: AcpOutboundClient | null = null;
 
   // ─── Managers ───────────────────────────────────────────────────
   private channelMgr: ChannelManager;
@@ -427,6 +430,9 @@ export class AgentImpl
     this.schedulerHandle?.stop();
     await this.actionsHttp.stop();
     await this.messageMgr.waitForStop();
+    if (this.acpClient) {
+      await this.acpClient.shutdown();
+    }
     await this.queue.shutdown(10000);
     for (const [, channel] of this.channels) {
       await channel.disconnect();
@@ -472,6 +478,18 @@ export class AgentImpl
         });
       },
     });
+
+    // Outbound ACP client — only constructed if peers are configured.
+    // Registers five `acp_*` HTTP actions that the in-VM model reaches via
+    // the existing search_actions / call_action MCP tools.
+    const acpPeers = this._options?.acp?.peers ?? [];
+    if (acpPeers.length > 0) {
+      this.acpClient = new AcpOutboundClient({
+        peers: acpPeers,
+        groupsDir: this.config.groupsDir,
+      });
+      this.acpClient.registerActions(this);
+    }
 
     this.ipcHandle = startIpcWatcher({
       dataDir: this.config.dataDir,

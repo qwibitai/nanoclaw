@@ -82,6 +82,7 @@ export function createSchema(
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
