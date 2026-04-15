@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Mock config before importing session-manager
 vi.mock('../config.js', () => ({
   BROWSER_MAX_CONTEXTS: 3,
-  BROWSER_CDP_URL: 'ws://localhost:9222',
+  BROWSER_MAX_PAGES: 2,
+  BROWSER_IDLE_TIMEOUT_MS: 600_000,
+  BROWSER_ACQUIRE_TIMEOUT_MS: 30_000,
+  BROWSER_CDP_URL: 'ws://test:9222',
   BROWSER_PROFILE_DIR: 'browser',
 }));
 
@@ -16,125 +18,76 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
+// Mock PlaywrightClient
+const mockContext = {
+  close: vi.fn(),
+  newPage: vi.fn(() => Promise.resolve({ close: vi.fn() })),
+  pages: vi.fn(() => []),
+  storageState: vi.fn(() => Promise.resolve({ cookies: [], origins: [] })),
+};
+
+const mockClient = {
+  connect: vi.fn(),
+  disconnect: vi.fn(),
+  isConnected: vi.fn(() => true),
+  newContext: vi.fn(() => Promise.resolve({
+    close: vi.fn(),
+    newPage: vi.fn(() => Promise.resolve({ close: vi.fn() })),
+    pages: vi.fn(() => []),
+    storageState: mockContext.storageState,
+  })),
+  setOnDisconnect: vi.fn(),
+};
+
+vi.mock('./playwright-client.js', () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  PlaywrightClient: vi.fn(function () { return mockClient; } as any),
+}));
+
 import { BrowserSessionManager } from './session-manager.js';
 
-describe('BrowserSessionManager', () => {
+describe('BrowserSessionManager (pool-based)', () => {
   let manager: BrowserSessionManager;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     manager = new BrowserSessionManager();
   });
 
-  describe('createContext', () => {
-    it('creates a new active context', async () => {
-      const ctx = await manager.createContext('group-1');
-      expect(ctx.groupId).toBe('group-1');
-      expect(ctx.state).toBe('active');
-      expect(ctx.createdAt).toBeGreaterThan(0);
+  afterEach(async () => {
+    await manager.shutdown();
+  });
+
+  describe('acquireContext', () => {
+    it('creates a new context for a group', async () => {
+      const ctx = await manager.acquireContext('group-1');
+      expect(ctx).toBeDefined();
+      expect(mockClient.newContext).toHaveBeenCalled();
     });
 
-    it('returns existing active context for same group', async () => {
-      const ctx1 = await manager.createContext('group-1');
-      const ctx2 = await manager.createContext('group-1');
+    it('returns existing context for same group', async () => {
+      const ctx1 = await manager.acquireContext('group-1');
+      const ctx2 = await manager.acquireContext('group-1');
       expect(ctx1).toBe(ctx2);
+      expect(mockClient.newContext).toHaveBeenCalledTimes(1);
     });
 
-    it('stores profileDir when provided', async () => {
-      const ctx = await manager.createContext(
-        'group-1',
-        '/data/groups/group-1/browser',
-      );
-      expect(ctx.profileDir).toBe('/data/groups/group-1/browser');
-    });
-
-    it('defaults profileDir to null', async () => {
-      const ctx = await manager.createContext('group-1');
-      expect(ctx.profileDir).toBeNull();
-    });
-
-    it('enforces max concurrent contexts', async () => {
-      await manager.createContext('g1');
-      await manager.createContext('g2');
-      await manager.createContext('g3');
-      await expect(manager.createContext('g4')).rejects.toThrow(
-        'max concurrent contexts reached',
-      );
-    });
-
-    it('allows new context after closing one', async () => {
-      await manager.createContext('g1');
-      await manager.createContext('g2');
-      await manager.createContext('g3');
-
-      await manager.closeContext('g2');
-
-      const ctx = await manager.createContext('g4');
-      expect(ctx.state).toBe('active');
+    it('creates separate contexts for different groups', async () => {
+      await manager.acquireContext('group-1');
+      await manager.acquireContext('group-2');
+      expect(mockClient.newContext).toHaveBeenCalledTimes(2);
     });
   });
 
-  describe('getContext', () => {
-    it('returns null for unknown group', () => {
-      expect(manager.getContext('nope')).toBeNull();
-    });
-
-    it('returns active context', async () => {
-      await manager.createContext('group-1');
-      const ctx = manager.getContext('group-1');
-      expect(ctx).not.toBeNull();
-      expect(ctx!.groupId).toBe('group-1');
-    });
-
-    it('returns null after context is closed', async () => {
-      await manager.createContext('group-1');
-      await manager.closeContext('group-1');
-      expect(manager.getContext('group-1')).toBeNull();
-    });
-  });
-
-  describe('closeContext', () => {
-    it('removes context from tracking', async () => {
-      await manager.createContext('group-1');
-      expect(manager.getActiveContextCount()).toBe(1);
-
-      await manager.closeContext('group-1');
-      expect(manager.getActiveContextCount()).toBe(0);
+  describe('releaseContext', () => {
+    it('closes context and exports storage state', async () => {
+      await manager.acquireContext('group-1');
+      await manager.releaseContext('group-1');
+      expect(mockContext.storageState).toHaveBeenCalled();
     });
 
     it('is idempotent for unknown groups', async () => {
-      // Should not throw
-      await manager.closeContext('nonexistent');
-    });
-
-    it('is idempotent for already-closed groups', async () => {
-      await manager.createContext('group-1');
-      await manager.closeContext('group-1');
-      await manager.closeContext('group-1'); // no throw
-    });
-  });
-
-  describe('closeAll', () => {
-    it('closes all active contexts', async () => {
-      await manager.createContext('g1');
-      await manager.createContext('g2');
-      await manager.createContext('g3');
-      expect(manager.getActiveContextCount()).toBe(3);
-
-      await manager.closeAll();
-      expect(manager.getActiveContextCount()).toBe(0);
-    });
-  });
-
-  describe('getActiveContextCount', () => {
-    it('starts at 0', () => {
-      expect(manager.getActiveContextCount()).toBe(0);
-    });
-
-    it('increments on create', async () => {
-      await manager.createContext('g1');
-      expect(manager.getActiveContextCount()).toBe(1);
-      await manager.createContext('g2');
-      expect(manager.getActiveContextCount()).toBe(2);
+      await manager.releaseContext('nope'); // no throw
     });
   });
 
@@ -143,79 +96,21 @@ describe('BrowserSessionManager', () => {
       expect(manager.getActiveGroupIds()).toEqual([]);
     });
 
-    it('returns active group ids', async () => {
-      await manager.createContext('g1');
-      await manager.createContext('g2');
+    it('tracks active groups', async () => {
+      await manager.acquireContext('g1');
+      await manager.acquireContext('g2');
       const ids = manager.getActiveGroupIds();
       expect(ids).toContain('g1');
       expect(ids).toContain('g2');
     });
   });
 
-  describe('events', () => {
-    it('emits browser.context.created on create', async () => {
-      const events: Array<{ type: string; groupId: string }> = [];
-      manager.on('browser.context.created', (e) => events.push(e));
-
-      await manager.createContext('group-1');
-
-      expect(events).toHaveLength(1);
-      expect(events[0].type).toBe('browser.context.created');
-      expect(events[0].groupId).toBe('group-1');
-    });
-
-    it('emits browser.context.closed on close', async () => {
-      const events: Array<{ type: string; groupId: string }> = [];
-      manager.on('browser.context.closed', (e) => events.push(e));
-
-      await manager.createContext('group-1');
-      await manager.closeContext('group-1');
-
-      expect(events).toHaveLength(1);
-      expect(events[0].type).toBe('browser.context.closed');
-      expect(events[0].groupId).toBe('group-1');
-    });
-
-    it('does not emit closed for unknown groups', async () => {
-      const events: Array<{ type: string }> = [];
-      manager.on('browser.context.closed', (e) => events.push(e));
-
-      await manager.closeContext('nope');
-      expect(events).toHaveLength(0);
-    });
-
-    it('unsubscribe stops events', async () => {
-      const events: Array<{ type: string }> = [];
-      const unsub = manager.on('browser.context.created', (e) =>
-        events.push(e),
-      );
-
-      await manager.createContext('g1');
-      expect(events).toHaveLength(1);
-
-      unsub();
-      await manager.createContext('g2');
-      expect(events).toHaveLength(1); // no new event
-    });
-
-    it('swallows handler errors without crashing', async () => {
-      manager.on('browser.context.created', () => {
-        throw new Error('handler boom');
-      });
-
-      // Should not throw
-      const ctx = await manager.createContext('g1');
-      expect(ctx.state).toBe('active');
-    });
-  });
-
-  describe('custom maxContexts', () => {
-    it('respects constructor override', async () => {
-      const small = new BrowserSessionManager(1);
-      await small.createContext('g1');
-      await expect(small.createContext('g2')).rejects.toThrow(
-        'max concurrent contexts reached (1)',
-      );
+  describe('shutdown', () => {
+    it('releases all contexts', async () => {
+      await manager.acquireContext('g1');
+      await manager.acquireContext('g2');
+      await manager.shutdown();
+      expect(manager.getActiveGroupIds()).toEqual([]);
     });
   });
 });

@@ -1,22 +1,12 @@
-/**
- * Browser Session Manager
- *
- * Manages per-group browser context lifecycle as a state machine.
- * For v1, this tracks state only — actual CDP connections happen
- * when the browser sidecar infrastructure is running.
- */
+import { createPool, type Pool } from 'generic-pool';
+import type { BrowserContext } from 'playwright-core';
+import { PlaywrightClient } from './playwright-client.js';
+import {
+  BROWSER_MAX_CONTEXTS,
+  BROWSER_IDLE_TIMEOUT_MS,
+  BROWSER_ACQUIRE_TIMEOUT_MS,
+} from '../config.js';
 import { logger } from '../logger.js';
-import { BROWSER_MAX_CONTEXTS } from '../config.js';
-
-export type ContextState = 'creating' | 'active' | 'closing' | 'closed';
-
-export interface BrowserContext {
-  groupId: string;
-  state: ContextState;
-  createdAt: number;
-  /** Profile directory path for this group's browser data */
-  profileDir: string | null;
-}
 
 export interface BrowserContextEvent {
   type: 'browser.context.created' | 'browser.context.closed';
@@ -27,140 +17,108 @@ export interface BrowserContextEvent {
 type EventHandler = (event: BrowserContextEvent) => void;
 
 export class BrowserSessionManager {
-  private contexts = new Map<string, BrowserContext>();
+  private pool: Pool<BrowserContext>;
+  private client: PlaywrightClient;
+  private groupContexts = new Map<string, BrowserContext>();
   private handlers = new Map<string, EventHandler[]>();
-  private maxContexts: number;
 
-  constructor(maxContexts?: number) {
-    this.maxContexts = maxContexts ?? BROWSER_MAX_CONTEXTS;
+  constructor(client?: PlaywrightClient) {
+    this.client = client ?? new PlaywrightClient();
+
+    this.pool = createPool<BrowserContext>(
+      {
+        create: async () => this.client.newContext(),
+        destroy: async (ctx) => {
+          try { await ctx.close(); } catch { /* already closed */ }
+        },
+        validate: async (ctx) => {
+          try {
+            return ctx.pages !== undefined;
+          } catch {
+            return false;
+          }
+        },
+      },
+      {
+        max: BROWSER_MAX_CONTEXTS,
+        min: 0,
+        idleTimeoutMillis: BROWSER_IDLE_TIMEOUT_MS,
+        acquireTimeoutMillis: BROWSER_ACQUIRE_TIMEOUT_MS,
+        evictionRunIntervalMillis: 60_000,
+        testOnBorrow: true,
+      },
+    );
+
+    this.client.setOnDisconnect(() => this.handleDisconnect());
   }
 
-  /**
-   * Create a new browser context for a group.
-   * Throws if max concurrent contexts would be exceeded.
-   */
-  async createContext(
-    groupId: string,
-    profileDir?: string,
-  ): Promise<BrowserContext> {
-    // Check if context already exists
-    const existing = this.contexts.get(groupId);
-    if (existing && existing.state === 'active') {
-      return existing;
-    }
+  async acquireContext(groupId: string): Promise<BrowserContext> {
+    const existing = this.groupContexts.get(groupId);
+    if (existing) return existing;
 
-    // Check capacity
-    const activeCount = this.getActiveContextCount();
-    if (activeCount >= this.maxContexts) {
-      throw new Error(
-        `Cannot create browser context for "${groupId}": ` +
-          `max concurrent contexts reached (${this.maxContexts})`,
-      );
-    }
+    const ctx = await this.pool.acquire();
+    this.groupContexts.set(groupId, ctx);
 
-    const context: BrowserContext = {
-      groupId,
-      state: 'creating',
-      createdAt: Date.now(),
-      profileDir: profileDir ?? null,
-    };
-
-    this.contexts.set(groupId, context);
-
-    // In v1, transition directly to active (no real CDP connection).
-    // When sidecar is running, this is where we'd connect via CDP.
-    context.state = 'active';
-
-    logger.info({ groupId }, 'Browser context created');
+    logger.info({ groupId }, 'Browser context acquired');
     this.emit({
       type: 'browser.context.created',
       groupId,
       timestamp: Date.now(),
     });
 
-    return context;
-  }
-
-  /**
-   * Get an existing active context for a group.
-   */
-  getContext(groupId: string): BrowserContext | null {
-    const ctx = this.contexts.get(groupId);
-    if (!ctx || ctx.state !== 'active') return null;
     return ctx;
   }
 
-  /**
-   * Close and clean up a browser context.
-   */
-  async closeContext(groupId: string): Promise<void> {
-    const ctx = this.contexts.get(groupId);
-    if (!ctx) return;
-    if (ctx.state === 'closed' || ctx.state === 'closing') return;
+  async releaseContext(groupId: string): Promise<object | null> {
+    const ctx = this.groupContexts.get(groupId);
+    if (!ctx) return null;
 
-    ctx.state = 'closing';
+    let storageState: object | null = null;
+    try {
+      storageState = await ctx.storageState();
+    } catch (err) {
+      logger.warn({ groupId, err }, 'Failed to export storage state');
+    }
 
-    // In v1, no real CDP cleanup needed.
-    // When sidecar is running, this is where we'd close the CDP context.
-    ctx.state = 'closed';
-    this.contexts.delete(groupId);
+    this.groupContexts.delete(groupId);
+    await this.pool.release(ctx);
 
-    logger.info({ groupId }, 'Browser context closed');
+    logger.info({ groupId }, 'Browser context released');
     this.emit({
       type: 'browser.context.closed',
       groupId,
       timestamp: Date.now(),
     });
+
+    return storageState;
   }
 
-  /**
-   * Close all active contexts.
-   */
-  async closeAll(): Promise<void> {
-    const groupIds = [...this.contexts.keys()];
-    for (const groupId of groupIds) {
-      await this.closeContext(groupId);
-    }
-  }
-
-  /**
-   * Number of active (non-closed) browser contexts.
-   */
-  getActiveContextCount(): number {
-    let count = 0;
-    for (const ctx of this.contexts.values()) {
-      if (ctx.state === 'active' || ctx.state === 'creating') {
-        count++;
-      }
-    }
-    return count;
-  }
-
-  /**
-   * List all active context group IDs.
-   */
   getActiveGroupIds(): string[] {
-    const ids: string[] = [];
-    for (const ctx of this.contexts.values()) {
-      if (ctx.state === 'active') {
-        ids.push(ctx.groupId);
-      }
-    }
-    return ids;
+    return [...this.groupContexts.keys()];
   }
 
-  /**
-   * Subscribe to browser context events.
-   */
-  on(
-    eventType: BrowserContextEvent['type'],
-    handler: EventHandler,
-  ): () => void {
+  getActiveContextCount(): number {
+    return this.groupContexts.size;
+  }
+
+  getContext(groupId: string): BrowserContext | null {
+    return this.groupContexts.get(groupId) ?? null;
+  }
+
+  async shutdown(): Promise<void> {
+    const groupIds = [...this.groupContexts.keys()];
+    for (const groupId of groupIds) {
+      await this.releaseContext(groupId);
+    }
+    await this.pool.drain();
+    await this.pool.clear();
+    await this.client.disconnect();
+  }
+
+  on(eventType: BrowserContextEvent['type'], handler: EventHandler): () => void {
     const handlers = this.handlers.get(eventType) || [];
     handlers.push(handler);
     this.handlers.set(eventType, handlers);
-
-    // Return unsubscribe function
     return () => {
       const current = this.handlers.get(eventType) || [];
       const idx = current.indexOf(handler);
@@ -174,11 +132,16 @@ export class BrowserSessionManager {
       try {
         handler(event);
       } catch (err) {
-        logger.error(
-          { error: err, eventType: event.type },
-          'Browser context event handler threw',
-        );
+        logger.error({ error: err, eventType: event.type }, 'Browser event handler threw');
       }
     }
+  }
+
+  private handleDisconnect(): void {
+    logger.warn(
+      { activeContexts: this.groupContexts.size },
+      'Browser sidecar disconnected — invalidating all contexts',
+    );
+    this.groupContexts.clear();
   }
 }
