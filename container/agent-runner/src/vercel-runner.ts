@@ -5,6 +5,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { buildIpcTools } from './tool-bridge.js';
 import { loadSession, saveSession } from './session-store.js';
+import { buildMcpServerConfigs, connectMcpServers } from './mcp-bridge.js';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
@@ -157,6 +158,21 @@ export async function runVercelQuery(
       };
     }
 
+    // Connect MCP servers for this session
+    const mcpConfigs = buildMcpServerConfigs({
+      chatJid: input.chatJid,
+      groupFolder: input.groupFolder,
+      isMain: input.isMain,
+    });
+    const mcpConnection = await connectMcpServers(mcpConfigs);
+
+    // MCP tools (already in AI SDK format from createMCPClient)
+    for (const [name, def] of Object.entries(mcpConnection.tools)) {
+      tools[name] = def;
+    }
+
+    log(`Tools registered: ${Object.keys(tools).length} (${Object.keys(ipcTools).length} IPC + ${Object.keys(mcpConnection.tools).length} MCP)`);
+
     const sessionDir = '/workspace/group/sessions/vercel';
     const sessionMessages = loadSession(sessionDir, input.sessionId);
 
@@ -192,6 +208,9 @@ export async function runVercelQuery(
       input.sessionId,
       allMessages as unknown as import('./session-store.js').SessionMessage[],
     );
+
+    // Clean up MCP server connections
+    await mcpConnection.cleanup();
 
     return {
       status: 'success',
