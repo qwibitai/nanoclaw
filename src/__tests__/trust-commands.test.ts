@@ -75,6 +75,12 @@ describe('parseTrustCommand', () => {
       type: 'what_did_i_miss',
     });
   });
+
+  it('parses "reset learning"', () => {
+    expect(parseTrustCommand('reset learning')).toEqual({
+      type: 'reset_learning',
+    });
+  });
 });
 
 describe('executeTrustCommand', () => {
@@ -135,6 +141,11 @@ describe('executeTrustCommand', () => {
   it('what_did_i_miss returns on-demand digest from tracked_items', () => {
     const result = executeTrustCommand({ type: 'what_did_i_miss' }, 'group1');
     expect(result).toContain('All clear');
+  });
+
+  it('reset_learning clears all adjustments', () => {
+    const result = executeTrustCommand({ type: 'reset_learning' }, 'group1');
+    expect(result).toContain('Classification learning reset');
   });
 
   it('what_did_i_miss shows pending items', () => {

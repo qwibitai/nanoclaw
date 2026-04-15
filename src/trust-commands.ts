@@ -10,6 +10,7 @@ import {
   setTrustAutoExecute,
 } from './db.js';
 import { generateOnDemandDigest } from './digest-engine.js';
+import { resetAdjustments } from './classification-adjustments.js';
 import type { ActionClass } from './trust-engine.js';
 
 export type TrustCommand =
@@ -17,7 +18,8 @@ export type TrustCommand =
   | { type: 'never_auto'; actionClass: ActionClass }
   | { type: 'reset' }
   | { type: 'what_did_i_miss' }
-  | { type: 'dismiss_item'; itemId: string };
+  | { type: 'dismiss_item'; itemId: string }
+  | { type: 'reset_learning' };
 
 /** Parse a trigger-stripped message into a trust command, or null. */
 export function parseTrustCommand(text: string): TrustCommand | null {
@@ -47,6 +49,10 @@ export function parseTrustCommand(text: string): TrustCommand | null {
     /^what['']?s\s+new/i.test(lower)
   ) {
     return { type: 'what_did_i_miss' };
+  }
+
+  if (lower === 'reset learning') {
+    return { type: 'reset_learning' };
   }
 
   const dismissMatch = lower.match(/^dismiss\s+(.+)$/);
@@ -108,6 +114,11 @@ export function executeTrustCommand(
     case 'dismiss_item': {
       markProcessedItemDismissed(command.itemId);
       return `✅ Dismissed: \`${command.itemId}\``;
+    }
+
+    case 'reset_learning': {
+      resetAdjustments();
+      return '🔄 Classification learning reset. All adjustments cleared — back to default rules.';
     }
   }
 }
