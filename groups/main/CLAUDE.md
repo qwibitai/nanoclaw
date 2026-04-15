@@ -292,6 +292,56 @@ You manage a daily news briefing system. Users can ask you to customize it conve
 
 **After any change**, confirm what was updated and mention the change takes effect in the next briefing.
 
+### Regenerating Today's Briefing
+
+When asked to "regenerate", "run now", or "generate today's briefing", follow these steps **in order** — do not skip any:
+
+**Step 1 — Get the research plan** (this clears stale results AND outputs exactly what to search for):
+```bash
+python /workspace/group/news-briefing-poc/run_live_briefing.py
+```
+Read the output carefully. It lists every category, every query to run, and every priority source to fetch.
+
+**Step 2 — Execute EVERY search in the plan** (⚠️ this step is mandatory — do NOT skip):
+For each category in the output:
+1. Run the `🌐 Broad sweep` query via WebSearch
+2. Run the `⚡ Major events` query via WebSearch
+3. Run each `🔍 Topic` query via WebSearch
+4. If `📌 Priority sources` are listed, WebFetch each one to check for breaking headlines
+
+Then save ONE result file per category to the path shown in the plan:
+`/workspace/group/news-briefing-poc/agents/results/result_research_{category_id}_{YYYYMMDD}.json`
+
+Result file format:
+```json
+{
+  "category": "category_id",
+  "research_date": "YYYY-MM-DD",
+  "articles": [
+    {
+      "title": "headline",
+      "summary": "2-3 sentence summary",
+      "impact": "why it matters",
+      "url": "source url",
+      "published": "YYYY-MM-DD HH:MM",
+      "source": "Publication name",
+      "relevance_score": 8
+    }
+  ],
+  "key_trends": [],
+  "notable_absence": "",
+  "situation_updates": []
+}
+```
+
+**Step 3 — Verify result files exist, then compile**:
+```bash
+ls /workspace/group/news-briefing-poc/agents/results/result_*.json
+python /workspace/group/news-briefing-poc/main.py
+```
+
+⚠️ Do NOT run main.py before all result files are saved — it will produce 0 articles.
+
 ---
 
 ## Global Memory
