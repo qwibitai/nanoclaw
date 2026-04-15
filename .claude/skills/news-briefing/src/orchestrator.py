@@ -47,9 +47,11 @@ class NewsBriefingOrchestrator:
         memory = json.load(open(memory_file, 'r'))
 
         # Migrate seen_articles from old list format to {hash: date} dict
+        # Use last_briefing_date so same-day articles aren't incorrectly filtered
         if isinstance(memory.get("seen_articles"), list):
-            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-            memory["seen_articles"] = {h: yesterday for h in memory["seen_articles"]}
+            last_date = memory.get("last_briefing_date") or \
+                (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            memory["seen_articles"] = {h: last_date for h in memory["seen_articles"]}
 
         if "ongoing_situations" not in memory:
             memory["ongoing_situations"] = {}
@@ -112,46 +114,57 @@ class NewsBriefingOrchestrator:
         today = datetime.now().strftime("%Y-%m-%d")
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-        prompt = f"""You are a specialized news research agent focused on: {category.replace('_', ' ').title()}
+        category_label = category.replace('_', ' ').title()
 
-TODAY'S DATE: {today}
-Your mission: Find the most important developments from the LAST 24 HOURS only (published {yesterday} or {today}).
+        prompt = f"""You are a news research agent covering: {category_label}
 
-Topics to research:
+TODAY: {today}. Only include articles published on {today} or {yesterday}.
+
+YOUR PRIMARY GOAL: Find the most IMPORTANT and NEWSWORTHY stories in {category_label} today.
+Do NOT just match the topic list below — if something major is happening that isn't on the list, include it.
+Think like a front-page editor: what would a reader NEED to know today in this space?
+
+RESEARCH STRATEGY (do these in order):
+1. BROAD SWEEP FIRST: Search "top {category_label.lower()} news {today}" and "breaking {category_label.lower()} news today"
+   → Scan results for anything significant you wouldn't want to miss
+2. MAJOR EVENTS: Search "major {category_label.lower()} developments {today}"
+   → Catch important stories outside the predefined topics
+3. TOPIC DEEP DIVES: For each topic below, run a targeted search to find the best recent article
 """
         for i, topic in enumerate(topics, 1):
-            prompt += f"{i}. {topic}\n"
+            prompt += f"   {i}. {topic}\n"
 
         if sources:
             prompt += f"""
-PRIORITY SOURCES — check these specific sites first using WebFetch:
+4. PRIORITY SOURCES — WebFetch these first, they often break news before it's indexed:
 """
             for src in sources:
-                prompt += f"- https://{src}\n"
-            prompt += "\nAlso search broadly beyond these sources.\n"
+                prompt += f"   - https://{src}\n"
 
         style = category_data.get("style_instructions", "").strip()
         if style:
             prompt += f"""
-EDITORIAL FOCUS FOR THIS CATEGORY:
+EDITORIAL FOCUS:
 {style}
-
-Apply this focus when selecting which articles to include and how to summarize them.
+Apply this when deciding what to include and how to frame summaries.
 """
 
         prompt += f"""
-CRITICAL DATE REQUIREMENTS:
-- ONLY include articles published on {today} or {yesterday}
-- Use search queries with date filters: e.g., WebSearch("{topics[0] if topics else 'news'} after:{yesterday}")
-- Reject any article that doesn't have a publication date of {yesterday} or {today}
-- If you can't find enough recent articles, note the shortage — do NOT pad with older stories
+SELECTION CRITERIA (importance-ranked):
+- Breaking or developing stories (highest priority, even if off-topic)
+- Stories with broad real-world impact
+- Stories that would surprise or inform a well-read person
+- Topic matches (only if nothing more important found)
+
+DATE FILTER: ONLY articles from {today} or {yesterday}. Reject anything older.
+If you can't find 5 recent articles, report fewer — do NOT pad with stale content.
 
 Requirements per article:
-- Clear, concise headline
-- 2-3 sentence summary of what happened
+- Clear headline
+- 2-3 sentence summary
 - Why it matters / impact
 - Source URL
-- Publication timestamp (must be {yesterday} or {today})
+- Publication date ({yesterday} or {today})
 - Relevance score 1-10
 """
 
