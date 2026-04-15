@@ -43,20 +43,68 @@ function makeRequest(
   });
 }
 
+function makeRequestUntilDone(
+  port: number,
+  options: http.RequestOptions,
+  body = '',
+): Promise<{
+  statusCode: number;
+  body: string;
+  terminalEvent: 'end' | 'close' | 'aborted';
+}> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { ...options, hostname: '127.0.0.1', port },
+      (res) => {
+        const chunks: Buffer[] = [];
+        let settled = false;
+        const finish = (terminalEvent: 'end' | 'close' | 'aborted') => {
+          if (settled) return;
+          settled = true;
+          resolve({
+            statusCode: res.statusCode!,
+            body: Buffer.concat(chunks).toString(),
+            terminalEvent,
+          });
+        };
+
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => finish('end'));
+        res.on('close', () => finish('close'));
+        res.on('aborted', () => finish('aborted'));
+      },
+    );
+
+    req.setTimeout(2_000, () => {
+      req.destroy(new Error('request timeout'));
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 describe('credential-proxy', () => {
   let proxyServer: http.Server;
   let upstreamServer: http.Server;
   let proxyPort: number;
   let upstreamPort: number;
   let lastUpstreamHeaders: http.IncomingHttpHeaders;
+  let upstreamHandler: (
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ) => void;
 
   beforeEach(async () => {
     lastUpstreamHeaders = {};
-
-    upstreamServer = http.createServer((req, res) => {
+    upstreamHandler = (req, res) => {
       lastUpstreamHeaders = { ...req.headers };
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
+    };
+
+    upstreamServer = http.createServer((req, res) => {
+      upstreamHandler(req, res);
     });
     await new Promise<void>((resolve) =>
       upstreamServer.listen(0, '127.0.0.1', resolve),
@@ -188,5 +236,51 @@ describe('credential-proxy', () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe('Bad Gateway');
+  });
+
+  it('handles upstream error after headers are sent without hanging downstream', async () => {
+    proxyPort = await startProxy({ ANTHROPIC_API_KEY: 'sk-ant-real-key' });
+
+    upstreamHandler = (req, res) => {
+      lastUpstreamHeaders = { ...req.headers };
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.write('partial');
+      setImmediate(() => {
+        res.socket?.destroy(new Error('upstream disconnected after headers'));
+      });
+    };
+
+    const brokenResponse = await makeRequestUntilDone(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: { 'content-type': 'application/json' },
+      },
+      '{}',
+    );
+
+    expect(brokenResponse.statusCode).toBe(200);
+    expect(['aborted', 'close', 'end']).toContain(brokenResponse.terminalEvent);
+    expect(proxyServer.listening).toBe(true);
+
+    upstreamHandler = (req, res) => {
+      lastUpstreamHeaders = { ...req.headers };
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    };
+
+    const recoveryResponse = await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: { 'content-type': 'application/json' },
+      },
+      '{}',
+    );
+
+    expect(recoveryResponse.statusCode).toBe(200);
+    expect(recoveryResponse.body).toContain('"ok":true');
   });
 });
