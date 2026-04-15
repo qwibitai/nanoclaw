@@ -119,11 +119,6 @@ export function startCredentialProxy(
           }
         });
 
-        // クライアント（コンテナ）が切断したら upstream も中止
-        req.on('close', () => {
-          if (!upstream.destroyed) upstream.destroy();
-        });
-
         upstream.write(body);
         upstream.end();
       });
