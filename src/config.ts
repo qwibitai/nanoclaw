@@ -189,6 +189,10 @@ export const CALENDAR_HOLD_BUFFER_MS = parseInt(
   process.env.CALENDAR_HOLD_BUFFER_MS || '300000',
   10,
 );
+export const DELEGATION_GUARDRAIL_COUNT = parseInt(
+  process.env.DELEGATION_GUARDRAIL_COUNT || '10',
+  10,
+);
 
 export interface QuietHoursConfig {
   enabled: boolean;

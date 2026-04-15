@@ -289,6 +289,14 @@ function createSchema(database: Database.Database): void {
       updated_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_class_beh_source ON classification_behaviors(source, sender_pattern);
+
+    CREATE TABLE IF NOT EXISTS delegation_counters (
+      group_name TEXT NOT NULL,
+      action_class TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      last_delegated_at INTEGER,
+      PRIMARY KEY (group_name, action_class)
+    );
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
