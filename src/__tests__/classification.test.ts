@@ -1,14 +1,28 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { _initTestDatabase, _closeDatabase } from '../db.js';
+import { recordBehavior } from '../classification-adjustments.js';
 
 vi.mock('../logger.js', () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
 }));
 vi.mock('../config.js', () => ({
   TIMEZONE: 'America/Los_Angeles',
   CHAT_INTERFACE_CONFIG: {
     urgencyKeywords: ['urgent', 'deadline', 'asap', 'blocking'],
     vipList: ['ceo@company.com'],
-    quietHours: { enabled: false, start: '22:00', end: '07:00', weekendMode: false, escalateOverride: true },
+    quietHours: {
+      enabled: false,
+      start: '22:00',
+      end: '07:00',
+      weekendMode: false,
+      escalateOverride: true,
+    },
     holdPushDuringMeetings: false,
   },
 }));
@@ -125,5 +139,51 @@ describe('classify', () => {
     expect(result.reason).toHaveProperty('superpilot', 'needs-attention');
     expect(result.reason).toHaveProperty('trust', 'escalate');
     expect(result.reason).toHaveProperty('final', 'push');
+  });
+});
+
+describe('classify with learning adjustments', () => {
+  const baseInput: ClassificationInput = {
+    source: 'gmail',
+    sourceId: 'thread_1',
+    superpilotLabel: null,
+    trustTier: null,
+    senderPattern: 'user@example.com',
+    title: 'Hello',
+    summary: 'A message',
+    userActed: false,
+    metadata: {},
+  };
+
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('demotes a push item to digest when learning says demote', () => {
+    for (let i = 0; i < 3; i++) {
+      recordBehavior('gmail', 'spammy@co.com', 'push', 'dismiss');
+    }
+
+    const result = classify({
+      ...baseInput,
+      senderPattern: 'spammy@co.com',
+      superpilotLabel: 'needs-attention',
+      trustTier: 'propose',
+    });
+    expect(result.decision).toBe('digest');
+    expect(result.reason.learning).toBe('demote');
+  });
+
+  it('promotes a digest item to push when learning says promote', () => {
+    for (let i = 0; i < 3; i++) {
+      recordBehavior('gmail', 'important@co.com', 'digest', 'immediate_action');
+    }
+
+    const result = classify({
+      ...baseInput,
+      senderPattern: 'important@co.com',
+      superpilotLabel: 'fyi',
+    });
+    expect(result.decision).toBe('push');
+    expect(result.reason.learning).toBe('promote');
   });
 });
