@@ -554,9 +554,22 @@ async function runAgent(
         { group: group.name, peakInputTokens },
         'Session exceeds compaction threshold, summarizing',
       );
-      const compacted = await compactSession(group.folder, chatJid);
-      if (compacted) {
+      const result = await compactSession(group.folder, chatJid);
+      if (result.compacted) {
         delete sessions[group.folder];
+
+        // Notify #overmind about the compaction
+        const overmindJid = Object.entries(registeredGroups).find(
+          ([, g]) => g.folder === 'discord_overmind',
+        )?.[0];
+        if (overmindJid) {
+          const ch = findChannel(channels, overmindJid);
+          const tokensK = Math.round(peakInputTokens / 1000);
+          const msg = `📦 **Compaction** — \`${group.folder}\` hit ${tokensK}K tokens → session reset (${result.summaryWords}-word summary saved)`;
+          ch?.sendMessage(overmindJid, msg).catch((err) =>
+            logger.warn({ err }, 'Failed to send compaction notification'),
+          );
+        }
       }
     }
 

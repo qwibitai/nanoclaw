@@ -29,17 +29,22 @@ export function shouldCompact(inputTokens: number): boolean {
   return inputTokens >= COMPACT_TOKEN_THRESHOLD;
 }
 
+export interface CompactionResult {
+  compacted: boolean;
+  summaryWords?: number;
+}
+
 /**
  * Run compaction: summarize recent messages, write summary file, delete session.
  */
 export async function compactSession(
   groupFolder: string,
   chatJid: string,
-): Promise<boolean> {
+): Promise<CompactionResult> {
   const messages = getRecentMessages(chatJid, 60);
   if (messages.length === 0) {
     logger.warn({ groupFolder }, 'Compaction: no messages to summarize');
-    return false;
+    return { compacted: false };
   }
 
   // Build a conversation transcript for the summarizer
@@ -86,14 +91,14 @@ Summary:`;
         { groupFolder, status: res.status },
         'Compaction: Ollama request failed',
       );
-      return false;
+      return { compacted: false };
     }
 
     const data = (await res.json()) as { response?: string };
     const summary = data.response?.trim();
     if (!summary) {
       logger.warn({ groupFolder }, 'Compaction: empty summary returned');
-      return false;
+      return { compacted: false };
     }
 
     // Write summary to group directory
@@ -114,12 +119,15 @@ Summary:`;
       'Compaction: session summarized and reset',
     );
 
-    return true;
+    return {
+      compacted: true,
+      summaryWords: summary.split(/\s+/).length,
+    };
   } catch (err) {
     logger.error(
       { groupFolder, err: err instanceof Error ? err.message : String(err) },
       'Compaction: failed',
     );
-    return false;
+    return { compacted: false };
   }
 }
