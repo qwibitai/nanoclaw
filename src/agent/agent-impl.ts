@@ -44,9 +44,12 @@ import { startIpcWatcher } from '../ipc.js';
 import { ActionsHttp } from './actions-http.js';
 import {
   assertCustomActionName,
+  type ActionContext,
   type ActionCallback,
   type RegisteredAction,
 } from '../api/action.js';
+import { AcpOutboundClient } from '../acp/client.js';
+import { ACP_NOTICE_SENDER, ACP_NOTICE_SENDER_NAME } from '../acp/notice.js';
 import { startSchedulerLoop } from '../task-scheduler.js';
 
 import path from 'path';
@@ -99,6 +102,8 @@ export class AgentImpl
   private schedulerHandle: { stop(): void } | null = null;
   private actions = new Map<string, RegisteredAction>();
   readonly actionsHttp = new ActionsHttp(() => this.actions);
+  /** Outbound ACP (Zed Agent Client Protocol) client; null unless opts.acp.peers is set. */
+  acpClient: AcpOutboundClient | null = null;
 
   // ─── Managers ───────────────────────────────────────────────────
   private channelMgr: ChannelManager;
@@ -371,6 +376,47 @@ export class AgentImpl
     this.groupMgr.saveState();
   }
 
+  private resolveAcpCallerChatJid(ctx: ActionContext): string {
+    if (ctx.jid) {
+      const group = this.registeredGroups[ctx.jid];
+      if (group?.folder === ctx.sourceGroup) {
+        return ctx.jid;
+      }
+    }
+
+    const matches = Object.entries(this.registeredGroups)
+      .filter(([, group]) => group.folder === ctx.sourceGroup)
+      .map(([jid]) => jid);
+
+    if (matches.length === 1) {
+      return matches[0]!;
+    }
+
+    throw new Error(
+      `cannot resolve ACP completion notice target for group folder "${ctx.sourceGroup}"`,
+    );
+  }
+
+  private async injectAcpNotice(jid: string, text: string): Promise<void> {
+    const group = this.registeredGroups[jid];
+    if (!group) {
+      throw new Error(`cannot inject ACP notice for unregistered JID ${jid}`);
+    }
+    const timestamp = new Date().toISOString();
+    this.db.storeChatMetadata(jid, timestamp, group.name);
+    this.db.storeMessageDirect({
+      id: `acp-notice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      chat_jid: jid,
+      sender: ACP_NOTICE_SENDER,
+      sender_name: ACP_NOTICE_SENDER_NAME,
+      content: text,
+      timestamp,
+      is_from_me: false,
+      is_bot_message: false,
+    });
+    this.queue.enqueueMessageCheck(jid);
+  }
+
   // ─── Lifecycle ──────────────────────────────────────────────────
 
   async start(): Promise<void> {
@@ -427,6 +473,9 @@ export class AgentImpl
     this.schedulerHandle?.stop();
     await this.actionsHttp.stop();
     await this.messageMgr.waitForStop();
+    if (this.acpClient) {
+      await this.acpClient.shutdown();
+    }
     await this.queue.shutdown(10000);
     for (const [, channel] of this.channels) {
       await channel.disconnect();
@@ -472,6 +521,21 @@ export class AgentImpl
         });
       },
     });
+
+    // Outbound ACP client — only constructed if peers are configured.
+    // Registers five `acp_*` HTTP actions that the in-VM model reaches via
+    // the existing search_actions / call_action MCP tools.
+    const acpPeers = this._options?.acp?.peers ?? [];
+    if (acpPeers.length > 0) {
+      this.acpClient = new AcpOutboundClient({
+        peers: acpPeers,
+        groupsDir: this.config.groupsDir,
+        dataDir: this.config.dataDir,
+        resolveCallerChatJid: (ctx) => this.resolveAcpCallerChatJid(ctx),
+        injectNotice: async (jid, text) => this.injectAcpNotice(jid, text),
+      });
+      this.acpClient.registerActions(this);
+    }
 
     this.ipcHandle = startIpcWatcher({
       dataDir: this.config.dataDir,

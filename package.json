@@ -38,6 +38,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.19.0",
     "@boxlite-ai/boxlite": "^0.4.3",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",

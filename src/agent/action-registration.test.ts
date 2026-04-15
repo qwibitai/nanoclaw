@@ -1,5 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { z } from 'zod';
+
+vi.mock('../box-runtime.js', () => ({
+  setBoxliteHome: vi.fn(),
+  ensureRuntimeReady: vi.fn(),
+  cleanupOrphans: vi.fn().mockResolvedValue(undefined),
+  spawnBox: vi.fn(),
+}));
 
 import { createAgentLite } from '../api/sdk.js';
 import type { Agent } from '../api/agent.js';
@@ -41,7 +48,7 @@ describe('agent.action() registration', () => {
   });
 
   afterEach(async () => {
-    await agent.stop();
+    await agent?.stop();
   });
 
   async function call(name: string, payload?: Record<string, unknown>) {
