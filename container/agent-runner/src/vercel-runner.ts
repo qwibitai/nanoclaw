@@ -5,6 +5,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { buildIpcTools } from './tool-bridge.js';
 import { loadSession, saveSession } from './session-store.js';
+import { buildMcpServerConfigs, connectMcpServers } from './mcp-bridge.js';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
@@ -113,6 +114,7 @@ function formatToolLabel(toolName: string): string {
   if (toolName === 'schedule') return 'Scheduling task';
   if (toolName === 'relay_message') return 'Relaying message';
   if (toolName === 'learn_feedback') return 'Recording lesson';
+  if (toolName === 'switch_model') return 'Switching model';
   const words = toolName
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/_/g, ' ')
@@ -131,6 +133,8 @@ export async function runVercelQuery(
   const modelId = input.model ?? 'gpt-4o-mini';
 
   log(`Provider: ${provider}, Model: ${modelId}`);
+
+  let mcpConnection: Awaited<ReturnType<typeof connectMcpServers>> | undefined;
 
   try {
     const factory = createProviderFactory(provider, input.providerBaseUrl);
@@ -156,14 +160,26 @@ export async function runVercelQuery(
       };
     }
 
+    // Connect MCP servers for this session
+    const mcpConfigs = buildMcpServerConfigs({
+      chatJid: input.chatJid,
+      groupFolder: input.groupFolder,
+      isMain: input.isMain,
+    });
+    mcpConnection = await connectMcpServers(mcpConfigs);
+
+    // MCP tools (already in AI SDK format from createMCPClient)
+    for (const [name, def] of Object.entries(mcpConnection.tools)) {
+      tools[name] = def;
+    }
+
+    log(`Tools registered: ${Object.keys(tools).length} (${Object.keys(ipcTools).length} IPC + ${Object.keys(mcpConnection.tools).length} MCP)`);
+
     const sessionDir = '/workspace/group/sessions/vercel';
     const sessionMessages = loadSession(sessionDir, input.sessionId);
 
     const messages: ModelMessage[] = [
-      ...sessionMessages.map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: String(m.content),
-      })),
+      ...(sessionMessages as ModelMessage[]),
       { role: 'user' as const, content: prompt },
     ];
 
@@ -188,20 +204,15 @@ export async function runVercelQuery(
       },
     });
 
-    const allMessages = [
-      ...messages.map((m) => ({
-        role: m.role,
-        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-      })),
-      ...result.response.messages.map((m) => ({
-        role: m.role,
-        content:
-          typeof m.content === 'string'
-            ? m.content
-            : JSON.stringify(m.content),
-      })),
-    ];
-    const newSessionId = saveSession(sessionDir, input.sessionId, allMessages);
+    const allMessages = [...messages, ...result.response.messages];
+    const newSessionId = saveSession(
+      sessionDir,
+      input.sessionId,
+      allMessages as unknown as import('./session-store.js').SessionMessage[],
+    );
+
+    // Clean up MCP server connections
+    await mcpConnection.cleanup();
 
     return {
       status: 'success',
@@ -216,6 +227,7 @@ export async function runVercelQuery(
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     log(`Error: ${errorMsg}`);
+    try { await mcpConnection?.cleanup(); } catch { /* best-effort */ }
     return {
       status: 'error',
       result: null,

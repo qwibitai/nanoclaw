@@ -14,38 +14,66 @@ function writeIpcFile(dir: string, data: Record<string, unknown>): void {
   fs.writeFileSync(path.join(dir, filename), JSON.stringify(data, null, 2));
 }
 
-async function checkTrust(
+function log(message: string): void {
+  console.error(`[tool-bridge] ${message}`);
+}
+
+interface TrustPollingOptions {
+  pollIntervalMs?: number;
+  maxPollMs?: number;
+}
+
+export async function checkTrustWithPolling(
   toolName: string,
   chatJid: string,
   groupId: string,
   description?: string,
+  options?: TrustPollingOptions,
 ): Promise<{ allowed: boolean; error?: string }> {
-  const gatewayUrl =
-    process.env.TRUST_GATEWAY_URL ?? 'http://host.docker.internal:10255';
+  const gatewayUrl = process.env.TRUST_GATEWAY_URL ?? 'http://host.docker.internal:10255';
+  const pollInterval = options?.pollIntervalMs ?? 3000;
+  const maxPoll = options?.maxPollMs ?? 300_000;
+
+  // Step 1: Initial evaluation
+  let evaluateResult: { decision?: string; approval_id?: string; error?: string };
   try {
     const res = await fetch(`${gatewayUrl}/trust/evaluate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tool_name: toolName,
-        group_id: groupId,
-        chat_jid: chatJid,
-        description,
-      }),
+      body: JSON.stringify({ tool_name: toolName, group_id: groupId, chat_jid: chatJid, description }),
     });
-    if (!res.ok) {
-      return { allowed: false, error: `Trust gateway returned ${res.status}` };
-    }
-    const body = (await res.json()) as { decision?: string; error?: string };
-    if (body.decision === 'approved') return { allowed: true };
-    if (body.decision === 'pending')
-      return { allowed: false, error: 'Action requires user approval' };
-    return { allowed: false, error: body.error ?? 'Trust check denied' };
+    if (!res.ok) return { allowed: false, error: `Trust gateway returned ${res.status}` };
+    evaluateResult = await res.json() as typeof evaluateResult;
   } catch {
-    // Trust gateway unreachable — fail open for now (container may be running
-    // without trust enabled). Log but allow.
-    return { allowed: true };
+    return { allowed: true }; // fail open if gateway unreachable
   }
+
+  if (evaluateResult.decision === 'approved') return { allowed: true };
+  if (evaluateResult.decision !== 'pending' || !evaluateResult.approval_id) {
+    return { allowed: false, error: evaluateResult.error ?? 'Trust check denied' };
+  }
+
+  // Step 2: Poll for resolution
+  const approvalId = evaluateResult.approval_id;
+  log(`Waiting for approval ${approvalId} (tool: ${toolName})`);
+  const startTime = Date.now();
+  while (Date.now() - startTime < maxPoll) {
+    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    try {
+      const pollRes = await fetch(`${gatewayUrl}/trust/approval/${approvalId}`);
+      if (!pollRes.ok) return { allowed: false, error: `Poll failed: ${pollRes.status}` };
+      const pollResult = (await pollRes.json()) as { decision?: string };
+      if (pollResult.decision === 'approved') { log(`Approval ${approvalId} granted`); return { allowed: true }; }
+      if (pollResult.decision === 'denied' || pollResult.decision === 'timeout') {
+        log(`Approval ${approvalId} ${pollResult.decision}`);
+        return { allowed: false, error: `Action ${pollResult.decision} by user` };
+      }
+    } catch {
+      return { allowed: false, error: 'Lost connection to trust gateway during polling' };
+    }
+  }
+  log(`Approval ${approvalId} timed out after ${maxPoll}ms`);
+  return { allowed: false, error: 'Approval timed out waiting for user response' };
 }
 
 export function buildIpcTools(
@@ -64,7 +92,7 @@ export function buildIpcTools(
         text: z.string().describe('Message text to send'),
       }),
       execute: async ({ text }: { text: string }) => {
-        const trust = await checkTrust('send_message', chatJid, groupId, 'Send a chat message');
+        const trust = await checkTrustWithPolling('send_message', chatJid, groupId, 'Send a chat message');
         if (!trust.allowed) return { success: false, error: trust.error };
         writeIpcFile(messagesDir, {
           type: 'message',
@@ -84,7 +112,7 @@ export function buildIpcTools(
         label: z.string().optional().describe('Human-readable label'),
       }),
       execute: async ({ when, prompt, label }: { when: string; prompt: string; label?: string }) => {
-        const trust = await checkTrust('schedule', chatJid, groupId, `Schedule task: ${label ?? prompt.slice(0, 60)}`);
+        const trust = await checkTrustWithPolling('schedule', chatJid, groupId, `Schedule task: ${label ?? prompt.slice(0, 60)}`);
         if (!trust.allowed) return { success: false, error: trust.error };
         writeIpcFile(tasksDir, {
           type: 'schedule',
@@ -104,7 +132,7 @@ export function buildIpcTools(
         text: z.string().describe('Message to relay'),
       }),
       execute: async ({ text }: { text: string }) => {
-        const trust = await checkTrust('relay_message', chatJid, groupId, 'Relay message to main channel');
+        const trust = await checkTrustWithPolling('relay_message', chatJid, groupId, 'Relay message to main channel');
         if (!trust.allowed) return { success: false, error: trust.error };
         writeIpcFile(messagesDir, {
           type: 'relay_message',
@@ -129,6 +157,38 @@ export function buildIpcTools(
           groupFolder,
           rule,
           source,
+        });
+        return { success: true };
+      },
+    },
+
+    switch_model: {
+      description:
+        'Switch the LLM model for this group. Use this to escalate to a stronger model for complex tasks, or switch to a cheaper model for simple follow-ups. The change takes effect on the next message.',
+      parameters: z.object({
+        provider: z
+          .enum(['anthropic', 'openai', 'google', 'ollama', 'groq', 'together'])
+          .describe('The LLM provider to switch to'),
+        model: z
+          .string()
+          .optional()
+          .describe(
+            'Model identifier (e.g. "gpt-4o", "gemini-2.5-pro"). If omitted, uses provider default.',
+          ),
+      }),
+      execute: async ({
+        provider,
+        model,
+      }: {
+        provider: string;
+        model?: string;
+      }) => {
+        writeIpcFile(messagesDir, {
+          type: 'switch_model',
+          chatJid,
+          groupFolder,
+          provider,
+          model,
         });
         return { success: true };
       },

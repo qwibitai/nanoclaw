@@ -77,3 +77,126 @@ describe('session-store', () => {
     expect(loaded).toHaveLength(2);
   });
 });
+
+describe('session-store structured messages', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-session-structured-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('preserves tool-call content array through save/load', async () => {
+    const { saveSession, loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
+    const messages = [
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'call_123',
+            toolName: 'search',
+            args: { query: 'cats' },
+          },
+        ],
+      },
+    ];
+    const id = saveSession(tempDir, null, messages);
+    const loaded = loadSession(tempDir, id);
+    expect(loaded).toHaveLength(1);
+    expect(Array.isArray(loaded[0].content)).toBe(true);
+    const content = loaded[0].content as unknown[];
+    expect(content[0]).toEqual({
+      type: 'tool-call',
+      toolCallId: 'call_123',
+      toolName: 'search',
+      args: { query: 'cats' },
+    });
+  });
+
+  it('preserves tool-result content array through save/load', async () => {
+    const { saveSession, loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
+    const messages = [
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'call_123',
+            toolName: 'search',
+            result: { items: ['cat1', 'cat2'] },
+          },
+        ],
+      },
+    ];
+    const id = saveSession(tempDir, null, messages);
+    const loaded = loadSession(tempDir, id);
+    expect(loaded).toHaveLength(1);
+    expect(Array.isArray(loaded[0].content)).toBe(true);
+    const content = loaded[0].content as unknown[];
+    expect(content[0]).toEqual({
+      type: 'tool-result',
+      toolCallId: 'call_123',
+      toolName: 'search',
+      result: { items: ['cat1', 'cat2'] },
+    });
+  });
+
+  it('keeps plain string content as string', async () => {
+    const { saveSession, loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
+    const messages = [
+      { role: 'user', content: 'hello world' },
+      { role: 'assistant', content: 'hi there' },
+    ];
+    const id = saveSession(tempDir, null, messages);
+    const loaded = loadSession(tempDir, id);
+    expect(loaded[0].content).toBe('hello world');
+    expect(loaded[1].content).toBe('hi there');
+    expect(typeof loaded[0].content).toBe('string');
+  });
+
+  it('handles mixed string and structured content messages', async () => {
+    const { saveSession, loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
+    const messages = [
+      { role: 'user', content: 'search for cats' },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'call_456',
+            toolName: 'search',
+            args: { query: 'cats' },
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'call_456',
+            toolName: 'search',
+            result: { items: ['cat1'] },
+          },
+        ],
+      },
+      { role: 'assistant', content: 'I found cat1' },
+    ];
+    const id = saveSession(tempDir, null, messages);
+    const loaded = loadSession(tempDir, id);
+    expect(loaded).toHaveLength(4);
+    expect(typeof loaded[0].content).toBe('string');
+    expect(Array.isArray(loaded[1].content)).toBe(true);
+    expect(Array.isArray(loaded[2].content)).toBe(true);
+    expect(typeof loaded[3].content).toBe('string');
+    expect(loaded).toEqual(messages);
+  });
+});

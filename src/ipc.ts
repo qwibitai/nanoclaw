@@ -16,7 +16,7 @@ import {
 } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { RegisteredGroup } from './types.js';
+import type { LlmConfig, RegisteredGroup } from './types.js';
 import { addRule } from './learning/rules-engine.js';
 import { addTrace } from './learning/procedure-recorder.js';
 import { inferActionClasses } from './learning/outcome-enricher.js';
@@ -217,6 +217,9 @@ export async function processTaskIpc(
     }>;
     // For toggle_verbose
     enabled?: boolean;
+    // For switch_model
+    provider?: string;
+    model?: string;
     // For browser_act/extract/observe
     instruction?: string;
     schema?: unknown;
@@ -765,6 +768,52 @@ export async function processTaskIpc(
           'learn_feedback IPC processed',
         );
       }
+      break;
+    }
+
+    case 'switch_model': {
+      const targetJid = data.chatJid;
+      if (!targetJid || !data.provider) {
+        logger.warn({ sourceGroup }, 'switch_model: missing chatJid or provider');
+        break;
+      }
+
+      const targetGroup = registeredGroups[targetJid];
+      if (!targetGroup) {
+        logger.warn({ targetJid }, 'switch_model: target group not registered');
+        break;
+      }
+
+      // Authorization: non-main groups can only switch their own model
+      if (!isMain && targetGroup.folder !== sourceGroup) {
+        logger.warn(
+          { sourceGroup, targetFolder: targetGroup.folder },
+          'Unauthorized switch_model attempt blocked',
+        );
+        break;
+      }
+
+      const updatedConfig = { ...(targetGroup.containerConfig ?? {}) };
+      updatedConfig.llm = {
+        ...updatedConfig.llm,
+        provider: data.provider as LlmConfig['provider'],
+        model: data.model ?? updatedConfig.llm?.model,
+      };
+
+      deps.registerGroup(targetJid, {
+        ...targetGroup,
+        containerConfig: updatedConfig,
+      });
+
+      logger.info(
+        {
+          targetJid,
+          sourceGroup,
+          provider: data.provider,
+          model: data.model,
+        },
+        'Model switched via IPC',
+      );
       break;
     }
 
