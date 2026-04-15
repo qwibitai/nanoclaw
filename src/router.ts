@@ -28,10 +28,19 @@ export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
+// Block external file-upload URLs that agents sometimes use instead of IPC.
+// Agents should send files via the IPC send_document mechanism, not upload them
+// to third-party services and paste a link.
+const BLOCKED_UPLOAD_URLS =
+  /https?:\/\/(?:files\.)?(?:catbox\.moe|litterbox\.catbox\.moe|litter\.catbox\.moe)\S*/gi;
+
 export function formatOutbound(rawText: string): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
-  return text;
+  return text.replace(
+    BLOCKED_UPLOAD_URLS,
+    '[Link entfernt — Dateien werden als Anhang gesendet]',
+  );
 }
 
 export function routeOutbound(
