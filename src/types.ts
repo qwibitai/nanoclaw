@@ -27,9 +27,17 @@ export interface AllowedRoot {
   description?: string;
 }
 
+export interface LlmConfig {
+  provider?: 'anthropic' | 'openai' | 'google' | 'ollama' | 'groq' | 'together';
+  model?: string;
+  escalationModel?: string;
+  providerBaseUrl?: string;
+}
+
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  llm?: LlmConfig;
 }
 
 export interface RegisteredGroup {
