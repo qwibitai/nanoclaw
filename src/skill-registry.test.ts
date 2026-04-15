@@ -161,6 +161,30 @@ describe('skill-registry', () => {
       expect(skills[0].allowedTools).toBeUndefined();
     });
 
+    it('GET /health returns the provided service health payload', async () => {
+      server = await startSkillServer(0, '127.0.0.1', () => ({
+        service: 'nanoclaw',
+        status: 'ok',
+        timestamp: '2026-04-13T00:00:00.000Z',
+      }));
+      const port = (server.address() as { port: number }).port;
+
+      const body = await new Promise<string>((resolve, reject) => {
+        http.get(`http://127.0.0.1:${port}/health`, (res) => {
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => resolve(data));
+          res.on('error', reject);
+        });
+      });
+
+      expect(JSON.parse(body)).toEqual({
+        service: 'nanoclaw',
+        status: 'ok',
+        timestamp: '2026-04-13T00:00:00.000Z',
+      });
+    });
+
     it('returns 404 for other paths', async () => {
       server = await startSkillServer(0, '127.0.0.1');
       const port = (server.address() as { port: number }).port;

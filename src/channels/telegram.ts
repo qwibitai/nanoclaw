@@ -20,6 +20,35 @@ export interface TelegramChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+interface SmartPlaylistFilters {
+  mood?: string;
+  bpm_min?: number;
+  bpm_max?: number;
+  bpm?: number;
+  energy?: string;
+  key?: string;
+}
+
+interface TelegramNonTextContext {
+  chat: { id: number | string; type: string };
+  message: {
+    date: number;
+    message_id: number;
+    caption?: string;
+    document?: { file_name?: string };
+    sticker?: { emoji?: string };
+  };
+  from?: {
+    first_name?: string;
+    username?: string;
+    id?: number | string;
+  };
+}
+
+function getTelegramChatTitle(chat: { title?: unknown }): string | undefined {
+  return typeof chat.title === 'string' ? chat.title : undefined;
+}
+
 /**
  * Send a message with Telegram Markdown parse mode, falling back to plain text.
  * Claude's output naturally matches Telegram's Markdown v1 format:
@@ -101,7 +130,7 @@ export class TelegramChannel implements Channel {
       const chatName =
         chatType === 'private'
           ? ctx.from?.first_name || 'Private'
-          : (ctx.chat as any).title || 'Unknown';
+          : getTelegramChatTitle(ctx.chat) || 'Unknown';
 
       ctx.reply(
         `Chat ID: \`tg:${chatId}\`\nName: ${chatName}\nType: ${chatType}`,
@@ -300,7 +329,7 @@ export class TelegramChannel implements Channel {
       }
 
       // Parse filter arguments
-      const filters: Record<string, any> = {};
+      const filters: SmartPlaylistFilters = {};
 
       const moodMatch = args.match(/mood:(\S+)/i);
       if (moodMatch) filters.mood = moodMatch[1];
@@ -482,7 +511,7 @@ export class TelegramChannel implements Channel {
       const chatName =
         ctx.chat.type === 'private'
           ? senderName
-          : (ctx.chat as any).title || chatJid;
+          : getTelegramChatTitle(ctx.chat) || chatJid;
 
       // Translate Telegram @bot_username mentions into TRIGGER_PATTERN format.
       // Telegram @mentions (e.g., @andy_ai_bot) won't match TRIGGER_PATTERN
@@ -543,7 +572,7 @@ export class TelegramChannel implements Channel {
     });
 
     // Handle non-text messages with placeholders so the agent knows something was sent
-    const storeNonText = (ctx: any, placeholder: string) => {
+    const storeNonText = (ctx: TelegramNonTextContext, placeholder: string) => {
       const chatJid = `tg:${ctx.chat.id}`;
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;

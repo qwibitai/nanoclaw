@@ -13,13 +13,47 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            container/agent-runner/package-lock.json
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
       - run: npm ci
+      - run: npm --prefix container/agent-runner ci
 
       - name: Format check
         run: npm run format:check
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Migration lint
+        run: npm run lint:migrations
+
       - name: Typecheck
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Tests
-        run: npx vitest run
+        run: npm run test
+
+      - name: Coverage
+        run: npm run test:coverage
+
+      - name: Build core
+        run: npm run build:core
+
+      - name: Build agent-runner
+        run: npm run build:agent-runner
+
+      - name: tmux runtime smoke
+        run: npm run smoke:runtime
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage
+          if-no-files-found: ignore

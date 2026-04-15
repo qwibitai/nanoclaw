@@ -2,9 +2,9 @@
 
 ## Source Code Changes
 
-**Accepted:** Bug fixes, security fixes, simplifications, reducing code.
+**Accepted:** Bug fixes, security fixes, deploy hardening, observability improvements, simplifications, reducing code.
 
-**Not accepted:** Features, capabilities, compatibility, enhancements. These should be skills.
+**Usually not accepted into core:** Features, channels, workflow expansions, broad compatibility layers, product enhancements. These should be skills or downstream forks.
 
 ## Skills
 
@@ -21,3 +21,18 @@ Every user should have clean and minimal code that does exactly what they need. 
 ### Testing
 
 Test your skill by running it on a fresh clone before submitting.
+
+## Core Boundary
+
+Core should stay focused on:
+
+- correctness
+- security
+- runtime and deploy safety
+- scheduler reliability
+- observability
+- session lifecycle behavior
+
+If a change mainly adds capability rather than hardens the harness, it probably belongs in a skill.
+
+See [docs/SKILL_AUTHORING.md](docs/SKILL_AUTHORING.md) and [docs/SKILL_CONFLICT_RECOVERY.md](docs/SKILL_CONFLICT_RECOVERY.md).

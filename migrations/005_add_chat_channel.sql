@@ -1,5 +1,5 @@
-ALTER TABLE chats ADD COLUMN channel TEXT;
-ALTER TABLE chats ADD COLUMN is_group INTEGER DEFAULT 0;
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS channel TEXT;
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS is_group INTEGER DEFAULT 0;
 
 -- Backfill from JID patterns
 UPDATE chats SET channel = 'whatsapp', is_group = 1 WHERE jid LIKE '%@g.us';

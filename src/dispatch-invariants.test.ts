@@ -120,7 +120,7 @@ beforeEach(() => {
 // host container runtime.
 // ===========================================================================
 describe('Invariant 1: slot count never exceeds PARALLEL_DISPATCH_WORKERS', () => {
-  it('allows exactly PARALLEL_DISPATCH_WORKERS slots then rejects any additional claim', () => {
+  it('allows exactly PARALLEL_DISPATCH_WORKERS slots then rejects any additional claim', async () => {
     // Fill all 4 slots
     for (let i = 0; i < PARALLEL_DISPATCH_WORKERS; i++) {
       const id = insertAcquiringSlot(i, `task-${i}`, null, `local-${i}`, null);
@@ -138,13 +138,15 @@ describe('Invariant 1: slot count never exceeds PARALLEL_DISPATCH_WORKERS', () =
     }
 
     // Higher-level claimSlot also returns null when all slots are occupied
-    expect(claimSlot('task-overflow', null, 'local-overflow', null)).toBeNull();
+    expect(
+      await claimSlot('task-overflow', null, 'local-overflow', null),
+    ).toBeNull();
 
     // Active count must remain exactly 4 — no overflow
     expect(getActiveSlots()).toHaveLength(PARALLEL_DISPATCH_WORKERS);
   });
 
-  it('a freed slot immediately becomes claimable, keeping total at exactly 4', () => {
+  it('a freed slot immediately becomes claimable, keeping total at exactly 4', async () => {
     const ids: number[] = [];
     for (let i = 0; i < PARALLEL_DISPATCH_WORKERS; i++) {
       ids.push(
@@ -162,7 +164,7 @@ describe('Invariant 1: slot count never exceeds PARALLEL_DISPATCH_WORKERS', () =
     freeSlot(ids[2], 'task-fill-2');
 
     // Exactly one new claim should succeed and restore the count to 4
-    const newClaim = claimSlot(
+    const newClaim = await claimSlot(
       'task-replacement',
       null,
       'local-replacement',
@@ -249,7 +251,7 @@ describe('Invariant 2: SIGKILL worker releases slot within one poll cycle', () =
 // same-branch tasks.
 // ===========================================================================
 describe('Invariant 3: branch collision triggers yield, not deadlock', () => {
-  it('prevents a second task with the same branch_id from claiming any slot', () => {
+  it('prevents a second task with the same branch_id from claiming any slot', async () => {
     // Task A claims a slot on branch 'agent/alice'
     const slotA = insertAcquiringSlot(
       0,
@@ -269,7 +271,7 @@ describe('Invariant 3: branch collision triggers yield, not deadlock', () => {
     }
 
     // Higher-level claimSlot also returns null for the same branch
-    expect(claimSlot('ahq-B', 'agent/alice', 'local-B', null)).toBeNull();
+    expect(await claimSlot('ahq-B', 'agent/alice', 'local-B', null)).toBeNull();
 
     // Task A's slot must still be intact — no corruption
     const active = getActiveSlots();
@@ -278,7 +280,7 @@ describe('Invariant 3: branch collision triggers yield, not deadlock', () => {
     expect(active[0].branch_id).toBe('agent/alice');
   });
 
-  it('allows the deferred task to claim a slot once the branch is free', () => {
+  it('allows the deferred task to claim a slot once the branch is free', async () => {
     const slotAId = insertAcquiringSlot(
       0,
       'ahq-A',
@@ -288,13 +290,13 @@ describe('Invariant 3: branch collision triggers yield, not deadlock', () => {
     )!;
 
     // B is still blocked
-    expect(claimSlot('ahq-B', 'agent/alice', 'local-B', null)).toBeNull();
+    expect(await claimSlot('ahq-B', 'agent/alice', 'local-B', null)).toBeNull();
 
     // A finishes; slot is freed
     freeSlot(slotAId, 'ahq-A');
 
     // B can now claim
-    const claimB = claimSlot('ahq-B', 'agent/alice', 'local-B', null);
+    const claimB = await claimSlot('ahq-B', 'agent/alice', 'local-B', null);
     expect(claimB).not.toBeNull();
     expect(claimB!.slotIndex).toBe(0);
   });
@@ -483,12 +485,7 @@ describe('Invariant 5: startup reconciliation frees orphaned acquiring rows', ()
   });
 
   it('re-queues the AHQ task via fetch when recoverStaleSlots is called at startup', async () => {
-    // recoverStaleSlots() uses the global fetch() directly (not agencyFetch),
-    // so we stub the global rather than the agency-hq-client mock.
-    const fetchStub = vi
-      .fn()
-      .mockResolvedValue(mockResponse({ success: true }));
-    vi.stubGlobal('fetch', fetchStub);
+    vi.mocked(agencyFetch).mockResolvedValue(mockResponse({ success: true }));
 
     vi.useFakeTimers();
 
@@ -506,13 +503,15 @@ describe('Invariant 5: startup reconciliation frees orphaned acquiring rows', ()
       // Slot must be freed in SQLite
       expect(getActiveSlots()).toHaveLength(0);
 
-      // Must have called fetch to re-queue the task (PUT status=ready)
-      const reQueueCall = fetchStub.mock.calls.find(
-        ([url, opts]: [string, RequestInit]) =>
-          typeof url === 'string' &&
-          url.includes('ahq-crash-victim') &&
-          opts?.method === 'PUT',
-      ) as [string, RequestInit] | undefined;
+      // Must have called Agency HQ to re-queue the task (PUT status=ready)
+      const reQueueCall = vi
+        .mocked(agencyFetch)
+        .mock.calls.find(
+          ([url, opts]: [string, RequestInit]) =>
+            typeof url === 'string' &&
+            url.includes('ahq-crash-victim') &&
+            opts?.method === 'PUT',
+        ) as [string, RequestInit] | undefined;
       expect(reQueueCall, 'expected a PUT re-queue call to AHQ').toBeDefined();
 
       const reQueueBody = JSON.parse(reQueueCall![1].body as string) as {
@@ -521,7 +520,6 @@ describe('Invariant 5: startup reconciliation frees orphaned acquiring rows', ()
       expect(reQueueBody.status).toBe('ready');
     } finally {
       vi.useRealTimers();
-      vi.unstubAllGlobals();
     }
   });
 });

@@ -9,7 +9,7 @@
  *   TEST_DOCKER=1 npm test -- src/container-runner.integration.test.ts
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawn, execSync, ChildProcess } from 'child_process';
+import { spawn, execSync } from 'child_process';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';

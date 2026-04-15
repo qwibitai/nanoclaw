@@ -34,15 +34,6 @@ const ALLOWED_COMMANDS = new Set([
 /** Allowed git subcommands (read-only operations only). */
 const GIT_ALLOWED_SUBCOMMANDS = new Set(['pull', 'log', 'status', 'diff']);
 
-/** Git subcommands/flags explicitly blocked as destructive. */
-const GIT_BLOCKED_PATTERNS = [
-  'push',
-  'reset',
-  'force-push',
-  'clean',
-  'checkout',
-];
-
 interface HostExecRequest {
   id: string;
   command: string;

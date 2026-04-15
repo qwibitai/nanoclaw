@@ -710,7 +710,6 @@ describe('runMigrations', () => {
 
   it('applies all migrations on a fresh database', () => {
     // _initTestDatabase uses the real migrations dir — schema_migrations should exist
-    const db = new Database(':memory:');
     // Simulate by calling _initTestDatabase which runs runMigrations internally
     _initTestDatabase();
 

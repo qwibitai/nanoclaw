@@ -32,138 +32,65 @@
  * All transitions are logged with task_id and timestamp.
  */
 
-import { AGENCY_HQ_URL } from './config.js';
+import { agencyFetch } from './agency-hq-client.js';
 import {
-  ACQUIRING_STALE_MS,
-  getActiveSlots,
-  insertAcquiringSlot,
-  pruneFreedSlots,
-  recoverStaleSlotRecords,
-  transitionToExecuting,
-  transitionToFree,
-  transitionToReleasing,
-  type SlotRecord,
-} from './db/dispatch-slots.js';
+  getDispatchSlotBackend,
+  isDispatchSlotsPgEnabled,
+  PARALLEL_DISPATCH_WORKERS,
+  workerSlotJid,
+  type ActiveSlotInfo,
+  type RecoveredSlotInfo,
+  type SlotClaim,
+} from './dispatch-slot-backends.js';
+import { getActiveSlots, type SlotRecord } from './db/dispatch-slots.js';
 import { createCorrelationLogger, logger } from './logger.js';
 import { cleanupOrphanedWorktrees } from './worktree-manager.js';
 
-// --- Constants ---
+export { isDispatchSlotsPgEnabled, PARALLEL_DISPATCH_WORKERS, workerSlotJid };
+export type { SlotClaim };
 
-/** Number of concurrent dev-inbox worker slots. */
-export const PARALLEL_DISPATCH_WORKERS = 4;
-
-/** Returns the synthetic JID for dev-inbox worker slot i. */
-export function workerSlotJid(i: number): string {
-  return `internal:dev-inbox:${i}`;
+function currentBackendName(): 'sqlite' | 'pg' {
+  return getDispatchSlotBackend().name;
 }
 
-// --- Feature flag ---
-
-/**
- * Returns true when the PostgreSQL-backed slot management is enabled.
- *
- * Activation: set DISPATCH_SLOTS_PG=true after applying migration
- * 1710600026000_add-dispatch-slots-table.ts to Agency HQ's PostgreSQL.
- *
- * Defaults to false (local SQLite backend).
- */
-export function isDispatchSlotsPgEnabled(): boolean {
-  return process.env.DISPATCH_SLOTS_PG === 'true';
-}
-
-// --- SlotClaim ---
-
-export interface SlotClaim {
-  slotId: number;
-  slotIndex: number;
-  slotJid: string;
-  worktreePath: string | null;
-}
-
-// --- PG-backed slot operations (calls Agency HQ HTTP API) ---
-
-async function claimSlotPg(
+async function requeueAgencyTask(
   ahqTaskId: string,
-  branchId: string | null,
-  worktreePath: string | null,
-): Promise<SlotClaim | null> {
-  const res = await fetch(`${AGENCY_HQ_URL}/api/v1/dispatch-slots/claim`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ahq_task_id: ahqTaskId, branch_id: branchId }),
-    signal: AbortSignal.timeout(10_000),
-  });
-
-  if (res.status === 409) {
-    return null; // All slots busy or branch collision
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`[dispatch-slots] claim failed: ${res.status} ${body}`);
-  }
-
-  const json = (await res.json()) as {
-    success: boolean;
-    data: { slot_index: number };
-  };
-  const slotIndex = json.data.slot_index;
-  return {
-    slotId: slotIndex,
-    slotIndex,
-    slotJid: workerSlotJid(slotIndex),
-    worktreePath,
-  };
-}
-
-async function markSlotExecutingPg(slotIndex: number): Promise<void> {
-  const res = await fetch(
-    `${AGENCY_HQ_URL}/api/v1/dispatch-slots/${slotIndex}/executing`,
-    {
+  log: ReturnType<typeof createCorrelationLogger>,
+  reason: string,
+): Promise<void> {
+  try {
+    const res = await agencyFetch(`/tasks/${ahqTaskId}`, {
       method: 'PUT',
-      signal: AbortSignal.timeout(10_000),
-    },
-  );
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    logger.warn(
-      { slotIndex, status: res.status, body },
-      '[dispatch-slots] markExecuting failed',
-    );
+      body: JSON.stringify({ status: 'ready' }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      log.error(
+        { status: res.status, body, ahqTaskId, reason },
+        'Failed to re-queue AHQ task',
+      );
+      return;
+    }
+
+    log.info({ ahqTaskId, reason }, 'AHQ task re-queued');
+  } catch (err) {
+    log.error({ err, ahqTaskId, reason }, 'Error re-queuing AHQ task');
   }
 }
 
-async function markSlotReleasingPg(slotIndex: number): Promise<void> {
-  const res = await fetch(
-    `${AGENCY_HQ_URL}/api/v1/dispatch-slots/${slotIndex}/releasing`,
-    {
-      method: 'PUT',
-      signal: AbortSignal.timeout(10_000),
-    },
-  );
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    logger.warn(
-      { slotIndex, status: res.status, body },
-      '[dispatch-slots] markReleasing failed',
-    );
+async function listActiveSlotSnapshot(
+  log: ReturnType<typeof createCorrelationLogger>,
+): Promise<ActiveSlotInfo[]> {
+  try {
+    return await getDispatchSlotBackend().listActiveSlots();
+  } catch (err) {
+    log.error({ err }, 'Failed to query active dispatch slots');
+    return [];
   }
 }
 
-async function freeSlotPg(slotIndex: number): Promise<void> {
-  const res = await fetch(
-    `${AGENCY_HQ_URL}/api/v1/dispatch-slots/${slotIndex}`,
-    {
-      method: 'DELETE',
-      signal: AbortSignal.timeout(10_000),
-    },
-  );
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    logger.warn(
-      { slotIndex, status: res.status, body },
-      '[dispatch-slots] free failed',
-    );
-  }
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // --- DispatchPool ---
@@ -190,53 +117,30 @@ export async function claimSlot(
   localTaskId: string,
   worktreePath: string | null,
 ): Promise<SlotClaim | null> {
-  if (isDispatchSlotsPgEnabled()) {
-    const claim = await claimSlotPg(ahqTaskId, branchId, worktreePath);
-    if (claim) {
-      logger.info(
-        {
-          slotId: claim.slotId,
-          slotIndex: claim.slotIndex,
-          ahqTaskId,
-          branchId,
-          worktreePath,
-          state: 'acquiring',
-          backend: 'pg',
-          timestamp: new Date().toISOString(),
-        },
-        '[slot] acquiring',
-      );
-    }
-    return claim;
+  const backend = getDispatchSlotBackend();
+  const claim = await backend.claimSlot(
+    ahqTaskId,
+    branchId,
+    localTaskId,
+    worktreePath,
+  );
+  if (claim) {
+    logger.info(
+      {
+        slotId: claim.slotId,
+        slotIndex: claim.slotIndex,
+        ahqTaskId,
+        branchId,
+        worktreePath,
+        state: 'acquiring',
+        backend: backend.name,
+        timestamp: new Date().toISOString(),
+      },
+      '[slot] acquiring',
+    );
   }
 
-  // --- SQLite backend ---
-  for (let i = 0; i < PARALLEL_DISPATCH_WORKERS; i++) {
-    const slotId = insertAcquiringSlot(
-      i,
-      ahqTaskId,
-      branchId,
-      localTaskId,
-      worktreePath,
-    );
-    if (slotId !== null) {
-      logger.info(
-        {
-          slotId,
-          slotIndex: i,
-          ahqTaskId,
-          branchId,
-          worktreePath,
-          state: 'acquiring',
-          backend: 'sqlite',
-          timestamp: new Date().toISOString(),
-        },
-        '[slot] acquiring',
-      );
-      return { slotId, slotIndex: i, slotJid: workerSlotJid(i), worktreePath };
-    }
-  }
-  return null;
+  return claim;
 }
 
 /**
@@ -247,17 +151,13 @@ export async function markSlotExecuting(
   slotId: number,
   ahqTaskId: string,
 ): Promise<void> {
-  if (isDispatchSlotsPgEnabled()) {
-    await markSlotExecutingPg(slotId); // slotId === slotIndex in PG backend
-  } else {
-    transitionToExecuting(slotId);
-  }
+  await getDispatchSlotBackend().markExecuting(slotId);
   logger.info(
     {
       slotId,
       ahqTaskId,
       state: 'executing',
-      backend: isDispatchSlotsPgEnabled() ? 'pg' : 'sqlite',
+      backend: currentBackendName(),
       timestamp: new Date().toISOString(),
     },
     '[slot] executing',
@@ -272,17 +172,13 @@ export async function markSlotReleasing(
   slotId: number,
   ahqTaskId: string,
 ): Promise<void> {
-  if (isDispatchSlotsPgEnabled()) {
-    await markSlotReleasingPg(slotId);
-  } else {
-    transitionToReleasing(slotId);
-  }
+  await getDispatchSlotBackend().markReleasing(slotId);
   logger.info(
     {
       slotId,
       ahqTaskId,
       state: 'releasing',
-      backend: isDispatchSlotsPgEnabled() ? 'pg' : 'sqlite',
+      backend: currentBackendName(),
       timestamp: new Date().toISOString(),
     },
     '[slot] releasing',
@@ -297,17 +193,13 @@ export async function freeSlot(
   slotId: number,
   ahqTaskId: string,
 ): Promise<void> {
-  if (isDispatchSlotsPgEnabled()) {
-    await freeSlotPg(slotId);
-  } else {
-    transitionToFree(slotId);
-  }
+  await getDispatchSlotBackend().freeSlot(slotId);
   logger.info(
     {
       slotId,
       ahqTaskId,
       state: 'free',
-      backend: isDispatchSlotsPgEnabled() ? 'pg' : 'sqlite',
+      backend: currentBackendName(),
       timestamp: new Date().toISOString(),
     },
     '[slot] free',
@@ -331,15 +223,9 @@ export async function freeSlot(
 export async function recoverStaleSlots(): Promise<void> {
   const log = createCorrelationLogger(undefined, { op: 'slot-recovery' });
 
-  if (isDispatchSlotsPgEnabled()) {
-    await recoverStaleSlotsFromPg(log);
-    return;
-  }
-
-  // --- SQLite path ---
-  let staleRecords;
+  let staleRecords: RecoveredSlotInfo[];
   try {
-    staleRecords = recoverStaleSlotRecords();
+    staleRecords = await getDispatchSlotBackend().recoverStaleSlots();
   } catch (err) {
     log.error({ err }, 'Failed to query stale dispatch slots');
     return;
@@ -347,7 +233,10 @@ export async function recoverStaleSlots(): Promise<void> {
 
   if (staleRecords.length === 0) return;
 
-  log.info({ count: staleRecords.length }, 'Recovering stale dispatch slots');
+  log.info(
+    { count: staleRecords.length, backend: currentBackendName() },
+    'Recovering stale dispatch slots',
+  );
 
   // Clean up any orphaned worktrees from crashed dispatches before re-queuing.
   const orphanedWorktrees = staleRecords.map((r) => r.worktreePath);
@@ -374,112 +263,17 @@ export async function recoverStaleSlots(): Promise<void> {
       'Freed stale slot, re-queuing AHQ task',
     );
 
-    // PUT the AHQ task back to ready so it will be dispatched again.
-    try {
-      const res = await fetch(
-        `${AGENCY_HQ_URL}/api/v1/tasks/${record.ahqTaskId}`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'ready' }),
-          signal: AbortSignal.timeout(10_000),
-        },
-      );
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        log.error(
-          { status: res.status, body, ahqTaskId: record.ahqTaskId },
-          'Failed to re-queue AHQ task after slot recovery',
-        );
-      } else {
-        log.info(
-          { ahqTaskId: record.ahqTaskId },
-          'AHQ task re-queued after slot recovery',
-        );
-      }
-    } catch (err) {
-      log.error(
-        { err, ahqTaskId: record.ahqTaskId },
-        'Error re-queuing AHQ task after slot recovery',
-      );
-    }
+    await requeueAgencyTask(record.ahqTaskId, log, 'slot recovery');
   }
 
   // Prune old history rows while we're at it.
   try {
-    const pruned = pruneFreedSlots();
+    const pruned = getDispatchSlotBackend().pruneHistory();
     if (pruned > 0) {
       log.info({ pruned }, 'Pruned old free slot history rows');
     }
   } catch (err) {
     log.warn({ err }, 'Failed to prune freed slot rows');
-  }
-}
-
-/**
- * PG-backend startup reconciliation.
- * Calls /api/v1/dispatch-slots/reconcile and re-queues each freed task.
- */
-async function recoverStaleSlotsFromPg(
-  log: ReturnType<typeof createCorrelationLogger>,
-): Promise<void> {
-  let freedTaskIds: string[] = [];
-  try {
-    const res = await fetch(
-      `${AGENCY_HQ_URL}/api/v1/dispatch-slots/reconcile`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-        signal: AbortSignal.timeout(15_000),
-      },
-    );
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      log.error({ status: res.status, body }, 'Dispatch slot reconcile failed');
-      return;
-    }
-    const json = (await res.json()) as {
-      success: boolean;
-      data: { freed_task_ids: string[] };
-    };
-    freedTaskIds = json.data?.freed_task_ids ?? [];
-  } catch (err) {
-    log.error({ err }, 'Error calling dispatch-slots reconcile endpoint');
-    return;
-  }
-
-  if (freedTaskIds.length === 0) return;
-
-  log.info(
-    { count: freedTaskIds.length },
-    'Recovering stale PG dispatch slots',
-  );
-
-  for (const ahqTaskId of freedTaskIds) {
-    log.warn({ ahqTaskId }, 'Freed stale PG slot, re-queuing AHQ task');
-    try {
-      const res = await fetch(`${AGENCY_HQ_URL}/api/v1/tasks/${ahqTaskId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'ready' }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        log.error(
-          { status: res.status, body, ahqTaskId },
-          'Failed to re-queue AHQ task after PG slot recovery',
-        );
-      } else {
-        log.info({ ahqTaskId }, 'AHQ task re-queued after PG slot recovery');
-      }
-    } catch (err) {
-      log.error(
-        { err, ahqTaskId },
-        'Error re-queuing AHQ task after PG slot recovery',
-      );
-    }
   }
 }
 
@@ -500,32 +294,17 @@ export async function drainSlots(timeoutMs: number): Promise<void> {
   const log = createCorrelationLogger(undefined, { op: 'dispatch-drain' });
   const deadline = Date.now() + timeoutMs;
 
-  if (isDispatchSlotsPgEnabled()) {
-    await drainSlotsPg(log, deadline, timeoutMs);
-    return;
-  }
-
-  // --- SQLite path ---
-  let active: SlotRecord[];
-  try {
-    active = getActiveSlots();
-  } catch {
-    return;
-  }
+  let active = await listActiveSlotSnapshot(log);
   if (active.length === 0) return;
 
   log.info(
-    { count: active.length, timeoutMs },
+    { count: active.length, timeoutMs, backend: currentBackendName() },
     'Drain: waiting for in-flight workers to complete',
   );
 
   while (Date.now() < deadline) {
-    await new Promise((res) => setTimeout(res, 500));
-    try {
-      active = getActiveSlots();
-    } catch {
-      return;
-    }
+    await sleep(500);
+    active = await listActiveSlotSnapshot(log);
     if (active.length === 0) {
       log.info('Drain: all slots free, clean shutdown');
       return;
@@ -534,11 +313,7 @@ export async function drainSlots(timeoutMs: number): Promise<void> {
   }
 
   // Drain timeout exceeded — revert remaining tasks to 'ready' and free slots.
-  try {
-    active = getActiveSlots();
-  } catch {
-    return;
-  }
+  active = await listActiveSlotSnapshot(log);
   if (active.length === 0) return;
 
   log.warn(
@@ -548,115 +323,18 @@ export async function drainSlots(timeoutMs: number): Promise<void> {
 
   for (const slot of active) {
     log.warn(
-      { slotId: slot.id, ahqTaskId: slot.ahq_task_id, state: slot.state },
+      { slotId: slot.slotId, ahqTaskId: slot.ahqTaskId, state: slot.state },
       'Drain timeout: reverting task to ready before exit',
     );
 
-    try {
-      const res = await fetch(
-        `${AGENCY_HQ_URL}/api/v1/tasks/${slot.ahq_task_id}`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'ready' }),
-          signal: AbortSignal.timeout(5_000),
-        },
-      );
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        log.error(
-          { status: res.status, body, ahqTaskId: slot.ahq_task_id },
-          'Drain timeout: failed to revert task to ready',
-        );
-      } else {
-        log.info(
-          { ahqTaskId: slot.ahq_task_id },
-          'Drain timeout: task reverted to ready',
-        );
-      }
-    } catch (err) {
-      log.error(
-        { err, ahqTaskId: slot.ahq_task_id },
-        'Drain timeout: error reverting task to ready',
-      );
-    }
-
-    transitionToFree(slot.id);
+    await requeueAgencyTask(slot.ahqTaskId, log, 'drain timeout');
+    await getDispatchSlotBackend().freeSlot(slot.slotId);
   }
 
   log.warn(
     { count: active.length },
     'Drain timeout: partial completion — remaining tasks reverted and slots freed',
   );
-}
-
-/** PG drain: polls active-slots endpoint until empty or timeout. */
-async function drainSlotsPg(
-  log: ReturnType<typeof createCorrelationLogger>,
-  deadline: number,
-  timeoutMs: number,
-): Promise<void> {
-  interface ActiveSlot {
-    slot_index: number;
-    ahq_task_id: string;
-    status: string;
-  }
-
-  const fetchActive = async (): Promise<ActiveSlot[]> => {
-    const res = await fetch(`${AGENCY_HQ_URL}/api/v1/dispatch-slots/active`, {
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!res.ok) return [];
-    const json = (await res.json()) as { success: boolean; data: ActiveSlot[] };
-    return json.data ?? [];
-  };
-
-  let active = await fetchActive();
-  if (active.length === 0) return;
-
-  log.info(
-    { count: active.length, timeoutMs },
-    'Drain (PG): waiting for in-flight workers',
-  );
-
-  while (Date.now() < deadline) {
-    await new Promise((res) => setTimeout(res, 500));
-    active = await fetchActive();
-    if (active.length === 0) {
-      log.info('Drain (PG): all slots free, clean shutdown');
-      return;
-    }
-    log.debug({ count: active.length }, 'Drain (PG): still waiting');
-  }
-
-  active = await fetchActive();
-  if (active.length === 0) return;
-
-  log.warn(
-    { count: active.length, timeoutMs },
-    'Drain (PG) timeout: reverting tasks to ready',
-  );
-
-  for (const slot of active) {
-    try {
-      await fetch(`${AGENCY_HQ_URL}/api/v1/tasks/${slot.ahq_task_id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'ready' }),
-        signal: AbortSignal.timeout(5_000),
-      });
-      await freeSlotPg(slot.slot_index);
-      log.warn(
-        { ahqTaskId: slot.ahq_task_id, slotIndex: slot.slot_index },
-        'Drain (PG): task reverted, slot freed',
-      );
-    } catch (err) {
-      log.error(
-        { err, ahqTaskId: slot.ahq_task_id },
-        'Drain (PG): error reverting task',
-      );
-    }
-  }
 }
 
 // --- Shutdown ---

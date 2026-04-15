@@ -152,6 +152,7 @@ export const EXECUTING_STALE_MS = 4 * 60 * 60_000; // 4 hours (very long tasks)
 
 export interface StaleSlotResult {
   slotId: number;
+  slotIndex: number;
   ahqTaskId: string;
   state: SlotState;
   worktreePath: string | null;
@@ -190,6 +191,7 @@ export function recoverStaleSlotRecords(): StaleSlotResult[] {
 
     results.push({
       slotId: slot.id,
+      slotIndex: slot.slot_index,
       ahqTaskId: slot.ahq_task_id,
       state: slot.state,
       worktreePath: slot.worktree_path ?? null,
@@ -224,6 +226,7 @@ export function recoverStaleSlotRecords(): StaleSlotResult[] {
 
     results.push({
       slotId: slot.id,
+      slotIndex: slot.slot_index,
       ahqTaskId: slot.ahq_task_id,
       state: slot.state,
       worktreePath: slot.worktree_path ?? null,

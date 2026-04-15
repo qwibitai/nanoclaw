@@ -162,7 +162,7 @@ export async function refreshSecrets(keys: string[]): Promise<void> {
     }),
   );
 
-  for (const result of results) {
+  for (const [index, result] of results.entries()) {
     if (result.status === 'fulfilled' && result.value.value !== undefined) {
       vaultCache.set(result.value.key, {
         value: result.value.value,
@@ -170,7 +170,7 @@ export async function refreshSecrets(keys: string[]): Promise<void> {
       });
     } else if (result.status === 'rejected') {
       logger.warn(
-        { err: result.reason, key: (result as any).value?.key },
+        { err: result.reason, key: staleKeys[index] },
         'Failed to fetch secret from Solo Vault — will use .env fallback',
       );
     }

@@ -4,7 +4,7 @@ import { CronExpressionParser } from 'cron-parser';
 import type pino from 'pino';
 
 import { TIMEZONE } from '../config.js';
-import { AvailableGroup, writeTasksSnapshot } from '../container-runner.js';
+import { writeTasksSnapshot } from '../container-runner.js';
 import {
   createTask,
   deleteTask,

@@ -4,33 +4,41 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process with a skill-based channel system.
+
+- The current default runtime is `tmux` host execution, not container isolation.
+- The runtime abstraction lives in `src/runtime-adapter.ts`.
+- Channel support is installation-specific; the repo currently includes Telegram core code and expects other channels to arrive via skills or downstream forks.
+- Session lifecycle commands `/compact` and `/clear` are already in core.
+- The process now exposes `GET /skills` and `GET /health` from the skill server.
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `src/index.ts` | Orchestrator: state, message loop, agent invocation |
-| `src/channels/registry.ts` | Channel registry (self-registration at startup) |
-| `src/ipc.ts` | IPC watcher and task processing |
-| `src/router.ts` | Message formatting and outbound routing |
-| `src/config.ts` | Trigger pattern, paths, intervals |
-| `src/container-runner.ts` | Spawns agent containers with mounts |
-| `src/task-scheduler.ts` | Runs scheduled tasks |
-| `src/db.ts` | SQLite operations |
-| `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
-| `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
+| File                       | Purpose                                               |
+| -------------------------- | ----------------------------------------------------- |
+| `src/index.ts`             | Orchestrator: state, message loop, agent invocation   |
+| `src/channels/registry.ts` | Channel registry (self-registration at startup)       |
+| `src/ipc.ts`               | IPC watcher and task processing                       |
+| `src/router.ts`            | Message formatting and outbound routing               |
+| `src/config.ts`            | Trigger pattern, paths, intervals                     |
+| `src/runtime-adapter.ts`   | Runtime descriptor and tmux adapter                   |
+| `src/container-runner.ts`  | Spawns tmux-backed agent sessions with mounts         |
+| `src/task-scheduler.ts`    | Runs scheduled tasks                                  |
+| `src/dispatch-pool.ts`     | Dispatch slot lifecycle, recovery, and drain behavior |
+| `src/service-health.ts`    | Builds the `/health` payload                          |
+| `src/db.ts`                | SQLite operations                                     |
+| `groups/{name}/CLAUDE.md`  | Per-group memory (isolated)                           |
 
 ## Skills
 
-| Skill | When to Use |
-|-------|-------------|
-| `/setup` | First-time installation, authentication, service configuration |
-| `/customize` | Adding channels, integrations, changing behavior |
-| `/debug` | Container issues, logs, troubleshooting |
-| `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
-| `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
-| `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+| Skill               | When to Use                                                       |
+| ------------------- | ----------------------------------------------------------------- |
+| `/setup`            | First-time installation, authentication, service configuration    |
+| `/customize`        | Adding channels, integrations, changing behavior                  |
+| `/debug`            | Container issues, logs, troubleshooting                           |
+| `/update-nanoclaw`  | Bring upstream NanoClaw updates into a customized install         |
+| `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch     |
+| `/get-qodo-rules`   | Load org- and repo-level coding rules from Qodo before code tasks |
 
 ## Development
 
@@ -38,11 +46,14 @@ Run commands directly—don't tell the user to run them.
 
 ```bash
 npm run dev          # Run with hot reload
-npm run build        # Compile TypeScript
-./container/build.sh # Rebuild agent container
+npm run build:core   # Compile the main service
+npm run build:agent-runner
+npm run smoke:runtime
+npm run smoke:health
 ```
 
 Service management:
+
 ```bash
 # macOS (launchd)
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
@@ -57,7 +68,9 @@ systemctl --user restart nanoclaw
 
 ## Troubleshooting
 
-**WhatsApp not connecting after upgrade:** WhatsApp is now a separate channel fork, not bundled in core. Run `/add-whatsapp` (or `git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git && git fetch whatsapp main && (git merge whatsapp/main || { git checkout --theirs package-lock.json && git add package-lock.json && git merge --continue; }) && npm run build`) to install it. Existing auth credentials and groups are preserved.
+Use [docs/SETUP_RECOVERY.md](docs/SETUP_RECOVERY.md) first.
+
+**WhatsApp not connecting after upgrade:** WhatsApp is a downstream channel path, not bundled in the current core. Reapply the relevant channel skill or downstream fork and re-run validation.
 
 ## Parallel Dispatch Metrics Gate
 
@@ -71,11 +84,11 @@ If any condition fails, NanoClaw runs in sequential single-worker mode. The fail
 
 **Override with `DISPATCH_PARALLEL` env var:**
 
-| Value | Behavior |
-|-------|----------|
-| `true` | Force-enable parallel dispatch, bypassing the metrics gate |
-| `false` | Kill switch: force sequential mode regardless of gate result |
-| _(unset)_ | Automatic: metrics gate decides |
+| Value     | Behavior                                                     |
+| --------- | ------------------------------------------------------------ |
+| `true`    | Force-enable parallel dispatch, bypassing the metrics gate   |
+| `false`   | Kill switch: force sequential mode regardless of gate result |
+| _(unset)_ | Automatic: metrics gate decides                              |
 
 ## Recovering from dispatch_blocked_until
 
@@ -94,4 +107,4 @@ The in-memory retry counter (`dispatchRetryCount` in `src/dispatch-loop.ts`) res
 
 ## Container Build Cache
 
-The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+Historical note: container build cache guidance only matters for experimental or historical runtime work. It is not part of the current default tmux runtime.

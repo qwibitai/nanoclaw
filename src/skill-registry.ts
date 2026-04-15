@@ -11,6 +11,7 @@
  *
  * The registry scans at startup and watches for changes via fs.watch.
  * A GET /skills HTTP endpoint returns the current registry as JSON.
+ * A GET /health endpoint returns the current service health snapshot.
  */
 import fs from 'fs';
 import path from 'path';
@@ -25,6 +26,8 @@ export interface SkillEntry {
   allowedTools?: string;
   registeredAt: string;
 }
+
+export type HealthProvider = () => unknown;
 
 const registry = new Map<string, SkillEntry>();
 
@@ -54,7 +57,7 @@ function parseFrontMatter(content: string): Record<string, string> | null {
 
 // --- Scanner ---
 
-function scanSkillFile(skillDir: string, dirName: string): SkillEntry | null {
+function scanSkillFile(skillDir: string, _dirName: string): SkillEntry | null {
   const skillFile = path.join(skillDir, 'SKILL.md');
   if (!fs.existsSync(skillFile)) return null;
 
@@ -185,6 +188,7 @@ let httpServer: Server | null = null;
 export function startSkillServer(
   port: number,
   host = '127.0.0.1',
+  healthProvider?: HealthProvider,
 ): Promise<Server> {
   return new Promise((resolve, reject) => {
     httpServer = createServer((req, res) => {
@@ -199,6 +203,20 @@ export function startSkillServer(
         );
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(skills));
+        return;
+      }
+
+      if (req.method === 'GET' && req.url === '/health') {
+        const payload =
+          healthProvider?.() ??
+          ({
+            service: 'nanoclaw',
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            skills: getRegisteredSkills().length,
+          } as const);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(payload));
         return;
       }
 
@@ -231,7 +249,12 @@ const SKILL_SERVER_PORT = parseInt(process.env.SKILL_SERVER_PORT || '3002', 10);
  */
 export async function initSkillRegistry(
   skillsDir = DEFAULT_SKILLS_DIR,
-  opts: { serve?: boolean; port?: number; host?: string } = {},
+  opts: {
+    serve?: boolean;
+    port?: number;
+    host?: string;
+    healthProvider?: HealthProvider;
+  } = {},
 ): Promise<Server | null> {
   const count = scanSkills(skillsDir);
   logger.info({ count, skillsDir }, 'Initial skill scan complete');
@@ -241,7 +264,7 @@ export async function initSkillRegistry(
   if (opts.serve !== false) {
     const port = opts.port ?? SKILL_SERVER_PORT;
     const host = opts.host ?? '127.0.0.1';
-    return startSkillServer(port, host);
+    return startSkillServer(port, host, opts.healthProvider);
   }
 
   return null;

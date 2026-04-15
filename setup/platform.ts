@@ -98,21 +98,28 @@ export function getServiceManager(): ServiceManager {
   return 'none';
 }
 
-export function getNodePath(): string {
+function resolveCommandPath(name: string): string | null {
   try {
-    return execSync('command -v node', { encoding: 'utf-8' }).trim();
+    const lookupCommand =
+      os.platform() === 'win32'
+        ? `where ${JSON.stringify(name)}`
+        : `command -v ${JSON.stringify(name)}`;
+    const output = execSync(lookupCommand, {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return output.split(/\r?\n/).find(Boolean) ?? null;
   } catch {
-    return process.execPath;
+    return null;
   }
 }
 
+export function getNodePath(): string {
+  return resolveCommandPath('node') ?? process.execPath;
+}
+
 export function commandExists(name: string): boolean {
-  try {
-    execSync(`command -v ${name}`, { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+  return resolveCommandPath(name) !== null;
 }
 
 export function getNodeVersion(): string | null {

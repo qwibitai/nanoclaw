@@ -5,7 +5,9 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc && npm run reload-service",
+    "build": "npm run build:core && npm run reload-service",
+    "build:core": "tsc",
+    "build:agent-runner": "npm --prefix container/agent-runner run build",
     "reload-service": "systemctl --user restart nanoclaw 2>/dev/null || true",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
@@ -19,7 +21,10 @@
     "lint": "eslint src/",
     "lint:migrations": "node scripts/lint-migrations.js --all",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "smoke:runtime": "node scripts/smoke-runtime.mjs",
+    "smoke:health": "node scripts/health-check.mjs"
   },
   "dependencies": {
     "@jeffrey-keyser/message-contracts": "^1.5.1",

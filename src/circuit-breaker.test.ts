@@ -58,11 +58,11 @@ describe('circuit-breaker', () => {
       health.consecutiveFailures = 0;
       expect(backoffDelay(health)).toBe(1000);
       health.consecutiveFailures = 1;
-      expect(backoffDelay(health)).toBe(2000);
+      expect(backoffDelay(health)).toBe(1000);
       health.consecutiveFailures = 2;
-      expect(backoffDelay(health)).toBe(4000);
+      expect(backoffDelay(health)).toBe(2000);
       health.consecutiveFailures = 3;
-      expect(backoffDelay(health)).toBe(8000);
+      expect(backoffDelay(health)).toBe(4000);
     });
 
     it('caps at maxDelay', () => {

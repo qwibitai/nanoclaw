@@ -7,6 +7,10 @@ import type { TelegramChannelOpts } from './telegram.js';
 let lastBotInstance: any = null;
 
 vi.mock('grammy', () => {
+  const setLastBotInstance = (bot: unknown) => {
+    lastBotInstance = bot;
+  };
+
   class MockBot {
     api = {
       sendMessage: vi.fn().mockResolvedValue({}),
@@ -25,7 +29,7 @@ vi.mock('grammy', () => {
     init = vi.fn().mockResolvedValue(undefined);
 
     constructor() {
-      lastBotInstance = this;
+      setLastBotInstance(this);
     }
   }
 

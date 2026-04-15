@@ -1,3 +1,4 @@
+import { calculateDispatchBackoffSkips } from './backoff.js';
 import { AGENCY_HQ_URL } from './config.js';
 import { completeStaleTasksByPrefix, createTask } from './db/index.js';
 import {
@@ -267,7 +268,6 @@ export async function dispatchReadyTasks(
 
       // Pick dispatch JID: parallel worker slot (via DispatchPool) or sequential target
       let dispatchJid: string;
-      let slotId: number | null = null;
 
       if (parallelDispatchEnabled) {
         // Slot is NOT claimed here — claimSlot happens inside dispatchTask
@@ -292,7 +292,6 @@ export async function dispatchReadyTasks(
         dispatchJid = 'internal:dev-inbox:pending';
       } else {
         dispatchJid = target.jid;
-        slotId = null;
       }
 
       const dispatched = await dispatchTask(
@@ -310,8 +309,7 @@ export async function dispatchReadyTasks(
       //   Failure 3+ will be caught by the retries >= 3 check on the next tick
       if (!dispatched) {
         const currentRetries = dispatchRetryCount.get(task.id) ?? 0;
-        const skipTicks =
-          currentRetries === 1 ? 1 : currentRetries === 2 ? 3 : 0;
+        const skipTicks = calculateDispatchBackoffSkips(currentRetries);
         if (skipTicks > 0) {
           dispatchSkipTicks.set(task.id, skipTicks);
           log.info(
@@ -332,8 +330,8 @@ async function dispatchTask(
   targetJid: string,
   targetFolder: string,
   deps: SchedulerDependencies,
-  isStopping: () => boolean,
-  parentLog: ReturnType<typeof createCorrelationLogger>,
+  _isStopping: () => boolean,
+  _parentLog: ReturnType<typeof createCorrelationLogger>,
 ): Promise<boolean> {
   const isWorkerSlot = parallelDispatchEnabled;
 

@@ -16,6 +16,7 @@ vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
+  OUTPUT_POLL_INTERVAL: 1000,
   TIMEZONE: 'America/Los_Angeles',
 }));
 
@@ -91,11 +92,7 @@ vi.mock('child_process', async () => {
 });
 
 import fs from 'fs';
-import {
-  buildVolumeMounts,
-  runContainerAgent,
-  ContainerOutput,
-} from './container-runner.js';
+import { buildVolumeMounts, runContainerAgent } from './container-runner.js';
 import { hasSession } from './container-runtime.js';
 import type { RegisteredGroup } from './types.js';
 import fsActual from 'fs';
@@ -136,7 +133,7 @@ describe('tmux session runner', () => {
     let pollCount = 0;
     vi.mocked(hasSession).mockImplementation(() => {
       pollCount++;
-      return pollCount <= 2;
+      return pollCount <= 1;
     });
 
     // Simulate output file containing sentinel markers

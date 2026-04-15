@@ -79,39 +79,6 @@ async function markSprintProcessed(
   }
 }
 
-async function createRetroMeeting(
-  sprint: CompletedSprint,
-): Promise<string | null> {
-  try {
-    const res = await agencyFetch('/meetings', {
-      method: 'POST',
-      body: JSON.stringify({
-        type: 'retro',
-        title: `${sprint.name} Retro`,
-        sprint_id: sprint.id,
-      }),
-    });
-    if (!res.ok) {
-      logger.warn(
-        { sprintId: sprint.id, status: res.status },
-        'Failed to create retro meeting record',
-      );
-      return null;
-    }
-    const json = (await res.json()) as {
-      success: boolean;
-      data: { id: string };
-    };
-    return json.data?.id ?? null;
-  } catch (err) {
-    logger.error(
-      { err, sprintId: sprint.id },
-      'Error creating retro meeting record',
-    );
-    return null;
-  }
-}
-
 async function fetchRetrospective(
   sprintId: string,
 ): Promise<RetrospectiveData | null> {

@@ -11,10 +11,7 @@ import { migrateJsonState, runMigrations } from './migrations.js';
 import { _setSessionsDb } from './sessions.js';
 import { _setTasksDb } from './tasks.js';
 
-let db: Database.Database;
-
 function setAllDbs(database: Database.Database): void {
-  db = database;
   _setMessagesDb(database);
   _setSessionsDb(database);
   _setGroupsDb(database);

@@ -1,122 +1,119 @@
 # NanoClaw Security Model
 
+## Current Reality
+
+NanoClaw currently runs agent work in tmux sessions on the host.
+
+That means:
+
+- the default runtime is **not** container-isolated
+- bash and CLI tools run on the host inside a controlled working context
+- the main security controls are mount scoping, privilege checks, sender allowlists, credential proxying, and minimal admin surfaces
+
+If you need true container or micro-VM isolation, treat that as future runtime work rather than assuming it exists today.
+
 ## Trust Model
 
-| Entity | Trust Level | Rationale |
-|--------|-------------|-----------|
-| Main group | Trusted | Private self-chat, admin control |
-| Non-main groups | Untrusted | Other users may be malicious |
-| Container agents | Sandboxed | Isolated execution environment |
-| WhatsApp messages | User input | Potential prompt injection |
+| Entity              | Trust level           | Rationale                                                      |
+| ------------------- | --------------------- | -------------------------------------------------------------- |
+| Main group          | Trusted               | Private admin surface with elevated control paths              |
+| Non-main groups     | Untrusted             | Other users may be malicious or prompt-injecting               |
+| tmux agent sessions | Semi-trusted          | Constrained by mounts and runtime wiring, but still host-exec  |
+| Credential proxy    | Trusted               | Holds or fetches real API credentials on the host              |
+| Host exec watcher   | Trusted admin surface | Narrow allowlist only; should not be treated as a general tool |
 
-## Security Boundaries
+## Primary Boundaries
 
-### 1. Container Isolation (Primary Boundary)
+### 1. Explicit Mount Boundaries
 
-Agents execute in containers (lightweight Linux VMs), providing:
-- **Process isolation** - Container processes cannot affect the host
-- **Filesystem isolation** - Only explicitly mounted directories are visible
-- **Non-root execution** - Runs as unprivileged `node` user (uid 1000)
-- **Ephemeral containers** - Fresh environment per invocation (`--rm`)
+Agents only receive paths NanoClaw mounts for them.
 
-This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted.
+- Main-group project root is mounted read-only.
+- Group folders are writable only for that group.
+- Shared global context is mounted read-only.
+- Additional mounts must pass allowlist validation.
 
-### 2. Mount Security
+### 2. Mount Allowlist
 
-**External Allowlist** - Mount permissions stored at `~/.config/nanoclaw/mount-allowlist.json`, which is:
-- Outside project root
-- Never mounted into containers
-- Cannot be modified by agents
+Mount permissions live outside the repo at `~/.config/nanoclaw/mount-allowlist.json`.
 
-**Default Blocked Patterns:**
-```
-.ssh, .gnupg, .aws, .azure, .gcloud, .kube, .docker,
-credentials, .env, .netrc, .npmrc, id_rsa, id_ed25519,
-private_key, .secret
-```
+That file is:
 
-**Protections:**
-- Symlink resolution before validation (prevents traversal attacks)
-- Container path validation (rejects `..` and absolute paths)
-- `nonMainReadOnly` option forces read-only for non-main groups
+- outside project control
+- never mounted into agent sessions
+- validated before every additional mount is accepted
 
-**Read-Only Project Root:**
+Blocked patterns still include common credential and secret locations such as `.ssh`, `.aws`, `.env`, and private key filenames.
 
-The main group's project root is mounted read-only. Writable paths the agent needs (group folder, IPC, `.claude/`) are mounted separately. This prevents the agent from modifying host application code (`src/`, `dist/`, `package.json`, etc.) which would bypass the sandbox entirely on next restart.
+### 3. Per-Group Session Isolation
 
-### 3. Session Isolation
+Each group has isolated Claude session state in `data/sessions/{group}/.claude/`.
 
-Each group has isolated Claude sessions at `data/sessions/{group}/.claude/`:
-- Groups cannot see other groups' conversation history
-- Session data includes full message history and file contents read
-- Prevents cross-group information disclosure
+- Groups do not share conversation history.
+- Session archival for `/clear` happens on the host.
+- Group IPC namespaces are separate.
 
-### 4. IPC Authorization
+### 4. Authorization And Admin Boundaries
 
-Messages and task operations are verified against group identity:
+IPC commands are checked against the source group and privilege level.
 
-| Operation | Main Group | Non-Main Group |
-|-----------|------------|----------------|
-| Send message to own chat | ✓ | ✓ |
-| Send message to other chats | ✓ | ✗ |
-| Schedule task for self | ✓ | ✓ |
-| Schedule task for others | ✓ | ✗ |
-| View all tasks | ✓ | Own only |
-| Manage other groups | ✓ | ✗ |
+| Operation                       | Main group            | Non-main group |
+| ------------------------------- | --------------------- | -------------- |
+| Send to own chat                | Yes                   | Yes            |
+| Send to another chat            | Yes                   | No             |
+| Schedule task for self          | Yes                   | Yes            |
+| Schedule task for another group | Yes                   | No             |
+| Register groups                 | Yes                   | No             |
+| Reload service                  | Main or ops path only | No             |
 
-### 5. Credential Isolation (Credential Proxy)
+## Credential Proxy Model
 
-Real API credentials **never enter containers**. Instead, the host runs an HTTP credential proxy that injects authentication headers transparently.
+Real Anthropic credentials stay on the host.
 
-**How it works:**
-1. Host starts a credential proxy on `CREDENTIAL_PROXY_PORT` (default: 3001)
-2. Containers receive `ANTHROPIC_BASE_URL=http://host.docker.internal:<port>` and `ANTHROPIC_API_KEY=placeholder`
-3. The SDK sends API requests to the proxy with the placeholder key
-4. The proxy strips placeholder auth, injects real credentials (`x-api-key` or `Authorization: Bearer`), and forwards to `api.anthropic.com`
-5. Agents cannot discover real credentials — not in environment, stdin, files, or `/proc`
+### How it works
 
-**NOT Mounted:**
-- WhatsApp session (`store/auth/`) - host only
-- Mount allowlist - external, never mounted
-- Any credentials matching blocked patterns
-- `.env` is shadowed with `/dev/null` in the project root mount
+1. NanoClaw starts a local HTTP proxy on `CREDENTIAL_PROXY_PORT`.
+2. Agent sessions receive `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>` plus a placeholder auth value.
+3. The SDK talks to the local proxy.
+4. The proxy injects the real API key or OAuth token at request time.
+5. Agent sessions never receive the real credential in mounted files or runtime env.
 
-## Privilege Comparison
+### Secret sources
 
-| Capability | Main Group | Non-Main Group |
-|------------|------------|----------------|
-| Project root access | `/workspace/project` (ro) | None |
-| Group folder | `/workspace/group` (rw) | `/workspace/group` (rw) |
-| Global memory | Implicit via project | `/workspace/global` (ro) |
-| Additional mounts | Configurable | Read-only unless allowed |
-| Network access | Unrestricted | Unrestricted |
-| MCP tools | All | All |
+- `.env`
+- Solo Vault, when configured
 
-## Security Architecture Diagram
+## Host-Exec Threat Model
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        UNTRUSTED ZONE                             │
-│  WhatsApp Messages (potentially malicious)                        │
-└────────────────────────────────┬─────────────────────────────────┘
-                                 │
-                                 ▼ Trigger check, input escaping
-┌──────────────────────────────────────────────────────────────────┐
-│                     HOST PROCESS (TRUSTED)                        │
-│  • Message routing                                                │
-│  • IPC authorization                                              │
-│  • Mount validation (external allowlist)                          │
-│  • Container lifecycle                                            │
-│  • Credential proxy (injects auth headers)                       │
-└────────────────────────────────┬─────────────────────────────────┘
-                                 │
-                                 ▼ Explicit mounts only, no secrets
-┌──────────────────────────────────────────────────────────────────┐
-│                CONTAINER (ISOLATED/SANDBOXED)                     │
-│  • Agent execution                                                │
-│  • Bash commands (sandboxed)                                      │
-│  • File operations (limited to mounts)                            │
-│  • API calls routed through credential proxy                     │
-│  • No real credentials in environment or filesystem              │
-└──────────────────────────────────────────────────────────────────┘
-```
+NanoClaw includes an allowlisted host-exec path for narrowly scoped administrative commands.
+
+That path should be treated as sensitive because it is one of the few places where NanoClaw intentionally crosses from the agent session boundary back into privileged host operations.
+
+Current safety properties:
+
+- command allowlist
+- subcommand restrictions for sensitive tools like `git`
+- dedicated watcher instead of broad shell passthrough
+
+Current limitations:
+
+- this is still host execution
+- mistakes in the allowlist are high-impact
+- operators should audit changes to host-exec rules carefully
+
+## What This Model Does Not Claim
+
+NanoClaw does **not** currently claim:
+
+- container isolation by default
+- micro-VM isolation by default
+- safe arbitrary host shell access for untrusted groups
+- protection against every prompt-injection or tool-misuse scenario
+
+## Practical Guidance
+
+- Keep mounts minimal.
+- Treat non-main groups as untrusted.
+- Review host-exec changes like security-sensitive code.
+- Use `/health` and the runtime smoke scripts after deploys.
+- Prefer skills for optional integrations instead of widening core privileges.

@@ -6,6 +6,7 @@ import type pino from 'pino';
 import { DATA_DIR, IPC_FALLBACK_POLL_INTERVAL } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { handleFeedbackIpc } from './ipc/feedback-handler.js';
+import { processJsonIpcDirectory } from './ipc/file-processor.js';
 import { handleMessageIpc } from './ipc/message-handler.js';
 import { handleTaskIpc } from './ipc/task-handler.js';
 import { createCorrelationLogger, logger } from './logger.js';
@@ -85,42 +86,30 @@ export function startIpcWatcher(deps: IpcDeps): void {
     try {
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
+      const errorDir = path.join(ipcBaseDir, 'errors');
 
       // Process messages from this group's IPC directory
       try {
-        if (fs.existsSync(messagesDir)) {
-          const messageFiles = fs
-            .readdirSync(messagesDir)
-            .filter((f) => f.endsWith('.json'));
-          for (const file of messageFiles) {
-            const filePath = path.join(messagesDir, file);
-            const log = createCorrelationLogger(undefined, {
+        await processJsonIpcDirectory({
+          directory: messagesDir,
+          errorDirectory: errorDir,
+          sourceGroup,
+          createLogger: (file) =>
+            createCorrelationLogger(undefined, {
               op: 'ipc-message',
               sourceGroup,
               file,
-            });
-            try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              await handleMessageIpc(
-                data,
-                sourceGroup,
-                isMain,
-                deps,
-                registeredGroups,
-                log,
-              );
-              fs.unlinkSync(filePath);
-            } catch (err) {
-              log.error({ err }, 'Error processing IPC message');
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
-            }
-          }
-        }
+            }),
+          handle: async (data, log) =>
+            handleMessageIpc(
+              data as { type: string; chatJid?: string; text?: string },
+              sourceGroup,
+              isMain,
+              deps,
+              registeredGroups,
+              log,
+            ),
+        });
       } catch (err) {
         logger.error(
           { err, sourceGroup },
@@ -130,33 +119,46 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
       // Process tasks from this group's IPC directory
       try {
-        if (fs.existsSync(tasksDir)) {
-          const taskFiles = fs
-            .readdirSync(tasksDir)
-            .filter((f) => f.endsWith('.json'));
-          for (const file of taskFiles) {
-            const filePath = path.join(tasksDir, file);
-            const log = createCorrelationLogger(undefined, {
+        await processJsonIpcDirectory({
+          directory: tasksDir,
+          errorDirectory: errorDir,
+          sourceGroup,
+          createLogger: (file) =>
+            createCorrelationLogger(undefined, {
               op: 'ipc-task',
               sourceGroup,
               file,
-            });
-            try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data, sourceGroup, isMain, deps, log);
-              fs.unlinkSync(filePath);
-            } catch (err) {
-              log.error({ err }, 'Error processing IPC task');
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
-            }
-          }
-        }
+            }),
+          handle: async (data, log) =>
+            processTaskIpc(
+              data as {
+                type: string;
+                taskId?: string;
+                prompt?: string;
+                schedule_type?: string;
+                schedule_value?: string;
+                context_mode?: string;
+                groupFolder?: string;
+                chatJid?: string;
+                targetJid?: string;
+                feedbackType?: string;
+                title?: string;
+                description?: string;
+                email?: string;
+                jid?: string;
+                name?: string;
+                folder?: string;
+                trigger?: string;
+                requiresTrigger?: boolean;
+                containerConfig?: RegisteredGroup['containerConfig'];
+                service?: string;
+              },
+              sourceGroup,
+              isMain,
+              deps,
+              log,
+            ),
+        });
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
       }

@@ -17,21 +17,18 @@ import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
 
-import { readEnvFile, refreshSecrets, isVaultConfigured } from './env.js';
+import {
+  applyCredentialHeaders,
+  loadCredentialState,
+  loadCredentialStateSync,
+} from './credentials.js';
 import { logger } from './logger.js';
 
-export type AuthMode = 'api-key' | 'oauth';
+export type { AuthMode } from './credentials.js';
 
 export interface ProxyConfig {
-  authMode: AuthMode;
+  authMode: import('./credentials.js').AuthMode;
 }
-
-const CREDENTIAL_KEYS = [
-  'ANTHROPIC_API_KEY',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_BASE_URL',
-] as const;
 
 export function startCredentialProxy(
   port: number,
@@ -50,25 +47,9 @@ export function startCredentialProxy(
       req.on('end', () => {
         const body = Buffer.concat(chunks);
 
-        // On-demand vault refresh: fetch fresh credentials if vault is configured
-        // and cache has expired (TTL-based, no-op when cache is fresh)
-        const credentialPromise = isVaultConfigured()
-          ? refreshSecrets([...CREDENTIAL_KEYS]).then(() =>
-              readEnvFile([...CREDENTIAL_KEYS]),
-            )
-          : Promise.resolve(readEnvFile([...CREDENTIAL_KEYS]));
-
-        credentialPromise
-          .then((secrets) => {
-            const authMode: AuthMode = secrets.ANTHROPIC_API_KEY
-              ? 'api-key'
-              : 'oauth';
-            const oauthToken =
-              secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
-
-            const upstreamUrl = new URL(
-              secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
-            );
+        loadCredentialState()
+          .then((credentialState) => {
+            const upstreamUrl = new URL(credentialState.baseUrl);
             const isHttps = upstreamUrl.protocol === 'https:';
             const makeRequest = isHttps ? httpsRequest : httpRequest;
 
@@ -85,21 +66,10 @@ export function startCredentialProxy(
             delete headers['connection'];
             delete headers['keep-alive'];
             delete headers['transfer-encoding'];
-
-            if (authMode === 'api-key') {
-              // API key mode: inject x-api-key on every request
-              delete headers['x-api-key'];
-              headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
-            } else {
-              // OAuth mode: replace placeholder Bearer token with the real one
-              // only when the container actually sends an Authorization header
-              if (headers['authorization']) {
-                delete headers['authorization'];
-                if (oauthToken) {
-                  headers['authorization'] = `Bearer ${oauthToken}`;
-                }
-              }
-            }
+            const upstreamHeaders = applyCredentialHeaders(
+              headers,
+              credentialState,
+            );
 
             const upstream = makeRequest(
               {
@@ -107,7 +77,7 @@ export function startCredentialProxy(
                 port: upstreamUrl.port || (isHttps ? 443 : 80),
                 path: req.url,
                 method: req.method,
-                headers,
+                headers: upstreamHeaders,
               } as RequestOptions,
               (upRes) => {
                 res.writeHead(upRes.statusCode!, upRes.headers);
@@ -136,23 +106,20 @@ export function startCredentialProxy(
           })
           .catch((err) => {
             logger.error({ err }, 'Credential proxy failed to refresh secrets');
-            // Fall back to .env-based credentials
-            const secrets = readEnvFile([...CREDENTIAL_KEYS]);
-            forwardRequest(req, res, body, secrets);
+            forwardRequest(req, res, body, loadCredentialStateSync());
           });
       });
     });
 
     server.listen(port, host, () => {
-      const vaultStatus = isVaultConfigured()
-        ? 'vault-backed'
-        : 'env-file-only';
-      const secrets = readEnvFile([...CREDENTIAL_KEYS]);
-      const authMode: AuthMode = secrets.ANTHROPIC_API_KEY
-        ? 'api-key'
-        : 'oauth';
+      const credentialState = loadCredentialStateSync();
       logger.info(
-        { port, host, authMode, credentialSource: vaultStatus },
+        {
+          port,
+          host,
+          authMode: credentialState.authMode,
+          credentialSource: credentialState.credentialSource,
+        },
         'Credential proxy started',
       );
       resolve(server);
@@ -167,16 +134,10 @@ function forwardRequest(
   req: import('http').IncomingMessage,
   res: import('http').ServerResponse,
   body: Buffer,
-  secrets: Record<string, string>,
+  credentialState: import('./credentials.js').CredentialState,
 ): void {
   if (res.headersSent) return; // Guard against double-write from race with .then() path
-  const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
-  const oauthToken =
-    secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
-
-  const upstreamUrl = new URL(
-    secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
-  );
+  const upstreamUrl = new URL(credentialState.baseUrl);
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
 
@@ -189,18 +150,7 @@ function forwardRequest(
   delete headers['connection'];
   delete headers['keep-alive'];
   delete headers['transfer-encoding'];
-
-  if (authMode === 'api-key') {
-    delete headers['x-api-key'];
-    headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
-  } else {
-    if (headers['authorization']) {
-      delete headers['authorization'];
-      if (oauthToken) {
-        headers['authorization'] = `Bearer ${oauthToken}`;
-      }
-    }
-  }
+  const upstreamHeaders = applyCredentialHeaders(headers, credentialState);
 
   const upstream = makeRequest(
     {
@@ -208,7 +158,7 @@ function forwardRequest(
       port: upstreamUrl.port || (isHttps ? 443 : 80),
       path: req.url,
       method: req.method,
-      headers,
+      headers: upstreamHeaders,
     } as RequestOptions,
     (upRes) => {
       res.writeHead(upRes.statusCode!, upRes.headers);
@@ -234,7 +184,6 @@ function forwardRequest(
 }
 
 /** Detect which auth mode the host is configured for. */
-export function detectAuthMode(): AuthMode {
-  const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
-  return secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
+export function detectAuthMode(): import('./credentials.js').AuthMode {
+  return loadCredentialStateSync().authMode;
 }

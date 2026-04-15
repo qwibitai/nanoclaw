@@ -7,14 +7,20 @@ echo "Deploying NanoClaw..."
 # Pull latest
 git pull origin main
 
-# Install dependencies
-npm ci --production
+# Install dependencies needed to build both the core and the agent-runner
+npm ci
+npm --prefix container/agent-runner ci
 
-# Build NanoClaw core
-npm run build
+# Build NanoClaw core and host-side agent-runner bundle
+npm run build:core
+npm run build:agent-runner
 
-# Build agent-runner
-(cd container/agent-runner && npm ci --production && npm run build)
+# Validate tmux runtime before we touch the running service
+npm run smoke:runtime
+
+# Trim dev dependencies after build so the deployed service matches runtime needs
+npm prune --omit=dev
+npm --prefix container/agent-runner prune --omit=dev
 
 # Check for active agent sessions before restarting
 ACTIVE=$(tmux ls 2>/dev/null | grep "^nanoclaw-" | wc -l)
@@ -38,5 +44,8 @@ fi
 
 # Restart (user service, no sudo needed)
 systemctl --user restart nanoclaw
+
+# Smoke-check the main service health endpoint after restart
+npm run smoke:health
 
 echo "Deploy complete."

@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, STORE_DIR } from '../config.js';
+import { DATA_DIR } from '../config.js';
 import { logger } from '../logger.js';
 import { RegisteredGroup } from '../types.js';
 
@@ -17,6 +17,88 @@ let migrationsDir = path.join(process.cwd(), 'migrations');
 /** @internal - for tests only. Override the migrations directory path. */
 export function _setMigrationsDir(dir: string): void {
   migrationsDir = dir;
+}
+
+function quoteIdentifier(identifier: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
+    throw new Error(`Unsafe SQL identifier: ${identifier}`);
+  }
+
+  return `"${identifier}"`;
+}
+
+function hasColumn(
+  database: Database.Database,
+  tableName: string,
+  columnName: string,
+): boolean {
+  const rows = database
+    .prepare(`PRAGMA table_info(${quoteIdentifier(tableName)})`)
+    .all() as Array<{ name: string }>;
+
+  return rows.some((row) => row.name === columnName);
+}
+
+function executeMigrationStatement(
+  database: Database.Database,
+  statement: string,
+): void {
+  const normalizedStatement = statement.trim();
+  if (!normalizedStatement) {
+    return;
+  }
+
+  const addColumnMatch = normalizedStatement.match(
+    /^ALTER\s+TABLE\s+([A-Za-z_][A-Za-z0-9_]*)\s+ADD\s+COLUMN\s+(IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+([\s\S]+)$/i,
+  );
+  if (addColumnMatch) {
+    const [, tableName, , columnName, definition] = addColumnMatch;
+    if (hasColumn(database, tableName, columnName)) {
+      return;
+    }
+
+    database.exec(
+      `ALTER TABLE ${quoteIdentifier(tableName)} ADD COLUMN ${quoteIdentifier(columnName)} ${definition}`,
+    );
+    return;
+  }
+
+  const renameColumnMatch = normalizedStatement.match(
+    /^ALTER\s+TABLE\s+([A-Za-z_][A-Za-z0-9_]*)\s+RENAME\s+COLUMN\s+([A-Za-z_][A-Za-z0-9_]*)\s+TO\s+([A-Za-z_][A-Za-z0-9_]*)$/i,
+  );
+  if (renameColumnMatch) {
+    const [, tableName, oldColumnName, newColumnName] = renameColumnMatch;
+    const oldExists = hasColumn(database, tableName, oldColumnName);
+    const newExists = hasColumn(database, tableName, newColumnName);
+
+    if (!oldExists && newExists) {
+      return;
+    }
+    if (!oldExists) {
+      throw new Error(
+        `Cannot rename missing column ${oldColumnName} on ${tableName}`,
+      );
+    }
+
+    database.exec(normalizedStatement);
+    return;
+  }
+
+  database.exec(normalizedStatement);
+}
+
+function splitSqlStatements(sql: string): string[] {
+  const uncommentedSql = sql
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n');
+
+  return uncommentedSql
+    .split(';')
+    .map((statement) => statement.trim())
+    .filter((statement) => statement.length > 0)
+    .map((statement) => `${statement};`)
+    .map((statement) => statement.slice(0, -1));
 }
 
 /**
@@ -98,7 +180,9 @@ export function runMigrations(database: Database.Database): void {
 
     try {
       database.exec('BEGIN');
-      database.exec(sql);
+      for (const statement of splitSqlStatements(sql)) {
+        executeMigrationStatement(database, statement);
+      }
       database
         .prepare(
           'INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)',
@@ -112,7 +196,12 @@ export function runMigrations(database: Database.Database): void {
       } catch {
         /* already rolled back */
       }
-      throw new Error(`Migration ${version} failed: ${(err as Error).message}`);
+      throw new Error(
+        `Migration ${version} failed: ${(err as Error).message}`,
+        {
+          cause: err,
+        },
+      );
     }
   }
 }

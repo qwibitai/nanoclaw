@@ -15,7 +15,7 @@ import {
   DATA_DIR,
   TIMEZONE,
 } from './config.js';
-import { detectAuthMode } from './credential-proxy.js';
+import { buildProxySessionEnv } from './credentials.js';
 import { logger } from './logger.js';
 import type { VolumeMount } from './container-runner.js';
 
@@ -74,17 +74,10 @@ export function buildSessionEnv(mounts: VolumeMount[]): Record<string, string> {
   const env: Record<string, string> = {};
 
   env.TZ = TIMEZONE;
-
-  // Route API traffic through the credential proxy
-  env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${CREDENTIAL_PROXY_PORT}`;
-
-  // Auth mode placeholder (proxy handles real credentials)
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
-    env.ANTHROPIC_API_KEY = 'placeholder';
-  } else {
-    env.CLAUDE_CODE_OAUTH_TOKEN = 'placeholder';
-  }
+  Object.assign(
+    env,
+    buildProxySessionEnv(`http://127.0.0.1:${CREDENTIAL_PROXY_PORT}`),
+  );
 
   // Map volume mount paths to env vars for the agent-runner
   for (const mount of mounts) {
@@ -135,6 +128,7 @@ export function ensureAgentRunnerCompiled(): string {
     } catch (err) {
       throw new Error(
         `Failed to compile agent-runner: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
     }
   }

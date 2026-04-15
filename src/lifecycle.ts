@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, CREDENTIAL_PROXY_PORT, GROUPS_DIR } from './config.js';
+import { CREDENTIAL_PROXY_PORT, GROUPS_DIR } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import { initSecrets } from './env.js';
 import './channels/index.js';
@@ -15,6 +15,7 @@ import {
   ensureContainerRuntimeRunning,
   PROXY_BIND_HOST,
 } from './container-runtime.js';
+import { buildServiceHealthSnapshot } from './service-health.js';
 
 import {
   getAllChats,
@@ -24,7 +25,6 @@ import {
   initDatabase,
   setRegisteredGroup,
   setRouterState,
-  setSession,
   storeChatMetadata,
   storeMessage,
 } from './db/index.js';
@@ -47,14 +47,14 @@ import { initSkillRegistry, shutdownSkillRegistry } from './skill-registry.js';
 import {
   startDispatchLoop,
   startStallDetector,
-  startSprintRetroWatcherSubsystem,
   stopAgencyHqSubsystems,
 } from './agency-hq-dispatcher.js';
+import { setSubsystemState } from './subsystem-status.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startUptimeMonitor, stopUptimeMonitor } from './uptime-monitor.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
-import { connectWithBackoff, shouldSkipChannel } from './circuit-breaker.js';
+import { connectWithBackoff } from './circuit-breaker.js';
 import type { AvailableGroup } from './container-runner.js';
 
 // --- Shared mutable state ---
@@ -175,9 +175,20 @@ export async function initApp(): Promise<void> {
     CREDENTIAL_PROXY_PORT,
     PROXY_BIND_HOST,
   );
+  setSubsystemState('credential-proxy', {
+    state: 'running',
+    details: `Listening on ${PROXY_BIND_HOST}:${CREDENTIAL_PROXY_PORT}.`,
+  });
 
   // Start skill registry (scans container/skills/, watches for changes, serves GET /skills)
-  const skillServer = await initSkillRegistry();
+  const skillServer = await initSkillRegistry(undefined, {
+    healthProvider: () =>
+      buildServiceHealthSnapshot(channels, state.registeredGroups),
+  });
+  setSubsystemState('skill-registry', {
+    state: 'running',
+    details: 'Serving /skills and /health.',
+  });
 
   // Graceful shutdown handlers
   let shuttingDown = false;
@@ -187,12 +198,44 @@ export async function initApp(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     try {
       shutdownSkillRegistry();
+      setSubsystemState('skill-registry', {
+        state: 'disabled',
+        details: 'Shutdown requested.',
+      });
       proxyServer.close();
+      setSubsystemState('credential-proxy', {
+        state: 'disabled',
+        details: 'Shutdown requested.',
+      });
       if (skillServer) skillServer.close();
       stopUptimeMonitor();
+      setSubsystemState('uptime-monitor', {
+        state: 'disabled',
+        details: 'Shutdown requested.',
+      });
       await stopAgencyHqSubsystems();
+      setSubsystemState('agency-dispatch', {
+        state: 'disabled',
+        details: 'Shutdown requested.',
+      });
+      setSubsystemState('stall-detector', {
+        state: 'disabled',
+        details: 'Shutdown requested.',
+      });
       stopHostExecWatcher();
+      setSubsystemState('host-exec', {
+        state: 'disabled',
+        details: 'Shutdown requested.',
+      });
       await queue.shutdown(10000);
+      setSubsystemState('scheduler', {
+        state: 'disabled',
+        details: 'Shutdown requested.',
+      });
+      setSubsystemState('ipc', {
+        state: 'disabled',
+        details: 'Shutdown requested.',
+      });
       for (const ch of channels) await ch.disconnect();
     } catch (err) {
       logger.error({ err }, 'Error during shutdown cleanup');
@@ -344,22 +387,58 @@ export async function initApp(): Promise<void> {
     },
   };
   startSchedulerLoop(schedulerDeps);
-  startDispatchLoop(schedulerDeps).catch((err) =>
-    logger.error({ err }, 'Failed to start dispatch loop'),
-  );
-  startStallDetector(schedulerDeps).catch((err) =>
-    logger.error({ err }, 'Failed to start stall detector'),
-  );
+  setSubsystemState('scheduler', {
+    state: 'running',
+    details: 'Scheduled task polling active.',
+  });
+  try {
+    await startDispatchLoop(schedulerDeps);
+    setSubsystemState('agency-dispatch', {
+      state: 'running',
+      details: 'Agency HQ dispatch loop active.',
+    });
+  } catch (err) {
+    setSubsystemState('agency-dispatch', {
+      state: 'degraded',
+      details: err instanceof Error ? err.message : 'Failed to start.',
+    });
+    logger.error({ err }, 'Failed to start dispatch loop');
+  }
+  try {
+    await startStallDetector(schedulerDeps);
+    setSubsystemState('stall-detector', {
+      state: 'running',
+      details: 'Agency HQ stall detector active.',
+    });
+  } catch (err) {
+    setSubsystemState('stall-detector', {
+      state: 'degraded',
+      details: err instanceof Error ? err.message : 'Failed to start.',
+    });
+    logger.error({ err }, 'Failed to start stall detector');
+  }
   // Sprint retro watcher disabled — redundant with the cron-scheduled task
   // and causes message leaks when the agent doesn't properly wrap no-op output.
   // startSprintRetroWatcherSubsystem(schedulerDeps).catch((err) =>
   //   logger.error({ err }, 'Failed to start sprint retro watcher'),
   // );
+  setSubsystemState('sprint-retro-watcher', {
+    state: 'disabled',
+    details: 'Disabled in startup; use scheduled-task workflows instead.',
+  });
   startUptimeMonitor({
     registeredGroups: () => state.registeredGroups,
     sendMessage: schedulerDeps.sendMessage,
   });
+  setSubsystemState('uptime-monitor', {
+    state: 'running',
+    details: 'User-service failure alerts enabled.',
+  });
   startHostExecWatcher();
+  setSubsystemState('host-exec', {
+    state: 'running',
+    details: 'Allowlisted host command watcher active.',
+  });
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
@@ -378,5 +457,9 @@ export async function initApp(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+  });
+  setSubsystemState('ipc', {
+    state: 'running',
+    details: 'Filesystem IPC watcher active.',
   });
 }

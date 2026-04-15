@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import { calculateExponentialBackoffDelay } from './backoff.js';
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
 
@@ -267,10 +268,11 @@ export class GroupQueue {
       return;
     }
 
-    const delayMs = Math.min(
-      BASE_RETRY_MS * Math.pow(2, state.retryCount - 1),
-      MAX_BACKOFF_MS,
-    );
+    const delayMs = calculateExponentialBackoffDelay(state.retryCount, {
+      baseDelayMs: BASE_RETRY_MS,
+      multiplier: 2,
+      maxDelayMs: MAX_BACKOFF_MS,
+    });
     logger.info(
       { groupJid, retryCount: state.retryCount, delayMs },
       'Scheduling retry with backoff',

@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  An AI assistant that runs agents securely in their own containers. Lightweight, built to be easily understood and completely customized for your needs.
+  A personal Claude assistant harness with a truthful runtime story: tmux host sessions today, explicit security boundaries today, and isolated runtimes as the next architectural step.
 </p>
 
 <p align="center">
@@ -15,22 +15,7 @@
 
 ---
 
-<h2 align="center">🐳 Now Runs in Docker Sandboxes</h2>
-<p align="center">Every agent gets its own isolated container inside a micro VM.<br>Hypervisor-level isolation. Millisecond startup. No complex setup.</p>
-
-**macOS (Apple Silicon)**
-```bash
-curl -fsSL https://nanoclaw.dev/install-docker-sandboxes.sh | bash
-```
-
-**Windows (WSL)**
-```bash
-curl -fsSL https://nanoclaw.dev/install-docker-sandboxes-windows.sh | bash
-```
-
-> Currently supported on macOS (Apple Silicon) and Windows (x86). Linux support coming soon.
-
-<p align="center"><a href="https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes">Read the announcement →</a>&nbsp; · &nbsp;<a href="docs/docker-sandboxes.md">Manual setup guide →</a></p>
+> Current implementation note: NanoClaw does not currently default to Docker, Apple Container, or micro-VM isolation. The shipping runtime is `tmux` host execution with explicit mounts, a credential proxy, sender allowlists, and narrow admin paths. See [docs/RUNTIME_COMPATIBILITY.md](docs/RUNTIME_COMPATIBILITY.md), [docs/SECURITY.md](docs/SECURITY.md), and [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
 
 ---
 
@@ -38,7 +23,7 @@ curl -fsSL https://nanoclaw.dev/install-docker-sandboxes-windows.sh | bash
 
 [OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
 
-NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. Claude agents run in their own Linux containers with filesystem isolation, not merely behind permission checks.
+NanoClaw keeps the core small enough to reason about. The current repo runs agent work in tmux sessions on the host. That is a less ambitious isolation model than containers or micro-VMs, but it is now described honestly and instrumented like a real production harness instead of being marketed as something it is not.
 
 ## Quick Start
 
@@ -58,7 +43,7 @@ claude
 
 </details>
 
-Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup and service configuration.
+Then run `/setup`. Claude Code handles dependencies, authentication, tmux runtime checks, and service configuration.
 
 > **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal. If you don't have Claude Code installed, get it at [claude.com/product/claude-code](https://claude.com/product/claude-code).
 
@@ -66,31 +51,39 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 **Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NanoClaw codebase, just ask Claude Code to walk you through it.
 
-**Secure by isolation.** Agents run in Linux containers (Apple Container on macOS, or Docker) and they can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
+**Truth over positioning.** The current default runtime is tmux host execution. Security today comes from explicit mounts, read-only project access for the main group, per-group session state, sender allowlists, a credential proxy, and narrow host-exec controls. That is materially safer than a monolithic shared agent, but it is not container isolation.
 
 **Built for the individual user.** NanoClaw isn't a monolithic framework; it's software that fits each user's exact needs. Instead of becoming bloatware, NanoClaw is designed to be bespoke. You make your own fork and have Claude Code modify it to match your needs.
 
 **Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that it's safe to make changes.
 
 **AI-native.**
+
 - No installation wizard; Claude Code guides setup.
 - No monitoring dashboard; ask Claude what's happening.
 - No debugging tools; describe the problem and Claude fixes it.
 
 **Skills over features.** Instead of adding features (e.g. support for Telegram) to the codebase, contributors submit [claude code skills](https://code.claude.com/docs/en/skills) like `/add-telegram` that transform your fork. You end up with clean code that does exactly what you need.
 
-**Best harness, best model.** NanoClaw runs on the Claude Agent SDK, which means you're running Claude Code directly. Claude Code is highly capable and its coding and problem-solving capabilities allow it to modify and expand NanoClaw and tailor it to each user.
+**Runtime adapter, not runtime drift.** The codebase now has a runtime abstraction so future Docker, Apple Container, or micro-VM work can happen behind a clean seam instead of leaking old claims into every doc and subsystem.
 
-## What It Supports
+## What Ships In Core
 
-- **Multi-channel messaging** - Talk to your assistant from WhatsApp, Telegram, Discord, Slack, or Gmail. Add channels with skills like `/add-whatsapp` or `/add-telegram`. Run one or many at the same time.
-- **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
-- **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
-- **Web access** - Search and fetch content from the Web
-- **Container isolation** - Agents are sandboxed in [Docker Sandboxes](https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes) (micro VM isolation), Apple Container (macOS), or Docker (macOS/Linux)
-- **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks
-- **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
+- **Telegram channel code in-repo** - The core repo currently includes Telegram. Other channels should land as skills or downstream forks.
+- **Per-group context** - Each group has isolated files, `CLAUDE.md`, sessions, and mounts.
+- **Main channel controls** - Admin actions, group registration, and cross-group task visibility belong to the main group.
+- **Scheduled tasks** - Recurring or one-time jobs run in group context and can reply back.
+- **Agency HQ orchestration** - Dispatch slots, worktrees, stall detection, and recovery flows are built in.
+- **Session lifecycle commands** - `/compact` and `/clear` are implemented in core.
+- **Operational health** - `GET /skills` and `GET /health` are served from the main process.
+- **Credential proxy and mount security** - Real Anthropic credentials stay on the host; mounts are validated against explicit rules.
+
+## Installation-Specific Or Experimental
+
+- **Additional channels and integrations** - Add them with skills or downstream forks.
+- **Agent teams / swarms** - Claude Code capability may be enabled, but NanoClaw does not ship a dedicated swarm UX.
+- **Remote control** - Present, but still experimental and main-group only.
+- **Container or micro-VM runtimes** - Target architecture, not the current default.
 
 ## Usage
 
@@ -103,10 +96,18 @@ Talk to your assistant with the trigger word (default: `@Andy`):
 ```
 
 From the main channel (your self-chat), you can manage groups and tasks:
+
 ```
 @Andy list all scheduled tasks across groups
 @Andy pause the Monday briefing task
 @Andy join the Family Chat group
+```
+
+Session lifecycle commands are available in core:
+
+```
+/compact
+/clear
 ```
 
 ## Customizing
@@ -122,65 +123,83 @@ Or run `/customize` for guided changes.
 
 The codebase is small enough that Claude can safely modify it.
 
+## Requirements
+
+- macOS or Linux with `tmux`
+- Node.js 20+
+- [Claude Code](https://claude.ai/download)
+- Windows via WSL is experimental
+- Windows native is not currently supported
+
+## Operations
+
+Runtime and service checks:
+
+```bash
+npm run smoke:runtime
+npm run smoke:health
+```
+
+Build paths:
+
+```bash
+npm run build:core
+npm run build:agent-runner
+```
+
+## Architecture
+
+```text
+Channels -> SQLite -> Queue/Scheduler -> tmux session -> credential proxy -> Claude API
+```
+
+Single Node.js process. Channels self-register at startup. Group work is queued and executed in tmux sessions with explicit host mounts. The runtime adapter keeps future isolated runtimes possible without changing the orchestration contract again.
+
+Key files:
+
+- `src/runtime-adapter.ts` - Runtime descriptor and tmux adapter
+- `src/container-runner.ts` - Session spawn path, mount assembly, and output wiring
+- `src/session-settings.ts` - Per-group Claude config and runtime env bootstrap
+- `src/lifecycle.ts` - Startup, health wiring, channels, and subsystem orchestration
+- `src/dispatch-pool.ts` - Slot lifecycle, startup recovery, and drain behavior
+- `src/ipc.ts` - Filesystem IPC watcher and handler routing
+- `src/service-health.ts` - `/health` snapshot builder
+
 ## Contributing
 
-**Don't add features. Add skills.**
+Core changes should focus on correctness, security, deploy safety, observability, and simplification.
 
-If you want to add Telegram support, don't create a PR that adds Telegram to the core codebase. Instead, fork NanoClaw, make the code changes on a branch, and open a PR. We'll create a `skill/telegram` branch from your PR that other users can merge into their fork.
+Feature growth should usually be a skill.
 
-Users then run `/add-telegram` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
+If you want to add a channel, workflow, or integration, prefer a skill or downstream fork instead of expanding the base repo.
 
 ### RFS (Request for Skills)
 
 Skills we'd like to see:
 
 **Communication Channels**
+
 - `/add-signal` - Add Signal as a channel
 
-**Session Management**
-- `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
-
-## Requirements
-
-- macOS or Linux
-- Node.js 20+
-- [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
-
-## Architecture
-
-```
-Channels --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
-```
-
-Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
-
-For the full architecture details, see [docs/SPEC.md](docs/SPEC.md).
-
-Key files:
-- `src/index.ts` - Orchestrator: state, message loop, agent invocation
-- `src/channels/registry.ts` - Channel registry (self-registration at startup)
-- `src/ipc.ts` - IPC watcher and task processing
-- `src/router.ts` - Message formatting and outbound routing
-- `src/group-queue.ts` - Per-group queue with global concurrency limit
-- `src/container-runner.ts` - Spawns streaming agent containers
-- `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
-- `groups/*/CLAUDE.md` - Per-group memory
+See [CONTRIBUTING.md](CONTRIBUTING.md), [docs/SKILL_AUTHORING.md](docs/SKILL_AUTHORING.md), and [docs/SKILL_CONFLICT_RECOVERY.md](docs/SKILL_CONFLICT_RECOVERY.md).
 
 ## FAQ
 
-**Why Docker?**
+**Why tmux instead of containers right now?**
 
-Docker provides cross-platform support (macOS, Linux and even Windows via WSL2) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime.
-
-**Can I run this on Linux?**
-
-Yes. Docker is the default runtime and works on both macOS and Linux. Just run `/setup`.
+Because that is what the current code actually runs. The repo now describes the tmux host runtime honestly and isolates future runtime work behind a dedicated adapter.
 
 **Is this secure?**
 
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. You should still review what you're running, but the codebase is small enough that you actually can. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
+Safer than a monolithic shared agent, yes. Container-isolated by default, no. The current model is host execution with explicit boundaries. Read [docs/SECURITY.md](docs/SECURITY.md) before trusting it with sensitive host access.
+
+**Can I run this on Linux?**
+
+Yes. Linux is the primary tmux runtime target.
+
+**Can I run this on Windows?**
+
+Only via WSL for now, and that path should still be treated as experimental.
 
 **Why no configuration files?**
 
@@ -196,6 +215,7 @@ ANTHROPIC_AUTH_TOKEN=your-token-here
 ```
 
 This allows you to use:
+
 - Local models via [Ollama](https://ollama.ai) with an API proxy
 - Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
 - Custom model deployments with Anthropic-compatible APIs
@@ -212,11 +232,18 @@ If you have issues, during setup, Claude will try to dynamically fix them. If th
 
 **What changes will be accepted into the codebase?**
 
-Only security fixes, bug fixes, and clear improvements will be accepted to the base configuration. That's all.
+Security fixes, bug fixes, deploy hardening, correctness improvements, and simplifications.
 
-Everything else (new capabilities, OS compatibility, hardware support, enhancements) should be contributed as skills.
+Most new capabilities should be skills.
 
-This keeps the base system minimal and lets every user customize their installation without inheriting features they don't want.
+## Documentation
+
+- [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)
+- [docs/RUNTIME_COMPATIBILITY.md](docs/RUNTIME_COMPATIBILITY.md)
+- [docs/SECURITY.md](docs/SECURITY.md)
+- [docs/SPEC.md](docs/SPEC.md)
+- [docs/SETUP_RECOVERY.md](docs/SETUP_RECOVERY.md)
+- [docs/SKILL_AUTHORING.md](docs/SKILL_AUTHORING.md)
 
 ## Community
 

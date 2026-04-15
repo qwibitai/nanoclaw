@@ -1,3 +1,4 @@
+import { calculateExponentialBackoffDelay } from './backoff.js';
 import { logger } from './logger.js';
 
 // --- Circuit Breaker Types ---
@@ -62,8 +63,14 @@ export function getChannelHealth(
 /** Calculate backoff delay for the current failure count */
 export function backoffDelay(health: ChannelHealth): number {
   const { baseDelay, multiplier, maxDelay } = health.config;
-  const delay = baseDelay * Math.pow(multiplier, health.consecutiveFailures);
-  return Math.min(delay, maxDelay);
+  return calculateExponentialBackoffDelay(
+    Math.max(1, health.consecutiveFailures),
+    {
+      baseDelayMs: baseDelay,
+      multiplier,
+      maxDelayMs: maxDelay,
+    },
+  );
 }
 
 /** Record a successful connection — reset to CLOSED */
