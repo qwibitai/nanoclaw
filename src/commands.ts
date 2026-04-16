@@ -486,7 +486,15 @@ function missionList(): string {
         const roles = getMissionRoles(m.id);
         const done = roles.filter((r) => r.status === 'success').length;
         const statusEmoji =
-          m.status === 'proposed' ? '📋' : m.status === 'running' ? '🚀' : '🔀';
+          m.status === 'proposed'
+            ? '📋'
+            : m.status === 'approved'
+              ? '⏳'
+              : m.status === 'running'
+                ? '🚀'
+                : m.status === 'synthesizing'
+                  ? '🔀'
+                  : '❓';
         lines.push(
           `  ${statusEmoji} ${m.title}  ${m.entity.toUpperCase()}  ${done}/${roles.length} roles  $${m.cost_actual_usd.toFixed(2)}`,
         );
