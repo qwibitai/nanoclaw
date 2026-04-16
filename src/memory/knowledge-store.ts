@@ -10,6 +10,7 @@
  */
 
 import { QdrantClient } from '@qdrant/js-client-rest';
+import { QDRANT_URL } from '../config.js';
 import { getDb } from '../db.js';
 import { logger } from '../logger.js';
 
@@ -197,7 +198,7 @@ export function getAllFacts(opts?: {
   return db.prepare(sql).all(...params) as Fact[];
 }
 
-const QDRANT_URL = process.env.QDRANT_URL || '';
+// QDRANT_URL imported from config.ts (reads .env via readEnvFile)
 const COLLECTION_NAME = 'nanoclaw_knowledge';
 
 let qdrantClient: QdrantClient | null = null;

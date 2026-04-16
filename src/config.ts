@@ -15,6 +15,9 @@ const envConfig = readEnvFile([
   'SUPERPILOT_API_URL',
   'NANOCLAW_SERVICE_TOKEN',
   'DAILY_BUDGET_USD',
+  'WEBHOOK_PORT',
+  'WEBHOOK_SECRET',
+  'QDRANT_URL',
 ]);
 
 export const ASSISTANT_NAME =
@@ -160,8 +163,15 @@ export const EMAIL_INTELLIGENCE_ENABLED =
     envConfig.EMAIL_INTELLIGENCE_ENABLED ??
     'true') !== 'false';
 
-export const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || '0', 10);
-export const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+export const WEBHOOK_PORT = parseInt(
+  process.env.WEBHOOK_PORT || envConfig.WEBHOOK_PORT || '0',
+  10,
+);
+export const WEBHOOK_SECRET =
+  process.env.WEBHOOK_SECRET || envConfig.WEBHOOK_SECRET || '';
+
+export const QDRANT_URL =
+  process.env.QDRANT_URL || envConfig.QDRANT_URL || '';
 
 // Browser sidecar settings
 export const BROWSER_CDP_URL =

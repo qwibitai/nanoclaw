@@ -150,9 +150,12 @@ export async function pollCalendar(): Promise<void> {
 
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(
-      `Calendar poll failed: ${response.status} ${response.statusText}`,
+    // OneCLI may not have a calendar endpoint yet — log once at debug level
+    logger.debug(
+      { status: response.status, url },
+      'Calendar endpoint not available (skipping)',
     );
+    return;
   }
 
   const data = (await response.json()) as {
