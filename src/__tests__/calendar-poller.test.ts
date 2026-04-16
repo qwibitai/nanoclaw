@@ -13,6 +13,10 @@ vi.mock('../config.js', () => ({
 vi.mock('../event-bus.js', () => ({
   eventBus: { emit: vi.fn() },
 }));
+vi.mock('../calendar-fetcher.js', () => ({
+  discoverCalendarAccounts: vi.fn(() => []),
+  fetchCalendarEvents: vi.fn(async () => []),
+}));
 
 import {
   storeCalendarEvents,

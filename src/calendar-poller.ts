@@ -6,6 +6,7 @@ import {
 import { getDb } from './db.js';
 import { eventBus } from './event-bus.js';
 import { logger } from './logger.js';
+import { fetchCalendarEvents, discoverCalendarAccounts } from './calendar-fetcher.js';
 
 export interface CalendarEvent {
   id: string;
@@ -140,17 +141,41 @@ export function getEventsInRange(
 }
 
 /**
- * Poll the OneCLI gateway for calendar events and store them.
+ * Poll for calendar events: tries direct Google Calendar API first, falls back to OneCLI.
  */
 export async function pollCalendar(): Promise<void> {
   const now = Date.now();
-  const url = `${ONECLI_URL}/calendar/events?from=${now}&to=${now + CALENDAR_LOOKAHEAD_MS}`;
 
-  logger.debug({ url }, 'Polling calendar');
+  // Try direct Google Calendar API first (preferred)
+  const calendarAccounts = discoverCalendarAccounts();
+  if (calendarAccounts.length > 0) {
+    logger.debug({ accounts: calendarAccounts.length }, 'Using direct calendar fetcher');
+
+    const events = await fetchCalendarEvents(
+      now,
+      now + CALENDAR_LOOKAHEAD_MS,
+      calendarAccounts,
+    );
+
+    storeCalendarEvents(events);
+
+    eventBus.emit('calendar.synced', {
+      type: 'calendar.synced',
+      source: 'calendar-poller',
+      timestamp: now,
+      payload: { eventsFound: events.length, lookaheadMs: CALENDAR_LOOKAHEAD_MS },
+    });
+
+    logger.info({ eventsFound: events.length, source: 'direct' }, 'Calendar poll complete');
+    return;
+  }
+
+  // Fallback: try OneCLI endpoint
+  const url = `${ONECLI_URL}/calendar/events?from=${now}&to=${now + CALENDAR_LOOKAHEAD_MS}`;
+  logger.debug({ url }, 'Polling calendar via OneCLI (fallback)');
 
   const response = await fetch(url);
   if (!response.ok) {
-    // OneCLI may not have a calendar endpoint yet — log once at debug level
     logger.debug(
       { status: response.status, url },
       'Calendar endpoint not available (skipping)',
@@ -192,7 +217,7 @@ export async function pollCalendar(): Promise<void> {
     payload: { eventsFound: events.length, lookaheadMs: CALENDAR_LOOKAHEAD_MS },
   });
 
-  logger.info({ eventsFound: events.length }, 'Calendar poll complete');
+  logger.info({ eventsFound: events.length, source: 'onecli' }, 'Calendar poll complete');
 }
 
 let pollerTimer: ReturnType<typeof setInterval> | null = null;
