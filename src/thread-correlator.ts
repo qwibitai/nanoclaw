@@ -8,7 +8,7 @@ import { logger } from './logger.js';
 export interface ThreadLink {
   thread_id: string;
   item_id: string;
-  link_type: 'attendee_match' | 'subject_match' | 'temporal';
+  link_type: 'attendee_match' | 'subject_match' | 'temporal' | 'semantic_match';
   confidence: number;
   created_at: number;
 }
@@ -168,4 +168,89 @@ export function getItemThreadLinks(itemId: string): ThreadLink[] {
        FROM thread_links WHERE item_id = ?`,
     )
     .all(itemId) as ThreadLink[];
+}
+
+interface SemanticMatchResult {
+  threadId: string;
+  confidence: number;
+  reasoning: string;
+}
+
+/**
+ * Use LLM to find semantic matches between a tracked item and active threads.
+ * Caps confidence at 0.85, requires minimum 0.6, validates thread IDs against DB.
+ */
+export async function correlateBySemanticMatch(
+  item: TrackedItem,
+  groupName: string,
+): Promise<ThreadLink[]> {
+  const threads = getActiveThreads(groupName);
+  if (threads.length === 0) return [];
+
+  // Filter out threads already linked to this item
+  const existingLinks = getItemThreadLinks(item.id);
+  const linkedThreadIds = new Set(existingLinks.map((l) => l.thread_id));
+  const candidates = threads.filter((t) => !linkedThreadIds.has(t.id));
+
+  if (candidates.length === 0) return [];
+
+  const validThreadIds = new Set(candidates.map((t) => t.id));
+
+  let matches: SemanticMatchResult[];
+  try {
+    const { generateShort } = await import('./llm/utility.js');
+    const prompt =
+      `Given this email:\nTitle: "${item.title}"\nSource: ${item.source}\n\n` +
+      `And these active conversation threads:\n${candidates.map((t) => `- ID: "${t.id}" Title: "${t.title}"`).join('\n')}\n\n` +
+      `Which threads are semantically related to this email? ` +
+      `Return a JSON array of objects with {threadId, confidence (0-1), reasoning}. ` +
+      `Return [] if none match.`;
+
+    const raw = await generateShort(prompt, { maxOutputTokens: 500 });
+    matches = JSON.parse(raw);
+    if (!Array.isArray(matches)) {
+      matches = [];
+    }
+  } catch {
+    logger.debug({ itemId: item.id }, 'Semantic match LLM call failed or returned invalid JSON');
+    return [];
+  }
+
+  const links: ThreadLink[] = [];
+
+  for (const match of matches) {
+    // Validate thread ID exists in candidates
+    if (!validThreadIds.has(match.threadId)) {
+      logger.debug(
+        { threadId: match.threadId, itemId: item.id },
+        'Semantic match: rejecting invalid thread ID',
+      );
+      continue;
+    }
+
+    // Enforce minimum confidence
+    if (match.confidence < 0.6) continue;
+
+    // Cap confidence at 0.85
+    const confidence = Math.min(match.confidence, 0.85);
+
+    const link: ThreadLink = {
+      thread_id: match.threadId,
+      item_id: item.id,
+      link_type: 'semantic_match',
+      confidence,
+      created_at: Date.now(),
+    };
+
+    storeThreadLink(link);
+    emitCorrelated(link);
+    links.push(link);
+
+    logger.debug(
+      { threadId: link.thread_id, itemId: item.id, confidence, reasoning: match.reasoning },
+      'Semantic match correlated',
+    );
+  }
+
+  return links;
 }

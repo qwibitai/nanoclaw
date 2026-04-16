@@ -25,14 +25,17 @@ export interface ClassifyResult {
   sender: string;
 }
 
-export function classifyFromSSE(emails: SSEEmail[]): ClassifyResult[] {
+export function classifyFromSSE(emails: SSEEmail[], groupName: string = 'main'): ClassifyResult[] {
   const results: ClassifyResult[] = [];
 
   for (const email of emails) {
     const sourceId = `gmail:${email.thread_id}`;
     const existing = getTrackedItemBySourceId('gmail', sourceId);
     if (existing) {
-      logger.debug({ threadId: email.thread_id }, 'SSE: already tracked, skipping');
+      logger.debug(
+        { threadId: email.thread_id },
+        'SSE: already tracked, skipping',
+      );
       continue;
     }
 
@@ -58,7 +61,7 @@ export function classifyFromSSE(emails: SSEEmail[]): ClassifyResult[] {
       id: itemId,
       source: 'gmail',
       source_id: sourceId,
-      group_name: 'main',
+      group_name: groupName,
       state: result.decision === 'push' ? 'pending' : 'queued',
       classification: result.decision,
       superpilot_label: email.superpilot_label ?? null,
@@ -77,8 +80,8 @@ export function classifyFromSSE(emails: SSEEmail[]): ClassifyResult[] {
     });
 
     if (result.decision === 'digest') {
-      const state = getDigestState('main');
-      updateDigestState('main', { queued_count: state.queued_count + 1 });
+      const state = getDigestState(groupName);
+      updateDigestState(groupName, { queued_count: state.queued_count + 1 });
     }
 
     const event: ItemClassifiedEvent = {
