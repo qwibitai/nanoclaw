@@ -157,6 +157,7 @@ export const EMAIL_INTELLIGENCE_ENABLED =
     envConfig.EMAIL_INTELLIGENCE_ENABLED ??
     'true') !== 'false';
 
+export const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || '0', 10);
 export const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 
 // Browser sidecar settings
@@ -195,6 +196,14 @@ export const DELEGATION_GUARDRAIL_COUNT = parseInt(
 );
 export const PROACTIVE_SUGGESTION_INTERVAL = parseInt(
   process.env.PROACTIVE_SUGGESTION_INTERVAL || '900000',
+  10,
+);
+export const PROACTIVE_LOOKAHEAD_MS = parseInt(
+  process.env.PROACTIVE_LOOKAHEAD_MS || '14400000',
+  10,
+);
+export const PROACTIVE_MIN_GAP_MS = parseInt(
+  process.env.PROACTIVE_MIN_GAP_MS || '300000',
   10,
 );
 

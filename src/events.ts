@@ -458,6 +458,21 @@ export interface ThreadCorrelatedEvent extends NanoClawEvent {
   };
 }
 
+// --- Watcher events ---
+
+export interface WatcherChangedEvent extends NanoClawEvent {
+  type: 'watcher.changed';
+  source: 'browser-watcher';
+  payload: {
+    watcherId: string;
+    url: string;
+    selector: string;
+    previousValue: string | null;
+    newValue: string | null;
+    groupId: string;
+  };
+}
+
 // --- Proactive scheduling events ---
 
 export interface ProactiveSuggestionEvent extends NanoClawEvent {
@@ -516,6 +531,7 @@ export interface EventMap {
   'calendar.synced': CalendarSyncedEvent;
   'thread.correlated': ThreadCorrelatedEvent;
   'proactive.suggestion': ProactiveSuggestionEvent;
+  'watcher.changed': WatcherChangedEvent;
 }
 
 export type EventType = keyof EventMap;

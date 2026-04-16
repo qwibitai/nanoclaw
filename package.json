@@ -26,6 +26,7 @@
     "@ai-sdk/openai": "^3.0.53",
     "@browserbasehq/stagehand": "^3.2.1",
     "@onecli-sh/sdk": "^0.2.0",
+    "@qdrant/js-client-rest": "^1.17.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "ai": "^6.0.161",
     "better-sqlite3": "11.10.0",

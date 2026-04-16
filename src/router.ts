@@ -57,6 +57,28 @@ export function normalizeConfidenceMarkers(
     .replace(/^\? Unknown:/gm, '[uncertain]');
 }
 
+export interface ConfidenceAnnotation {
+  claim: string;
+  confidence: 'verified' | 'unverified' | 'unknown';
+  source?: string;
+}
+
+export function addConfidenceMarkers(
+  text: string,
+  annotations: ConfidenceAnnotation[],
+): string {
+  if (annotations.length === 0) return text;
+
+  const footnotes: string[] = [];
+  for (const ann of annotations) {
+    const marker = ann.confidence === 'verified' ? '✓' : ann.confidence === 'unverified' ? '?' : '~';
+    const sourceInfo = ann.source ? ` (${ann.source})` : '';
+    footnotes.push(`${marker} ${ann.claim}${sourceInfo}`);
+  }
+
+  return text + '\n\n' + footnotes.join('\n');
+}
+
 export function formatOutbound(
   rawText: string,
   plainText: boolean = false,

@@ -44,11 +44,22 @@ import type {
 const APPROVAL_TIMEOUT_S = 1800; // 30 minutes
 const TIMEOUT_CHECK_INTERVAL_MS = 30_000; // check every 30s
 
-/** Read the full request body as a string. */
+const MAX_BODY_BYTES = 1_048_576; // 1 MB
+
+/** Read the full request body as a string. Rejects if body exceeds MAX_BODY_BYTES. */
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        req.destroy();
+        reject(new Error('Body too large'));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on('end', () => resolve(Buffer.concat(chunks).toString()));
     req.on('error', reject);
   });
@@ -207,6 +218,30 @@ function validateActionIntent(
   }
 
   return null;
+}
+
+export async function validatePreAction(
+  userRequest: string,
+  actionClass: string,
+  proposedAction: string,
+): Promise<{ approved: boolean; reason?: string }> {
+  try {
+    const { generateShort } = await import('./llm/utility.js');
+    const result = await generateShort(
+      `The user asked: "${userRequest}"\nThe system is about to execute action class "${actionClass}": "${proposedAction}"\n\nDoes the proposed action match what the user requested? Respond with exactly "MATCH" if yes, or "MISMATCH: <reason>" if no.`,
+      { maxOutputTokens: 50 },
+    );
+
+    const trimmed = result.trim();
+    if (trimmed.startsWith('MISMATCH')) {
+      logger.warn({ actionClass, reason: trimmed }, 'Pre-action validation rejected');
+      return { approved: false, reason: trimmed };
+    }
+    return { approved: true };
+  } catch (err) {
+    logger.warn({ err }, 'Pre-action validation LLM call failed, allowing action');
+    return { approved: true };
+  }
 }
 
 /** Handle POST /trust/evaluate */
@@ -482,6 +517,10 @@ export function startTrustGateway(port: number = 10255): { close: () => void } {
       json(res, 404, { error: 'Not found' });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (message === 'Body too large') {
+        json(res, 413, { error: 'Request body too large' });
+        return;
+      }
       logger.error({ error: message, method, url }, 'Trust gateway error');
       json(res, 500, { error: 'Internal server error' });
     }

@@ -774,4 +774,33 @@ describe('ExecutorPool', () => {
       await vi.advanceTimersByTimeAsync(10);
     });
   });
+
+  describe('warm pool crash recovery', () => {
+    it('recreates warm slot when crash is simulated', () => {
+      pool.initWarmPool();
+      expect(pool.getWarmSlotCount()).toBe(2);
+
+      pool.simulateWarmSlotCrash(0);
+
+      // replenishWarmPool is called synchronously within evictWarmSlot
+      expect(pool.getWarmSlotCount()).toBe(2);
+    });
+
+    it('emits pool.warm.evicted event with crash reason', () => {
+      const events: any[] = [];
+      eventBus.on('pool.warm.evicted', (e: any) => events.push(e));
+
+      pool.initWarmPool();
+      pool.simulateWarmSlotCrash(0);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].payload.reason).toBe('crash');
+    });
+
+    it('does nothing for invalid index', () => {
+      pool.initWarmPool();
+      pool.simulateWarmSlotCrash(99);
+      expect(pool.getWarmSlotCount()).toBe(2);
+    });
+  });
 });

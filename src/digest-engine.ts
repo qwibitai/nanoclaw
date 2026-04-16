@@ -3,6 +3,7 @@ import { formatLocalTime } from './timezone.js';
 import { logger } from './logger.js';
 import { getDb } from './db.js';
 import { eventBus } from './event-bus.js';
+import { getCostBreakdown } from './memory/cost-dashboard.js';
 import {
   getTrackedItemsByState,
   getDigestState,
@@ -75,6 +76,19 @@ export function generateMorningDashboard(groupName: string): string {
   if (actionRequired.length === 0 && queued.length === 0) {
     lines.push('');
     lines.push('Nothing urgent. Clean slate today.');
+  }
+
+  const costSince = new Date(Date.now() - 7 * 86400000).toISOString();
+  const costBreakdown = getCostBreakdown(costSince);
+  const totalCost = costBreakdown.reduce((sum, r) => sum + r.total_cost, 0);
+  if (totalCost > 0) {
+    lines.push('<b>━━ COST (7d) ━━</b>');
+    for (const row of costBreakdown) {
+      const label = row.session_type.charAt(0).toUpperCase() + row.session_type.slice(1);
+      lines.push(`💰 ${label}: $${row.total_cost.toFixed(2)} (${row.task_count} tasks)`);
+    }
+    lines.push(`Total: $${totalCost.toFixed(2)}`);
+    lines.push('');
   }
 
   lines.push('');

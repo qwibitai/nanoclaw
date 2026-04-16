@@ -14,6 +14,7 @@ vi.mock('../config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test',
   STORE_DIR: '/tmp/nanoclaw-test/store',
   ASSISTANT_NAME: 'Andy',
+  DAILY_BUDGET_USD: 10.0,
   CHAT_INTERFACE_CONFIG: {
     morningDashboardTime: '07:30',
     digestThreshold: 5,
@@ -115,6 +116,18 @@ describe('generateMorningDashboard', () => {
 
     const result = generateMorningDashboard('main');
     expect(result).toContain('OVERNIGHT SUMMARY');
+  });
+
+  it('includes cost summary when costs are recorded', () => {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO session_costs (session_type, group_folder, started_at, duration_ms, estimated_cost_usd)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run('interactive', 'main', new Date().toISOString(), 5000, 0.05);
+
+    const result = generateMorningDashboard('main');
+    expect(result).toContain('COST');
+    expect(result).toContain('$0.05');
   });
 
   it('shows items grouped by thread when thread exists', () => {

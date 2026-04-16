@@ -618,6 +618,16 @@ export class ExecutorPool {
     }
   }
 
+  getWarmSlotCount(): number {
+    return this.warmSlots.length;
+  }
+
+  simulateWarmSlotCrash(index: number): void {
+    const slot = this.warmSlots[index];
+    if (!slot) return;
+    this.evictWarmSlot(slot, 'crash');
+  }
+
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
