@@ -93,9 +93,14 @@ export interface TaskRunLog {
 
 // --- Channel abstraction ---
 
+export type ActionStyle = 'primary' | 'destructive-safe' | 'plan-execution' | 'secondary' | 'timed-auto';
+
 export interface Action {
   label: string;
   callbackData: string;
+  style?: ActionStyle;
+  confirmRequired?: boolean;
+  webAppUrl?: string;
 }
 
 export interface CallbackQuery {
@@ -176,4 +181,29 @@ export interface Commitment {
   status: string;
   created_at: string;
   completed_at: string | null;
+}
+
+// --- Agentic UX types ---
+
+export type MessageCategory =
+  | 'financial'
+  | 'security'
+  | 'email'
+  | 'team'
+  | 'account'
+  | 'auto-handled';
+
+export type MessageUrgency = 'info' | 'attention' | 'action-required' | 'urgent';
+
+export interface MessageMeta {
+  category: MessageCategory;
+  urgency: MessageUrgency;
+  actions: Action[];
+  batchable: boolean;
+  miniAppUrl?: string;
+  emailId?: string;
+  threadId?: string;
+  account?: string;
+  questionType?: 'yes-no' | 'financial-confirm' | 'multi-option';
+  questionId?: string;
 }

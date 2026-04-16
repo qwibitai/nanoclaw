@@ -495,6 +495,69 @@ export interface ProactiveSuggestionEvent extends NanoClawEvent {
   };
 }
 
+// --- Plan events ---
+
+export interface PlanProposedEvent extends NanoClawEvent {
+  type: 'plan.proposed';
+  source: 'agent';
+  payload: {
+    taskId: string;
+    plan: string;
+    urgency: 'normal' | 'urgent';
+    domain: string;
+  };
+}
+
+export interface PlanAutoApprovedEvent extends NanoClawEvent {
+  type: 'plan.auto_approved';
+  source: 'auto-approval';
+  payload: {
+    taskId: string;
+  };
+}
+
+export interface PlanCancelledEvent extends NanoClawEvent {
+  type: 'plan.cancelled';
+  source: 'auto-approval';
+  payload: {
+    taskId: string;
+  };
+}
+
+// --- Draft events ---
+
+export interface EmailDraftCreatedEvent extends NanoClawEvent {
+  type: 'email.draft.created';
+  source: 'draft-watcher';
+  payload: {
+    draftId: string;
+    threadId: string;
+    account: string;
+  };
+}
+
+export interface EmailDraftEnrichedEvent extends NanoClawEvent {
+  type: 'email.draft.enriched';
+  source: 'draft-enrichment';
+  payload: {
+    draftId: string;
+    changes: string;
+  };
+}
+
+// --- Email action events ---
+
+export interface EmailActionCompletedEvent extends NanoClawEvent {
+  type: 'email.action.completed';
+  source: 'archive-tracker';
+  payload: {
+    emailId: string;
+    threadId: string;
+    account: string;
+    action: string;
+  };
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -541,6 +604,12 @@ export interface EventMap {
   'thread.correlated': ThreadCorrelatedEvent;
   'proactive.suggestion': ProactiveSuggestionEvent;
   'watcher.changed': WatcherChangedEvent;
+  'plan.proposed': PlanProposedEvent;
+  'plan.auto_approved': PlanAutoApprovedEvent;
+  'plan.cancelled': PlanCancelledEvent;
+  'email.draft.created': EmailDraftCreatedEvent;
+  'email.draft.enriched': EmailDraftEnrichedEvent;
+  'email.action.completed': EmailActionCompletedEvent;
 }
 
 export type EventType = keyof EventMap;
