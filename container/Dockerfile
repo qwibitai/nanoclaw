@@ -34,7 +34,7 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Install agent-browser globally
-RUN bun add -g agent-browser && install -m 0755 /root/.bun/bin/agent-browser /usr/local/bin/agent-browser
+RUN bun add -g agent-browser --trust
 
 # Create app directory
 WORKDIR /app
