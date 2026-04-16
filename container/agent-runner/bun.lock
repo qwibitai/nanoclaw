@@ -479,7 +479,7 @@
 
     "once": ["once@1.4.0", "", { "dependencies": { "wrappy": "1" } }, "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w=="],
 
-    "open-agent-sdk": ["open-agent-sdk@./.open-agent-sdk-fork/open-agent-sdk-fork.tgz", { "dependencies": { "@ai-sdk/anthropic": "^3.0.0", "@ai-sdk/google": "^3.0.21", "@ai-sdk/openai": "^3.0.25", "@mariozechner/pi-ai": "0.60.0", "@modelcontextprotocol/sdk": "^1.26.0", "@mozilla/readability": "^0.6.0", "ai": "^6.0.70", "jsdom": "^28.0.0", "turndown": "^7.2.2", "uuid": "^11.0.0", "yaml": "^2.7.0", "zod": "^3.22.0" }, "peerDependencies": { "typescript": "^5.0.0" }, "bin": { "open-agent-sdk": "./bin/open-agent-sdk.js", "oas": "./bin/open-agent-sdk.js" } }],
+    "open-agent-sdk": ["open-agent-sdk@./.open-agent-sdk-fork/open-agent-sdk-fork.tgz", { "dependencies": { "@ai-sdk/anthropic": "^3.0.0", "@ai-sdk/google": "^3.0.21", "@ai-sdk/openai": "^3.0.25", "@mariozechner/pi-ai": "0.60.0", "@modelcontextprotocol/sdk": "^1.26.0", "@mozilla/readability": "^0.6.0", "ai": "^6.0.70", "jsdom": "^28.0.0", "turndown": "^7.2.2", "uuid": "^11.0.0", "yaml": "^2.7.0", "zod": "^3.22.0" }, "peerDependencies": { "typescript": "^5.0.0" }, "bin": { "open-agent-sdk": "./bin/open-agent-sdk.js", "oas": "./bin/open-agent-sdk.js" } }, "sha512-Eo0eNdGVGM6VeNGweFtUYYLlKeLK5oDhj/O8qmBu60KlnKW2Su9/cAuGqEcLPQvC+KQm2N/mZDco0s/MEfC8fw=="],
 
     "openai": ["openai@6.26.0", "", { "peerDependencies": { "ws": "^8.18.0", "zod": "^3.25 || ^4.0" }, "optionalPeers": ["ws", "zod"], "bin": { "openai": "bin/cli" } }, "sha512-zd23dbWTjiJ6sSAX6s0HrCZi41JwTA1bQVs0wLQPZ2/5o2gxOJA5wh7yOAUgwYybfhDXyhwlpeQf7Mlgx8EOCA=="],
 
