@@ -19,6 +19,7 @@ import {
 import { eventBus } from './event-bus.js';
 import type { EmailReceivedEvent } from './events.js';
 import { logger } from './logger.js';
+import type { EmailTriggerDebouncer } from './email-trigger-debouncer.js';
 
 const SSE_RECONNECT_MIN_MS = 5_000;
 const SSE_RECONNECT_MAX_MS = 300_000; // 5 minutes max backoff
@@ -34,6 +35,16 @@ interface SSEConnection {
 
 let running = false;
 const connections: SSEConnection[] = [];
+
+let debouncer: EmailTriggerDebouncer | null = null;
+
+export function setEmailTriggerDebouncer(d: EmailTriggerDebouncer): void {
+  debouncer = d;
+}
+
+export function getEmailTriggerDebouncer(): EmailTriggerDebouncer | null {
+  return debouncer;
+}
 
 /**
  * Start SSE connections to superpilot.
@@ -195,6 +206,37 @@ function scheduleReconnect(conn: SSEConnection): void {
   conn.reconnectMs = Math.min(conn.reconnectMs * 2, SSE_RECONNECT_MAX_MS);
 }
 
+export function writeIpcTrigger(
+  emails: Array<{ thread_id: string; account: string; subject?: string; sender?: string }>,
+  label: string,
+): void {
+  const ipcDir = path.join(DATA_DIR, 'ipc', 'whatsapp_main', 'tasks');
+  fs.mkdirSync(ipcDir, { recursive: true });
+
+  const payload = {
+    type: 'email_trigger',
+    emails: emails.map((e) => ({
+      thread_id: e.thread_id,
+      account: e.account || 'unknown',
+      subject: e.subject || '',
+      sender: e.sender || '',
+    })),
+    triggered_at: new Date().toISOString(),
+    source: 'sse',
+    connection: label,
+  };
+
+  const filename = `sse_trigger_${Date.now()}.json`;
+  fs.writeFileSync(
+    path.join(ipcDir, filename),
+    JSON.stringify(payload, null, 2),
+  );
+  logger.info(
+    { count: emails.length, filename, label },
+    'SSE email trigger written',
+  );
+}
+
 function handleTriagedEmails(data: string, label: string): void {
   try {
     const parsed = JSON.parse(data);
@@ -227,41 +269,28 @@ function handleTriagedEmails(data: string, label: string): void {
       );
     }
 
-    // Write IPC trigger file to whatsapp_main (main group) — the email_trigger
-    // handler dispatches to the configured notification channel (Telegram).
-    const ipcDir = path.join(DATA_DIR, 'ipc', 'whatsapp_main', 'tasks');
-    fs.mkdirSync(ipcDir, { recursive: true });
-
-    const payload = {
-      type: 'email_trigger',
-      emails: emails.map(
-        (e: {
-          thread_id: string;
-          account: string;
-          subject?: string;
-          sender?: string;
-          classified_at?: string;
-        }) => ({
-          thread_id: e.thread_id,
-          account: e.account || 'unknown',
-          subject: e.subject || '',
-          sender: e.sender || '',
-        }),
-      ),
-      triggered_at: new Date().toISOString(),
-      source: 'sse',
-      connection: label,
-    };
-
-    const filename = `sse_trigger_${Date.now()}.json`;
-    fs.writeFileSync(
-      path.join(ipcDir, filename),
-      JSON.stringify(payload, null, 2),
-    );
-    logger.info(
-      { count: emails.length, filename, label },
-      'SSE email trigger written',
-    );
+    // Buffer emails in debouncer (merges rapid-fire triggers into one IPC file)
+    // or write IPC directly if no debouncer is configured
+    if (debouncer) {
+      debouncer.add(
+        emails.map(
+          (e: {
+            thread_id: string;
+            account: string;
+            subject?: string;
+            sender?: string;
+          }) => ({
+            thread_id: e.thread_id,
+            account: e.account || 'unknown',
+            subject: e.subject || '',
+            sender: e.sender || '',
+          }),
+        ),
+        label,
+      );
+    } else {
+      writeIpcTrigger(emails, label);
+    }
 
     // Emit structured event for the event router / proactive monitor
     const emailEvent: EmailReceivedEvent = {
