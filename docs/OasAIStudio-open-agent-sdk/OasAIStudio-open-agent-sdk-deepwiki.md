@@ -85,14 +85,14 @@ Sources: [docs/introduction.md30-112](https://github.com/OasAIStudio/open-agent-
 
 The project uses a Bun-based monorepo layout, separating the core logic from the developer tools, documentation, and evaluation suites [README.md83-93](https://github.com/OasAIStudio/open-agent-sdk/blob/8a6e16c7/README.md?plain=1#L83-L93)
 
-| Package Path | Purpose |
+| Component | Purpose |
 | --- | --- |
-|  | The primary SDK implementation, including the ReAct loop and built-in tools [README.md87](https://github.com/OasAIStudio/open-agent-sdk/blob/8a6e16c7/README.md?plain=1#L87-L87) |
-|  | The CLI tool for running agents from the terminal [packages/core/package.json7-10](https://github.com/OasAIStudio/open-agent-sdk/blob/8a6e16c7/packages/core/package.json#L7-L10) |
-|  | The product landing page built with Next.js 15 [README.md88](https://github.com/OasAIStudio/open-agent-sdk/blob/8a6e16c7/README.md?plain=1#L88-L88) |
-|  | The documentation site built with Astro and Starlight [README.md89](https://github.com/OasAIStudio/open-agent-sdk/blob/8a6e16c7/README.md?plain=1#L89-L89) |
-|  | Runnable usage examples, including quickstarts and a full code-agent demo [README.md90](https://github.com/OasAIStudio/open-agent-sdk/blob/8a6e16c7/README.md?plain=1#L90-L90) |
-|  | Evaluation harnesses for SWE-bench and Terminal-bench [README.md91](https://github.com/OasAIStudio/open-agent-sdk/blob/8a6e16c7/README.md?plain=1#L91-L91) |
+| Core SDK | The primary SDK implementation, including the ReAct loop and built-in tools [README.md87](https://github.com/OasAIStudio/open-agent-sdk/blob/8a6e16c7/README.md?plain=1#L87-L87) |
+| CLI | The CLI tool for running agents from the terminal [packages/core/package.json7-10](https://github.com/OasAIStudio/open-agent-sdk/blob/8a6e16c7/packages/core/package.json#L7-L10) |
+| Landing page | The product landing page built with Next.js 15 [README.md88](https://github.com/OasAIStudio/open-agent-sdk/blob/8a6e16c7/README.md?plain=1#L88-L88) |
+| Documentation site | The documentation site built with Astro and Starlight [README.md89](https://github.com/OasAIStudio/open-agent-sdk/blob/8a6e16c7/README.md?plain=1#L89-L89) |
+| Examples | Runnable usage examples, including quickstarts and a full code-agent demo [README.md90](https://github.com/OasAIStudio/open-agent-sdk/blob/8a6e16c7/README.md?plain=1#L90-L90) |
+| Evaluation harnesses | Evaluation harnesses for SWE-bench and Terminal-bench [README.md91](https://github.com/OasAIStudio/open-agent-sdk/blob/8a6e16c7/README.md?plain=1#L91-L91) |
 
 For a deep dive into the monorepo tooling and build scripts, see [Monorepo Structure & Tooling](https://deepwiki.com/OasAIStudio/open-agent-sdk/1.2-monorepo-structure-and-tooling).
 
