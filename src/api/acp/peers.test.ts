@@ -12,12 +12,13 @@ const mockExecFileSync = vi.mocked(execFileSync);
 // ─── codex() unit tests ────────────────────────────────────────────
 
 describe('codex()', () => {
-  it('disables sandbox by default with full access', () => {
+  it('disables sandbox and approval by default for full autonomy', () => {
     const peer = codex();
     expect(peer.name).toBe('codex');
     expect(peer.command).toBe('npx');
     expect(peer.args).toContain('@zed-industries/codex-acp');
     expect(peer.args).toContain('sandbox="danger-full-access"');
+    expect(peer.args).toContain('approval_policy="never"');
   });
 
   it('does not specify a model by default', () => {
