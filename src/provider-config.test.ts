@@ -33,6 +33,7 @@ describe('provider-config', () => {
     const config = detectActiveProviderConfig();
     expect(config.provider).toBe('anthropic');
     expect(config.usesCredentialProxy).toBe(true);
+    expect(config.allowDirectSecretInjection).toBe(false);
     expect(config.apiKey).toBe('sk-ant');
     expect(config.upstreamBaseURL).toBe('https://api.anthropic.com');
   });
@@ -46,30 +47,55 @@ describe('provider-config', () => {
     const config = detectActiveProviderConfig();
     expect(config.provider).toBe('openai');
     expect(config.usesCredentialProxy).toBe(true);
+    expect(config.allowDirectSecretInjection).toBe(false);
     expect(config.apiKey).toBe('sk-openai');
     expect(config.upstreamBaseURL).toBe('https://example.openai-proxy.local');
   });
 
-  it('detects gemini as direct key injection mode', () => {
+  it('detects gemini as direct key injection mode when opt-in is enabled', () => {
     Object.assign(mockEnv, {
       GEMINI_API_KEY: 'gem-key',
+      ALLOW_DIRECT_SECRET_INJECTION: 'true',
     });
 
     const config = detectActiveProviderConfig();
     expect(config.provider).toBe('gemini');
     expect(config.usesCredentialProxy).toBe(false);
+    expect(config.allowDirectSecretInjection).toBe(true);
     expect(config.apiKey).toBe('gem-key');
   });
 
-  it('detects codex from oauth json when no API key providers exist', () => {
+  it('detects codex from oauth json when no API key providers exist and opt-in is enabled', () => {
     Object.assign(mockEnv, {
       OAS_CODEX_OAUTH_JSON: '{"access":"a","refresh":"r","expires":1}',
+      ALLOW_DIRECT_SECRET_INJECTION: 'true',
     });
 
     const config = detectActiveProviderConfig();
     expect(config.provider).toBe('codex');
     expect(config.usesCredentialProxy).toBe(false);
+    expect(config.allowDirectSecretInjection).toBe(true);
     expect(config.codexOAuthJson).toContain('access');
+  });
+
+  it('throws when gemini key is set without direct injection opt-in', () => {
+    Object.assign(mockEnv, {
+      GEMINI_API_KEY: 'gem-key',
+    });
+
+    expect(() => detectActiveProviderConfig()).toThrow(
+      'ALLOW_DIRECT_SECRET_INJECTION=true is not set',
+    );
+  });
+
+  it('throws when codex oauth is set without direct injection opt-in', () => {
+    Object.assign(mockEnv, {
+      OAS_CODEX_OAUTH_JSON: '{"access":"a","refresh":"r","expires":1}',
+    });
+
+    expect(() => detectActiveProviderConfig()).toThrow(
+      'ALLOW_DIRECT_SECRET_INJECTION=true is not set',
+    );
   });
 
   it('throws when no supported provider config is present', () => {
@@ -83,6 +109,7 @@ describe('provider-config', () => {
       {
         provider: 'anthropic',
         usesCredentialProxy: true,
+        allowDirectSecretInjection: false,
         apiKey: 'sk-ant',
         upstreamBaseURL: 'https://api.anthropic.com',
       },
@@ -101,6 +128,7 @@ describe('provider-config', () => {
       {
         provider: 'openai',
         usesCredentialProxy: true,
+        allowDirectSecretInjection: false,
         apiKey: 'sk-openai',
         upstreamBaseURL: 'https://api.openai.com',
       },
@@ -119,6 +147,7 @@ describe('provider-config', () => {
       {
         provider: 'gemini',
         usesCredentialProxy: false,
+        allowDirectSecretInjection: true,
         apiKey: 'gem-key',
       },
       'host.docker.internal',
@@ -133,6 +162,7 @@ describe('provider-config', () => {
       {
         provider: 'codex',
         usesCredentialProxy: false,
+        allowDirectSecretInjection: true,
         codexOAuthJson: '{"access":"a","refresh":"r","expires":1}',
       },
       'host.docker.internal',
@@ -142,5 +172,20 @@ describe('provider-config', () => {
     expect(env).toEqual({
       OAS_CODEX_OAUTH_JSON: '{"access":"a","refresh":"r","expires":1}',
     });
+  });
+
+  it('throws when building gemini env without direct injection opt-in', () => {
+    expect(() =>
+      buildContainerProviderEnv(
+        {
+          provider: 'gemini',
+          usesCredentialProxy: false,
+          allowDirectSecretInjection: false,
+          apiKey: 'gem-key',
+        },
+        'host.docker.internal',
+        3001,
+      ),
+    ).toThrow('ALLOW_DIRECT_SECRET_INJECTION=true');
   });
 });

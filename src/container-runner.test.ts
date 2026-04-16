@@ -61,6 +61,7 @@ vi.mock('./provider-config.js', () => ({
   detectActiveProviderConfig: vi.fn(() => ({
     provider: 'anthropic',
     usesCredentialProxy: true,
+    allowDirectSecretInjection: false,
     apiKey: 'sk-ant-real-key',
     upstreamBaseURL: 'https://api.anthropic.com',
   })),

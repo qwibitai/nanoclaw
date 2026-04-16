@@ -201,7 +201,10 @@ describe('credential-proxy', () => {
   });
 
   it('returns 503 in disabled mode for direct-injection providers', async () => {
-    proxyPort = await startProxy({ GEMINI_API_KEY: 'gem-real-key' });
+    proxyPort = await startProxy({
+      GEMINI_API_KEY: 'gem-real-key',
+      ALLOW_DIRECT_SECRET_INJECTION: 'true',
+    });
 
     const res = await makeRequest(
       proxyPort,
@@ -220,6 +223,7 @@ describe('credential-proxy', () => {
   it('returns 503 in disabled mode for codex oauth provider', async () => {
     proxyPort = await startProxy({
       OAS_CODEX_OAUTH_JSON: '{"access":"a","refresh":"r","expires":1}',
+      ALLOW_DIRECT_SECRET_INJECTION: 'true',
     });
 
     const res = await makeRequest(
