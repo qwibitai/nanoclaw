@@ -60,11 +60,12 @@ import {
   storeChatMetadata,
   storeMessage,
   getPendingTrustApprovalIds,
+  getDb,
 } from './db.js';
 import { ExecutorPool } from './executor-pool.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { findChannel, formatMessages, formatOutbound, classifyAndFormat } from './router.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -147,6 +148,14 @@ import {
 } from './push-manager.js';
 import { classify } from './classification.js';
 /* eslint-enable @typescript-eslint/no-unused-vars */
+import { StatusBarManager } from './status-bar.js';
+import { AutoApprovalTimer } from './auto-approval.js';
+import { FailureEscalator } from './failure-escalator.js';
+import { ArchiveTracker } from './archive-tracker.js';
+import { MessageBatcher } from './message-batcher.js';
+import { handleCallback } from './callback-router.js';
+import { formatBatch } from './message-formatter.js';
+import { startMiniAppServer } from './mini-app/server.js';
 import type {
   MessageInboundEvent,
   MessageOutboundEvent,
@@ -1251,6 +1260,63 @@ async function main(): Promise<void> {
     logger.fatal('No channels connected');
     process.exit(1);
   }
+
+  // --- Agentic UX initialization ---
+
+  const archiveTracker = new ArchiveTracker(getDb());
+  const autoApproval = new AutoApprovalTimer(eventBus);
+
+  // Status bar — sends/edits a pinned message in the main group
+  const mainGroupEntry = Object.entries(registeredGroups).find(([, g]) => g.isMain);
+  const statusBar = new StatusBarManager(eventBus, {
+    onUpdate: (text) => {
+      if (mainGroupEntry) {
+        const [mainJid] = mainGroupEntry;
+        const channel = findChannel(channels, mainJid);
+        channel?.sendMessage(mainJid, text).catch(() => {});
+      }
+    },
+  });
+
+  // Failure escalator
+  const _failureEscalator = new FailureEscalator(eventBus, {
+    onEscalate: (text, actions) => {
+      if (mainGroupEntry) {
+        const [mainJid] = mainGroupEntry;
+        const channel = findChannel(channels, mainJid);
+        channel?.sendMessageWithActions?.(mainJid, text, actions).catch(() => {});
+      }
+    },
+  });
+
+  // Message batcher for auto-handled items
+  const _batcher = new MessageBatcher({
+    maxItems: 5,
+    maxWaitMs: 10_000,
+    onFlush: (items) => {
+      if (mainGroupEntry) {
+        const [mainJid] = mainGroupEntry;
+        const channel = findChannel(channels, mainJid);
+        channel?.sendMessage(mainJid, formatBatch(items)).catch(() => {});
+      }
+    },
+  });
+
+  // Register callback handler on Telegram channel
+  const telegramChannel = channels.find((c) => c.name === 'telegram');
+  if (telegramChannel?.onCallbackQuery) {
+    telegramChannel.onCallbackQuery((query) => {
+      handleCallback(query, {
+        archiveTracker,
+        autoApproval,
+        statusBar,
+        findChannel: (jid) => findChannel(channels, jid),
+      });
+    });
+  }
+
+  // Start Mini App server
+  startMiniAppServer({ port: Number(process.env.MINI_APP_PORT) || 3847, db: getDb() });
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
