@@ -19,7 +19,13 @@ vi.mock('../config.js', () => ({
     pushRateLimit: 3,
     pushRateWindowMs: 1800000,
     holdPushDuringMeetings: false,
-    quietHours: { enabled: false, start: '22:00', end: '07:00', weekendMode: false, escalateOverride: true },
+    quietHours: {
+      enabled: false,
+      start: '22:00',
+      end: '07:00',
+      weekendMode: false,
+      escalateOverride: true,
+    },
     morningDashboardTime: '07:30',
     microBriefingDelayMs: 60000,
   },
@@ -38,13 +44,15 @@ describe('classifyFromSSE', () => {
   afterEach(() => _closeDatabase());
 
   it('classifies a needs-attention email as push', () => {
-    const emails: SSEEmail[] = [{
-      thread_id: 'thread1',
-      account: 'dev@test.com',
-      subject: 'Budget approval needed',
-      sender: 'cfo@company.com',
-      superpilot_label: 'needs-attention',
-    }];
+    const emails: SSEEmail[] = [
+      {
+        thread_id: 'thread1',
+        account: 'dev@test.com',
+        subject: 'Budget approval needed',
+        sender: 'cfo@company.com',
+        superpilot_label: 'needs-attention',
+      },
+    ];
     const results = classifyFromSSE(emails);
     expect(results).toHaveLength(1);
     expect(results[0].decision).toBe('push');
@@ -52,38 +60,44 @@ describe('classifyFromSSE', () => {
   });
 
   it('classifies a newsletter email as digest', () => {
-    const emails: SSEEmail[] = [{
-      thread_id: 'thread2',
-      account: 'dev@test.com',
-      subject: 'Weekly roundup',
-      sender: 'news@service.com',
-      superpilot_label: 'newsletter',
-    }];
+    const emails: SSEEmail[] = [
+      {
+        thread_id: 'thread2',
+        account: 'dev@test.com',
+        subject: 'Weekly roundup',
+        sender: 'news@service.com',
+        superpilot_label: 'newsletter',
+      },
+    ];
     const results = classifyFromSSE(emails);
     expect(results).toHaveLength(1);
     expect(results[0].decision).toBe('digest');
   });
 
   it('skips already-tracked emails', () => {
-    const emails: SSEEmail[] = [{
-      thread_id: 'thread3',
-      account: 'dev@test.com',
-      subject: 'First time',
-      sender: 'a@b.com',
-    }];
+    const emails: SSEEmail[] = [
+      {
+        thread_id: 'thread3',
+        account: 'dev@test.com',
+        subject: 'First time',
+        sender: 'a@b.com',
+      },
+    ];
     classifyFromSSE(emails);
     const results = classifyFromSSE(emails);
     expect(results).toHaveLength(0);
   });
 
   it('inserts tracked item into database', () => {
-    const emails: SSEEmail[] = [{
-      thread_id: 'thread4',
-      account: 'dev@test.com',
-      subject: 'Important thing',
-      sender: 'boss@company.com',
-      superpilot_label: 'needs-attention',
-    }];
+    const emails: SSEEmail[] = [
+      {
+        thread_id: 'thread4',
+        account: 'dev@test.com',
+        subject: 'Important thing',
+        sender: 'boss@company.com',
+        superpilot_label: 'needs-attention',
+      },
+    ];
     classifyFromSSE(emails);
     const item = getTrackedItemBySourceId('gmail', 'gmail:thread4');
     expect(item).not.toBeNull();
@@ -92,12 +106,14 @@ describe('classifyFromSSE', () => {
   });
 
   it('emits item.classified event for each email', () => {
-    const emails: SSEEmail[] = [{
-      thread_id: 'thread5',
-      account: 'dev@test.com',
-      subject: 'Test',
-      sender: 'x@y.com',
-    }];
+    const emails: SSEEmail[] = [
+      {
+        thread_id: 'thread5',
+        account: 'dev@test.com',
+        subject: 'Test',
+        sender: 'x@y.com',
+      },
+    ];
     classifyFromSSE(emails);
     expect(eventBus.emit).toHaveBeenCalledWith(
       'item.classified',
@@ -109,13 +125,15 @@ describe('classifyFromSSE', () => {
   });
 
   it('sets state to queued for digest items', () => {
-    const emails: SSEEmail[] = [{
-      thread_id: 'thread6',
-      account: 'dev@test.com',
-      subject: 'FYI stuff',
-      sender: 'info@news.com',
-      superpilot_label: 'fyi',
-    }];
+    const emails: SSEEmail[] = [
+      {
+        thread_id: 'thread6',
+        account: 'dev@test.com',
+        subject: 'FYI stuff',
+        sender: 'info@news.com',
+        superpilot_label: 'fyi',
+      },
+    ];
     classifyFromSSE(emails);
     const item = getTrackedItemBySourceId('gmail', 'gmail:thread6');
     expect(item).not.toBeNull();

@@ -72,10 +72,10 @@ describe('crossReferenceFactualClaims', () => {
   });
 
   it('handles multiple tool results and finds a match in any of them', () => {
-    const result = crossReferenceFactualClaims(
-      'The balance is $500.00.',
-      ['No relevant data here', 'Current balance: $500.00'],
-    );
+    const result = crossReferenceFactualClaims('The balance is $500.00.', [
+      'No relevant data here',
+      'Current balance: $500.00',
+    ]);
     expect(result.verified).toBe(true);
     expect(result.unverifiedClaims).toHaveLength(0);
   });

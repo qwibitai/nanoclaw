@@ -170,8 +170,7 @@ export const WEBHOOK_PORT = parseInt(
 export const WEBHOOK_SECRET =
   process.env.WEBHOOK_SECRET || envConfig.WEBHOOK_SECRET || '';
 
-export const QDRANT_URL =
-  process.env.QDRANT_URL || envConfig.QDRANT_URL || '';
+export const QDRANT_URL = process.env.QDRANT_URL || envConfig.QDRANT_URL || '';
 
 // Browser sidecar settings
 export const BROWSER_CDP_URL =

@@ -71,7 +71,12 @@ export function addConfidenceMarkers(
 
   const footnotes: string[] = [];
   for (const ann of annotations) {
-    const marker = ann.confidence === 'verified' ? '✓' : ann.confidence === 'unverified' ? '?' : '~';
+    const marker =
+      ann.confidence === 'verified'
+        ? '✓'
+        : ann.confidence === 'unverified'
+          ? '?'
+          : '~';
     const sourceInfo = ann.source ? ` (${ann.source})` : '';
     footnotes.push(`${marker} ${ann.claim}${sourceInfo}`);
   }

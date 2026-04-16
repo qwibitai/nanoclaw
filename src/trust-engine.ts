@@ -124,7 +124,10 @@ export function classifyTool(
   }
 
   // Default: highest risk
-  logger.warn({ toolName }, 'Unknown tool name, defaulting to services.transact');
+  logger.warn(
+    { toolName },
+    'Unknown tool name, defaulting to services.transact',
+  );
   eventBus.emit('trust.unknown_tool', {
     type: 'trust.unknown_tool',
     source: 'trust-engine',

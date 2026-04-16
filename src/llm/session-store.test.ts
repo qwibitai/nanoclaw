@@ -82,7 +82,9 @@ describe('session-store structured messages', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-session-structured-'));
+    tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'nanoclaw-session-structured-'),
+    );
   });
 
   afterEach(() => {

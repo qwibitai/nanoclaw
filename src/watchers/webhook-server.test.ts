@@ -80,7 +80,9 @@ describe('validateWebhookSignature', () => {
 
   it('rejects a tampered body', () => {
     const sig = makeSignature(body, secret);
-    expect(validateWebhookSignature(body + ' tampered', sig, secret)).toBe(false);
+    expect(validateWebhookSignature(body + ' tampered', sig, secret)).toBe(
+      false,
+    );
   });
 
   it('rejects a wrong secret', () => {
@@ -98,7 +100,9 @@ describe('validateWebhookSignature', () => {
   });
 
   it('rejects a malformed hex after sha256= prefix', () => {
-    expect(validateWebhookSignature(body, 'sha256=nothex!', secret)).toBe(false);
+    expect(validateWebhookSignature(body, 'sha256=nothex!', secret)).toBe(
+      false,
+    );
   });
 });
 
@@ -164,7 +168,10 @@ describe('startWebhookServer', () => {
   });
 
   it('returns 405 for PUT requests', async () => {
-    const res = await fetch(`http://localhost:${port}`, { method: 'PUT', body: '{}' });
+    const res = await fetch(`http://localhost:${port}`, {
+      method: 'PUT',
+      body: '{}',
+    });
     expect(res.status).toBe(405);
   });
 
@@ -194,7 +201,10 @@ describe('startWebhookServer', () => {
     expect(status).toBe(200);
     expect(text).toBe('OK');
     expect(mockEmit).toHaveBeenCalledOnce();
-    const [, event] = mockEmit.mock.calls[0] as [string, { type: string; payload: { webhookSource: string } }];
+    const [, event] = mockEmit.mock.calls[0] as [
+      string,
+      { type: string; payload: { webhookSource: string } },
+    ];
     expect(event.type).toBe('webhook.github');
     expect(event.payload.webhookSource).toBe('github');
   });

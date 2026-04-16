@@ -20,6 +20,8 @@ import type { LlmConfig, RegisteredGroup } from './types.js';
 import { addRule } from './learning/rules-engine.js';
 import { addTrace } from './learning/procedure-recorder.js';
 import { inferActionClasses } from './learning/outcome-enricher.js';
+import { saveProcedure } from './memory/procedure-store.js';
+import type { Procedure } from './memory/procedure-store.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -757,6 +759,7 @@ export async function processTaskIpc(
       const feedbackData = data as typeof data & {
         feedback?: string;
         groupId?: string;
+        procedure?: Procedure;
       };
       if (feedbackData.feedback) {
         const actionClasses = inferActionClasses(feedbackData.feedback);
@@ -768,6 +771,19 @@ export async function processTaskIpc(
           confidence: 0.9,
           evidenceCount: 1,
         });
+      }
+      if (feedbackData.procedure) {
+        const proc = feedbackData.procedure;
+        if (!proc.groupId) {
+          proc.groupId = feedbackData.groupId ?? sourceGroup;
+        }
+        saveProcedure(proc);
+        logger.info(
+          { name: proc.name, groupId: proc.groupId, stepCount: proc.steps?.length },
+          'Teach-mode procedure saved via IPC',
+        );
+      }
+      if (feedbackData.feedback || feedbackData.procedure) {
         logger.info(
           { groupId: feedbackData.groupId ?? sourceGroup },
           'learn_feedback IPC processed',
@@ -851,16 +867,26 @@ export async function processTaskIpc(
     }
 
     case 'search_memory': {
-      const { queryFactsSemantic } = await import('./memory/knowledge-store.js');
+      const { queryFactsSemantic } =
+        await import('./memory/knowledge-store.js');
       const query = data.query as string;
       const domain = data.domain as string | undefined;
       const limit = (data.limit as number) || 5;
       const groupFolder = data.groupFolder as string;
 
-      const facts = await queryFactsSemantic(query, { domain, groupId: groupFolder, limit });
+      const facts = await queryFactsSemantic(query, {
+        domain,
+        groupId: groupFolder,
+        limit,
+      });
       if (facts.length > 0) {
-        const formatted = facts.map((f) => `• ${f.text} [${f.domain}]`).join('\n');
-        logger.info({ query, resultCount: facts.length, groupFolder }, 'Memory search results');
+        const formatted = facts
+          .map((f) => `• ${f.text} [${f.domain}]`)
+          .join('\n');
+        logger.info(
+          { query, resultCount: facts.length, groupFolder },
+          'Memory search results',
+        );
         const contextDir = path.join(GROUPS_DIR, groupFolder, 'context');
         fs.mkdirSync(contextDir, { recursive: true });
         fs.writeFileSync(

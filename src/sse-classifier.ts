@@ -25,7 +25,10 @@ export interface ClassifyResult {
   sender: string;
 }
 
-export function classifyFromSSE(emails: SSEEmail[], groupName: string = 'main'): ClassifyResult[] {
+export function classifyFromSSE(
+  emails: SSEEmail[],
+  groupName: string = 'main',
+): ClassifyResult[] {
   const results: ClassifyResult[] = [];
 
   for (const email of emails) {

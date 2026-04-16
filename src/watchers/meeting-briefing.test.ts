@@ -139,17 +139,19 @@ describe('getMeetingBriefings', () => {
     expect(briefings).toHaveLength(1);
 
     const { prompt } = briefings[0];
-    expect(prompt).toMatch(/Prepare a briefing for this meeting: Quarterly Review/);
+    expect(prompt).toMatch(
+      /Prepare a briefing for this meeting: Quarterly Review/,
+    );
     expect(prompt).toMatch(/Attendees: ceo@company\.com/);
     expect(prompt).toMatch(/Location: Conference Room A/);
-    expect(prompt).toMatch(/Review recent emails, tracked items, and thread correlations/);
+    expect(prompt).toMatch(
+      /Review recent emails, tracked items, and thread correlations/,
+    );
     expect(prompt).toMatch(/3-5 bullets/);
   });
 
   it('builds the prompt without location line when location is null', () => {
-    storeCalendarEvents([
-      makeEvent({ location: null }),
-    ]);
+    storeCalendarEvents([makeEvent({ location: null })]);
 
     const briefings = getMeetingBriefings(NOW, MINUTES_BEFORE);
     expect(briefings).toHaveLength(1);
@@ -157,9 +159,7 @@ describe('getMeetingBriefings', () => {
   });
 
   it('handles events with no attendees gracefully', () => {
-    storeCalendarEvents([
-      makeEvent({ attendees: [] }),
-    ]);
+    storeCalendarEvents([makeEvent({ attendees: [] })]);
 
     const briefings = getMeetingBriefings(NOW, MINUTES_BEFORE);
     expect(briefings).toHaveLength(1);
@@ -169,8 +169,18 @@ describe('getMeetingBriefings', () => {
 
   it('returns multiple briefings for multiple upcoming meetings', () => {
     storeCalendarEvents([
-      makeEvent({ id: 'evt-a', title: 'Meeting A', start_time: NOW + 10 * 60_000, end_time: NOW + 40 * 60_000 }),
-      makeEvent({ id: 'evt-b', title: 'Meeting B', start_time: NOW + 20 * 60_000, end_time: NOW + 50 * 60_000 }),
+      makeEvent({
+        id: 'evt-a',
+        title: 'Meeting A',
+        start_time: NOW + 10 * 60_000,
+        end_time: NOW + 40 * 60_000,
+      }),
+      makeEvent({
+        id: 'evt-b',
+        title: 'Meeting B',
+        start_time: NOW + 20 * 60_000,
+        end_time: NOW + 50 * 60_000,
+      }),
     ]);
 
     const briefings = getMeetingBriefings(NOW, MINUTES_BEFORE);

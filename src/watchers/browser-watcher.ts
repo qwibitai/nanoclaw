@@ -43,7 +43,12 @@ export async function evaluateWatcher(
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     logger.warn(
-      { watcherId: config.id, url: config.url, selector: config.selector, error },
+      {
+        watcherId: config.id,
+        url: config.url,
+        selector: config.selector,
+        error,
+      },
       'Browser watcher extraction failed',
     );
     return { changed: false, newValue: null, previousValue, error };

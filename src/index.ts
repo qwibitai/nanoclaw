@@ -929,7 +929,10 @@ async function startMessageLoop(): Promise<void> {
             // Assistant commands: cost report, teach, etc.
             const assistantCmd = parseAssistantCommand(strippedText);
             if (assistantCmd) {
-              const response = executeAssistantCommand(assistantCmd, group.folder);
+              const response = executeAssistantCommand(
+                assistantCmd,
+                group.folder,
+              );
               channel
                 .sendMessage(chatJid, response)
                 .catch((err) =>

@@ -84,13 +84,19 @@ export function findProcedure(
   const triggerWords = normalizedTrigger.split(/\s+/).filter(Boolean);
 
   function scoreMatch(proc: Procedure): number {
-    const procWords = proc.trigger.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const procWords = proc.trigger
+      .toLowerCase()
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
     // Exact match
     if (proc.trigger.toLowerCase().trim() === normalizedTrigger) return 1.0;
     // Word overlap score
     const matchingWords = triggerWords.filter((w) => procWords.includes(w));
     if (matchingWords.length === 0) return 0;
-    return matchingWords.length / Math.max(triggerWords.length, procWords.length);
+    return (
+      matchingWords.length / Math.max(triggerWords.length, procWords.length)
+    );
   }
 
   const FUZZY_THRESHOLD = 0.5;

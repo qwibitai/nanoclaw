@@ -31,9 +31,8 @@ describe('checkTrustWithPolling', () => {
         json: async () => ({ decision: 'approved' }),
       });
 
-    const { checkTrustWithPolling } = await import(
-      '../../container/agent-runner/src/tool-bridge.ts'
-    );
+    const { checkTrustWithPolling } =
+      await import('../../container/agent-runner/src/tool-bridge.ts');
     const result = await checkTrustWithPolling(
       'send_message',
       'chat@jid',
@@ -58,9 +57,8 @@ describe('checkTrustWithPolling', () => {
         json: async () => ({ decision: 'denied' }),
       });
 
-    const { checkTrustWithPolling } = await import(
-      '../../container/agent-runner/src/tool-bridge.ts'
-    );
+    const { checkTrustWithPolling } =
+      await import('../../container/agent-runner/src/tool-bridge.ts');
     const result = await checkTrustWithPolling(
       'send_message',
       'chat@jid',
@@ -85,9 +83,8 @@ describe('checkTrustWithPolling', () => {
         json: async () => ({ decision: 'pending' }),
       });
 
-    const { checkTrustWithPolling } = await import(
-      '../../container/agent-runner/src/tool-bridge.ts'
-    );
+    const { checkTrustWithPolling } =
+      await import('../../container/agent-runner/src/tool-bridge.ts');
     const result = await checkTrustWithPolling(
       'send_message',
       'chat@jid',
@@ -105,9 +102,8 @@ describe('checkTrustWithPolling', () => {
       json: async () => ({ decision: 'approved' }),
     });
 
-    const { checkTrustWithPolling } = await import(
-      '../../container/agent-runner/src/tool-bridge.ts'
-    );
+    const { checkTrustWithPolling } =
+      await import('../../container/agent-runner/src/tool-bridge.ts');
     const result = await checkTrustWithPolling(
       'send_message',
       'chat@jid',

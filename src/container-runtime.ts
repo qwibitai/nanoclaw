@@ -130,7 +130,10 @@ export function ensureBrowserSidecar(): void {
     });
     logger.info('Browser sidecar started');
   } catch (err) {
-    logger.error({ err }, 'Failed to start browser sidecar (non-fatal, continuing without it)');
+    logger.error(
+      { err },
+      'Failed to start browser sidecar (non-fatal, continuing without it)',
+    );
   }
 }
 

@@ -22,7 +22,9 @@ describe('pre-action LLM validation', () => {
   });
 
   it('rejects when action does not match request', async () => {
-    mockGenerateShort.mockResolvedValue('MISMATCH: user asked to reply, action deletes message');
+    mockGenerateShort.mockResolvedValue(
+      'MISMATCH: user asked to reply, action deletes message',
+    );
     const result = await validatePreAction(
       'Reply to Alice',
       'comms.write',

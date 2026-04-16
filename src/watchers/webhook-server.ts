@@ -23,7 +23,10 @@ export function validateWebhookSignature(
   const provided = signature.slice('sha256='.length);
   if (expected.length !== provided.length) return false;
   try {
-    return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(provided, 'hex'));
+    return timingSafeEqual(
+      Buffer.from(expected, 'hex'),
+      Buffer.from(provided, 'hex'),
+    );
   } catch {
     return false;
   }
@@ -118,7 +121,11 @@ export function startWebhookServer(
       let payload: Record<string, unknown>;
       try {
         const parsed: unknown = JSON.parse(body);
-        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        if (
+          typeof parsed !== 'object' ||
+          parsed === null ||
+          Array.isArray(parsed)
+        ) {
           throw new Error('Payload must be a JSON object');
         }
         payload = parsed as Record<string, unknown>;

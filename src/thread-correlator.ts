@@ -212,7 +212,10 @@ export async function correlateBySemanticMatch(
       matches = [];
     }
   } catch {
-    logger.debug({ itemId: item.id }, 'Semantic match LLM call failed or returned invalid JSON');
+    logger.debug(
+      { itemId: item.id },
+      'Semantic match LLM call failed or returned invalid JSON',
+    );
     return [];
   }
 
@@ -247,7 +250,12 @@ export async function correlateBySemanticMatch(
     links.push(link);
 
     logger.debug(
-      { threadId: link.thread_id, itemId: item.id, confidence, reasoning: match.reasoning },
+      {
+        threadId: link.thread_id,
+        itemId: item.id,
+        confidence,
+        reasoning: match.reasoning,
+      },
       'Semantic match correlated',
     );
   }

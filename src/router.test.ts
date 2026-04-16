@@ -30,10 +30,13 @@ describe('normalizeConfidenceMarkers', () => {
 
 describe('confidence markers', () => {
   it('annotates verified claims with source', () => {
-    const formatted = addConfidenceMarkers(
-      'Your refill is ready.',
-      [{ claim: 'refill is ready', confidence: 'verified', source: 'alto.com check, 2min ago' }],
-    );
+    const formatted = addConfidenceMarkers('Your refill is ready.', [
+      {
+        claim: 'refill is ready',
+        confidence: 'verified',
+        source: 'alto.com check, 2min ago',
+      },
+    ]);
     expect(formatted).toContain('✓');
     expect(formatted).toContain('alto.com');
   });

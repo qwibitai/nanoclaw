@@ -140,10 +140,20 @@ describe('ensureQdrantCollection', () => {
 
 describe('queryFactsSemantic groupId filter', () => {
   it('passes groupId filter to FTS5 fallback when Qdrant unavailable', async () => {
-    storeFact({ text: 'Alpha fact for group A', source: 'test', groupId: 'group-a' });
-    storeFact({ text: 'Alpha fact for group B', source: 'test', groupId: 'group-b' });
+    storeFact({
+      text: 'Alpha fact for group A',
+      source: 'test',
+      groupId: 'group-a',
+    });
+    storeFact({
+      text: 'Alpha fact for group B',
+      source: 'test',
+      groupId: 'group-b',
+    });
 
-    const results = await queryFactsSemantic('Alpha fact', { groupId: 'group-a' });
+    const results = await queryFactsSemantic('Alpha fact', {
+      groupId: 'group-a',
+    });
     expect(results.every((f) => f.group_id === 'group-a')).toBe(true);
   });
 });

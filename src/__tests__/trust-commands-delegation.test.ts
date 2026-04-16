@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 vi.mock('../logger.js', () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
 }));
 vi.mock('../config.js', () => ({
   DELEGATION_GUARDRAIL_COUNT: 10,
@@ -16,7 +22,13 @@ vi.mock('../config.js', () => ({
     urgencyKeywords: ['urgent', 'deadline', 'asap', 'blocking'],
     holdPushDuringMeetings: false,
     microBriefingDelayMs: 60000,
-    quietHours: { enabled: false, start: '22:00', end: '07:00', weekendMode: false, escalateOverride: true },
+    quietHours: {
+      enabled: false,
+      start: '22:00',
+      end: '07:00',
+      weekendMode: false,
+      escalateOverride: true,
+    },
   },
 }));
 vi.mock('../event-bus.js', () => ({

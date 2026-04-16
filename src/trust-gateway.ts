@@ -234,12 +234,18 @@ export async function validatePreAction(
 
     const trimmed = result.trim();
     if (trimmed.startsWith('MISMATCH')) {
-      logger.warn({ actionClass, reason: trimmed }, 'Pre-action validation rejected');
+      logger.warn(
+        { actionClass, reason: trimmed },
+        'Pre-action validation rejected',
+      );
       return { approved: false, reason: trimmed };
     }
     return { approved: true };
   } catch (err) {
-    logger.warn({ err }, 'Pre-action validation LLM call failed, allowing action');
+    logger.warn(
+      { err },
+      'Pre-action validation LLM call failed, allowing action',
+    );
     return { approved: true };
   }
 }

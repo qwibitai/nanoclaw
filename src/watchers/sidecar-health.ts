@@ -9,8 +9,7 @@ export interface HealthStatus {
 export async function checkSidecarHealth(cdpUrl: string): Promise<boolean> {
   try {
     const url =
-      cdpUrl.replace('ws://', 'http://').replace(/\/.*$/, '') +
-      '/json/version';
+      cdpUrl.replace('ws://', 'http://').replace(/\/.*$/, '') + '/json/version';
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     const response = await fetch(url, { signal: controller.signal });

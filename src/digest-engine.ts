@@ -84,8 +84,11 @@ export function generateMorningDashboard(groupName: string): string {
   if (totalCost > 0) {
     lines.push('<b>━━ COST (7d) ━━</b>');
     for (const row of costBreakdown) {
-      const label = row.session_type.charAt(0).toUpperCase() + row.session_type.slice(1);
-      lines.push(`💰 ${label}: $${row.total_cost.toFixed(2)} (${row.task_count} tasks)`);
+      const label =
+        row.session_type.charAt(0).toUpperCase() + row.session_type.slice(1);
+      lines.push(
+        `💰 ${label}: $${row.total_cost.toFixed(2)} (${row.task_count} tasks)`,
+      );
     }
     lines.push(`Total: $${totalCost.toFixed(2)}`);
     lines.push('');

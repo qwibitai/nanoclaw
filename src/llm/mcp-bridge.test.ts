@@ -24,9 +24,8 @@ describe('MCP bridge config builder', () => {
     });
 
     vi.resetModules();
-    const { buildMcpServerConfigs } = await import(
-      '../../container/agent-runner/src/mcp-bridge.js'
-    );
+    const { buildMcpServerConfigs } =
+      await import('../../container/agent-runner/src/mcp-bridge.js');
 
     const configs = buildMcpServerConfigs({
       chatJid: 'test@chat',
@@ -48,9 +47,8 @@ describe('MCP bridge config builder', () => {
     });
 
     vi.resetModules();
-    const { buildMcpServerConfigs } = await import(
-      '../../container/agent-runner/src/mcp-bridge.js'
-    );
+    const { buildMcpServerConfigs } =
+      await import('../../container/agent-runner/src/mcp-bridge.js');
 
     const configs = buildMcpServerConfigs({
       chatJid: 'test@chat',
@@ -65,9 +63,8 @@ describe('MCP bridge config builder', () => {
     process.env.NOTION_TOKEN = 'test-notion-token';
 
     vi.resetModules();
-    const { buildMcpServerConfigs } = await import(
-      '../../container/agent-runner/src/mcp-bridge.js'
-    );
+    const { buildMcpServerConfigs } =
+      await import('../../container/agent-runner/src/mcp-bridge.js');
 
     const configs = buildMcpServerConfigs({
       chatJid: 'test@chat',
@@ -84,9 +81,8 @@ describe('MCP bridge config builder', () => {
     vi.spyOn(fs, 'existsSync').mockReturnValue(false);
 
     vi.resetModules();
-    const { buildMcpServerConfigs } = await import(
-      '../../container/agent-runner/src/mcp-bridge.js'
-    );
+    const { buildMcpServerConfigs } =
+      await import('../../container/agent-runner/src/mcp-bridge.js');
 
     const configs = buildMcpServerConfigs({
       chatJid: 'test@chat',

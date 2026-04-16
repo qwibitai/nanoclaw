@@ -276,20 +276,23 @@ export async function queryFactsSemantic(
   try {
     const { embedText } = await import('../llm/utility.js');
     const vector = await embedText(query);
-    const filterConditions: Array<{ key: string; match: { value: string } }> = [];
+    const filterConditions: Array<{ key: string; match: { value: string } }> =
+      [];
     if (opts?.domain) {
       filterConditions.push({ key: 'domain', match: { value: opts.domain } });
     }
     if (opts?.groupId) {
-      filterConditions.push({ key: 'group_id', match: { value: opts.groupId } });
+      filterConditions.push({
+        key: 'group_id',
+        match: { value: opts.groupId },
+      });
     }
 
     const results = await client.search(COLLECTION_NAME, {
       vector,
       limit: opts?.limit ?? 10,
-      filter: filterConditions.length > 0
-        ? { must: filterConditions }
-        : undefined,
+      filter:
+        filterConditions.length > 0 ? { must: filterConditions } : undefined,
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

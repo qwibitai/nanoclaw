@@ -51,7 +51,8 @@ export function getCalibrationStats(): CalibrationStats {
     if (buckets[key]) {
       buckets[key].total = row.total;
       buckets[key].correct = row.correct ?? 0;
-      buckets[key].accuracy = row.total > 0 ? buckets[key].correct / row.total : 0;
+      buckets[key].accuracy =
+        row.total > 0 ? buckets[key].correct / row.total : 0;
     }
   }
 

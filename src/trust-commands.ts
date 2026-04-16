@@ -130,8 +130,14 @@ export function executeTrustCommand(
     case 'delegation_status': {
       const db = getDb();
       const rows = db
-        .prepare('SELECT action_class, count, last_delegated_at FROM delegation_counters WHERE group_name = ? ORDER BY count DESC')
-        .all(groupId) as Array<{ action_class: string; count: number; last_delegated_at: number | null }>;
+        .prepare(
+          'SELECT action_class, count, last_delegated_at FROM delegation_counters WHERE group_name = ? ORDER BY count DESC',
+        )
+        .all(groupId) as Array<{
+        action_class: string;
+        count: number;
+        last_delegated_at: number | null;
+      }>;
 
       if (rows.length === 0) {
         return '📊 DELEGATION STATUS\n\nNo delegations recorded yet. Use "Handle It" on push notifications to start building delegation trust.';
@@ -140,7 +146,9 @@ export function executeTrustCommand(
       let output = '📊 DELEGATION STATUS\n\n';
       for (const row of rows) {
         const guardrailMet = row.count >= DELEGATION_GUARDRAIL_COUNT;
-        const status = guardrailMet ? '✅ Auto' : `🔒 ${row.count}/${DELEGATION_GUARDRAIL_COUNT}`;
+        const status = guardrailMet
+          ? '✅ Auto'
+          : `🔒 ${row.count}/${DELEGATION_GUARDRAIL_COUNT}`;
         output += `${row.action_class}: ${status}\n`;
       }
       return output;

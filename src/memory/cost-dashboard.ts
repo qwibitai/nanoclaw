@@ -103,7 +103,10 @@ export function parseAssistantCommand(text: string): AssistantCommand | null {
 /**
  * Execute an assistant command and return the response text.
  */
-export function executeAssistantCommand(command: AssistantCommand, groupId?: string): string {
+export function executeAssistantCommand(
+  command: AssistantCommand,
+  groupId?: string,
+): string {
   switch (command.type) {
     case 'cost_report':
       return formatCostReport(command.days);
