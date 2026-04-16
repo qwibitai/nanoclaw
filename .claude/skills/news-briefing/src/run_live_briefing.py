@@ -20,11 +20,20 @@ from typing import List, Dict, Any
 BASE_DIR = Path("/workspace/group/nanoclaw-skills/news-briefing")
 RESULTS_DIR = BASE_DIR / "agents" / "results"
 CONFIG_PATH = BASE_DIR / "config" / "user_preferences.json"
+MEMORY_PATH = BASE_DIR / "memory" / "briefing_memory.json"
 
 
 def load_preferences() -> Dict[str, Any]:
     with open(CONFIG_PATH) as f:
         return json.load(f)
+
+
+def load_ongoing_situations() -> Dict[str, Any]:
+    if not MEMORY_PATH.exists():
+        return {}
+    with open(MEMORY_PATH) as f:
+        memory = json.load(f)
+    return memory.get("ongoing_situations", {})
 
 
 def clear_stale_results():
@@ -49,11 +58,27 @@ def main():
 
     prefs = load_preferences()
     categories = {k: v for k, v in prefs["categories"].items() if v.get("enabled", True)}
+    situations = load_ongoing_situations()
 
     print("=" * 70)
     print(f"📰 LIVE NEWS BRIEFING — {today}")
     print("=" * 70)
     print()
+
+    if situations:
+        print("## ONGOING TRACKED SITUATIONS")
+        print("These are multi-day stories in memory. Apply these rules for ALL research below:")
+        print("  1. Search for updates on EACH situation — include findings in situation_updates")
+        print("  2. If an article is a recap/background of a tracked situation with NO new info, SKIP IT")
+        print("  3. Only include an article about a tracked situation if it contains a genuine update")
+        print()
+        for key, s in situations.items():
+            icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(s.get("severity", "medium"), "⚪")
+            print(f"  {icon} [{key}] {s['title']}")
+            print(f"     Status: {s.get('current_status', 'unknown')}")
+            print(f"     Last updated: {s.get('last_updated', 'unknown')}")
+        print()
+
     print("Research instructions for each category below.")
     print(f"Only include articles published on {today} or {yesterday}.")
     print()
@@ -150,8 +175,23 @@ Result file format:
   ],
   "key_trends": ["trend1", "trend2"],
   "notable_absence": "anything expected that didn't happen",
-  "situation_updates": []
+  "situation_updates": [
+    {{
+      "situation_key": "existing_key_or_new_snake_case",
+      "title": "Human-readable situation title",
+      "is_new": false,
+      "current_status": "One sentence on the situation right now",
+      "today_summary": "What specifically happened today",
+      "severity": "high"
+    }}
+  ]
 }}
+
+situation_updates rules:
+- Include an entry for EVERY tracked situation you found news about today
+- Set is_new: true only for brand-new situations not in the tracked list above
+- severity: "high", "medium", or "low"
+- Leave situation_updates as [] only if you found zero relevant news for any tracked situation
 
 After saving all {len(categories)} result files, run:
   python {BASE_DIR}/main.py

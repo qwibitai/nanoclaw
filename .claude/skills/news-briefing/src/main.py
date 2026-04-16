@@ -180,7 +180,8 @@ class NewsBriefingSystem:
     def _cleanup_old_results(self):
         """Remove result files that are not from today"""
         results_dir = self.base_dir / "agents" / "results"
-        today = datetime.now().strftime("%Y%m%d")
+        today_dashes = datetime.now().strftime("%Y-%m-%d")
+        today_nodashes = datetime.now().strftime("%Y%m%d")
 
         if not results_dir.exists():
             print("⚠️  No results directory found")
@@ -194,7 +195,7 @@ class NewsBriefingSystem:
             if len(parts) >= 4:
                 file_date = parts[-1]
 
-                if file_date != today:
+                if file_date not in (today_dashes, today_nodashes):
                     file.unlink()
                     removed_count += 1
                 else:
