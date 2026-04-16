@@ -335,6 +335,104 @@ Grey left bar, `✓ Auto-handled · N items`, one line per item, dimmed text.
 
 ---
 
+## Section 8: Email Preview & Full View
+
+Three tiers of depth for viewing email content — summary alone often isn't enough.
+
+### Tier 1: Intelligent Summary (Default)
+
+NanoClaw's classification produces a concise summary with key points and pending actions. This is the default message shown in chat — no email body included.
+
+### Tier 2: Quick Preview (Inline Expand)
+
+- "Preview ▼" button on any email notification
+- Tapping it edits the message in-place to include the first ~500 characters of the actual email body
+- Email body fetched via Gmail API on demand (not stored in the notification)
+- "Collapse ▲" shrinks back to summary
+- Useful for quick context without leaving the chat
+
+### Tier 3: Full Email (Mini App)
+
+- "Full Email ↗" button opens the Mini App with complete rendered email
+- Preserves HTML formatting, shows attachments list, full headers (From, To, CC, Date)
+- Reply chain shown threaded
+- Action buttons available at bottom of the full view (Reply, Archive, Forward)
+
+### Implementation
+
+- Gmail API `messages.get` with `format: full` for preview/full content
+- Cache fetched email bodies in memory (not SQLite) with 30-minute TTL to avoid repeated API calls
+- Preview truncation: first 500 chars, break at word boundary, append "— truncated, tap Full Email for complete message"
+
+---
+
+## Section 9: Auto-Attached Question Buttons
+
+When NanoClaw asks a question, appropriate buttons are auto-attached based on question type.
+
+### Question Detection
+
+The message classifier detects question patterns in outbound messages:
+- Yes/no: "Want me to...?", "Should I...?", "All expected?", "Is this correct?"
+- Confirmation: "Were both expected?", "Approve this?"
+- Multi-option: numbered lists with a question at the end
+
+### Button Variants
+
+| Question Type | Buttons |
+|---------------|---------|
+| Yes/No | `Yes \| No \| Let me think...` |
+| Financial confirmation | `Yes, all expected \| Not all — review \| Details ↗` |
+| Multi-option | One button per option + `Let me respond` fallback |
+
+### "Let me think..." / Defer Behavior
+
+- Snoozes the item — removes from immediate view but keeps it in "Needs You" on the status bar
+- Re-surfaces in the next digest or after a configurable snooze interval (default 2 hours)
+- Item is never auto-resolved by snoozing — it stays pending until explicitly acted on
+
+### Implementation
+
+- Detection runs in the message formatter, after classification
+- Pattern matching on the last sentence/line of the outbound message
+- Buttons attached via `sendMessageWithActions()` — same mechanism as action buttons
+- Callback data format: `answer:questionId:yes`, `answer:questionId:no`, `answer:questionId:defer`
+
+---
+
+## Section 10: Post-Action Archive Flow
+
+After an action is performed on an email, NanoClaw offers archiving without auto-archiving. Respects the rule: **never auto-archive emails**.
+
+### Layer 1: Inline Post-Action
+
+After the user acts on an email (confirms, replies, approves):
+1. Message edits in-place: buttons replaced with result text + new buttons
+2. Result format: `✓ [action completed]` + `📥 Archive | Done`
+3. "Archive" → two-step confirm (consistent with safety pattern throughout)
+4. "Done" → item resolved, disappears from "Needs You", email stays in inbox
+5. If both ignored → item auto-resolves after timeout, email stays in inbox
+
+### Layer 2: Morning Digest Batch Sweep
+
+For acted-on emails that weren't archived:
+- Morning digest includes an "Inbox Cleanup" section
+- Lists only emails where NanoClaw completed an action (replied, confirmed, verified)
+- Never includes emails that were just read or previewed
+- Buttons: `Archive All N | Review List | Skip`
+- "Archive All" gets two-step confirm
+- "Review List" opens Mini App with per-email detail
+- "Skip" dismisses — section won't re-appear until next digest with new items
+- If user never archives, that's fine — no nagging beyond the single daily digest mention
+
+### Tracking
+
+- New `acted_emails` table in SQLite: `email_id`, `thread_id`, `account`, `action_taken`, `acted_at`, `archived_at` (null until archived)
+- Populated when a callback action completes on an email notification
+- Morning digest queries for `archived_at IS NULL AND acted_at > yesterday`
+
+---
+
 ## New Events Required
 
 Events that must be added to the event bus (not already emitted):
@@ -347,6 +445,7 @@ Events that must be added to the event bus (not already emitted):
 | `email.draft.created` | Gmail watcher | `{ draftId, threadId, account }` |
 | `email.draft.enriched` | DraftEnrichmentWatcher | `{ draftId, changes }` |
 | `task.progress` | Container runner | `{ taskId, step, total, substatus }` |
+| `email.action.completed` | Archive tracker | `{ emailId, threadId, account, action }` |
 
 Existing events already emitted and consumed: `task.started`, `task.complete`, `task.failed`, `task.queued`, `item.classified`, `digest.sent`.
 
@@ -368,3 +467,6 @@ Existing events already emitted and consumed: `task.started`, `task.complete`, `
 | New: `src/mini-app/templates/` | HTML templates for task detail pages |
 | New: `src/failure-escalator.ts` | FailureEscalator event consumer |
 | New: `src/message-batcher.ts` | Batch buffer + flush logic |
+| New: `src/email-preview.ts` | Gmail API fetch, preview truncation, caching |
+| New: `src/question-detector.ts` | Pattern matching for auto-attaching yes/no/multi-option buttons |
+| New: `src/archive-tracker.ts` | Post-action archive flow, acted_emails table, batch sweep |
