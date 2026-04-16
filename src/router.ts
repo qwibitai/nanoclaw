@@ -3,6 +3,7 @@ import { formatLocalTime } from './timezone.js';
 import { classifyMessage } from './message-classifier.js';
 import { formatWithMeta } from './message-formatter.js';
 import { detectQuestion } from './question-detector.js';
+import { truncatePreview } from './email-preview.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -145,6 +146,40 @@ export function classifyAndFormat(rawText: string): ClassifiedMessage {
     meta.actions = [...meta.actions, ...question.actions];
   }
 
-  const formatted = formatWithMeta(text, meta);
+  let displayText = text;
+
+  // Email preview: truncate body and attach expand/full/archive actions
+  if (meta.category === 'email') {
+    // Extract account tag from email format: [Email [personal] from ...]
+    const accountMatch = text.match(/\[Email(?:\s*\[(\w+)\])?\s+from\s/);
+    const account = accountMatch?.[1] || '';
+
+    // Find the body (after double newline following Subject: line)
+    const bodyStart = text.indexOf('\n\n');
+    if (bodyStart !== -1 && text.length - bodyStart > 302) {
+      const header = text.slice(0, bodyStart + 2);
+      const body = text.slice(bodyStart + 2);
+      displayText = header + truncatePreview(body, 300);
+
+      // Attach email actions if we have an emailId on meta
+      if (meta.emailId) {
+        meta.actions = [
+          ...meta.actions,
+          {
+            label: '📧 Expand',
+            callbackData: `expand:${meta.emailId}:${account}`,
+            style: 'secondary' as const,
+          },
+          {
+            label: '🗄 Archive',
+            callbackData: `archive:${meta.emailId}`,
+            style: 'secondary' as const,
+          },
+        ];
+      }
+    }
+  }
+
+  const formatted = formatWithMeta(displayText, meta);
   return { text: formatted, meta };
 }

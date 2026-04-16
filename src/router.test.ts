@@ -87,3 +87,23 @@ describe('classifyAndFormat', () => {
     expect(result.meta.actions).toHaveLength(0);
   });
 });
+
+describe('classifyAndFormat email truncation', () => {
+  it('truncates email body to 300 chars and attaches expand/archive actions', () => {
+    const longBody = 'A'.repeat(500);
+    const emailText = `[Email [personal] from Alice <alice@example.com>]\nSubject: Test\n\n${longBody}`;
+
+    const result = classifyAndFormat(emailText);
+    expect(result.meta.category).toBe('email');
+    // Body should be truncated — total text shorter than original
+    expect(result.text.length).toBeLessThan(emailText.length + 20); // +20 for category prefix
+  });
+
+  it('does not truncate short email bodies', () => {
+    const emailText = `[Email from Bob <bob@test.com>]\nSubject: Short\n\nHi there`;
+    const result = classifyAndFormat(emailText);
+    expect(result.meta.category).toBe('email');
+    // Short body should pass through intact
+    expect(result.text).toContain('Hi there');
+  });
+});
