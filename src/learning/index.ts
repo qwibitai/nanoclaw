@@ -62,22 +62,22 @@ export function initLearningSystem(bus: EventBus, deps: LearningDeps): void {
       const pruned = pruneStaleRules();
       const decayed = decayConfidence();
       if (pruned > 0 || decayed > 0) {
-        logger.info(
-          { pruned, decayed },
-          'Learning maintenance run',
-        );
+        logger.info({ pruned, decayed }, 'Learning maintenance run');
       }
     },
     24 * 60 * 60 * 1000,
   );
 
   // Prune orphaned trace buffers every 15 minutes
-  setInterval(() => {
-    const pruned = pruneOrphanedTraces();
-    if (pruned > 0) {
-      logger.debug({ pruned }, 'Pruned orphaned traces');
-    }
-  }, 15 * 60 * 1000);
+  setInterval(
+    () => {
+      const pruned = pruneOrphanedTraces();
+      if (pruned > 0) {
+        logger.debug({ pruned }, 'Pruned orphaned traces');
+      }
+    },
+    15 * 60 * 1000,
+  );
 }
 
 function analyzeOutcomePatterns(groupId: string): void {

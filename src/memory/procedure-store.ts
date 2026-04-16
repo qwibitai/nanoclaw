@@ -186,7 +186,10 @@ export function updateProcedureStats(
     if (shouldDeprecate) {
       const deprecatedPath = filePath.replace(/\.json$/, '.deprecated.json');
       fs.renameSync(filePath, deprecatedPath);
-      logger.info({ name, groupId, filePath: deprecatedPath }, 'Procedure deprecated');
+      logger.info(
+        { name, groupId, filePath: deprecatedPath },
+        'Procedure deprecated',
+      );
       return true;
     }
 
@@ -219,7 +222,9 @@ function listProceduresFromDir(dir: string): Procedure[] {
   const procedures: Procedure[] = [];
 
   try {
-    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && !f.endsWith('.deprecated.json'));
+    const files = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.json') && !f.endsWith('.deprecated.json'));
     for (const file of files) {
       try {
         const data = JSON.parse(

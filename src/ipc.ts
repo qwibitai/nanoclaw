@@ -779,7 +779,11 @@ export async function processTaskIpc(
         }
         saveProcedure(proc);
         logger.info(
-          { name: proc.name, groupId: proc.groupId, stepCount: proc.steps?.length },
+          {
+            name: proc.name,
+            groupId: proc.groupId,
+            stepCount: proc.steps?.length,
+          },
           'Teach-mode procedure saved via IPC',
         );
       }

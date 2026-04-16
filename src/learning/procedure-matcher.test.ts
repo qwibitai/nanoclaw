@@ -119,10 +119,7 @@ describe('executeProcedure', () => {
       name: 'legacy-proc',
       trigger: 'do legacy thing',
       description: 'Legacy procedure without details',
-      steps: [
-        { action: 'navigate' },
-        { action: 'click' },
-      ],
+      steps: [{ action: 'navigate' }, { action: 'click' }],
       success_count: 0,
       failure_count: 0,
       auto_execute: false,

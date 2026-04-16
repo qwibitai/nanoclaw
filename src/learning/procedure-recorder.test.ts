@@ -12,7 +12,12 @@ vi.mock('../memory/procedure-store.js', () => ({
   findProcedure: (...args: unknown[]) => mockFindProcedure(...args),
 }));
 
-import { startTrace, addTrace, finalizeTrace, pruneOrphanedTraces } from './procedure-recorder.js';
+import {
+  startTrace,
+  addTrace,
+  finalizeTrace,
+  pruneOrphanedTraces,
+} from './procedure-recorder.js';
 
 describe('pruneOrphanedTraces', () => {
   beforeEach(() => vi.clearAllMocks());
