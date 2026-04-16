@@ -95,7 +95,12 @@ export function handleConfigCommand(
 }
 
 export function formatConfigList(
-  items: Array<{ key: string; value: string; defaultValue: string; updatedAt: string }>,
+  items: Array<{
+    key: string;
+    value: string;
+    defaultValue: string;
+    updatedAt: string;
+  }>,
 ): string {
   const lines = items.map((item) => {
     let display: string;
@@ -122,7 +127,10 @@ export function formatConfigList(
 // --- Smoke Test ---
 
 export interface SmokeTestDeps {
-  classifyAndFormat: (text: string) => { text: string; meta: { category: string; urgency?: string; actions: unknown[] } };
+  classifyAndFormat: (text: string) => {
+    text: string;
+    meta: { category: string; urgency?: string; actions: unknown[] };
+  };
   gmailOpsRouter: {
     listRecentDrafts: (account: string) => Promise<unknown[]>;
     accounts: string[];
@@ -132,9 +140,17 @@ export interface SmokeTestDeps {
   };
   draftWatcherRunning: boolean;
   uxConfig: {
-    list: () => Array<{ key: string; value: string; defaultValue: string; updatedAt: string }>;
+    list: () => Array<{
+      key: string;
+      value: string;
+      defaultValue: string;
+      updatedAt: string;
+    }>;
   };
   miniAppPort: number;
+  triggerDebouncer: {
+    getBufferSize: () => number;
+  } | null;
 }
 
 export async function handleSmokeTest(deps: SmokeTestDeps): Promise<string> {
@@ -240,6 +256,25 @@ export async function handleSmokeTest(deps: SmokeTestDeps): Promise<string> {
         detail: err instanceof Error ? err.message : 'not reachable',
       });
     }
+  }
+
+  // 7. Trigger debouncer
+  if (deps.triggerDebouncer) {
+    const bufferSize = deps.triggerDebouncer.getBufferSize();
+    results.push({
+      name: 'Trigger debouncer',
+      ok: true,
+      detail:
+        bufferSize > 0
+          ? `active, ${bufferSize} email(s) buffered`
+          : 'idle, 0 email(s) buffered',
+    });
+  } else {
+    results.push({
+      name: 'Trigger debouncer',
+      ok: false,
+      detail: 'not initialized',
+    });
   }
 
   // Format output

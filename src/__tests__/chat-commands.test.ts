@@ -22,11 +22,17 @@ function createTestDb(): Database.Database {
 
 describe('parseCommand', () => {
   it('should parse "config list"', () => {
-    expect(parseCommand('config list')).toEqual({ type: 'config', action: 'list' });
+    expect(parseCommand('config list')).toEqual({
+      type: 'config',
+      action: 'list',
+    });
   });
 
   it('should parse "Config List" case-insensitively', () => {
-    expect(parseCommand('Config List')).toEqual({ type: 'config', action: 'list' });
+    expect(parseCommand('Config List')).toEqual({
+      type: 'config',
+      action: 'list',
+    });
   });
 
   it('should parse "config set key value"', () => {
@@ -39,7 +45,9 @@ describe('parseCommand', () => {
   });
 
   it('should parse "config set" with multi-word value', () => {
-    expect(parseCommand('config set enrichment.prompt Hello {body} world')).toEqual({
+    expect(
+      parseCommand('config set enrichment.prompt Hello {body} world'),
+    ).toEqual({
       type: 'config',
       action: 'set',
       key: 'enrichment.prompt',
@@ -76,7 +84,10 @@ describe('handleConfigCommand', () => {
   });
 
   it('should handle config list', () => {
-    const result = handleConfigCommand({ type: 'config', action: 'list' }, config);
+    const result = handleConfigCommand(
+      { type: 'config', action: 'list' },
+      config,
+    );
     expect(result).toContain('⚙️ UX Configuration');
     expect(result).toContain('batcher.maxItems');
   });
@@ -125,16 +136,28 @@ describe('handleConfigCommand', () => {
 describe('formatConfigList', () => {
   it('should show truncated values for long strings', () => {
     const items = [
-      { key: 'enrichment.prompt', value: 'x'.repeat(200), defaultValue: 'x'.repeat(200), updatedAt: '2026-01-01' },
+      {
+        key: 'enrichment.prompt',
+        value: 'x'.repeat(200),
+        defaultValue: 'x'.repeat(200),
+        updatedAt: '2026-01-01',
+      },
     ];
     const output = formatConfigList(items);
     expect(output).toContain('[200 chars]');
   });
 
   it('should show rule count for classifier.rules', () => {
-    const rules = JSON.stringify([{ patterns: ['a'], category: 'email', urgency: 'info', batchable: false }]);
+    const rules = JSON.stringify([
+      { patterns: ['a'], category: 'email', urgency: 'info', batchable: false },
+    ]);
     const items = [
-      { key: 'classifier.rules', value: rules, defaultValue: rules, updatedAt: '2026-01-01' },
+      {
+        key: 'classifier.rules',
+        value: rules,
+        defaultValue: rules,
+        updatedAt: '2026-01-01',
+      },
     ];
     const output = formatConfigList(items);
     expect(output).toContain('[1 rule');
@@ -159,6 +182,7 @@ describe('handleSmokeTest', () => {
         ],
       },
       miniAppPort: 0,
+      triggerDebouncer: { getBufferSize: () => 0 },
     };
 
     const result = await handleSmokeTest(deps);
@@ -184,10 +208,30 @@ describe('handleSmokeTest', () => {
         list: () => [],
       },
       miniAppPort: 0,
+      triggerDebouncer: { getBufferSize: () => 2 },
     };
 
     const result = await handleSmokeTest(deps);
     expect(result).toContain('❌');
     expect(result).toContain('Classifier');
+  });
+
+  it('should report debouncer buffer size', async () => {
+    const deps: SmokeTestDeps = {
+      classifyAndFormat,
+      gmailOpsRouter: { listRecentDrafts: async () => [], accounts: [] },
+      archiveTracker: { getUnarchived: () => [] },
+      draftWatcherRunning: true,
+      uxConfig: {
+        list: () => [
+          { key: 'test', value: '1', defaultValue: '1', updatedAt: '' },
+        ],
+      },
+      miniAppPort: 0,
+      triggerDebouncer: { getBufferSize: () => 3 },
+    };
+    const result = await handleSmokeTest(deps);
+    expect(result).toContain('Trigger debouncer');
+    expect(result).toContain('3 email(s) buffered');
   });
 });

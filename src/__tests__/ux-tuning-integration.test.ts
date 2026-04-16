@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { UxConfig } from '../ux-config.js';
-import { parseCommand, handleConfigCommand, handleSmokeTest } from '../chat-commands.js';
+import {
+  parseCommand,
+  handleConfigCommand,
+  handleSmokeTest,
+} from '../chat-commands.js';
 import { classifyMessage } from '../message-classifier.js';
 import { classifyAndFormat } from '../router.js';
 
@@ -27,10 +31,20 @@ describe('UX tuning integration', () => {
 
   it('should update classifier rules via config set and use them', () => {
     const newRules = JSON.stringify([
-      { patterns: ['custom trigger'], category: 'security', urgency: 'urgent', batchable: false },
+      {
+        patterns: ['custom trigger'],
+        category: 'security',
+        urgency: 'urgent',
+        batchable: false,
+      },
     ]);
     const setResult = handleConfigCommand(
-      { type: 'config', action: 'set', key: 'classifier.rules', value: newRules },
+      {
+        type: 'config',
+        action: 'set',
+        key: 'classifier.rules',
+        value: newRules,
+      },
       config,
     );
     expect(setResult).toContain('✅');
@@ -45,7 +59,12 @@ describe('UX tuning integration', () => {
     config.set(
       'classifier.rules',
       JSON.stringify([
-        { patterns: ['only match'], category: 'team', urgency: 'info', batchable: true },
+        {
+          patterns: ['only match'],
+          category: 'team',
+          urgency: 'info',
+          batchable: true,
+        },
       ]),
     );
 
@@ -77,6 +96,7 @@ describe('UX tuning integration', () => {
       draftWatcherRunning: false,
       uxConfig: { list: () => config.list() },
       miniAppPort: 0,
+      triggerDebouncer: null,
     });
 
     expect(result).toContain('🔍 Smoke Test Results');

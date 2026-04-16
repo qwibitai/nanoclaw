@@ -102,7 +102,12 @@ import { startWebhookServer } from './watchers/webhook-server.js';
 import { getMeetingBriefings } from './watchers/meeting-briefing.js';
 import { runHealthCheck } from './watchers/sidecar-health.js';
 import { startDealWatchLoop } from './deal-watch-loop.js';
-import { startEmailSSE, setEmailTriggerDebouncer, getEmailTriggerDebouncer, writeIpcTrigger } from './email-sse.js';
+import {
+  startEmailSSE,
+  setEmailTriggerDebouncer,
+  getEmailTriggerDebouncer,
+  writeIpcTrigger,
+} from './email-sse.js';
 import { EmailTriggerDebouncer } from './email-trigger-debouncer.js';
 import { startCalendarPoller, stopCalendarPoller } from './calendar-poller.js';
 import {
