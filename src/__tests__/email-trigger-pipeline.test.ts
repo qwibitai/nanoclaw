@@ -138,7 +138,8 @@ Hi, let's meet tomorrow at 3pm to discuss the project.`;
   });
 
   it('should pass through non-email agent output and return the text', () => {
-    const normalText = 'I checked your calendar and you have no meetings today.';
+    const normalText =
+      'I checked your calendar and you have no meetings today.';
     const { text, meta } = classifyAndFormat(normalText);
     // The default category for unrecognised messages is 'email' (classifier fallback);
     // what matters here is that the text is preserved and meta.actions starts empty.
@@ -162,11 +163,21 @@ describe('archive buttons from trigger metadata', () => {
     const tracker = new ArchiveTracker(db);
 
     const triggerEmails = [
-      { thread_id: 'thread-123', account: 'personal', subject: 'Test', sender: 'bob@example.com' },
+      {
+        thread_id: 'thread-123',
+        account: 'personal',
+        subject: 'Test',
+        sender: 'bob@example.com',
+      },
     ];
 
     for (const email of triggerEmails) {
-      tracker.recordAction(email.thread_id, email.thread_id, email.account, 'replied');
+      tracker.recordAction(
+        email.thread_id,
+        email.thread_id,
+        email.account,
+        'replied',
+      );
     }
 
     const unarchived = tracker.getUnarchived();
@@ -176,15 +187,28 @@ describe('archive buttons from trigger metadata', () => {
   });
 
   it('should add archive button when not already present', () => {
-    const actions: Array<{ label: string; callbackData: string; style: string }> = [];
+    const actions: Array<{
+      label: string;
+      callbackData: string;
+      style: string;
+    }> = [];
     const triggerEmails = [
-      { thread_id: 'thread-456', account: 'dev', subject: 'Deploy', sender: 'ci@example.com' },
+      {
+        thread_id: 'thread-456',
+        account: 'dev',
+        subject: 'Deploy',
+        sender: 'ci@example.com',
+      },
     ];
 
     for (const email of triggerEmails) {
       const emailId = email.thread_id;
       if (!actions.some((a) => a.callbackData?.startsWith('archive:'))) {
-        actions.push({ label: '🗄 Archive', callbackData: `archive:${emailId}`, style: 'secondary' });
+        actions.push({
+          label: '🗄 Archive',
+          callbackData: `archive:${emailId}`,
+          style: 'secondary',
+        });
       }
     }
 
@@ -195,10 +219,56 @@ describe('archive buttons from trigger metadata', () => {
   it('should not duplicate archive buttons for multiple emails from same trigger', () => {
     const { meta } = classifyAndFormat('Agent processed 2 emails.');
     const triggerEmails = [
-      { thread_id: 'thread-1', account: 'personal', subject: 'A', sender: 'a@x.com' },
-      { thread_id: 'thread-2', account: 'dev', subject: 'B', sender: 'b@x.com' },
+      {
+        thread_id: 'thread-1',
+        account: 'personal',
+        subject: 'A',
+        sender: 'a@x.com',
+      },
+      {
+        thread_id: 'thread-2',
+        account: 'dev',
+        subject: 'B',
+        sender: 'b@x.com',
+      },
     ];
 
+    for (const email of triggerEmails) {
+      const emailId = email.thread_id;
+      if (
+        !meta.actions.some((a) =>
+          a.callbackData?.startsWith(`archive:${emailId}`),
+        )
+      ) {
+        meta.actions.push({
+          label: '🗄 Archive',
+          callbackData: `archive:${emailId}`,
+          style: 'secondary' as const,
+        });
+      }
+    }
+
+    const archiveActions = meta.actions.filter((a) =>
+      a.callbackData?.startsWith('archive:'),
+    );
+    expect(archiveActions).toHaveLength(2);
+  });
+});
+
+describe('email trigger pipeline — end-to-end', () => {
+  it('should produce formatted output with archive buttons from trigger metadata', () => {
+    const triggerEmails = [
+      { thread_id: 'thread-e2e-1', account: 'personal', subject: 'Project update', sender: 'pm@example.com' },
+      { thread_id: 'thread-e2e-2', account: 'dev', subject: 'CI failure', sender: 'ci@example.com' },
+    ];
+
+    // Simulate the agent response (not in [Email ...] format)
+    const agentResponse = 'I reviewed 2 new emails:\n1. Project update from pm@example.com — scheduling meeting\n2. CI failure from ci@example.com — test suite needs fix';
+
+    // Run through the pipeline
+    const { text, meta } = classifyAndFormat(agentResponse);
+
+    // Force-attach archive buttons from trigger metadata
     for (const email of triggerEmails) {
       const emailId = email.thread_id;
       if (!meta.actions.some((a) => a.callbackData?.startsWith(`archive:${emailId}`))) {
@@ -210,7 +280,43 @@ describe('archive buttons from trigger metadata', () => {
       }
     }
 
+    // Should have archive buttons for both emails
     const archiveActions = meta.actions.filter((a) => a.callbackData?.startsWith('archive:'));
     expect(archiveActions).toHaveLength(2);
+    expect(archiveActions[0].callbackData).toBe('archive:thread-e2e-1');
+    expect(archiveActions[1].callbackData).toBe('archive:thread-e2e-2');
+  });
+
+  it('should not duplicate archive buttons when classifier already detected email', () => {
+    const triggerEmails = [
+      { thread_id: 'thread-dup-1', account: 'personal', subject: 'Test', sender: 'alice@example.com' },
+    ];
+
+    // Agent response in [Email ...] format that classifier WILL detect
+    const emailFormatResponse = `[Email [personal] from alice@example.com]
+Subject: Test
+
+Short body here.`;
+
+    const { meta } = classifyAndFormat(emailFormatResponse);
+
+    // Force-attach — should check for existing archive buttons
+    for (const email of triggerEmails) {
+      const emailId = email.thread_id;
+      if (!meta.actions.some((a) => a.callbackData?.startsWith('archive:'))) {
+        meta.actions.push({
+          label: '🗄 Archive',
+          callbackData: `archive:${emailId}`,
+          style: 'secondary' as const,
+        });
+      }
+    }
+
+    // Should have at most one set of archive buttons (no duplicates)
+    const archiveActions = meta.actions.filter((a) => a.callbackData?.startsWith('archive:'));
+    expect(archiveActions.length).toBeGreaterThanOrEqual(1);
+    // No exact duplicate callbackData
+    const uniqueData = new Set(archiveActions.map((a) => a.callbackData));
+    expect(uniqueData.size).toBe(archiveActions.length);
   });
 });
