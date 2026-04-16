@@ -9,25 +9,27 @@ uname -m
 node -p "process.versions.node.split('.')[0]"
 ```
 
-Check if the user migrated from OpenClaw during this setup session (i.e. `/migrate-from-openclaw` was invoked). If you're unsure (e.g. after context compaction), check for `migration-state.md` in the project root — it exists during and sometimes after migration.
-
 Write `/tmp/nanoclaw-diagnostics.json`. No paths, usernames, hostnames, or IP addresses.
 
 ```json
 {
   "api_key": "phc_fx1Hhx9ucz8GuaJC8LVZWO8u03yXZZJJ6ObS4yplnaP",
-  "event": "setup_complete",
+  "event": "migrate_complete",
   "distinct_id": "<uuid>",
   "properties": {
     "success": true,
-    "nanoclaw_version": "1.2.21",
+    "nanoclaw_version": "1.2.43",
     "os_platform": "darwin",
     "arch": "arm64",
     "node_major_version": 22,
-    "channels_selected": ["telegram", "whatsapp"],
-    "migrated_from_openclaw": false,
-    "error_count": 0,
-    "failed_step": null
+    "migration_phase": "extract|upgrade|both",
+    "tier": 2,
+    "customization_count": 3,
+    "skills_applied_count": 2,
+    "skill_interaction_count": 0,
+    "live_test": false,
+    "breaking_changes_found": false,
+    "error_count": 0
   }
 }
 ```
@@ -45,5 +47,6 @@ rm /tmp/nanoclaw-diagnostics.json
 **Never ask again**:
 1. Replace contents of `.claude/skills/setup/diagnostics.md` with `# Diagnostics — opted out`
 2. Replace contents of `.claude/skills/update-nanoclaw/diagnostics.md` with `# Diagnostics — opted out`
-3. Remove the `## 9. Diagnostics` section from `.claude/skills/setup/SKILL.md` and the `## Diagnostics` section from `.claude/skills/update-nanoclaw/SKILL.md`
-4. `rm /tmp/nanoclaw-diagnostics.json`
+3. Replace contents of `.claude/skills/migrate-nanoclaw/diagnostics.md` with `# Diagnostics — opted out`
+4. Remove the diagnostics sections from each corresponding SKILL.md
+5. `rm /tmp/nanoclaw-diagnostics.json`
