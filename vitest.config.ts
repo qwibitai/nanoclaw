@@ -36,13 +36,17 @@ export default defineConfig({
         'container/agent-runner/src/workspace.ts',
       ],
       reporter: ['text', 'html', 'lcov'],
-      // Thresholds start at the current baseline and will be raised to 90
-      // in Step 8 after the refactor/test-expansion work lands.
+      // Raised from the initial baseline (65/55) after the db/host-runner/
+      // agent-runner splits + expanded unit tests landed. Files that can't
+      // reasonably be unit-tested (spawn wrappers, SDK for-await loops) are
+      // excluded above. Lifting these further requires splitting src/index.ts
+      // and making container-runner.ts / ipc.ts / telegram.ts more testable —
+      // tracked as follow-ups.
       thresholds: {
-        lines: 65,
-        functions: 65,
-        branches: 55,
-        statements: 65,
+        lines: 75,
+        functions: 75,
+        branches: 65,
+        statements: 75,
       },
     },
   },

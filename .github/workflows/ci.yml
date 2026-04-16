@@ -21,5 +21,5 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Tests
-        run: npx vitest run
+      - name: Tests + coverage gate
+        run: npm run test:coverage
