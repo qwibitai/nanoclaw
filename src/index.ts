@@ -15,6 +15,9 @@ import {
   TIMEZONE,
   TRUST_GATEWAY_PORT,
   PROACTIVE_SUGGESTION_INTERVAL,
+  WEBHOOK_PORT,
+  WEBHOOK_SECRET,
+  BROWSER_CDP_URL,
 } from './config.js';
 import { generateSuggestion } from './proactive-suggestions.js';
 import './channels/index.js';
@@ -86,12 +89,16 @@ import {
   executeAssistantCommand,
 } from './memory/cost-dashboard.js';
 import { startTrustGateway } from './trust-gateway.js';
+import { startWebhookServer } from './watchers/webhook-server.js';
+import { getMeetingBriefings } from './watchers/meeting-briefing.js';
+import { runHealthCheck } from './watchers/sidecar-health.js';
 import { startDealWatchLoop } from './deal-watch-loop.js';
 import { startEmailSSE } from './email-sse.js';
 import { startCalendarPoller, stopCalendarPoller } from './calendar-poller.js';
 import {
   correlateByAttendee,
   correlateBySubject,
+  correlateBySemanticMatch,
 } from './thread-correlator.js';
 import { classifyFromSSE } from './sse-classifier.js';
 import {
@@ -1377,6 +1384,25 @@ async function main(): Promise<void> {
   // Start trust gateway (containers call this before write/transact ops)
   startTrustGateway(TRUST_GATEWAY_PORT);
 
+  // Webhook event source (disabled when WEBHOOK_PORT=0)
+  startWebhookServer(WEBHOOK_PORT, WEBHOOK_SECRET);
+
+  // Browser sidecar health monitoring (every 30 seconds)
+  if (BROWSER_CDP_URL) {
+    setInterval(() => {
+      runHealthCheck(BROWSER_CDP_URL, () => {
+        logger.error('Browser sidecar unhealthy — attempting restart');
+        try {
+          ensureBrowserSidecar();
+        } catch (err) {
+          logger.error({ err: String(err) }, 'Failed to restart browser sidecar');
+        }
+      }).catch((err) => {
+        logger.warn({ err: String(err) }, 'Sidecar health check failed');
+      });
+    }, 30_000);
+  }
+
   // Real-time email notifications via SSE (poll is fallback)
   startEmailSSE();
   startCalendarPoller();
@@ -1431,9 +1457,14 @@ async function main(): Promise<void> {
         if (telegramJid) {
           const channel = findChannel(channels, telegramJid);
           if (channel) {
-            channel.sendMessage(telegramJid, suggestion.message).catch((err) => {
-              logger.warn({ err: String(err) }, 'Failed to send proactive suggestion');
-            });
+            channel
+              .sendMessage(telegramJid, suggestion.message)
+              .catch((err) => {
+                logger.warn(
+                  { err: String(err) },
+                  'Failed to send proactive suggestion',
+                );
+              });
           }
         }
 
@@ -1450,6 +1481,32 @@ async function main(): Promise<void> {
           },
         };
         eventBus.emit('proactive.suggestion', event);
+
+        // Meeting briefings: check for upcoming meetings
+        try {
+          const briefings = getMeetingBriefings(now, 15);
+          for (const briefing of briefings) {
+            const telegramJid = Object.keys(registeredGroups).find((jid) =>
+              jid.startsWith('tg:'),
+            );
+            const notifyJid = telegramJid || Object.keys(registeredGroups)[0];
+            if (notifyJid) {
+              const group = registeredGroups[notifyJid];
+              if (group) {
+                const taskId = `briefing-${briefing.eventId}`;
+                queue.enqueueTask(notifyJid, taskId, async () => {
+                  await runAgent(group, briefing.prompt, notifyJid);
+                });
+                logger.info(
+                  { eventId: briefing.eventId, title: briefing.eventTitle },
+                  'Meeting briefing task enqueued',
+                );
+              }
+            }
+          }
+        } catch (err) {
+          logger.warn({ err: String(err) }, 'Meeting briefing check failed');
+        }
       } catch (err) {
         logger.warn({ err: String(err) }, 'Proactive suggestion check failed');
       }
@@ -1478,6 +1535,13 @@ async function main(): Promise<void> {
       if (!item) return;
       correlateByAttendee(item);
       correlateBySubject(item, item.group_name);
+      // Async semantic correlation (fire-and-forget)
+      correlateBySemanticMatch(item, item.group_name).catch((err) => {
+        logger.warn(
+          { err: String(err), itemId: event.payload.itemId },
+          'Semantic thread correlation failed',
+        );
+      });
     } catch (err) {
       logger.warn(
         { err: String(err), itemId: event.payload.itemId },
