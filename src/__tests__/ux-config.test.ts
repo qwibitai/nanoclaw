@@ -35,6 +35,12 @@ describe('UxConfig', () => {
       ).toBe('200');
     });
 
+    it('should seed trigger debounce keys', () => {
+      const items = config.list();
+      expect(items.find((i) => i.key === 'trigger.debounceMs')?.value).toBe('60000');
+      expect(items.find((i) => i.key === 'trigger.maxHoldMs')?.value).toBe('300000');
+    });
+
     it('should not overwrite existing values on re-seed', () => {
       config.set('batcher.maxItems', '10');
       config.seedDefaults();

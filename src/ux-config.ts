@@ -21,6 +21,8 @@ const DEFAULTS: ConfigDefault[] = [
   { key: 'enrichment.maxBodyLength', value: '200', type: 'number' },
   { key: 'enrichment.maxAgeMinutes', value: '30', type: 'number' },
   { key: 'enrichment.timeoutMs', value: '60000', type: 'number' },
+  { key: 'trigger.debounceMs', value: '60000', type: 'number' },
+  { key: 'trigger.maxHoldMs', value: '300000', type: 'number' },
   {
     key: 'enrichment.prompt',
     value: `You are improving an auto-generated email draft reply.
