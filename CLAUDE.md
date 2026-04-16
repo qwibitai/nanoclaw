@@ -27,6 +27,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 |-------|-------------|
 | `/setup` | First-time installation, authentication, service configuration |
 | `/customize` | Adding channels, integrations, changing behavior |
+| `/add-<channel>` | Install multi-channel support (e.g., `/add-discord`, `/add-slack`, `/add-telegram`, `/add-whatsapp`, `/add-gmail`) |
 | `/debug` | Container issues, logs, troubleshooting |
 | `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
@@ -57,7 +58,7 @@ systemctl --user restart nanoclaw
 
 ## Troubleshooting
 
-**WhatsApp not connecting after upgrade:** WhatsApp is now a separate channel fork, not bundled in core. Run `/add-whatsapp` (or `git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git && git fetch whatsapp main && (git merge whatsapp/main || { git checkout --theirs package-lock.json && git add package-lock.json && git merge --continue; }) && npm run build`) to install it. Existing auth credentials and groups are preserved.
+**Channel not connecting after upgrade:** Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are now separate channel forks/skills, not bundled in core. Run `/add-<channel>` (e.g., `/add-whatsapp`, `/add-discord`) to install multi-channel support. Existing auth credentials and groups are preserved.
 
 ## Container Build Cache
 

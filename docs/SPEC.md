@@ -376,7 +376,7 @@ setRegisteredGroup("1234567890@g.us", {
 });
 ```
 
-フォルダ名は `{channel}_{group-name}` の慣習に従います（例： `whatsapp_family-chat`, `telegram_dev-team`）。メイングループは登録時に `isMain: true` が設定されます。
+フォルダ名は `{channel}_{group-name}` の慣習に従います（例： `whatsapp_family-chat`, `telegram_dev-team`）。メイングループは `groupType: 'main'` で識別されます（旧 `isMain: true` フラグは `groupType` フィールドに統合されました）。
 
 追加マウントは、コンテナ内の `/workspace/extra/{containerPath}` に表示されます。
 
