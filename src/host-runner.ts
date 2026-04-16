@@ -3,23 +3,17 @@
  * Runs agent-runner directly on the host (no container).
  * Drop-in replacement for container-runner when HOST_MODE=true.
  */
-import { ChildProcess, execSync, spawn } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import {
-  CONTAINER_MAX_OUTPUT_SIZE,
-  CONTAINER_TIMEOUT,
-  DATA_DIR,
-  GROUPS_DIR,
-  IDLE_TIMEOUT,
-  TIMEZONE,
-} from './config.js';
-import { readEnvFile } from './env.js';
-import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
+import { CONTAINER_MAX_OUTPUT_SIZE, CONTAINER_TIMEOUT, IDLE_TIMEOUT } from './config.js';
 import { logger } from './logger.js';
-import { syncSkills } from './skill-sync.js';
 import { RegisteredGroup } from './types.js';
+
+import { buildEnvironment } from './host-runner/environment.js';
+import { setupDirectories } from './host-runner/setup.js';
+import { ensureAgentRunnerBuilt } from './host-runner/build.js';
 
 // Re-export shared types and helpers from container-runner
 export {
@@ -31,182 +25,14 @@ export {
 } from './container-runner.js';
 import type { ContainerInput, ContainerOutput } from './container-runner.js';
 
+// Also re-export the extracted helpers so tests can exercise them.
+export { findClaudePath } from './host-runner/claude-path.js';
+export { buildEnvironment } from './host-runner/environment.js';
+export { setupDirectories } from './host-runner/setup.js';
+export { ensureAgentRunnerBuilt } from './host-runner/build.js';
+
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-
-let cachedClaudePath: string | undefined;
-function findClaudePath(): string {
-  if (cachedClaudePath) return cachedClaudePath;
-  const candidates = [
-    path.join(process.env.HOME || '', '.local', 'bin', 'claude'),
-    '/usr/local/bin/claude',
-    '/usr/bin/claude',
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      cachedClaudePath = p;
-      return p;
-    }
-  }
-  try {
-    cachedClaudePath = execSync('which claude', { encoding: 'utf8' }).trim();
-    // eslint-disable-next-line no-catch-all/no-catch-all
-  } catch {
-    cachedClaudePath = '';
-  }
-  return cachedClaudePath;
-}
-
-function buildEnvironment(
-  _group: RegisteredGroup,
-  input: ContainerInput,
-  ipcDir: string,
-  groupDir: string,
-  globalDir: string,
-  extraDir: string,
-  claudeHome: string,
-): Record<string, string> {
-  // Read auth credentials from .env — systemd doesn't load .env into process.env
-  const dotenvAuth = readEnvFile([
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'ANTHROPIC_API_KEY',
-  ]);
-
-  // Ensure node/npx are on PATH (systemd may not have asdf/nvm paths)
-  const nodeBinDir = path.dirname(process.execPath);
-  const existingPath = process.env.PATH || '/usr/local/bin:/usr/bin:/bin';
-  const augmentedPath = existingPath.includes(nodeBinDir)
-    ? existingPath
-    : `${nodeBinDir}:${existingPath}`;
-
-  const env: Record<string, string> = {
-    ...(process.env as Record<string, string>),
-    ...dotenvAuth,
-    PATH: augmentedPath,
-    TZ: TIMEZONE,
-    // Agent-runner workspace paths (replaces container mount points)
-    NANOCLAW_IPC_DIR: ipcDir,
-    NANOCLAW_GROUP_DIR: groupDir,
-    NANOCLAW_GLOBAL_DIR: globalDir,
-    NANOCLAW_EXTRA_DIR: extraDir,
-    // MCP server context
-    NANOCLAW_CHAT_JID: input.chatJid,
-    NANOCLAW_GROUP_FOLDER: input.groupFolder,
-    NANOCLAW_IS_MAIN: input.isMain ? '1' : '0',
-    // Use globally installed claude CLI in host mode
-    CLAUDE_CODE_PATH: process.env.CLAUDE_CODE_PATH || findClaudePath(),
-    // Claude SDK reads settings from this directory
-    CLAUDE_CONFIG_DIR: claudeHome,
-  };
-
-  return env;
-}
-
-function setupDirectories(
-  group: RegisteredGroup,
-  _input: ContainerInput,
-): {
-  groupDir: string;
-  ipcDir: string;
-  globalDir: string;
-  extraDir: string;
-  claudeHome: string;
-  agentRunnerDir: string;
-} {
-  const projectRoot = process.cwd();
-  const groupDir = resolveGroupFolderPath(group.folder);
-  fs.mkdirSync(groupDir, { recursive: true });
-
-  // IPC directory (same as container-runner)
-  const ipcDir = resolveGroupIpcPath(group.folder);
-  fs.mkdirSync(path.join(ipcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(ipcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(ipcDir, 'input'), { recursive: true });
-
-  // Global memory directory
-  const globalDir = path.join(GROUPS_DIR, 'global');
-  fs.mkdirSync(globalDir, { recursive: true });
-
-  // Extra mounts directory
-  const extraDir = path.join(DATA_DIR, 'extra', group.folder);
-  fs.mkdirSync(extraDir, { recursive: true });
-
-  // Symlink additional mounts into extra dir
-  if (group.containerConfig?.additionalMounts) {
-    for (const mount of group.containerConfig.additionalMounts) {
-      const hostPath = mount.hostPath.replace(/^~/, process.env.HOME || '');
-      const linkName = mount.containerPath
-        ? path.basename(mount.containerPath)
-        : path.basename(hostPath);
-      const linkPath = path.join(extraDir, linkName);
-      try {
-        // Remove stale symlink
-        if (fs.existsSync(linkPath)) fs.unlinkSync(linkPath);
-        fs.symlinkSync(hostPath, linkPath);
-        // eslint-disable-next-line no-catch-all/no-catch-all
-      } catch (err) {
-        logger.warn(
-          { hostPath, linkPath, err },
-          'Failed to create extra mount symlink',
-        );
-      }
-    }
-  }
-
-  // Per-group Claude sessions directory
-  const claudeHome = path.join(DATA_DIR, 'sessions', group.folder, '.claude');
-  fs.mkdirSync(claudeHome, { recursive: true });
-  const settingsFile = path.join(claudeHome, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
-  }
-
-  // Sync built-in skills, then group-specific skills (group wins on collision)
-  const skillsDst = path.join(claudeHome, 'skills');
-  syncSkills(path.join(projectRoot, 'container', 'skills'), skillsDst);
-  syncSkills(path.join(groupDir, 'skills'), skillsDst);
-
-  // Copy agent-runner source into a per-group writable location
-  const agentRunnerSrc = path.join(
-    projectRoot,
-    'container',
-    'agent-runner',
-    'src',
-  );
-  const agentRunnerDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    'agent-runner-src',
-  );
-  if (fs.existsSync(agentRunnerSrc)) {
-    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
-    const cachedIndex = path.join(agentRunnerDir, 'index.ts');
-    const needsCopy =
-      !fs.existsSync(agentRunnerDir) ||
-      !fs.existsSync(cachedIndex) ||
-      (fs.existsSync(srcIndex) &&
-        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
-    if (needsCopy) {
-      fs.cpSync(agentRunnerSrc, agentRunnerDir, { recursive: true });
-    }
-  }
-
-  return { groupDir, ipcDir, globalDir, extraDir, claudeHome, agentRunnerDir };
-}
 
 export async function runHostAgent(
   group: RegisteredGroup,
@@ -217,70 +43,24 @@ export async function runHostAgent(
   const startTime = Date.now();
   const projectRoot = process.cwd();
 
-  const { groupDir, ipcDir, globalDir, extraDir, claudeHome } =
-    setupDirectories(group, input);
-
-  const env = buildEnvironment(
+  const { groupDir, ipcDir, globalDir, extraDir, claudeHome } = setupDirectories(
     group,
     input,
+  );
+
+  const env = buildEnvironment(group, input, {
     ipcDir,
     groupDir,
     globalDir,
     extraDir,
     claudeHome,
-  );
+  });
 
-  // Build the agent-runner inside its own package directory so node_modules
-  // resolution works naturally (no symlinks needed).
-  const agentRunnerPkg = path.join(projectRoot, 'container', 'agent-runner');
-  const buildDir = path.join(agentRunnerPkg, 'dist');
-  fs.mkdirSync(buildDir, { recursive: true });
-
-  // Compile agent-runner TypeScript
-  const tsconfigPath = path.join(agentRunnerPkg, 'tsconfig.json');
-  const entryPoint = path.join(buildDir, 'index.js');
-
-  // Only recompile if any source file is newer than dist
-  const agentRunnerSrcDir = path.join(agentRunnerPkg, 'src');
-  let srcMtime = 0;
-  if (fs.existsSync(agentRunnerSrcDir)) {
-    for (const f of fs.readdirSync(agentRunnerSrcDir)) {
-      if (
-        f.endsWith('.ts') &&
-        !f.endsWith('.test.ts') &&
-        !f.endsWith('.d.ts')
-      ) {
-        const mt = fs.statSync(path.join(agentRunnerSrcDir, f)).mtimeMs;
-        if (mt > srcMtime) srcMtime = mt;
-      }
-    }
+  const build = ensureAgentRunnerBuilt(projectRoot);
+  if (build.error) {
+    return { status: 'error', result: null, error: build.error };
   }
-  const distMtime = fs.existsSync(entryPoint)
-    ? fs.statSync(entryPoint).mtimeMs
-    : 0;
-
-  if (srcMtime > distMtime) {
-    const { execSync } = await import('child_process');
-    try {
-      const npxPath = path.join(path.dirname(process.execPath), 'npx');
-      execSync(`${npxPath} tsc --project ${tsconfigPath}`, {
-        cwd: agentRunnerPkg,
-        stdio: 'pipe',
-        env: {
-          ...process.env,
-          PATH: `${path.dirname(process.execPath)}:${process.env.PATH || ''}`,
-        },
-      });
-      // eslint-disable-next-line no-catch-all/no-catch-all
-    } catch (err) {
-      logger.error({ err }, 'Failed to compile agent-runner');
-      return {
-        status: 'error',
-        result: null,
-        error: `Failed to compile agent-runner: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
-  }
+  const entryPoint = build.entryPoint;
 
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const processName = `nanoclaw-host-${safeName}-${Date.now()}`;
