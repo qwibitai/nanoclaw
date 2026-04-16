@@ -20,9 +20,9 @@ describe('codex()', () => {
     expect(peer.args).toContain('sandbox="danger-full-access"');
   });
 
-  it('sets model to o3 by default', () => {
+  it('does not specify a model by default', () => {
     const peer = codex();
-    expect(peer.args).toContain('model="o3"');
+    expect(peer.args.join(' ')).not.toContain('model=');
   });
 
   it('enables sandbox when sandbox: true', () => {
@@ -30,8 +30,8 @@ describe('codex()', () => {
     expect(peer.args.join(' ')).not.toContain('sandbox=');
   });
 
-  it('accepts model override', () => {
-    const peer = codex({ model: 'o4-mini' });
+  it('accepts model via extraArgs', () => {
+    const peer = codex({ extraArgs: ['-c', 'model="o4-mini"'] });
     expect(peer.args).toContain('model="o4-mini"');
   });
 
@@ -55,7 +55,6 @@ describe('codex()', () => {
     expect(peer).toHaveProperty('name');
     expect(peer).toHaveProperty('command');
     expect(peer).toHaveProperty('args');
-    // Must be assignable to AcpPeerConfig
     const _check: AcpPeerConfig = peer;
     expect(_check).toBeDefined();
   });
@@ -90,11 +89,9 @@ describe('claudeCode()', () => {
     expect(peer.args).toContain('@agentclientprotocol/claude-agent-acp');
   });
 
-  it('sets model to sonnet by default', () => {
+  it('does not specify a model by default', () => {
     const peer = claudeCode();
-    const modelIdx = peer.args.indexOf('--model');
-    expect(modelIdx).toBeGreaterThan(-1);
-    expect(peer.args[modelIdx + 1]).toBe('sonnet');
+    expect(peer.args).not.toContain('--model');
   });
 
   it('enables permissions when sandbox: true', () => {
@@ -102,21 +99,11 @@ describe('claudeCode()', () => {
     expect(peer.args).not.toContain('--dangerously-skip-permissions');
   });
 
-  it('still includes --model when sandbox: true', () => {
-    const peer = claudeCode({ sandbox: true });
-    expect(peer.args).toContain('--model');
-  });
-
-  it('accepts model override', () => {
-    const peer = claudeCode({ model: 'opus' });
+  it('accepts model via extraArgs', () => {
+    const peer = claudeCode({ extraArgs: ['--model', 'opus'] });
     const modelIdx = peer.args.indexOf('--model');
+    expect(modelIdx).toBeGreaterThan(-1);
     expect(peer.args[modelIdx + 1]).toBe('opus');
-  });
-
-  it('accepts full model ID', () => {
-    const peer = claudeCode({ model: 'claude-sonnet-4-6' });
-    const modelIdx = peer.args.indexOf('--model');
-    expect(peer.args[modelIdx + 1]).toBe('claude-sonnet-4-6');
   });
 
   it('accepts overrides', () => {
@@ -136,13 +123,6 @@ describe('claudeCode()', () => {
     expect(typeof peer.name).toBe('string');
     expect(typeof peer.command).toBe('string');
     expect(Array.isArray(peer.args)).toBe(true);
-  });
-
-  it('puts --model before extraArgs', () => {
-    const peer = claudeCode({ extraArgs: ['--effort', 'max'] });
-    const modelIdx = peer.args.indexOf('--model');
-    const effortIdx = peer.args.indexOf('--effort');
-    expect(modelIdx).toBeLessThan(effortIdx);
   });
 
   it('provides a description by default', () => {
@@ -234,7 +214,6 @@ describe('auto()', () => {
     });
     const peers = auto();
     expect(peers).toHaveLength(0);
-    // All calls were which — no side-effect from build
   });
 
   it('returns a fresh array on each call (no shared state)', () => {

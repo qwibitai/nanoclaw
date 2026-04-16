@@ -51,7 +51,7 @@ function binExists(name: string): boolean {
  *
  * Scans `$PATH` for known agent CLIs (`claude`, `codex`, etc.).
  * Each discovered agent gets the same defaults as its explicit factory
- * (sandbox disabled, sensible model).
+ * (sandbox disabled).
  *
  * @example
  * ```typescript
@@ -82,8 +82,6 @@ export interface CodexPeerOptions {
   env?: Record<string, string>;
   /** Description shown to the model. */
   description?: string;
-  /** OpenAI model to use. Default: "o3" */
-  model?: string;
   /**
    * Whether Codex should run with its built-in sandbox enabled.
    * Default: false — sandbox is set to `danger-full-access` so git,
@@ -98,18 +96,16 @@ export interface CodexPeerOptions {
  *
  * Out of the box:
  * - Sandbox: `danger-full-access` (full filesystem + shell)
- * - Approvals: bypassed (`--dangerously-bypass-approvals-and-sandbox`)
- * - Model: o3
+ *
+ * Model selection is left to Codex's own config / CLI defaults.
+ * Pass `extraArgs: ['-c', 'model="o3"']` to override.
  *
  * Requires `OPENAI_API_KEY` in the environment (or Codex OAuth via `codex login`).
  */
 export function codex(opts?: CodexPeerOptions): AcpPeerConfig {
   const sandbox = opts?.sandbox ?? false;
-  const model = opts?.model ?? 'o3';
 
   const args = ['-y', '@zed-industries/codex-acp'];
-  // Pass config overrides to the ACP adapter
-  args.push('-c', `model="${model}"`);
   if (!sandbox) {
     args.push('-c', 'sandbox="danger-full-access"');
   }
@@ -141,8 +137,6 @@ export interface ClaudeCodePeerOptions {
   env?: Record<string, string>;
   /** Description shown to the model. */
   description?: string;
-  /** Anthropic model to use (alias or full ID). Default: "sonnet" */
-  model?: string;
   /**
    * Whether Claude Code should run with its permission checks enabled.
    * Default: false — permissions are bypassed so the peer can operate
@@ -157,16 +151,16 @@ export interface ClaudeCodePeerOptions {
  *
  * Out of the box:
  * - Permissions: bypassed (`--dangerously-skip-permissions`)
- * - Model: sonnet (latest Claude Sonnet)
+ *
+ * Model selection is left to Claude Code's own config / CLI defaults.
+ * Pass `extraArgs: ['--model', 'opus']` to override.
  *
  * Requires `ANTHROPIC_API_KEY` in the environment.
  */
 export function claudeCode(opts?: ClaudeCodePeerOptions): AcpPeerConfig {
   const sandbox = opts?.sandbox ?? false;
-  const model = opts?.model ?? 'sonnet';
 
   const args = ['-y', '@agentclientprotocol/claude-agent-acp'];
-  args.push('--model', model);
   if (!sandbox) {
     args.push('--dangerously-skip-permissions');
   }
