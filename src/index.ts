@@ -110,6 +110,7 @@ import {
 } from './gmail-token-refresh.js';
 import { runDailyDigest } from './daily-digest.js';
 import { startEventRouter } from './event-router.js';
+import { handleWebhookEvent } from './webhook-consumer.js';
 import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { initLearningSystem, buildRulesBlock } from './learning/index.js';
@@ -1427,6 +1428,33 @@ async function main(): Promise<void> {
 
   // Webhook event source (disabled when WEBHOOK_PORT=0)
   startWebhookServer(WEBHOOK_PORT, WEBHOOK_SECRET);
+
+  // Webhook event consumer: route received webhooks to the main group as tasks
+  eventBus.on('webhook.received', (event) => {
+    const mainEntry = Object.entries(registeredGroups).find(
+      ([, g]) => g.isMain,
+    );
+    if (!mainEntry) {
+      logger.warn('webhook.received: no main group registered, dropping event');
+      return;
+    }
+    const [mainJid, mainGroup] = mainEntry;
+    handleWebhookEvent(
+      {
+        type: event.type,
+        payload: (event.payload.data as Record<string, unknown>) ?? {},
+        source: (event.payload.webhookSource as string) ?? 'generic',
+        receivedAt: new Date(event.timestamp).toISOString(),
+      },
+      (prompt) => {
+        const taskId = `webhook-${Date.now()}`;
+        queue.enqueueTask(mainJid, taskId, async () => {
+          await runAgent(mainGroup, prompt, mainJid);
+        });
+      },
+      mainGroup.folder,
+    );
+  });
 
   // Browser sidecar health monitoring (every 30 seconds)
   if (BROWSER_CDP_URL) {
