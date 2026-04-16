@@ -112,6 +112,7 @@ const lastRateLimit: Record<
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 const compactPending = new Set<string>(); // chatJids with pending compact
+const deferredCompact = new Set<string>(); // chatJids waiting for compact on next container run
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -354,6 +355,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let outputSentToUser = false;
   let lastSentText: string | null = null;
   let streamMessageId: number | null = null;
+  // Deferred compact: tracks whether a /compact IPC message is in-flight
+  let compactInFlight = false;
+  let compactSafetyTimer: ReturnType<typeof setTimeout> | null = null;
   let streamingFailed = false;
 
   // Buffered streaming loop — update() is synchronous and non-blocking,
@@ -525,7 +529,37 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         }
 
         if (result.status === 'success' && !result.partial) {
-          queue.notifyIdle(chatJid);
+          if (deferredCompact.has(chatJid)) {
+            // Deferred compact: send /compact via IPC now that container is idle
+            deferredCompact.delete(chatJid);
+            const compactSent = queue.sendMessage(chatJid, '/compact');
+            if (compactSent) {
+              compactPending.add(chatJid);
+              compactInFlight = true;
+              // Safety timeout: clear in-flight flag if compact doesn't complete
+              compactSafetyTimer = setTimeout(() => {
+                if (compactInFlight) {
+                  compactInFlight = false;
+                  queue.notifyIdle(chatJid);
+                }
+              }, 60000);
+            } else {
+              queue.notifyIdle(chatJid);
+            }
+          } else if (compactInFlight) {
+            // Don't call notifyIdle while compact is being processed —
+            // prevents container closure by pending tasks
+            if (result.compacted) {
+              compactInFlight = false;
+              if (compactSafetyTimer) {
+                clearTimeout(compactSafetyTimer);
+                compactSafetyTimer = null;
+              }
+              queue.notifyIdle(chatJid);
+            }
+          } else {
+            queue.notifyIdle(chatJid);
+          }
         }
 
         if (result.status === 'error') {
@@ -538,9 +572,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     clearInterval(typingKeepalive);
     await channel.setTyping?.(chatJid, false).catch(() => {});
     if (idleTimer) clearTimeout(idleTimer);
+    if (compactSafetyTimer) clearTimeout(compactSafetyTimer);
   }
 
   if (output === 'error' || hadError) {
+    deferredCompact.delete(chatJid);
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -1111,6 +1147,14 @@ async function main(): Promise<void> {
       const sent = queue.sendMessage(chatJid, text);
       if (sent && text === '/compact') {
         compactPending.add(chatJid);
+      }
+      if (!sent && text === '/compact') {
+        // No active container — defer compact to next container run if session exists
+        const group = registeredGroups[chatJid];
+        if (group && sessions[group.folder]) {
+          deferredCompact.add(chatJid);
+          return true;
+        }
       }
       return sent;
     },
