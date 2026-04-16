@@ -71,6 +71,17 @@ systemctl --user stop nanoclaw
 systemctl --user restart nanoclaw
 ```
 
+## Logs
+
+Application logs are written to `./logs/`:
+
+| File | Contents |
+|------|---------|
+| `logs/nanoclaw.error.log` | stderr (warn/error level) |
+| `logs/nanoclaw.error.log-YYYYMMDD` / `.gz` | Rotated daily |
+
+Per-group host-agent run logs: `groups/{name}/logs/host-agent-*.log`
+
 ## Troubleshooting
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.
