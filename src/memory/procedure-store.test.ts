@@ -155,4 +155,30 @@ describe('Procedure Store', () => {
     const found = findProcedure('reorder alto refills');
     expect(found).not.toBeNull();
   });
+
+  describe('fuzzy matching', () => {
+    it('matches procedures by keyword overlap', () => {
+      saveProcedure({
+        name: 'check-pr-status',
+        trigger: 'check PR status',
+        description: 'Check GitHub PR status',
+        steps: [{ action: 'github_api', details: 'list PRs' }],
+        success_count: 3,
+        failure_count: 0,
+        auto_execute: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      // Exact match works
+      expect(findProcedure('check PR status')).not.toBeNull();
+
+      // Fuzzy match: subset of trigger words
+      expect(findProcedure('check PR')).not.toBeNull();
+      expect(findProcedure('PR status check')).not.toBeNull();
+
+      // Non-match: no overlapping keywords
+      expect(findProcedure('deploy to production')).toBeNull();
+    });
+  });
 });

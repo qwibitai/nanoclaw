@@ -74,29 +74,51 @@ export function saveProcedure(proc: Procedure): void {
 /**
  * Find a procedure by trigger text.
  * Searches group-specific procedures first, then global.
+ * Uses fuzzy word-overlap matching with a 0.5 threshold.
  */
 export function findProcedure(
   trigger: string,
   groupId?: string,
 ): Procedure | null {
   const normalizedTrigger = trigger.toLowerCase().trim();
+  const triggerWords = normalizedTrigger.split(/\s+/).filter(Boolean);
+
+  function scoreMatch(proc: Procedure): number {
+    const procWords = proc.trigger.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    // Exact match
+    if (proc.trigger.toLowerCase().trim() === normalizedTrigger) return 1.0;
+    // Word overlap score
+    const matchingWords = triggerWords.filter((w) => procWords.includes(w));
+    if (matchingWords.length === 0) return 0;
+    return matchingWords.length / Math.max(triggerWords.length, procWords.length);
+  }
+
+  const FUZZY_THRESHOLD = 0.5;
+  let bestMatch: Procedure | null = null;
+  let bestScore = 0;
 
   // Search group-specific first
   if (groupId) {
-    const groupProcs = listProceduresFromDir(groupProceduresDir(groupId));
-    const match = groupProcs.find(
-      (p) => p.trigger.toLowerCase().trim() === normalizedTrigger,
-    );
-    if (match) return match;
+    for (const p of listProceduresFromDir(groupProceduresDir(groupId))) {
+      const score = scoreMatch(p);
+      if (score > bestScore && score >= FUZZY_THRESHOLD) {
+        bestScore = score;
+        bestMatch = p;
+      }
+    }
+    if (bestMatch) return bestMatch;
   }
 
   // Then global
-  const globalProcs = listProceduresFromDir(globalProceduresDir());
-  return (
-    globalProcs.find(
-      (p) => p.trigger.toLowerCase().trim() === normalizedTrigger,
-    ) || null
-  );
+  for (const p of listProceduresFromDir(globalProceduresDir())) {
+    const score = scoreMatch(p);
+    if (score > bestScore && score >= FUZZY_THRESHOLD) {
+      bestScore = score;
+      bestMatch = p;
+    }
+  }
+
+  return bestMatch;
 }
 
 /**
