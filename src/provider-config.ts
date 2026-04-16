@@ -97,7 +97,11 @@ export function detectActiveProviderConfig(): ActiveProviderConfig {
   }
 
   throw new Error(
-    '[provider-config] No supported provider credentials found in .env. Set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, OAS_CODEX_OAUTH_JSON',
+    '[provider-config] No supported provider credentials found in .env.\n' +
+    'Set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, OAS_CODEX_OAUTH_JSON\n' +
+    '\n' +
+    'NOTE: OAuth-based authentication (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_AUTH_TOKEN) is not supported.\n' +
+    'Anthropic prohibits third-party use of OAuth tokens. Use an API key from https://console.anthropic.com instead.',
   );
 }
 
