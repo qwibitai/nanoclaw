@@ -9,18 +9,9 @@
     "start": "bun run src/index.ts"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.0",
-    "@ai-sdk/google": "^3.0.21",
-    "@ai-sdk/openai": "^3.0.25",
-    "@mariozechner/pi-ai": "0.60.0",
-    "open-agent-sdk": "0.1.0-alpha.1",
+    "open-agent-sdk": "file:./.open-agent-sdk-fork/open-agent-sdk-fork.tgz",
     "@modelcontextprotocol/sdk": "^1.26.0",
-    "@mozilla/readability": "^0.6.0",
-    "ai": "^6.0.70",
     "cron-parser": "^5.0.0",
-    "jsdom": "^28.0.0",
-    "turndown": "^7.2.2",
-    "uuid": "^11.0.0",
     "zod": "^3.22.0"
   },
   "devDependencies": {

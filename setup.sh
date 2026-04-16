@@ -12,7 +12,12 @@ AGENT_RUNNER_PACKAGE_JSON="$AGENT_RUNNER_DIR/package.json"
 AGENT_RUNNER_INDEX_TS="$AGENT_RUNNER_DIR/src/index.ts"
 AGENT_RUNNER_BUN_LOCK="$AGENT_RUNNER_DIR/bun.lock"
 AGENT_RUNNER_PACKAGE_LOCK="$AGENT_RUNNER_DIR/package-lock.json"
-OPEN_AGENT_SDK_VERSION="0.1.0-alpha.1"
+OPEN_AGENT_SDK_DEP_SPEC="file:./.open-agent-sdk-fork/open-agent-sdk-fork.tgz"
+OPEN_AGENT_SDK_FORK_URL="${OPEN_AGENT_SDK_FORK_URL:-https://github.com/shin902/open-agent-sdk.git}"
+OPEN_AGENT_SDK_FORK_REF="${OPEN_AGENT_SDK_FORK_REF:-main}"
+OPEN_AGENT_SDK_FORK_DIR="$AGENT_RUNNER_DIR/.open-agent-sdk-fork"
+OPEN_AGENT_SDK_FORK_CORE_PACKAGE_JSON="$OPEN_AGENT_SDK_FORK_DIR/packages/core/package.json"
+OPEN_AGENT_SDK_FORK_TARBALL="$OPEN_AGENT_SDK_FORK_DIR/open-agent-sdk-fork.tgz"
 
 mkdir -p "$PROJECT_ROOT/logs"
 
@@ -122,12 +127,103 @@ check_build_tools() {
   log "Build tools: $HAS_BUILD_TOOLS"
 }
 
+ensure_open_agent_sdk_fork() {
+  OPEN_AGENT_SDK_FORK_PREPARED="false"
+
+  if [ -f "$OPEN_AGENT_SDK_FORK_CORE_PACKAGE_JSON" ]; then
+    log "open-agent-sdk fork already present at $OPEN_AGENT_SDK_FORK_DIR"
+    return 0
+  fi
+
+  if ! command -v git >/dev/null 2>&1; then
+    log "git is not available; cannot clone open-agent-sdk fork"
+    return 1
+  fi
+
+  rm -rf "$OPEN_AGENT_SDK_FORK_DIR"
+  log "Cloning open-agent-sdk fork ($OPEN_AGENT_SDK_FORK_URL#$OPEN_AGENT_SDK_FORK_REF)"
+
+  if git clone --depth 1 --branch "$OPEN_AGENT_SDK_FORK_REF" "$OPEN_AGENT_SDK_FORK_URL" "$OPEN_AGENT_SDK_FORK_DIR" >> "$LOG_FILE" 2>&1; then
+    OPEN_AGENT_SDK_FORK_PREPARED="true"
+  else
+    log "Failed to clone open-agent-sdk fork"
+    return 1
+  fi
+
+  if [ ! -f "$OPEN_AGENT_SDK_FORK_CORE_PACKAGE_JSON" ]; then
+    log "Fork clone completed but packages/core/package.json is missing"
+    return 1
+  fi
+
+  return 0
+}
+
+ensure_open_agent_sdk_bundle() {
+  OPEN_AGENT_SDK_FORK_BUNDLE_PREPARED="false"
+
+  if [ ! -f "$OPEN_AGENT_SDK_FORK_CORE_PACKAGE_JSON" ]; then
+    log "open-agent-sdk fork source is missing; cannot build tarball"
+    return 1
+  fi
+
+  if [ -f "$OPEN_AGENT_SDK_FORK_TARBALL" ] && [ "${OPEN_AGENT_SDK_FORK_PREPARED:-false}" != "true" ]; then
+    log "open-agent-sdk fork tarball already present at $OPEN_AGENT_SDK_FORK_TARBALL"
+    return 0
+  fi
+
+  if ! command -v bun >/dev/null 2>&1; then
+    log "bun is not available; cannot build open-agent-sdk fork tarball"
+    return 1
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    log "npm is not available; cannot pack open-agent-sdk fork tarball"
+    return 1
+  fi
+
+  log "Building open-agent-sdk fork tarball"
+
+  local packed_file
+  packed_file=$(cd "$OPEN_AGENT_SDK_FORK_DIR/packages/core" \
+    && bun install >> "$LOG_FILE" 2>&1 \
+    && bun run build >> "$LOG_FILE" 2>&1 \
+    && npm pack --silent 2>> "$LOG_FILE") || {
+    log "Failed to build/pack open-agent-sdk fork"
+    return 1
+  }
+
+  if [ -z "$packed_file" ] || [ ! -f "$OPEN_AGENT_SDK_FORK_DIR/packages/core/$packed_file" ]; then
+    log "npm pack did not produce the expected tarball"
+    return 1
+  fi
+
+  rm -f "$OPEN_AGENT_SDK_FORK_TARBALL"
+  mv "$OPEN_AGENT_SDK_FORK_DIR/packages/core/$packed_file" "$OPEN_AGENT_SDK_FORK_TARBALL"
+  OPEN_AGENT_SDK_FORK_BUNDLE_PREPARED="true"
+
+  log "Prepared open-agent-sdk fork tarball at $OPEN_AGENT_SDK_FORK_TARBALL"
+  return 0
+}
+
+cleanup_agent_runner_open_agent_sdk_node_modules() {
+  local nested_dir="$AGENT_RUNNER_DIR/node_modules/open-agent-sdk/node_modules"
+
+  if [ -d "$nested_dir" ]; then
+    rm -rf "$nested_dir"
+    log "Removed nested open-agent-sdk node_modules to avoid Bun symlink resolution issues"
+  fi
+
+  return 0
+}
+
 # --- Agent-runner migration for open-agent-sdk + Bun ---
 
 migrate_agent_runner() {
   MIGRATION_OK="true"
   MIGRATION_CHANGED="false"
   MIGRATION_LOCK_UPDATED="false"
+  MIGRATION_FORK_PREPARED="false"
+  MIGRATION_FORK_BUNDLE_PREPARED="false"
 
   if [ "$NODE_OK" = "false" ]; then
     log "Skipping agent-runner migration — Node not available"
@@ -137,6 +233,22 @@ migrate_agent_runner() {
 
   if [ ! -f "$AGENT_RUNNER_PACKAGE_JSON" ] || [ ! -f "$AGENT_RUNNER_INDEX_TS" ]; then
     log "Skipping agent-runner migration — required files not found"
+    MIGRATION_OK="false"
+    return
+  fi
+
+  if ensure_open_agent_sdk_fork; then
+    MIGRATION_FORK_PREPARED="$OPEN_AGENT_SDK_FORK_PREPARED"
+  else
+    log "Skipping agent-runner migration — open-agent-sdk fork unavailable"
+    MIGRATION_OK="false"
+    return
+  fi
+
+  if ensure_open_agent_sdk_bundle; then
+    MIGRATION_FORK_BUNDLE_PREPARED="$OPEN_AGENT_SDK_FORK_BUNDLE_PREPARED"
+  else
+    log "Skipping agent-runner migration — open-agent-sdk fork tarball unavailable"
     MIGRATION_OK="false"
     return
   fi
@@ -170,17 +282,17 @@ NODE
   fi
 
   local package_update_status
-  package_update_status=$(node - "$AGENT_RUNNER_PACKAGE_JSON" "$OPEN_AGENT_SDK_VERSION" <<'NODE'
+  package_update_status=$(node - "$AGENT_RUNNER_PACKAGE_JSON" "$OPEN_AGENT_SDK_DEP_SPEC" <<'NODE'
 const fs = require('fs');
 const packageJsonPath = process.argv[2];
-const sdkVersion = process.argv[3];
+const sdkSpec = process.argv[3];
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 
 packageJson.dependencies = packageJson.dependencies || {};
 let changed = false;
 
-if (packageJson.dependencies['open-agent-sdk'] !== sdkVersion) {
-  packageJson.dependencies['open-agent-sdk'] = sdkVersion;
+if (packageJson.dependencies['open-agent-sdk'] !== sdkSpec) {
+  packageJson.dependencies['open-agent-sdk'] = sdkSpec;
   changed = true;
 }
 
@@ -204,7 +316,7 @@ NODE
 
   if [ "$package_update_status" = "changed" ]; then
     MIGRATION_CHANGED="true"
-    log "Updated agent-runner dependency to open-agent-sdk@$OPEN_AGENT_SDK_VERSION"
+    log "Updated agent-runner dependency to $OPEN_AGENT_SDK_DEP_SPEC"
   fi
 
   if [ -f "$AGENT_RUNNER_PACKAGE_LOCK" ]; then
@@ -216,7 +328,11 @@ NODE
   local lock_needs_refresh="false"
   if [ ! -f "$AGENT_RUNNER_BUN_LOCK" ]; then
     lock_needs_refresh="true"
-  elif ! grep -q "\"open-agent-sdk\": \"$OPEN_AGENT_SDK_VERSION\"" "$AGENT_RUNNER_BUN_LOCK"; then
+  elif ! grep -q "\"open-agent-sdk\": \"$OPEN_AGENT_SDK_DEP_SPEC\"" "$AGENT_RUNNER_BUN_LOCK"; then
+    lock_needs_refresh="true"
+  elif [ "$MIGRATION_FORK_BUNDLE_PREPARED" = "true" ]; then
+    lock_needs_refresh="true"
+  elif [ "$MIGRATION_FORK_PREPARED" = "true" ]; then
     lock_needs_refresh="true"
   elif [ "$MIGRATION_CHANGED" = "true" ]; then
     lock_needs_refresh="true"
@@ -226,6 +342,7 @@ NODE
     log "Refreshing agent-runner bun.lock"
     if command -v bun >/dev/null 2>&1; then
       if (cd "$AGENT_RUNNER_DIR" && bun install) >> "$LOG_FILE" 2>&1; then
+        cleanup_agent_runner_open_agent_sdk_node_modules
         MIGRATION_LOCK_UPDATED="true"
         log "bun.lock refreshed with local bun"
       else
@@ -235,6 +352,7 @@ NODE
       fi
     elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
       if docker run --rm --user "$(id -u):$(id -g)" -v "$AGENT_RUNNER_DIR:/work" -w /work oven/bun:1 bun install >> "$LOG_FILE" 2>&1; then
+        cleanup_agent_runner_open_agent_sdk_node_modules
         MIGRATION_LOCK_UPDATED="true"
         log "bun.lock refreshed with dockerized bun"
       else
@@ -288,6 +406,11 @@ HAS_BUILD_TOOLS: $HAS_BUILD_TOOLS
 MIGRATION_OK: $MIGRATION_OK
 MIGRATION_CHANGED: $MIGRATION_CHANGED
 MIGRATION_LOCK_UPDATED: $MIGRATION_LOCK_UPDATED
+MIGRATION_FORK_PREPARED: $MIGRATION_FORK_PREPARED
+MIGRATION_FORK_BUNDLE_PREPARED: $MIGRATION_FORK_BUNDLE_PREPARED
+OPEN_AGENT_SDK_DEP_SPEC: $OPEN_AGENT_SDK_DEP_SPEC
+OPEN_AGENT_SDK_FORK_URL: $OPEN_AGENT_SDK_FORK_URL
+OPEN_AGENT_SDK_FORK_REF: $OPEN_AGENT_SDK_FORK_REF
 STATUS: $STATUS
 LOG: logs/setup.log
 === END ===

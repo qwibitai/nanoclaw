@@ -3,6 +3,9 @@
 
 FROM oven/bun:1
 
+ARG OPEN_AGENT_SDK_FORK_URL=https://github.com/shin902/open-agent-sdk.git
+ARG OPEN_AGENT_SDK_FORK_REF=main
+
 # Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \
     chromium \
@@ -39,11 +42,24 @@ WORKDIR /app
 # Copy package files first for better caching
 COPY agent-runner/package.json agent-runner/bun.lock ./
 
+# Clone forked open-agent-sdk so file: dependency resolves reliably under Bun.
+RUN git clone --depth 1 --branch "${OPEN_AGENT_SDK_FORK_REF}" "${OPEN_AGENT_SDK_FORK_URL}" /app/.open-agent-sdk-fork \
+    && test -f /app/.open-agent-sdk-fork/packages/core/package.json \
+    && cd /app/.open-agent-sdk-fork/packages/core \
+    && bun install \
+    && bun run build \
+    && PACK_FILE="$(npm pack --silent)" \
+    && mv "$PACK_FILE" /app/.open-agent-sdk-fork/open-agent-sdk-fork.tgz \
+    && test -f /app/.open-agent-sdk-fork/open-agent-sdk-fork.tgz \
+    && rm -rf /app/.open-agent-sdk-fork/.git
+
 # Install dependencies
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile \
+    && rm -rf /app/node_modules/open-agent-sdk/node_modules
 
 # Copy source code
-COPY agent-runner/ ./
+COPY agent-runner/src ./src
+COPY agent-runner/tsconfig.json ./tsconfig.json
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
