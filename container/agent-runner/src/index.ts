@@ -366,6 +366,30 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 /**
+ * Load additional MCP servers from the group-level .mcp.json.
+ * Supports both stdio servers (command + args + env) and HTTP servers
+ * (type: "http", url, headers). The SDK handles header injection for
+ * HTTP servers natively via McpHttpServerConfig.
+ */
+function loadGroupMcpServers(): Record<string, unknown> {
+  const configPath = '/workspace/group/.mcp.json';
+  try {
+    if (fs.existsSync(configPath)) {
+      const mcpJson = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      const servers = mcpJson.mcpServers || {};
+      const count = Object.keys(servers).length;
+      if (count > 0) {
+        log(`Loaded ${count} MCP server(s) from .mcp.json: ${Object.keys(servers).join(', ')}`);
+      }
+      return servers;
+    }
+  } catch (err) {
+    log(`Failed to load .mcp.json: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return {};
+}
+
+/**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
  * allowing agent teams subagents to run to completion.
@@ -435,6 +459,33 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  // Load additional MCP servers from the group's .mcp.json
+  const groupMcpServers = loadGroupMcpServers();
+  const allMcpServers: Record<string, unknown> = {
+    nanoclaw: {
+      command: 'node',
+      args: [mcpServerPath],
+      env: {
+        NANOCLAW_CHAT_JID: containerInput.chatJid,
+        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      },
+    },
+    ...groupMcpServers,
+  };
+
+  const mcpToolPatterns = Object.keys(allMcpServers).map(name => `mcp__${name}__*`);
+  const allowedTools = [
+    'Bash',
+    'Read', 'Write', 'Edit', 'Glob', 'Grep',
+    'WebSearch', 'WebFetch',
+    'Task', 'TaskOutput', 'TaskStop',
+    'TeamCreate', 'TeamDelete', 'SendMessage',
+    'TodoWrite', 'ToolSearch', 'Skill',
+    'NotebookEdit',
+    ...mcpToolPatterns,
+  ];
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -449,42 +500,12 @@ async function runQuery(
             append: globalClaudeMd,
           }
         : undefined,
-      allowedTools: [
-        'Bash',
-        'Read',
-        'Write',
-        'Edit',
-        'Glob',
-        'Grep',
-        'WebSearch',
-        'WebFetch',
-        'Task',
-        'TaskOutput',
-        'TaskStop',
-        'TeamCreate',
-        'TeamDelete',
-        'SendMessage',
-        'TodoWrite',
-        'ToolSearch',
-        'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*',
-      ],
+      allowedTools,
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-          },
-        },
-      },
+      mcpServers: allMcpServers as Record<string, any>,
       hooks: {
         PreCompact: [
           { hooks: [createPreCompactHook(containerInput.assistantName)] },
