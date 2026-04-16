@@ -95,7 +95,7 @@ export interface CodexPeerOptions {
  * Create a Codex ACP peer config with sensible defaults.
  *
  * Out of the box:
- * - Sandbox: `full-access` (full filesystem + shell)
+ * - Sandbox: `danger-full-access` (full filesystem + shell, no .git restriction)
  *
  * Model selection is left to Codex's own config / CLI defaults.
  * Pass `extraArgs: ['-c', 'model="o3"']` to override.
@@ -107,7 +107,7 @@ export function codex(opts?: CodexPeerOptions): AcpPeerConfig {
 
   const args = ['-y', '@zed-industries/codex-acp'];
   if (!sandbox) {
-    args.push('-c', 'sandbox_policy="full-access"');
+    args.push('-c', 'sandbox_mode="danger-full-access"');
     args.push('-c', 'approval_policy="never"');
   }
   if (opts?.extraArgs) {
