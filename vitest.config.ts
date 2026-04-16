@@ -19,6 +19,8 @@ export default defineConfig({
         // covered end-to-end by integration tests and manual runs.
         'src/index.ts',
         'container/agent-runner/src/index.ts',
+        // Barrel file: just imports to trigger channel self-registration.
+        'src/channels/index.ts',
       ],
       reporter: ['text', 'html', 'lcov'],
       // Thresholds start at the current baseline and will be raised to 90
