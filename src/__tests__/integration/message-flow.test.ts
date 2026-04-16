@@ -190,8 +190,7 @@ describe('integration: message-to-response flow', () => {
     // Let any queued microtasks finish on real timers.
     await waitIdle(queue);
 
-    expect(attempts).toBeGreaterThanOrEqual(3);
-    expect(channel.sent.length).toBeGreaterThanOrEqual(1);
-    expect(channel.sent.at(-1)?.text).toBe('ok');
+    expect(attempts).toBe(3);
+    expect(channel.sent).toEqual([{ jid: groupJid, text: 'ok' }]);
   });
 });

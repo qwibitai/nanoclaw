@@ -12,15 +12,21 @@ import {
 } from './mount-security.js';
 import type { MountAllowlist } from './types.js';
 
-const ALLOWLIST = '/tmp/test-allowlist.json';
+// Each test gets its own sandbox under mkdtempSync so concurrent runs
+// can't collide and nothing leaks into the shared /tmp root.
+let sandbox: string;
+let ALLOWLIST: string;
 
 vi.mock('./config.js', async () => {
   const actual =
     await vi.importActual<typeof import('./config.js')>('./config.js');
-  return { ...actual, MOUNT_ALLOWLIST_PATH: '/tmp/test-allowlist.json' };
+  return {
+    ...actual,
+    get MOUNT_ALLOWLIST_PATH() {
+      return ALLOWLIST;
+    },
+  };
 });
-
-const HOME = os.tmpdir();
 
 function writeAllowlist(contents: object | string): void {
   fs.writeFileSync(
@@ -30,7 +36,7 @@ function writeAllowlist(contents: object | string): void {
 }
 
 function makeRealDir(rel: string): string {
-  const p = path.join(HOME, rel);
+  const p = path.join(sandbox, rel);
   fs.mkdirSync(p, { recursive: true });
   return p;
 }
@@ -39,14 +45,10 @@ describe('mount-security', () => {
   const origHome = process.env.HOME;
 
   beforeEach(() => {
+    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'mount-sec-'));
+    ALLOWLIST = path.join(sandbox, 'allowlist.json');
     _resetMountAllowlistCache();
-    process.env.HOME = HOME;
-    try {
-      fs.unlinkSync(ALLOWLIST);
-      // eslint-disable-next-line no-catch-all/no-catch-all
-    } catch {
-      /* not present */
-    }
+    process.env.HOME = sandbox;
   });
 
   afterEach(() => {
@@ -54,7 +56,7 @@ describe('mount-security', () => {
     if (origHome === undefined) delete process.env.HOME;
     else process.env.HOME = origHome;
     try {
-      fs.unlinkSync(ALLOWLIST);
+      fs.rmSync(sandbox, { recursive: true, force: true });
       // eslint-disable-next-line no-catch-all/no-catch-all
     } catch {
       /* ignore */
@@ -129,12 +131,12 @@ describe('mount-security', () => {
 
     it('rejects containerPath containing ".."', () => {
       writeAllowlist({
-        allowedRoots: [{ path: HOME, allowReadWrite: true }],
+        allowedRoots: [{ path: sandbox, allowReadWrite: true }],
         blockedPatterns: [],
         nonMainReadOnly: false,
       });
       const result = validateMount(
-        { hostPath: HOME, containerPath: '../escape' },
+        { hostPath: sandbox, containerPath: '../escape' },
         true,
       );
       expect(result.allowed).toBe(false);
@@ -143,12 +145,12 @@ describe('mount-security', () => {
 
     it('rejects absolute containerPath', () => {
       writeAllowlist({
-        allowedRoots: [{ path: HOME, allowReadWrite: true }],
+        allowedRoots: [{ path: sandbox, allowReadWrite: true }],
         blockedPatterns: [],
         nonMainReadOnly: false,
       });
       const result = validateMount(
-        { hostPath: HOME, containerPath: '/etc' },
+        { hostPath: sandbox, containerPath: '/etc' },
         true,
       );
       expect(result.allowed).toBe(false);
@@ -157,12 +159,12 @@ describe('mount-security', () => {
 
     it('rejects containerPath with colon (docker injection guard)', () => {
       writeAllowlist({
-        allowedRoots: [{ path: HOME, allowReadWrite: true }],
+        allowedRoots: [{ path: sandbox, allowReadWrite: true }],
         blockedPatterns: [],
         nonMainReadOnly: false,
       });
       const result = validateMount(
-        { hostPath: HOME, containerPath: 'repo:rw' },
+        { hostPath: sandbox, containerPath: 'repo:rw' },
         true,
       );
       expect(result.allowed).toBe(false);
@@ -171,7 +173,7 @@ describe('mount-security', () => {
 
     it('rejects non-existent host path', () => {
       writeAllowlist({
-        allowedRoots: [{ path: HOME, allowReadWrite: true }],
+        allowedRoots: [{ path: sandbox, allowReadWrite: true }],
         blockedPatterns: [],
         nonMainReadOnly: false,
       });
@@ -186,7 +188,7 @@ describe('mount-security', () => {
     it('rejects paths matching default blocked patterns', () => {
       const target = makeRealDir('test-ssh-block/.ssh');
       writeAllowlist({
-        allowedRoots: [{ path: HOME, allowReadWrite: true }],
+        allowedRoots: [{ path: sandbox, allowReadWrite: true }],
         blockedPatterns: [],
         nonMainReadOnly: false,
       });

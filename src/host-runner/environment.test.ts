@@ -1,3 +1,5 @@
+import path from 'path';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ContainerInput } from '../container-runner.js';
@@ -92,7 +94,6 @@ describe('buildEnvironment', () => {
   });
 
   it('leaves PATH unchanged when node bin dir is already present', () => {
-    const path = require('path');
     const nodeBinDir = path.dirname(process.execPath);
     process.env.PATH = `${nodeBinDir}:/usr/bin`;
     const env = buildEnvironment(baseGroup, baseInput, basePaths);

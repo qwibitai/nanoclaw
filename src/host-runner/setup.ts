@@ -11,6 +11,17 @@ import { logger } from '../logger.js';
 import { syncSkills } from '../skill-sync.js';
 import type { RegisteredGroup } from '../types.js';
 
+/** Return the most-recent mtime across every .ts file under `dir`. */
+function latestTsMtime(dir: string): number {
+  let newest = 0;
+  for (const entry of fs.readdirSync(dir)) {
+    if (!entry.endsWith('.ts') || entry.endsWith('.d.ts')) continue;
+    const mt = fs.statSync(path.join(dir, entry)).mtimeMs;
+    if (mt > newest) newest = mt;
+  }
+  return newest;
+}
+
 export interface HostDirectories {
   groupDir: string;
   ipcDir: string;
@@ -108,13 +119,18 @@ export function setupDirectories(
     'agent-runner-src',
   );
   if (fs.existsSync(agentRunnerSrc)) {
-    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
+    // Compare the newest mtime across *every* .ts in src/ so edits to any
+    // post-split module (main.ts, query-runner.ts, ipc.ts, hooks.ts, …)
+    // invalidate the per-group cache, not only changes to index.ts.
+    const newestSrcMtime = latestTsMtime(agentRunnerSrc);
     const cachedIndex = path.join(agentRunnerDir, 'index.ts');
+    const cachedMtime = fs.existsSync(cachedIndex)
+      ? fs.statSync(cachedIndex).mtimeMs
+      : 0;
     const needsCopy =
       !fs.existsSync(agentRunnerDir) ||
       !fs.existsSync(cachedIndex) ||
-      (fs.existsSync(srcIndex) &&
-        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
+      newestSrcMtime > cachedMtime;
     if (needsCopy) {
       fs.cpSync(agentRunnerSrc, agentRunnerDir, { recursive: true });
     }
