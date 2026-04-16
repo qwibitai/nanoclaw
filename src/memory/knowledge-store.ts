@@ -231,7 +231,9 @@ export async function ensureQdrantCollection(): Promise<void> {
   }
 }
 
-export async function storeFactWithVector(input: StoreFactInput): Promise<void> {
+export async function storeFactWithVector(
+  input: StoreFactInput,
+): Promise<void> {
   storeFact(input);
 
   const client = getQdrant();
@@ -242,17 +244,19 @@ export async function storeFactWithVector(input: StoreFactInput): Promise<void> 
     const vector = await embedText(input.text);
     const { randomUUID } = await import('crypto');
     await client.upsert(COLLECTION_NAME, {
-      points: [{
-        id: randomUUID(),
-        vector,
-        payload: {
-          text: input.text,
-          domain: input.domain ?? 'general',
-          group_id: input.groupId ?? 'global',
-          source: input.source,
-          created_at: new Date().toISOString(),
+      points: [
+        {
+          id: randomUUID(),
+          vector,
+          payload: {
+            text: input.text,
+            domain: input.domain ?? 'general',
+            group_id: input.groupId ?? 'global',
+            source: input.source,
+            created_at: new Date().toISOString(),
+          },
         },
-      }],
+      ],
     });
   } catch (err) {
     logger.warn({ err }, 'Qdrant store failed, FTS5 fallback retained');
@@ -271,15 +275,25 @@ export async function queryFactsSemantic(
   try {
     const { embedText } = await import('../llm/utility.js');
     const vector = await embedText(query);
+    const filterConditions: Array<{ key: string; match: { value: string } }> = [];
+    if (opts?.domain) {
+      filterConditions.push({ key: 'domain', match: { value: opts.domain } });
+    }
+    if (opts?.groupId) {
+      filterConditions.push({ key: 'group_id', match: { value: opts.groupId } });
+    }
+
     const results = await client.search(COLLECTION_NAME, {
       vector,
       limit: opts?.limit ?? 10,
-      filter: opts?.domain ? { must: [{ key: 'domain', match: { value: opts.domain } }] } : undefined,
+      filter: filterConditions.length > 0
+        ? { must: filterConditions }
+        : undefined,
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return results.map((r: any, i: number) => ({
-      rowid: i,
+    return results.map((r: any) => ({
+      rowid: typeof r.id === 'number' ? r.id : 0,
       text: (r.payload as Record<string, string>).text,
       domain: (r.payload as Record<string, string>).domain,
       group_id: (r.payload as Record<string, string>).group_id,
