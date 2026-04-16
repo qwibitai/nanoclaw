@@ -18,6 +18,11 @@
       "types": "./dist/api/channels/telegram.d.ts",
       "import": "./dist/api/channels/telegram.js",
       "default": "./dist/api/channels/telegram.js"
+    },
+    "./acp/peers": {
+      "types": "./dist/api/acp/peers.d.ts",
+      "import": "./dist/api/acp/peers.js",
+      "default": "./dist/api/acp/peers.js"
     }
   },
   "scripts": {
