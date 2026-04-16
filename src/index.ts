@@ -65,7 +65,12 @@ import {
 import { ExecutorPool } from './executor-pool.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound, classifyAndFormat } from './router.js';
+import {
+  findChannel,
+  formatMessages,
+  formatOutbound,
+  classifyAndFormat,
+} from './router.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -1267,14 +1272,26 @@ async function main(): Promise<void> {
   const autoApproval = new AutoApprovalTimer(eventBus);
 
   // Status bar — sends/edits a pinned message in the main group
-  const mainGroupEntry = Object.entries(registeredGroups).find(([, g]) => g.isMain);
+  const mainGroupEntry = Object.entries(registeredGroups).find(
+    ([, g]) => g.isMain,
+  );
   const statusBar = new StatusBarManager(eventBus, {
-    onUpdate: (text) => {
-      if (mainGroupEntry) {
-        const [mainJid] = mainGroupEntry;
-        const channel = findChannel(channels, mainJid);
-        channel?.sendMessage(mainJid, text).catch(() => {});
+    sendProgress: async (text) => {
+      if (!mainGroupEntry)
+        return { update: async () => {}, clear: async () => {} };
+      const [mainJid] = mainGroupEntry;
+      const channel = findChannel(channels, mainJid);
+      if (channel?.sendProgress) {
+        return channel.sendProgress(mainJid, text);
       }
+      await channel?.sendMessage(mainJid, text);
+      return { update: async () => {}, clear: async () => {} };
+    },
+    sendMessage: async (text) => {
+      if (!mainGroupEntry) return;
+      const [mainJid] = mainGroupEntry;
+      const channel = findChannel(channels, mainJid);
+      await channel?.sendMessage(mainJid, text);
     },
   });
 
@@ -1284,7 +1301,9 @@ async function main(): Promise<void> {
       if (mainGroupEntry) {
         const [mainJid] = mainGroupEntry;
         const channel = findChannel(channels, mainJid);
-        channel?.sendMessageWithActions?.(mainJid, text, actions).catch(() => {});
+        channel
+          ?.sendMessageWithActions?.(mainJid, text, actions)
+          .catch(() => {});
       }
     },
   });
@@ -1316,7 +1335,10 @@ async function main(): Promise<void> {
   }
 
   // Start Mini App server
-  startMiniAppServer({ port: Number(process.env.MINI_APP_PORT) || 3847, db: getDb() });
+  startMiniAppServer({
+    port: Number(process.env.MINI_APP_PORT) || 3847,
+    db: getDb(),
+  });
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

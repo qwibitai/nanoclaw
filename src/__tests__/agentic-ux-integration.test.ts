@@ -58,16 +58,29 @@ describe('Agentic UX Integration', () => {
     batcher.destroy();
   });
 
-  it('status bar + failure escalator work together', () => {
+  it('status bar + failure escalator work together', async () => {
     let statusText = '';
     let escalation: string | null = null;
 
     const statusBar = new StatusBarManager(bus, {
-      onUpdate: (text) => { statusText = text; },
+      sendProgress: vi.fn(async (text: string) => {
+        statusText = text;
+        return {
+          update: async (t: string) => {
+            statusText = t;
+          },
+          clear: async () => {},
+        };
+      }),
+      sendMessage: vi.fn(async (text: string) => {
+        statusText = text;
+      }),
     });
 
     const _escalator = new FailureEscalator(bus, {
-      onEscalate: (text) => { escalation = text; },
+      onEscalate: (text) => {
+        escalation = text;
+      },
     });
 
     // Task starts
@@ -75,10 +88,15 @@ describe('Agentic UX Integration', () => {
       type: 'task.started',
       source: 'executor',
       timestamp: Date.now(),
-      payload: { taskId: 't1', groupJid: 'tg:123', containerName: 'Spamhaus investigation', slotIndex: 0 },
+      payload: {
+        taskId: 't1',
+        groupJid: 'tg:123',
+        containerName: 'Spamhaus investigation',
+        slotIndex: 0,
+      },
     });
 
-    vi.advanceTimersByTime(2000);
+    await vi.advanceTimersByTimeAsync(2000);
     expect(statusText).toContain('ACTIVE');
     expect(statusText).toContain('Spamhaus investigation');
 
@@ -87,10 +105,15 @@ describe('Agentic UX Integration', () => {
       type: 'task.complete',
       source: 'executor',
       timestamp: Date.now(),
-      payload: { taskId: 't1', groupJid: 'tg:123', status: 'error', durationMs: 5000 },
+      payload: {
+        taskId: 't1',
+        groupJid: 'tg:123',
+        status: 'error',
+        durationMs: 5000,
+      },
     });
 
-    vi.advanceTimersByTime(2000);
+    await vi.advanceTimersByTimeAsync(2000);
     expect(escalation).toContain('🚨');
     expect(escalation).toContain('failed');
 
