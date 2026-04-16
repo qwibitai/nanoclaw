@@ -12,12 +12,14 @@ import {
   incrementDigestCount,
   type TrackedItem,
 } from './tracked-items.js';
+import { generateArchiveDigestSection } from './digest-archive-section.js';
+import type { ArchiveTracker } from './archive-tracker.js';
 
 function normalizeDigestTitle(title: string): string {
   return title.replace(/^(re|fwd|fw):\s*/gi, '').trim();
 }
 
-export function generateMorningDashboard(groupName: string): string {
+export function generateMorningDashboard(groupName: string, archiveTracker?: ArchiveTracker): string {
   const now = Date.now();
   const dateStr =
     formatLocalTime(new Date(now).toISOString(), TIMEZONE).split(',')[0] ||
@@ -98,6 +100,14 @@ export function generateMorningDashboard(groupName: string): string {
   lines.push('━━━━━━━━━━━━━━━━━━━━━━');
   if (actionRequired.length > 0) {
     lines.push('Reply with a number to act, or just start your day.');
+  }
+
+  // Inbox cleanup section
+  if (archiveTracker) {
+    const archiveSection = generateArchiveDigestSection(archiveTracker);
+    if (archiveSection) {
+      lines.push(archiveSection);
+    }
   }
 
   updateDigestState(groupName, {
