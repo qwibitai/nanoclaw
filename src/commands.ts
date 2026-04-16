@@ -10,7 +10,11 @@ import fs from 'fs';
 import path from 'path';
 
 import { getPauseStatus, resumeGroup } from './auto-pause.js';
-import { ATLAS_STATE_DIR, ATLAS_OPS_DIR, TELEGRAM_CEO_USER_ID } from './config.js';
+import {
+  ATLAS_STATE_DIR,
+  ATLAS_OPS_DIR,
+  TELEGRAM_CEO_USER_ID,
+} from './config.js';
 import {
   createMission,
   createMissionRole,
@@ -68,8 +72,12 @@ const APPROVAL_REJECTED_DIR = path.join(
 
 // Dangerous commands that require CEO sender verification
 const CEO_ONLY_COMMANDS = new Set([
-  '/approve', '/reject', '/pause', '/resume',
-  '/reset-mode', '/mission',
+  '/approve',
+  '/reject',
+  '/pause',
+  '/resume',
+  '/reset-mode',
+  '/mission',
 ]);
 
 // Model weights for quota display (mirrors governance/quota.ts)
@@ -476,8 +484,9 @@ function missionList(): string {
       lines.push(`Active (${active.length}):`);
       for (const m of active) {
         const roles = getMissionRoles(m.id);
-        const done = roles.filter(r => r.status === 'success').length;
-        const statusEmoji = m.status === 'proposed' ? '📋' : m.status === 'running' ? '🚀' : '🔀';
+        const done = roles.filter((r) => r.status === 'success').length;
+        const statusEmoji =
+          m.status === 'proposed' ? '📋' : m.status === 'running' ? '🚀' : '🔀';
         lines.push(
           `  ${statusEmoji} ${m.title}  ${m.entity.toUpperCase()}  ${done}/${roles.length} roles  $${m.cost_actual_usd.toFixed(2)}`,
         );
@@ -485,15 +494,19 @@ function missionList(): string {
     }
 
     // Show recent completed/failed that aren't in active
-    const activeIds = new Set(active.map(m => m.id));
-    const completed = recent.filter(m => !activeIds.has(m.id));
+    const activeIds = new Set(active.map((m) => m.id));
+    const completed = recent.filter((m) => !activeIds.has(m.id));
     if (completed.length > 0) {
       if (lines.length > 0) lines.push('');
       lines.push('Recent:');
       for (const m of completed.slice(0, 7)) {
-        const emoji = m.status === 'complete' ? '✅' : m.status === 'failed' ? '❌' : '⏸️';
+        const emoji =
+          m.status === 'complete' ? '✅' : m.status === 'failed' ? '❌' : '⏸️';
         const date = m.completed_at
-          ? new Date(m.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          ? new Date(m.completed_at).toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+            })
           : '';
         lines.push(
           `  ${emoji} ${m.title}  ${m.entity.toUpperCase()}  $${m.cost_actual_usd.toFixed(2)}  ${date}`,
@@ -518,13 +531,22 @@ function missionStatus(id?: string): string {
     const events = getMissionEvents(mission.id);
 
     const statusEmoji: Record<string, string> = {
-      proposed: '📋', approved: '⏳', running: '🚀',
-      synthesizing: '🔀', complete: '✅', failed: '❌', stopped: '⏸️',
+      proposed: '📋',
+      approved: '⏳',
+      running: '🚀',
+      synthesizing: '🔀',
+      complete: '✅',
+      failed: '❌',
+      stopped: '⏸️',
     };
 
     const roleEmoji: Record<string, string> = {
-      pending: '⏳', running: '🔄', success: '✅',
-      error: '❌', timeout: '❌', cancelled: '⏸️',
+      pending: '⏳',
+      running: '🔄',
+      success: '✅',
+      error: '❌',
+      timeout: '❌',
+      cancelled: '⏸️',
     };
 
     const lines = [
@@ -535,9 +557,10 @@ function missionStatus(id?: string): string {
       'Roles:',
     ];
     for (const r of roles) {
-      const dur = r.started_at && r.completed_at
-        ? `${Math.round((new Date(r.completed_at).getTime() - new Date(r.started_at).getTime()) / 1000)}s`
-        : '';
+      const dur =
+        r.started_at && r.completed_at
+          ? `${Math.round((new Date(r.completed_at).getTime() - new Date(r.started_at).getTime()) / 1000)}s`
+          : '';
       lines.push(
         `  ${roleEmoji[r.status] || '❓'} ${r.role_name} (${r.model})${dur ? ` — ${dur}` : ''}${r.error ? ` — ${r.error.slice(0, 60)}` : ''}`,
       );
@@ -592,12 +615,26 @@ function missionCreate(missionType?: string, entity?: string): string {
       });
     }
 
-    logMissionEvent(missionId, 'created', undefined, `Template: ${missionType}, Entity: ${missionEntity}`);
+    logMissionEvent(
+      missionId,
+      'created',
+      undefined,
+      `Template: ${missionType}, Entity: ${missionEntity}`,
+    );
 
     const roleNames = Object.keys(template.roles).join(', ');
-    logger.info({ missionId, missionType, entity: missionEntity }, 'Mission created via /mission create');
+    logger.info(
+      { missionId, missionType, entity: missionEntity },
+      'Mission created via /mission create',
+    );
 
-    return `📋 Mission: ${template.name}\nEntity: ${missionEntity.toUpperCase()}\n\nRoster:\n${Object.entries(template.roles).map(([name, cfg]) => `  • ${name} (${(cfg as { model: string }).model})`).join('\n')}\n\nEst. cost: ~$${template.estimated_cost}  |  Est. time: ~${template.estimated_minutes}min\n\n⏳ ID: ${missionId}\nApprove: /mission approve ${missionId}`;
+    return `📋 Mission: ${template.name}\nEntity: ${missionEntity.toUpperCase()}\n\nRoster:\n${Object.entries(
+      template.roles,
+    )
+      .map(([name, cfg]) => `  • ${name} (${(cfg as { model: string }).model})`)
+      .join(
+        '\n',
+      )}\n\nEst. cost: ~$${template.estimated_cost}  |  Est. time: ~${template.estimated_minutes}min\n\n⏳ ID: ${missionId}\nApprove: /mission approve ${missionId}`;
   } catch (err) {
     return `Error: ${err}`;
   }
@@ -618,12 +655,20 @@ function missionApprove(id?: string): string {
       status: 'approved',
       approved_at: new Date().toISOString(),
     });
-    logMissionEvent(mission.id, 'approved', undefined, 'CEO approved via Telegram');
+    logMissionEvent(
+      mission.id,
+      'approved',
+      undefined,
+      'CEO approved via Telegram',
+    );
 
-    logger.info({ missionId: mission.id }, 'Mission approved via /mission approve');
+    logger.info(
+      { missionId: mission.id },
+      'Mission approved via /mission approve',
+    );
 
     const roles = getMissionRoles(mission.id);
-    return `🚀 Mission approved: ${mission.title}\n\n${roles.length} roles spawning...\n${roles.map(r => `  🔄 ${r.role_name} (${r.model})`).join('\n')}\n\nTrack: /mission status ${mission.id}`;
+    return `🚀 Mission approved: ${mission.title}\n\n${roles.length} roles spawning...\n${roles.map((r) => `  🔄 ${r.role_name} (${r.model})`).join('\n')}\n\nTrack: /mission status ${mission.id}`;
   } catch (err) {
     return `Error: ${err}`;
   }
@@ -643,7 +688,12 @@ function missionStop(id?: string): string {
       status: 'stopped' as any,
       completed_at: new Date().toISOString(),
     });
-    logMissionEvent(mission.id, 'stopped', undefined, 'CEO stopped via Telegram');
+    logMissionEvent(
+      mission.id,
+      'stopped',
+      undefined,
+      'CEO stopped via Telegram',
+    );
 
     // Mark any running roles as cancelled
     const roles = getMissionRoles(mission.id);
@@ -666,17 +716,21 @@ function missionStop(id?: string): string {
 function missionHistory(): string {
   try {
     const missions = getRecentMissions(20);
-    const completed = missions.filter(m =>
+    const completed = missions.filter((m) =>
       ['complete', 'failed', 'stopped'].includes(m.status),
     );
     if (completed.length === 0) return 'No completed missions yet.';
 
     const lines = ['Mission History (last 20):'];
     for (const m of completed) {
-      const emoji = m.status === 'complete' ? '✅' : m.status === 'failed' ? '❌' : '⏸️';
+      const emoji =
+        m.status === 'complete' ? '✅' : m.status === 'failed' ? '❌' : '⏸️';
       const date = m.completed_at
         ? new Date(m.completed_at).toLocaleDateString('en-US', {
-            month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
           })
         : '';
       lines.push(
@@ -700,12 +754,21 @@ function missionShow(id?: string): string {
     const events = getMissionEvents(mission.id);
 
     const statusEmoji: Record<string, string> = {
-      proposed: '📋', approved: '⏳', running: '🚀',
-      synthesizing: '🔀', complete: '✅', failed: '❌', stopped: '⏸️',
+      proposed: '📋',
+      approved: '⏳',
+      running: '🚀',
+      synthesizing: '🔀',
+      complete: '✅',
+      failed: '❌',
+      stopped: '⏸️',
     };
     const roleEmoji: Record<string, string> = {
-      pending: '⏳', running: '🔄', success: '✅',
-      error: '❌', timeout: '❌', cancelled: '⏸️',
+      pending: '⏳',
+      running: '🔄',
+      success: '✅',
+      error: '❌',
+      timeout: '❌',
+      cancelled: '⏸️',
     };
 
     const lines = [
@@ -720,7 +783,9 @@ function missionShow(id?: string): string {
       lines.push('*Timeline:*');
       for (const evt of events) {
         const time = new Date(evt.timestamp).toLocaleTimeString('en-US', {
-          hour: 'numeric', minute: '2-digit', hour12: true,
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
         });
         const role = evt.role_name ? ` [${evt.role_name}]` : '';
         lines.push(`  ${time}  ${evt.event_type}${role}`);
@@ -731,9 +796,10 @@ function missionShow(id?: string): string {
     // Roles
     lines.push('*Roles:*');
     for (const r of roles) {
-      const dur = r.started_at && r.completed_at
-        ? `${Math.round((new Date(r.completed_at).getTime() - new Date(r.started_at).getTime()) / 1000)}s`
-        : '';
+      const dur =
+        r.started_at && r.completed_at
+          ? `${Math.round((new Date(r.completed_at).getTime() - new Date(r.started_at).getTime()) / 1000)}s`
+          : '';
       lines.push(
         `  ${roleEmoji[r.status] || '❓'} ${r.role_name} (${r.model})  $${r.cost_usd.toFixed(2)}${dur ? `  ${dur}` : ''}`,
       );
@@ -749,7 +815,9 @@ function missionShow(id?: string): string {
 
     // Dashboard link
     lines.push('');
-    lines.push(`Full report: https://atlas.gainpropertygroup.com/missions/${mission.id}`);
+    lines.push(
+      `Full report: https://atlas.gainpropertygroup.com/missions/${mission.id}`,
+    );
 
     return lines.join('\n');
   } catch (err) {

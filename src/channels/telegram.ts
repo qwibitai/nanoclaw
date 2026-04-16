@@ -237,10 +237,16 @@ export class TelegramChannel implements Channel {
         const { handleCommand } = await import('../commands.js');
         const result = handleCommand(`/mission ${subcmd} ${missionId}`, sender);
         if (result.response) {
-          await ctx.answerCallbackQuery({ text: result.response.slice(0, 200) });
+          await ctx.answerCallbackQuery({
+            text: result.response.slice(0, 200),
+          });
           // Also send full response to chat
           if (chatJid) {
-            await sendTelegramMessage(this.bot!.api, chatJid.replace(/^tg:/, ''), result.response);
+            await sendTelegramMessage(
+              this.bot!.api,
+              chatJid.replace(/^tg:/, ''),
+              result.response,
+            );
           }
         } else {
           await ctx.answerCallbackQuery({ text: 'Done' });

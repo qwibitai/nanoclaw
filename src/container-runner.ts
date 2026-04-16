@@ -154,7 +154,9 @@ function spoolCallback(callback: MissionCallback): void {
  * Check if an IPC task payload is a bridge mission task.
  * Bridge tasks include a missionId and role in the prompt metadata.
  */
-function parseMissionContext(prompt: string): { missionId: string; role: string } | null {
+function parseMissionContext(
+  prompt: string,
+): { missionId: string; role: string } | null {
   // Bridge prefixes mission tasks with [Bridge Mission {id}]
   const match = prompt.match(/\[Bridge Mission (\S+)\]/);
   if (!match) return null;

@@ -254,7 +254,11 @@ export async function processTaskIpc(
               targetJid = jid;
               targetGroupEntry = group;
               logger.info(
-                { dispatch: data.targetJid, resolved: jid, folder: dispatchFolder },
+                {
+                  dispatch: data.targetJid,
+                  resolved: jid,
+                  folder: dispatchFolder,
+                },
                 'Dispatch JID resolved to registered group',
               );
               break;
@@ -523,11 +527,13 @@ export async function processTaskIpc(
 
     case 'create_mission': {
       // NL detection: main group agent proposes a mission from conversation
-      const { createMission, createMissionRole, logMissionEvent } = await import('./db.js');
+      const { createMission, createMissionRole, logMissionEvent } =
+        await import('./db.js');
       const templateType = (data as any).templateType as string;
-      const entity = (data as any).entity as string || 'gpg';
-      const title = (data as any).title as string || `Mission: ${templateType}`;
-      const brief = (data as any).brief as string || '';
+      const entity = ((data as any).entity as string) || 'gpg';
+      const title =
+        ((data as any).title as string) || `Mission: ${templateType}`;
+      const brief = ((data as any).brief as string) || '';
 
       if (!templateType) {
         logger.warn('create_mission IPC missing templateType');
@@ -536,12 +542,18 @@ export async function processTaskIpc(
 
       // Load template to get roles
       const { ATLAS_OPS_DIR } = await import('./config.js');
-      const templatesPath = path.join(ATLAS_OPS_DIR, 'swarm', 'mission-templates.json');
+      const templatesPath = path.join(
+        ATLAS_OPS_DIR,
+        'swarm',
+        'mission-templates.json',
+      );
       let template: any = null;
       try {
         const tmplData = JSON.parse(fs.readFileSync(templatesPath, 'utf-8'));
         template = tmplData.templates?.[templateType];
-      } catch { /* template not found */ }
+      } catch {
+        /* template not found */
+      }
 
       if (!template) {
         logger.warn({ templateType }, 'create_mission: template not found');
@@ -570,27 +582,41 @@ export async function processTaskIpc(
         });
       }
 
-      logMissionEvent(missionId, 'created', undefined,
-        `NL detection: ${(data as any).source || 'ipc'}, template: ${templateType}`);
+      logMissionEvent(
+        missionId,
+        'created',
+        undefined,
+        `NL detection: ${(data as any).source || 'ipc'}, template: ${templateType}`,
+      );
 
       // Notify CEO via main group channel with the mission proposal
-      const mainJid = Object.entries(registeredGroups).find(([, g]) => g.isMain)?.[0];
+      const mainJid = Object.entries(registeredGroups).find(
+        ([, g]) => g.isMain,
+      )?.[0];
       if (mainJid) {
         const roleNames = Object.keys(template.roles).join(', ');
-        const msg = `📋 Mission: ${template.name}\n` +
+        const msg =
+          `📋 Mission: ${template.name}\n` +
           `Entity: ${entity.toUpperCase()}\n\n` +
-          `Roster:\n${Object.entries(template.roles).map(([n, c]) => `  • ${n} (${(c as any).model})`).join('\n')}\n\n` +
+          `Roster:\n${Object.entries(template.roles)
+            .map(([n, c]) => `  • ${n} (${(c as any).model})`)
+            .join('\n')}\n\n` +
           `Est. cost: ~$${template.estimated_cost}  |  Est. time: ~${template.estimated_minutes}min\n\n` +
           `⏳ ID: ${missionId}\nApprove: /mission approve ${missionId}`;
         try {
           await deps.sendMessage(mainJid, msg);
         } catch (err) {
-          logger.error({ err, missionId }, 'Failed to send mission proposal to main group');
+          logger.error(
+            { err, missionId },
+            'Failed to send mission proposal to main group',
+          );
         }
       }
 
-      logger.info({ missionId, templateType, entity, source: (data as any).source },
-        'Mission created via NL detection IPC');
+      logger.info(
+        { missionId, templateType, entity, source: (data as any).source },
+        'Mission created via NL detection IPC',
+      );
       break;
     }
 

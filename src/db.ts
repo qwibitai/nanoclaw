@@ -787,16 +787,26 @@ export function getMission(id: string): MissionRow | undefined {
 
 export function getMissionByPrefix(prefix: string): MissionRow | undefined {
   return db
-    .prepare('SELECT * FROM missions WHERE id LIKE ? ORDER BY created_at DESC LIMIT 1')
+    .prepare(
+      'SELECT * FROM missions WHERE id LIKE ? ORDER BY created_at DESC LIMIT 1',
+    )
     .get(`${prefix}%`) as MissionRow | undefined;
 }
 
 export function updateMission(
   id: string,
-  updates: Partial<Pick<MissionRow,
-    'status' | 'approved_at' | 'started_at' | 'completed_at' |
-    'result_summary' | 'cost_actual_usd' | 'paperclip_issue_id'
-  >>,
+  updates: Partial<
+    Pick<
+      MissionRow,
+      | 'status'
+      | 'approved_at'
+      | 'started_at'
+      | 'completed_at'
+      | 'result_summary'
+      | 'cost_actual_usd'
+      | 'paperclip_issue_id'
+    >
+  >,
 ): void {
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -849,10 +859,20 @@ export function getMissionRoles(missionId: string): MissionRoleRow[] {
 export function updateMissionRole(
   missionId: string,
   roleName: string,
-  updates: Partial<Pick<MissionRoleRow,
-    'status' | 'container_name' | 'started_at' | 'completed_at' |
-    'cost_usd' | 'input_tokens' | 'output_tokens' | 'output_path' | 'error'
-  >>,
+  updates: Partial<
+    Pick<
+      MissionRoleRow,
+      | 'status'
+      | 'container_name'
+      | 'started_at'
+      | 'completed_at'
+      | 'cost_usd'
+      | 'input_tokens'
+      | 'output_tokens'
+      | 'output_path'
+      | 'error'
+    >
+  >,
 ): void {
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -878,7 +898,13 @@ export function logMissionEvent(
   db.prepare(
     `INSERT INTO mission_events (mission_id, event_type, role_name, details, timestamp)
      VALUES (?, ?, ?, ?, ?)`,
-  ).run(missionId, eventType, roleName || null, details || null, new Date().toISOString());
+  ).run(
+    missionId,
+    eventType,
+    roleName || null,
+    details || null,
+    new Date().toISOString(),
+  );
 }
 
 export function getMissionEvents(missionId: string): Array<{
@@ -903,7 +929,9 @@ export function getMissionEvents(missionId: string): Array<{
 export function countMissionsByStatus(status: string, entity?: string): number {
   if (entity) {
     const row = db
-      .prepare('SELECT COUNT(*) as cnt FROM missions WHERE status = ? AND entity = ?')
+      .prepare(
+        'SELECT COUNT(*) as cnt FROM missions WHERE status = ? AND entity = ?',
+      )
       .get(status, entity) as { cnt: number };
     return row.cnt;
   }
