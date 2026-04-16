@@ -237,7 +237,7 @@ function buildVolumeMounts(
   }
   mounts.push({
     hostPath: groupSessionsDir,
-    containerPath: '/home/node/.claude',
+    containerPath: '/home/bun/.claude',
     readonly: false,
   });
 
@@ -309,12 +309,12 @@ function buildContainerArgs(
   // ホストゲートウェイ解決のためのランタイム固有の引数
   args.push(...hostGatewayArgs());
 
-  // バインドマウントされたファイルにアクセスできるよう、ホストユーザーとして実行。root (uid 0)、コンテナの node ユーザー (uid 1000)、またはgetuid が利用できない場合（WSL ではないネイティブ Windows）はスキップ。
+  // バインドマウントされたファイルにアクセスできるよう、ホストユーザーとして実行。root (uid 0)、コンテナの bun ユーザー (uid 1000)、またはgetuid が利用できない場合（WSL ではないネイティブ Windows）はスキップ。
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
     args.push('--user', `${hostUid}:${hostGid}`);
-    args.push('-e', 'HOME=/home/node');
+    args.push('-e', 'HOME=/home/bun');
   }
 
   for (const mount of mounts) {

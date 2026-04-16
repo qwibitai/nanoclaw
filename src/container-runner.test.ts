@@ -257,7 +257,7 @@ describe('container-runner timeout behavior', () => {
     const args = spawnCalls[spawnCalls.length - 1][1] as string[];
     const joined = args.join(' ');
     expect(joined).toContain(
-      '/tmp/nanoclaw-test-data/sessions/folder-test-group/.claude:/home/node/.claude',
+      '/tmp/nanoclaw-test-data/sessions/folder-test-group/.claude:/home/bun/.claude',
     );
   });
 
@@ -288,7 +288,7 @@ describe('container-runner timeout behavior', () => {
     const args = spawnCalls[spawnCalls.length - 1][1] as string[];
     const joined = args.join(' ');
     expect(joined).toContain(
-      '/tmp/nanoclaw-test-data/sessions/jid-main%40g.us/.claude:/home/node/.claude',
+      '/tmp/nanoclaw-test-data/sessions/jid-main%40g.us/.claude:/home/bun/.claude',
     );
   });
 
