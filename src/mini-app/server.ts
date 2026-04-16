@@ -109,12 +109,14 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
         body = await opts.gmailOps.getMessageBody(account, emailId);
         if (body) cacheEmailBody(emailId, body);
       } catch (err) {
-        logger.warn({ emailId, err }, 'Failed to fetch email body for Mini App');
+        logger.warn(
+          { emailId, err },
+          'Failed to fetch email body for Mini App',
+        );
       }
     }
 
     const html = renderEmailFull({
-      emailId,
       subject: `Email ${emailId}`,
       from: '',
       to: '',
@@ -153,7 +155,9 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
   app.post('/api/draft/:draftId/revert', async (req, res) => {
     const { draftId } = req.params;
     if (!opts.draftWatcher) {
-      res.status(503).json({ success: false, error: 'Draft watcher not configured' });
+      res
+        .status(503)
+        .json({ success: false, error: 'Draft watcher not configured' });
       return;
     }
     try {
