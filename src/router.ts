@@ -1,5 +1,8 @@
-import { Channel, NewMessage } from './types.js';
+import { Channel, NewMessage, MessageMeta } from './types.js';
 import { formatLocalTime } from './timezone.js';
+import { classifyMessage } from './message-classifier.js';
+import { formatWithMeta } from './message-formatter.js';
+import { detectQuestion } from './question-detector.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -108,4 +111,40 @@ export function findChannel(
   jid: string,
 ): Channel | undefined {
   return channels.find((c) => c.ownsJid(jid));
+}
+
+export interface ClassifiedMessage {
+  text: string;
+  meta: MessageMeta;
+}
+
+/**
+ * Full classification + formatting pipeline.
+ * Classifies the message, detects questions, formats with category prefix.
+ */
+export function classifyAndFormat(rawText: string): ClassifiedMessage {
+  const text = stripInternalTags(rawText);
+  if (!text)
+    return {
+      text: '',
+      meta: {
+        category: 'auto-handled',
+        urgency: 'info',
+        actions: [],
+        batchable: true,
+      },
+    };
+
+  const meta = classifyMessage(text);
+
+  // Detect questions and attach buttons
+  const question = detectQuestion(text);
+  if (question) {
+    meta.questionType = question.type;
+    meta.questionId = question.questionId;
+    meta.actions = [...meta.actions, ...question.actions];
+  }
+
+  const formatted = formatWithMeta(text, meta);
+  return { text: formatted, meta };
 }

@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeConfidenceMarkers, addConfidenceMarkers } from './router.js';
+import {
+  normalizeConfidenceMarkers,
+  addConfidenceMarkers,
+  classifyAndFormat,
+} from './router.js';
 
 describe('normalizeConfidenceMarkers', () => {
   it('passes markers through unchanged in rich-text mode', () => {
@@ -44,5 +48,42 @@ describe('confidence markers', () => {
   it('passes through text with no claims to annotate', () => {
     const formatted = addConfidenceMarkers('Hello, how can I help?', []);
     expect(formatted).toBe('Hello, how can I help?');
+  });
+});
+
+describe('classifyAndFormat', () => {
+  it('classifies and formats a financial message', () => {
+    const result = classifyAndFormat(
+      'Chase — 2 incoming wires. Total: $54,900. Were both expected?',
+    );
+    expect(result.meta.category).toBe('financial');
+    expect(result.text).toContain('💰');
+    expect(result.meta.actions.length).toBeGreaterThan(0); // question detected
+    expect(result.meta.questionType).toBe('financial-confirm');
+  });
+
+  it('classifies and formats an auto-handled message', () => {
+    const result = classifyAndFormat(
+      'Motley Fool newsletter — AUTO, no action.',
+    );
+    expect(result.meta.category).toBe('auto-handled');
+    expect(result.meta.batchable).toBe(true);
+    expect(result.text).toContain('Auto-handled');
+  });
+
+  it('attaches yes/no buttons to questions', () => {
+    const result = classifyAndFormat(
+      "Want me to reply yes to Florian's exception?",
+    );
+    expect(result.meta.questionType).toBe('yes-no');
+    expect(result.meta.actions).toHaveLength(3);
+  });
+
+  it('passes through non-question messages without buttons', () => {
+    const result = classifyAndFormat(
+      'Dmitrii acknowledged request #WANF-864. No action needed.',
+    );
+    expect(result.meta.questionType).toBeUndefined();
+    expect(result.meta.actions).toHaveLength(0);
   });
 });
