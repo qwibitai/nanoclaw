@@ -424,7 +424,12 @@ export class TelegramChannel implements Channel {
     const chatId = jid.replace(/^tg:/, '');
     const keyboard = {
       inline_keyboard: [
-        actions.map((a) => ({ text: a.label, callback_data: a.callbackData })),
+        actions.map((a) => ({
+          text: a.label,
+          ...(a.webAppUrl
+            ? { web_app: { url: a.webAppUrl } }
+            : { callback_data: a.callbackData }),
+        })),
       ],
     };
 

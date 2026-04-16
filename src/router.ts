@@ -1,9 +1,10 @@
-import { Channel, NewMessage, MessageMeta } from './types.js';
+import { Action, Channel, NewMessage, MessageMeta } from './types.js';
 import { formatLocalTime } from './timezone.js';
 import { classifyMessage } from './message-classifier.js';
 import { formatWithMeta } from './message-formatter.js';
 import { detectQuestion } from './question-detector.js';
 import { truncatePreview } from './email-preview.js';
+import { MINI_APP_URL } from './config.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -163,19 +164,29 @@ export function classifyAndFormat(rawText: string): ClassifiedMessage {
 
       // Attach email actions if we have an emailId on meta
       if (meta.emailId) {
-        meta.actions = [
-          ...meta.actions,
+        const emailActions: Action[] = [
           {
             label: '📧 Expand',
             callbackData: `expand:${meta.emailId}:${account}`,
             style: 'secondary' as const,
           },
-          {
-            label: '🗄 Archive',
-            callbackData: `archive:${meta.emailId}`,
-            style: 'secondary' as const,
-          },
         ];
+        // Tier 3: full email in Mini App (only when tunnel URL is configured)
+        if (MINI_APP_URL) {
+          const fullUrl = `${MINI_APP_URL}/email/${meta.emailId}${account ? `?account=${account}` : ''}`;
+          emailActions.push({
+            label: '🌐 Full Email',
+            callbackData: `noop:${meta.emailId}`,
+            style: 'secondary' as const,
+            webAppUrl: fullUrl,
+          });
+        }
+        emailActions.push({
+          label: '🗄 Archive',
+          callbackData: `archive:${meta.emailId}`,
+          style: 'secondary' as const,
+        });
+        meta.actions = [...meta.actions, ...emailActions];
       }
     }
   }

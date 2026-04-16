@@ -172,6 +172,11 @@ export const WEBHOOK_SECRET =
 
 export const QDRANT_URL = process.env.QDRANT_URL || envConfig.QDRANT_URL || '';
 
+// Telegram Mini App: public HTTPS URL that Telegram can open.
+// Must point to the Mini App Express server (default local port 3847).
+// Typically exposed via Cloudflare tunnel.
+export const MINI_APP_URL = process.env.MINI_APP_URL || '';
+
 // Browser sidecar settings
 export const BROWSER_CDP_URL =
   process.env.BROWSER_CDP_URL || 'http://localhost:9223';

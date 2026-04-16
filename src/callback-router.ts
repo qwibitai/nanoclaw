@@ -4,6 +4,7 @@ import type { AutoApprovalTimer } from './auto-approval.js';
 import type { StatusBarManager } from './status-bar.js';
 import type { GmailOps } from './gmail-ops.js';
 import type { DraftEnrichmentWatcher } from './draft-enrichment.js';
+import { MINI_APP_URL } from './config.js';
 import {
   truncatePreview,
   getCachedEmailBody,
@@ -113,7 +114,7 @@ export async function handleCallback(
               {
                 label: '🌐 Full Email',
                 callbackData: `noop:${entityId}`,
-                webAppUrl: `/email/${entityId}?account=${account}`,
+                webAppUrl: MINI_APP_URL ? `${MINI_APP_URL}/email/${entityId}?account=${account}` : undefined,
                 style: 'secondary',
               },
               {
@@ -144,7 +145,7 @@ export async function handleCallback(
               {
                 label: '🌐 Full Email',
                 callbackData: `noop:${entityId}`,
-                webAppUrl: `/email/${entityId}`,
+                webAppUrl: MINI_APP_URL ? `${MINI_APP_URL}/email/${entityId}` : undefined,
                 style: 'secondary',
               },
               {

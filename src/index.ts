@@ -147,7 +147,6 @@ import {
 import { recordBehavior } from './classification-adjustments.js';
 import { PushBuffer } from './push-buffer.js';
 import {
-  formatPushMessage,
   getPushActions,
   PushRateLimiter,
 } from './push-manager.js';
@@ -2054,39 +2053,14 @@ async function main(): Promise<void> {
         sender?: string;
       }>;
 
+      // Classify for digest tracking only — the email-trigger agent
+      // pipeline handles all Telegram notifications via its formatted
+      // summary, so we no longer send individual push messages here.
       const results = classifyFromSSE(emails);
 
-      const pushItems = results.filter((r) => r.decision === 'push');
-      if (pushItems.length > 0) {
-        const telegramJid = Object.keys(registeredGroups).find((jid) =>
-          jid.startsWith('tg:'),
-        );
-        const notifyJid = telegramJid || Object.keys(registeredGroups)[0];
-
-        if (notifyJid) {
-          const channel = findChannel(channels, notifyJid);
-          if (channel) {
-            for (const item of pushItems) {
-              const message = formatPushMessage({
-                source: 'gmail',
-                title: item.subject,
-                sender: item.sender,
-                summary: null,
-              });
-              channel.sendMessage(notifyJid, message).catch((err) => {
-                logger.warn(
-                  { err: String(err), itemId: item.itemId },
-                  'Failed to send push',
-                );
-              });
-            }
-          }
-        }
-      }
-
       logger.info(
-        { total: results.length, pushed: pushItems.length },
-        'SSE emails classified inline',
+        { total: results.length },
+        'SSE emails classified inline (agent handles notifications)',
       );
     } catch (err) {
       logger.warn({ err: String(err) }, 'SSE inline classification failed');
