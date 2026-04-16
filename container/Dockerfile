@@ -3,9 +3,6 @@
 
 FROM oven/bun:1
 
-ARG OPEN_AGENT_SDK_FORK_URL=https://github.com/shin902/open-agent-sdk.git
-ARG OPEN_AGENT_SDK_FORK_REF=main
-
 # Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \
     chromium \
@@ -26,8 +23,6 @@ RUN apt-get update && apt-get install -y \
     libdrm2 \
     libxshmfence1 \
     curl \
-    git \
-    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
@@ -40,19 +35,10 @@ RUN bun add -g agent-browser --trust
 # Create app directory
 WORKDIR /app
 
-# Copy package files first for better caching
+# Copy package files and pre-built open-agent-sdk tarball (built by setup.sh on host).
+# Using the host-built tarball ensures the integrity hash in bun.lock matches.
 COPY agent-runner/package.json agent-runner/bun.lock ./
-
-# Clone forked open-agent-sdk so file: dependency resolves reliably under Bun.
-RUN git clone --depth 1 --branch "${OPEN_AGENT_SDK_FORK_REF}" "${OPEN_AGENT_SDK_FORK_URL}" /app/.open-agent-sdk-fork \
-    && test -f /app/.open-agent-sdk-fork/packages/core/package.json \
-    && cd /app/.open-agent-sdk-fork/packages/core \
-    && bun install \
-    && bun run build \
-    && PACK_FILE="$(npm pack --silent)" \
-    && mv "$PACK_FILE" /app/.open-agent-sdk-fork/open-agent-sdk-fork.tgz \
-    && test -f /app/.open-agent-sdk-fork/open-agent-sdk-fork.tgz \
-    && rm -rf /app/.open-agent-sdk-fork/.git
+COPY agent-runner/.open-agent-sdk-fork/open-agent-sdk-fork.tgz ./.open-agent-sdk-fork/open-agent-sdk-fork.tgz
 
 # Install dependencies
 RUN bun install --frozen-lockfile \
