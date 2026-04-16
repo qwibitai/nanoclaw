@@ -1,46 +1,104 @@
 /**
  * コンテナを分離するための認証情報プロキシ。
- * コンテナは Anthropic API に直接接続する代わりに、ここを介して接続します。
+ * コンテナは対応プロバイダー API に直接接続する代わりに、ここを介して接続します。
  * プロキシが実際の認証情報を注入するため、コンテナがそれらを知ることはありません。
- *
- * 2 つの認証モード:
- *   API キー: プロキシがすべてのリクエストに x-api-key を注入します。
- *   OAuth:   コンテナ CLI が /api/oauth/claude_cli/create_api_key を介して、
- *            プレースホルダー・トークンを一時的な API キーに交換します。
- *            プロキシはその交換リクエストに実際の OAuth トークンを注入します。
- *            その後のリクエストは一時的なキーをそのまま使用します。
  */
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
 
-import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
+import { detectActiveProviderConfig } from './provider-config.js';
 
-export type AuthMode = 'api-key' | 'oauth';
+function buildUpstreamPath(upstreamUrl: URL, requestUrl?: string): string {
+  const incomingPath = requestUrl?.startsWith('/')
+    ? requestUrl
+    : `/${requestUrl || ''}`;
 
-export interface ProxyConfig {
-  authMode: AuthMode;
+  if (!upstreamUrl.pathname || upstreamUrl.pathname === '/') {
+    return incomingPath || '/';
+  }
+
+  const basePath = upstreamUrl.pathname.endsWith('/')
+    ? upstreamUrl.pathname.slice(0, -1)
+    : upstreamUrl.pathname;
+
+  if (
+    incomingPath === basePath ||
+    incomingPath.startsWith(`${basePath}/`) ||
+    incomingPath.startsWith(`${basePath}?`)
+  ) {
+    return incomingPath;
+  }
+
+  return `${basePath}${incomingPath}`;
+}
+
+function injectAuthHeaders(
+  headers: Record<string, string | number | string[] | undefined>,
+  provider: 'anthropic' | 'openai',
+  apiKey: string,
+): void {
+  if (provider === 'anthropic') {
+    delete headers['x-api-key'];
+    headers['x-api-key'] = apiKey;
+    return;
+  }
+
+  // OpenAI 互換 API は Authorization Bearer を使うのが標準だが、
+  // x-api-key を使う実装にも対応できるよう、存在時は両方を置き換える。
+  delete headers['authorization'];
+  headers['authorization'] = `Bearer ${apiKey}`;
+
+  if (headers['x-api-key'] !== undefined) {
+    delete headers['x-api-key'];
+    headers['x-api-key'] = apiKey;
+  }
 }
 
 export function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
 ): Promise<Server> {
-  const secrets = readEnvFile([
-    'ANTHROPIC_API_KEY',
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'ANTHROPIC_AUTH_TOKEN',
-    'ANTHROPIC_BASE_URL',
-  ]);
+  const providerConfig = detectActiveProviderConfig();
 
-  const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
-  const oauthToken =
-    secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
+  if (!providerConfig.usesCredentialProxy) {
+    return new Promise((resolve, reject) => {
+      const server = createServer((_req, res) => {
+        res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end(
+          `Credential proxy is disabled for provider ${providerConfig.provider}.`,
+        );
+      });
 
-  const upstreamUrl = new URL(
-    secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
-  );
+      server.listen(port, host, () => {
+        logger.info(
+          {
+            port,
+            host,
+            provider: providerConfig.provider,
+            usesCredentialProxy: false,
+          },
+          'Credential proxy started in disabled mode',
+        );
+        resolve(server);
+      });
+
+      server.on('error', reject);
+    });
+  }
+
+  if (
+    providerConfig.provider !== 'anthropic' &&
+    providerConfig.provider !== 'openai'
+  ) {
+    throw new Error(
+      `Credential proxy cannot route provider ${providerConfig.provider}.`,
+    );
+  }
+  const proxiedProvider = providerConfig.provider;
+
+  const upstreamUrl = new URL(providerConfig.upstreamBaseURL!);
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
 
@@ -50,6 +108,16 @@ export function startCredentialProxy(
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
         const body = Buffer.concat(chunks);
+        if (!providerConfig.apiKey) {
+          logger.error(
+            { provider: providerConfig.provider },
+            'API key is missing for proxied provider',
+          );
+          res.writeHead(500);
+          res.end('Credential proxy misconfiguration');
+          return;
+        }
+
         const headers: Record<string, string | number | string[] | undefined> =
           {
             ...(req.headers as Record<string, string>),
@@ -62,28 +130,17 @@ export function startCredentialProxy(
         delete headers['keep-alive'];
         delete headers['transfer-encoding'];
 
-        if (authMode === 'api-key') {
-          // API キーモード: すべてのリクエストに x-api-key を注入
-          delete headers['x-api-key'];
-          headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
-        } else {
-          // OAuth モード: コンテナが実際に Authorization ヘッダーを送信したときのみ、
-          // プレースホルダーの Bearer トークンを本物のトークンに置き換える
-          // （交換リクエスト + 認証プローブ）。交換後のリクエストは x-api-key のみを
-          // 使用するため、トークン注入なしでそのまま通過する。
-          if (headers['authorization']) {
-            delete headers['authorization'];
-            if (oauthToken) {
-              headers['authorization'] = `Bearer ${oauthToken}`;
-            }
-          }
-        }
+        injectAuthHeaders(
+          headers,
+          proxiedProvider,
+          providerConfig.apiKey,
+        );
 
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
+            path: buildUpstreamPath(upstreamUrl, req.url),
             method: req.method,
             headers,
           } as RequestOptions,
@@ -140,16 +197,13 @@ export function startCredentialProxy(
     });
 
     server.listen(port, host, () => {
-      logger.info({ port, host, authMode }, 'Credential proxy started');
+      logger.info(
+        { port, host, provider: providerConfig.provider },
+        'Credential proxy started',
+      );
       resolve(server);
     });
 
     server.on('error', reject);
   });
-}
-
-/** ホストに設定されている認証モードを検出します。 */
-export function detectAuthMode(): AuthMode {
-  const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
-  return secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
 }

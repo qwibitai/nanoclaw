@@ -30,7 +30,10 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { detectAuthMode } from './credential-proxy.js';
+import {
+  buildContainerProviderEnv,
+  detectActiveProviderConfig,
+} from './provider-config.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { getDefaultAllowedTools } from './group-type.js';
 import { GroupType, RegisteredGroup } from './types.js';
@@ -289,20 +292,18 @@ function buildContainerArgs(
   // コンテナのローカル時間がユーザーと一致するようにホストのタイムゾーンを渡す
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // API トラフィックを認証情報プロキシ経由でルーティング（コンテナは実際のシークレットを関知しない）
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+  const activeProviderConfig = detectActiveProviderConfig();
+  const providerEnv = buildContainerProviderEnv(
+    activeProviderConfig,
+    CONTAINER_HOST_GATEWAY,
+    CREDENTIAL_PROXY_PORT,
   );
 
-  // ホストの認証方法をプレースホルダー値でミラーリング
-  // API キーモード: SDK は x-api-key を送信し、プロキシが本物のキーに置き換える
-  // OAuth モード:   SDK はプレースホルダー・トークンを一時的な API キーに交換し、プロキシはその交換リクエストに実際の OAuth トークンを注入する
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
-    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
-  } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  // プロバイダーごとに必要な環境変数のみを注入する。
+  // Anthropic/OpenAI はプロキシ + placeholder、Gemini は直接キー注入、
+  // Codex は OAuth JSON を渡してコンテナ側で codexOAuth を構築する。
+  for (const [key, value] of Object.entries(providerEnv)) {
+    args.push('-e', `${key}=${value}`);
   }
 
   // ホストゲートウェイ解決のためのランタイム固有の引数

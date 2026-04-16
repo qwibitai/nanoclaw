@@ -22,6 +22,7 @@ import {
   type HookCallback,
   type HooksConfig,
   type PreCompactHookInput,
+  type CodexOAuthOptions,
   type SDKMessage,
   type Session,
 } from 'open-agent-sdk';
@@ -64,6 +65,22 @@ interface ParsedMessage {
 }
 
 type GroupType = NonNullable<ContainerInput['groupType']>;
+type SessionProvider = 'anthropic' | 'openai' | 'google' | 'codex';
+
+interface CodexOAuthCredentials {
+  access: string;
+  refresh: string;
+  expires: number;
+  accountId?: string;
+}
+
+interface SessionProviderConfig {
+  provider: SessionProvider;
+  model: string;
+  apiKey?: string;
+  baseURL?: string;
+  codexOAuth?: CodexOAuthOptions;
+}
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
@@ -73,8 +90,12 @@ const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DEFAULT_ANTHROPIC_MODEL =
-  process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+const DEFAULT_MODEL_BY_PROVIDER = {
+  anthropic: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
+  openai: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
+  google: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  codex: process.env.CODEX_MODEL || 'codex-mini-latest',
+} as const;
 const ALLOWED_GROUP_TYPES = new Set<GroupType>([
   'override',
   'main',
@@ -152,6 +173,113 @@ function toSdkEnv(env: Record<string, string | undefined>): Record<string, strin
     }
   }
   return normalized;
+}
+
+function normalizeCodexOAuthCredentials(
+  value: unknown,
+): CodexOAuthCredentials | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const direct = value as Record<string, unknown>;
+  if (
+    typeof direct.access === 'string' &&
+    typeof direct.refresh === 'string' &&
+    typeof direct.expires === 'number'
+  ) {
+    return {
+      access: direct.access,
+      refresh: direct.refresh,
+      expires: direct.expires,
+      ...(typeof direct.accountId === 'string'
+        ? { accountId: direct.accountId }
+        : {}),
+    };
+  }
+
+  const mapped = direct['openai-codex'];
+  if (!mapped || typeof mapped !== 'object') {
+    return undefined;
+  }
+
+  const nested = mapped as Record<string, unknown>;
+  if (
+    typeof nested.access === 'string' &&
+    typeof nested.refresh === 'string' &&
+    typeof nested.expires === 'number'
+  ) {
+    return {
+      access: nested.access,
+      refresh: nested.refresh,
+      expires: nested.expires,
+      ...(typeof nested.accountId === 'string'
+        ? { accountId: nested.accountId }
+        : {}),
+    };
+  }
+
+  return undefined;
+}
+
+function parseCodexOAuthJson(oauthJson: string): CodexOAuthOptions {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(oauthJson);
+  } catch (err) {
+    throw new Error(
+      `OAS_CODEX_OAUTH_JSON is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  const credentials = normalizeCodexOAuthCredentials(parsed);
+  if (!credentials) {
+    throw new Error(
+      'OAS_CODEX_OAUTH_JSON must be an OAuth credentials object or a map containing "openai-codex".',
+    );
+  }
+
+  return { credentials };
+}
+
+function resolveSessionProviderConfig(env: NodeJS.ProcessEnv): SessionProviderConfig {
+  if (env.ANTHROPIC_API_KEY) {
+    return {
+      provider: 'anthropic',
+      model: DEFAULT_MODEL_BY_PROVIDER.anthropic,
+      apiKey: env.ANTHROPIC_API_KEY,
+      baseURL: env.ANTHROPIC_BASE_URL,
+    };
+  }
+
+  if (env.OPENAI_API_KEY) {
+    return {
+      provider: 'openai',
+      model: DEFAULT_MODEL_BY_PROVIDER.openai,
+      apiKey: env.OPENAI_API_KEY,
+      baseURL: env.OPENAI_BASE_URL,
+    };
+  }
+
+  if (env.GEMINI_API_KEY) {
+    return {
+      provider: 'google',
+      model: DEFAULT_MODEL_BY_PROVIDER.google,
+      apiKey: env.GEMINI_API_KEY,
+    };
+  }
+
+  if (env.OAS_CODEX_OAUTH_JSON) {
+    return {
+      provider: 'codex',
+      model: DEFAULT_MODEL_BY_PROVIDER.codex,
+      codexOAuth: parseCodexOAuthJson(env.OAS_CODEX_OAUTH_JSON),
+    };
+  }
+
+  throw new Error(
+    'No provider credentials found. Set one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or OAS_CODEX_OAUTH_JSON.',
+  );
 }
 
 function extractAssistantText(message: SDKMessage): string | null {
@@ -425,7 +553,7 @@ async function createOrResumeSession(
   systemPrompt: string | undefined,
 ): Promise<Session> {
   const privileged = isPrivilegedGroup(groupType);
-  const apiKey = process.env.ANTHROPIC_API_KEY || 'placeholder';
+  const providerConfig = resolveSessionProviderConfig(process.env);
   const hooks = createHooks(containerInput.assistantName);
 
   if (requestedSessionId) {
@@ -435,12 +563,18 @@ async function createOrResumeSession(
       );
     } else {
       try {
-        const resumed = await resumeSession(requestedSessionId, {
+        const resumeOptions = {
           storage,
-          apiKey,
-          permissionMode: 'bypassPermissions',
+          ...(providerConfig.apiKey ? { apiKey: providerConfig.apiKey } : {}),
+          ...(providerConfig.codexOAuth
+            ? { codexOAuth: providerConfig.codexOAuth }
+            : {}),
+          permissionMode: 'bypassPermissions' as const,
           allowDangerouslySkipPermissions: true,
           hooks,
+        };
+        const resumed = await resumeSession(requestedSessionId, {
+          ...resumeOptions,
         });
         log(`セッションを再開しました: ${resumed.id}`);
         return resumed;
@@ -453,10 +587,13 @@ async function createOrResumeSession(
   }
 
   const created = await createSession({
-    model: DEFAULT_ANTHROPIC_MODEL,
-    provider: 'anthropic',
-    apiKey,
-    baseURL: process.env.ANTHROPIC_BASE_URL,
+    model: providerConfig.model,
+    provider: providerConfig.provider,
+    ...(providerConfig.apiKey ? { apiKey: providerConfig.apiKey } : {}),
+    ...(providerConfig.baseURL ? { baseURL: providerConfig.baseURL } : {}),
+    ...(providerConfig.codexOAuth
+      ? { codexOAuth: providerConfig.codexOAuth }
+      : {}),
     storage,
     cwd: '/workspace/group',
     env: toSdkEnv(sdkEnv),
@@ -481,7 +618,9 @@ async function createOrResumeSession(
     hooks,
   });
 
-  log(`新規セッションを作成しました: ${created.id}`);
+  log(
+    `新規セッションを作成しました: ${created.id} (provider: ${providerConfig.provider})`,
+  );
   return created;
 }
 
@@ -581,7 +720,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // 認証情報はホストの認証情報プロキシによって ANTHROPIC_BASE_URL 経由で注入されます。コンテナ環境には本物のシークレットは存在しません。
+  // 認証情報はホスト側で注入される。
+  // Anthropic/OpenAI は BASE_URL + placeholder を使ってプロキシ経由、
+  // Gemini/Codex は SDK 制約に合わせて直接注入される。
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
