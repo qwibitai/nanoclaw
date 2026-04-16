@@ -9,11 +9,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GroupQueue } from '../../group-queue.js';
-import {
-  getNewMessages,
-  storeChatMetadata,
-  storeMessage,
-} from '../../db.js';
+import { getNewMessages, storeChatMetadata, storeMessage } from '../../db.js';
 import { formatMessages, routeOutbound } from '../../router.js';
 import type { RegisteredGroup } from '../../types.js';
 
@@ -50,7 +46,13 @@ describe('integration: message-to-response flow', () => {
       isMain: false,
       requiresTrigger: false,
     });
-    storeChatMetadata(groupJid, '2026-01-01T00:00:00.000Z', 'Group 1', 'stub', true);
+    storeChatMetadata(
+      groupJid,
+      '2026-01-01T00:00:00.000Z',
+      'Group 1',
+      'stub',
+      true,
+    );
 
     // Seed an inbound message (as if a channel stored it)
     const msg = createMessage({
@@ -58,7 +60,7 @@ describe('integration: message-to-response flow', () => {
       content: 'hello andy',
       timestamp: '2026-01-01T00:00:01.000Z',
     });
-    storeMessage(msg, 'stub');
+    storeMessage(msg);
 
     // Wire a fake processMessagesFn that mirrors the real orchestrator:
     // read new messages, format, invoke "agent", route result outbound.
@@ -106,7 +108,6 @@ describe('integration: message-to-response flow', () => {
         content: 'first',
         timestamp: '2026-01-01T00:00:01.000Z',
       }),
-      'stub',
     );
 
     const queue = new GroupQueue();
@@ -121,7 +122,6 @@ describe('integration: message-to-response flow', () => {
             content: 'second',
             timestamp: '2026-01-01T00:00:02.000Z',
           }),
-          'stub',
         );
         queue.enqueueMessageCheck(jid);
       }
@@ -158,7 +158,6 @@ describe('integration: message-to-response flow', () => {
         content: 'failing',
         timestamp: '2026-01-01T00:00:01.000Z',
       }),
-      'stub',
     );
 
     const queue = new GroupQueue();
