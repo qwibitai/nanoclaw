@@ -182,6 +182,26 @@ export function buildIpcTools(
       },
     },
 
+    search_memory: {
+      description: 'Search long-term memory for relevant facts. Uses semantic search when available, falls back to keyword search.',
+      parameters: z.object({
+        query: z.string().describe('What to search for'),
+        domain: z.string().optional().describe('Filter by domain'),
+        limit: z.number().optional().describe('Max results (default 5)'),
+      }),
+      execute: async ({ query, domain, limit }: { query: string; domain?: string; limit?: number }) => {
+        writeIpcFile(messagesDir, {
+          type: 'search_memory',
+          chatJid,
+          groupFolder,
+          query,
+          domain,
+          limit: limit ?? 5,
+        });
+        return { success: true, note: 'Memory search submitted. Results will appear in context if found.' };
+      },
+    },
+
     switch_model: {
       description:
         'Switch the LLM model for this group. Use this to escalate to a stronger model for complex tasks, or switch to a cheaper model for simple follow-ups. The change takes effect on the next message.',

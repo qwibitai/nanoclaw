@@ -5,7 +5,7 @@ import { CronExpressionParser } from 'cron-parser';
 
 import type { StagehandBridge } from './browser/stagehand-bridge.js';
 import { isDestructiveIntent } from './browser/stagehand-bridge.js';
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { DATA_DIR, GROUPS_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import {
   createTask,
@@ -220,9 +220,11 @@ export async function processTaskIpc(
     // For switch_model
     provider?: string;
     model?: string;
-    // For learn_fact
+    // For learn_fact / search_memory
     domain?: string;
     source?: string;
+    query?: string;
+    limit?: number;
     // For browser_act/extract/observe
     instruction?: string;
     schema?: unknown;
@@ -775,7 +777,8 @@ export async function processTaskIpc(
     }
 
     case 'learn_fact': {
-      const { storeFactWithVector } = await import('./memory/knowledge-store.js');
+      const { storeFactWithVector } =
+        await import('./memory/knowledge-store.js');
       const factText = data.text as string;
       const factDomain = data.domain || 'general';
       const factSource = data.source || 'agent';
@@ -787,7 +790,14 @@ export async function processTaskIpc(
         groupId: factGroup,
         source: factSource,
       });
-      logger.info({ domain: factDomain, groupFolder: factGroup, textLen: factText.length }, 'Fact stored via IPC');
+      logger.info(
+        {
+          domain: factDomain,
+          groupFolder: factGroup,
+          textLen: factText.length,
+        },
+        'Fact stored via IPC',
+      );
       break;
     }
 
@@ -837,6 +847,28 @@ export async function processTaskIpc(
         },
         'Model switched via IPC',
       );
+      break;
+    }
+
+    case 'search_memory': {
+      const { queryFactsSemantic } = await import('./memory/knowledge-store.js');
+      const query = data.query as string;
+      const domain = data.domain as string | undefined;
+      const limit = (data.limit as number) || 5;
+      const groupFolder = data.groupFolder as string;
+
+      const facts = await queryFactsSemantic(query, { domain, groupId: groupFolder, limit });
+      if (facts.length > 0) {
+        const formatted = facts.map((f) => `• ${f.text} [${f.domain}]`).join('\n');
+        logger.info({ query, resultCount: facts.length, groupFolder }, 'Memory search results');
+        const contextDir = path.join(GROUPS_DIR, groupFolder, 'context');
+        fs.mkdirSync(contextDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(contextDir, 'memory-results.txt'),
+          `Memory recall for "${query}":\n${formatted}\n`,
+          'utf-8',
+        );
+      }
       break;
     }
 
