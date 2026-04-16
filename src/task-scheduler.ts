@@ -182,14 +182,28 @@ async function runTask(
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
   // query loop to time out. A short delay handles any final MCP calls.
-  const TASK_CLOSE_DELAY_MS = 10000;
+  const TASK_CLOSE_DELAY_MS = 10_000;
+  // Grace period before force-killing. The _close sentinel mechanism is
+  // unreliable when the SDK's for-await loop does not exit promptly
+  // (observed on the first scheduled run after a NanoClaw restart).
+  const TASK_KILL_GRACE_MS = 15_000;
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
+  let killTimer: ReturnType<typeof setTimeout> | null = null;
 
   const scheduleClose = () => {
     if (closeTimer) return; // already scheduled
     closeTimer = setTimeout(() => {
       logger.debug({ taskId: task.id }, 'Closing task container after result');
       deps.queue.closeStdin(task.chat_jid);
+      // Fallback: if the agent process does not exit within the grace
+      // period, kill it directly.
+      killTimer = setTimeout(() => {
+        logger.warn(
+          { taskId: task.id },
+          'Agent did not exit after _close, force-killing',
+        );
+        deps.queue.killProcess(task.chat_jid);
+      }, TASK_KILL_GRACE_MS);
     }, TASK_CLOSE_DELAY_MS);
   };
 
@@ -238,7 +252,11 @@ async function runTask(
           scheduleClose();
         }
 
-        if (streamedOutput.status === 'success' && !streamedOutput.partial) {
+        if (
+          streamedOutput.status === 'success' &&
+          !streamedOutput.partial &&
+          !streamedOutput.compacted
+        ) {
           deps.queue.notifyIdle(task.chat_jid);
           scheduleClose();
         }
@@ -249,6 +267,7 @@ async function runTask(
     );
 
     if (closeTimer) clearTimeout(closeTimer);
+    if (killTimer) clearTimeout(killTimer);
 
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
@@ -264,6 +283,7 @@ async function runTask(
     // eslint-disable-next-line no-catch-all/no-catch-all
   } catch (err) {
     if (closeTimer) clearTimeout(closeTimer);
+    if (killTimer) clearTimeout(killTimer);
     error = err instanceof Error ? err.message : String(err);
     logger.error({ taskId: task.id, error }, 'Task failed');
   }

@@ -216,6 +216,7 @@ describe('task scheduler', () => {
         ),
         closeStdin: vi.fn(),
         notifyIdle: vi.fn(),
+        killProcess: vi.fn(),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       onProcess: () => {},
@@ -681,5 +682,177 @@ describe('task scheduler', () => {
       expect.anything(),
       expect.anything(),
     );
+  });
+
+  it('force-kills agent if it does not exit after _close grace period', async () => {
+    const mock = await getRunHostAgentMock();
+
+    let resolveAgent: (() => void) | undefined;
+    mock.mockImplementation(
+      async (
+        _group: RegisteredGroup,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        _input: any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        _onProcess: any,
+        onOutput?: (output: ContainerOutput) => Promise<void>,
+      ) => {
+        if (onOutput) {
+          // Emit a final HEARTBEAT_OK → triggers scheduleClose
+          await onOutput({ result: 'HEARTBEAT_OK', status: 'success' });
+        }
+        // Simulate a hung agent that does not exit after _close
+        await new Promise<void>((resolve) => {
+          resolveAgent = resolve;
+        });
+        return { result: null, status: 'success' as const };
+      },
+    );
+
+    createTask({
+      id: 'kill-fallback-task',
+      group_folder: 'test-group',
+      chat_jid: 'tg:999',
+      prompt: 'heartbeat',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+    });
+
+    const deps = makeDeps();
+    startSchedulerLoop(deps);
+    // Let the task start and emit its result
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Advance past TASK_CLOSE_DELAY_MS (10s) — closeStdin should fire
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(deps.queue.closeStdin).toHaveBeenCalledWith('tg:999');
+    expect(deps.queue.killProcess).not.toHaveBeenCalled();
+
+    // Advance past TASK_KILL_GRACE_MS (15s) — killProcess should fire
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(deps.queue.killProcess).toHaveBeenCalledWith('tg:999');
+
+    // Clean up the hung promise so the test exits cleanly
+    resolveAgent?.();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('does not force-kill when agent exits normally before grace period', async () => {
+    const mock = await getRunHostAgentMock();
+    mock.mockImplementation(
+      async (
+        _group: RegisteredGroup,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        _input: any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        _onProcess: any,
+        onOutput?: (output: ContainerOutput) => Promise<void>,
+      ) => {
+        if (onOutput) {
+          await onOutput({ result: 'HEARTBEAT_OK', status: 'success' });
+        }
+        // Agent exits normally (returns immediately)
+        return { result: 'HEARTBEAT_OK', status: 'success' as const };
+      },
+    );
+
+    createTask({
+      id: 'no-kill-task',
+      group_folder: 'test-group',
+      chat_jid: 'tg:999',
+      prompt: 'heartbeat',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+    });
+
+    const deps = makeDeps();
+    startSchedulerLoop(deps);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Agent already exited — timers should be cleared
+    // Advance well past the kill grace period
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    // Neither closeStdin nor killProcess should have been called
+    // (timers were cleared on normal exit)
+    expect(deps.queue.killProcess).not.toHaveBeenCalled();
+  });
+
+  it('compact_boundary does not trigger scheduleClose (agent still working)', async () => {
+    const mock = await getRunHostAgentMock();
+
+    let resolveAgent: (() => void) | undefined;
+    mock.mockImplementation(
+      async (
+        _group: RegisteredGroup,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        _input: any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        _onProcess: any,
+        onOutput?: (output: ContainerOutput) => Promise<void>,
+      ) => {
+        if (onOutput) {
+          // Compact boundary emitted mid-processing (SDK still working)
+          await onOutput({
+            result: null,
+            status: 'success',
+            compacted: true,
+          });
+          // SDK continues processing after compaction...
+          // simulate work that takes time
+          await new Promise<void>((r) => setTimeout(r, 30_000));
+          // Final result after long processing
+          await onOutput({
+            result: 'Done after compaction',
+            status: 'success',
+          });
+        }
+        await new Promise<void>((resolve) => {
+          resolveAgent = resolve;
+        });
+        return { result: null, status: 'success' as const };
+      },
+    );
+
+    createTask({
+      id: 'compact-task',
+      group_folder: 'test-group',
+      chat_jid: 'tg:999',
+      prompt: 'long task',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'group',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+    });
+
+    const deps = makeDeps();
+    startSchedulerLoop(deps);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Advance past compact_boundary — should NOT trigger close/kill
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(deps.queue.closeStdin).not.toHaveBeenCalled();
+    expect(deps.queue.killProcess).not.toHaveBeenCalled();
+
+    // Advance to let the final result arrive (30s simulated work)
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    // NOW scheduleClose should have been triggered by the final result
+    // Advance past close + kill timers
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(deps.queue.closeStdin).toHaveBeenCalledWith('tg:999');
+
+    resolveAgent?.();
+    await vi.advanceTimersByTimeAsync(10);
   });
 });
