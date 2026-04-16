@@ -15,6 +15,7 @@ vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
+  ONECLI_API_KEY: '',
   ONECLI_URL: 'http://localhost:10254',
   SUPERPILOT_MCP_URL: 'http://localhost:8100',
   SUPERPILOT_API_URL: 'http://localhost:8101',
