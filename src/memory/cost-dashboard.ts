@@ -103,20 +103,20 @@ export function parseAssistantCommand(text: string): AssistantCommand | null {
 /**
  * Execute an assistant command and return the response text.
  */
-export function executeAssistantCommand(command: AssistantCommand): string {
+export function executeAssistantCommand(command: AssistantCommand, groupId?: string): string {
   switch (command.type) {
     case 'cost_report':
       return formatCostReport(command.days);
 
     case 'teach':
-      return handleTeachCommand(command.description);
+      return handleTeachCommand(command.description, groupId);
   }
 }
 
 /**
  * Handle the teach command — create a procedure from description.
  */
-function handleTeachCommand(description: string): string {
+function handleTeachCommand(description: string, groupId?: string): string {
   // Parse the description into a procedure name and steps
   const lines = description
     .split('\n')
@@ -154,6 +154,7 @@ function handleTeachCommand(description: string): string {
     auto_execute: false,
     created_at: now,
     updated_at: now,
+    groupId,
   });
 
   return (

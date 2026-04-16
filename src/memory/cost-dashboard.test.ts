@@ -121,4 +121,11 @@ describe('executeAssistantCommand', () => {
     const result = executeAssistantCommand({ type: 'cost_report', days: 7 });
     expect(result).toContain('Cost report');
   });
+
+  it('teaches a procedure scoped to a group', () => {
+    const cmd = parseAssistantCommand('teach: check PR status');
+    expect(cmd).toEqual({ type: 'teach', description: 'check PR status' });
+    const result = executeAssistantCommand(cmd!, 'test-group');
+    expect(result).toContain('Learned');
+  });
 });

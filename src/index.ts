@@ -666,10 +666,14 @@ async function runAgent(
         .slice(0, 5);
 
       if (relevant.length > 0) {
-        const procedureContext = '<learned_procedures>\n' +
-          relevant.map((p) =>
-            `- "${p.trigger}": ${p.description || p.steps.map(s => s.action).join(' → ')} (${p.success_count} successes)`
-          ).join('\n') +
+        const procedureContext =
+          '<learned_procedures>\n' +
+          relevant
+            .map(
+              (p) =>
+                `- "${p.trigger}": ${p.description || p.steps.map((s) => s.action).join(' → ')} (${p.success_count} successes)`,
+            )
+            .join('\n') +
           '\n</learned_procedures>';
 
         const contextDir = path.join(GROUPS_DIR, group.folder, 'context');
@@ -925,7 +929,7 @@ async function startMessageLoop(): Promise<void> {
             // Assistant commands: cost report, teach, etc.
             const assistantCmd = parseAssistantCommand(strippedText);
             if (assistantCmd) {
-              const response = executeAssistantCommand(assistantCmd);
+              const response = executeAssistantCommand(assistantCmd, group.folder);
               channel
                 .sendMessage(chatJid, response)
                 .catch((err) =>
