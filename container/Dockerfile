@@ -66,7 +66,10 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 
 # Create entrypoint script
 # Container input (prompt, group info) is passed via stdin JSON.
-# Credentials are injected by the host's credential proxy — never passed here.
+# Credentials are provider-dependent:
+#   - Anthropic / OpenAI: injected at runtime by the host credential proxy (not passed directly).
+#   - Gemini / Codex: injected directly as env vars (GEMINI_API_KEY / OAS_CODEX_OAUTH_JSON)
+#     because these providers are not routed through the proxy.
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
 RUN printf '#!/bin/bash\nset -e\ncd /app\ncat > /tmp/input.json\nbun run /app/src/index.ts < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
