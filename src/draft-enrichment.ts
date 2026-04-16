@@ -32,6 +32,16 @@ export interface DraftInfo {
   createdAt: string;
 }
 
+/**
+ * Parse agent response for draft enrichment.
+ * Returns null if the agent says NO_CHANGE, otherwise the enriched body.
+ */
+export function parseEnrichmentResponse(response: string): string | null {
+  const trimmed = response.trim();
+  if (/^no_change$/i.test(trimmed)) return null;
+  return trimmed || null;
+}
+
 export class DraftEnrichmentWatcher {
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private bus: EventBus;

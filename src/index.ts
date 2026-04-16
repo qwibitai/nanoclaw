@@ -1343,11 +1343,84 @@ async function main(): Promise<void> {
         if (draft.body.length > 200) return null;
         const ageMs = Date.now() - new Date(draft.createdAt).getTime();
         if (ageMs > 30 * 60 * 1000) return null;
-        logger.debug(
-          { draftId: draft.draftId },
-          'Draft eligible for enrichment (not yet wired to executor)',
+
+        const ENRICHMENT_TIMEOUT_MS = 60_000;
+        const telegramJid = Object.keys(registeredGroups).find((jid) =>
+          jid.startsWith('tg:'),
         );
-        return null;
+        if (!telegramJid) {
+          logger.warn('No Telegram JID for draft enrichment task');
+          return null;
+        }
+
+        const { parseEnrichmentResponse } = await import(
+          './draft-enrichment.js'
+        );
+
+        return new Promise<string | null>((resolve) => {
+          const timer = setTimeout(() => {
+            logger.warn(
+              { draftId: draft.draftId },
+              'Draft enrichment timed out',
+            );
+            resolve(null);
+          }, ENRICHMENT_TIMEOUT_MS);
+
+          const taskId = `draft-enrich-${draft.draftId}-${Date.now()}`;
+          queue.enqueueTask(
+            telegramJid,
+            taskId,
+            async () => {
+              try {
+                const group = registeredGroups[telegramJid];
+                if (!group) {
+                  clearTimeout(timer);
+                  resolve(null);
+                  return;
+                }
+
+                const enrichPrompt = `## Draft Enrichment Task
+
+You are improving an auto-generated email draft reply.
+
+Subject: ${draft.subject}
+Current draft body:
+---
+${draft.body}
+---
+
+Instructions:
+- Improve the draft with better tone, completeness, and context
+- Keep the same intent and meaning
+- Return ONLY the improved body text, nothing else
+- If the draft is already adequate, return exactly: NO_CHANGE`;
+
+                let enrichedBody: string | null = null;
+                await runAgent(
+                  group,
+                  enrichPrompt,
+                  telegramJid,
+                  async (output) => {
+                    if (output.result) {
+                      enrichedBody = parseEnrichmentResponse(output.result);
+                    }
+                  },
+                );
+
+                clearTimeout(timer);
+                resolve(enrichedBody);
+              } catch (err) {
+                logger.error(
+                  { draftId: draft.draftId, err },
+                  'Draft enrichment agent failed',
+                );
+                clearTimeout(timer);
+                resolve(null);
+              }
+            },
+            'proactive',
+          );
+        });
       },
     });
     draftWatcher.start();
@@ -1613,7 +1686,11 @@ async function main(): Promise<void> {
                     'replied',
                   );
 
-                  if (!meta.actions.some((a) => a.callbackData?.startsWith('archive:'))) {
+                  if (
+                    !meta.actions.some((a) =>
+                      a.callbackData?.startsWith('archive:'),
+                    )
+                  ) {
                     meta.actions.push({
                       label: '🗄 Archive',
                       callbackData: `archive:${emailId}`,
