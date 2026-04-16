@@ -24,21 +24,42 @@ describe('Email trigger debounce integration', () => {
   it('should coalesce 3 wire transfers into 1 flush', () => {
     // Simulate the actual wire scenario: 3 emails, 45s apart each
     debouncer.add(
-      [{ thread_id: '19d9759c', account: 'personal', subject: 'Wire sent ····7958', sender: 'chase@chase.com' }],
+      [
+        {
+          thread_id: '19d9759c',
+          account: 'personal',
+          subject: 'Wire sent ····7958',
+          sender: 'chase@chase.com',
+        },
+      ],
       'conn1',
     );
     expect(debouncer.has('19d9759c')).toBe(true);
 
     vi.advanceTimersByTime(45_000);
     debouncer.add(
-      [{ thread_id: '19d975a8', account: 'personal', subject: 'Wire sent ····1269', sender: 'chase@chase.com' }],
+      [
+        {
+          thread_id: '19d975a8',
+          account: 'personal',
+          subject: 'Wire sent ····1269',
+          sender: 'chase@chase.com',
+        },
+      ],
       'conn1',
     );
     expect(debouncer.has('19d975a8')).toBe(true);
 
     vi.advanceTimersByTime(45_000);
     debouncer.add(
-      [{ thread_id: '19d975bf', account: 'personal', subject: 'Wire sent ····7958', sender: 'chase@chase.com' }],
+      [
+        {
+          thread_id: '19d975bf',
+          account: 'personal',
+          subject: 'Wire sent ····7958',
+          sender: 'chase@chase.com',
+        },
+      ],
       'conn1',
     );
 
@@ -63,10 +84,7 @@ describe('Email trigger debounce integration', () => {
   });
 
   it('push suppression: has() returns true while buffered, false after flush', () => {
-    debouncer.add(
-      [{ thread_id: 'wire1', account: 'personal' }],
-      'conn1',
-    );
+    debouncer.add([{ thread_id: 'wire1', account: 'personal' }], 'conn1');
 
     // Simulate Consumer B checking — should suppress
     expect(debouncer.has('wire1')).toBe(true);
@@ -111,14 +129,8 @@ describe('Email trigger debounce integration', () => {
   });
 
   it('graceful shutdown flushes pending buffer', () => {
-    debouncer.add(
-      [{ thread_id: 't1', account: 'personal' }],
-      'conn1',
-    );
-    debouncer.add(
-      [{ thread_id: 't2', account: 'personal' }],
-      'conn1',
-    );
+    debouncer.add([{ thread_id: 't1', account: 'personal' }], 'conn1');
+    debouncer.add([{ thread_id: 't2', account: 'personal' }], 'conn1');
 
     // Simulate shutdown
     debouncer.flush();

@@ -207,7 +207,12 @@ function scheduleReconnect(conn: SSEConnection): void {
 }
 
 export function writeIpcTrigger(
-  emails: Array<{ thread_id: string; account: string; subject?: string; sender?: string }>,
+  emails: Array<{
+    thread_id: string;
+    account: string;
+    subject?: string;
+    sender?: string;
+  }>,
   label: string,
 ): void {
   const ipcDir = path.join(DATA_DIR, 'ipc', 'whatsapp_main', 'tasks');
