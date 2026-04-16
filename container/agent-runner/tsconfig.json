@@ -3,10 +3,13 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
+    "types": ["node"],
     "skipLibCheck": true,
     "declaration": true
   },

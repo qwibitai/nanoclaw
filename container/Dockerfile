@@ -1,7 +1,7 @@
 # NanoClaw Agent Container
-# Runs Claude Agent SDK in isolated Linux VM with browser automation
+# Runs Open Agent SDK in isolated Linux VM with browser automation
 
-FROM node:22-slim
+FROM oven/bun:1
 
 # Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \
@@ -30,23 +30,20 @@ RUN apt-get update && apt-get install -y \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install agent-browser globally
+RUN bun add -g agent-browser && install -m 0755 /root/.bun/bin/agent-browser /usr/local/bin/agent-browser
 
 # Create app directory
 WORKDIR /app
 
 # Copy package files first for better caching
-COPY agent-runner/package*.json ./
+COPY agent-runner/package.json agent-runner/bun.lock ./
 
 # Install dependencies
-RUN npm install
+RUN bun install --frozen-lockfile
 
 # Copy source code
 COPY agent-runner/ ./
-
-# Build TypeScript
-RUN npm run build
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
@@ -55,7 +52,7 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 # Container input (prompt, group info) is passed via stdin JSON.
 # Credentials are injected by the host's credential proxy — never passed here.
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+RUN printf '#!/bin/bash\nset -e\ncd /app\ncat > /tmp/input.json\nbun run /app/src/index.ts < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
