@@ -1219,6 +1219,36 @@ async function main(): Promise<void> {
         return;
       }
 
+      // "Archive all" command — batch-archive acted emails
+      if (trimmed.toLowerCase() === 'archive all') {
+        const group = registeredGroups[chatJid];
+        if (group?.isMain) {
+          (async () => {
+            const unarchived = archiveTracker.getUnarchived();
+            const ch = findChannel(channels, chatJid);
+            if (unarchived.length === 0) {
+              await ch?.sendMessage(chatJid, '✅ No emails to archive');
+              return;
+            }
+            let archived = 0;
+            for (const email of unarchived) {
+              try {
+                await gmailOpsRouter.archiveThread(email.account, email.thread_id);
+                archiveTracker.markArchived(email.email_id, email.action_taken);
+                archived++;
+              } catch (err) {
+                logger.error({ err, emailId: email.email_id }, 'Failed to archive email');
+              }
+            }
+            await ch?.sendMessage(
+              chatJid,
+              `✅ Archived ${archived}/${unarchived.length} threads`,
+            );
+          })().catch((err) => logger.error({ err }, 'Archive all failed'));
+          return; // Don't store this message or process further
+        }
+      }
+
       // Sender allowlist drop mode: discard messages from denied senders before storing
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
         const cfg = loadSenderAllowlist();
@@ -1272,7 +1302,8 @@ async function main(): Promise<void> {
   const gmailOpsRouter = new GmailOpsRouter();
   for (const ch of channels) {
     if (ch.name.startsWith('gmail')) {
-      const alias = ch.name === 'gmail' ? 'default' : ch.name.replace('gmail-', '');
+      const alias =
+        ch.name === 'gmail' ? 'default' : ch.name.replace('gmail-', '');
       if ('archiveThread' in ch && 'listRecentDrafts' in ch) {
         gmailOpsRouter.register(alias, ch as unknown as GmailOpsProvider);
         logger.info({ alias }, 'Registered Gmail channel with GmailOpsRouter');
@@ -1288,9 +1319,13 @@ async function main(): Promise<void> {
   // --- Draft enrichment watcher ---
   const enrichmentAccounts = channels
     .filter((ch) => ch.name.startsWith('gmail') && 'listRecentDrafts' in ch)
-    .map((ch) => (ch.name === 'gmail' ? 'default' : ch.name.replace('gmail-', '')));
+    .map((ch) =>
+      ch.name === 'gmail' ? 'default' : ch.name.replace('gmail-', ''),
+    );
 
-  let draftWatcher: import('./draft-enrichment.js').DraftEnrichmentWatcher | undefined;
+  let draftWatcher:
+    | import('./draft-enrichment.js').DraftEnrichmentWatcher
+    | undefined;
   if (enrichmentAccounts.length > 0) {
     const { DraftEnrichmentWatcher } = await import('./draft-enrichment.js');
     draftWatcher = new DraftEnrichmentWatcher(eventBus, getDb(), {
@@ -1310,7 +1345,10 @@ async function main(): Promise<void> {
       },
     });
     draftWatcher.start();
-    logger.info({ accounts: enrichmentAccounts }, 'Draft enrichment watcher started');
+    logger.info(
+      { accounts: enrichmentAccounts },
+      'Draft enrichment watcher started',
+    );
   }
 
   // --- Archive flow: record email actions for later cleanup ---
