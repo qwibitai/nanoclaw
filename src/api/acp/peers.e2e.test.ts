@@ -65,10 +65,7 @@ function createAgentWithPeers(
   });
 }
 
-function createAgentWithTestPeer(
-  name: string,
-  tmpDir: string,
-): AgentImpl {
+function createAgentWithTestPeer(name: string, tmpDir: string): AgentImpl {
   const peerScript = fileURLToPath(
     new URL('../../acp/fixtures/test-peer.js', import.meta.url),
   );
@@ -184,8 +181,16 @@ describe('ACP peers e2e', () => {
 
   it('multiple factory peers coexist in a single agent', async () => {
     const peers = [
-      { ...codex(), command: process.execPath, args: ['-e', 'process.exit(0)'] },
-      { ...claudeCode(), command: process.execPath, args: ['-e', 'process.exit(0)'] },
+      {
+        ...codex(),
+        command: process.execPath,
+        args: ['-e', 'process.exit(0)'],
+      },
+      {
+        ...claudeCode(),
+        command: process.execPath,
+        args: ['-e', 'process.exit(0)'],
+      },
     ];
 
     const agent = createAgentWithPeers('multi-peer', tmpDir, peers);
@@ -201,13 +206,19 @@ describe('ACP peers e2e', () => {
       'team@g.us',
     );
     expect(listResp.status).toBe(200);
-    const result = listResp.json.result as { agents: Array<{ name: string; description?: string }> };
+    const result = listResp.json.result as {
+      agents: Array<{ name: string; description?: string }>;
+    };
     const names = result.agents.map((a) => a.name);
     expect(names).toContain('codex');
     expect(names).toContain('claude-code');
     // Descriptions come through
-    expect(result.agents.find((a) => a.name === 'codex')?.description).toBeTruthy();
-    expect(result.agents.find((a) => a.name === 'claude-code')?.description).toBeTruthy();
+    expect(
+      result.agents.find((a) => a.name === 'codex')?.description,
+    ).toBeTruthy();
+    expect(
+      result.agents.find((a) => a.name === 'claude-code')?.description,
+    ).toBeTruthy();
   });
 
   it('factory peer completes a real ACP prompt cycle using test-peer fixture', async () => {
@@ -284,8 +295,16 @@ describe('ACP peers e2e', () => {
 
   it('agent with factory peers shuts down cleanly', async () => {
     const peers = [
-      { ...codex(), command: process.execPath, args: ['-e', 'process.exit(0)'] },
-      { ...claudeCode(), command: process.execPath, args: ['-e', 'process.exit(0)'] },
+      {
+        ...codex(),
+        command: process.execPath,
+        args: ['-e', 'process.exit(0)'],
+      },
+      {
+        ...claudeCode(),
+        command: process.execPath,
+        args: ['-e', 'process.exit(0)'],
+      },
     ];
 
     const agent = createAgentWithPeers('shutdown', tmpDir, peers);
@@ -300,7 +319,11 @@ describe('ACP peers e2e', () => {
 
   it('acp_new_session fails gracefully for unknown peer name', async () => {
     const agent = createAgentWithPeers('unknown-peer', tmpDir, [
-      { ...codex(), command: process.execPath, args: ['-e', 'process.exit(0)'] },
+      {
+        ...codex(),
+        command: process.execPath,
+        args: ['-e', 'process.exit(0)'],
+      },
     ]);
     agents.push(agent);
     await agent.start();
