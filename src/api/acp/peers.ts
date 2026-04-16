@@ -108,6 +108,7 @@ export function codex(opts?: CodexPeerOptions): AcpPeerConfig {
   const args = ['-y', '@zed-industries/codex-acp'];
   if (!sandbox) {
     args.push('-c', 'sandbox="danger-full-access"');
+    args.push('-c', 'approval_policy="never"');
   }
   if (opts?.extraArgs) {
     args.push(...opts.extraArgs);
