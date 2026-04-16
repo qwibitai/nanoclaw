@@ -135,7 +135,10 @@ export function detectActiveProviderConfig(): ActiveProviderConfig {
 function assertDirectSecretInjectionAllowed(
   providerConfig: ActiveProviderConfig,
 ): void {
-  if (providerConfig.provider !== 'gemini' && providerConfig.provider !== 'codex') {
+  if (
+    providerConfig.provider !== 'gemini' &&
+    providerConfig.provider !== 'codex'
+  ) {
     return;
   }
 
