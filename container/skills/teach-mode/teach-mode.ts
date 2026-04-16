@@ -16,30 +16,51 @@ export interface Procedure {
 }
 
 export function parseStepFromNarration(narration: string): ProcedureStep | null {
-  const lower = narration.toLowerCase().trim();
+  // Strip polite/filler prefixes before matching the action verb
+  const stripped = narration
+    .replace(/^(please|can you|now|then|next,?|and then|first,?|finally,?)\s+/i, '')
+    .trim();
+  const lower = stripped.toLowerCase().trim();
 
   if (lower.startsWith('go to ') || lower.startsWith('navigate to ') || lower.startsWith('open ')) {
-    const url = narration.replace(/^(go to|navigate to|open)\s+/i, '').trim();
+    const url = stripped.replace(/^(go to|navigate to|open)\s+/i, '').trim();
     return { action: 'navigate', target: url, description: narration };
   }
 
-  if (lower.startsWith('click ') || lower.startsWith('press ') || lower.startsWith('tap ')) {
-    const target = narration.replace(/^(click|press|tap)\s+(on\s+)?/i, '').trim();
+  if (lower.startsWith('scroll ')) {
+    const target = stripped.replace(/^scroll\s+/i, '').trim();
+    return { action: 'navigate', target, description: narration };
+  }
+
+  if (
+    lower.startsWith('click ') || lower.startsWith('press ') ||
+    lower.startsWith('tap ') || lower.startsWith('select ') ||
+    lower.startsWith('choose ')
+  ) {
+    const target = stripped.replace(/^(click|press|tap|select|choose)\s+(on\s+)?/i, '').trim();
     return { action: 'click', target, description: narration };
   }
 
   if (lower.startsWith('find ') || lower.startsWith('look for ') || lower.startsWith('locate ')) {
-    const target = narration.replace(/^(find|look for|locate)\s+/i, '').trim();
+    const target = stripped.replace(/^(find|look for|locate)\s+/i, '').trim();
     return { action: 'find', target, description: narration };
   }
 
   if (lower.startsWith('type ') || lower.startsWith('enter ') || lower.startsWith('input ')) {
-    const target = narration.replace(/^(type|enter|input)\s+/i, '').trim();
+    const target = stripped.replace(/^(type|enter|input)\s+/i, '').trim();
     return { action: 'type', target, description: narration };
   }
 
+  if (
+    lower.startsWith('extract ') || lower.startsWith('grab ') ||
+    lower.startsWith('copy ')
+  ) {
+    const target = stripped.replace(/^(extract|grab|copy)\s+/i, '').trim();
+    return { action: 'extract', target, description: narration };
+  }
+
   if (lower.startsWith('wait ')) {
-    return { action: 'wait', target: narration.replace(/^wait\s+/i, ''), description: narration };
+    return { action: 'wait', target: stripped.replace(/^wait\s+/i, ''), description: narration };
   }
 
   return null;

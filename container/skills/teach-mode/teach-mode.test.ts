@@ -97,12 +97,73 @@ describe('parseStepFromNarration', () => {
     });
   });
 
+  describe('extract action', () => {
+    it.each([
+      ['Extract the price', 'the price'],
+      ['extract all email addresses', 'all email addresses'],
+      ['Grab the title text', 'the title text'],
+      ['grab order number', 'order number'],
+      ['Copy the confirmation code', 'the confirmation code'],
+      ['copy that value', 'that value'],
+    ])('parses "%s" → extract target "%s"', (narration, expectedTarget) => {
+      const step = parseStepFromNarration(narration);
+      expect(step).not.toBeNull();
+      expect(step!.action).toBe('extract');
+      expect(step!.target).toBe(expectedTarget);
+      expect(step!.description).toBe(narration);
+    });
+  });
+
+  describe('polite/prefixed phrasing', () => {
+    it.each([
+      ['Please click the submit button', 'click', 'the submit button'],
+      ['Can you open https://example.com', 'navigate', 'https://example.com'],
+      ['Now type hello', 'type', 'hello'],
+      ['Then find the login form', 'find', 'the login form'],
+      ['Please navigate to settings', 'navigate', 'settings'],
+      ['Next, click Save', 'click', 'Save'],
+      ['And then wait 5 seconds', 'wait', '5 seconds'],
+    ])('parses "%s" → action "%s" target "%s"', (narration, expectedAction, expectedTarget) => {
+      const step = parseStepFromNarration(narration);
+      expect(step).not.toBeNull();
+      expect(step!.action).toBe(expectedAction);
+      expect(step!.target).toBe(expectedTarget);
+      expect(step!.description).toBe(narration);
+    });
+  });
+
+  describe('scroll action', () => {
+    it.each([
+      ['Scroll down', 'down'],
+      ['scroll to the bottom', 'to the bottom'],
+      ['Scroll up to the top', 'up to the top'],
+    ])('parses "%s" → navigate target "%s"', (narration, expectedTarget) => {
+      const step = parseStepFromNarration(narration);
+      expect(step).not.toBeNull();
+      expect(step!.action).toBe('navigate');
+      expect(step!.target).toBe(expectedTarget);
+      expect(step!.description).toBe(narration);
+    });
+  });
+
+  describe('select/choose action', () => {
+    it.each([
+      ['Select the dropdown', 'the dropdown'],
+      ['select option B', 'option B'],
+      ['Choose the first item', 'the first item'],
+      ['choose Premium plan', 'Premium plan'],
+    ])('parses "%s" → click target "%s"', (narration, expectedTarget) => {
+      const step = parseStepFromNarration(narration);
+      expect(step).not.toBeNull();
+      expect(step!.action).toBe('click');
+      expect(step!.target).toBe(expectedTarget);
+      expect(step!.description).toBe(narration);
+    });
+  });
+
   describe('unrecognized narrations return null', () => {
     it.each([
       'Hmm let me think',
-      'Now scroll down',
-      'Select the dropdown',
-      'Copy the text',
       'Then you should see',
       '',
       '   ',
@@ -373,7 +434,8 @@ describe('end-to-end teach flow', () => {
       .map(parseStepFromNarration)
       .filter((s): s is NonNullable<typeof s> => s !== null);
 
-    expect(steps).toHaveLength(3);
-    expect(steps.map((s) => s.action)).toEqual(['navigate', 'click', 'wait']);
+    // "Then scroll down a bit" now parses as navigate (scroll→navigate after stripping "Then")
+    expect(steps).toHaveLength(4);
+    expect(steps.map((s) => s.action)).toEqual(['navigate', 'navigate', 'click', 'wait']);
   });
 });
