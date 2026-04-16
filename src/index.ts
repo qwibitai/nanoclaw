@@ -161,6 +161,8 @@ import { MessageBatcher } from './message-batcher.js';
 import { handleCallback } from './callback-router.js';
 import { formatBatch } from './message-formatter.js';
 import { startMiniAppServer } from './mini-app/server.js';
+import { GmailOpsRouter } from './gmail-ops.js';
+import type { GmailOpsProvider } from './gmail-ops.js';
 import type {
   MessageInboundEvent,
   MessageOutboundEvent,
@@ -1266,10 +1268,60 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // --- GmailOps router: expose Gmail API operations to UX modules ---
+  const gmailOpsRouter = new GmailOpsRouter();
+  for (const ch of channels) {
+    if (ch.name.startsWith('gmail')) {
+      const alias = ch.name === 'gmail' ? 'default' : ch.name.replace('gmail-', '');
+      if ('archiveThread' in ch && 'listRecentDrafts' in ch) {
+        gmailOpsRouter.register(alias, ch as unknown as GmailOpsProvider);
+        logger.info({ alias }, 'Registered Gmail channel with GmailOpsRouter');
+      }
+    }
+  }
+
   // --- Agentic UX initialization ---
 
   const archiveTracker = new ArchiveTracker(getDb());
   const autoApproval = new AutoApprovalTimer(eventBus);
+
+  // --- Draft enrichment watcher ---
+  const enrichmentAccounts = channels
+    .filter((ch) => ch.name.startsWith('gmail') && 'listRecentDrafts' in ch)
+    .map((ch) => (ch.name === 'gmail' ? 'default' : ch.name.replace('gmail-', '')));
+
+  let draftWatcher: import('./draft-enrichment.js').DraftEnrichmentWatcher | undefined;
+  if (enrichmentAccounts.length > 0) {
+    const { DraftEnrichmentWatcher } = await import('./draft-enrichment.js');
+    draftWatcher = new DraftEnrichmentWatcher(eventBus, getDb(), {
+      accounts: enrichmentAccounts,
+      listRecentDrafts: (account) => gmailOpsRouter.listRecentDrafts(account),
+      updateDraft: (account, draftId, newBody) =>
+        gmailOpsRouter.updateDraft(account, draftId, newBody),
+      evaluateEnrichment: async (draft) => {
+        if (draft.body.length > 200) return null;
+        const ageMs = Date.now() - new Date(draft.createdAt).getTime();
+        if (ageMs > 30 * 60 * 1000) return null;
+        logger.debug(
+          { draftId: draft.draftId },
+          'Draft eligible for enrichment (not yet wired to executor)',
+        );
+        return null;
+      },
+    });
+    draftWatcher.start();
+    logger.info({ accounts: enrichmentAccounts }, 'Draft enrichment watcher started');
+  }
+
+  // --- Archive flow: record email actions for later cleanup ---
+  eventBus.on('email.action.completed', (event) => {
+    archiveTracker.recordAction(
+      event.payload.emailId,
+      event.payload.threadId,
+      event.payload.account,
+      event.payload.action,
+    );
+  });
 
   // Status bar — sends/edits a pinned message in the main group
   const mainGroupEntry = Object.entries(registeredGroups).find(
@@ -1329,6 +1381,8 @@ async function main(): Promise<void> {
         archiveTracker,
         autoApproval,
         statusBar,
+        gmailOps: gmailOpsRouter,
+        draftWatcher,
         findChannel: (jid) => findChannel(channels, jid),
       });
     });
@@ -1338,6 +1392,29 @@ async function main(): Promise<void> {
   startMiniAppServer({
     port: Number(process.env.MINI_APP_PORT) || 3847,
     db: getDb(),
+    gmailOps: gmailOpsRouter,
+    draftWatcher,
+  });
+
+  // --- Notify on draft enrichment ---
+  eventBus.on('email.draft.enriched', (event) => {
+    if (!mainGroupEntry) return;
+    const [mainJid] = mainGroupEntry;
+    const channel = findChannel(channels, mainJid);
+    const text = `✏️ Draft enriched: "${event.payload.changes}"`;
+    const actions = [
+      {
+        label: '↩ Revert',
+        callbackData: `revert:${event.payload.draftId}`,
+        style: 'secondary' as const,
+      },
+      {
+        label: '✅ Keep',
+        callbackData: `keep:${event.payload.draftId}`,
+        style: 'primary' as const,
+      },
+    ];
+    channel?.sendMessageWithActions?.(mainJid, text, actions).catch(() => {});
   });
 
   // Start subsystems (independently of connection handler)
