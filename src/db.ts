@@ -350,6 +350,14 @@ function createSchema(database: Database.Database): void {
     )
   `);
 
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS ux_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
   // Add context_mode column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
