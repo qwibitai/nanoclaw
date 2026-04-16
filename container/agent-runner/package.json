@@ -13,7 +13,7 @@
     "@ai-sdk/google": "^3.0.21",
     "@ai-sdk/openai": "^3.0.25",
     "@mariozechner/pi-ai": "0.60.0",
-    "open-agent-sdk": "git+https://github.com/shin902/open-agent-sdk.git#main",
+    "open-agent-sdk": "0.1.0-alpha.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@mozilla/readability": "^0.6.0",
     "ai": "^6.0.70",

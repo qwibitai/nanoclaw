@@ -24,7 +24,7 @@ import {
   type PreCompactHookInput,
   type SDKMessage,
   type Session,
-} from 'open-agent-sdk/packages/core/src/index.ts';
+} from 'open-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
