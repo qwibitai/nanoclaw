@@ -64,7 +64,11 @@ describe('buildEnvironment', () => {
   });
 
   it('formats NANOCLAW_IS_MAIN as "0" for non-main groups', () => {
-    const env = buildEnvironment(baseGroup, { ...baseInput, isMain: false }, basePaths);
+    const env = buildEnvironment(
+      baseGroup,
+      { ...baseInput, isMain: false },
+      basePaths,
+    );
     expect(env.NANOCLAW_IS_MAIN).toBe('0');
   });
 

@@ -85,7 +85,8 @@ describe('formatOutbound', () => {
 
 describe('extractImages', () => {
   it('extracts image tags and returns clean text', () => {
-    const input = 'hello <image path="/a.png" /> world <image path="/b.jpg" caption="cap" />';
+    const input =
+      'hello <image path="/a.png" /> world <image path="/b.jpg" caption="cap" />';
     const { cleanText, images } = extractImages(input);
     expect(cleanText).toBe('hello  world');
     expect(images).toEqual([
@@ -149,7 +150,11 @@ describe('routeOutbound', () => {
 
 describe('findChannel', () => {
   it('returns the owning channel regardless of connection state', () => {
-    const ch = makeStub({ name: 'offline', jids: ['x@g.us'], connected: false });
+    const ch = makeStub({
+      name: 'offline',
+      jids: ['x@g.us'],
+      connected: false,
+    });
     expect(findChannel([ch], 'x@g.us')).toBe(ch);
   });
 

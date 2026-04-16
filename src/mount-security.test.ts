@@ -15,9 +15,8 @@ import type { MountAllowlist } from './types.js';
 const ALLOWLIST = '/tmp/test-allowlist.json';
 
 vi.mock('./config.js', async () => {
-  const actual = await vi.importActual<typeof import('./config.js')>(
-    './config.js',
-  );
+  const actual =
+    await vi.importActual<typeof import('./config.js')>('./config.js');
   return { ...actual, MOUNT_ALLOWLIST_PATH: '/tmp/test-allowlist.json' };
 });
 
@@ -91,7 +90,7 @@ describe('mount-security', () => {
       expect(second).toBe(first); // same cached object
     });
 
-    it('caches parse errors so logs aren\'t spammed', () => {
+    it("caches parse errors so logs aren't spammed", () => {
       writeAllowlist('{ not-json');
       expect(loadMountAllowlist()).toBeNull();
       // Re-writing a valid file doesn't revive — error is cached.
@@ -354,9 +353,7 @@ describe('mount-security', () => {
 
   describe('generateAllowlistTemplate', () => {
     it('returns JSON with allowedRoots, blockedPatterns, and nonMainReadOnly', () => {
-      const parsed = JSON.parse(
-        generateAllowlistTemplate(),
-      ) as MountAllowlist;
+      const parsed = JSON.parse(generateAllowlistTemplate()) as MountAllowlist;
       expect(Array.isArray(parsed.allowedRoots)).toBe(true);
       expect(parsed.allowedRoots.length).toBeGreaterThan(0);
       expect(Array.isArray(parsed.blockedPatterns)).toBe(true);

@@ -4,9 +4,8 @@ const execSyncMock = vi.fn<(cmd: string, opts?: unknown) => string>();
 const existsSyncMock = vi.fn<(p: string) => boolean>();
 
 vi.mock('child_process', async () => {
-  const actual = await vi.importActual<typeof import('child_process')>(
-    'child_process',
-  );
+  const actual =
+    await vi.importActual<typeof import('child_process')>('child_process');
   return { ...actual, execSync: execSyncMock };
 });
 vi.mock('fs', async () => {

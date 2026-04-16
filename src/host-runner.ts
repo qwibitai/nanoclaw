@@ -7,7 +7,11 @@ import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { CONTAINER_MAX_OUTPUT_SIZE, CONTAINER_TIMEOUT, IDLE_TIMEOUT } from './config.js';
+import {
+  CONTAINER_MAX_OUTPUT_SIZE,
+  CONTAINER_TIMEOUT,
+  IDLE_TIMEOUT,
+} from './config.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -43,10 +47,8 @@ export async function runHostAgent(
   const startTime = Date.now();
   const projectRoot = process.cwd();
 
-  const { groupDir, ipcDir, globalDir, extraDir, claudeHome } = setupDirectories(
-    group,
-    input,
-  );
+  const { groupDir, ipcDir, globalDir, extraDir, claudeHome } =
+    setupDirectories(group, input);
 
   const env = buildEnvironment(group, input, {
     ipcDir,

@@ -98,9 +98,7 @@ export function createSchema(database: Database.Database): void {
     );
   });
   alter(`ALTER TABLE scheduled_tasks ADD COLUMN script TEXT`);
-  alter(
-    `ALTER TABLE scheduled_tasks ADD COLUMN silent INTEGER DEFAULT 0`,
-  );
+  alter(`ALTER TABLE scheduled_tasks ADD COLUMN silent INTEGER DEFAULT 0`);
   alter(`ALTER TABLE scheduled_tasks ADD COLUMN model TEXT`);
   alter(`ALTER TABLE scheduled_tasks ADD COLUMN effort TEXT`);
   alter(

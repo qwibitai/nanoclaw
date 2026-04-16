@@ -3,7 +3,10 @@ import path from 'path';
 
 import { DATA_DIR, GROUPS_DIR } from '../config.js';
 import type { ContainerInput } from '../container-runner.js';
-import { resolveGroupFolderPath, resolveGroupIpcPath } from '../group-folder.js';
+import {
+  resolveGroupFolderPath,
+  resolveGroupIpcPath,
+} from '../group-folder.js';
 import { logger } from '../logger.js';
 import { syncSkills } from '../skill-sync.js';
 import type { RegisteredGroup } from '../types.js';

@@ -29,7 +29,11 @@ export function ensureAgentRunnerBuilt(
   let srcMtime = 0;
   if (fs.existsSync(agentRunnerSrcDir)) {
     for (const f of fs.readdirSync(agentRunnerSrcDir)) {
-      if (f.endsWith('.ts') && !f.endsWith('.test.ts') && !f.endsWith('.d.ts')) {
+      if (
+        f.endsWith('.ts') &&
+        !f.endsWith('.test.ts') &&
+        !f.endsWith('.d.ts')
+      ) {
         const mt = fs.statSync(path.join(agentRunnerSrcDir, f)).mtimeMs;
         if (mt > srcMtime) srcMtime = mt;
       }
