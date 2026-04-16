@@ -82,7 +82,10 @@ import {
   handlePotentialApprovalReply,
 } from './trust-approval-handler.js';
 import { parseTrustCommand, executeTrustCommand } from './trust-commands.js';
-import { initKnowledgeStore, ensureQdrantCollection } from './memory/knowledge-store.js';
+import {
+  initKnowledgeStore,
+  ensureQdrantCollection,
+} from './memory/knowledge-store.js';
 import { initOutcomeStore, logOutcome } from './memory/outcome-store.js';
 import {
   parseAssistantCommand,
@@ -649,6 +652,33 @@ async function runAgent(
             'Auto-escalated model',
           );
         }
+      }
+    }
+
+    // Inject learned procedures into agent context
+    const { listProcedures } = await import('./memory/procedure-store.js');
+    const groupProcs = listProcedures(group.folder);
+
+    if (groupProcs.length > 0) {
+      const relevant = groupProcs
+        .filter((p) => p.success_count > 0)
+        .sort((a, b) => b.success_count - a.success_count)
+        .slice(0, 5);
+
+      if (relevant.length > 0) {
+        const procedureContext = '<learned_procedures>\n' +
+          relevant.map((p) =>
+            `- "${p.trigger}": ${p.description || p.steps.map(s => s.action).join(' → ')} (${p.success_count} successes)`
+          ).join('\n') +
+          '\n</learned_procedures>';
+
+        const contextDir = path.join(GROUPS_DIR, group.folder, 'context');
+        fs.mkdirSync(contextDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(contextDir, 'procedures.txt'),
+          procedureContext,
+          'utf-8',
+        );
       }
     }
 
