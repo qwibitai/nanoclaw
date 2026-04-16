@@ -636,6 +636,7 @@ async function runQuery(
   sdkEnv: Record<string, string | undefined>,
 ): Promise<{
   newSessionId?: string;
+  shouldExit: boolean;
 }> {
   const groupType = resolveGroupType(containerInput.groupType);
   const privileged = isPrivilegedGroup(groupType);
@@ -652,6 +653,10 @@ async function runQuery(
   let session: Session | undefined;
   let latestAssistantText: string | null = null;
   let streamedMessageCount = 0;
+  let shouldExit = false;
+  let ipcPollingActive = false;
+  let ipcPollTimer: NodeJS.Timeout | undefined;
+  let followupSendChain = Promise.resolve();
 
   try {
     session = await createOrResumeSession(
@@ -664,16 +669,121 @@ async function runQuery(
       globalClaudeMd,
     );
 
+    const stopIpcPolling = () => {
+      ipcPollingActive = false;
+      if (ipcPollTimer) {
+        clearTimeout(ipcPollTimer);
+        ipcPollTimer = undefined;
+      }
+    };
+
+    const requestExit = (reason: string) => {
+      if (shouldExit) return;
+      shouldExit = true;
+      log(reason);
+      stopIpcPolling();
+      // stream() が次のイベント待ちでブロックしていても、close で早期終了させる。
+      void session
+        ?.close()
+        .catch((err) =>
+          log(
+            `プリエンプション時のセッションクローズに失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
+    };
+
+    const enqueueIpcFollowups = () => {
+      const pending = drainIpcInput();
+      if (pending.length === 0) return;
+
+      const messages = [...pending];
+      followupSendChain = followupSendChain
+        .then(async () => {
+          for (const text of messages) {
+            if (shouldExit) return;
+            log(
+              `実行中セッションに IPC フォローアップを反映します (${text.length} 文字)`,
+            );
+            await session.send(text);
+          }
+        })
+        .catch((err) => {
+          if (shouldExit) return;
+          log(
+            `実行中 IPC フォローアップ反映に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+    };
+
+    const pollIpcDuringStream = () => {
+      if (!ipcPollingActive || shouldExit) return;
+      if (shouldClose()) {
+        requestExit('_close センチネルを検知したため、実行中クエリを終了します');
+        return;
+      }
+
+      enqueueIpcFollowups();
+      ipcPollTimer = setTimeout(pollIpcDuringStream, IPC_POLL_MS);
+    };
+
+    if (shouldClose()) {
+      requestExit(
+        '_close センチネルを検知したため、クエリ開始前に出力を抑止して終了します',
+      );
+      return { newSessionId: session.id, shouldExit };
+    }
+
     await session.send(prompt);
 
-    for await (const message of session.stream()) {
-      streamedMessageCount++;
-      log(`[メッセージ #${streamedMessageCount}] type=${message.type}`);
+    ipcPollingActive = true;
+    ipcPollTimer = setTimeout(pollIpcDuringStream, IPC_POLL_MS);
 
-      const assistantText = extractAssistantText(message);
-      if (assistantText) {
-        latestAssistantText = assistantText;
+    // stream が動き始めた直後に到着していた IPC を取りこぼさない。
+    enqueueIpcFollowups();
+
+    try {
+      for await (const message of session.stream()) {
+        if (shouldExit) break;
+
+        streamedMessageCount++;
+        log(`[メッセージ #${streamedMessageCount}] type=${message.type}`);
+
+        const assistantText = extractAssistantText(message);
+        if (assistantText) {
+          latestAssistantText = assistantText;
+        }
+
+        if (shouldClose()) {
+          requestExit(
+            '_close センチネルを検知したため、ストリーミング出力を停止します',
+          );
+          break;
+        }
+
+        // ストリーミング中に届いたフォローアップを都度セッションへ送る。
+        enqueueIpcFollowups();
       }
+    } catch (err) {
+      if (!shouldExit) {
+        throw err;
+      }
+      log(
+        `プリエンプションによりストリームを終了しました: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    stopIpcPolling();
+    await followupSendChain;
+
+    if (!shouldExit && shouldClose()) {
+      requestExit('_close センチネルを検知したため、クエリ結果出力を抑止します');
+    }
+
+    if (shouldExit) {
+      log(
+        `クエリをプリエンプション終了しました。streamedMessageCount=${streamedMessageCount}`,
+      );
+      return { newSessionId: session.id, shouldExit };
     }
 
     writeOutput({
@@ -685,8 +795,14 @@ async function runQuery(
     log(
       `クエリ終了。streamedMessageCount=${streamedMessageCount}, resultLength=${latestAssistantText?.length || 0}`,
     );
-    return { newSessionId: session.id };
+    return { newSessionId: session.id, shouldExit: false };
   } finally {
+    ipcPollingActive = false;
+    if (ipcPollTimer) {
+      clearTimeout(ipcPollTimer);
+      ipcPollTimer = undefined;
+    }
+    await followupSendChain;
     if (session) {
       try {
         await session.close();
@@ -722,7 +838,7 @@ async function main(): Promise<void> {
 
   // 認証情報はホスト側で注入される。
   // Anthropic/OpenAI は BASE_URL + placeholder を使ってプロキシ経由、
-  // Gemini/Codex は SDK 制約に合わせて直接注入される。
+  // Gemini/Codex の直接注入は ALLOW_DIRECT_SECRET_INJECTION=true の明示オプトイン時のみ許可される。
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -765,6 +881,12 @@ async function main(): Promise<void> {
       );
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
+      }
+
+      // runQuery 内で _close を検知した場合は、追加 OUTPUT を出さずに終了する。
+      if (queryResult.shouldExit) {
+        log('runQuery から終了シグナルを受信しました。出力を抑止して終了します');
+        break;
       }
 
       // 実行中に _close が置かれた場合、セッション更新マーカーを出す前に終了する
