@@ -13,6 +13,7 @@ interface QueuedTask {
 
 const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 5000;
+const PREEMPT_GRACE_MS = 60_000;
 
 interface GroupState {
   active: boolean;
@@ -26,6 +27,7 @@ interface GroupState {
   groupFolder: string | null;
   retryCount: number;
   lastResponseSentAt: number;
+  preemptTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export class GroupQueue {
@@ -53,6 +55,7 @@ export class GroupQueue {
         groupFolder: null,
         retryCount: 0,
         lastResponseSentAt: 0,
+        preemptTimer: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -109,7 +112,7 @@ export class GroupQueue {
     if (state.active) {
       state.pendingTasks.push({ id: taskId, groupJid, fn });
       if (state.idleWaiting) {
-        this.closeStdin(groupJid);
+        this.startPreemptTimer(groupJid);
       }
       logger.debug({ groupJid, taskId }, 'Container active, task queued');
       return;
@@ -147,13 +150,33 @@ export class GroupQueue {
 
   /**
    * Mark the container as idle-waiting (finished work, waiting for IPC input).
-   * If tasks are pending, preempt the idle container immediately.
+   * If tasks are pending, start a grace timer before preempting the container.
    */
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
     state.idleWaiting = true;
     if (state.pendingTasks.length > 0) {
-      this.closeStdin(groupJid);
+      this.startPreemptTimer(groupJid);
+    }
+  }
+
+  private startPreemptTimer(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    if (state.preemptTimer) return; // already scheduled — don't restart
+    state.preemptTimer = setTimeout(() => {
+      state.preemptTimer = null;
+      if (this.shuttingDown) return;
+      if (state.idleWaiting && state.pendingTasks.length > 0) {
+        this.closeStdin(groupJid);
+      }
+    }, PREEMPT_GRACE_MS);
+  }
+
+  private cancelPreemptTimer(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    if (state.preemptTimer) {
+      clearTimeout(state.preemptTimer);
+      state.preemptTimer = null;
     }
   }
 
@@ -166,6 +189,7 @@ export class GroupQueue {
     if (!state.active || !state.groupFolder || state.isTaskContainer)
       return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
+    this.cancelPreemptTimer(groupJid);
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
@@ -198,6 +222,23 @@ export class GroupQueue {
   isRecentResponseSent(groupJid: string, withinMs: number = 10000): boolean {
     const state = this.getGroup(groupJid);
     return Date.now() - state.lastResponseSentAt < withinMs;
+  }
+
+  /**
+   * Force-kill the agent process.  Used as a fallback when the _close
+   * sentinel is not consumed within a grace period (e.g. SDK hangs).
+   */
+  killProcess(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    if (!state.process || state.process.killed) return;
+
+    logger.info({ groupJid }, 'Force-killing agent process (close timeout)');
+    state.process.kill('SIGTERM');
+    setTimeout(() => {
+      if (state.process && !state.process.killed) {
+        state.process.kill('SIGKILL');
+      }
+    }, 5000);
   }
 
   /**
@@ -248,6 +289,7 @@ export class GroupQueue {
       logger.error({ groupJid, err }, 'Error processing messages for group');
       this.scheduleRetry(groupJid, state);
     } finally {
+      this.cancelPreemptTimer(groupJid);
       state.active = false;
       state.process = null;
       state.containerName = null;
@@ -276,6 +318,7 @@ export class GroupQueue {
     } catch (err) {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
+      this.cancelPreemptTimer(groupJid);
       state.active = false;
       state.isTaskContainer = false;
       state.runningTaskId = null;

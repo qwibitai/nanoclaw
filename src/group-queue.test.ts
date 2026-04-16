@@ -370,7 +370,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
-  it('preempts idle container when task is enqueued', async () => {
+  it('preempts idle container when task is enqueued (after grace period)', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;
 
@@ -404,8 +404,16 @@ describe('GroupQueue', () => {
     const taskFn = vi.fn(async () => {});
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
 
-    // _close SHOULD have been written (container is idle)
-    const closeWrites = writeFileSync.mock.calls.filter(
+    // _close should NOT be written immediately (grace period)
+    let closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    // After grace period (60s), _close SHOULD be written
+    await vi.advanceTimersByTimeAsync(60000);
+
+    closeWrites = writeFileSync.mock.calls.filter(
       (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
     );
     expect(closeWrites).toHaveLength(1);
@@ -449,7 +457,14 @@ describe('GroupQueue', () => {
     const taskFn = vi.fn(async () => {});
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
 
-    const closeWrites = writeFileSync.mock.calls.filter(
+    let closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    // Even after grace period, _close should NOT fire (sendMessage cancelled preemption)
+    await vi.advanceTimersByTimeAsync(60000);
+    closeWrites = writeFileSync.mock.calls.filter(
       (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
     );
     expect(closeWrites).toHaveLength(0);
@@ -486,7 +501,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
-  it('preempts when idle arrives with pending tasks', async () => {
+  it('preempts when idle arrives with pending tasks (after grace period)', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;
 
@@ -523,9 +538,17 @@ describe('GroupQueue', () => {
     );
     expect(closeWrites).toHaveLength(0);
 
-    // Now container becomes idle — should preempt because task is pending
+    // Now container becomes idle — grace timer starts (no immediate _close)
     writeFileSync.mockClear();
     queue.notifyIdle('group1@g.us');
+
+    closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    // After grace period, _close SHOULD be written
+    await vi.advanceTimersByTimeAsync(60000);
 
     closeWrites = writeFileSync.mock.calls.filter(
       (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
@@ -571,6 +594,174 @@ describe('GroupQueue', () => {
     queue.markResponseSent('group1@g.us');
     expect(queue.isRecentResponseSent('group1@g.us')).toBe(true);
     expect(queue.isRecentResponseSent('group2@g.us')).toBe(false);
+  });
+
+  // --- killProcess ---
+
+  it('killProcess sends SIGTERM then SIGKILL after 5s', async () => {
+    let resolveTask: () => void;
+
+    const taskFn = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const kill = vi.fn();
+    const proc = {
+      kill,
+      killed: false,
+    } as unknown as import('child_process').ChildProcess;
+    queue.registerProcess('group1@g.us', proc, 'container-1', 'test-group');
+
+    queue.killProcess('group1@g.us');
+
+    expect(kill).toHaveBeenCalledWith('SIGTERM');
+    expect(kill).toHaveBeenCalledTimes(1);
+
+    // After 5s, SIGKILL is sent because killed is still false
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(kill).toHaveBeenCalledWith('SIGKILL');
+    expect(kill).toHaveBeenCalledTimes(2);
+
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('killProcess skips SIGKILL if process already killed', async () => {
+    let resolveTask: () => void;
+
+    const taskFn = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const kill = vi.fn();
+    const proc = {
+      kill,
+      killed: false,
+    } as unknown as import('child_process').ChildProcess;
+    queue.registerProcess('group1@g.us', proc, 'container-1', 'test-group');
+
+    queue.killProcess('group1@g.us');
+    expect(kill).toHaveBeenCalledWith('SIGTERM');
+
+    // Process exits before the 5s SIGKILL timer
+    (proc as { killed: boolean }).killed = true;
+    await vi.advanceTimersByTimeAsync(5000);
+    // Only SIGTERM was sent
+    expect(kill).toHaveBeenCalledTimes(1);
+
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('killProcess is a no-op when no process is registered', () => {
+    // Should not throw
+    queue.killProcess('nonexistent@g.us');
+  });
+
+  // --- Grace period preemption ---
+
+  it('sendMessage during grace period cancels preemption', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess(
+      'group1@g.us',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+
+    // Container becomes idle, task arrives — grace timer starts
+    queue.notifyIdle('group1@g.us');
+    const taskFn = vi.fn(async () => {});
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // 30s into the grace period, user sends a message
+    await vi.advanceTimersByTimeAsync(30000);
+    queue.sendMessage('group1@g.us', 'hello');
+
+    // Wait past the original grace period
+    await vi.advanceTimersByTimeAsync(60000);
+
+    // _close should NOT have been written — sendMessage cancelled the timer
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('does not restart grace timer on additional notifyIdle calls', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess(
+      'group1@g.us',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+
+    const taskFn = vi.fn(async () => {});
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+
+    // First notifyIdle starts the 60s grace timer
+    queue.notifyIdle('group1@g.us');
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // 30s later, another notifyIdle (e.g. from compact result)
+    await vi.advanceTimersByTimeAsync(30000);
+    queue.notifyIdle('group1@g.us');
+
+    // At t=60s from first notifyIdle, _close should fire (timer was NOT restarted)
+    await vi.advanceTimersByTimeAsync(30000);
+
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(1);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
   });
 
   // --- getStatus ---
