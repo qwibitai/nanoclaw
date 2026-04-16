@@ -1340,8 +1340,8 @@ async function main(): Promise<void> {
       await channel.connect();
       channels.push(channel);
     } catch (err) {
-      logger.warn(
-        { channel: channelName, err: String(err) },
+      logger.error(
+        { channel: channelName, err },
         'Channel failed to connect — skipping',
       );
     }

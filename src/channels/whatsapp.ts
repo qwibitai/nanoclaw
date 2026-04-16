@@ -153,10 +153,12 @@ export class WhatsAppChannel implements Channel {
         exec(
           `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
         );
-        // Don't kill the process — reject connect() so main() continues with other channels
         this.connected = false;
+        this.sock?.end(undefined);
         if (this.pendingFirstOpenReject) {
-          this.pendingFirstOpenReject(new Error('WhatsApp authentication required'));
+          this.pendingFirstOpenReject(
+            new Error('WhatsApp authentication required'),
+          );
           this.pendingFirstOpenReject = undefined;
           this.pendingFirstOpen = undefined;
         }
@@ -189,8 +191,15 @@ export class WhatsAppChannel implements Channel {
             }, 5000);
           });
         } else {
-          logger.info('Logged out. Run /setup to re-authenticate.');
-          process.exit(0);
+          logger.error('WhatsApp logged out. Run /setup to re-authenticate.');
+          this.sock?.end(undefined);
+          if (this.pendingFirstOpenReject) {
+            this.pendingFirstOpenReject(
+              new Error('WhatsApp auth expired — logged out'),
+            );
+            this.pendingFirstOpenReject = undefined;
+            this.pendingFirstOpen = undefined;
+          }
         }
       } else if (connection === 'open') {
         this.connected = true;
