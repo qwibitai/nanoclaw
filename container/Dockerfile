@@ -60,11 +60,11 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
 RUN printf '#!/bin/bash\nset -e\ncd /app\ncat > /tmp/input.json\nbun run /app/src/index.ts < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
-# Set ownership to node user (non-root) for writable directories
-RUN chown -R node:node /workspace && chmod 777 /home/node
+# Set ownership to bun user (non-root) for writable directories
+RUN chown -R bun:bun /workspace && chmod 777 /home/bun
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
-USER node
+USER bun
 
 # Set working directory to group workspace
 WORKDIR /workspace/group
