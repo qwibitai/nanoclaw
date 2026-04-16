@@ -220,6 +220,9 @@ export async function processTaskIpc(
     // For switch_model
     provider?: string;
     model?: string;
+    // For learn_fact
+    domain?: string;
+    source?: string;
     // For browser_act/extract/observe
     instruction?: string;
     schema?: unknown;
@@ -771,10 +774,30 @@ export async function processTaskIpc(
       break;
     }
 
+    case 'learn_fact': {
+      const { storeFactWithVector } = await import('./memory/knowledge-store.js');
+      const factText = data.text as string;
+      const factDomain = data.domain || 'general';
+      const factSource = data.source || 'agent';
+      const factGroup = data.groupFolder as string;
+
+      await storeFactWithVector({
+        text: factText,
+        domain: factDomain,
+        groupId: factGroup,
+        source: factSource,
+      });
+      logger.info({ domain: factDomain, groupFolder: factGroup, textLen: factText.length }, 'Fact stored via IPC');
+      break;
+    }
+
     case 'switch_model': {
       const targetJid = data.chatJid;
       if (!targetJid || !data.provider) {
-        logger.warn({ sourceGroup }, 'switch_model: missing chatJid or provider');
+        logger.warn(
+          { sourceGroup },
+          'switch_model: missing chatJid or provider',
+        );
         break;
       }
 

@@ -162,6 +162,26 @@ export function buildIpcTools(
       },
     },
 
+    learn_fact: {
+      description: 'Store a fact in long-term memory for future recall. Use for important information worth remembering across sessions.',
+      parameters: z.object({
+        text: z.string().describe('The fact to remember'),
+        domain: z.string().optional().describe('Category: preferences, contacts, workflows, general'),
+        source: z.string().optional().describe('Where this fact came from'),
+      }),
+      execute: async ({ text, domain, source }: { text: string; domain?: string; source?: string }) => {
+        writeIpcFile(messagesDir, {
+          type: 'learn_fact',
+          chatJid,
+          groupFolder,
+          text,
+          domain: domain ?? 'general',
+          source: source ?? 'agent',
+        });
+        return { success: true, stored: text.slice(0, 80) };
+      },
+    },
+
     switch_model: {
       description:
         'Switch the LLM model for this group. Use this to escalate to a stronger model for complex tasks, or switch to a cheaper model for simple follow-ups. The change takes effect on the next message.',
