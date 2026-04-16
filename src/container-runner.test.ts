@@ -347,7 +347,9 @@ describe('container-runner timeout behavior', () => {
     const spawnCalls = vi.mocked(spawn).mock.calls;
     const args = spawnCalls[spawnCalls.length - 1][1] as string[];
     const joined = args.join(' ');
-    expect(joined).toContain('-e OPENAI_BASE_URL=http://host.docker.internal:3001');
+    expect(joined).toContain(
+      '-e OPENAI_BASE_URL=http://host.docker.internal:3001',
+    );
     expect(joined).toContain('-e OPENAI_API_KEY=placeholder');
     expect(joined).not.toContain('ANTHROPIC_API_KEY=placeholder');
   });

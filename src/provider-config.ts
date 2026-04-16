@@ -54,7 +54,11 @@ export function detectActiveProviderConfig(): ActiveProviderConfig {
       return {
         provider,
         usesCredentialProxy: true,
-        apiKey: requiredValue(env.ANTHROPIC_API_KEY, 'ANTHROPIC_API_KEY', provider),
+        apiKey: requiredValue(
+          env.ANTHROPIC_API_KEY,
+          'ANTHROPIC_API_KEY',
+          provider,
+        ),
         upstreamBaseURL:
           env.ANTHROPIC_BASE_URL || DEFAULT_UPSTREAM_BASE_URL.anthropic,
       };
@@ -65,7 +69,8 @@ export function detectActiveProviderConfig(): ActiveProviderConfig {
         provider,
         usesCredentialProxy: true,
         apiKey: requiredValue(env.OPENAI_API_KEY, 'OPENAI_API_KEY', provider),
-        upstreamBaseURL: env.OPENAI_BASE_URL || DEFAULT_UPSTREAM_BASE_URL.openai,
+        upstreamBaseURL:
+          env.OPENAI_BASE_URL || DEFAULT_UPSTREAM_BASE_URL.openai,
       };
     }
 

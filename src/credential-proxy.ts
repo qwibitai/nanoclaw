@@ -130,11 +130,7 @@ export function startCredentialProxy(
         delete headers['keep-alive'];
         delete headers['transfer-encoding'];
 
-        injectAuthHeaders(
-          headers,
-          proxiedProvider,
-          providerConfig.apiKey,
-        );
+        injectAuthHeaders(headers, proxiedProvider, providerConfig.apiKey);
 
         const upstream = makeRequest(
           {
