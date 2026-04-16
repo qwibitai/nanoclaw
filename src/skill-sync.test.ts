@@ -147,9 +147,7 @@ describe('syncSkills', () => {
 
     const dstSkill = path.join(dst, 'my-skill');
     expect(fs.lstatSync(dstSkill).isSymbolicLink()).toBe(false);
-    expect(fs.readFileSync(path.join(dstSkill, 'SKILL.md'), 'utf8')).toBe(
-      'v2',
-    );
+    expect(fs.readFileSync(path.join(dstSkill, 'SKILL.md'), 'utf8')).toBe('v2');
   });
 
   it('copies multiple skill directories', () => {
