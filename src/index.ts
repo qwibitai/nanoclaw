@@ -559,11 +559,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         outputSentToUser = true;
         try {
           const inbound = getLatestInboundMessage(chatJid, ASSISTANT_NAME);
-          // Only pair if the inbound is recent (≤5 min old). For proactive
-          // sends from scheduled tasks, getLatestInboundMessage may return a
-          // stale user message from hours ago — pairing those would create
-          // bogus extraction candidates.
-          const TURN_PAIRING_WINDOW_MS = 5 * 60 * 1000;
+          // Only pair if the inbound is reasonably recent. Proactive replies
+          // from scheduled tasks (hours-old user messages) shouldn't create
+          // bogus candidates. Containers can queue messages for many minutes
+          // when busy, so 30 min covers the typical max.
+          const TURN_PAIRING_WINDOW_MS = 30 * 60 * 1000;
           const inboundAgeMs = inbound
             ? Date.now() - new Date(inbound.timestamp).getTime()
             : Infinity;
