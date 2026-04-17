@@ -4,7 +4,7 @@ import path from 'path';
 
 import { Api, Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, MINI_APP_URL, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
@@ -380,6 +380,20 @@ export class TelegramChannel implements Channel {
             `  Send /chatid to the bot to get a chat's registration ID\n`,
           );
           resolve();
+          // Set Web App menu button if MINI_APP_URL is configured
+          if (MINI_APP_URL) {
+            this.bot!.api.setChatMenuButton({
+              menu_button: {
+                type: 'web_app',
+                text: '📱 App',
+                web_app: { url: MINI_APP_URL },
+              },
+            }).then(() => {
+              logger.info({ url: MINI_APP_URL }, 'Telegram menu button set');
+            }).catch((err) => {
+              logger.debug({ err }, 'Failed to set menu button (non-fatal)');
+            });
+          }
         },
       });
     });
