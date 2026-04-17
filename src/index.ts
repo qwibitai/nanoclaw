@@ -18,6 +18,7 @@ import {
   WEBHOOK_PORT,
   WEBHOOK_SECRET,
   BROWSER_CDP_URL,
+  MINI_APP_URL,
 } from './config.js';
 import { generateSuggestion } from './proactive-suggestions.js';
 import './channels/index.js';
@@ -1746,6 +1747,24 @@ async function main(): Promise<void> {
                       a.callbackData?.startsWith('archive:'),
                     )
                   ) {
+                    // Tier 1: quick text expansion
+                    meta.actions.push({
+                      label: '📧 Expand',
+                      callbackData: `expand:${emailId}:${email.account ?? ''}`,
+                      style: 'secondary' as const,
+                    });
+                    // Tier 3: full email in Mini App (only if tunnel URL configured)
+                    if (MINI_APP_URL) {
+                      const fullUrl = `${MINI_APP_URL}/email/${emailId}${
+                        email.account ? `?account=${email.account}` : ''
+                      }`;
+                      meta.actions.push({
+                        label: '🌐 Full Email',
+                        callbackData: `noop:${emailId}`,
+                        style: 'secondary' as const,
+                        webAppUrl: fullUrl,
+                      });
+                    }
                     meta.actions.push({
                       label: '🗄 Archive',
                       callbackData: `archive:${emailId}`,
