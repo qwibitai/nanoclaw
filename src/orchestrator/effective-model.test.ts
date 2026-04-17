@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
-import { AGENT_MODEL_TIMEOUT_MS } from './config.js';
-import { getEffectiveModel } from './index.js';
-import { RegisteredGroup } from './types.js';
+import { AGENT_MODEL_TIMEOUT_MS } from '../config.js';
+import { RegisteredGroup } from '../types.js';
+
+import { getEffectiveModel } from './effective-model.js';
 
 function makeGroup(overrides: Partial<RegisteredGroup> = {}): RegisteredGroup {
   return {

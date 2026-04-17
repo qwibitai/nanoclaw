@@ -5,10 +5,8 @@ import {
   HOST_MODE,
   MAX_MESSAGES_PER_PROMPT,
   ONECLI_URL,
-  TIMEZONE,
   WEBHOOK_ENABLED,
   WEBHOOK_PORT,
-  getTriggerPattern,
 } from './config.js';
 import './channels/index.js';
 import {
@@ -19,17 +17,12 @@ import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
-import {
-  deleteSession,
-  getAllTasks,
-  getMessagesSince,
-  initDatabase,
-  storeChatMetadata,
-  storeMessage,
-} from './db.js';
 import { writeGroupsSnapshot, writeTasksSnapshot } from './container-runner.js';
+import { getAllTasks, getMessagesSince, initDatabase } from './db.js';
 import { GroupQueue } from './group-queue.js';
-import { getEffectiveModel } from './orchestrator/effective-model.js';
+import { startIpcWatcher } from './ipc.js';
+import { logger } from './logger.js';
+import { buildChannelOpts } from './orchestrator/channel-opts.js';
 import {
   ensureOneCLIAgent as ensureOneCLIAgentFn,
   getAvailableGroups as getAvailableGroupsFn,
@@ -48,33 +41,18 @@ import {
   loadState,
   saveState,
 } from './orchestrator/state.js';
-import { startIpcWatcher } from './ipc.js';
+import { startWebhookBridge } from './orchestrator/webhook-bridge.js';
+import { restoreRemoteControl } from './remote-control.js';
 import {
   extractImages,
   findChannel,
-  formatMessages,
   formatOutbound,
   sendImages,
 } from './router.js';
-import {
-  restoreRemoteControl,
-  startRemoteControl,
-  stopRemoteControl,
-} from './remote-control.js';
-import {
-  isSenderAllowed,
-  isTriggerAllowed,
-  loadSenderAllowlist,
-  shouldDropMessage,
-} from './sender-allowlist.js';
 import { SessionGuard } from './session-guard.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
-import { logger } from './logger.js';
-import { startWebhookServer, stopWebhookServer } from './webhook.js';
-
-// Re-export for backwards compatibility during refactor
-export { escapeXml, formatMessages } from './router.js';
+import { Channel, RegisteredGroup } from './types.js';
+import { stopWebhookServer } from './webhook.js';
 
 const state = createState();
 const sessionGuard = new SessionGuard();
@@ -83,11 +61,6 @@ const channels: Channel[] = [];
 const queue = new GroupQueue();
 
 const onecli = new OneCLI({ url: ONECLI_URL });
-
-// Aliases that keep the rest of src/index.ts readable without fully
-// rewriting every state access. Each points at the same object/set as
-// the canonical state, so mutations flow back.
-const { compactPending, deferredCompact } = state;
 
 function loadStateHere(): void {
   loadState(state);
@@ -106,23 +79,9 @@ function registerGroupHere(jid: string, group: RegisteredGroup): void {
   );
 }
 
-/** Available groups list for the agent (barrel export). */
-export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
+function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
   return getAvailableGroupsFn(state.registeredGroups);
 }
-
-/** @internal - exported for testing */
-export function _setRegisteredGroups(
-  groups: Record<string, RegisteredGroup>,
-): void {
-  state.registeredGroups = groups;
-}
-
-// Re-export for backwards-compat test imports
-export {
-  getEffectiveModel,
-  type EffectiveModelResult,
-} from './orchestrator/effective-model.js';
 
 // processGroupMessages lives in ./orchestrator/process-group-messages.ts
 // runAgent lives in ./orchestrator/run-agent.ts
@@ -194,169 +153,13 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Handle /remote-control and /remote-control-end commands
-  async function handleRemoteControl(
-    command: string,
-    chatJid: string,
-    msg: NewMessage,
-  ): Promise<void> {
-    const group = state.registeredGroups[chatJid];
-    if (!group?.isMain) {
-      logger.warn(
-        { chatJid, sender: msg.sender },
-        'Remote control rejected: not main group',
-      );
-      return;
-    }
-
-    const channel = findChannel(channels, chatJid);
-    if (!channel) return;
-
-    if (command === '/remote-control') {
-      const result = await startRemoteControl(
-        msg.sender,
-        chatJid,
-        process.cwd(),
-      );
-      if (result.ok) {
-        await channel.sendMessage(chatJid, result.url);
-      } else {
-        await channel.sendMessage(
-          chatJid,
-          `Remote Control failed: ${result.error}`,
-        );
-      }
-    } else {
-      const result = stopRemoteControl();
-      if (result.ok) {
-        await channel.sendMessage(chatJid, 'Remote Control session ended.');
-      } else {
-        await channel.sendMessage(chatJid, result.error);
-      }
-    }
-  }
-
   // Channel callbacks (shared by all channels)
-  const channelOpts = {
-    onMessage: (chatJid: string, msg: NewMessage) => {
-      // Remote control commands — intercept before storage
-      const trimmed = msg.content.trim();
-      if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
-        handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
-          logger.error({ err, chatJid }, 'Remote control command error'),
-        );
-        return;
-      }
-
-      // Sender allowlist drop mode: discard messages from denied senders before storing
-      if (
-        !msg.is_from_me &&
-        !msg.is_bot_message &&
-        state.registeredGroups[chatJid]
-      ) {
-        const cfg = loadSenderAllowlist();
-        if (
-          shouldDropMessage(chatJid, cfg) &&
-          !isSenderAllowed(chatJid, msg.sender, cfg)
-        ) {
-          if (cfg.logDenied) {
-            logger.debug(
-              { chatJid, sender: msg.sender },
-              'sender-allowlist: dropping message (drop mode)',
-            );
-          }
-          return;
-        }
-      }
-      storeMessage(msg);
-
-      // Event-driven: kick message processing immediately without waiting for poll
-      const group = state.registeredGroups[chatJid];
-      if (!group) return;
-
-      const ch = findChannel(channels, chatJid);
-      if (!ch) return;
-
-      const isMainGroup = group.isMain === true;
-      const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
-
-      if (needsTrigger) {
-        const triggerPattern = getTriggerPattern(group.trigger);
-        const allowlistCfg = loadSenderAllowlist();
-        const hasTrigger =
-          triggerPattern.test(msg.content.trim()) &&
-          (msg.is_from_me ||
-            isTriggerAllowed(chatJid, msg.sender, allowlistCfg));
-        if (!hasTrigger) return;
-      }
-
-      // Active container → pipe via IPC + typing indicator
-      const allPending = getMessagesSince(
-        chatJid,
-        getOrRecoverCursorHere(chatJid),
-        ASSISTANT_NAME,
-        MAX_MESSAGES_PER_PROMPT,
-      );
-      if (allPending.length > 0) {
-        const formatted = formatMessages(
-          allPending,
-          TIMEZONE,
-          group,
-          getEffectiveModel(group).model,
-        );
-        if (queue.sendMessage(chatJid, formatted)) {
-          // Advance cursor so the next pipe doesn't re-send these messages
-          state.lastAgentTimestamp[chatJid] =
-            allPending[allPending.length - 1].timestamp;
-          saveStateHere();
-          if (!queue.isRecentResponseSent(chatJid)) {
-            ch.setTyping?.(chatJid, true)?.catch(() => {});
-          }
-          return;
-        }
-      }
-
-      // No active container → enqueue for a new one
-      queue.enqueueMessageCheck(chatJid);
-    },
-    onChatMetadata: (
-      chatJid: string,
-      timestamp: string,
-      name?: string,
-      channel?: string,
-      isGroup?: boolean,
-    ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
-    registeredGroups: () => state.registeredGroups,
-    getStatus: () => ({
-      activeContainers: queue.getStatus().activeContainers,
-      uptimeSeconds: Math.floor(process.uptime()),
-      sessions: { ...state.sessions },
-      lastUsage: { ...state.lastUsage },
-      compactCount: { ...state.compactCount },
-      lastRateLimit: { ...state.lastRateLimit },
-    }),
-    sendIpcMessage: (chatJid: string, text: string) => {
-      const sent = queue.sendMessage(chatJid, text);
-      if (sent && text === '/compact') {
-        compactPending.add(chatJid);
-      }
-      if (!sent && text === '/compact') {
-        // No active container — defer compact to next container run if session exists
-        const group = state.registeredGroups[chatJid];
-        if (group && state.sessions[group.folder]) {
-          deferredCompact.add(chatJid);
-          return true;
-        }
-      }
-      return sent;
-    },
-    clearSession: (groupFolder: string, chatJid: string) => {
-      delete state.sessions[groupFolder];
-      deleteSession(groupFolder);
-      sessionGuard.markCleared(groupFolder);
-      queue.closeStdin(chatJid);
-    },
-  };
+  const channelOpts = buildChannelOpts({
+    state,
+    queue,
+    channels,
+    sessionGuard,
+  });
 
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
@@ -471,53 +274,7 @@ async function main(): Promise<void> {
 
   // Incoming webhook: external systems can trigger the agent via HTTP POST
   if (WEBHOOK_ENABLED) {
-    startWebhookServer(WEBHOOK_PORT, {
-      getMainGroupJid: () =>
-        Object.keys(state.registeredGroups).find(
-          (jid) => state.registeredGroups[jid].isMain === true,
-        ),
-      onWebhookMessage: (chatJid: string, text: string) => {
-        const msg: NewMessage = {
-          id: `wh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          chat_jid: chatJid,
-          sender: 'webhook',
-          sender_name: 'Webhook',
-          content: text,
-          timestamp: new Date().toISOString(),
-          is_from_me: true,
-        };
-        storeMessage(msg);
-
-        // Event-driven: pipe to active container or enqueue for a new one
-        const allPending = getMessagesSince(
-          chatJid,
-          getOrRecoverCursorHere(chatJid),
-          ASSISTANT_NAME,
-          MAX_MESSAGES_PER_PROMPT,
-        );
-        if (allPending.length > 0) {
-          const grp = state.registeredGroups[chatJid];
-          const formatted = formatMessages(
-            allPending,
-            TIMEZONE,
-            grp,
-            grp ? getEffectiveModel(grp).model : undefined,
-          );
-          if (queue.sendMessage(chatJid, formatted)) {
-            state.lastAgentTimestamp[chatJid] =
-              allPending[allPending.length - 1].timestamp;
-            saveStateHere();
-            return;
-          }
-        }
-        queue.enqueueMessageCheck(chatJid);
-      },
-    }).catch((err) => {
-      logger.warn(
-        { err },
-        'Webhook server failed to start, continuing without it',
-      );
-    });
+    startWebhookBridge({ state, queue, port: WEBHOOK_PORT });
   }
 }
 

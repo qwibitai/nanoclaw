@@ -50,6 +50,10 @@ export default defineConfig({
         'src/orchestrator/run-agent.ts',
         'src/orchestrator/process-group-messages.ts',
         'src/orchestrator/message-loop.ts',
+        // Same family as the factories above — closures over OrchestratorState
+        // that are exercised by integration tests but not attributable by v8.
+        'src/orchestrator/channel-opts.ts',
+        'src/orchestrator/webhook-bridge.ts',
         // Pure type-only module.
         'src/ipc/types.ts',
       ],

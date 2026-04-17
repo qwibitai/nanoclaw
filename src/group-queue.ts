@@ -1,34 +1,19 @@
 import { ChildProcess } from 'child_process';
-import fs from 'fs';
-import path from 'path';
 
-import { DATA_DIR, HOST_MODE, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { HOST_MODE, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import {
+  writeCloseSentinel,
+  writeMessageIpc,
+} from './group-queue/ipc-writer.js';
+import {
+  BASE_RETRY_MS,
+  createGroupState,
+  GroupState,
+  MAX_RETRIES,
+  PREEMPT_GRACE_MS,
+  QueuedTask,
+} from './group-queue/types.js';
 import { logger } from './logger.js';
-
-interface QueuedTask {
-  id: string;
-  groupJid: string;
-  fn: () => Promise<void>;
-}
-
-const MAX_RETRIES = 5;
-const BASE_RETRY_MS = 5000;
-const PREEMPT_GRACE_MS = 60_000;
-
-interface GroupState {
-  active: boolean;
-  idleWaiting: boolean;
-  isTaskContainer: boolean;
-  runningTaskId: string | null;
-  pendingMessages: boolean;
-  pendingTasks: QueuedTask[];
-  process: ChildProcess | null;
-  containerName: string | null;
-  groupFolder: string | null;
-  retryCount: number;
-  lastResponseSentAt: number;
-  preemptTimer: ReturnType<typeof setTimeout> | null;
-}
 
 export class GroupQueue {
   private groups = new Map<string, GroupState>();
@@ -43,20 +28,7 @@ export class GroupQueue {
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
     if (!state) {
-      state = {
-        active: false,
-        idleWaiting: false,
-        isTaskContainer: false,
-        runningTaskId: null,
-        pendingMessages: false,
-        pendingTasks: [],
-        process: null,
-        containerName: null,
-        groupFolder: null,
-        retryCount: 0,
-        lastResponseSentAt: 0,
-        preemptTimer: null,
-      };
+      state = createGroupState();
       this.groups.set(groupJid, state);
     }
     return state;
@@ -190,20 +162,7 @@ export class GroupQueue {
       return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
     this.cancelPreemptTimer(groupJid);
-
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
-    try {
-      fs.mkdirSync(inputDir, { recursive: true });
-      const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
-      const filepath = path.join(inputDir, filename);
-      const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
-      fs.renameSync(tempPath, filepath);
-      return true;
-      // eslint-disable-next-line no-catch-all/no-catch-all
-    } catch {
-      return false;
-    }
+    return writeMessageIpc(state.groupFolder, text);
   }
 
   /** Mark that the agent has sent a response to the user in this session. */
@@ -247,15 +206,7 @@ export class GroupQueue {
   closeStdin(groupJid: string): void {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder) return;
-
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
-    try {
-      fs.mkdirSync(inputDir, { recursive: true });
-      fs.writeFileSync(path.join(inputDir, '_close'), '');
-      // eslint-disable-next-line no-catch-all/no-catch-all
-    } catch {
-      // ignore
-    }
+    writeCloseSentinel(state.groupFolder);
   }
 
   private async runForGroup(
