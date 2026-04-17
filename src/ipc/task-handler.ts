@@ -151,10 +151,7 @@ function handleSimpleTaskOp(
       status: action === 'pause' ? 'paused' : 'active',
     });
   }
-  logger.info(
-    { taskId: data.taskId, sourceGroup },
-    `Task ${action} via IPC`,
-  );
+  logger.info({ taskId: data.taskId, sourceGroup }, `Task ${action} via IPC`);
   deps.onTasksChanged();
 }
 

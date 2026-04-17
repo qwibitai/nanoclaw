@@ -51,10 +51,7 @@ export async function processMessageFiles(
       fs.unlinkSync(filePath);
       // eslint-disable-next-line no-catch-all/no-catch-all
     } catch (err) {
-      logger.error(
-        { file, sourceGroup, err },
-        'Error processing IPC message',
-      );
+      logger.error({ file, sourceGroup, err }, 'Error processing IPC message');
       fs.mkdirSync(errorsDir, { recursive: true });
       fs.renameSync(filePath, path.join(errorsDir, `${sourceGroup}-${file}`));
     }

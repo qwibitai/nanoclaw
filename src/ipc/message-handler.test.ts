@@ -75,13 +75,7 @@ describe('processMessageFiles', () => {
       chatJid: 'child@g.us',
       text: 'hi',
     });
-    await processMessageFiles(
-      messagesDir,
-      'main-group',
-      true,
-      deps,
-      errorsDir,
-    );
+    await processMessageFiles(messagesDir, 'main-group', true, deps, errorsDir);
     expect(sent).toEqual([['child@g.us', 'hi']]);
     expect(fs.existsSync(p)).toBe(false);
   });
@@ -121,13 +115,7 @@ describe('processMessageFiles', () => {
 
   it('ignores messages missing required fields (no send, no error)', async () => {
     dropMessage({ type: 'message', chatJid: 'child@g.us' }); // no text
-    await processMessageFiles(
-      messagesDir,
-      'main-group',
-      true,
-      deps,
-      errorsDir,
-    );
+    await processMessageFiles(messagesDir, 'main-group', true, deps, errorsDir);
     expect(sent).toEqual([]);
     expect(fs.readdirSync(messagesDir)).toEqual([]); // still cleaned up
   });
@@ -135,26 +123,14 @@ describe('processMessageFiles', () => {
   it('moves malformed JSON to errorsDir', async () => {
     const p = path.join(messagesDir, 'bad.json');
     fs.writeFileSync(p, '{ not-json');
-    await processMessageFiles(
-      messagesDir,
-      'main-group',
-      true,
-      deps,
-      errorsDir,
-    );
+    await processMessageFiles(messagesDir, 'main-group', true, deps, errorsDir);
     expect(fs.existsSync(p)).toBe(false);
     expect(fs.readdirSync(errorsDir)).toHaveLength(1);
   });
 
   it('is a no-op when the messages directory does not exist', async () => {
     const missingDir = path.join(sandbox, 'not-there');
-    await processMessageFiles(
-      missingDir,
-      'main-group',
-      true,
-      deps,
-      errorsDir,
-    );
+    await processMessageFiles(missingDir, 'main-group', true, deps, errorsDir);
     expect(sent).toEqual([]);
   });
 });
