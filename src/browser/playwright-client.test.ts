@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { waitForSidecarReady } from './playwright-client.js';
 
 vi.mock('../config.js', () => ({
   BROWSER_CDP_URL: 'http://test-sidecar:9222',
@@ -28,6 +29,32 @@ vi.mock('playwright-core', () => ({
 }));
 
 import { PlaywrightClient } from './playwright-client.js';
+
+describe('waitForSidecarReady', () => {
+  it('returns true once CDP /json/version responds', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ Browser: 'Chromium/1' }) });
+    const ok = await waitForSidecarReady('http://localhost:9222', {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      timeoutMs: 5000,
+      intervalMs: 50,
+    });
+    expect(ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns false on timeout', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+    const ok = await waitForSidecarReady('http://localhost:9222', {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      timeoutMs: 200,
+      intervalMs: 50,
+    });
+    expect(ok).toBe(false);
+  });
+});
 
 describe('PlaywrightClient', () => {
   let client: PlaywrightClient;

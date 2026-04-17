@@ -2,6 +2,33 @@ import { chromium, type Browser, type BrowserContext } from 'playwright-core';
 import { BROWSER_CDP_URL } from '../config.js';
 import { logger } from '../logger.js';
 
+export interface WaitOpts {
+  timeoutMs?: number;
+  intervalMs?: number;
+  fetchImpl?: typeof fetch;
+}
+
+export async function waitForSidecarReady(
+  cdpUrl: string,
+  opts: WaitOpts = {},
+): Promise<boolean> {
+  const timeoutMs = opts.timeoutMs ?? 10_000;
+  const intervalMs = opts.intervalMs ?? 250;
+  const f = opts.fetchImpl ?? fetch;
+  const deadline = Date.now() + timeoutMs;
+  const url = cdpUrl.replace(/\/$/, '') + '/json/version';
+  while (Date.now() < deadline) {
+    try {
+      const res = await f(url);
+      if (res.ok) return true;
+    } catch {
+      // not ready
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return false;
+}
+
 export class PlaywrightClient {
   private browser: Browser | null = null;
   private cdpUrl: string;
