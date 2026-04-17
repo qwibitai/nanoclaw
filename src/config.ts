@@ -60,6 +60,10 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
 ); // 10MB default
 export const ONECLI_URL =
   process.env.ONECLI_URL || envConfig.ONECLI_URL || 'http://localhost:10254';
+export const CREDENTIAL_PROXY_PORT = parseInt(
+  process.env.CREDENTIAL_PROXY_PORT || '3001',
+  10,
+);
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
@@ -79,6 +83,11 @@ export const TRIGGER_PATTERN = new RegExp(
   `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
   'i',
 );
+
+export function getTriggerPattern(trigger: string | undefined): RegExp {
+  if (!trigger) return TRIGGER_PATTERN;
+  return new RegExp(`^${escapeRegex(trigger)}\\b`, 'i');
+}
 
 // Timezone for scheduled tasks, message formatting, etc.
 // Validates each candidate is a real IANA identifier before accepting.

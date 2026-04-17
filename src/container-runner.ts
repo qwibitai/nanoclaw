@@ -361,12 +361,6 @@ function buildContainerArgs(
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
-  // Use a specific Docker network if configured (e.g. for macvlan or custom bridge)
-  const dockerNetwork = process.env.NANOCLAW_DOCKER_NETWORK;
-  if (dockerNetwork) {
-    args.push('--network', dockerNetwork);
-  }
-
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
