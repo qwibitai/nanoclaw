@@ -1,10 +1,20 @@
 import type { DraftInfo } from './draft-enrichment.js';
 
+export interface EmailMeta {
+  subject: string;
+  from: string;
+  to: string;
+  date: string;
+  cc?: string;
+  body: string;
+}
+
 export interface GmailOps {
   archiveThread(account: string, threadId: string): Promise<void>;
   listRecentDrafts(account: string): Promise<DraftInfo[]>;
   updateDraft(account: string, draftId: string, newBody: string): Promise<void>;
   getMessageBody(account: string, messageId: string): Promise<string | null>;
+  getMessageMeta(account: string, messageId: string): Promise<EmailMeta | null>;
   forwardThread(
     account: string,
     threadId: string,
@@ -17,6 +27,7 @@ export interface GmailOpsProvider {
   listRecentDrafts(): Promise<DraftInfo[]>;
   updateDraft(draftId: string, newBody: string): Promise<void>;
   getMessageBody(messageId: string): Promise<string | null>;
+  getMessageMeta(messageId: string): Promise<EmailMeta | null>;
   forwardThread?(threadId: string, recipient: string): Promise<void>;
   emailAddress?: string;
 }
@@ -74,6 +85,13 @@ export class GmailOpsRouter implements GmailOps {
     return this.getChannel(account).getMessageBody(messageId);
   }
 
+  async getMessageMeta(
+    account: string,
+    messageId: string,
+  ): Promise<EmailMeta | null> {
+    return this.getChannel(account).getMessageMeta(messageId);
+  }
+
   async forwardThread(
     account: string,
     threadId: string,
@@ -81,7 +99,9 @@ export class GmailOpsRouter implements GmailOps {
   ): Promise<void> {
     const ch = this.getChannel(account);
     if (!ch.forwardThread) {
-      throw new Error(`Gmail channel for ${account} does not support forwarding`);
+      throw new Error(
+        `Gmail channel for ${account} does not support forwarding`,
+      );
     }
     return ch.forwardThread(threadId, recipient);
   }

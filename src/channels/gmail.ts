@@ -7,6 +7,7 @@ import { OAuth2Client } from 'google-auth-library';
 
 // isMain flag is used instead of MAIN_GROUP_FOLDER constant
 import { logger } from '../logger.js';
+import type { EmailMeta } from '../gmail-ops.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -207,9 +208,7 @@ export class GmailChannel implements Channel {
       headers.find((h) => h.name?.toLowerCase() === 'date')?.value || '';
 
     const body = this.extractTextBody(lastMsg.payload);
-    const fwdSubject = subject.startsWith('Fwd:')
-      ? subject
-      : `Fwd: ${subject}`;
+    const fwdSubject = subject.startsWith('Fwd:') ? subject : `Fwd: ${subject}`;
 
     const rawEmail = [
       `To: ${recipient}`,
@@ -525,6 +524,33 @@ export class GmailChannel implements Channel {
       return body || null;
     } catch (err) {
       logger.warn({ messageId, err }, 'Failed to fetch message body');
+      return null;
+    }
+  }
+
+  async getMessageMeta(messageId: string): Promise<EmailMeta | null> {
+    if (!this.gmail) return null;
+    try {
+      const msg = await this.gmail.users.messages.get({
+        userId: 'me',
+        id: messageId,
+        format: 'full',
+      });
+      const headers = msg.data.payload?.headers || [];
+      const header = (name: string) =>
+        headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())
+          ?.value || '';
+      const body = this.extractTextBody(msg.data.payload);
+      return {
+        subject: header('Subject'),
+        from: header('From'),
+        to: header('To'),
+        date: header('Date'),
+        cc: header('Cc') || undefined,
+        body: body || '',
+      };
+    } catch (err) {
+      logger.warn({ messageId, err }, 'Failed to fetch message meta');
       return null;
     }
   }
