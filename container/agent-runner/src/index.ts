@@ -485,7 +485,10 @@ async function runQuery(
             append: systemPromptAppend,
           }
         : undefined,
-      model: 'opus[1m]',
+      // AGENT_MODEL is set by the orchestrator (`src/container-runner.ts`)
+      // so the model can be bumped without rebuilding the agent-runner image.
+      // Fallback matches the historical hardcoded value.
+      model: process.env.AGENT_MODEL || 'opus[1m]',
       effort: 'max',
       allowedTools: [
         'Bash',

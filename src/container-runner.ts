@@ -52,6 +52,27 @@ const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 /**
+ * Model the agent-runner passes to the SDK's `query()` call. Forwarded as
+ * the `AGENT_MODEL` env var on container spawn and read by
+ * `container/agent-runner/src/index.ts`. Bumping this constant is the single
+ * source of truth for the container agent's model — no rebuild of the
+ * agent-runner image needed.
+ *
+ * Format: SDK model alias (`opus`, `sonnet[1m]`) or full model ID
+ * (`claude-opus-4-7[1m]`). See
+ * `container/agent-runner/node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts`
+ * for the `model` field on `Options`.
+ */
+// Default keeps the 4.6-resolving alias (`opus[1m]`) — switching to
+// `claude-opus-4-7[1m]` without also updating the agent-runner's
+// query() call breaks every request with:
+//   "\"thinking.type.enabled\" is not supported for this model.
+//    Use \"thinking.type.adaptive\" and \"output_config.effort\" to
+//    control thinking behavior."
+// Move to 4.7 after updating agent-runner to the new thinking shape.
+const AGENT_MODEL = 'opus[1m]';
+
+/**
  * Create a filtered copy of messages.db containing only one group's messages.
  * Returns the path to the filtered DB, or null if the source DB doesn't exist.
  */
@@ -275,7 +296,12 @@ function buildVolumeMounts(
     JSON.stringify(
       {
         env: {
-          CLAUDE_CODE_MODEL: 'claude-opus-4-6',
+          // NOTE: model selection is NOT controlled here. The agent-runner
+          // calls the SDK's query() directly (not via the Claude Code CLI),
+          // and the SDK takes `model` as a query() parameter. We pass it as
+          // `AGENT_MODEL` on the container env (see below) so the runner can
+          // read it at call time. `CLAUDE_CODE_MODEL` is not a real Claude
+          // Code env var — previously set here but silently ignored.
           CLAUDE_CODE_MAX_CONTEXT_WINDOW: '1000000',
           CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
           CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
@@ -601,6 +627,11 @@ function buildContainerArgs(
       args.push('-e', `${varName}=${value}`);
     }
   }
+
+  // Select which model the agent-runner's SDK query() uses. The runner
+  // reads `process.env.AGENT_MODEL` — see `AGENT_MODEL` constant at the
+  // top of this file.
+  args.push('-e', `AGENT_MODEL=${AGENT_MODEL}`);
 
   // Pass chat JID so container scripts know which group they're in
   if (chatJid) {
