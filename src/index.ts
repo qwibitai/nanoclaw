@@ -1735,7 +1735,10 @@ async function main(): Promise<void> {
               }
               const clean = formatOutbound(output.result);
               if (clean) {
-                const { text: formatted, meta } = classifyAndFormat(clean);
+                const gmailOpsAvailable = gmailOpsRouter.accounts.length > 0;
+                const { text: formatted, meta } = classifyAndFormat(clean, {
+                  gmailOpsAvailable,
+                });
 
                 // Force-attach archive buttons from trigger metadata
                 // (classifier may not detect email category since agent formats freely)
@@ -1753,12 +1756,14 @@ async function main(): Promise<void> {
                       a.callbackData?.startsWith('archive:'),
                     )
                   ) {
-                    // Tier 1: quick text expansion
-                    meta.actions.push({
-                      label: '📧 Expand',
-                      callbackData: `expand:${emailId}:${email.account ?? ''}`,
-                      style: 'secondary' as const,
-                    });
+                    // Tier 1: quick text expansion (requires Gmail channel)
+                    if (gmailOpsAvailable) {
+                      meta.actions.push({
+                        label: '📧 Expand',
+                        callbackData: `expand:${emailId}:${email.account ?? ''}`,
+                        style: 'secondary' as const,
+                      });
+                    }
                     // Tier 3: full email in Mini App (only if tunnel URL configured)
                     if (MINI_APP_URL) {
                       const fullUrl = `${MINI_APP_URL}/email/${emailId}${
@@ -1771,11 +1776,13 @@ async function main(): Promise<void> {
                         webAppUrl: fullUrl,
                       });
                     }
-                    meta.actions.push({
-                      label: '🗄 Archive',
-                      callbackData: `archive:${emailId}`,
-                      style: 'secondary' as const,
-                    });
+                    if (gmailOpsAvailable) {
+                      meta.actions.push({
+                        label: '🗄 Archive',
+                        callbackData: `archive:${emailId}`,
+                        style: 'secondary' as const,
+                      });
+                    }
                   }
                 }
 
@@ -1805,7 +1812,11 @@ async function main(): Promise<void> {
                       );
                       const msgId = await (
                         outChannel as any
-                      ).sendMessageWithActions(chatJid, formatted, meta.actions);
+                      ).sendMessageWithActions(
+                        chatJid,
+                        formatted,
+                        meta.actions,
+                      );
                       lastMessageId = msgId;
                     }
                   } else {

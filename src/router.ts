@@ -125,7 +125,11 @@ export interface ClassifiedMessage {
  * Full classification + formatting pipeline.
  * Classifies the message, detects questions, formats with category prefix.
  */
-export function classifyAndFormat(rawText: string): ClassifiedMessage {
+export function classifyAndFormat(
+  rawText: string,
+  opts: { gmailOpsAvailable?: boolean } = {},
+): ClassifiedMessage {
+  const gmailOpsAvailable = opts.gmailOpsAvailable ?? true;
   const text = stripInternalTags(rawText);
   if (!text)
     return {
@@ -168,7 +172,7 @@ export function classifyAndFormat(rawText: string): ClassifiedMessage {
       const body = text.slice(bodyStart + 2);
       displayText = header + truncatePreview(body, 300);
 
-      if (meta.emailId) {
+      if (meta.emailId && gmailOpsAvailable) {
         meta.actions.push({
           label: '📧 Expand',
           callbackData: `expand:${meta.emailId}:${account}`,
@@ -177,7 +181,8 @@ export function classifyAndFormat(rawText: string): ClassifiedMessage {
       }
     }
 
-    // Always attach Full Email + Archive when we have an emailId
+    // Full Email works via Mini App URL even without Gmail channel;
+    // Archive requires Gmail channel to be registered.
     if (meta.emailId) {
       if (MINI_APP_URL) {
         const fullUrl = `${MINI_APP_URL}/email/${meta.emailId}${account ? `?account=${account}` : ''}`;
@@ -188,11 +193,13 @@ export function classifyAndFormat(rawText: string): ClassifiedMessage {
           webAppUrl: fullUrl,
         });
       }
-      meta.actions.push({
-        label: '🗄 Archive',
-        callbackData: `archive:${meta.emailId}`,
-        style: 'secondary' as const,
-      });
+      if (gmailOpsAvailable) {
+        meta.actions.push({
+          label: '🗄 Archive',
+          callbackData: `archive:${meta.emailId}`,
+          style: 'secondary' as const,
+        });
+      }
     }
   }
 
