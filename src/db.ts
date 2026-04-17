@@ -393,6 +393,11 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+  try {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN reminded_at INTEGER`);
+  } catch {
+    /* column already exists */
+  }
 
   // Triage v1: skip-list for learned pre-filter patterns
   database.exec(`

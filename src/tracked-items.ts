@@ -67,6 +67,7 @@ export interface TrackedItem {
     signal: string;
   }> | null;
   reasons: string[] | null;
+  reminded_at?: number | null;
 }
 
 export interface Thread {
@@ -119,14 +120,16 @@ export function insertTrackedItem(item: TrackedItem): void {
       detected_at, pushed_at, resolved_at, resolution_method,
       digest_count, telegram_message_id, classification_reason, metadata,
       confidence, model_tier, action_intent,
-      facts_extracted_json, repo_candidates_json, reasons_json
+      facts_extracted_json, repo_candidates_json, reasons_json,
+      reminded_at
     ) VALUES (
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?,
       ?, ?, ?, ?,
       ?, ?, ?,
-      ?, ?, ?
+      ?, ?, ?,
+      ?
     )`,
   ).run(
     item.id,
@@ -156,6 +159,7 @@ export function insertTrackedItem(item: TrackedItem): void {
     item.facts_extracted != null ? JSON.stringify(item.facts_extracted) : null,
     item.repo_candidates != null ? JSON.stringify(item.repo_candidates) : null,
     item.reasons != null ? JSON.stringify(item.reasons) : null,
+    item.reminded_at ?? null,
   );
 }
 
@@ -268,6 +272,7 @@ export function deserializeItem(row: Record<string, unknown>): TrackedItem {
       signal: string;
     }>('repo_candidates_json'),
     reasons: parseJsonArray<string>('reasons_json'),
+    reminded_at: (row['reminded_at'] as number | null) ?? null,
   };
 }
 
