@@ -73,10 +73,7 @@ describe('host-side output dedup', () => {
   it('strips internal tags before dedup comparison', () => {
     const sendMessage = vi.fn(async () => {});
     simulateOnOutput(
-      [
-        { result: '<internal>thinking</internal>Hello' },
-        { result: 'Hello' },
-      ],
+      [{ result: '<internal>thinking</internal>Hello' }, { result: 'Hello' }],
       sendMessage,
     );
     expect(sendMessage).toHaveBeenCalledTimes(1);

@@ -32,9 +32,11 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function countCloseWrites(writeFileSync: ReturnType<typeof vi.mocked>): number {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function countCloseWrites(writeFileSync: any): number {
   return writeFileSync.mock.calls.filter(
-    (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    (call: unknown[]) =>
+      typeof call[0] === 'string' && call[0].endsWith('_close'),
   ).length;
 }
 
