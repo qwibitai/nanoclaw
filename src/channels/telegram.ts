@@ -2,7 +2,7 @@ import fs from 'fs';
 import https from 'https';
 import path from 'path';
 
-import { Api, Bot, InlineKeyboard, InputFile } from 'grammy';
+import { Bot, InlineKeyboard, InputFile } from 'grammy';
 
 import {
   ASSISTANT_NAME,
@@ -14,6 +14,20 @@ import {
   TIMEZONE,
   TRIGGER_PATTERN,
 } from '../config.js';
+import { downloadTelegramFile } from './telegram/download.js';
+import {
+  buildEffortKeyboard,
+  buildModelKeyboard,
+  buildTargetKeyboard,
+  buildTaskPicker,
+  buildThinkingBudgetKeyboard,
+  VALID_EFFORTS,
+  VALID_THINKING_BUDGETS,
+} from './telegram/keyboards.js';
+import {
+  sendLongTelegramMessage,
+  sendTelegramMessage,
+} from './telegram/send.js';
 import {
   LiveLocationManager,
   buildLocationPrefix,
@@ -48,30 +62,6 @@ export interface TelegramChannelOpts {
   clearSession: (groupFolder: string, chatJid: string) => void;
 }
 
-/**
- * Send a message with Telegram Markdown parse mode, falling back to plain text.
- * Claude's output naturally matches Telegram's Markdown v1 format:
- *   *bold*, _italic_, `code`, ```code blocks```, [links](url)
- */
-async function sendTelegramMessage(
-  api: { sendMessage: Api['sendMessage'] },
-  chatId: string | number,
-  text: string,
-  options: { message_thread_id?: number } = {},
-): Promise<void> {
-  try {
-    await api.sendMessage(chatId, text, {
-      ...options,
-      parse_mode: 'Markdown',
-    });
-    // eslint-disable-next-line no-catch-all/no-catch-all
-  } catch (err) {
-    // Fallback: send as plain text if Markdown parsing fails
-    logger.debug({ err }, 'Markdown send failed, falling back to plain text');
-    await api.sendMessage(chatId, text, options);
-  }
-}
-
 export class TelegramChannel implements Channel {
   name = 'telegram';
 
@@ -85,56 +75,20 @@ export class TelegramChannel implements Channel {
     this.opts = opts;
   }
 
-  /**
-   * Download a Telegram file to the group's attachments directory.
-   * Returns the container-relative path (e.g. /workspace/group/attachments/photo_123.jpg)
-   * or null if the download fails.
-   */
+  /** Download helper — thin wrapper so handlers read consistent syntax. */
   private async downloadFile(
     fileId: string,
     groupFolder: string,
     filename: string,
   ): Promise<string | null> {
     if (!this.bot) return null;
-
-    try {
-      const file = await this.bot.api.getFile(fileId);
-      if (!file.file_path) {
-        logger.warn({ fileId }, 'Telegram getFile returned no file_path');
-        return null;
-      }
-
-      const groupDir = resolveGroupFolderPath(groupFolder);
-      const attachDir = path.join(groupDir, 'attachments');
-      fs.mkdirSync(attachDir, { recursive: true });
-
-      // Sanitize filename and add extension from Telegram's file_path if missing
-      const tgExt = path.extname(file.file_path);
-      const localExt = path.extname(filename);
-      const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const finalName = localExt ? safeName : `${safeName}${tgExt}`;
-      const destPath = path.join(attachDir, finalName);
-
-      const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
-      const resp = await fetch(fileUrl);
-      if (!resp.ok) {
-        logger.warn(
-          { fileId, status: resp.status },
-          'Telegram file download failed',
-        );
-        return null;
-      }
-
-      const buffer = Buffer.from(await resp.arrayBuffer());
-      fs.writeFileSync(destPath, buffer);
-
-      logger.info({ fileId, dest: destPath }, 'Telegram file downloaded');
-      return `/workspace/group/attachments/${finalName}`;
-      // eslint-disable-next-line no-catch-all/no-catch-all
-    } catch (err) {
-      logger.error({ fileId, err }, 'Failed to download Telegram file');
-      return null;
-    }
+    return downloadTelegramFile(
+      this.bot.api,
+      this.botToken,
+      fileId,
+      groupFolder,
+      filename,
+    );
   }
 
   async connect(): Promise<void> {
@@ -182,76 +136,7 @@ export class TelegramChannel implements Channel {
 
     // Command to view/change the model for this group
     // --- /model multi-step configuration flow ---
-    const VALID_EFFORTS = ['low', 'medium', 'high', 'max'] as const;
-    const VALID_THINKING_BUDGETS = [
-      'low',
-      'medium',
-      'high',
-      'adaptive',
-    ] as const;
-
-    const buildTargetKeyboard = () =>
-      new InlineKeyboard()
-        .text('This group', 'cfg:tgt:grp')
-        .text('Task', 'cfg:tgt:task');
-
-    const buildModelKeyboard = (
-      currentModel: string | undefined,
-      target: string,
-    ) => {
-      const aliases = loadModelAliases();
-      const kb = new InlineKeyboard();
-      const currentResolved = currentModel || DEFAULT_MODEL;
-      let col = 0;
-      for (const [alias, id] of Object.entries(aliases)) {
-        if (col > 0 && col % 3 === 0) kb.row();
-        const label = id === currentResolved ? `● ${alias}` : alias;
-        kb.text(label, `cfg:mod:${target}:${alias}`);
-        col++;
-      }
-      kb.row().text('Reset to default', `cfg:mod:${target}:reset`);
-      return kb;
-    };
-
-    const buildEffortKeyboard = (
-      current: string | undefined,
-      target: string,
-    ) => {
-      const kb = new InlineKeyboard();
-      for (const level of VALID_EFFORTS) {
-        const label = current === level ? `● ${level}` : level;
-        kb.text(label, `cfg:eff:${target}:${level}`);
-      }
-      kb.row()
-        .text('Reset', `cfg:eff:${target}:reset`)
-        .text('Back', `cfg:eff:${target}:back`);
-      return kb;
-    };
-
-    const buildThinkingBudgetKeyboard = (
-      current: string | undefined,
-      target: string,
-    ) => {
-      const kb = new InlineKeyboard();
-      for (const preset of VALID_THINKING_BUDGETS) {
-        const label = current === preset ? `● ${preset}` : preset;
-        kb.text(label, `cfg:tb:${target}:${preset}`);
-      }
-      kb.row().text('Back', `cfg:tb:${target}:back`);
-      return kb;
-    };
-
-    const buildTaskPicker = (
-      tasks: { id: string; model?: string | null }[],
-    ) => {
-      const kb = new InlineKeyboard();
-      for (const t of tasks) {
-        const label = `${t.id}${t.model ? ` [${t.model}]` : ''}`;
-        kb.text(label, `cfg:tpick:${t.id}`).row();
-      }
-      kb.text('Back', 'cfg:tgt:back');
-      return kb;
-    };
+    // Keyboard builders live in ./telegram/keyboards.ts — see imports.
 
     this.bot.command('model', (ctx) => {
       const chatJid = `tg:${ctx.chat.id}`;
@@ -1118,20 +1003,7 @@ export class TelegramChannel implements Channel {
         ? { message_thread_id: parseInt(threadId, 10) }
         : {};
 
-      // Telegram has a 4096 character limit per message — split if needed
-      const MAX_LENGTH = 4096;
-      if (text.length <= MAX_LENGTH) {
-        await sendTelegramMessage(this.bot.api, numericId, text, options);
-      } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await sendTelegramMessage(
-            this.bot.api,
-            numericId,
-            text.slice(i, i + MAX_LENGTH),
-            options,
-          );
-        }
-      }
+      await sendLongTelegramMessage(this.bot.api, numericId, text, options);
       logger.info(
         { jid, length: text.length, threadId },
         'Telegram message sent',

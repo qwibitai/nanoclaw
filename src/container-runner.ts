@@ -24,10 +24,7 @@ import {
   IDLE_TIMEOUT,
   ONECLI_URL,
 } from './config.js';
-import {
-  CONTAINER_RUNTIME_BIN,
-  stopContainer,
-} from './container-runtime.js';
+import { CONTAINER_RUNTIME_BIN, stopContainer } from './container-runtime.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import type { RegisteredGroup } from './types.js';
@@ -352,4 +349,3 @@ export async function runContainerAgent(
     });
   });
 }
-
