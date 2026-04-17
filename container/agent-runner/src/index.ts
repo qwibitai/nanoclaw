@@ -94,7 +94,7 @@ const DEFAULT_MODEL_BY_PROVIDER = {
   anthropic: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
   openai: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
   google: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
-  codex: process.env.CODEX_MODEL || 'codex-mini-latest',
+  codex: process.env.CODEX_MODEL || 'gpt-5.4',
 } as const;
 const ALLOWED_GROUP_TYPES = new Set<GroupType>([
   'override',
@@ -175,6 +175,45 @@ function toSdkEnv(env: Record<string, string | undefined>): Record<string, strin
   return normalized;
 }
 
+function decodeJwtExpiry(token: string): number | undefined {
+  const parts = token.split('.');
+  if (parts.length !== 3) return undefined;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1]!, 'base64url').toString('utf8'),
+    ) as Record<string, unknown>;
+    const exp = payload.exp;
+    return typeof exp === 'number' ? exp * 1000 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeCodexCliCredentials(
+  value: Record<string, unknown>,
+): CodexOAuthCredentials | undefined {
+  const tokens = value.tokens;
+  if (!tokens || typeof tokens !== 'object') {
+    return undefined;
+  }
+  const t = tokens as Record<string, unknown>;
+  const access = t.access_token;
+  const refresh = t.refresh_token;
+  if (typeof access !== 'string' || typeof refresh !== 'string') {
+    return undefined;
+  }
+  const expires = decodeJwtExpiry(access);
+  if (typeof expires !== 'number') {
+    return undefined;
+  }
+  return {
+    access,
+    refresh,
+    expires,
+    ...(typeof t.account_id === 'string' ? { accountId: t.account_id } : {}),
+  };
+}
+
 function normalizeCodexOAuthCredentials(
   value: unknown,
 ): CodexOAuthCredentials | undefined {
@@ -183,6 +222,14 @@ function normalizeCodexOAuthCredentials(
   }
 
   const direct = value as Record<string, unknown>;
+
+  // Codex CLI format: { tokens: { access_token, refresh_token, account_id } }
+  const cliFormat = normalizeCodexCliCredentials(direct);
+  if (cliFormat) {
+    return cliFormat;
+  }
+
+  // Direct format: { access, refresh, expires }
   if (
     typeof direct.access === 'string' &&
     typeof direct.refresh === 'string' &&
@@ -198,6 +245,7 @@ function normalizeCodexOAuthCredentials(
     };
   }
 
+  // Provider map format: { "openai-codex": { access, refresh, expires } }
   const mapped = direct['openai-codex'];
   if (!mapped || typeof mapped !== 'object') {
     return undefined;
@@ -239,7 +287,7 @@ function parseCodexOAuthJson(oauthJson: string): CodexOAuthOptions {
     );
   }
 
-  return { credentials };
+  return { credentials: credentials as CodexOAuthOptions['credentials'] };
 }
 
 function resolveSessionProviderConfig(env: NodeJS.ProcessEnv): SessionProviderConfig {
@@ -704,7 +752,7 @@ async function runQuery(
             log(
               `実行中セッションに IPC フォローアップを反映します (${text.length} 文字)`,
             );
-            await session.send(text);
+            await session!.send(text);
           }
         })
         .catch((err) => {

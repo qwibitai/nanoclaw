@@ -1,3 +1,7 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
 import { readEnvFile } from './env.js';
 
 export type LlmProvider = 'anthropic' | 'openai' | 'gemini' | 'codex';
@@ -25,6 +29,7 @@ const ENV_KEYS = [
   'OPENAI_BASE_URL',
   'GEMINI_API_KEY',
   'OAS_CODEX_OAUTH_JSON',
+  'OAS_CODEX_AUTH_PATH',
   'ALLOW_DIRECT_SECRET_INJECTION',
 ] as const;
 
@@ -46,6 +51,28 @@ function requiredValue(
 
 function isDirectSecretInjectionEnabled(value: string | undefined): boolean {
   return value === 'true';
+}
+
+function resolveCodexAuthPath(envPath: string | undefined): string {
+  if (envPath) {
+    return envPath.startsWith('~')
+      ? path.join(os.homedir(), envPath.slice(1))
+      : envPath;
+  }
+  const codexHome = process.env.CODEX_HOME
+    ? path.resolve(process.env.CODEX_HOME)
+    : path.join(os.homedir(), '.codex');
+  return path.join(codexHome, 'auth.json');
+}
+
+function readCodexAuthFile(authPath: string): string | undefined {
+  try {
+    const content = fs.readFileSync(authPath, 'utf-8');
+    JSON.parse(content);
+    return content;
+  } catch {
+    return undefined;
+  }
 }
 
 function requireDirectSecretInjectionOptIn(
@@ -108,24 +135,26 @@ export function detectActiveProviderConfig(): ActiveProviderConfig {
       };
     }
 
-    if (provider === 'codex' && env.OAS_CODEX_OAUTH_JSON) {
-      requireDirectSecretInjectionOptIn(provider, allowDirectSecretInjection);
-      return {
-        provider,
-        usesCredentialProxy: false,
-        allowDirectSecretInjection,
-        codexOAuthJson: requiredValue(
-          env.OAS_CODEX_OAUTH_JSON,
-          'OAS_CODEX_OAUTH_JSON',
+    if (provider === 'codex') {
+      const codexAuthPath = resolveCodexAuthPath(env.OAS_CODEX_AUTH_PATH);
+      const codexOAuthJson =
+        env.OAS_CODEX_OAUTH_JSON || readCodexAuthFile(codexAuthPath);
+      if (codexOAuthJson) {
+        requireDirectSecretInjectionOptIn(provider, allowDirectSecretInjection);
+        return {
           provider,
-        ),
-      };
+          usesCredentialProxy: false,
+          allowDirectSecretInjection,
+          codexOAuthJson,
+        };
+      }
     }
   }
 
   throw new Error(
     '[provider-config] No supported provider credentials found in .env.\n' +
-      'Set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, OAS_CODEX_OAUTH_JSON\n' +
+      'Set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, OAS_CODEX_AUTH_PATH\n' +
+      '(Or have ~/.codex/auth.json from `codex login`)\n' +
       '\n' +
       'NOTE: OAuth-based authentication (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_AUTH_TOKEN) is not supported.\n' +
       'Anthropic prohibits third-party use of OAuth tokens. Use an API key from https://console.anthropic.com instead.',
