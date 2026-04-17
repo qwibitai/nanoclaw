@@ -346,9 +346,17 @@ function createSchema(database: Database.Database): void {
       account TEXT NOT NULL,
       original_body TEXT NOT NULL,
       enriched_at TEXT NOT NULL,
-      expires_at TEXT NOT NULL
+      expires_at TEXT NOT NULL,
+      thread_id TEXT
     )
   `);
+
+  // Backward-compat: add thread_id column if it doesn't already exist
+  try {
+    database.exec(`ALTER TABLE draft_originals ADD COLUMN thread_id TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
 
   database.exec(`
     CREATE TABLE IF NOT EXISTS ux_config (

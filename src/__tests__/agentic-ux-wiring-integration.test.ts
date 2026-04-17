@@ -22,7 +22,7 @@ describe('Agentic UX wiring integration', () => {
       );
       CREATE TABLE draft_originals (
         draft_id TEXT PRIMARY KEY, account TEXT, original_body TEXT,
-        enriched_at TEXT, expires_at TEXT
+        enriched_at TEXT, expires_at TEXT, thread_id TEXT
       );
       CREATE TABLE task_detail_state (
         task_id TEXT PRIMARY KEY, title TEXT, status TEXT,

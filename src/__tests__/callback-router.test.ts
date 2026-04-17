@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { handleCallback } from '../callback-router.js';
+import { handleCallback, resolveFullEmailUrl } from '../callback-router.js';
 import type { CallbackRouterDeps } from '../callback-router.js';
 
 vi.mock('../config.js', async (importOriginal) => {
@@ -22,6 +22,7 @@ function makeDeps(): CallbackRouterDeps {
         },
       ]),
       recordAction: vi.fn(),
+      getByEmailId: vi.fn().mockReturnValue(null),
     } as any,
     autoApproval: { cancel: vi.fn() } as any,
     statusBar: { removePendingItem: vi.fn() } as any,
@@ -337,5 +338,35 @@ describe('handleCallback', () => {
       expect.stringContaining('Declined'),
       [],
     );
+  });
+});
+
+describe('resolveFullEmailUrl', () => {
+  it('uses /reply/:draftId when a draft exists', () => {
+    const url = resolveFullEmailUrl({
+      emailId: 'email-X',
+      account: 'personal',
+      draftIdForThread: 'draft-for-thread-X',
+    });
+    expect(url).toMatch(/\/reply\/draft-for-thread-X\?account=personal$/);
+  });
+
+  it('uses /email/:emailId when no draft exists', () => {
+    const url = resolveFullEmailUrl({
+      emailId: 'email-Y',
+      account: 'personal',
+      draftIdForThread: null,
+    });
+    expect(url).toMatch(/\/email\/email-Y\?account=personal$/);
+  });
+
+  it('URL-encodes emailId and account', () => {
+    const url = resolveFullEmailUrl({
+      emailId: 'email with space',
+      account: 'has@at.com',
+      draftIdForThread: null,
+    });
+    expect(url).toContain('email%20with%20space');
+    expect(url).toContain('has%40at.com');
   });
 });

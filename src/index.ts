@@ -1561,6 +1561,7 @@ async function main(): Promise<void> {
         gmailOps: gmailOpsRouter,
         calendarOps: calendarOpsRouter,
         draftWatcher,
+        db: getDb(),
         findChannel: (jid) => findChannel(channels, jid),
       });
     });

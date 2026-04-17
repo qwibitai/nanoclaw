@@ -4,7 +4,23 @@ import type { AutoApprovalTimer } from './auto-approval.js';
 import type { StatusBarManager } from './status-bar.js';
 import type { GmailOps } from './gmail-ops.js';
 import type { DraftEnrichmentWatcher } from './draft-enrichment.js';
+import { getDraftIdForThread } from './draft-enrichment.js';
+import type Database from 'better-sqlite3';
 import { MINI_APP_URL } from './config.js';
+
+export interface FullEmailUrlInput {
+  emailId: string;
+  account: string;
+  draftIdForThread: string | null;
+}
+
+export function resolveFullEmailUrl(input: FullEmailUrlInput): string {
+  const base = (MINI_APP_URL || '').replace(/\/$/, '');
+  if (input.draftIdForThread) {
+    return `${base}/reply/${encodeURIComponent(input.draftIdForThread)}?account=${encodeURIComponent(input.account)}`;
+  }
+  return `${base}/email/${encodeURIComponent(input.emailId)}?account=${encodeURIComponent(input.account)}`;
+}
 import {
   truncatePreview,
   getCachedEmailBody,
@@ -22,6 +38,7 @@ export interface CallbackRouterDeps {
     rsvp(account: string, eventId: string, response: string): Promise<void>;
   };
   draftWatcher?: DraftEnrichmentWatcher;
+  db?: Database.Database;
   findChannel: (jid: string) => (Channel & Record<string, any>) | undefined;
 }
 
@@ -159,6 +176,14 @@ export async function handleCallback(
         }
         if (body && channel?.editMessageTextAndButtons) {
           const preview = truncatePreview(body, 800);
+          const actedExpand = deps.archiveTracker.getByEmailId
+            ? deps.archiveTracker.getByEmailId(entityId)
+            : null;
+          const threadIdExpand = actedExpand?.thread_id ?? null;
+          const draftIdExpand =
+            threadIdExpand && account && deps.db
+              ? getDraftIdForThread(deps.db, account, threadIdExpand)
+              : null;
           await channel.editMessageTextAndButtons(
             query.chatJid,
             query.messageId,
@@ -173,7 +198,11 @@ export async function handleCallback(
                 label: '🌐 Full Email',
                 callbackData: `noop:${entityId}`,
                 webAppUrl: MINI_APP_URL
-                  ? `${MINI_APP_URL}/email/${entityId}?account=${account}`
+                  ? resolveFullEmailUrl({
+                      emailId: entityId,
+                      account,
+                      draftIdForThread: draftIdExpand,
+                    })
                   : undefined,
                 style: 'secondary',
               },
@@ -189,10 +218,20 @@ export async function handleCallback(
       }
 
       case 'collapse': {
-        const account = extra;
         const body = getCachedEmailBody(entityId);
         if (body && channel?.editMessageTextAndButtons) {
           const summary = truncatePreview(body, 300);
+          // collapse callback carries account as `extra` (collapse:entityId:account).
+          // Fall back to acted_emails lookup for legacy callbacks that lack it.
+          const actedCollapse = deps.archiveTracker.getByEmailId
+            ? deps.archiveTracker.getByEmailId(entityId)
+            : null;
+          const threadIdCollapse = actedCollapse?.thread_id ?? null;
+          const accountCollapse = extra || actedCollapse?.account || '';
+          const draftIdCollapse =
+            threadIdCollapse && accountCollapse && deps.db
+              ? getDraftIdForThread(deps.db, accountCollapse, threadIdCollapse)
+              : null;
           await channel.editMessageTextAndButtons(
             query.chatJid,
             query.messageId,
@@ -200,8 +239,8 @@ export async function handleCallback(
             [
               {
                 label: '📧 Expand',
-                callbackData: account
-                  ? `expand:${entityId}:${account}`
+                callbackData: accountCollapse
+                  ? `expand:${entityId}:${accountCollapse}`
                   : `expand:${entityId}`,
                 style: 'secondary',
               },
@@ -209,7 +248,11 @@ export async function handleCallback(
                 label: '🌐 Full Email',
                 callbackData: `noop:${entityId}`,
                 webAppUrl: MINI_APP_URL
-                  ? `${MINI_APP_URL}/email/${entityId}${account ? '?account=' + account : ''}`
+                  ? resolveFullEmailUrl({
+                      emailId: entityId,
+                      account: accountCollapse,
+                      draftIdForThread: draftIdCollapse,
+                    })
                   : undefined,
                 style: 'secondary',
               },
