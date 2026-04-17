@@ -44,6 +44,18 @@ export interface MessageOutboundEvent extends NanoClawEvent {
   };
 }
 
+export interface TurnCompletedEvent extends NanoClawEvent {
+  type: 'turn.completed';
+  source: 'orchestrator';
+  groupId: string;
+  payload: {
+    groupName: string;
+    userMessage: string;
+    agentReply: string;
+    durationMs: number;
+  };
+}
+
 // --- Task/Executor events ---
 
 export interface TaskQueuedEvent extends NanoClawEvent {
@@ -576,6 +588,7 @@ export interface EmailDraftSendFailedEvent extends NanoClawEvent {
 export interface EventMap {
   'message.inbound': MessageInboundEvent;
   'message.outbound': MessageOutboundEvent;
+  'turn.completed': TurnCompletedEvent;
   'task.queued': TaskQueuedEvent;
   'task.started': TaskStartedEvent;
   'task.complete': TaskCompleteEvent;

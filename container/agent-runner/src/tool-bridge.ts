@@ -83,6 +83,8 @@ export function buildIpcTools(
 ): Record<string, ToolDefinition> {
   const messagesDir = path.join(ipcDir, 'messages');
   const tasksDir = path.join(ipcDir, 'tasks');
+  const rememberDir = path.join(ipcDir, 'remember');
+  fs.mkdirSync(rememberDir, { recursive: true });
   const groupId = path.basename(groupFolder);
 
   return {
@@ -231,6 +233,51 @@ export function buildIpcTools(
           model,
         });
         return { success: true };
+      },
+    },
+
+    remember: {
+      description:
+        'Save a durable fact to shared cross-group memory. Use sparingly for facts that should persist across conversations and groups (user preferences, identity, ongoing projects, external references).',
+      parameters: z.object({
+        type: z
+          .enum(['user', 'feedback', 'project', 'reference'])
+          .describe('Fact category'),
+        name: z.string().min(1).max(80).describe('Short title under 60 chars'),
+        body: z.string().min(1).describe('1-3 paragraphs explaining the fact'),
+        description: z
+          .string()
+          .optional()
+          .describe('One-line summary for the index; defaults to name'),
+        scopes: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Optional scope tags: personal, chat, coding, research, work:whoisxml, etc.',
+          ),
+      }),
+      execute: async ({
+        type,
+        name,
+        body,
+        description,
+        scopes,
+      }: {
+        type: 'user' | 'feedback' | 'project' | 'reference';
+        name: string;
+        body: string;
+        description?: string;
+        scopes?: string[];
+      }) => {
+        writeIpcFile(rememberDir, {
+          type,
+          name,
+          body,
+          description,
+          scopes,
+          timestamp: new Date().toISOString(),
+        });
+        return { success: true, message: `Saved candidate: ${name}` };
       },
     },
   };

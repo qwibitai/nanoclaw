@@ -810,6 +810,33 @@ export function getMessageContentById(
   return row?.content;
 }
 
+/**
+ * Returns the most recent USER message (not from bot, not from self if applicable)
+ * for the given chat. Used to pair agent replies with the user message that
+ * likely triggered them, for memory extraction.
+ */
+export function getLatestInboundMessage(
+  chatJid: string,
+  botPrefix: string,
+): { content: string; timestamp: string } | undefined {
+  const row = db
+    .prepare(
+      `SELECT content, timestamp FROM messages
+       WHERE chat_jid = ?
+         AND is_from_me = 0
+         AND is_bot_message = 0
+         AND content NOT LIKE ?
+         AND content != ''
+         AND content IS NOT NULL
+       ORDER BY timestamp DESC
+       LIMIT 1`,
+    )
+    .get(chatJid, `${botPrefix}:%`) as
+    | { content: string; timestamp: string }
+    | undefined;
+  return row;
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {

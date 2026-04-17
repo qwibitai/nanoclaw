@@ -1,4 +1,9 @@
 import type { UxConfig } from './ux-config.js';
+import {
+  parseMemoryCommand,
+  handleMemoryCommand,
+  type MemoryCommand,
+} from './memory/shared/commands.js';
 
 export interface ConfigListCommand {
   type: 'config';
@@ -26,7 +31,8 @@ export type ChatCommand =
   | ConfigListCommand
   | ConfigSetCommand
   | ConfigResetCommand
-  | SmokeTestCommand;
+  | SmokeTestCommand
+  | (MemoryCommand & { type: 'memory' });
 
 export function parseCommand(text: string): ChatCommand | null {
   const trimmed = text.trim();
@@ -35,6 +41,9 @@ export function parseCommand(text: string): ChatCommand | null {
   if (lower === 'smoketest') {
     return { type: 'smoketest' };
   }
+
+  const mem = parseMemoryCommand(trimmed);
+  if (mem) return { type: 'memory', ...mem };
 
   if (!lower.startsWith('config ') && lower !== 'config list') {
     return null;
@@ -59,6 +68,13 @@ export function parseCommand(text: string): ChatCommand | null {
   }
 
   return null;
+}
+
+export function handleMemoryChatCommand(cmd: ChatCommand): string {
+  if (cmd.type !== 'memory') return '';
+  // strip the discriminator before passing to inner handler
+  const { type: _t, ...inner } = cmd;
+  return handleMemoryCommand(inner as MemoryCommand);
 }
 
 export function handleConfigCommand(

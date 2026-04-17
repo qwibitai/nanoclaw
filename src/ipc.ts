@@ -23,6 +23,7 @@ import { inferActionClasses } from './learning/outcome-enricher.js';
 import { saveProcedure } from './memory/procedure-store.js';
 import type { Procedure } from './memory/procedure-store.js';
 import { addWatcher } from './watchers/watcher-store.js';
+import { rememberTool } from './memory/shared/remember-tool.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -217,6 +218,47 @@ export function startIpcWatcher(deps: IpcDeps): void {
         }
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+      }
+
+      // Process remember/ IPC files from this group
+      const rememberDir = path.join(ipcBaseDir, sourceGroup, 'remember');
+      if (fs.existsSync(rememberDir)) {
+        for (const file of fs.readdirSync(rememberDir)) {
+          if (!file.endsWith('.json')) continue;
+          const filePath = path.join(rememberDir, file);
+          try {
+            const raw = fs.readFileSync(filePath, 'utf8');
+            const data = JSON.parse(raw) as {
+              type: 'user' | 'feedback' | 'project' | 'reference';
+              name: string;
+              body: string;
+              description?: string;
+              scopes?: string[];
+            };
+            await rememberTool({
+              groupName: sourceGroup,
+              type: data.type,
+              name: data.name,
+              body: data.body,
+              description: data.description,
+              scopes: data.scopes,
+            });
+            fs.unlinkSync(filePath);
+          } catch (err) {
+            logger.warn(
+              { err: err instanceof Error ? err.message : String(err), file },
+              'failed to process remember IPC file',
+            );
+            // Move to .failed/ to prevent retry loop
+            try {
+              const failedDir = path.join(rememberDir, '.failed');
+              fs.mkdirSync(failedDir, { recursive: true });
+              fs.renameSync(filePath, path.join(failedDir, file));
+            } catch {
+              /* ignore */
+            }
+          }
+        }
       }
     }
 

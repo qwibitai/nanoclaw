@@ -62,6 +62,7 @@ import {
   storeMessage,
   getPendingTrustApprovalIds,
   getDb,
+  getLatestInboundMessage,
 } from './db.js';
 import { ExecutorPool } from './executor-pool.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -183,6 +184,11 @@ import type {
   SystemStartupEvent,
   ProactiveSuggestionEvent,
 } from './events.js';
+import { extractCandidates } from './memory/shared/extractor.js';
+import { runVerifierSweep } from './memory/shared/verifier.js';
+import { regenerateIndex } from './memory/shared/store.js';
+import { ensureMemoryDirs } from './memory/shared/paths.js';
+import { NANOCLAW_MEMORY_EXTRACT, NANOCLAW_MEMORY_VERIFY } from './env.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -551,6 +557,38 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           },
         });
         outputSentToUser = true;
+        try {
+          const inbound = getLatestInboundMessage(chatJid, ASSISTANT_NAME);
+          // Only pair if the inbound is recent (≤5 min old). For proactive
+          // sends from scheduled tasks, getLatestInboundMessage may return a
+          // stale user message from hours ago — pairing those would create
+          // bogus extraction candidates.
+          const TURN_PAIRING_WINDOW_MS = 5 * 60 * 1000;
+          const inboundAgeMs = inbound
+            ? Date.now() - new Date(inbound.timestamp).getTime()
+            : Infinity;
+          if (inbound && inboundAgeMs <= TURN_PAIRING_WINDOW_MS) {
+            eventBus.emit('turn.completed', {
+              type: 'turn.completed',
+              source: 'orchestrator',
+              groupId: group.folder,
+              timestamp: Date.now(),
+              payload: {
+                groupName: group.folder,
+                userMessage: inbound.content,
+                agentReply: outText,
+                durationMs: Date.now() - responseStartMs,
+              },
+            });
+          }
+        } catch (emitErr) {
+          logger.warn(
+            {
+              err: emitErr instanceof Error ? emitErr.message : String(emitErr),
+            },
+            'failed to emit turn.completed (per-reply)',
+          );
+        }
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -1144,6 +1182,36 @@ async function main(): Promise<void> {
   initOutcomeStore();
   logger.info('Database initialized');
   loadState();
+
+  // Shared memory — init dirs and index, wire extractor + verifier.
+  try {
+    ensureMemoryDirs();
+    regenerateIndex();
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'shared memory init failed (continuing without it)',
+    );
+  }
+
+  if (NANOCLAW_MEMORY_EXTRACT === '1') {
+    eventBus.on('turn.completed', (event) => {
+      void extractCandidates({
+        groupName: event.payload.groupName,
+        userMessage: event.payload.userMessage,
+        agentReply: event.payload.agentReply,
+      });
+    });
+  }
+
+  if (NANOCLAW_MEMORY_VERIFY === '1') {
+    const MEMORY_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+    const memorySweepTimer = setInterval(() => {
+      void runVerifierSweep();
+    }, MEMORY_SWEEP_INTERVAL_MS);
+    process.on('SIGTERM', () => clearInterval(memorySweepTimer));
+    process.on('SIGINT', () => clearInterval(memorySweepTimer));
+  }
 
   // Ensure OneCLI agents exist for all registered groups.
   // Recovers from missed creates (e.g. OneCLI was down at registration time).

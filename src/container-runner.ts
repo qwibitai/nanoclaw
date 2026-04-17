@@ -33,6 +33,8 @@ import {
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
 import { readEnvFile } from './env.js';
+import { ensureMemoryDirs } from './memory/shared/paths.js';
+import { regenerateIndex } from './memory/shared/store.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -730,6 +732,16 @@ export async function runContainerAgent(
 ): Promise<ContainerOutput> {
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
+
+  try {
+    ensureMemoryDirs();
+    regenerateIndex();
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'shared memory init failed (continuing without it)',
+    );
+  }
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');

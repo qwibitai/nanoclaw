@@ -2,6 +2,18 @@ import fs from 'fs';
 import path from 'path';
 import { logger } from './logger.js';
 
+// Shared-memory kill-switch env vars (read from process.env; set before startup).
+// Convention: '0' disables, '1' (default) enables.
+export const NANOCLAW_MEMORY_EXTRACT =
+  process.env.NANOCLAW_MEMORY_EXTRACT ?? '1';
+export const NANOCLAW_MEMORY_VERIFY = process.env.NANOCLAW_MEMORY_VERIFY ?? '1';
+// Optional comma-separated list of group folder names to restrict auto-extraction.
+// Unset or empty = extract from all groups.
+export const NANOCLAW_MEMORY_EXTRACT_GROUPS =
+  process.env.NANOCLAW_MEMORY_EXTRACT_GROUPS ?? '';
+// Optional override for shared memory directory (used in tests).
+export const NANOCLAW_MEMORY_DIR = process.env.NANOCLAW_MEMORY_DIR;
+
 /**
  * Parse the .env file and return values for the requested keys.
  * Does NOT load anything into process.env — callers decide what to
