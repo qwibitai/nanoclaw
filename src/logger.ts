@@ -2,7 +2,6 @@ import pino from 'pino';
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
-  transport: { target: 'pino-pretty', options: { colorize: true } },
 });
 
 /** Install process-level error handlers that route through pino.
@@ -10,7 +9,7 @@ export const logger = pino({
 export function installProcessHandlers(): void {
   process.on('uncaughtException', (err) => {
     logger.fatal({ err }, 'Uncaught exception');
-    process.exit(1);
+    process.exitCode = 1;
   });
 
   process.on('unhandledRejection', (reason) => {
