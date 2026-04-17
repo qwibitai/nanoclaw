@@ -27,10 +27,7 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
-import {
-  writeGroupsSnapshot,
-  writeTasksSnapshot,
-} from './container-runner.js';
+import { writeGroupsSnapshot, writeTasksSnapshot } from './container-runner.js';
 import { GroupQueue } from './group-queue.js';
 import { getEffectiveModel } from './orchestrator/effective-model.js';
 import {

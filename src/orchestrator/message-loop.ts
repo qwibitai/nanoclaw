@@ -15,14 +15,8 @@ import {
 } from '../db.js';
 import type { GroupQueue } from '../group-queue.js';
 import { logger } from '../logger.js';
-import {
-  findChannel,
-  formatMessages,
-} from '../router.js';
-import {
-  isTriggerAllowed,
-  loadSenderAllowlist,
-} from '../sender-allowlist.js';
+import { findChannel, formatMessages } from '../router.js';
+import { isTriggerAllowed, loadSenderAllowlist } from '../sender-allowlist.js';
 import type { Channel, NewMessage } from '../types.js';
 
 import { getEffectiveModel } from './effective-model.js';

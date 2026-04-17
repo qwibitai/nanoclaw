@@ -49,7 +49,9 @@ export function createProcessGroupMessages(
 ): (chatJid: string) => Promise<boolean> {
   const { state, queue, channels, runAgent } = deps;
 
-  return async function processGroupMessages(chatJid: string): Promise<boolean> {
+  return async function processGroupMessages(
+    chatJid: string,
+  ): Promise<boolean> {
     const group = state.registeredGroups[chatJid];
     if (!group) return true;
 
@@ -100,7 +102,12 @@ export function createProcessGroupMessages(
         );
     }
 
-    const prompt = formatMessages(missedMessages, TIMEZONE, group, effectiveModel);
+    const prompt = formatMessages(
+      missedMessages,
+      TIMEZONE,
+      group,
+      effectiveModel,
+    );
 
     const previousCursor = state.lastAgentTimestamp[chatJid] || '';
     state.lastAgentTimestamp[chatJid] =
