@@ -481,4 +481,104 @@ describe('GroupQueue', () => {
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
   });
+
+  // --- Idle timer resetter ---
+
+  it('sendMessage invokes registered idle timer resetter', async () => {
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+
+    const resetter = vi.fn();
+    queue.registerIdleTimerResetter('group1@g.us', resetter);
+
+    queue.sendMessage('group1@g.us', 'hello');
+    expect(resetter).toHaveBeenCalledTimes(1);
+
+    // Second message should invoke it again
+    queue.sendMessage('group1@g.us', 'world');
+    expect(resetter).toHaveBeenCalledTimes(2);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('sendMessage does not throw when no resetter is registered', async () => {
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+
+    // No resetter registered — sendMessage should still succeed
+    expect(() => queue.sendMessage('group1@g.us', 'hello')).not.toThrow();
+    expect(queue.sendMessage('group1@g.us', 'hello')).toBe(true);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('unregisterIdleTimerResetter stops callback invocation', async () => {
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+
+    const resetter = vi.fn();
+    queue.registerIdleTimerResetter('group1@g.us', resetter);
+
+    queue.sendMessage('group1@g.us', 'hello');
+    expect(resetter).toHaveBeenCalledTimes(1);
+
+    // Unregister, then send another message
+    queue.unregisterIdleTimerResetter('group1@g.us');
+
+    queue.sendMessage('group1@g.us', 'world');
+    expect(resetter).toHaveBeenCalledTimes(1); // not called again
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
 });
