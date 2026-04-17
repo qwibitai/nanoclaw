@@ -29,6 +29,72 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
   const app = express();
   app.use(express.json());
 
+  // Root page — opened when user taps the "📱 App" menu button in Telegram.
+  // Lists the attention and archive queues with live counts so the user has
+  // somewhere to land. Individual item links go to existing /email/:id etc.
+  app.get('/', (_req, res) => {
+    const attention = opts.db
+      .prepare(
+        `SELECT id, title, detected_at FROM tracked_items
+         WHERE state IN ('pushed','pending','held')
+           AND classification = 'push'
+         ORDER BY detected_at DESC
+         LIMIT 20`,
+      )
+      .all() as Array<{ id: string; title: string; detected_at: number }>;
+    const archive = opts.db
+      .prepare(
+        `SELECT id, title, action_intent, detected_at FROM tracked_items
+         WHERE classification = 'digest' AND state = 'queued'
+         ORDER BY detected_at DESC
+         LIMIT 20`,
+      )
+      .all() as Array<{
+      id: string;
+      title: string;
+      action_intent: string | null;
+      detected_at: number;
+    }>;
+
+    const esc = (s: string) =>
+      s.replace(
+        /[&<>"']/g,
+        (c) =>
+          ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+          })[c] ?? c,
+      );
+    const row = (it: { id: string; title: string; detected_at: number }) => {
+      const mins = Math.round((Date.now() - it.detected_at) / 60_000);
+      return `<li><a href="/email/${esc(it.id)}">${esc(it.title || '(no subject)')}</a> <span class="age">${mins}m</span></li>`;
+    };
+
+    res.type('html').send(`<!doctype html><html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nanoclaw</title>
+<style>
+body{font:16px/1.45 -apple-system,system-ui,sans-serif;margin:0;padding:16px;background:#f4f6f8;color:#111}
+h1{font-size:18px;margin:0 0 16px}
+h2{font-size:15px;margin:20px 0 8px;color:#444}
+ul{list-style:none;padding:0;margin:0;background:#fff;border-radius:10px;overflow:hidden}
+li{padding:10px 14px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+li:last-child{border-bottom:none}
+a{color:#0366d6;text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.age{color:#888;font-size:12px;flex:none}
+.empty{color:#888;font-style:italic;padding:10px 14px;background:#fff;border-radius:10px}
+</style></head><body>
+<h1>nanoclaw</h1>
+<h2>📥 Attention (${attention.length})</h2>
+${attention.length === 0 ? '<div class="empty">Inbox is clear.</div>' : `<ul>${attention.map(row).join('')}</ul>`}
+<h2>🗂 Archive queue (${archive.length})</h2>
+${archive.length === 0 ? '<div class="empty">Nothing queued for archive.</div>' : `<ul>${archive.map(row).join('')}</ul>`}
+</body></html>`);
+  });
+
   function lookupDraftAccount(draftId: string): string | null {
     const row = opts.db
       .prepare('SELECT account FROM draft_originals WHERE draft_id = ?')

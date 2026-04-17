@@ -53,13 +53,18 @@ export function handleArchive(itemId: string): void {
   }
 
   if (item.classification) {
+    // Archive from an attention card is effectively an override: the
+    // classifier put this item in attention and the user chose to archive
+    // — so the routing was wrong. Record as a negative example so the
+    // learning loop can correct. This consolidates the former
+    // "Move to archive queue" button's role into plain "Archive".
     recordExample({
-      kind: 'positive',
+      kind: 'negative',
       trackedItemId: itemId,
       emailSummary: item.title,
       agentQueue: item.classification,
       userQueue: 'archive_candidate',
-      reasons: ['user clicked archive'],
+      reasons: ['user archived from attention card'],
     });
   }
 }

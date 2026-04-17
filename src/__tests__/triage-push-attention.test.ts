@@ -51,8 +51,11 @@ describe('pushAttentionItem', () => {
         'triage:snooze:1h:x1',
         'triage:snooze:tomorrow:x1',
         'triage:archive:x1',
-        'triage:override:archive:x1',
       ]),
     );
+    // "triage:override:archive" was folded into plain "triage:archive" when
+    // the keyboard was simplified — archive-from-attention now records the
+    // negative learning signal directly.
+    expect(flat).not.toContain('triage:override:archive:x1');
   });
 });

@@ -18,8 +18,10 @@ export async function pushAttentionItem(
 ): Promise<void> {
   const text = `📌 *${input.title}*\nfrom: ${input.sender}\nreason: ${input.reason}`;
 
-  // Two rows of compact emoji-prefixed buttons (was three rows). Keeps all
-  // five actions accessible without the lonely "Move to archive queue" row.
+  // Single row of four compact actions. "Move to archive queue" was dropped
+  // — its learning signal (negative override) is now what Archive records
+  // by default when clicked from an attention card, since an archive action
+  // on a classifier-escalated item IS the classifier being wrong.
   const keyboard = [
     [
       { text: '⏰ 1h', callback_data: `triage:snooze:1h:${input.itemId}` },
@@ -28,13 +30,7 @@ export async function pushAttentionItem(
         callback_data: `triage:snooze:tomorrow:${input.itemId}`,
       },
       { text: '✕ Dismiss', callback_data: `triage:dismiss:${input.itemId}` },
-    ],
-    [
       { text: '🗃 Archive', callback_data: `triage:archive:${input.itemId}` },
-      {
-        text: '→ Archive queue',
-        callback_data: `triage:override:archive:${input.itemId}`,
-      },
     ],
   ];
 

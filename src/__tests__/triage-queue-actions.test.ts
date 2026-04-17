@@ -12,7 +12,7 @@ describe('queue-actions', () => {
   beforeEach(() => _initTestDatabase());
   afterEach(() => _closeDatabase());
 
-  it('handleArchive marks item resolved and records skip + positive example', () => {
+  it('handleArchive marks item resolved and records skip + negative example', () => {
     insertTrackedItem({
       id: 'a1',
       source: 'gmail',
@@ -61,7 +61,10 @@ describe('queue-actions', () => {
         `SELECT kind, user_queue FROM triage_examples WHERE tracked_item_id = ?`,
       )
       .get('a1') as { kind: string; user_queue: string } | undefined;
-    expect(ex?.kind).toBe('positive');
+    // Archive-from-attention records a negative example (the classifier
+    // shouldn't have escalated this). This consolidates the former
+    // "Move to archive queue" override into plain Archive.
+    expect(ex?.kind).toBe('negative');
     expect(ex?.user_queue).toBe('archive_candidate');
   });
 
