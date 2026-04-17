@@ -6,6 +6,7 @@ import { execSync } from 'child_process';
 import os from 'os';
 import path from 'path';
 
+import { BROWSER_CDP_URL } from './config.js';
 import { logger } from './logger.js';
 import { waitForSidecarReady } from './browser/playwright-client.js';
 
@@ -136,12 +137,17 @@ export async function ensureBrowserSidecar(): Promise<void> {
     );
     return;
   }
-  const cdpUrl = process.env.BROWSER_CDP_URL ?? 'http://localhost:9222';
-  const ready = await waitForSidecarReady(cdpUrl, { timeoutMs: 15_000, intervalMs: 250 });
+  const ready = await waitForSidecarReady(BROWSER_CDP_URL, {
+    timeoutMs: 15_000,
+    intervalMs: 250,
+  });
   if (ready) {
     logger.info('Browser sidecar started and CDP is ready');
   } else {
-    logger.warn({ cdpUrl }, 'Browser sidecar started but CDP did not respond within 15s');
+    logger.warn(
+      { cdpUrl: BROWSER_CDP_URL },
+      'Browser sidecar started but CDP did not respond within 15s',
+    );
   }
 }
 
