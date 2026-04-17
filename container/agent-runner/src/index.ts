@@ -581,7 +581,16 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
 - For tasks with multiple independent subtasks (e.g. fixing 5 repos), send incremental progress via \`send_message\` as each subtask completes. Don't wait for all to finish.
 - Format: "✅ 1/5 — fixed auth bug in repo-x (PR #123)" as each one lands.
 - If a subtask fails, report immediately: "❌ Failed: repo-y — GitHub auth error (details...)"
-- When all done, send a summary.`;
+- When all done, send a summary.
+
+## Parallelize independent work
+
+Your turn blocks new user messages — anything that arrives while you're mid-turn gets "queued behind current task." Keep turns short by running independent work in parallel.
+
+- **Multiple unrelated commands in one user message** (e.g. "sign for me", "update my address", "check the ticket") — handle them as parallel tool calls in a single response, not one-by-one. Only serialize when a later step truly depends on an earlier one's output.
+- **N-of-something work** (reading 5 emails, checking 3 tickets, fetching 4 URLs) — fire all the tool calls in one batch, then summarize once per "Batch results" guidance in the per-group prompt.
+- **Genuinely long or heavy branches** — dispatch them via the \`Agent\` tool so they run on their own budget while your main turn stays responsive. Good candidates: deep web research, multi-file codebase exploration, anything you'd describe as "go do X and come back with findings."
+- **Rule of thumb:** if two steps don't read each other's output, they should run concurrently.`;
   globalClaudeMd = globalClaudeMd
     ? globalClaudeMd + escalationInstruction
     : escalationInstruction;
