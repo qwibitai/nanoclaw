@@ -411,22 +411,38 @@ export async function runOpenAIAgent(
     }
   }
 
-  // Filter out invalid tool definitions and enforce OpenAI's 128 limit
-  const validTools = tools.filter((t) => {
-    if (!t.function.name) {
-      log(`WARNING: Dropping tool with no name`);
-      return false;
+  // Filter out invalid tools and trim large MCP servers to essential tools
+  const MOLTBOOK_ESSENTIAL = new Set([
+    'moltbook_digest', 'moltbook_post', 'moltbook_post_create', 'moltbook_comment',
+    'moltbook_vote', 'moltbook_search', 'moltbook_submolts', 'moltbook_profile',
+    'moltbook_follow', 'moltbook_state', 'moltbook_thread_diff',
+    'moltbook_trust', 'moltbook_karma', 'moltbook_pending',
+    'moltbook_dedup_check', 'moltbook_dedup_record',
+    'log_engagement', 'human_review_flag', 'human_review_list',
+    'engagement_quality', 'knowledge_read',
+  ]);
+
+  const filteredTools = tools.filter((t) => {
+    if (!t.function.name) return false;
+    // Only keep essential moltbook tools (full set is 200+, OpenAI limit is 128)
+    if (t.function.name.startsWith('mcp__moltbook__')) {
+      const toolName = t.function.name.replace('mcp__moltbook__', '');
+      return MOLTBOOK_ESSENTIAL.has(toolName);
     }
     return true;
   });
+
+  const dropped = tools.length - filteredTools.length;
+  if (dropped > 0) log(`Filtered ${dropped} non-essential moltbook tools`);
+
   const MAX_TOOLS = 128;
-  if (validTools.length > MAX_TOOLS) {
-    log(`WARNING: ${validTools.length} tools exceeds OpenAI limit of ${MAX_TOOLS}, trimming`);
-    validTools.length = MAX_TOOLS;
+  if (filteredTools.length > MAX_TOOLS) {
+    log(`WARNING: ${filteredTools.length} tools still exceeds limit of ${MAX_TOOLS}, trimming`);
+    filteredTools.length = MAX_TOOLS;
   }
   tools.length = 0;
-  tools.push(...validTools);
-  log(`Total tools: ${tools.length} (${BUILTIN_TOOLS.length} built-in + ${mcpToolMap.size} MCP)`);
+  tools.push(...filteredTools);
+  log(`Total tools: ${tools.length} (${BUILTIN_TOOLS.length} built-in + ${tools.length - BUILTIN_TOOLS.length} MCP)`);
 
   // Build messages — carry forward conversation history if provided
   // Detect [Photo: /path] in user messages and convert to multimodal content
