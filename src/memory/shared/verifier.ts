@@ -5,11 +5,7 @@ import yaml from 'js-yaml';
 import { generateText } from 'ai';
 import { resolveUtilityModel } from '../../llm/utility.js';
 import { logger } from '../../logger.js';
-import {
-  candidateDir,
-  rejectedDir,
-  ensureMemoryDirs,
-} from './paths.js';
+import { candidateDir, rejectedDir, ensureMemoryDirs } from './paths.js';
 import { readFact, writeFact, regenerateIndex } from './store.js';
 import { logAudit } from './audit.js';
 import type {
@@ -134,11 +130,18 @@ function mergeFact(existing: Fact, cand: Candidate): void {
 
   const newBody = cand.body.trim();
   if (newBody && newBody !== existing.body.trim()) {
-    fm.history = [existing.body.trim(), ...(fm.history ?? [])].slice(0, MAX_HISTORY);
+    fm.history = [existing.body.trim(), ...(fm.history ?? [])].slice(
+      0,
+      MAX_HISTORY,
+    );
     fm.last_value = newBody.split('\n')[0].slice(0, 80);
   }
 
-  writeFact({ slug: existing.slug, frontmatter: fm, body: newBody || existing.body });
+  writeFact({
+    slug: existing.slug,
+    frontmatter: fm,
+    body: newBody || existing.body,
+  });
 }
 
 interface Verdict {
@@ -169,20 +172,27 @@ Reject if: transient state (current task progress), agent confusion, hallucinati
   try {
     const llm = await generateText({
       model,
-      system: 'You are a careful gatekeeper for a long-term memory store. Output JSON only.',
+      system:
+        'You are a careful gatekeeper for a long-term memory store. Output JSON only.',
       messages: [{ role: 'user', content: prompt }],
       maxOutputTokens: 200,
     });
     text = llm.text;
   } catch (err) {
-    return { pass: false, reason: `verifier LLM error: ${err instanceof Error ? err.message : String(err)}` };
+    return {
+      pass: false,
+      reason: `verifier LLM error: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 
   try {
     const parsed = JSON.parse(
-      text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, ''),
+      text
+        .trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/```\s*$/, ''),
     ) as Verdict & { verdict: 'pass' | 'fail' };
-    return { pass: parsed.verdict === 'pass', reason: parsed.reason };
+    return { pass: String(parsed.verdict).toLowerCase() === 'pass', reason: parsed.reason };
   } catch {
     return { pass: false, reason: 'unparseable verifier output' };
   }
@@ -204,10 +214,13 @@ function listCandidates(): Candidate[] {
       body: parsed.body,
     });
   }
+  out.sort((a, b) => a.filename.localeCompare(b.filename));
   return out;
 }
 
-function parseFront(raw: string): { frontmatter: Record<string, unknown>; body: string } | null {
+function parseFront(
+  raw: string,
+): { frontmatter: Record<string, unknown>; body: string } | null {
   if (!raw.startsWith('---')) return null;
   const end = raw.indexOf('\n---', 3);
   if (end < 0) return null;
@@ -228,10 +241,11 @@ function rejectCandidate(cand: Candidate, reason: string): void {
 }
 
 function slugFor(cand: Candidate): string {
-  const base = cand.frontmatter.name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 40) || 'fact';
+  const base =
+    cand.frontmatter.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40) || 'fact';
   return `${cand.frontmatter.type}_${base}`;
 }
