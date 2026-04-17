@@ -60,13 +60,10 @@ export function handleTaskPick(ctx: Context, taskId: string): void {
   }
   const current = task.model || '(default)';
   const target = `t:${taskId}`;
-  ctx.editMessageText(
-    `Task \`${taskId}\` model (current: \`${current}\`)`,
-    {
-      parse_mode: 'Markdown',
-      reply_markup: buildModelKeyboard(task.model || undefined, target),
-    },
-  );
+  ctx.editMessageText(`Task \`${taskId}\` model (current: \`${current}\`)`, {
+    parse_mode: 'Markdown',
+    reply_markup: buildModelKeyboard(task.model || undefined, target),
+  });
   ctx.answerCallbackQuery();
 }
 

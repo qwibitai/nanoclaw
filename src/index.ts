@@ -1,15 +1,9 @@
-import fs from 'fs';
-import path from 'path';
-
 import { OneCLI } from '@onecli-sh/sdk';
 
 import {
-  AGENT_MODEL_TIMEOUT_MS,
   ASSISTANT_NAME,
-  DEFAULT_MODEL,
   DEFAULT_TRIGGER,
   getTriggerPattern,
-  GROUPS_DIR,
   HOST_MODE,
   IDLE_TIMEOUT,
   MAX_MESSAGES_PER_PROMPT,
@@ -38,26 +32,30 @@ import { runHostAgent } from './host-runner.js';
 import {
   deleteOutboxMessage,
   enqueueOutbox,
-  getAllChats,
-  getAllRegisteredGroups,
-  getAllSessions,
   deleteSession,
   getAllTasks,
-  getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
   getOutboxMessages,
-  getRouterState,
   incrementOutboxAttempts,
   initDatabase,
-  setRegisteredGroup,
-  setRouterState,
   setSession,
   storeChatMetadata,
   storeMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
-import { resolveGroupFolderPath } from './group-folder.js';
+import { getEffectiveModel } from './orchestrator/effective-model.js';
+import {
+  ensureOneCLIAgent as ensureOneCLIAgentFn,
+  getAvailableGroups as getAvailableGroupsFn,
+  registerGroup,
+} from './orchestrator/group-registry.js';
+import {
+  createState,
+  getOrRecoverCursor,
+  loadState,
+  saveState,
+} from './orchestrator/state.js';
 import { startIpcWatcher } from './ipc.js';
 import {
   extractImages,
@@ -88,168 +86,46 @@ import { startWebhookServer, stopWebhookServer } from './webhook.js';
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
 
-let lastTimestamp = '';
-let sessions: Record<string, string> = {};
+const state = createState();
 const sessionGuard = new SessionGuard();
-let registeredGroups: Record<string, RegisteredGroup> = {};
-let lastAgentTimestamp: Record<string, string> = {};
-let messageLoopRunning = false;
-const lastUsage: Record<
-  string,
-  {
-    inputTokens: number;
-    outputTokens: number;
-    numTurns: number;
-    contextWindow?: number;
-  }
-> = {};
-const compactCount: Record<string, number> = {};
-const lastRateLimit: Record<
-  string,
-  { utilization?: number; resetsAt?: number; rateLimitType?: string }
-> = {};
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
-const compactPending = new Set<string>(); // chatJids with pending compact
-const deferredCompact = new Set<string>(); // chatJids waiting for compact on next container run
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
-function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
-  if (group.isMain) return;
-  const identifier = group.folder.toLowerCase().replace(/_/g, '-');
-  onecli.ensureAgent({ name: group.name, identifier }).then(
-    (res) => {
-      logger.info(
-        { jid, identifier, created: res.created },
-        'OneCLI agent ensured',
-      );
-    },
-    (err) => {
-      logger.debug(
-        { jid, identifier, err: String(err) },
-        'OneCLI agent ensure skipped',
-      );
-    },
+// Aliases that keep the rest of src/index.ts readable without fully
+// rewriting every state access. Each points at the same object/set as
+// the canonical state, so mutations flow back.
+const { compactPending, deferredCompact } = state;
+
+function loadStateHere(): void {
+  loadState(state);
+}
+function saveStateHere(): void {
+  saveState(state);
+}
+function getOrRecoverCursorHere(chatJid: string): string {
+  return getOrRecoverCursor(state, chatJid, ASSISTANT_NAME);
+}
+function registerGroupHere(jid: string, group: RegisteredGroup): void {
+  registerGroup(
+    { onecli, registeredGroups: state.registeredGroups },
+    jid,
+    group,
   );
 }
 
-function loadState(): void {
-  lastTimestamp = getRouterState('last_timestamp') || '';
-  const agentTs = getRouterState('last_agent_timestamp');
-  try {
-    lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
-    // eslint-disable-next-line no-catch-all/no-catch-all
-  } catch {
-    logger.warn('Corrupted last_agent_timestamp in DB, resetting');
-    lastAgentTimestamp = {};
-  }
-  sessions = getAllSessions();
-  registeredGroups = getAllRegisteredGroups();
-  logger.info(
-    { groupCount: Object.keys(registeredGroups).length },
-    'State loaded',
-  );
-}
-
-/**
- * Return the message cursor for a group, recovering from the last bot reply
- * if lastAgentTimestamp is missing (new group, corrupted state, restart).
- */
-function getOrRecoverCursor(chatJid: string): string {
-  const existing = lastAgentTimestamp[chatJid];
-  if (existing) return existing;
-
-  const botTs = getLastBotMessageTimestamp(chatJid, ASSISTANT_NAME);
-  if (botTs) {
-    logger.info(
-      { chatJid, recoveredFrom: botTs },
-      'Recovered message cursor from last bot reply',
-    );
-    lastAgentTimestamp[chatJid] = botTs;
-    saveState();
-    return botTs;
-  }
-  return '';
-}
-
-function saveState(): void {
-  setRouterState('last_timestamp', lastTimestamp);
-  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
-}
-
-function registerGroup(jid: string, group: RegisteredGroup): void {
-  let groupDir: string;
-  try {
-    groupDir = resolveGroupFolderPath(group.folder);
-    // eslint-disable-next-line no-catch-all/no-catch-all
-  } catch (err) {
-    logger.warn(
-      { jid, folder: group.folder, err },
-      'Rejecting group registration with invalid folder',
-    );
-    return;
-  }
-
-  registeredGroups[jid] = group;
-  setRegisteredGroup(jid, group);
-
-  // Create group folder
-  fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
-
-  // Copy CLAUDE.md template into the new group folder so agents have
-  // identity and instructions from the first run.  (Fixes #1391)
-  const groupMdFile = path.join(groupDir, 'CLAUDE.md');
-  if (!fs.existsSync(groupMdFile)) {
-    const templateFile = path.join(
-      GROUPS_DIR,
-      group.isMain ? 'main' : 'global',
-      'CLAUDE.md',
-    );
-    if (fs.existsSync(templateFile)) {
-      let content = fs.readFileSync(templateFile, 'utf-8');
-      if (ASSISTANT_NAME !== 'Andy') {
-        content = content.replace(/^# Andy$/m, `# ${ASSISTANT_NAME}`);
-        content = content.replace(/You are Andy/g, `You are ${ASSISTANT_NAME}`);
-      }
-      fs.writeFileSync(groupMdFile, content);
-      logger.info({ folder: group.folder }, 'Created CLAUDE.md from template');
-    }
-  }
-
-  // Ensure a corresponding OneCLI agent exists (best-effort, non-blocking)
-  ensureOneCLIAgent(jid, group);
-
-  logger.info(
-    { jid, name: group.name, folder: group.folder },
-    'Group registered',
-  );
-}
-
-/**
- * Get available groups list for the agent.
- * Returns groups ordered by most recent activity.
- */
+/** Available groups list for the agent (barrel export). */
 export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
-  const chats = getAllChats();
-  const registeredJids = new Set(Object.keys(registeredGroups));
-
-  return chats
-    .filter((c) => c.jid !== '__group_sync__' && c.is_group)
-    .map((c) => ({
-      jid: c.jid,
-      name: c.name,
-      lastActivity: c.last_message_time,
-      isRegistered: registeredJids.has(c.jid),
-    }));
+  return getAvailableGroupsFn(state.registeredGroups);
 }
 
 /** @internal - exported for testing */
 export function _setRegisteredGroups(
   groups: Record<string, RegisteredGroup>,
 ): void {
-  registeredGroups = groups;
+  state.registeredGroups = groups;
 }
 
 /**
@@ -257,7 +133,7 @@ export function _setRegisteredGroups(
  * Called by the GroupQueue when it's this group's turn.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
-  const group = registeredGroups[chatJid];
+  const group = state.registeredGroups[chatJid];
   if (!group) return true;
 
   const channel = findChannel(channels, chatJid);
@@ -270,7 +146,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const missedMessages = getMessagesSince(
     chatJid,
-    getOrRecoverCursor(chatJid),
+    getOrRecoverCursorHere(chatJid),
     ASSISTANT_NAME,
     MAX_MESSAGES_PER_PROMPT,
   );
@@ -318,10 +194,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
+  const previousCursor = state.lastAgentTimestamp[chatJid] || '';
+  state.lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
+  saveStateHere();
 
   logger.info(
     { group: group.name, messageCount: missedMessages.length },
@@ -587,8 +463,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       return true;
     }
     // Roll back cursor so retries can re-process these messages
-    lastAgentTimestamp[chatJid] = previousCursor;
-    saveState();
+    state.lastAgentTimestamp[chatJid] = previousCursor;
+    saveStateHere();
     logger.warn(
       { group: group.name },
       'Agent error, rolled back message cursor for retry',
@@ -599,36 +475,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
-/** @internal - exported for testing */
-export interface EffectiveModelResult {
-  model: string;
-  reverted?: boolean;
-  revertedFrom?: string;
-}
-
-/** @internal - exported for testing */
-export function getEffectiveModel(
-  group: RegisteredGroup,
-): EffectiveModelResult {
-  if (group.agentModelOverride && group.agentModelOverrideSetAt) {
-    const elapsed = Date.now() - group.agentModelOverrideSetAt;
-    if (elapsed < AGENT_MODEL_TIMEOUT_MS) {
-      return { model: group.agentModelOverride };
-    }
-    // Override expired — clear and set revert notice
-    const expiredModel = group.agentModelOverride;
-    group.agentModelOverride = undefined;
-    group.agentModelOverrideSetAt = undefined;
-    const revertedTo = group.model || DEFAULT_MODEL;
-    group.pendingModelNotice = `[model override expired — reverted from ${expiredModel} to ${revertedTo}]`;
-    logger.info(
-      { folder: group.folder, expiredModel, revertedTo },
-      'Agent model override expired',
-    );
-    return { model: revertedTo, reverted: true, revertedFrom: expiredModel };
-  }
-  return { model: group.model || DEFAULT_MODEL };
-}
+// getEffectiveModel lives in ./orchestrator/effective-model.ts
+export {
+  getEffectiveModel,
+  type EffectiveModelResult,
+} from './orchestrator/effective-model.js';
 
 async function runAgent(
   group: RegisteredGroup,
@@ -640,7 +491,7 @@ async function runAgent(
   const isMain = group.isMain === true;
   // Allow session saves for this new agent run (previous clear is consumed)
   sessionGuard.startRun(group.folder);
-  const sessionId = sessions[group.folder];
+  const sessionId = state.sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -669,14 +520,14 @@ async function runAgent(
     group.folder,
     isMain,
     availableGroups,
-    new Set(Object.keys(registeredGroups)),
+    new Set(Object.keys(state.registeredGroups)),
   );
 
   // Wrap onOutput to track session ID and usage from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId && !sessionGuard.isCleared(group.folder)) {
-          sessions[group.folder] = output.newSessionId;
+          state.sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
 
           if (compactPending.has(chatJid)) {
@@ -688,17 +539,17 @@ async function runAgent(
           }
         }
         if (output.usage) {
-          lastUsage[group.folder] = {
+          state.lastUsage[group.folder] = {
             ...output.usage,
             contextWindow:
-              output.contextWindow ?? lastUsage[group.folder]?.contextWindow,
+              output.contextWindow ?? state.lastUsage[group.folder]?.contextWindow,
           };
         }
         if (output.compacted) {
-          compactCount[group.folder] = (compactCount[group.folder] || 0) + 1;
+          state.compactCount[group.folder] = (state.compactCount[group.folder] || 0) + 1;
         }
         if (output.rateLimit) {
-          lastRateLimit[group.folder] = output.rateLimit;
+          state.lastRateLimit[group.folder] = output.rateLimit;
         }
         await onOutput(output);
       }
@@ -725,21 +576,21 @@ async function runAgent(
     );
 
     if (output.newSessionId && !sessionGuard.isCleared(group.folder)) {
-      sessions[group.folder] = output.newSessionId;
+      state.sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
     }
     if (output.usage) {
-      lastUsage[group.folder] = {
+      state.lastUsage[group.folder] = {
         ...output.usage,
         contextWindow:
-          output.contextWindow ?? lastUsage[group.folder]?.contextWindow,
+          output.contextWindow ?? state.lastUsage[group.folder]?.contextWindow,
       };
     }
     if (output.compacted) {
-      compactCount[group.folder] = (compactCount[group.folder] || 0) + 1;
+      state.compactCount[group.folder] = (state.compactCount[group.folder] || 0) + 1;
     }
     if (output.rateLimit) {
-      lastRateLimit[group.folder] = output.rateLimit;
+      state.lastRateLimit[group.folder] = output.rateLimit;
     }
 
     if (output.status === 'error') {
@@ -760,7 +611,7 @@ async function runAgent(
           { group: group.name, staleSessionId: sessionId, error: output.error },
           'Stale session detected — clearing for next retry',
         );
-        delete sessions[group.folder];
+        delete state.sessions[group.folder];
         deleteSession(group.folder);
       }
 
@@ -780,20 +631,20 @@ async function runAgent(
 }
 
 async function startMessageLoop(): Promise<void> {
-  if (messageLoopRunning) {
+  if (state.messageLoopRunning) {
     logger.debug('Message loop already running, skipping duplicate start');
     return;
   }
-  messageLoopRunning = true;
+  state.messageLoopRunning = true;
 
   logger.info(`NanoClaw running (default trigger: ${DEFAULT_TRIGGER})`);
 
   while (true) {
     try {
-      const jids = Object.keys(registeredGroups);
+      const jids = Object.keys(state.registeredGroups);
       const { messages, newTimestamp } = getNewMessages(
         jids,
-        lastTimestamp,
+        state.lastTimestamp,
         ASSISTANT_NAME,
       );
 
@@ -801,8 +652,8 @@ async function startMessageLoop(): Promise<void> {
         logger.info({ count: messages.length }, 'New messages');
 
         // Advance the "seen" cursor for all messages immediately
-        lastTimestamp = newTimestamp;
-        saveState();
+        state.lastTimestamp = newTimestamp;
+        saveStateHere();
 
         // Deduplicate by group
         const messagesByGroup = new Map<string, NewMessage[]>();
@@ -816,7 +667,7 @@ async function startMessageLoop(): Promise<void> {
         }
 
         for (const [chatJid, groupMessages] of messagesByGroup) {
-          const group = registeredGroups[chatJid];
+          const group = state.registeredGroups[chatJid];
           if (!group) continue;
 
           const channel = findChannel(channels, chatJid);
@@ -843,11 +694,11 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
-          // Pull all messages since lastAgentTimestamp so non-trigger
+          // Pull all messages since state.lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
           const allPending = getMessagesSince(
             chatJid,
-            getOrRecoverCursor(chatJid),
+            getOrRecoverCursorHere(chatJid),
             ASSISTANT_NAME,
             MAX_MESSAGES_PER_PROMPT,
           );
@@ -868,9 +719,9 @@ async function startMessageLoop(): Promise<void> {
             );
             // Advance cursor so the next poll/event doesn't re-send these messages.
             // advanceCursorFn on container exit also advances as a safety net.
-            lastAgentTimestamp[chatJid] =
+            state.lastAgentTimestamp[chatJid] =
               allPending[allPending.length - 1].timestamp;
-            saveState();
+            saveStateHere();
 
             // Show typing indicator while the container processes the piped message
             // Skip if agent sent a response recently — prevents typing reappearing on Telegram
@@ -900,13 +751,13 @@ async function startMessageLoop(): Promise<void> {
 
 /**
  * Startup recovery: check for unprocessed messages in registered groups.
- * Handles crash between advancing lastTimestamp and processing messages.
+ * Handles crash between advancing state.lastTimestamp and processing messages.
  */
 function recoverPendingMessages(): void {
-  for (const [chatJid, group] of Object.entries(registeredGroups)) {
+  for (const [chatJid, group] of Object.entries(state.registeredGroups)) {
     const pending = getMessagesSince(
       chatJid,
-      getOrRecoverCursor(chatJid),
+      getOrRecoverCursorHere(chatJid),
       ASSISTANT_NAME,
       MAX_MESSAGES_PER_PROMPT,
     );
@@ -971,12 +822,12 @@ async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
-  loadState();
+  loadStateHere();
 
   // Ensure OneCLI agents exist for all registered groups.
   // Recovers from missed creates (e.g. OneCLI was down at registration time).
-  for (const [jid, group] of Object.entries(registeredGroups)) {
-    ensureOneCLIAgent(jid, group);
+  for (const [jid, group] of Object.entries(state.registeredGroups)) {
+    ensureOneCLIAgentFn(onecli, jid, group);
   }
 
   restoreRemoteControl();
@@ -986,18 +837,18 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     // Advance cursor for all groups before killing containers so piped
     // messages are not re-delivered on restart (Issue #10).
-    for (const chatJid of Object.keys(registeredGroups)) {
+    for (const chatJid of Object.keys(state.registeredGroups)) {
       const pending = getMessagesSince(
         chatJid,
-        getOrRecoverCursor(chatJid),
+        getOrRecoverCursorHere(chatJid),
         ASSISTANT_NAME,
         MAX_MESSAGES_PER_PROMPT,
       );
       if (pending.length > 0) {
-        lastAgentTimestamp[chatJid] = pending[pending.length - 1].timestamp;
+        state.lastAgentTimestamp[chatJid] = pending[pending.length - 1].timestamp;
       }
     }
-    saveState();
+    saveStateHere();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     await stopWebhookServer();
@@ -1012,7 +863,7 @@ async function main(): Promise<void> {
     chatJid: string,
     msg: NewMessage,
   ): Promise<void> {
-    const group = registeredGroups[chatJid];
+    const group = state.registeredGroups[chatJid];
     if (!group?.isMain) {
       logger.warn(
         { chatJid, sender: msg.sender },
@@ -1061,7 +912,7 @@ async function main(): Promise<void> {
       }
 
       // Sender allowlist drop mode: discard messages from denied senders before storing
-      if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
+      if (!msg.is_from_me && !msg.is_bot_message && state.registeredGroups[chatJid]) {
         const cfg = loadSenderAllowlist();
         if (
           shouldDropMessage(chatJid, cfg) &&
@@ -1079,7 +930,7 @@ async function main(): Promise<void> {
       storeMessage(msg);
 
       // Event-driven: kick message processing immediately without waiting for poll
-      const group = registeredGroups[chatJid];
+      const group = state.registeredGroups[chatJid];
       if (!group) return;
 
       const ch = findChannel(channels, chatJid);
@@ -1101,7 +952,7 @@ async function main(): Promise<void> {
       // Active container → pipe via IPC + typing indicator
       const allPending = getMessagesSince(
         chatJid,
-        getOrRecoverCursor(chatJid),
+        getOrRecoverCursorHere(chatJid),
         ASSISTANT_NAME,
         MAX_MESSAGES_PER_PROMPT,
       );
@@ -1114,9 +965,9 @@ async function main(): Promise<void> {
         );
         if (queue.sendMessage(chatJid, formatted)) {
           // Advance cursor so the next pipe doesn't re-send these messages
-          lastAgentTimestamp[chatJid] =
+          state.lastAgentTimestamp[chatJid] =
             allPending[allPending.length - 1].timestamp;
-          saveState();
+          saveStateHere();
           if (!queue.isRecentResponseSent(chatJid)) {
             ch.setTyping?.(chatJid, true)?.catch(() => {});
           }
@@ -1134,14 +985,14 @@ async function main(): Promise<void> {
       channel?: string,
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
-    registeredGroups: () => registeredGroups,
+    registeredGroups: () => state.registeredGroups,
     getStatus: () => ({
       activeContainers: queue.getStatus().activeContainers,
       uptimeSeconds: Math.floor(process.uptime()),
-      sessions: { ...sessions },
-      lastUsage: { ...lastUsage },
-      compactCount: { ...compactCount },
-      lastRateLimit: { ...lastRateLimit },
+      sessions: { ...state.sessions },
+      lastUsage: { ...state.lastUsage },
+      compactCount: { ...state.compactCount },
+      lastRateLimit: { ...state.lastRateLimit },
     }),
     sendIpcMessage: (chatJid: string, text: string) => {
       const sent = queue.sendMessage(chatJid, text);
@@ -1150,8 +1001,8 @@ async function main(): Promise<void> {
       }
       if (!sent && text === '/compact') {
         // No active container — defer compact to next container run if session exists
-        const group = registeredGroups[chatJid];
-        if (group && sessions[group.folder]) {
+        const group = state.registeredGroups[chatJid];
+        if (group && state.sessions[group.folder]) {
           deferredCompact.add(chatJid);
           return true;
         }
@@ -1159,7 +1010,7 @@ async function main(): Promise<void> {
       return sent;
     },
     clearSession: (groupFolder: string, chatJid: string) => {
-      delete sessions[groupFolder];
+      delete state.sessions[groupFolder];
       deleteSession(groupFolder);
       sessionGuard.markCleared(groupFolder);
       queue.closeStdin(chatJid);
@@ -1189,8 +1040,8 @@ async function main(): Promise<void> {
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
-    registeredGroups: () => registeredGroups,
-    getSessions: () => sessions,
+    registeredGroups: () => state.registeredGroups,
+    getSessions: () => state.sessions,
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder) =>
       queue.registerProcess(groupJid, proc, containerName, groupFolder),
@@ -1215,8 +1066,8 @@ async function main(): Promise<void> {
       if (cleanText) await channel.sendMessage(jid, cleanText);
       await sendImages(channel, jid, images);
     },
-    registeredGroups: () => registeredGroups,
-    registerGroup,
+    registeredGroups: () => state.registeredGroups,
+    registerGroup: registerGroupHere,
     syncGroups: async (force: boolean) => {
       await Promise.all(
         channels
@@ -1243,7 +1094,7 @@ async function main(): Promise<void> {
         status: t.status,
         next_run: t.next_run,
       }));
-      for (const group of Object.values(registeredGroups)) {
+      for (const group of Object.values(state.registeredGroups)) {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
       }
     },
@@ -1252,13 +1103,13 @@ async function main(): Promise<void> {
   queue.advanceCursorFn = (chatJid) => {
     const pending = getMessagesSince(
       chatJid,
-      getOrRecoverCursor(chatJid),
+      getOrRecoverCursorHere(chatJid),
       ASSISTANT_NAME,
       MAX_MESSAGES_PER_PROMPT,
     );
     if (pending.length > 0) {
-      lastAgentTimestamp[chatJid] = pending[pending.length - 1].timestamp;
-      saveState();
+      state.lastAgentTimestamp[chatJid] = pending[pending.length - 1].timestamp;
+      saveStateHere();
     }
   };
   queue.onMaxRetriesExceeded = (groupJid) => {
@@ -1281,8 +1132,8 @@ async function main(): Promise<void> {
   if (WEBHOOK_ENABLED) {
     startWebhookServer(WEBHOOK_PORT, {
       getMainGroupJid: () =>
-        Object.keys(registeredGroups).find(
-          (jid) => registeredGroups[jid].isMain === true,
+        Object.keys(state.registeredGroups).find(
+          (jid) => state.registeredGroups[jid].isMain === true,
         ),
       onWebhookMessage: (chatJid: string, text: string) => {
         const msg: NewMessage = {
@@ -1299,12 +1150,12 @@ async function main(): Promise<void> {
         // Event-driven: pipe to active container or enqueue for a new one
         const allPending = getMessagesSince(
           chatJid,
-          getOrRecoverCursor(chatJid),
+          getOrRecoverCursorHere(chatJid),
           ASSISTANT_NAME,
           MAX_MESSAGES_PER_PROMPT,
         );
         if (allPending.length > 0) {
-          const grp = registeredGroups[chatJid];
+          const grp = state.registeredGroups[chatJid];
           const formatted = formatMessages(
             allPending,
             TIMEZONE,
@@ -1312,9 +1163,9 @@ async function main(): Promise<void> {
             grp ? getEffectiveModel(grp).model : undefined,
           );
           if (queue.sendMessage(chatJid, formatted)) {
-            lastAgentTimestamp[chatJid] =
+            state.lastAgentTimestamp[chatJid] =
               allPending[allPending.length - 1].timestamp;
-            saveState();
+            saveStateHere();
             return;
           }
         }

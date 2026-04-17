@@ -11,11 +11,7 @@ import { createMediaStore, type MediaHandlerDeps } from './media.js';
 export interface LocationHandlerDeps extends MediaHandlerDeps {
   opts: ChannelOpts;
   liveLocation: LiveLocationManager;
-  sendMessage: (
-    jid: string,
-    text: string,
-    threadId?: string,
-  ) => Promise<void>;
+  sendMessage: (jid: string, text: string, threadId?: string) => Promise<void>;
 }
 
 export function registerLocationHandlers(

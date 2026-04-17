@@ -60,10 +60,7 @@ export function formatStatus(
   return lines.join('\n');
 }
 
-export function registerStatusCommand(
-  bot: Bot,
-  deps: StatusCommandDeps,
-): void {
+export function registerStatusCommand(bot: Bot, deps: StatusCommandDeps): void {
   bot.command('status', (ctx) => {
     const chatJid = `tg:${ctx.chat.id}`;
     const group = deps.opts.registeredGroups()[chatJid];
