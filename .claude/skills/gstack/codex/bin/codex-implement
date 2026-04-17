@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# /codex implement entry point. Orchestrates parse → per-wave run → per-wave merge.
+#
+# Usage:
+#   codex-implement <plan-file> [options]
+#
+# Options:
+#   --base <ref>          default origin/main (auto-falls-back to main)
+#   --dry-run             parse-only, print summary, exit 0
+#   --resume              resume from state.json
+#   --rollback            revert every merged commit (see --rollback doc)
+#   --only-task N         limit to a single task (for canary runs)
+#   --max-parallel N      fan-out ceiling, default 4
+#   --task-timeout SEC    default 1800
+#   --force               bypass plan-sha mismatch on --resume
+#   --force-clean         also clean orphan worktrees before starting
+set -euo pipefail
+
+SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BIN="$SKILL_DIR/bin"
+
+GSTACK_HOME="${GSTACK_HOME:-$HOME/.gstack}"
+WORK_ROOT="$GSTACK_HOME/codex-work"
+mkdir -p "$WORK_ROOT"
+
+PLAN=""
+BASE=""; DRY=0; RESUME=0; ROLLBACK=0; ONLY_TASK=""
+MAX_PAR=4; TO=1800; FORCE=0; FORCE_CLEAN=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base)         BASE="$2"; shift 2 ;;
+    --dry-run)      DRY=1; shift ;;
+    --resume)       RESUME=1; shift ;;
+    --rollback)     ROLLBACK=1; shift ;;
+    --only-task)    ONLY_TASK="$2"; shift 2 ;;
+    --max-parallel) MAX_PAR="$2"; shift 2 ;;
+    --task-timeout) TO="$2"; shift 2 ;;
+    --force)        FORCE=1; shift ;;
+    --force-clean)  FORCE_CLEAN=1; shift ;;
+    -*) echo "unknown flag: $1" >&2; exit 2 ;;
+    *)  PLAN="$1"; shift ;;
+  esac
+done
+[ -r "$PLAN" ] || { echo "usage: codex-implement <plan-file> [...]" >&2; exit 2; }
+
+plan_slug="$(basename "$PLAN" .md)"
+WORK="$WORK_ROOT/$plan_slug"
+mkdir -p "$WORK"
+
+preflight() {
+  if [ "$DRY" -eq 0 ] && [ "$ROLLBACK" -eq 0 ]; then
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+      echo "ERROR: working tree is not clean. Commit or stash before running." >&2
+      exit 2
+    fi
+    if ! command -v "${CODEX_BIN:-codex}" >/dev/null 2>&1; then
+      echo "ERROR: codex CLI not found on PATH" >&2; exit 2
+    fi
+    if ! git worktree list >/dev/null 2>&1; then
+      echo "ERROR: git worktree is not available (need Git >= 2.5)" >&2; exit 2
+    fi
+  fi
+}
+
+# Run preflight BEFORE parsing/locking so dirty-tree errors surface fastest.
+preflight
+
+LOCK="$WORK/lock"
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$LOCK"
+  if ! flock -n 9; then
+    echo "ERROR: another /codex implement run is active on this plan." >&2
+    exit 2
+  fi
+fi
+
+PLAN_JSON="$WORK/plan.json"
+"$BIN/codex-parse-plan" "$PLAN" > "$PLAN_JSON"
+
+if [ -z "$BASE" ]; then
+  if git show-ref --verify --quiet refs/remotes/origin/main; then
+    BASE="origin/main"
+  else
+    BASE="main"
+  fi
+fi
+
+if [ "$DRY" -eq 1 ]; then
+  waves="$(jq '.waves | length' "$PLAN_JSON")"
+  tasks="$(jq '.tasks | length' "$PLAN_JSON")"
+  printf 'plan: %s\ntasks: %d\nwaves: %d\nbase: %s\n' "$PLAN" "$tasks" "$waves" "$BASE"
+  jq -r '.waves[] | "Wave \(.wave): \(.tasks | length) task(s) — " + (.tasks | map(tostring) | join(", "))' "$PLAN_JSON"
+  exit 0
+fi
+
+if [ "$ROLLBACK" -eq 1 ]; then
+  STATE="$WORK/state.json"
+  [ -r "$STATE" ] || { echo "nothing to roll back"; exit 0; }
+  shas="$(jq -r '.waves[].tasks[] | select(.final_commit_on_base != null) | .final_commit_on_base' "$STATE" \
+          | awk '{a[NR]=$0} END{for(i=NR;i>=1;i--) print a[i]}')"
+  git checkout -q "$BASE"
+  for s in $shas; do
+    git revert --no-edit "$s"
+  done
+  rm -rf "$WORK"
+  echo "rollback complete; state dir removed"
+  exit 0
+fi
+
+STATE="$WORK/state.json"
+if [ "$RESUME" -eq 1 ]; then
+  [ -r "$STATE" ] || { echo "ERROR: --resume but no state.json"; exit 2; }
+  recorded_sha="$(jq -r '.plan_sha' "$STATE")"
+  current_sha="$(shasum -a 256 "$PLAN" | cut -d' ' -f1)"
+  if [ "$FORCE" -eq 0 ] && [ "$recorded_sha" != "$current_sha" ]; then
+    echo "ERROR: plan was edited since run started (use --force to override)" >&2
+    exit 2
+  fi
+else
+  [ -e "$STATE" ] && { echo "ERROR: state.json exists. Use --resume or --force-clean."; exit 2; }
+  plan_sha="$(shasum -a 256 "$PLAN" | cut -d' ' -f1)"
+  base_sha="$(git rev-parse "$BASE")"
+  waves_arr="$(jq '.waves' "$PLAN_JSON")"
+  tasks_arr="$(jq '.tasks | map({num, slug})' "$PLAN_JSON")"
+  "$BIN/codex-state" init "$WORK" \
+    --plan-path "$PLAN" --plan-sha "$plan_sha" \
+    --base-ref "$BASE"  --base-sha "$base_sha" \
+    --waves "$waves_arr" --tasks "$tasks_arr"
+fi
+
+if [ "$FORCE_CLEAN" -eq 1 ]; then
+  for s in $(jq -r '.tasks[].slug' "$PLAN_JSON"); do
+    "$BIN/codex-worktree" teardown "$WORK" "$s" > /dev/null || true
+  done
+fi
+
+total_waves="$(jq '.waves | length' "$PLAN_JSON")"
+for wave in $(seq 1 "$total_waves"); do
+  wstate="$(jq -r --argjson w "$wave" '.waves[] | select(.wave == $w) | .status' "$STATE")"
+  if [ "$wstate" = "completed" ]; then
+    echo "[WAVE $wave/$total_waves] skipped (already completed)"
+    continue
+  fi
+  "$BIN/codex-state" set-wave-status "$WORK" --wave "$wave" --status in_progress
+  echo "[WAVE $wave/$total_waves] starting"
+
+  if ! "$BIN/codex-run-wave" \
+        --work-dir "$WORK" --wave "$wave" --base "$BASE" \
+        --plan-json "$PLAN_JSON" --max-parallel "$MAX_PAR" \
+        --task-timeout "$TO"; then
+    echo "[WAVE $wave] escalated; state checkpointed at $STATE"
+    exit 2
+  fi
+
+  if ! "$BIN/codex-merge-wave" \
+        --work-dir "$WORK" --wave "$wave" --base "$BASE" \
+        --plan-json "$PLAN_JSON"; then
+    echo "[WAVE $wave] merge or post-wave test failed; state checkpointed"
+    exit 2
+  fi
+done
+
+echo "all waves complete. merged commits on $BASE:"
+jq -r '.waves[].tasks[] | select(.final_commit_on_base != null) | "  \(.num) \(.slug) → \(.final_commit_on_base[0:8])"' "$STATE"
