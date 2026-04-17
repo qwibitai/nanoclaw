@@ -64,7 +64,11 @@ function getFactory(providerName: string): ProviderFactory {
         apiKey: readKey('GOOGLE_GENERATIVE_AI_API_KEY'),
       });
     case 'anthropic':
-      return createAnthropic({ apiKey: readKey('ANTHROPIC_API_KEY'), baseURL: readKey('ANTHROPIC_BASE_URL') ?? 'https://api.anthropic.com/v1' });
+      return createAnthropic({
+        apiKey: readKey('ANTHROPIC_API_KEY'),
+        baseURL:
+          readKey('ANTHROPIC_BASE_URL') ?? 'https://api.anthropic.com/v1',
+      });
     default:
       throw new Error(`Unknown utility provider: ${providerName}`);
   }
