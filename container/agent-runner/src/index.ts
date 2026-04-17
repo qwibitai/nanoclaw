@@ -17,7 +17,12 @@
 import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
-import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
+import {
+  query,
+  HookCallback,
+  PreCompactHookInput,
+  EffortLevel,
+} from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -59,6 +64,69 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+// Per-group agent config. The `.claude` dir is mounted from
+// `data/sessions/{group}/.claude` on the host.
+const GROUP_SETTINGS_PATH = '/home/node/.claude/settings.json';
+const DEFAULT_AGENT_MODEL = 'sonnet[1m]';
+const DEFAULT_AGENT_EFFORT: EffortLevel = 'high';
+const VALID_EFFORTS: readonly EffortLevel[] = ['low', 'medium', 'high', 'max'];
+// Model IDs: alias or dated variant, optional [1m] context hint.
+// Length-bounded to prevent pathological strings; no shell/path chars.
+const MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,126}(\[1m\])?$/;
+
+function readGroupSettingsEnv(): Record<string, unknown> {
+  try {
+    if (!fs.existsSync(GROUP_SETTINGS_PATH)) return {};
+    const raw = fs.readFileSync(GROUP_SETTINGS_PATH, 'utf-8');
+    const parsed = JSON.parse(raw);
+    const env = parsed && typeof parsed === 'object' ? parsed.env : null;
+    return env && typeof env === 'object' ? (env as Record<string, unknown>) : {};
+  } catch (err) {
+    log(
+      `Failed to read ${GROUP_SETTINGS_PATH}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return {};
+  }
+}
+
+function pickString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function resolveAgentConfig(): { model: string; effort: EffortLevel } {
+  const groupEnv = readGroupSettingsEnv();
+
+  const rawModel =
+    pickString(groupEnv.NANOCLAW_AGENT_MODEL) ??
+    pickString(process.env.NANOCLAW_AGENT_MODEL);
+  let model = DEFAULT_AGENT_MODEL;
+  if (rawModel !== undefined) {
+    if (MODEL_ID_RE.test(rawModel)) {
+      model = rawModel;
+    } else {
+      log(
+        `Ignoring invalid NANOCLAW_AGENT_MODEL (regex mismatch); falling back to default '${DEFAULT_AGENT_MODEL}'`,
+      );
+    }
+  }
+
+  const rawEffort =
+    pickString(groupEnv.NANOCLAW_AGENT_EFFORT) ??
+    pickString(process.env.NANOCLAW_AGENT_EFFORT);
+  let effort: EffortLevel = DEFAULT_AGENT_EFFORT;
+  if (rawEffort !== undefined) {
+    if ((VALID_EFFORTS as readonly string[]).includes(rawEffort)) {
+      effort = rawEffort as EffortLevel;
+    } else {
+      log(
+        `Ignoring invalid NANOCLAW_AGENT_EFFORT='${rawEffort}' (expected one of ${VALID_EFFORTS.join('|')}); falling back to '${DEFAULT_AGENT_EFFORT}'`,
+      );
+    }
+  }
+
+  return { model, effort };
+}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -395,6 +463,9 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  const agentConfig = resolveAgentConfig();
+  log(`Agent config: model=${agentConfig.model} effort=${agentConfig.effort}`);
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -405,7 +476,8 @@ async function runQuery(
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
-      model: 'sonnet[1m]',
+      model: agentConfig.model,
+      effort: agentConfig.effort,
       allowedTools: [
         'Bash',
         'Read', 'Write', 'Edit', 'Glob', 'Grep',

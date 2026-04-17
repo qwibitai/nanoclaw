@@ -151,6 +151,13 @@ function buildVolumeMounts(
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
+    // Seed per-group agent knobs from the container env (if set) so Unraid / CA
+    // users can set one container-level default and have new groups inherit it.
+    // Existing groups are never overwritten — the guard above protects them.
+    // Edit these per-group after creation to override for just that group.
+    // Include the [1m] suffix on the model to opt in to 1M context.
+    const agentModel = process.env.NANOCLAW_AGENT_MODEL || 'sonnet[1m]';
+    const agentEffort = process.env.NANOCLAW_AGENT_EFFORT || 'high';
     fs.writeFileSync(
       settingsFile,
       JSON.stringify(
@@ -165,6 +172,12 @@ function buildVolumeMounts(
             // Enable Claude's memory feature (persists user preferences between sessions)
             // https://code.claude.com/docs/en/memory#manage-auto-memory
             CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+            // Per-group agent model. Edit to override for this group only.
+            // Supports aliases (sonnet, opus, haiku) or full IDs. Append [1m]
+            // for 1M context; omit the suffix for the model's default window.
+            NANOCLAW_AGENT_MODEL: agentModel,
+            // Per-group reasoning effort: low | medium | high | max.
+            NANOCLAW_AGENT_EFFORT: agentEffort,
           },
         },
         null,
