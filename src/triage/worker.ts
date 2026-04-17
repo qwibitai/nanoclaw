@@ -122,6 +122,14 @@ export async function triageEmail(
   });
 
   // Persist triage decision to tracked_items (shadow-safe: DB writes are fine).
+  // State transitions:
+  //   queue='ignore'             -> resolved immediately (user never sees it)
+  //   queue='attention'          -> left 'queued' here; push-side below
+  //                                 marks 'pushed' on successful send
+  //   queue='archive_candidate'  -> left 'queued' so it shows in archive queue
+  //   queue='action'             -> left 'queued' (needs user action; surface
+  //                                 in attention queue via the fallback)
+  const shouldAutoResolve = result.decision.queue === 'ignore';
   getDb()
     .prepare(
       `UPDATE tracked_items SET
@@ -131,7 +139,10 @@ export async function triageEmail(
          facts_extracted_json = ?,
          repo_candidates_json = ?,
          reasons_json = ?,
-         queue = ?
+         queue = ?,
+         state = CASE WHEN ? = 1 THEN 'resolved' ELSE state END,
+         resolution_method = CASE WHEN ? = 1 THEN 'classifier:ignore' ELSE resolution_method END,
+         resolved_at = CASE WHEN ? = 1 THEN ? ELSE resolved_at END
        WHERE id = ?`,
     )
     .run(
@@ -142,6 +153,10 @@ export async function triageEmail(
       JSON.stringify(result.decision.repo_candidates),
       JSON.stringify(result.decision.reasons),
       result.decision.queue ?? null,
+      shouldAutoResolve ? 1 : 0,
+      shouldAutoResolve ? 1 : 0,
+      shouldAutoResolve ? 1 : 0,
+      Date.now(),
       input.trackedItemId,
     );
 
@@ -181,6 +196,17 @@ export async function triageEmail(
             '(no reason)',
           sender: input.sender,
         });
+        // Mark pushed so dashboards + invariants know this item was
+        // surfaced to the user. Before, the state stayed 'queued' forever
+        // even after a successful push, and attention-queue rows looked
+        // indistinguishable from unpushed work.
+        getDb()
+          .prepare(
+            `UPDATE tracked_items
+             SET state = 'pushed', pushed_at = ?
+             WHERE id = ? AND state = 'queued'`,
+          )
+          .run(Date.now(), input.trackedItemId);
         const { renderAttentionDashboard } = await import('./dashboards.js');
         const { getOpenAttentionItems } = await import('../tracked-items.js');
         const open = getOpenAttentionItems('main');

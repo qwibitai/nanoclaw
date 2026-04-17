@@ -623,9 +623,7 @@ export async function handleCallback(
               'Mass archive via dashboard button',
             );
             // Refresh the dashboard immediately so the user sees 0 pending.
-            const { postArchiveDashboard } = await import(
-              './daily-digest.js'
-            );
+            const { postArchiveDashboard } = await import('./daily-digest.js');
             await postArchiveDashboard();
           }
           break;
