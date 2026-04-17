@@ -40,6 +40,11 @@ export interface IpcDeps {
 
 let ipcWatcherRunning = false;
 
+/** @internal - for tests only. Resets the singleton guard. */
+export function _resetIpcWatcherForTests(): void {
+  ipcWatcherRunning = false;
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
