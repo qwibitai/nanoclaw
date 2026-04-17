@@ -6,6 +6,7 @@ import { updateChatName } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+import { replyBus } from './reply-bus.js';
 import {
   Channel,
   OnInboundMessage,
@@ -136,6 +137,8 @@ export class SlackChannel implements Channel {
         is_from_me: isFromMe,
         is_bot_message: isBotMessage,
       });
+
+      replyBus.emitReply({ channel: 'slack', userId: msg.user || msg.bot_id || '', text: msg.text || '' });
 
       // Show thinking indicator for non-self messages (including other bots)
       if (!isFromMe && !this.thinkingMessages.has(jid)) {
