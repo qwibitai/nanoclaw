@@ -1,9 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { PassThrough } from 'stream';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   OUTPUT_END_MARKER,
   OUTPUT_START_MARKER,
   log,
+  readStdin,
   stripInternalTags,
   writeOutput,
 } from './io.js';
@@ -53,5 +56,41 @@ describe('log', () => {
     log('hello');
     expect(err).toHaveBeenCalledWith('[agent-runner] hello');
     err.mockRestore();
+  });
+});
+
+describe('readStdin', () => {
+  const origStdin = process.stdin;
+
+  afterEach(() => {
+    Object.defineProperty(process, 'stdin', {
+      value: origStdin,
+      configurable: true,
+    });
+  });
+
+  it('accumulates data chunks and resolves on end', async () => {
+    const fake = new PassThrough();
+    Object.defineProperty(process, 'stdin', {
+      value: fake,
+      configurable: true,
+    });
+    const promise = readStdin();
+    fake.write('hel');
+    fake.write('lo\n');
+    fake.end();
+    await expect(promise).resolves.toBe('hello\n');
+  });
+
+  it('rejects when stdin emits an error', async () => {
+    const fake = new PassThrough();
+    Object.defineProperty(process, 'stdin', {
+      value: fake,
+      configurable: true,
+    });
+    const promise = readStdin();
+    const boom = new Error('boom');
+    fake.destroy(boom);
+    await expect(promise).rejects.toBe(boom);
   });
 });
