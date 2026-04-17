@@ -46,6 +46,7 @@ import {
 import { initSkillRegistry, shutdownSkillRegistry } from './skill-registry.js';
 import {
   startDispatchLoop,
+  startSprintRetroWatcherSubsystem,
   startStallDetector,
   stopAgencyHqSubsystems,
 } from './agency-hq-dispatcher.js';
@@ -417,14 +418,12 @@ export async function initApp(): Promise<void> {
     });
     logger.error({ err }, 'Failed to start stall detector');
   }
-  // Sprint retro watcher disabled — redundant with the cron-scheduled task
-  // and causes message leaks when the agent doesn't properly wrap no-op output.
-  // startSprintRetroWatcherSubsystem(schedulerDeps).catch((err) =>
-  //   logger.error({ err }, 'Failed to start sprint retro watcher'),
-  // );
+  startSprintRetroWatcherSubsystem(schedulerDeps).catch((err) =>
+    logger.error({ err }, 'Failed to start sprint retro watcher'),
+  );
   setSubsystemState('sprint-retro-watcher', {
-    state: 'disabled',
-    details: 'Disabled in startup; use scheduled-task workflows instead.',
+    state: 'running',
+    details: 'Polling hourly; sends messages only on sprint status changes.',
   });
   startUptimeMonitor({
     registeredGroups: () => state.registeredGroups,

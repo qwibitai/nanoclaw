@@ -89,9 +89,9 @@ const subsystemDefaults: Array<Omit<SubsystemStatus, 'updatedAt'>> = [
   {
     id: 'sprint-retro-watcher',
     label: 'Sprint retro watcher',
-    classification: 'dormant',
+    classification: 'internal',
     state: 'disabled',
-    details: 'Disabled in startup; replaced by scheduled-task flows.',
+    details: 'Not started yet.',
   },
   {
     id: 'meeting-engine',
