@@ -14,10 +14,12 @@
  */
 
 import { TIMEZONE } from './config.js';
-import { getPendingTrustApprovalIds } from './db.js';
+import { getDb, getPendingTrustApprovalIds } from './db.js';
 import { queryEvents } from './event-log.js';
 import { formatLocalTime } from './timezone.js';
 import { logger } from './logger.js';
+import { TRIAGE_DEFAULTS } from './triage/config.js';
+import { renderArchiveDashboard } from './triage/dashboards.js';
 
 /** How far back to look for events (24 hours). */
 const DIGEST_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -132,6 +134,61 @@ export function generateDigest(mainGroupJid: string, now?: number): string {
 }
 
 /**
+ * Compute archive-candidate counts for the triage archive dashboard.
+ *
+ * Source: `tracked_items` rows with `classification = 'digest'` AND
+ * `state = 'queued'` — the legacy archive-candidate marker used before a
+ * dedicated queue column exists. Counts are grouped by `action_intent`
+ * (falling back to `'uncategorized'` when null/empty).
+ *
+ * Exported for tests.
+ */
+export function computeArchiveDashboardCounts(): {
+  counts: Record<string, number>;
+  total: number;
+} {
+  const rows = getDb()
+    .prepare(
+      `SELECT action_intent FROM tracked_items
+       WHERE classification = 'digest' AND state = 'queued'`,
+    )
+    .all() as Array<{ action_intent: string | null }>;
+  const counts: Record<string, number> = {};
+  for (const r of rows) {
+    const cat =
+      r.action_intent && r.action_intent.trim().length > 0
+        ? r.action_intent
+        : 'uncategorized';
+    counts[cat] = (counts[cat] ?? 0) + 1;
+  }
+  return { counts, total: rows.length };
+}
+
+/**
+ * Post (or edit) the pinned archive-queue dashboard for the main triage chat.
+ *
+ * No-op unless `TRIAGE_DEFAULTS.enabled` is true and
+ * `EMAIL_INTEL_TG_CHAT_ID` is set. Any failure is logged but never rethrown —
+ * a broken dashboard must not block the daily digest.
+ */
+export async function postArchiveDashboard(): Promise<void> {
+  if (!TRIAGE_DEFAULTS.enabled) return;
+  const chatId = process.env.EMAIL_INTEL_TG_CHAT_ID;
+  if (!chatId) return;
+  try {
+    const { counts, total } = computeArchiveDashboardCounts();
+    await renderArchiveDashboard({
+      chatId,
+      counts,
+      total,
+      nextDigestHuman: 'tomorrow 8am',
+    });
+  } catch (err) {
+    logger.warn({ err: String(err) }, 'Archive dashboard render failed');
+  }
+}
+
+/**
  * Run the daily digest: generate and send.
  */
 export async function runDailyDigest(deps: DigestDeps): Promise<void> {
@@ -144,4 +201,7 @@ export async function runDailyDigest(deps: DigestDeps): Promise<void> {
   const digest = generateDigest(mainJid);
   await deps.sendMessage(mainJid, digest);
   logger.info('Daily digest sent');
+
+  // Triage v1: refresh pinned archive-queue dashboard alongside the digest.
+  await postArchiveDashboard();
 }

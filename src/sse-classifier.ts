@@ -8,6 +8,8 @@ import {
   getDigestState,
 } from './tracked-items.js';
 import type { ItemClassifiedEvent } from './events.js';
+import { triageEmail } from './triage/worker.js';
+import { TRIAGE_DEFAULTS } from './triage/config.js';
 
 export interface SSEEmail {
   thread_id: string;
@@ -80,6 +82,12 @@ export function classifyFromSSE(
       telegram_message_id: null,
       classification_reason: result.reason,
       metadata: { account: email.account, sender },
+      confidence: null,
+      model_tier: null,
+      action_intent: null,
+      facts_extracted: null,
+      repo_candidates: null,
+      reasons: null,
     });
 
     if (result.decision === 'digest') {
@@ -99,6 +107,25 @@ export function classifyFromSSE(
       },
     };
     eventBus.emit('item.classified', event);
+
+    if (TRIAGE_DEFAULTS.enabled) {
+      // Fire-and-forget. Errors are logged inside triageEmail; this catch is a
+      // belt-and-suspenders guard so triage failures never crash the classifier.
+      void triageEmail({
+        trackedItemId: itemId,
+        emailBody: email.subject || '',
+        sender,
+        subject,
+        superpilotLabel: email.superpilot_label ?? null,
+        threadId: email.thread_id,
+        account: email.account,
+      }).catch((err) => {
+        logger.warn(
+          { err: String(err), itemId },
+          'Triage worker error (async)',
+        );
+      });
+    }
 
     results.push({
       itemId,

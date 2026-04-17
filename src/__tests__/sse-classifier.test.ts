@@ -124,6 +124,22 @@ describe('classifyFromSSE', () => {
     );
   });
 
+  it('skips triage worker when TRIAGE_V1_ENABLED is falsy', async () => {
+    delete process.env.TRIAGE_V1_ENABLED;
+    const emails: SSEEmail[] = [
+      {
+        thread_id: 't1-flag-off',
+        account: 'a@b.com',
+        subject: 's',
+        sender: 'x@y.com',
+      },
+    ];
+    const res = classifyFromSSE(emails);
+    expect(res).toHaveLength(1);
+    const item = getTrackedItemBySourceId('gmail', 'gmail:t1-flag-off');
+    expect(item?.confidence).toBeFalsy();
+  });
+
   it('sets state to queued for digest items', () => {
     const emails: SSEEmail[] = [
       {
@@ -139,5 +155,76 @@ describe('classifyFromSSE', () => {
     expect(item).not.toBeNull();
     expect(item!.state).toBe('queued');
     expect(item!.classification).toBe('digest');
+  });
+});
+
+describe('classifyFromSSE with TRIAGE_V1_ENABLED=1', () => {
+  beforeEach(() => {
+    process.env.TRIAGE_V1_ENABLED = '1';
+    vi.resetModules();
+  });
+  afterEach(() => {
+    delete process.env.TRIAGE_V1_ENABLED;
+    vi.resetModules();
+  });
+
+  it('invokes triage worker when flag is on', async () => {
+    // Re-mock the shared modules for the reset module graph.
+    vi.doMock('../logger.js', () => ({
+      logger: {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        fatal: vi.fn(),
+      },
+    }));
+    vi.doMock('../config.js', () => ({
+      CHAT_INTERFACE_CONFIG: {
+        urgencyKeywords: ['urgent', 'deadline', 'asap', 'blocking'],
+        vipList: [],
+        digestThreshold: 5,
+        digestMinIntervalMs: 7200000,
+        staleAfterDigestCycles: 2,
+        pushRateLimit: 3,
+        pushRateWindowMs: 1800000,
+        holdPushDuringMeetings: false,
+        quietHours: {
+          enabled: false,
+          start: '22:00',
+          end: '07:00',
+          weekendMode: false,
+          escalateOverride: true,
+        },
+        morningDashboardTime: '07:30',
+        microBriefingDelayMs: 60000,
+      },
+    }));
+    vi.doMock('../event-bus.js', () => ({
+      eventBus: { emit: vi.fn(), on: vi.fn() },
+    }));
+    // Init DB on the freshly reset db module so sse-classifier sees it.
+    const db = await import('../db.js');
+    db._initTestDatabase();
+
+    const worker = await import('../triage/worker.js');
+    const spy = vi
+      .spyOn(worker, 'triageEmail')
+      .mockResolvedValue({ outcome: 'skipped', reason: 'test' });
+
+    const mod = await import('../sse-classifier.js');
+    const emails: SSEEmail[] = [
+      {
+        thread_id: 't2-flag-on',
+        account: 'a@b.com',
+        subject: 'urgent fix',
+        sender: 'x@y.com',
+      },
+    ];
+    mod.classifyFromSSE(emails);
+
+    await new Promise((r) => setImmediate(r));
+    expect(spy).toHaveBeenCalled();
+    db._closeDatabase();
   });
 });

@@ -52,6 +52,22 @@ export interface TrackedItem {
   telegram_message_id: number | null;
   classification_reason: ClassificationReason | null;
   metadata: Record<string, unknown> | null;
+  // Triage v1 fields
+  confidence: number | null;
+  model_tier: number | null;
+  action_intent: string | null;
+  facts_extracted: Array<{
+    key: string;
+    value: string;
+    source_span: string;
+  }> | null;
+  repo_candidates: Array<{
+    repo: string;
+    score: number;
+    signal: string;
+  }> | null;
+  reasons: string[] | null;
+  reminded_at?: number | null;
 }
 
 export interface Thread {
@@ -102,12 +118,18 @@ export function insertTrackedItem(item: TrackedItem): void {
       id, source, source_id, group_name, state, classification,
       superpilot_label, trust_tier, title, summary, thread_id,
       detected_at, pushed_at, resolved_at, resolution_method,
-      digest_count, telegram_message_id, classification_reason, metadata
+      digest_count, telegram_message_id, classification_reason, metadata,
+      confidence, model_tier, action_intent,
+      facts_extracted_json, repo_candidates_json, reasons_json,
+      reminded_at
     ) VALUES (
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?,
-      ?, ?, ?, ?
+      ?, ?, ?, ?,
+      ?, ?, ?,
+      ?, ?, ?,
+      ?
     )`,
   ).run(
     item.id,
@@ -131,6 +153,13 @@ export function insertTrackedItem(item: TrackedItem): void {
       ? JSON.stringify(item.classification_reason)
       : null,
     item.metadata != null ? JSON.stringify(item.metadata) : null,
+    item.confidence ?? null,
+    item.model_tier ?? null,
+    item.action_intent ?? null,
+    item.facts_extracted != null ? JSON.stringify(item.facts_extracted) : null,
+    item.repo_candidates != null ? JSON.stringify(item.repo_candidates) : null,
+    item.reasons != null ? JSON.stringify(item.reasons) : null,
+    item.reminded_at ?? null,
   );
 }
 
@@ -212,6 +241,10 @@ export function transitionItemState(
 }
 
 export function deserializeItem(row: Record<string, unknown>): TrackedItem {
+  const parseJsonArray = <T>(key: string): T[] | null => {
+    const v = row[key];
+    return typeof v === 'string' && v ? (JSON.parse(v) as T[]) : null;
+  };
   return {
     ...(row as unknown as TrackedItem),
     classification_reason:
@@ -225,6 +258,21 @@ export function deserializeItem(row: Record<string, unknown>): TrackedItem {
       typeof row['metadata'] === 'string' && row['metadata']
         ? (JSON.parse(row['metadata'] as string) as Record<string, unknown>)
         : null,
+    confidence: (row['confidence'] as number | null) ?? null,
+    model_tier: (row['model_tier'] as number | null) ?? null,
+    action_intent: (row['action_intent'] as string | null) ?? null,
+    facts_extracted: parseJsonArray<{
+      key: string;
+      value: string;
+      source_span: string;
+    }>('facts_extracted_json'),
+    repo_candidates: parseJsonArray<{
+      repo: string;
+      score: number;
+      signal: string;
+    }>('repo_candidates_json'),
+    reasons: parseJsonArray<string>('reasons_json'),
+    reminded_at: (row['reminded_at'] as number | null) ?? null,
   };
 }
 
@@ -240,6 +288,31 @@ export function getTrackedItemsByState(
       `SELECT * FROM tracked_items WHERE group_name = ? AND state IN (${placeholders}) ORDER BY detected_at ASC`,
     )
     .all(groupName, ...states) as Record<string, unknown>[];
+  return rows.map(deserializeItem);
+}
+
+/**
+ * Returns currently-open items for the attention queue in a group.
+ *
+ * v1 filter: items still in a non-terminal, surfaced state (pushed/pending/held)
+ * that have gone through triage (either the legacy push classification or have
+ * reasons_json populated by the triage worker). The plan's original
+ * `action_intent IS NOT 'none'` filter was acknowledged as crude; this is a
+ * slightly better approximation and can be refined once we persist the explicit
+ * triage queue.
+ */
+export function getOpenAttentionItems(groupName: string): TrackedItem[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT * FROM tracked_items
+       WHERE group_name = ?
+         AND state IN ('pushed', 'pending', 'held')
+         AND (classification = 'push' OR reasons_json IS NOT NULL)
+       ORDER BY detected_at DESC
+       LIMIT 50`,
+    )
+    .all(groupName) as Record<string, unknown>[];
   return rows.map(deserializeItem);
 }
 

@@ -358,6 +358,92 @@ function createSchema(database: Database.Database): void {
     // Column already exists — ignore
   }
 
+  // Triage v1: add LLM classifier columns to tracked_items (idempotent)
+  try {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN confidence REAL`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN model_tier INTEGER`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN action_intent TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE tracked_items ADD COLUMN facts_extracted_json TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE tracked_items ADD COLUMN repo_candidates_json TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN reasons_json TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN reminded_at INTEGER`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Triage v1: skip-list for learned pre-filter patterns
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS triage_skip_list (
+      pattern TEXT PRIMARY KEY,
+      pattern_type TEXT NOT NULL,
+      hit_count INTEGER NOT NULL DEFAULT 0,
+      last_hit_at INTEGER NOT NULL,
+      promoted_at INTEGER
+    )
+  `);
+
+  // Triage v1: positive/negative example store for prompt injection
+  database
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS triage_examples (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        tracked_item_id TEXT NOT NULL,
+        email_summary TEXT NOT NULL,
+        agent_queue TEXT NOT NULL,
+        user_queue TEXT NOT NULL,
+        reasons_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )`,
+    )
+    .run();
+  database
+    .prepare(
+      `CREATE INDEX IF NOT EXISTS idx_triage_examples_kind_created
+       ON triage_examples(kind, created_at DESC)`,
+    )
+    .run();
+
+  // Triage v1: pinned live dashboards (one per topic)
+  database
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS triage_dashboards (
+        topic TEXT PRIMARY KEY,
+        telegram_chat_id TEXT NOT NULL,
+        pinned_msg_id INTEGER,
+        last_rendered_at INTEGER
+      )`,
+    )
+    .run();
+
   database.exec(`
     CREATE TABLE IF NOT EXISTS ux_config (
       key TEXT PRIMARY KEY,

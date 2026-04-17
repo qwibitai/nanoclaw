@@ -139,6 +139,9 @@ import { resolveModel, getEscalationModel } from './llm/provider.js';
 import { scoreComplexity } from './llm/escalation.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { runAttentionReminderSweep } from './triage/reminder.js';
+import { runNightlyAgreementCheck } from './triage/agreement.js';
+import { TRIAGE_DEFAULTS } from './triage/config.js';
 import { eventBus } from './event-bus.js';
 import { shouldFireDigest, generateSmartDigest } from './digest-engine.js';
 /* eslint-disable @typescript-eslint/no-unused-vars -- scaffolding: callback/push/classification wiring */
@@ -2076,6 +2079,32 @@ async function main(): Promise<void> {
       });
     }, 30_000);
   }
+
+  // Triage attention re-surface reminder sweep: runs every hour, but the sweep
+  // itself only sends for items older than windowHours with reminded_at IS NULL.
+  setInterval(
+    () => {
+      if (!TRIAGE_DEFAULTS.enabled) return;
+      void runAttentionReminderSweep({
+        windowHours: TRIAGE_DEFAULTS.attentionRemindHours,
+      }).catch((err) => {
+        logger.warn({ err: String(err) }, 'attention reminder sweep failed');
+      });
+    },
+    60 * 60 * 1000,
+  );
+
+  // Triage nightly agreement-rate calibration check: runs every 24h.
+  // Posts a calibration alert to attention when 7d agreement drops below floor.
+  setInterval(
+    () => {
+      if (!TRIAGE_DEFAULTS.enabled) return;
+      void runNightlyAgreementCheck({ agreementFloor: 0.8 }).catch((err) => {
+        logger.warn({ err: String(err) }, 'nightly agreement check failed');
+      });
+    },
+    24 * 60 * 60 * 1000,
+  );
 
   // Initialize email trigger debouncer — buffers rapid-fire SSE triggers
   // into a single merged IPC file to prevent duplicate agent runs

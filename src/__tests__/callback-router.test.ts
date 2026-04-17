@@ -7,6 +7,13 @@ vi.mock('../config.js', async (importOriginal) => {
   return { ...original, MINI_APP_URL: 'https://app.example.com' };
 });
 
+vi.mock('../triage/queue-actions.js', () => ({
+  handleArchive: vi.fn(),
+  handleDismiss: vi.fn(),
+  handleSnooze: vi.fn(),
+  handleOverride: vi.fn(),
+}));
+
 function makeDeps(): CallbackRouterDeps {
   return {
     archiveTracker: {
@@ -367,6 +374,68 @@ describe('handleCallback', () => {
       'telegram:123',
       100,
       expect.stringContaining('Declined'),
+      [],
+    );
+  });
+
+  it('triage:archive dispatches to handleArchive with itemId', async () => {
+    const deps = makeDeps();
+    const mod = await import('../triage/queue-actions.js');
+    (mod.handleArchive as any).mockClear();
+    await handleCallback(makeQuery('triage:archive:item-1'), deps);
+    expect(mod.handleArchive).toHaveBeenCalledWith('item-1');
+  });
+
+  it('triage:dismiss dispatches to handleDismiss', async () => {
+    const deps = makeDeps();
+    const mod = await import('../triage/queue-actions.js');
+    (mod.handleDismiss as any).mockClear();
+    await handleCallback(makeQuery('triage:dismiss:item-2'), deps);
+    expect(mod.handleDismiss).toHaveBeenCalledWith('item-2');
+  });
+
+  it('triage:snooze:1h dispatches to handleSnooze with duration 1h', async () => {
+    const deps = makeDeps();
+    const mod = await import('../triage/queue-actions.js');
+    (mod.handleSnooze as any).mockClear();
+    await handleCallback(makeQuery('triage:snooze:1h:item-3'), deps);
+    expect(mod.handleSnooze).toHaveBeenCalledWith('item-3', '1h');
+  });
+
+  it('triage:snooze:tomorrow dispatches to handleSnooze with tomorrow', async () => {
+    const deps = makeDeps();
+    const mod = await import('../triage/queue-actions.js');
+    (mod.handleSnooze as any).mockClear();
+    await handleCallback(makeQuery('triage:snooze:tomorrow:item-4'), deps);
+    expect(mod.handleSnooze).toHaveBeenCalledWith('item-4', 'tomorrow');
+  });
+
+  it('triage:override:attention dispatches to handleOverride with attention', async () => {
+    const deps = makeDeps();
+    const mod = await import('../triage/queue-actions.js');
+    (mod.handleOverride as any).mockClear();
+    await handleCallback(makeQuery('triage:override:attention:item-5'), deps);
+    expect(mod.handleOverride).toHaveBeenCalledWith('item-5', 'attention');
+  });
+
+  it('triage:override:archive dispatches to handleOverride with archive_candidate', async () => {
+    const deps = makeDeps();
+    const mod = await import('../triage/queue-actions.js');
+    (mod.handleOverride as any).mockClear();
+    await handleCallback(makeQuery('triage:override:archive:item-6'), deps);
+    expect(mod.handleOverride).toHaveBeenCalledWith(
+      'item-6',
+      'archive_candidate',
+    );
+  });
+
+  it('triage callback clears buttons after handling', async () => {
+    const deps = makeDeps();
+    await handleCallback(makeQuery('triage:archive:item-7'), deps);
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    expect(channel.editMessageButtons).toHaveBeenCalledWith(
+      'telegram:123',
+      100,
       [],
     );
   });

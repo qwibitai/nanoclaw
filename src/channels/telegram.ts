@@ -25,7 +25,7 @@ export interface TelegramChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
-async function sendTelegramMessage(
+async function sendTelegramMessageViaApi(
   api: { sendMessage: Api['sendMessage'] },
   chatId: string | number,
   text: string,
@@ -420,10 +420,10 @@ export class TelegramChannel implements Channel {
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
       if (text.length <= MAX_LENGTH) {
-        await sendTelegramMessage(this.bot.api, numericId, text, options);
+        await sendTelegramMessageViaApi(this.bot.api, numericId, text, options);
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await sendTelegramMessage(
+          await sendTelegramMessageViaApi(
             this.bot.api,
             numericId,
             text.slice(i, i + MAX_LENGTH),
@@ -627,6 +627,96 @@ export class TelegramChannel implements Channel {
       );
     }
   }
+}
+
+/**
+ * Resolve the bot token at call time from env/env-file. Kept inside each
+ * wrapper call so tests can mock these functions without needing the token.
+ */
+function resolveBotToken(): string {
+  const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
+  return process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';
+}
+
+function normalizeChatId(chatId: string | number): string {
+  const s = String(chatId);
+  return s.startsWith('tg:') ? s.slice(3) : s;
+}
+
+async function callBotApi<T>(
+  method: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const token = resolveBotToken();
+  if (!token) throw new Error('TELEGRAM_BOT_TOKEN not set');
+  const url = `https://api.telegram.org/bot${token}/${method}`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = (await resp.json()) as {
+    ok: boolean;
+    result?: T;
+    description?: string;
+  };
+  if (!resp.ok || !json.ok) {
+    throw new Error(
+      `Telegram ${method} failed: ${resp.status} ${json.description || ''}`,
+    );
+  }
+  return json.result as T;
+}
+
+/**
+ * Send a plain Telegram message via the Bot API. Returns the sent message id.
+ * Thin wrapper intended for module-level callers (e.g., triage dashboards)
+ * that don't have access to the TelegramChannel instance.
+ */
+export async function sendTelegramMessage(
+  chatId: string | number,
+  text: string,
+  opts: { parse_mode?: string; reply_markup?: unknown } = {},
+): Promise<{ message_id: number }> {
+  const body: Record<string, unknown> = {
+    chat_id: normalizeChatId(chatId),
+    text,
+  };
+  if (opts.parse_mode) body.parse_mode = opts.parse_mode;
+  if (opts.reply_markup) body.reply_markup = opts.reply_markup;
+  return callBotApi<{ message_id: number }>('sendMessage', body);
+}
+
+/**
+ * Edit an existing Telegram message's text in place. Returns the message id.
+ */
+export async function editTelegramMessage(
+  chatId: string | number,
+  messageId: number,
+  text: string,
+  opts: { parse_mode?: string } = {},
+): Promise<{ message_id: number }> {
+  const body: Record<string, unknown> = {
+    chat_id: normalizeChatId(chatId),
+    message_id: messageId,
+    text,
+  };
+  if (opts.parse_mode) body.parse_mode = opts.parse_mode;
+  return callBotApi<{ message_id: number }>('editMessageText', body);
+}
+
+/**
+ * Pin a message in a Telegram chat.
+ */
+export async function pinTelegramMessage(
+  chatId: string | number,
+  messageId: number,
+): Promise<{ ok: true }> {
+  await callBotApi<boolean>('pinChatMessage', {
+    chat_id: normalizeChatId(chatId),
+    message_id: messageId,
+  });
+  return { ok: true };
 }
 
 registerChannel('telegram', (opts: ChannelOpts) => {
