@@ -286,6 +286,31 @@ export function getTrackedItemsByState(
   return rows.map(deserializeItem);
 }
 
+/**
+ * Returns currently-open items for the attention queue in a group.
+ *
+ * v1 filter: items still in a non-terminal, surfaced state (pushed/pending/held)
+ * that have gone through triage (either the legacy push classification or have
+ * reasons_json populated by the triage worker). The plan's original
+ * `action_intent IS NOT 'none'` filter was acknowledged as crude; this is a
+ * slightly better approximation and can be refined once we persist the explicit
+ * triage queue.
+ */
+export function getOpenAttentionItems(groupName: string): TrackedItem[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT * FROM tracked_items
+       WHERE group_name = ?
+         AND state IN ('pushed', 'pending', 'held')
+         AND (classification = 'push' OR reasons_json IS NOT NULL)
+       ORDER BY detected_at DESC
+       LIMIT 50`,
+    )
+    .all(groupName) as Record<string, unknown>[];
+  return rows.map(deserializeItem);
+}
+
 export function getTrackedItemBySourceId(
   source: string,
   sourceId: string,

@@ -92,6 +92,50 @@ describe('triageEmail', () => {
     expect(mockClassify).toHaveBeenCalledOnce();
   });
 
+  it('does NOT push or render when shadowMode=true', async () => {
+    process.env.EMAIL_INTEL_TG_CHAT_ID = '-100999';
+    mockClassify.mockResolvedValueOnce({
+      decision: {
+        queue: 'attention',
+        confidence: 0.9,
+        reasons: ['r1', 'r2'],
+        action_intent: 'none',
+        facts_extracted: [],
+        repo_candidates: [],
+        attention_reason: 'x',
+      },
+      tier: 1,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 8,
+        cacheCreationTokens: 0,
+      },
+    });
+
+    const pushSpy = vi.fn();
+    vi.resetModules();
+    vi.doMock('../triage/push-attention.js', () => ({
+      pushAttentionItem: pushSpy,
+    }));
+
+    const out = await triageEmail({
+      trackedItemId: 'x3',
+      emailBody: 'x',
+      sender: 's@example.com',
+      subject: 's',
+      superpilotLabel: null,
+      threadId: 't',
+      account: 'a',
+      shadowMode: true,
+    });
+    expect(out.outcome).toBe('classified');
+    expect(pushSpy).not.toHaveBeenCalled();
+
+    vi.doUnmock('../triage/push-attention.js');
+    delete process.env.EMAIL_INTEL_TG_CHAT_ID;
+  });
+
   it('returns classified-shadow when shadow mode is on (no side effects)', async () => {
     mockClassify.mockResolvedValueOnce({
       decision: {

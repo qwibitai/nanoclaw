@@ -118,6 +118,42 @@ export async function triageEmail(
       input.trackedItemId,
     );
 
+  if (!shadowMode && result.decision.queue === 'attention') {
+    const chatId = process.env.EMAIL_INTEL_TG_CHAT_ID;
+    if (chatId) {
+      try {
+        const { pushAttentionItem } = await import('./push-attention.js');
+        await pushAttentionItem({
+          chatId,
+          itemId: input.trackedItemId,
+          title: input.subject || '(no subject)',
+          reason:
+            result.decision.attention_reason ??
+            result.decision.reasons[0] ??
+            '(no reason)',
+          sender: input.sender,
+        });
+        const { renderAttentionDashboard } = await import('./dashboards.js');
+        const { getOpenAttentionItems } = await import('../tracked-items.js');
+        const open = getOpenAttentionItems('main');
+        await renderAttentionDashboard({
+          chatId,
+          items: open.map((it) => ({
+            id: it.id,
+            title: it.title,
+            reason: (it.reasons && it.reasons[0]) ?? '(no reason)',
+            ageMins: Math.round((Date.now() - it.detected_at) / 60_000),
+          })),
+        });
+      } catch (err) {
+        logger.warn(
+          { err: String(err), itemId: input.trackedItemId },
+          'Triage: failed to push+render attention',
+        );
+      }
+    }
+  }
+
   return {
     outcome: 'classified',
     decision: result.decision,
