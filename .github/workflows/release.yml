@@ -1,0 +1,20 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    uses: Ai-road-4-You/enterprise-ci-cd/.github/workflows/release.yml@v1
+    with:
+      package-manager: "npm"
+    secrets: inherit

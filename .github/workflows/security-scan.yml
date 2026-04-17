@@ -1,0 +1,19 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  security:
+    uses: Ai-road-4-You/enterprise-ci-cd/.github/workflows/security-scan.yml@v1
+    secrets: inherit

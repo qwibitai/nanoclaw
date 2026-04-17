@@ -1,0 +1,34 @@
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/docker.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+  id-token: write
+  attestations: write
+
+jobs:
+  docker:
+    uses: Ai-road-4-You/enterprise-ci-cd/.github/workflows/ci-docker.yml@v1
+    with:
+      tags-override: latest
+    secrets: inherit

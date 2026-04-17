@@ -1,0 +1,31 @@
+name: CI - Docker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'container/**'
+      - '.github/workflows/ci-docker.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'container/**'
+      - '.github/workflows/ci-docker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+  id-token: write
+  attestations: write
+
+jobs:
+  docker:
+    uses: Ai-road-4-You/enterprise-ci-cd/.github/workflows/ci-docker.yml@v1
+    with:
+      dockerfile: container/Dockerfile
+      context: container
+      push: ${{ github.event_name != 'pull_request' }}
+      tags-override: |
+        type=raw,value=latest
