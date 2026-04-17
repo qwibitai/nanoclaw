@@ -567,6 +567,9 @@ async function buildContainerArgs(
     'NANOCLAW_SERVICE_TOKEN',
     'GH_TOKEN',
     'NOTION_TOKEN',
+    'DROPBOX_APP_KEY',
+    'DROPBOX_APP_SECRET',
+    'DROPBOX_REFRESH_TOKEN',
   ]);
   const discordToken =
     process.env.DISCORD_BOT_TOKEN || containerEnv.DISCORD_BOT_TOKEN;
@@ -594,6 +597,20 @@ async function buildContainerArgs(
   const notionToken = process.env.NOTION_TOKEN || containerEnv.NOTION_TOKEN;
   if (notionToken) {
     args.push('-e', `NOTION_TOKEN=${notionToken}`);
+  }
+
+  // Dropbox refresh-token auth for in-container Dropbox MCP server.
+  // Refresh token + app key/secret = permanent access; SDK auto-refreshes.
+  const dropboxKey =
+    process.env.DROPBOX_APP_KEY || containerEnv.DROPBOX_APP_KEY;
+  const dropboxSecret =
+    process.env.DROPBOX_APP_SECRET || containerEnv.DROPBOX_APP_SECRET;
+  const dropboxRefresh =
+    process.env.DROPBOX_REFRESH_TOKEN || containerEnv.DROPBOX_REFRESH_TOKEN;
+  if (dropboxKey && dropboxSecret && dropboxRefresh) {
+    args.push('-e', `DROPBOX_APP_KEY=${dropboxKey}`);
+    args.push('-e', `DROPBOX_APP_SECRET=${dropboxSecret}`);
+    args.push('-e', `DROPBOX_REFRESH_TOKEN=${dropboxRefresh}`);
   }
 
   // Non-Anthropic LLM provider keys

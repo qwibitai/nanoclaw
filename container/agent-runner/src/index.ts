@@ -670,6 +670,7 @@ Only use ✓ for KNOWN facts with a named source. Use ~ for REMEMBERED claims. U
         'NotebookEdit',
         'mcp__nanoclaw__*',
         'mcp__notion__*',
+        'mcp__dropbox__*',
         'mcp__superpilot__*',
         ...safeGmailTools(),
       ],
@@ -690,6 +691,7 @@ Only use ✓ for KNOWN facts with a named source. Use ~ for REMEMBERED claims. U
             'TodoWrite',
             'mcp__nanoclaw__*',
             'mcp__notion__*',
+            'mcp__dropbox__*',
             'mcp__superpilot__*',
             ...safeGmailTools(),
           ],
@@ -756,6 +758,26 @@ Only use ✓ for KNOWN facts with a named source. Use ~ for REMEMBERED claims. U
             },
           };
           log('Notion MCP server registered');
+        }
+
+        // Dropbox MCP — local stdio server using refresh-token auth
+        const dropboxKey = process.env.DROPBOX_APP_KEY;
+        const dropboxSecret = process.env.DROPBOX_APP_SECRET;
+        const dropboxRefresh = process.env.DROPBOX_REFRESH_TOKEN;
+        if (dropboxKey && dropboxSecret && dropboxRefresh) {
+          const dropboxMcpPath = path.join(__dirname, 'dropbox-mcp.js');
+          if (fs.existsSync(dropboxMcpPath)) {
+            servers['dropbox'] = {
+              command: 'node',
+              args: [dropboxMcpPath],
+              env: {
+                DROPBOX_APP_KEY: dropboxKey,
+                DROPBOX_APP_SECRET: dropboxSecret,
+                DROPBOX_REFRESH_TOKEN: dropboxRefresh,
+              },
+            };
+            log('Dropbox MCP server registered');
+          }
         }
 
         // SuperPilot MCP — local stdio server that proxies to production API

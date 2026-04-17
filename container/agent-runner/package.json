@@ -16,6 +16,7 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "ai": "^6.0.168",
     "cron-parser": "^5.0.0",
+    "dropbox": "^10.34.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
