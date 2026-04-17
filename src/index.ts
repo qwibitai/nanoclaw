@@ -1710,6 +1710,7 @@ async function main(): Promise<void> {
           }, EMAIL_TRIGGER_CLOSE_DELAY_MS);
         };
 
+        let lastMessageId: number | null = null;
         const result = await runAgent(
           group,
           prompt,
@@ -1773,18 +1774,42 @@ async function main(): Promise<void> {
                   }
                 }
 
-                // Send with buttons if the channel supports them
                 const outChannel = findChannel(channels, chatJid);
                 if (
                   outChannel &&
                   meta.actions.length > 0 &&
                   'sendMessageWithActions' in outChannel
                 ) {
-                  await (outChannel as any).sendMessageWithActions(
-                    chatJid,
-                    formatted,
-                    meta.actions,
-                  );
+                  if (
+                    lastMessageId !== null &&
+                    'editMessageTextAndButtons' in outChannel
+                  ) {
+                    // Edit-in-place: update existing message
+                    try {
+                      await (outChannel as any).editMessageTextAndButtons(
+                        chatJid,
+                        lastMessageId,
+                        formatted,
+                        meta.actions,
+                      );
+                    } catch (editErr) {
+                      // Edit failed — fall back to new message
+                      logger.debug(
+                        { err: String(editErr), lastMessageId },
+                        'Edit-in-place failed, sending new message',
+                      );
+                      const msgId = await (
+                        outChannel as any
+                      ).sendMessageWithActions(chatJid, formatted, meta.actions);
+                      lastMessageId = msgId;
+                    }
+                  } else {
+                    // First chunk — send new message, save ID
+                    const msgId = await (
+                      outChannel as any
+                    ).sendMessageWithActions(chatJid, formatted, meta.actions);
+                    lastMessageId = msgId;
+                  }
                 } else {
                   await onResult(formatted, triggerEmails ?? []);
                 }
