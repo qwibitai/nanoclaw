@@ -77,8 +77,7 @@ function renderExamples(
 
 export function buildPrompt(input: BuildPromptInput): BuiltPrompt {
   const memoryDir = input.memoryDir ?? path.resolve(process.cwd(), 'memory');
-  const rulesPath =
-    input.rulesPath ?? path.join(memoryDir, 'triage_rules.md');
+  const rulesPath = input.rulesPath ?? path.join(memoryDir, 'triage_rules.md');
   const rules = readIfExists(rulesPath) ?? '';
 
   const negatives = getRecentExamples(

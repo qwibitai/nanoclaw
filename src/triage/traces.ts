@@ -3,7 +3,8 @@ import path from 'path';
 import { logger } from '../logger.js';
 
 let traceDir =
-  process.env.TRIAGE_TRACE_DIR ?? path.resolve(process.cwd(), '.omc/logs/triage');
+  process.env.TRIAGE_TRACE_DIR ??
+  path.resolve(process.cwd(), '.omc/logs/triage');
 
 export function setTraceDir(d: string): void {
   traceDir = d;

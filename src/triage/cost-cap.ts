@@ -4,7 +4,10 @@ import { getTraceDir } from './traces.js';
 
 // Rough $/1M token prices (as of model release). Update when pricing changes.
 // Input pricing is used for uncached input; cached reads are billed at 10%.
-const PRICES: Record<1 | 2 | 3, { inUsdPerMtok: number; outUsdPerMtok: number }> = {
+const PRICES: Record<
+  1 | 2 | 3,
+  { inUsdPerMtok: number; outUsdPerMtok: number }
+> = {
   1: { inUsdPerMtok: 1.0, outUsdPerMtok: 5.0 }, // Haiku
   2: { inUsdPerMtok: 3.0, outUsdPerMtok: 15.0 }, // Sonnet
   3: { inUsdPerMtok: 15.0, outUsdPerMtok: 75.0 }, // Opus
