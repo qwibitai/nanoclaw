@@ -34,6 +34,11 @@ export default defineConfig({
         'container/agent-runner/src/query-runner.ts',
         'container/agent-runner/src/script-runner.ts',
         'container/agent-runner/src/workspace.ts',
+        // Thin entry: reads env → creates server → connects stdio.
+        // Only reachable when the subprocess is spawned (the MCP client
+        // test spawns dist/ipc-mcp-stdio.js). The logic is in
+        // ipc-mcp-stdio/ — fully covered by unit tests.
+        'container/agent-runner/src/ipc-mcp-stdio.ts',
       ],
       reporter: ['text', 'html', 'lcov'],
       // Raised from the initial baseline (65/55) after the db/host-runner/
