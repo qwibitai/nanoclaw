@@ -53,6 +53,7 @@ import {
 import { setSubsystemState } from './subsystem-status.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startUptimeMonitor, stopUptimeMonitor } from './uptime-monitor.js';
+import { NotificationBatcher } from './notification-batcher.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { connectWithBackoff } from './circuit-breaker.js';
@@ -209,6 +210,7 @@ export async function initApp(): Promise<void> {
         details: 'Shutdown requested.',
       });
       if (skillServer) skillServer.close();
+      await notificationBatcher.flushAll();
       stopUptimeMonitor();
       setSubsystemState('uptime-monitor', {
         state: 'disabled',
@@ -366,6 +368,19 @@ export async function initApp(): Promise<void> {
     process.exit(1);
   }
 
+  // Notification batcher — groups low-priority notifications to reduce Telegram spam.
+  // Critical/error notifications are still delivered immediately.
+  const sendMessageFn = async (jid: string, rawText: string) => {
+    const channel = findChannel(channels, jid);
+    if (!channel) {
+      logger.warn({ jid }, 'No channel owns JID, cannot send message');
+      return;
+    }
+    const text = formatOutbound(rawText);
+    if (text) await channel.sendMessage(jid, text);
+  };
+  const notificationBatcher = new NotificationBatcher(sendMessageFn);
+
   // Start subsystems
   const schedulerDeps = {
     registeredGroups: () => state.registeredGroups,
@@ -377,15 +392,7 @@ export async function initApp(): Promise<void> {
       sessionName: string,
       groupFolder: string,
     ) => queue.registerProcess(groupJid, _proc, sessionName, groupFolder),
-    sendMessage: async (jid: string, rawText: string) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) {
-        logger.warn({ jid }, 'No channel owns JID, cannot send message');
-        return;
-      }
-      const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
-    },
+    sendMessage: sendMessageFn,
   };
   startSchedulerLoop(schedulerDeps);
   setSubsystemState('scheduler', {
@@ -406,7 +413,7 @@ export async function initApp(): Promise<void> {
     logger.error({ err }, 'Failed to start dispatch loop');
   }
   try {
-    await startStallDetector(schedulerDeps);
+    await startStallDetector(schedulerDeps, notificationBatcher);
     setSubsystemState('stall-detector', {
       state: 'running',
       details: 'Agency HQ stall detector active.',
@@ -428,6 +435,7 @@ export async function initApp(): Promise<void> {
   startUptimeMonitor({
     registeredGroups: () => state.registeredGroups,
     sendMessage: schedulerDeps.sendMessage,
+    notificationBatcher,
   });
   setSubsystemState('uptime-monitor', {
     state: 'running',

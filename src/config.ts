@@ -129,6 +129,20 @@ export const AUTO_COMPACT_THRESHOLD = Math.min(
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+// Notification batching: configurable time windows (ms) per severity level.
+// Notifications within a window are grouped into a single message to reduce spam.
+// critical/error: immediate (0ms). warning: 10s. info: 30s.
+export const NOTIFICATION_BATCH_WINDOW_CRITICAL = 0;
+export const NOTIFICATION_BATCH_WINDOW_ERROR = 0;
+export const NOTIFICATION_BATCH_WINDOW_WARNING = parseInt(
+  process.env.NOTIFICATION_BATCH_WINDOW_WARNING || '10000',
+  10,
+);
+export const NOTIFICATION_BATCH_WINDOW_INFO = parseInt(
+  process.env.NOTIFICATION_BATCH_WINDOW_INFO || '30000',
+  10,
+);
+
 // Provider-agnostic agent runner configuration.
 // AGENT_RUNNER_BACKEND selects the CLI backend (default: claude).
 // AGENT_CLI_BIN overrides the binary name/path for the selected backend.

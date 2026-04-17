@@ -1,6 +1,7 @@
 import { STALL_THRESHOLD_MS } from './config.js';
 import { agencyFetch, type AgencyHqTask } from './agency-hq-client.js';
 import { createCorrelationLogger } from './logger.js';
+import type { NotificationBatcher } from './notification-batcher.js';
 import type { SchedulerDependencies } from './task-scheduler.js';
 
 /** Tracks when each task was dispatched (for stall detection). */
@@ -22,6 +23,7 @@ function findCeoJid(
 export async function detectStalledTasks(
   deps: SchedulerDependencies,
   isStopping: () => boolean,
+  notificationBatcher?: NotificationBatcher,
 ): Promise<void> {
   if (isStopping()) return;
 
@@ -96,11 +98,13 @@ export async function detectStalledTasks(
       // Also notify via message if CEO group exists
       const ceo = findCeoJid(deps);
       if (ceo) {
+        const stallMsg = `⚠️ Task stalled (in-progress > ${Math.round(STALL_THRESHOLD_MS / 60_000)}min): ${task.title} (${task.id})`;
         try {
-          await deps.sendMessage(
-            ceo.jid,
-            `⚠️ Task stalled (in-progress > ${Math.round(STALL_THRESHOLD_MS / 60_000)}min): ${task.title} (${task.id})`,
-          );
+          if (notificationBatcher) {
+            await notificationBatcher.send(ceo.jid, stallMsg, 'warning');
+          } else {
+            await deps.sendMessage(ceo.jid, stallMsg);
+          }
         } catch (err) {
           log.error({ err }, 'Failed to send stall message to CEO group');
         }

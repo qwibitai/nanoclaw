@@ -29,6 +29,7 @@ import {
   stopSprintRetroWatcher,
 } from './sprint-retro-watcher.js';
 import { createCorrelationLogger, logger } from './logger.js';
+import type { NotificationBatcher } from './notification-batcher.js';
 import type { SchedulerDependencies } from './task-scheduler.js';
 
 // --- Module-level state ---
@@ -36,6 +37,7 @@ import type { SchedulerDependencies } from './task-scheduler.js';
 let stopping = false;
 let dispatchIntervalHandle: ReturnType<typeof setInterval> | null = null;
 let stallIntervalHandle: ReturnType<typeof setInterval> | null = null;
+let stallNotificationBatcher: NotificationBatcher | undefined;
 
 const isStopping = () => stopping;
 
@@ -258,16 +260,18 @@ export async function startDispatchLoop(
 
 export async function startStallDetector(
   deps: SchedulerDependencies,
+  notificationBatcher?: NotificationBatcher,
 ): Promise<void> {
   stopping = false;
+  stallNotificationBatcher = notificationBatcher;
   logger.info(
     { intervalMs: STALL_DETECTOR_INTERVAL },
     'Starting Agency HQ stall detector',
   );
 
   stallIntervalHandle = setInterval(() => {
-    detectStalledTasks(deps, isStopping).catch((err) =>
-      logger.error({ err }, 'Stall detector tick failed'),
+    detectStalledTasks(deps, isStopping, stallNotificationBatcher).catch(
+      (err) => logger.error({ err }, 'Stall detector tick failed'),
     );
   }, STALL_DETECTOR_INTERVAL);
 }
@@ -290,6 +294,7 @@ export async function stopAgencyHqSubsystems(): Promise<void> {
     stallIntervalHandle = null;
   }
   stopSprintRetroWatcher();
+  stallNotificationBatcher = undefined;
   dispatchRetryCount.clear();
   dispatchSkipTicks.clear();
   dispatchTime.clear();
@@ -312,8 +317,10 @@ export const _testInternals = {
   lockedWorkerSlots,
   dispatchReadyTasks: (deps: SchedulerDependencies) =>
     dispatchReadyTasks(deps, isStopping),
-  detectStalledTasks: (deps: SchedulerDependencies) =>
-    detectStalledTasks(deps, isStopping),
+  detectStalledTasks: (
+    deps: SchedulerDependencies,
+    batcher?: NotificationBatcher,
+  ) => detectStalledTasks(deps, isStopping, batcher),
   buildPrompt,
   findDispatchTarget,
   findCeoJid,

@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 
 import { logger } from './logger.js';
+import type { NotificationBatcher } from './notification-batcher.js';
 import { RegisteredGroup } from './types.js';
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -8,6 +9,7 @@ const INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 export interface UptimeMonitorDeps {
   registeredGroups: () => Record<string, RegisteredGroup>;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  notificationBatcher?: NotificationBatcher;
 }
 
 function runCommand(
@@ -80,11 +82,12 @@ async function checkServices(deps: UptimeMonitorDeps): Promise<void> {
       const msg = `*[ALERT] Service down: ${unit}*\n\n\`\`\`\n${tail}\n\`\`\``;
 
       logger.warn({ unit }, 'Uptime monitor: service failed, sending alert');
-      await deps
-        .sendMessage(mainJid, msg)
-        .catch((err) =>
-          logger.error({ err, unit }, 'Uptime monitor: failed to send alert'),
-        );
+      const send = deps.notificationBatcher
+        ? deps.notificationBatcher.send(mainJid, msg, 'error')
+        : deps.sendMessage(mainJid, msg);
+      await send.catch((err) =>
+        logger.error({ err, unit }, 'Uptime monitor: failed to send alert'),
+      );
     }
   }
 
@@ -94,14 +97,15 @@ async function checkServices(deps: UptimeMonitorDeps): Promise<void> {
       knownFailures.delete(unit);
       const msg = `*[RESOLVED] Service recovered: ${unit}*`;
       logger.info({ unit }, 'Uptime monitor: service recovered');
-      await deps
-        .sendMessage(mainJid, msg)
-        .catch((err) =>
-          logger.error(
-            { err, unit },
-            'Uptime monitor: failed to send recovery alert',
-          ),
-        );
+      const send = deps.notificationBatcher
+        ? deps.notificationBatcher.send(mainJid, msg, 'info')
+        : deps.sendMessage(mainJid, msg);
+      await send.catch((err) =>
+        logger.error(
+          { err, unit },
+          'Uptime monitor: failed to send recovery alert',
+        ),
+      );
     }
   }
 }
