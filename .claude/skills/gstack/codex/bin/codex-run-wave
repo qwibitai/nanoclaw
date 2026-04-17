@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+# Run ONE wave of tasks:
+#   1. for each task in the wave, set up worktree and dispatch codex (up to max-parallel)
+#   2. run the 3-stage gate per task; on gate failure, re-dispatch (retry ladder)
+#   3. tasks that pass → leave the worktree + branch in place for the merger
+#   4. tasks that exhaust retries → emit needs-claude-fallback marker;
+#      wait for claude-fallback-result; if still bad, state=escalated and stop wave
+#
+# Flags:
+#   --work-dir <dir>     plan work dir
+#   --wave <N>           wave number
+#   --base <ref>
+#   --plan-json <file>   output of codex-parse-plan
+#   --max-parallel <N>   default 4
+#   --task-timeout <sec> default 1800
+#
+# Exits 0 if every task in the wave ends up "passed gate".
+# Exits 2 if any task ended up "escalated".
+#
+# Portability: bash 3.2 compatible (no declare -A, no wait -n).
+set -euo pipefail
+
+WORK="" WAVE="" BASE="" PLAN_JSON="" MAX_PARALLEL=4 TIMEOUT=1800
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --work-dir)      WORK="$2"; shift 2 ;;
+    --wave)          WAVE="$2"; shift 2 ;;
+    --base)          BASE="$2"; shift 2 ;;
+    --plan-json)     PLAN_JSON="$2"; shift 2 ;;
+    --max-parallel)  MAX_PARALLEL="$2"; shift 2 ;;
+    --task-timeout)  TIMEOUT="$2"; shift 2 ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+: "${WORK:?}" "${WAVE:?}" "${BASE:?}" "${PLAN_JSON:?}"
+
+SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BIN="$SKILL_DIR/bin"
+PROMPT_TMPL="$SKILL_DIR/codex-implementer-prompt.md"
+
+# tasks in this wave (newline-separated numbers)
+wave_tasks="$(jq -r --argjson w "$WAVE" \
+  '.waves[] | select(.wave == $w) | .tasks[]' "$PLAN_JSON")"
+
+task_meta() {  # $1 = task num; emits json
+  jq --argjson n "$1" '.tasks[] | select(.num == $n)' "$PLAN_JSON"
+}
+
+render_prompt() {
+  local num="$1" findings="${2:-}" forbidden="$3"
+  local meta heading body test_cmd slug goal arch prior_section=""
+  meta="$(task_meta "$num")"
+  heading="$(jq -r '.heading' <<<"$meta")"
+  body="$(jq -r '.body' <<<"$meta")"
+  slug="$(jq -r '.slug' <<<"$meta")"
+  test_cmd="$(jq -r '.test_command // empty' <<<"$meta")"
+  [ -z "$test_cmd" ] && test_cmd="$(jq -r '.test_command' "$PLAN_JSON")"
+  goal="$(jq -r '.goal' "$PLAN_JSON")"
+  arch="$(jq -r '.architecture' "$PLAN_JSON")"
+
+  if [ -n "$findings" ] && [ -r "$findings" ]; then
+    prior_section="PRIOR ATTEMPT FAILED BECAUSE:
+$(cat "$findings")
+
+Fix and re-verify."
+  fi
+
+  awk -v goal="$goal" -v arch="$arch" -v heading="$heading" \
+      -v body="$body" -v prior="$prior_section" \
+      -v wt="$WORK/$slug" \
+      -v fb="$forbidden" -v tc="$test_cmd" '
+    {
+      gsub(/\{\{GOAL\}\}/, goal)
+      gsub(/\{\{ARCHITECTURE\}\}/, arch)
+      gsub(/\{\{TASK_HEADING\}\}/, heading)
+      gsub(/\{\{TASK_BODY\}\}/, body)
+      gsub(/\{\{PRIOR_ATTEMPT_FINDINGS\}\}/, prior)
+      gsub(/\{\{WORKTREE_PATH\}\}/, wt)
+      gsub(/\{\{FORBIDDEN_FILES\}\}/, fb)
+      gsub(/\{\{TEST_COMMAND\}\}/, tc)
+      print
+    }
+  ' "$PROMPT_TMPL"
+}
+
+# Precompute and cache each task's forbidden-files list in $WORK/forbidden.<n>
+# (bash 3.2 has no associative arrays; files serve as the same lookup.)
+mkdir -p "$WORK"
+for n in $wave_tasks; do
+  others="$(jq -r --argjson n "$n" --argjson w "$WAVE" '
+    [.waves[] | select(.wave == $w) | .tasks[] | select(. != $n)] as $peers
+    | .tasks[] | select(.num | IN($peers[])) | .files[]' "$PLAN_JSON" \
+    | sort -u | paste -sd, -)"
+  printf '%s' "$others" > "$WORK/forbidden.$n"
+done
+
+LOGS="$WORK/logs"; mkdir -p "$LOGS"
+
+process_one() {
+  local num="$1"
+  local slug wt sid_file prompt_file attempt reasoning test_cmd forbidden
+  slug="$(task_meta "$num" | jq -r '.slug')"
+  wt="$WORK/$slug"
+  sid_file="$WORK/sid.$WAVE.$num"
+  prompt_file="$WORK/prompt.$WAVE.$num.txt"
+  attempt=1
+  reasoning="high"
+  test_cmd="$(task_meta "$num" | jq -r '.test_command // empty')"
+  [ -z "$test_cmd" ] && test_cmd="$(jq -r '.test_command' "$PLAN_JSON")"
+  forbidden="$(cat "$WORK/forbidden.$num" 2>/dev/null || printf '')"
+  local findings=""
+
+  "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status dispatched
+
+  if [ ! -d "$wt" ]; then
+    "$BIN/codex-worktree" setup "$WORK" "$slug" "$BASE" > /dev/null
+  fi
+
+  while :; do
+    render_prompt "$num" "$findings" "$forbidden" > "$prompt_file"
+
+    local status gate_status
+    status="$("$BIN/codex-dispatch-task" \
+      --worktree "$wt" \
+      --log "$LOGS/$slug.log" \
+      --prompt-file "$prompt_file" \
+      --reasoning "$reasoning" \
+      --session-file "$sid_file" \
+      --timeout "$TIMEOUT")"
+
+    "$BIN/codex-state" append-attempt "$WORK" \
+      --wave "$WAVE" --task "$num" \
+      --impl "codex-$reasoning" \
+      --session-id "$(cat "$sid_file" 2>/dev/null || echo '')" \
+      --result "$status"
+
+    if [ "$status" = "BLOCKED" ] || [ "$status" = "NEEDS_CONTEXT" ]; then
+      gate_status="FAIL dispatch"
+    else
+      "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status gate-check
+      GATE_ATTEMPT="$attempt" \
+        gate_status="$("$BIN/codex-gate" \
+          --worktree "$wt" \
+          --work-dir "$WORK" \
+          --wave "$WAVE" --task "$num" --task-slug "$slug" \
+          --base "$BASE" \
+          --test-cmd "$test_cmd")"
+    fi
+
+    if [ "$gate_status" = "PASS" ]; then
+      "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status passed-gate
+      return 0
+    fi
+
+    findings="$WORK/findings.$WAVE.$num.$attempt.txt"
+    attempt=$((attempt + 1))
+    case "$attempt" in
+      2) reasoning="high" ;;
+      3) reasoning="xhigh" ;;
+      4)
+        "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status claude-fallback
+        jq -n \
+          --argjson w "$WAVE" --argjson t "$num" \
+          --arg slug "$slug" --arg wt "$wt" \
+          --arg base "$BASE" --arg findings "$findings" \
+          --arg plan_json "$PLAN_JSON" \
+          --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          '{wave:$w, task:$t, slug:$slug, worktree_path:$wt, base:$base,
+            findings_file:$findings, plan_json:$plan_json, requested_at:$now}' \
+          > "$WORK/needs-claude-fallback.$WAVE.$num.json"
+        local waited=0
+        while [ ! -r "$WORK/claude-fallback-result.$WAVE.$num.json" ]; do
+          sleep 5; waited=$((waited + 5))
+          if [ "$waited" -gt 1800 ]; then
+            "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status escalated
+            return 2
+          fi
+        done
+        local res
+        res="$(jq -r '.status' "$WORK/claude-fallback-result.$WAVE.$num.json")"
+        rm -f "$WORK/claude-fallback-result.$WAVE.$num.json"
+        if [ "$res" = "DONE" ] || [ "$res" = "DONE_WITH_CONCERNS" ]; then
+          GATE_ATTEMPT="$attempt" \
+          gate_status="$("$BIN/codex-gate" \
+            --worktree "$wt" --work-dir "$WORK" \
+            --wave "$WAVE" --task "$num" --task-slug "$slug" \
+            --base "$BASE" --test-cmd "$test_cmd")"
+          if [ "$gate_status" = "PASS" ]; then
+            "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status passed-gate
+            return 0
+          fi
+        fi
+        "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status escalated
+        return 2
+        ;;
+    esac
+  done
+}
+
+# Dispatch wave with a max-parallel ceiling.
+# Portable pattern (no `wait -n`): maintain an active-pids list; whenever the
+# list reaches MAX_PARALLEL, poll every ~0.2s for any child to exit, reap it,
+# then continue.
+active_pids=()
+failed=0
+
+reap_any() {
+  # Blocks until at least one active pid exits; prunes all exited pids; returns.
+  while :; do
+    local still_alive=()
+    local reaped=0
+    local p
+    for p in "${active_pids[@]:-}"; do
+      if [ -z "$p" ]; then continue; fi
+      if kill -0 "$p" 2>/dev/null; then
+        still_alive+=("$p")
+      else
+        if ! wait "$p"; then failed=$((failed + 1)); fi
+        reaped=1
+      fi
+    done
+    active_pids=("${still_alive[@]:-}")
+    if [ "$reaped" = "1" ]; then return 0; fi
+    sleep 0.2
+  done
+}
+
+reap_all() {
+  local p
+  for p in "${active_pids[@]:-}"; do
+    [ -z "$p" ] && continue
+    if ! wait "$p"; then failed=$((failed + 1)); fi
+  done
+  active_pids=()
+}
+
+for n in $wave_tasks; do
+  process_one "$n" &
+  active_pids+=("$!")
+  while [ "${#active_pids[@]}" -ge "$MAX_PARALLEL" ]; do
+    reap_any
+  done
+done
+
+reap_all
+
+if [ "$failed" -gt 0 ]; then
+  echo "wave $WAVE: $failed task(s) escalated" >&2
+  exit 2
+fi
+exit 0
