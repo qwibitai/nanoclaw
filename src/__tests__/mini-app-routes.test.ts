@@ -108,6 +108,40 @@ describe('Mini App extended routes', () => {
     expect(res.text).toContain('sandbox');
   });
 
+  it('GET /email/:emailId renders Open in Gmail as a link', async () => {
+    const { app } = setup();
+    const res = await request(app).get('/email/gmailmsg?account=personal');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('mail.google.com');
+    expect(res.text).toContain('gmailmsg');
+  });
+
+  it('GET /email/:emailId renders Archive button with data attributes', async () => {
+    const { app } = setup();
+    const res = await request(app).get('/email/archmsg?account=personal');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('data-email-id');
+    expect(res.text).toContain('data-account');
+    expect(res.text).toContain('archmsg');
+    expect(res.text).toContain('personal');
+  });
+
+  it('POST /api/email/:emailId/archive calls gmailOps.archiveThread', async () => {
+    const { app, mockGmailOps } = setup();
+    (mockGmailOps.archiveThread as ReturnType<typeof vi.fn>).mockResolvedValue(
+      undefined,
+    );
+    const res = await request(app)
+      .post('/api/email/archmsg/archive')
+      .send({ account: 'personal', threadId: 'thread123' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true });
+    expect(mockGmailOps.archiveThread).toHaveBeenCalledWith(
+      'personal',
+      'thread123',
+    );
+  });
+
   it('GET /draft-diff/:draftId shows diff view', async () => {
     const { app, db } = setup();
     db.prepare(

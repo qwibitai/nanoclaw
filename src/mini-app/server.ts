@@ -3,7 +3,12 @@ import type Database from 'better-sqlite3';
 import { renderTaskDetail } from './templates/task-detail.js';
 import { renderEmailFull } from './templates/email-full.js';
 import { renderDraftDiff } from './templates/draft-diff.js';
-import { getCachedEmailBody, cacheEmailBody, getCachedEmailMeta, cacheEmailMeta } from '../email-preview.js';
+import {
+  getCachedEmailBody,
+  cacheEmailBody,
+  getCachedEmailMeta,
+  cacheEmailMeta,
+} from '../email-preview.js';
 import type { GmailOps } from '../gmail-ops.js';
 import type { DraftEnrichmentWatcher } from '../draft-enrichment.js';
 import { logger } from '../logger.js';
@@ -112,7 +117,10 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
           if (meta) cacheEmailMeta(emailId, meta);
         }
       } catch (err) {
-        logger.warn({ emailId, err }, 'Failed to fetch email meta for Mini App');
+        logger.warn(
+          { emailId, err },
+          'Failed to fetch email meta for Mini App',
+        );
       }
     }
 
@@ -129,7 +137,13 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
           );
         }
       }
-      meta = { subject: '', from: '', to: '', date: '', body: body || 'Email body could not be loaded.' };
+      meta = {
+        subject: '',
+        from: '',
+        to: '',
+        date: '',
+        body: body || 'Email body could not be loaded.',
+      };
     }
 
     const html = renderEmailFull({
@@ -144,6 +158,23 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
       account,
     });
     res.type('html').send(html);
+  });
+
+  // --- Archive email API ---
+  app.post('/api/email/:emailId/archive', async (req, res) => {
+    const { emailId } = req.params;
+    const { account, threadId } = req.body;
+    if (!opts.gmailOps || !account) {
+      res.status(400).json({ error: 'Missing account or gmailOps' });
+      return;
+    }
+    try {
+      await opts.gmailOps.archiveThread(account, threadId || emailId);
+      res.json({ success: true });
+    } catch (err) {
+      logger.error({ emailId, err }, 'Mini app archive failed');
+      res.status(500).json({ error: 'Archive failed' });
+    }
   });
 
   // --- Draft diff view ---

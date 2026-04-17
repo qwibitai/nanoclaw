@@ -60,9 +60,37 @@ export function renderEmailFull(data: EmailFullData): string {
 </div>
   ${attachmentsHtml}
   <div class="actions">
-    <button class="btn" style="background:#276749;color:#c6f6d5;">Archive</button>
-    <button class="btn">Open in Gmail</button>
-  </div>
+  <button class="btn" style="background:#276749;color:#c6f6d5;"
+    data-email-id="${escapeHtml(data.emailId || '')}"
+    data-account="${escapeHtml(data.account || '')}"
+    onclick="archiveEmail(this)">Archive</button>
+  <a class="btn" href="https://mail.google.com/mail/u/0/#inbox/${escapeHtml(data.emailId || '')}"
+    target="_blank" rel="noopener" style="text-decoration:none;display:inline-block;">Open in Gmail</a>
+</div>
+<script>
+async function archiveEmail(btn) {
+  btn.disabled = true;
+  btn.textContent = 'Archiving...';
+  try {
+    const resp = await fetch('/api/email/' + btn.dataset.emailId + '/archive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account: btn.dataset.account }),
+    });
+    if (resp.ok) {
+      btn.textContent = 'Archived';
+      btn.style.opacity = '0.5';
+      if (window.Telegram && window.Telegram.WebApp) window.Telegram.WebApp.close();
+    } else {
+      btn.textContent = 'Failed - Retry';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    btn.textContent = 'Failed - Retry';
+    btn.disabled = false;
+  }
+}
+</script>
 </body>
 </html>`;
 }
