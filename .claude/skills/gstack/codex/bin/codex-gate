@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# Runs the 3-stage merge gate on a single task worktree. On gate failure,
+# assembles findings and returns them so the caller can re-dispatch Codex.
+#
+# Input flags:
+#   --worktree <dir>            task worktree
+#   --work-dir  <dir>           plan work dir (home of state.json + markers)
+#   --wave <N> --task <N> --task-slug <slug>
+#   --base <ref>                base branch ref
+#   --test-cmd <string>         the plan's/task's test command (run inside worktree)
+#   --spec-check-poll-seconds <sec>  how often to poll the marker file (default 5)
+#   --spec-check-timeout-seconds <sec>  total wait (default 900)
+#
+# Output on stdout (single line):
+#   PASS
+#   or
+#   FAIL <stage>    # stage = tests|review|spec
+#
+# Side effects on FAIL:
+#   writes findings to $WORK/findings.<wave>.<task>.<attempt>.txt
+set -euo pipefail
+
+WT="" WORK="" WAVE="" TASK="" SLUG="" BASE=""
+TEST_CMD=""
+POLL=5 TIMEOUT=900
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --worktree)                   WT="$2"; shift 2 ;;
+    --work-dir)                   WORK="$2"; shift 2 ;;
+    --wave)                       WAVE="$2"; shift 2 ;;
+    --task)                       TASK="$2"; shift 2 ;;
+    --task-slug)                  SLUG="$2"; shift 2 ;;
+    --base)                       BASE="$2"; shift 2 ;;
+    --test-cmd)                   TEST_CMD="$2"; shift 2 ;;
+    --spec-check-poll-seconds)    POLL="$2"; shift 2 ;;
+    --spec-check-timeout-seconds) TIMEOUT="$2"; shift 2 ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+: "${WT:?}" "${WORK:?}" "${WAVE:?}" "${TASK:?}" "${SLUG:?}" "${BASE:?}" "${TEST_CMD:?}"
+
+MARKER_IN="$WORK/needs-spec-check.$WAVE.$TASK.json"
+MARKER_OUT="$WORK/spec-check-result.$WAVE.$TASK.json"
+
+findings_file() {
+  local attempt="$1"
+  printf '%s/findings.%s.%s.%s.txt\n' "$WORK" "$WAVE" "$TASK" "$attempt"
+}
+
+# -------- Stage 1: task-local tests --------
+stage_tests() {
+  local attempt="$1" ff; ff="$(findings_file "$attempt")"
+  local tmp; tmp="$(mktemp)"
+  if (cd "$WT" && bash -c "$TEST_CMD") > "$tmp" 2>&1; then
+    rm -f "$tmp"; return 0
+  fi
+  {
+    echo "=== STAGE 1: TASK-LOCAL TESTS FAILED ==="
+    echo "command: $TEST_CMD"
+    echo "--- last 100 lines ---"
+    tail -n 100 "$tmp"
+  } > "$ff"
+  rm -f "$tmp"
+  return 1
+}
+
+# -------- Stage 2: codex review --------
+SIBLING_BIN="$(cd "$(dirname "$0")" && pwd)"
+
+stage_review() {
+  local attempt="$1" ff; ff="$(findings_file "$attempt")"
+  local rv
+  rv="$("$SIBLING_BIN/codex-gate-review" --worktree "$WT" --base "$BASE" --findings-file "$ff.review" 2>/dev/null)"
+  if [ "$rv" = "PASS" ]; then
+    rm -f "$ff.review"; return 0
+  fi
+  {
+    echo "=== STAGE 2: CODEX REVIEW FAILED ==="
+    cat "$ff.review"
+  } > "$ff"
+  rm -f "$ff.review"
+  return 1
+}
+
+# -------- Stage 3: Claude spec check (via marker protocol) --------
+stage_spec() {
+  local attempt="$1" ff; ff="$(findings_file "$attempt")"
+  local diff_file="$WORK/diff.$WAVE.$TASK.txt"
+  (cd "$WT" && git diff "$BASE"...HEAD 2>/dev/null) > "$diff_file" || true
+
+  jq -n \
+    --argjson w "$WAVE" --argjson t "$TASK" \
+    --arg base "$BASE" --arg wt "$WT" \
+    --arg diff "$diff_file" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{wave:$w, task:$t, base:$base, worktree_path:$wt, diff_file:$diff, requested_at:$now}' \
+    > "$MARKER_IN.tmp"
+  mv "$MARKER_IN.tmp" "$MARKER_IN"
+
+  local waited=0
+  while [ ! -r "$MARKER_OUT" ]; do
+    sleep "$POLL"; waited=$((waited + POLL))
+    if [ "$waited" -ge "$TIMEOUT" ]; then
+      {
+        echo "=== STAGE 3: TIMED OUT waiting for Claude spec check ==="
+        echo "marker file still present: $MARKER_IN"
+      } > "$ff"
+      return 1
+    fi
+  done
+
+  local verdict
+  verdict="$(jq -r '.verdict' "$MARKER_OUT")"
+  if [ "$verdict" = "PASS" ]; then
+    rm -f "$MARKER_OUT"; return 0
+  fi
+  {
+    echo "=== STAGE 3: CLAUDE SPEC CHECK FAILED ==="
+    jq -r '.findings_text' "$MARKER_OUT"
+  } > "$ff"
+  rm -f "$MARKER_OUT"
+  return 1
+}
+
+attempt="${GATE_ATTEMPT:-1}"
+
+if ! stage_tests  "$attempt"; then echo "FAIL tests";  exit 0; fi
+if ! stage_review "$attempt"; then echo "FAIL review"; exit 0; fi
+if ! stage_spec   "$attempt"; then echo "FAIL spec";   exit 0; fi
+
+echo "PASS"
