@@ -4,10 +4,7 @@ import {
   _setActiveLiveLocationManager,
   getActiveLiveLocationContext,
 } from './live-location.js';
-import {
-  installLlFsSpies,
-  makeManager,
-} from './live-location-test-harness.js';
+import { installLlFsSpies, makeManager } from './live-location-test-harness.js';
 
 beforeEach(() => {
   vi.useFakeTimers();

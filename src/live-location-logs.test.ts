@@ -126,7 +126,9 @@ describe('LiveLocationManager — initialize', () => {
     const manager = makeManager();
     manager.initialize();
 
-    fsSpies.readdirSync.mockReturnValue(['stale.log'] as unknown as fs.Dirent[]);
+    fsSpies.readdirSync.mockReturnValue([
+      'stale.log',
+    ] as unknown as fs.Dirent[]);
     fsSpies.statSync.mockReturnValue({ mtimeMs: oldMtime } as fs.Stats);
 
     vi.advanceTimersByTime(60 * 60 * 1000 + 1);
