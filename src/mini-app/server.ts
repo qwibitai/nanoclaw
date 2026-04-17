@@ -13,17 +13,28 @@ import type { GmailOps } from '../gmail-ops.js';
 import type { DraftEnrichmentWatcher } from '../draft-enrichment.js';
 import { logger } from '../logger.js';
 import type { TaskStep, TaskLog } from './templates/task-detail.js';
+import { PendingSendRegistry } from './pending-send.js';
 
 export interface MiniAppServerOpts {
   port: number;
   db: Database.Database;
   gmailOps?: GmailOps;
   draftWatcher?: DraftEnrichmentWatcher;
+  eventBus?: import('../event-bus.js').EventBus;
+  pendingSendRegistry?: PendingSendRegistry;
 }
 
 export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
+  const registry = opts.pendingSendRegistry ?? new PendingSendRegistry();
   const app = express();
   app.use(express.json());
+
+  function lookupDraftAccount(draftId: string): string | null {
+    const row = opts.db
+      .prepare('SELECT account FROM draft_originals WHERE draft_id = ?')
+      .get(draftId) as { account: string } | undefined;
+    return row?.account ?? null;
+  }
 
   app.get('/task/:taskId', (req, res) => {
     const { taskId } = req.params;
@@ -222,12 +233,169 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
     }
   });
 
+  // --- Reply view (render) ---
+  app.get('/reply/:draftId', async (req, res) => {
+    const { draftId } = req.params;
+    const account = lookupDraftAccount(draftId);
+    if (!account) {
+      res
+        .type('html')
+        .send(
+          '<html><body style="background:#0d1117;color:#c9d1d9;font-family:-apple-system,system-ui,sans-serif;padding:24px;"><h2>Draft no longer exists</h2><p>The draft may have been sent or deleted.</p></body></html>',
+        );
+      return;
+    }
+    if (!opts.gmailOps) {
+      res.status(500).type('html').send('Gmail ops not configured');
+      return;
+    }
+    try {
+      const ctx = await opts.gmailOps.getDraftReplyContext(account, draftId);
+      if (!ctx) {
+        res
+          .type('html')
+          .send(
+            '<html><body style="background:#0d1117;color:#c9d1d9;font-family:-apple-system,system-ui,sans-serif;padding:24px;"><h2>Draft no longer exists</h2><p>The draft may have been sent or deleted.</p></body></html>',
+          );
+        return;
+      }
+      const html = renderEmailFull({
+        mode: 'reply',
+        draftId,
+        account,
+        subject: ctx.incoming.subject,
+        from: ctx.incoming.from,
+        to: ctx.incoming.to,
+        cc: ctx.incoming.cc,
+        date: ctx.incoming.date,
+        body: ctx.body,
+        attachments: [],
+      });
+      res.type('html').send(html);
+    } catch (err) {
+      logger.error({ draftId, err }, 'Failed to render /reply');
+      res.status(500).type('html').send('Failed to load draft');
+    }
+  });
+
+  // --- Save draft body ---
+  app.patch('/api/draft/:draftId/save', async (req, res) => {
+    const { draftId } = req.params;
+    const body = req.body?.body;
+    if (typeof body !== 'string') {
+      res.status(400).json({
+        ok: false,
+        error: 'body field must be a string',
+        code: 'INVALID_BODY',
+      });
+      return;
+    }
+    const account = lookupDraftAccount(draftId);
+    if (!account) {
+      res.status(404).json({
+        ok: false,
+        error: 'Draft not found',
+        code: 'DRAFT_NOT_FOUND',
+      });
+      return;
+    }
+    if (!opts.gmailOps) {
+      res
+        .status(500)
+        .json({ ok: false, error: 'Gmail not configured', code: 'INTERNAL' });
+      return;
+    }
+    try {
+      await opts.gmailOps.updateDraft(account, draftId, body);
+      logger.info(
+        { account, draftId, bodyLen: body.length, component: 'mini-app' },
+        'Draft save via mini-app',
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      logger.error(
+        { account, draftId, err, component: 'mini-app' },
+        'Draft save failed from mini-app',
+      );
+      res.status(500).json({
+        ok: false,
+        error: 'Gmail API error',
+        code: 'GMAIL_API_ERROR',
+      });
+    }
+  });
+
+  // --- Schedule send with 10s undo window ---
+  app.post('/api/draft/:draftId/send', async (req, res) => {
+    const { draftId } = req.params;
+    const account = lookupDraftAccount(draftId);
+    if (!account) {
+      res.status(404).json({
+        ok: false,
+        error: 'Draft not found',
+        code: 'DRAFT_NOT_FOUND',
+      });
+      return;
+    }
+    if (!opts.gmailOps) {
+      res
+        .status(500)
+        .json({ ok: false, error: 'Gmail not configured', code: 'INTERNAL' });
+      return;
+    }
+    const delayMs = 10_000;
+    const { sendAt } = registry.schedule(
+      draftId,
+      account,
+      delayMs,
+      async (id, acct) => {
+        try {
+          await opts.gmailOps!.sendDraft(acct, id);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.error(
+            { account: acct, draftId: id, err, component: 'mini-app' },
+            'Draft send failed',
+          );
+          opts.eventBus?.emit('email.draft.send_failed', {
+            type: 'email.draft.send_failed',
+            source: 'mini-app',
+            timestamp: Date.now(),
+            payload: { draftId: id, account: acct, error: message },
+          });
+        }
+      },
+    );
+    logger.info(
+      { account, draftId, sendAt, delayMs, component: 'mini-app' },
+      'Draft send scheduled',
+    );
+    res.json({ ok: true, sendAt });
+  });
+
+  // --- Cancel pending send ---
+  app.post('/api/draft/:draftId/send/cancel', (req, res) => {
+    const { draftId } = req.params;
+    const cancelled = registry.cancel(draftId);
+    if (cancelled) {
+      logger.info(
+        { draftId, component: 'mini-app' },
+        'Draft send cancelled',
+      );
+    }
+    res.json({ ok: true, cancelled });
+  });
+
   return app;
 }
 
-export function startMiniAppServer(opts: MiniAppServerOpts): void {
-  const app = createMiniAppServer(opts);
-  app.listen(opts.port, () => {
+export function startMiniAppServer(
+  opts: MiniAppServerOpts,
+): { server: ReturnType<express.Application['listen']>; registry: PendingSendRegistry } {
+  const registry = new PendingSendRegistry();
+  const app = createMiniAppServer({ ...opts, pendingSendRegistry: registry });
+  const server = app.listen(opts.port, () => {
     logger.info({ port: opts.port }, 'Mini App server started');
   });
+  return { server, registry };
 }

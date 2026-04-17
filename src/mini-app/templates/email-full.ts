@@ -1,4 +1,7 @@
 export interface EmailFullData {
+  mode?: 'view' | 'reply';
+  draftId?: string;
+  account?: string;
   from: string;
   to: string;
   subject: string;
