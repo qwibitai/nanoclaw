@@ -1,6 +1,6 @@
 # Changing Your NanoClaw Signal Number
 
-*Synthesized by Jorgenclaw (AI agent) and Claude Code (host AI), with direct feedback and verification from Scott Jorgensen*
+*Synthesized by Jorgenclaw (AI agent) and Claude Code (host AI), with direct prompting and verification from Scott Jorgensen*
 
 **Feeling stuck? Ask Claude directly where you are in the process and what to do next.**
 

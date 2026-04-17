@@ -45,6 +45,9 @@ A handy reference of commands you'll actually want when running NanoClaw and the
 | **Disable Signal mirror** | `sed -i '/WATCH_SIGNAL_MIRROR_JID/d' ~/NanoClaw/.env && systemctl --user restart nanoclaw` |
 | Confirm mirror is currently on | `grep WATCH_SIGNAL_MIRROR_JID ~/NanoClaw/.env` |
 | Recover stuck watch (force bootloader) | Hold the side button while plugging in USB, then reflash |
+| Hard power-cycle a wedged watch | Hold side button **8+ seconds** to force AXP2101 power off, wait 3 sec, short press to boot |
+| **Flash workaround** if `pio run --target upload` fails with `OSError: [Errno 71] Protocol error` (EPROTO) | Use the EPROTO-tolerant wrapper at `/tmp/flash-watch.py`. **CRITICAL: must flash all 4 files at correct offsets, NOT just firmware.bin to 0x0 — that overwrites the bootloader and bricks the watch.** Correct invocation:<br>`~/.platformio/penv/bin/python /tmp/flash-watch.py --chip esp32s3 --port /dev/ttyACM0 --baud 460800 write-flash 0x0 ~/projects/nanoclaw-watch/.pio/build/twatch-s3/bootloader.bin 0x8000 ~/projects/nanoclaw-watch/.pio/build/twatch-s3/partitions.bin 0xe000 ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin 0x10000 ~/projects/nanoclaw-watch/.pio/build/twatch-s3/firmware.bin` |
+| Recover a watch where the bootloader was overwritten | Same all-4-files command above. The ESP32-S3 BOOTROM is in silicon and always responds to esptool even when the flash is corrupt. Plug USB, run the command, you're back. |
 
 ---
 

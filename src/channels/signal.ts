@@ -84,6 +84,13 @@ interface SignalEnvelope {
       title?: string;
       groupId?: string;
     };
+    quote?: {
+      id?: number;
+      author?: string;
+      authorNumber?: string;
+      authorName?: string;
+      text?: string;
+    };
   };
   syncMessage?: {
     sentMessage?: {
@@ -160,6 +167,7 @@ export class SignalChannel implements Channel {
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
   private lastGroupDataMessage = Date.now();
   private lastSignalCliRestart = Date.now();
+  private lastReceiveEvent = Date.now();
 
   private opts: SignalChannelOpts;
 
@@ -282,6 +290,7 @@ export class SignalChannel implements Channel {
       | undefined;
     const envelope = params?.envelope ?? params?.result?.envelope;
     if (!envelope) return;
+    this.lastReceiveEvent = Date.now();
     const timestamp = envelope.timestamp
       ? new Date(envelope.timestamp).toISOString()
       : new Date().toISOString();
@@ -396,6 +405,16 @@ export class SignalChannel implements Channel {
 
     const groups = this.opts.registeredGroups();
     const isFromMe = senderPhone === SIGNAL_PHONE_NUMBER;
+
+    // Extract reply-to (quote) context if present — Signal includes this when
+    // the user taps Reply on a specific message. The quote text is truncated
+    // by Signal itself (preview only), so we store it as-is.
+    const quote = dataMsg.quote;
+    const quotedMessageId = quote?.id ? String(quote.id) : undefined;
+    const quotedText = quote?.text || undefined;
+    const quotedAuthor =
+      quote?.authorName || quote?.authorNumber || quote?.author || undefined;
+
     // Always store individual DMs (even from unregistered contacts) so the
     // admin can be notified and approve them. Only store group messages if
     // the group is already registered.
@@ -409,6 +428,9 @@ export class SignalChannel implements Channel {
         timestamp,
         is_from_me: isFromMe,
         is_bot_message: isFromMe,
+        quoted_message_id: quotedMessageId,
+        quoted_text: quotedText,
+        quoted_author: quotedAuthor,
       });
     }
   }
@@ -553,16 +575,34 @@ export class SignalChannel implements Channel {
   }
 
   /**
-   * Periodic watchdog that restarts signal-cli when group messages stop arriving.
-   * signal-cli's TCP daemon can go stale for group delivery after long uptime
-   * while DMs and receipts continue working normally.
+   * Periodic watchdog with two checks:
+   * 1. Subscription liveness: if no receive events at all for 10+ min while
+   *    connected, the subscription is silently dead — force reconnect.
+   * 2. Group staleness: restart signal-cli if no group messages for 6+ hours
+   *    or every 8 hours as a safety net.
    */
   private startWatchdog(): void {
     if (this.watchdogTimer) return;
-    // Check every 10 minutes
+    // Check every 5 minutes
     this.watchdogTimer = setInterval(
       () => {
         const now = Date.now();
+
+        // --- Subscription liveness check ---
+        const minSinceReceive = (now - this.lastReceiveEvent) / (1000 * 60);
+        const minSinceConnect = (now - this.lastSignalCliRestart) / (1000 * 60);
+        // Only check if we've been connected long enough for events to arrive
+        if (this.connected && minSinceConnect >= 10 && minSinceReceive >= 10) {
+          logger.warn(
+            { minSinceReceive: minSinceReceive.toFixed(1) },
+            'Watchdog: no receive events for 10+ min, subscription may be dead — reconnecting',
+          );
+          this.lastReceiveEvent = now; // prevent re-trigger
+          this.socket?.destroy(); // triggers close → reconnect cycle
+          return;
+        }
+
+        // --- Group staleness check ---
         const hasRegisteredGroups = Object.keys(
           this.opts.registeredGroups(),
         ).some((jid) => jid.startsWith('signal:group.'));
@@ -573,8 +613,7 @@ export class SignalChannel implements Channel {
         const hoursSinceRestart =
           (now - this.lastSignalCliRestart) / (1000 * 60 * 60);
 
-        // Restart if no group messages for 2+ hours, or every 8 hours as a safety net
-        if (hoursSinceGroupMsg >= 2 || hoursSinceRestart >= 8) {
+        if (hoursSinceGroupMsg >= 6 || hoursSinceRestart >= 8) {
           logger.info(
             {
               hoursSinceGroupMsg: hoursSinceGroupMsg.toFixed(1),
@@ -585,7 +624,7 @@ export class SignalChannel implements Channel {
           this.restartSignalCli();
         }
       },
-      10 * 60 * 1000,
+      5 * 60 * 1000,
     );
   }
 

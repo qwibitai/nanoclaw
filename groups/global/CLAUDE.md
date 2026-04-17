@@ -45,7 +45,7 @@ When writing `.md` guide files (setup docs, how-tos, troubleshooting guides), al
 This style applies to all guides — whether written by you, Scott, or Claude Code.
 
 **Attribution:** ALL published writings must include this line right below the title heading:
-`*Synthesized by Jorgenclaw (AI agent) and Claude Code (host AI), with direct feedback and verification from Scott Jorgensen*`
+`*Synthesized by Jorgenclaw (AI agent) and Claude Code (host AI), with direct prompting and verification from Scott Jorgensen*`
 
 ## Communication
 

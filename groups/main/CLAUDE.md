@@ -45,7 +45,7 @@ When writing `.md` guide files (setup docs, how-tos, troubleshooting guides), al
 This style applies to all guides — whether written by you, Scott, or Claude Code.
 
 **Attribution:** ALL published writings must include this line right below the title heading:
-`*Synthesized by Jorgenclaw (AI agent) and Claude Code (host AI), with direct feedback and verification from Scott Jorgensen*`
+`*Synthesized by Jorgenclaw (AI agent) and Claude Code (host AI), with direct prompting and verification from Scott Jorgensen*`
 
 ## Communication
 
@@ -82,10 +82,13 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 ## Memory
 
-Your memory is stored in `/workspace/group/memory/`. At the start of every session:
+Your memory is stored in `/workspace/group/memory/`. At the start of every container:
 1. Read `memory/index.md` to orient yourself (30 seconds)
 2. Read `memory/ongoing.md` to see what's in progress
-3. Read the most recent `conversations/YYYY-MM-DD.md` if context is unclear
+3. Read `memory/captures.md` to see persistent notes from T-Watch captures and "remember this" moments
+4. Read the most recent `conversations/YYYY-MM-DD.md` if context is unclear
+
+When Scott sends a Capture message or says "remember this" / "save this", append a timestamped entry to `memory/captures.md` in the format `- YYYY-MM-DD: [note content]` and confirm it was saved.
 
 ### Memory files
 
@@ -95,6 +98,7 @@ Your memory is stored in `/workspace/group/memory/`. At the start of every sessi
 | `memory/contacts.md` | People you interact with — names, relationships, key facts |
 | `memory/preferences.md` | Scott's preferences, habits, communication style |
 | `memory/ongoing.md` | Active projects, open questions, follow-ups needed |
+| `memory/captures.md` | Persistent notes from T-Watch Capture button and "remember this" moments |
 | `conversations/YYYY-MM-DD.md` | Daily summaries — topics, decisions, facts learned, open loops |
 
 ### Automated consolidation
@@ -732,6 +736,109 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+## Video Generation (Remotion + AWS Lambda)
+
+You can create videos programmatically and deliver them via Signal. The project lives at `/workspace/group/remotion/` and is fully mounted read-write.
+
+### Architecture
+
+- **Code-first video:** Remotion renders React components into MP4/WebM. You edit `.tsx` files, the code becomes video.
+- **Rendering:** You run renders on **AWS Lambda** (serverless, ~$0.01-0.05 per short video). Local rendering is also possible for sanity checks but is slower and ties up the container.
+- **Delivery:** Downloaded MP4 → `send_message` tool with `file_path` pointing at the downloaded file. signal-cli attaches it as media.
+
+### Project layout
+
+```
+/workspace/group/remotion/
+├── src/
+│   ├── Root.tsx           # Registers compositions (video "scenes" with fps, dimensions, duration)
+│   ├── Composition.tsx    # The React component that becomes the video
+│   └── index.ts           # Entry point — don't touch
+├── package.json           # Has @remotion/cli, @remotion/lambda installed
+├── remotion.config.ts     # Rendering config
+├── aws-policies/          # IAM JSONs + Scott's AWS setup walkthrough (don't edit)
+└── drafts/                # Where you save rendered MP4s before delivery (create if missing)
+```
+
+### The "make me a video" workflow
+
+1. **React with 👍** — this is a >10s task, always acknowledge first.
+2. **Read the current composition** — `/workspace/group/remotion/src/Composition.tsx` and `src/Root.tsx`. Understand what's already there before editing.
+3. **Edit the composition to match the request.** Use Remotion primitives:
+   - `useCurrentFrame()` — current frame number for animation
+   - `useVideoConfig()` — `{fps, durationInFrames, width, height}`
+   - `interpolate(frame, [0, 30], [0, 100])` — linear/eased value transitions
+   - `spring({frame, fps, from, to})` — physics-based easing
+   - `Sequence` — time-sliced sub-components
+   - `AbsoluteFill`, `Img`, `Video`, `Audio` — layout/media primitives
+4. **Update `Root.tsx`** if duration / fps / dimensions need to change (`durationInFrames` = seconds × fps).
+5. **Redeploy the Lambda site bundle** (only needed if code changed since last render):
+   ```bash
+   cd /workspace/group/remotion
+   npx remotion lambda sites create src/index.ts --site-name=jorgenclaw-main
+   ```
+   This takes ~30s. The serve URL is stored in `REMOTION_SERVE_URL` env var for re-use (and the `--site-name` makes re-deploys idempotent — same URL).
+6. **Trigger the Lambda render:**
+   ```bash
+   npx remotion lambda render "$REMOTION_SERVE_URL" MyComp --frames-per-lambda=60
+   ```
+   Takes ~30-90s for short videos. Output is a presigned S3 URL printed to stdout. Parse it.
+
+   **⚠️ Why `--frames-per-lambda=60` is mandatory right now:**
+   Scott's AWS account has a Lambda Concurrent Executions cap of **10** (AWS declined the 1500-increase request on 2026-04-16, citing insufficient usage history — we're re-requesting 100). Without this flag, Remotion can try to spawn 20+ parallel Lambdas per render and fail with `TooManyRequestsException`. Setting frames-per-lambda to 60 keeps a 15-30s video at ~8 concurrent Lambdas, safely under the cap. When the quota is raised later, this flag can be removed or raised for speed. If a render *still* fails with the rate error, raise the number further (e.g., `--frames-per-lambda=100` or `200`) to reduce parallelism more.
+
+   **Quick sizing guide** (30fps video, target ≤8 concurrent Lambdas):
+   - ≤15s video → `--frames-per-lambda=60` (default)
+   - 30s video → `--frames-per-lambda=120`
+   - 60s video → `--frames-per-lambda=200`
+   - >60s → consider whether Lambda is the right tool, or run locally with `npx remotion render`
+7. **Download the MP4** to `/workspace/group/remotion/drafts/video-<timestamp>.mp4`:
+   ```bash
+   mkdir -p drafts
+   curl -sSL "<s3-url>" -o "drafts/video-$(date +%s).mp4"
+   ```
+8. **Deliver via Signal:**
+   ```
+   mcp__nanoclaw__send_message({
+     text: "Here's the video you asked for",
+     file_path: "/workspace/group/remotion/drafts/video-<timestamp>.mp4",
+     caption: "15s, Remotion Lambda render"
+   })
+   ```
+
+### Cost awareness
+
+Each Lambda render costs roughly **$0.01-0.05** depending on length and quality. Scott's budget alert fires at $5/month. You don't need to ask permission for individual renders — just be sensible. Don't render the same video 10 times to "perfect" it without reason.
+
+### Local render (for quick iteration or if Lambda is down)
+
+```bash
+cd /workspace/group/remotion
+npx remotion render MyComp drafts/local-test.mp4
+```
+
+**⚠️ Host warning:** Local rendering on Scott's Surface Pro 7+ is painfully slow — only use it for tiny (≤5 second) sanity checks of composition layout. For anything longer, stay on Lambda with `--frames-per-lambda=60` or higher even while the quota is capped at 10.
+
+### Errors you may hit
+
+- `Cannot find module '@remotion/lambda'` — already installed, but if npm state is broken: `cd /workspace/group/remotion && npm install`
+- `Environment variable AWS_ACCESS_KEY_ID not set` — creds aren't reaching the container. Tell Scott to check `.env` and that container-runner's readSecrets includes AWS_*.
+- `No site with name "jorgenclaw-main"` — first time. Run `npx remotion lambda sites create src/index.ts --site-name=jorgenclaw-main` to deploy the bundle.
+- `No function named remotion-render-...` — Lambda function was never deployed or got deleted. Ask Scott to run `cd /workspace/project/groups/main/remotion && npx remotion lambda functions deploy` on the host.
+- `AWS Concurrency limit reached (Rate Exceeded)` or `TooManyRequestsException` — you tried to use more parallel Lambdas than Scott's account quota (currently **10**). Raise `--frames-per-lambda` to reduce parallelism (see step 6 above for sizing). This will make renders slower but they'll complete. Do NOT fall back to local render for anything over 5 seconds — Scott's Surface Pro is too slow for that.
+
+### Environment variables available to you
+
+| Var | Purpose |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | Remotion IAM user access key |
+| `AWS_SECRET_ACCESS_KEY` | Remotion IAM user secret |
+| `AWS_REGION` | Usually `us-east-1` |
+| `REMOTION_AWS_BUCKET` | The S3 bucket Remotion uses (auto-created on first deploy) |
+| `REMOTION_SERVE_URL` | Current site bundle URL — re-use this across renders |
+
+---
+
 ## Email Skill
 
 You have access to Proton Mail via `mcp__proton__mail__*` tools.

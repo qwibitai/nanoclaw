@@ -32,6 +32,9 @@ function createSchema(database: Database.Database): void {
       timestamp TEXT,
       is_from_me INTEGER,
       is_bot_message INTEGER DEFAULT 0,
+      quoted_message_id TEXT,
+      quoted_text TEXT,
+      quoted_author TEXT,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -123,6 +126,23 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add quoted_* columns for reply-to context (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN quoted_message_id TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN quoted_text TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN quoted_author TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_main column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
@@ -134,6 +154,39 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* column already exists */
+  }
+
+  // Drop UNIQUE constraint on registered_groups.folder so multiple channels
+  // can share one group folder (e.g. watch:scott and signal:<scott-uuid>
+  // both mapping to folder='main'). SQLite has no ALTER TABLE DROP
+  // CONSTRAINT, so rebuild the table when the old UNIQUE is still present.
+  const schemaRow = database
+    .prepare(
+      `SELECT sql FROM sqlite_master WHERE type='table' AND name='registered_groups'`,
+    )
+    .get() as { sql: string } | undefined;
+  if (schemaRow && /folder\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(schemaRow.sql)) {
+    database.exec(`
+      BEGIN;
+      CREATE TABLE registered_groups_new (
+        jid TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        folder TEXT NOT NULL,
+        trigger_pattern TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        container_config TEXT,
+        requires_trigger INTEGER DEFAULT 1,
+        is_main INTEGER DEFAULT 0
+      );
+      INSERT INTO registered_groups_new
+        (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
+      SELECT jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main
+      FROM registered_groups;
+      DROP TABLE registered_groups;
+      ALTER TABLE registered_groups_new RENAME TO registered_groups;
+      CREATE INDEX idx_registered_groups_folder ON registered_groups(folder);
+      COMMIT;
+    `);
   }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
@@ -284,7 +337,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, quoted_message_id, quoted_text, quoted_author) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -294,6 +347,9 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.quoted_message_id ?? null,
+    msg.quoted_text ?? null,
+    msg.quoted_author ?? null,
   );
 }
 
@@ -338,7 +394,8 @@ export function getNewMessages(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
+             quoted_message_id, quoted_text, quoted_author
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -371,7 +428,8 @@ export function getMessagesSince(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
+             quoted_message_id, quoted_text, quoted_author
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND content NOT LIKE ?

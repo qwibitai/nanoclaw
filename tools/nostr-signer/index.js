@@ -42,7 +42,7 @@ function logAlert(msg) {
 // --- Load key from kernel keyring ---
 let secretKeyHex;
 try {
-  const keyId = execSync('keyctl search @u user wn_nsec', { encoding: 'utf8' }).trim();
+  const keyId = execSync('keyctl search @u user nsec', { encoding: 'utf8' }).trim();
   const nsec = execSync(`keyctl print ${keyId}`, { encoding: 'utf8' }).trim();
   const decoded = decodeNsec(nsec);
   if (decoded.type !== 'nsec') throw new Error('Keyring value is not an nsec');

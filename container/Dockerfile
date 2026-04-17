@@ -33,7 +33,16 @@ RUN apt-get update && apt-get install -y \
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV AGENT_BROWSER_ARGS="--no-sandbox,--disable-dev-shm-usage,--disable-gpu,--disable-crash-reporter"
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Wrap chrome_crashpad_handler to inject the missing --database flag.
+# Chromium in containers omits this arg, causing crashpad to exit immediately.
+RUN mv /usr/lib/chromium/chrome_crashpad_handler /usr/lib/chromium/chrome_crashpad_handler.real && \
+    printf '#!/bin/sh\nexec /usr/lib/chromium/chrome_crashpad_handler.real --database=/tmp/crashpad "$@"\n' \
+      > /usr/lib/chromium/chrome_crashpad_handler && \
+    chmod +x /usr/lib/chromium/chrome_crashpad_handler && \
+    mkdir -p /tmp/crashpad && chmod 777 /tmp/crashpad
 
 # WeasyPrint for PDF generation (HTML→PDF via CSS, no LaTeX needed)
 RUN apt-get update && apt-get install -y --no-install-recommends python3-pip && \

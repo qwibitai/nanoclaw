@@ -318,6 +318,20 @@ function buildVolumeMounts(
     });
   }
 
+  // Proton daemon socket: allows agent to access Proton Calendar (and future
+  // Mail/Drive) via authenticated API calls without seeing the passphrase.
+  const protondSocket = path.join(
+    process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid?.() || 1000}`,
+    'protond.sock',
+  );
+  if (fs.existsSync(protondSocket)) {
+    mounts.push({
+      hostPath: protondSocket,
+      containerPath: '/run/proton/protond.sock',
+      readonly: false,
+    });
+  }
+
   // Nostr signing tools: mount clawstr-post script + dependencies into container
   const clawstrPostDir = path.join(projectRoot, 'tools', 'nostr-signer');
   if (fs.existsSync(path.join(clawstrPostDir, 'clawstr-post.js'))) {
@@ -457,15 +471,8 @@ function buildContainerArgs(
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
-  // Custom seccomp profile: Docker's default + syscalls Chromium needs.
-  const seccompProfile = path.join(
-    process.cwd(),
-    'container',
-    'chromium-seccomp.json',
-  );
-  if (fs.existsSync(seccompProfile)) {
-    args.push('--security-opt', `seccomp=${seccompProfile}`);
-  }
+  // Disable seccomp so Chromium (agent-browser) can launch inside containers.
+  args.push('--security-opt', 'seccomp=unconfined');
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -496,6 +503,27 @@ function buildContainerArgs(
     const ghToken = process.env.GITHUB_TOKEN || ghEnv.GITHUB_TOKEN;
     if (ghToken) {
       args.push('-e', `GH_TOKEN=${ghToken}`);
+    }
+  }
+
+  // AWS credentials for Remotion Lambda + udioapi.pro key (main-only).
+  // Threaded via env vars so the container's SDKs read them directly.
+  if (isMain) {
+    const mainKeys = [
+      'AWS_ACCESS_KEY_ID',
+      'AWS_SECRET_ACCESS_KEY',
+      'AWS_REGION',
+      'REMOTION_AWS_BUCKET',
+      'REMOTION_SERVE_URL',
+      'UDIOAPI_PRO_KEY',
+      'OPENAI_API_KEY',
+    ];
+    const mainEnv = readEnvFile(mainKeys);
+    for (const key of mainKeys) {
+      const value = process.env[key] || mainEnv[key];
+      if (value) {
+        args.push('-e', `${key}=${value}`);
+      }
     }
   }
 
@@ -588,6 +616,7 @@ export async function runContainerAgent(
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
     let newSessionId: string | undefined;
+    let lastParsedError: string | undefined;
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let outputChain = Promise.resolve();
@@ -630,6 +659,9 @@ export async function runContainerAgent(
             }
             if (parsed.inputTokens) totalInputTokens = parsed.inputTokens;
             if (parsed.outputTokens) totalOutputTokens = parsed.outputTokens;
+            if (parsed.status === 'error' && parsed.error) {
+              lastParsedError = parsed.error;
+            }
             hadStreamingOutput = true;
             // Activity detected — reset the hard timeout
             resetTimeout();
@@ -822,6 +854,25 @@ export async function runContainerAgent(
       logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
 
       if (code !== 0) {
+        // Agent-runner idle watchdog fired after the response completed.
+        // The response already streamed out — this is cleanup, not a failure.
+        if (hadStreamingOutput && lastParsedError === 'Query idle timeout') {
+          logger.info(
+            { group: group.name, containerName, duration, code },
+            'Agent-runner idle timeout after successful response (suppressing alert)',
+          );
+          outputChain.then(() => {
+            resolve({
+              status: 'success',
+              result: null,
+              newSessionId,
+              inputTokens: totalInputTokens || undefined,
+              outputTokens: totalOutputTokens || undefined,
+            });
+          });
+          return;
+        }
+
         logger.error(
           {
             group: group.name,

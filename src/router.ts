@@ -16,7 +16,17 @@ export function formatMessages(
 ): string {
   const lines = messages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
-    return `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" sender_id="${escapeXml(m.sender)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
+    // When a message is a reply to another, prepend a context line so the
+    // agent knows which earlier message it refers to. Truncate quoted text
+    // to keep the prompt manageable.
+    let body = m.content;
+    if (m.quoted_message_id) {
+      const author = m.quoted_author || 'unknown';
+      const snippet = (m.quoted_text || '').slice(0, 200);
+      const prefix = `↩ Replying to [${author}, message ${m.quoted_message_id}]: "${snippet}"\n\n`;
+      body = `${prefix}${body}`;
+    }
+    return `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" sender_id="${escapeXml(m.sender)}" time="${escapeXml(displayTime)}">${escapeXml(body)}</message>`;
   });
 
   const header = `<context timezone="${escapeXml(timezone)}" />\n`;

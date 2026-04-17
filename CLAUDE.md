@@ -2,6 +2,23 @@
 
 Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
 
+## Coding Guidelines (Karpathy-Inspired)
+
+Four principles to apply to all work:
+
+| Principle | What it addresses |
+|-----------|------------------|
+| **Think Before Coding** | Wrong assumptions, hidden confusion, missing tradeoffs — pause and reason before writing code |
+| **Simplicity First** | Overcomplication, bloated abstractions — the simplest solution that works is the right one |
+| **Surgical Changes** | Orthogonal edits, touching code you shouldn't — only modify what the task requires |
+| **Goal-Driven Execution** | Tests-first, verifiable success criteria — know what "done" looks like before starting |
+
+From Andrej Karpathy's observations on LLM coding pitfalls:
+- Don't make wrong assumptions and run with them without checking
+- Don't overcomplicate code, bloat abstractions, or implement a thousand-line construction when 20 lines would do
+- Don't change/remove comments and code that aren't side effects of the task
+- Always push back when asked to do something orthogonal to the goal
+
 ## Quick Context
 
 Single Node.js process that connects to WhatsApp, routes messages to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.

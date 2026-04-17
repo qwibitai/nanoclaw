@@ -578,7 +578,7 @@ async function runAgent(
 async function checkNewContactDMs(): Promise<void> {
   const registeredJids = new Set(Object.keys(registeredGroups));
   const adminJid = Object.entries(registeredGroups).find(
-    ([, g]) => g.folder === 'main',
+    ([, g]) => g.isMain,
   )?.[0];
   if (!adminJid) return;
 
@@ -963,9 +963,7 @@ async function main(): Promise<void> {
   }
 
   // Initialize health monitor — sends alerts to admin (main group) on errors
-  const mainEntry = Object.entries(registeredGroups).find(
-    ([, g]) => g.folder === 'main',
-  );
+  const mainEntry = Object.entries(registeredGroups).find(([, g]) => g.isMain);
   if (mainEntry) {
     const signalChannel = channels.find((c) => c.name === 'signal');
     if (signalChannel) {
