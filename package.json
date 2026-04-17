@@ -53,6 +53,7 @@
     "husky": "^9.1.7",
     "pixelmatch": "^7.1.0",
     "prettier": "^3.8.1",
+    "qrcode-terminal": "^0.12.0",
     "supertest": "^7.2.2",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
