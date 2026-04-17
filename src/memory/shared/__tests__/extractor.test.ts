@@ -55,8 +55,8 @@ describe('extractor', () => {
     });
     await extractCandidates({
       groupName: 'telegram_main',
-      userMessage: 'be terse from now on',
-      agentReply: 'OK, will keep it short.',
+      userMessage: 'Please be terse and concise from now on in all your replies to me',
+      agentReply: 'Understood, I will keep all my replies short and to the point going forward.',
     });
     const files = fs
       .readdirSync(candidateDir())
@@ -102,10 +102,14 @@ describe('extractor', () => {
     });
     await extractCandidates({
       groupName: 'tg',
-      userMessage: 'this is a substantive turn that exceeds the trivial threshold easily',
-      agentReply: 'OK substantive reply also long enough to skip trivial filtering rules',
+      userMessage:
+        'this is a substantive turn that exceeds the trivial threshold easily',
+      agentReply:
+        'OK substantive reply also long enough to skip trivial filtering rules',
     });
-    const files = fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'));
+    const files = fs
+      .readdirSync(candidateDir())
+      .filter((f) => f.endsWith('.md'));
     expect(files).toHaveLength(1); // only the valid one
   });
 
@@ -117,9 +121,22 @@ describe('extractor', () => {
     await expect(
       extractCandidates({
         groupName: 'tg',
-        userMessage: 'x',
-        agentReply: 'y',
+        userMessage: 'I have a substantive question that exceeds trivial thresholds',
+        agentReply: 'Here is a detailed and substantive reply that also exceeds the threshold',
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('extractCandidates skips trivial turns without calling the LLM', async () => {
+    const { generateText } = await import('ai');
+    const mock = generateText as unknown as ReturnType<typeof vi.fn>;
+    mock.mockClear();
+    await extractCandidates({
+      groupName: 'tg',
+      userMessage: 'hi',
+      agentReply: 'hello!',
+    });
+    expect(mock).not.toHaveBeenCalled();
+    expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'))).toHaveLength(0);
   });
 });

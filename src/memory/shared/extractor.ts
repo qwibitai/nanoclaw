@@ -45,6 +45,7 @@ export interface ExtractInput {
 
 export async function extractCandidates(input: ExtractInput): Promise<void> {
   if (process.env.NANOCLAW_MEMORY_EXTRACT === '0') return;
+  if (isTrivialTurn(input.userMessage, input.agentReply)) return;
 
   ensureMemoryDirs();
   const indexSnippet = readIndexSnippet();
@@ -79,7 +80,10 @@ export async function extractCandidates(input: ExtractInput): Promise<void> {
       writeCandidate(cand, input);
     } catch (err) {
       logger.warn(
-        { err: err instanceof Error ? err.message : String(err), name: cand.name },
+        {
+          err: err instanceof Error ? err.message : String(err),
+          name: cand.name,
+        },
         'memory extractor: failed to write candidate, skipping',
       );
     }
