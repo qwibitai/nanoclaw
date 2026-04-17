@@ -8,6 +8,10 @@ type ProviderFactory = ReturnType<
   typeof createOpenAI | typeof createGoogleGenerativeAI | typeof createAnthropic
 >;
 
+export function isEmbeddingAvailable(): boolean {
+  return Boolean(process.env.OPENAI_API_KEY);
+}
+
 export function resolveUtilityModel(explicit?: string): LanguageModel {
   const spec = explicit ?? process.env.UTILITY_LLM_MODEL;
   if (spec) {
@@ -88,7 +92,10 @@ export async function generateShort(
 export async function embedText(
   text: string,
   options?: { model?: string },
-): Promise<number[]> {
+): Promise<number[] | null> {
+  if (!isEmbeddingAvailable()) {
+    return null;
+  }
   const spec = options?.model ?? 'openai:text-embedding-3-small';
   const [providerName, ...modelParts] = spec.split(':');
   const modelId = modelParts.join(':');

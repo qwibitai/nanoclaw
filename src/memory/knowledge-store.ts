@@ -243,6 +243,7 @@ export async function storeFactWithVector(
   try {
     const { embedText } = await import('../llm/utility.js');
     const vector = await embedText(input.text);
+    if (!vector) return; // OPENAI_API_KEY not set; FTS5 write above is sufficient
     const { randomUUID } = await import('crypto');
     await client.upsert(COLLECTION_NAME, {
       points: [
@@ -276,6 +277,7 @@ export async function queryFactsSemantic(
   try {
     const { embedText } = await import('../llm/utility.js');
     const vector = await embedText(query);
+    if (!vector) return queryFacts(query, opts);
     const filterConditions: Array<{ key: string; match: { value: string } }> =
       [];
     if (opts?.domain) {

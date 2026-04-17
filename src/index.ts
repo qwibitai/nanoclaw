@@ -1091,10 +1091,10 @@ function recoverPendingMessages(): void {
   }
 }
 
-function ensureContainerSystemRunning(): void {
+async function ensureContainerSystemRunning(): Promise<void> {
   ensureContainerRuntimeRunning();
   ensureDockerNetwork('nanoclaw');
-  ensureBrowserSidecar();
+  await ensureBrowserSidecar();
   cleanupOrphans();
 }
 
@@ -1130,7 +1130,7 @@ function startSmartDigestCheck(
 }
 
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
+  await ensureContainerSystemRunning();
   initDatabase();
   initKnowledgeStore();
   // Initialize Qdrant collection if configured (non-blocking, non-fatal)
@@ -1160,6 +1160,11 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    try {
+      miniApp.registry.shutdown();
+    } catch (err) {
+      logger.warn({ err }, 'Failed to shutdown pending-send registry');
+    }
     await queue.shutdown(10000);
     await browserSessionManager.shutdown();
     for (const ch of channels) await ch.disconnect();
@@ -1561,17 +1566,19 @@ async function main(): Promise<void> {
         gmailOps: gmailOpsRouter,
         calendarOps: calendarOpsRouter,
         draftWatcher,
+        db: getDb(),
         findChannel: (jid) => findChannel(channels, jid),
       });
     });
   }
 
   // Start Mini App server
-  startMiniAppServer({
+  const miniApp = startMiniAppServer({
     port: Number(process.env.MINI_APP_PORT) || 3847,
     db: getDb(),
     gmailOps: gmailOpsRouter,
     draftWatcher,
+    eventBus,
   });
 
   // --- Notify on draft enrichment ---
@@ -1593,6 +1600,31 @@ async function main(): Promise<void> {
       },
     ];
     channel?.sendMessageWithActions?.(mainJid, text, actions).catch(() => {});
+  });
+
+  // --- Notify on draft send failure (mini-app 10s timer fired but sendDraft errored) ---
+  eventBus.on('email.draft.send_failed', (event) => {
+    if (!mainGroupEntry) return;
+    const [mainJid] = mainGroupEntry;
+    const channel = findChannel(channels, mainJid);
+    if (!channel) return;
+    const subjectPart = event.payload.subject
+      ? ` to *${event.payload.subject}*`
+      : '';
+    const text = `❌ Couldn't send reply${subjectPart} — ${event.payload.error}`;
+    const actions = [
+      {
+        label: '↻ Retry',
+        callbackData: `retry_send:${event.payload.draftId}`,
+        style: 'primary' as const,
+      },
+      {
+        label: '🌐 Open in Gmail',
+        callbackData: `noop:${event.payload.draftId}`,
+        style: 'secondary' as const,
+      },
+    ];
+    channel.sendMessageWithActions?.(mainJid, text, actions).catch(() => {});
   });
 
   // Start subsystems (independently of connection handler)
@@ -1914,14 +1946,12 @@ async function main(): Promise<void> {
     setInterval(() => {
       runHealthCheck(BROWSER_CDP_URL, () => {
         logger.error('Browser sidecar unhealthy — attempting restart');
-        try {
-          ensureBrowserSidecar();
-        } catch (err) {
+        ensureBrowserSidecar().catch((err) => {
           logger.error(
             { err: String(err) },
             'Failed to restart browser sidecar',
           );
-        }
+        });
       }).catch((err) => {
         logger.warn({ err: String(err) }, 'Sidecar health check failed');
       });

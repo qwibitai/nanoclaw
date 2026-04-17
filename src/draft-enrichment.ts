@@ -108,7 +108,7 @@ export class DraftEnrichmentWatcher {
           ).toISOString();
           this.db
             .prepare(
-              `INSERT OR REPLACE INTO draft_originals (draft_id, account, original_body, enriched_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
+              `INSERT OR REPLACE INTO draft_originals (draft_id, account, original_body, enriched_at, expires_at, thread_id) VALUES (?, ?, ?, ?, ?, ?)`,
             )
             .run(
               draft.draftId,
@@ -116,6 +116,7 @@ export class DraftEnrichmentWatcher {
               draft.body,
               new Date().toISOString(),
               expiresAt,
+              draft.threadId,
             );
 
           // Update the draft
@@ -165,4 +166,21 @@ export class DraftEnrichmentWatcher {
       .prepare('DELETE FROM draft_originals WHERE expires_at < ?')
       .run(new Date().toISOString());
   }
+}
+
+/**
+ * Look up the most recent draft ID associated with a given thread for an account.
+ * Returns null if no matching draft exists.
+ */
+export function getDraftIdForThread(
+  db: Database.Database,
+  account: string,
+  threadId: string,
+): string | null {
+  const row = db
+    .prepare(
+      `SELECT draft_id FROM draft_originals WHERE account = ? AND thread_id = ? ORDER BY enriched_at DESC LIMIT 1`,
+    )
+    .get(account, threadId) as { draft_id: string } | undefined;
+  return row?.draft_id ?? null;
 }

@@ -46,4 +46,11 @@ export class ArchiveTracker {
       )
       .all() as ActedEmail[];
   }
+
+  getByEmailId(emailId: string): ActedEmail | null {
+    const row = this.db
+      .prepare('SELECT * FROM acted_emails WHERE email_id = ?')
+      .get(emailId) as ActedEmail | undefined;
+    return row ?? null;
+  }
 }

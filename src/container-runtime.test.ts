@@ -16,6 +16,12 @@ vi.mock('child_process', () => ({
   execSync: (...args: unknown[]) => mockExecSync(...args),
 }));
 
+// Mock playwright-client so ensureBrowserSidecar doesn't hit the network
+const mockWaitForSidecarReady = vi.fn().mockResolvedValue(true);
+vi.mock('./browser/playwright-client.js', () => ({
+  waitForSidecarReady: (...args: unknown[]) => mockWaitForSidecarReady(...args),
+}));
+
 import {
   CONTAINER_RUNTIME_BIN,
   readonlyMountArgs,
@@ -192,9 +198,9 @@ describe('ensureDockerNetwork', () => {
 });
 
 describe('ensureBrowserSidecar', () => {
-  it('runs docker compose up', () => {
+  it('runs docker compose up and waits for CDP', async () => {
     mockExecSync.mockReturnValueOnce('');
-    ensureBrowserSidecar();
+    await ensureBrowserSidecar();
     expect(mockExecSync).toHaveBeenCalledWith(
       expect.stringContaining('compose -f'),
       expect.any(Object),
@@ -203,6 +209,15 @@ describe('ensureBrowserSidecar', () => {
       expect.stringContaining('docker-compose.browser.yml'),
       expect.any(Object),
     );
+    expect(mockWaitForSidecarReady).toHaveBeenCalled();
+  });
+
+  it('returns early without waiting for CDP when compose fails', async () => {
+    mockExecSync.mockImplementationOnce(() => {
+      throw new Error('compose failed');
+    });
+    await ensureBrowserSidecar();
+    expect(mockWaitForSidecarReady).not.toHaveBeenCalled();
   });
 });
 

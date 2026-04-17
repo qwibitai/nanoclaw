@@ -18,7 +18,13 @@ vi.mock('@ai-sdk/anthropic', () => ({
 }));
 
 import { generateText, embed } from 'ai';
-import { resolveUtilityModel, classify, generateShort } from './utility.js';
+import {
+  resolveUtilityModel,
+  classify,
+  generateShort,
+  embedText,
+  isEmbeddingAvailable,
+} from './utility.js';
 
 describe('resolveUtilityModel', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -87,5 +93,41 @@ describe('generateShort', () => {
 
     const result = await generateShort('Summarize this in one line');
     expect(result).toBe('A brief summary.');
+  });
+});
+
+describe('isEmbeddingAvailable', () => {
+  it('returns false when OPENAI_API_KEY is unset', () => {
+    const prev = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    try {
+      expect(isEmbeddingAvailable()).toBe(false);
+    } finally {
+      if (prev !== undefined) process.env.OPENAI_API_KEY = prev;
+    }
+  });
+
+  it('returns true when OPENAI_API_KEY is set', () => {
+    const prev = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = 'sk-test';
+    try {
+      expect(isEmbeddingAvailable()).toBe(true);
+    } finally {
+      if (prev !== undefined) process.env.OPENAI_API_KEY = prev;
+      else delete process.env.OPENAI_API_KEY;
+    }
+  });
+});
+
+describe('embedText availability gate', () => {
+  it('returns null when OPENAI_API_KEY is unset', async () => {
+    const prev = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    try {
+      const vec = await embedText('hello');
+      expect(vec).toBeNull();
+    } finally {
+      if (prev !== undefined) process.env.OPENAI_API_KEY = prev;
+    }
   });
 });

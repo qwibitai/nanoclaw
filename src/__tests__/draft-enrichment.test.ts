@@ -19,7 +19,8 @@ describe('DraftEnrichmentWatcher', () => {
         account TEXT NOT NULL,
         original_body TEXT NOT NULL,
         enriched_at TEXT NOT NULL,
-        expires_at TEXT NOT NULL
+        expires_at TEXT NOT NULL,
+        thread_id TEXT
       )
     `);
   });

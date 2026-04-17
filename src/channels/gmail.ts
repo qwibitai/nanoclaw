@@ -9,6 +9,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { logger } from '../logger.js';
 import type { EmailMeta } from '../gmail-ops.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+import type { DraftReplyContext } from '../gmail-ops.js';
 import {
   Channel,
   OnChatMetadata,
@@ -552,6 +553,88 @@ export class GmailChannel implements Channel {
     } catch (err) {
       logger.warn({ messageId, err }, 'Failed to fetch message meta');
       return null;
+    }
+  }
+
+
+  async getDraftReplyContext(
+    draftId: string,
+  ): Promise<DraftReplyContext | null> {
+    if (!this.gmail) throw new Error('Gmail not connected');
+    try {
+      const draft = await this.gmail.users.drafts.get({
+        userId: 'me',
+        id: draftId,
+        format: 'full',
+      });
+      const msg = draft.data.message;
+      if (!msg) return null;
+      const body = this.extractTextBody(msg.payload);
+      const threadId = msg.threadId;
+      if (!threadId) {
+        return {
+          body,
+          incoming: { from: '', to: '', subject: '', date: '' },
+        };
+      }
+      const thread = await this.gmail.users.threads.get({
+        userId: 'me',
+        id: threadId,
+        format: 'metadata',
+        metadataHeaders: ['From', 'To', 'Cc', 'Subject', 'Date'],
+      });
+      const nonDraft = (thread.data.messages || [])
+        .slice()
+        .reverse()
+        .find((m) => !(m.labelIds || []).includes('DRAFT'));
+      const headers = nonDraft?.payload?.headers || [];
+      const getHeader = (name: string) =>
+        headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())
+          ?.value || '';
+      return {
+        body,
+        incoming: {
+          from: getHeader('From'),
+          to: getHeader('To'),
+          subject: getHeader('Subject'),
+          date: getHeader('Date'),
+          cc: getHeader('Cc') || undefined,
+        },
+      };
+    } catch (err: unknown) {
+      const maybe = err as { code?: number };
+      if (maybe && maybe.code === 404) return null;
+      logger.warn(
+        { draftId, err, account: this.accountAlias },
+        'Failed to fetch draft reply context',
+      );
+      throw err;
+    }
+  }
+
+  async sendDraft(draftId: string): Promise<void> {
+    if (!this.gmail) throw new Error('Gmail not connected');
+    const started = Date.now();
+    try {
+      const res = await this.gmail.users.drafts.send({
+        userId: 'me',
+        requestBody: { id: draftId },
+      });
+      logger.info(
+        {
+          account: this.accountAlias,
+          draftId,
+          threadId: res.data.threadId,
+          elapsedMs: Date.now() - started,
+        },
+        'Draft sent',
+      );
+    } catch (err) {
+      logger.error(
+        { account: this.accountAlias, draftId, err },
+        'Draft send failed',
+      );
+      throw err;
     }
   }
 

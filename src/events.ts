@@ -558,6 +558,18 @@ export interface EmailActionCompletedEvent extends NanoClawEvent {
   };
 }
 
+export interface EmailDraftSendFailedEvent extends NanoClawEvent {
+  type: 'email.draft.send_failed';
+  source: string;
+  payload: {
+    draftId: string;
+    account: string;
+    subject?: string;
+    threadId?: string;
+    error: string;
+  };
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -610,6 +622,7 @@ export interface EventMap {
   'email.draft.created': EmailDraftCreatedEvent;
   'email.draft.enriched': EmailDraftEnrichedEvent;
   'email.action.completed': EmailActionCompletedEvent;
+  'email.draft.send_failed': EmailDraftSendFailedEvent;
 }
 
 export type EventType = keyof EventMap;
