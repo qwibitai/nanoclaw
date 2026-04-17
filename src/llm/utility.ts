@@ -44,9 +44,10 @@ export function resolveUtilityModel(explicit?: string): LanguageModel {
   }
   const anthropicKey = readKey('ANTHROPIC_API_KEY');
   if (anthropicKey) {
-    return createAnthropic({ apiKey: anthropicKey })(
-      'claude-haiku-4-5-20251001',
-    );
+    return createAnthropic({
+      apiKey: anthropicKey,
+      baseURL: readKey('ANTHROPIC_BASE_URL') ?? 'https://api.anthropic.com/v1',
+    })('claude-haiku-4-5-20251001');
   }
 
   // No API key found — attempt openai as default (will fail at runtime if no key;
@@ -63,7 +64,7 @@ function getFactory(providerName: string): ProviderFactory {
         apiKey: readKey('GOOGLE_GENERATIVE_AI_API_KEY'),
       });
     case 'anthropic':
-      return createAnthropic({ apiKey: readKey('ANTHROPIC_API_KEY') });
+      return createAnthropic({ apiKey: readKey('ANTHROPIC_API_KEY'), baseURL: readKey('ANTHROPIC_BASE_URL') ?? 'https://api.anthropic.com/v1' });
     default:
       throw new Error(`Unknown utility provider: ${providerName}`);
   }
