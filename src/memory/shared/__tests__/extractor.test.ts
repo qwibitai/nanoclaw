@@ -55,8 +55,10 @@ describe('extractor', () => {
     });
     await extractCandidates({
       groupName: 'telegram_main',
-      userMessage: 'Please be terse and concise from now on in all your replies to me',
-      agentReply: 'Understood, I will keep all my replies short and to the point going forward.',
+      userMessage:
+        'Please be terse and concise from now on in all your replies to me',
+      agentReply:
+        'Understood, I will keep all my replies short and to the point going forward.',
     });
     const files = fs
       .readdirSync(candidateDir())
@@ -121,10 +123,51 @@ describe('extractor', () => {
     await expect(
       extractCandidates({
         groupName: 'tg',
-        userMessage: 'I have a substantive question that exceeds trivial thresholds',
-        agentReply: 'Here is a detailed and substantive reply that also exceeds the threshold',
+        userMessage:
+          'I have a substantive question that exceeds trivial thresholds',
+        agentReply:
+          'Here is a detailed and substantive reply that also exceeds the threshold',
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('respects NANOCLAW_MEMORY_EXTRACT_GROUPS allowlist (group not in list → skip)', async () => {
+    const { generateText } = await import('ai');
+    const mock = generateText as unknown as ReturnType<typeof vi.fn>;
+    mock.mockClear();
+    process.env.NANOCLAW_MEMORY_EXTRACT_GROUPS = 'telegram_main, test-group';
+    try {
+      await extractCandidates({
+        groupName: 'whatsapp_main',
+        userMessage:
+          'A substantial message that easily clears the trivial-turn skip threshold.',
+        agentReply: 'A substantial reply that also clears the threshold easily here.',
+      });
+      expect(mock).not.toHaveBeenCalled();
+      expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'))).toHaveLength(0);
+    } finally {
+      delete process.env.NANOCLAW_MEMORY_EXTRACT_GROUPS;
+    }
+  });
+
+  it('respects NANOCLAW_MEMORY_EXTRACT_GROUPS allowlist (group in list → proceed)', async () => {
+    const { generateText } = await import('ai');
+    (generateText as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify({ candidates: [] }),
+    });
+    process.env.NANOCLAW_MEMORY_EXTRACT_GROUPS = 'telegram_main, test-group';
+    try {
+      await extractCandidates({
+        groupName: 'telegram_main',
+        userMessage:
+          'A substantial message that easily clears the trivial-turn skip threshold.',
+        agentReply: 'A substantial reply that also clears the threshold easily here.',
+      });
+      const { generateText: g } = await import('ai');
+      expect(g).toHaveBeenCalled();
+    } finally {
+      delete process.env.NANOCLAW_MEMORY_EXTRACT_GROUPS;
+    }
   });
 
   it('extractCandidates skips trivial turns without calling the LLM', async () => {
@@ -137,6 +180,8 @@ describe('extractor', () => {
       agentReply: 'hello!',
     });
     expect(mock).not.toHaveBeenCalled();
-    expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'))).toHaveLength(0);
+    expect(
+      fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')),
+    ).toHaveLength(0);
   });
 });

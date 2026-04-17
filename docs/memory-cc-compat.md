@@ -90,3 +90,10 @@ Then enable CC inside the container to read it via the same
 Both stores can drift independently. To reconcile (e.g. before enabling
 the cross-mount), copy or symlink one into the other and let the verifier
 dedupe by name collision on its next sweep.
+
+## Per-group extraction allowlist
+
+Set `NANOCLAW_MEMORY_EXTRACT_GROUPS=group1,group2` to restrict auto-extraction to specific
+group folders during rollout or smoke testing. Unset or empty = extract from all groups.
+The verifier (and the explicit `remember` tool) ignore this — they always run for all
+candidates that reach disk.

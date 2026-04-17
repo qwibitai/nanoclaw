@@ -7,6 +7,10 @@ import { logger } from './logger.js';
 export const NANOCLAW_MEMORY_EXTRACT =
   process.env.NANOCLAW_MEMORY_EXTRACT ?? '1';
 export const NANOCLAW_MEMORY_VERIFY = process.env.NANOCLAW_MEMORY_VERIFY ?? '1';
+// Optional comma-separated list of group folder names to restrict auto-extraction.
+// Unset or empty = extract from all groups.
+export const NANOCLAW_MEMORY_EXTRACT_GROUPS =
+  process.env.NANOCLAW_MEMORY_EXTRACT_GROUPS ?? '';
 // Optional override for shared memory directory (used in tests).
 export const NANOCLAW_MEMORY_DIR = process.env.NANOCLAW_MEMORY_DIR;
 
