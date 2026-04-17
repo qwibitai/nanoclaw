@@ -166,6 +166,7 @@ import { formatBatch } from './message-formatter.js';
 import { startMiniAppServer } from './mini-app/server.js';
 import { GmailOpsRouter } from './gmail-ops.js';
 import type { GmailOpsProvider } from './gmail-ops.js';
+import { buildCalendarOpsRouter } from './calendar-ops.js';
 import { UxConfig } from './ux-config.js';
 import {
   parseCommand,
@@ -1376,6 +1377,9 @@ async function main(): Promise<void> {
     }
   }
 
+  // --- Calendar Ops (RSVP support) ---
+  const calendarOpsRouter = buildCalendarOpsRouter();
+
   // --- Agentic UX initialization ---
 
   const archiveTracker = new ArchiveTracker(getDb());
@@ -1555,6 +1559,7 @@ async function main(): Promise<void> {
         autoApproval,
         statusBar,
         gmailOps: gmailOpsRouter,
+        calendarOps: calendarOpsRouter,
         draftWatcher,
         findChannel: (jid) => findChannel(channels, jid),
       });
