@@ -132,6 +132,14 @@ describe('Telegram callback matrix — happy paths', () => {
     expect(ctx.deps.autoApproval.cancel).toHaveBeenCalledWith('timer1');
   });
 
+  it('forward_person → injects lookup-and-forward instruction into agent', async () => {
+    await handleCallback(query('forward_person:act_1:Philip%20Ye'), ctx.deps);
+    expect(ctx.injectUserReply).toHaveBeenCalledWith(
+      'tg:123',
+      expect.stringMatching(/Philip Ye.*search_contacts/i),
+    );
+  });
+
   it('unknown action → logs warning (no throw)', async () => {
     await expect(
       handleCallback(query('totally_unknown:xyz'), ctx.deps),

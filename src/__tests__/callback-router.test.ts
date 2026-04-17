@@ -246,13 +246,13 @@ describe('handleCallback', () => {
       expect.stringContaining("Couldn't archive"),
       expect.arrayContaining([
         expect.objectContaining({
-          callbackData: 'retry_archive:email1',
+          callbackData: 'retry:confirm_archive:email1',
         }),
       ]),
     );
   });
 
-  it('retry_archive re-attempts archiveThread', async () => {
+  it('retry_archive legacy alias still re-attempts archiveThread', async () => {
     const deps = makeDeps();
     await handleCallback(makeQuery('retry_archive:email1'), deps);
     expect(deps.gmailOps!.archiveThread).toHaveBeenCalledWith(

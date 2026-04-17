@@ -40,11 +40,37 @@ describe('detectActions', () => {
       expect(actions[0].recipient).toBe('alice@example.org');
     });
 
-    it('does not detect forward without email address', () => {
+    it('does not detect forward for single-word name (ambiguous)', () => {
+      // Single-word names are too ambiguous ("Philip" could be a draft name,
+      // a variable, etc.) — require 2+ words for the person-name fallback.
       const text = 'Want me to forward this to Philip?';
       const meta = makeMeta({ threadId: 't1' });
       const actions = detectActions(text, meta);
       expect(actions.filter((a) => a.type === 'forward')).toHaveLength(0);
+    });
+
+    it('detects person-name forward (2+ capitalized words) with contact-lookup intent', () => {
+      const text = 'Want me to forward 911proxy login info to Philip Ye?';
+      const meta = makeMeta({ threadId: 't1' });
+      const actions = detectActions(text, meta);
+      const fwd = actions.find((a) => a.type === 'forward');
+      expect(fwd).toBeDefined();
+      expect(fwd!.actions[0].label).toMatch(/📨 Forward to Philip Ye/);
+      expect(fwd!.actions[0].callbackData).toMatch(
+        /^forward_person:[^:]+:Philip%20Ye$/,
+      );
+      expect(fwd!.actions[1].callbackData).toMatch(/^answer:[^:]+:no$/);
+    });
+
+    it('email-address forward takes priority over person-name forward', () => {
+      const text = 'Forward this to alice@example.com or Alice Smith?';
+      const meta = makeMeta({ threadId: 't1' });
+      const actions = detectActions(text, meta);
+      const forwards = actions.filter((a) => a.type === 'forward');
+      expect(forwards).toHaveLength(1);
+      expect(forwards[0].actions[0].callbackData).toMatch(
+        /^forward:t1:alice@example.com/,
+      );
     });
 
     it('skips forward when no threadId in meta', () => {

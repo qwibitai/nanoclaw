@@ -72,6 +72,7 @@ import {
   formatOutbound,
   classifyAndFormat,
 } from './router.js';
+import { inferEmailContext } from './email-context-inference.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -1675,13 +1676,28 @@ async function main(): Promise<void> {
         gmailOpsAvailable,
       });
 
+      // Agent-explicit context wins, but if the agent forgot to pass
+      // email_id yet the message clearly names a single thread (e.g. the
+      // agent echoed back "thread: abc123 [personal]"), infer it so the
+      // user still gets the buttons. Instructions drift; code doesn't.
+      let effectiveContext = context;
+      if (!effectiveContext?.emailId) {
+        const inferred = inferEmailContext(clean);
+        if (inferred) {
+          effectiveContext = {
+            emailId: inferred.emailId,
+            emailAccount: inferred.emailAccount ?? context?.emailAccount,
+          };
+        }
+      }
+
       // When the agent explicitly tags the message with an email_id, attach
       // Expand / Full Email / Archive buttons (same set as email triggers).
       // This lets ad-hoc agent messages about a specific email carry the
       // same affordances as the original notification.
-      if (context?.emailId) {
-        const emailId = context.emailId;
-        const account = context.emailAccount ?? '';
+      if (effectiveContext?.emailId) {
+        const emailId = effectiveContext.emailId;
+        const account = effectiveContext.emailAccount ?? '';
         if (
           gmailOpsAvailable &&
           !meta.actions.some((a) => a.callbackData?.startsWith('expand:'))

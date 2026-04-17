@@ -118,7 +118,10 @@ export async function handleCallback(
                 [
                   {
                     label: '🔄 Retry',
-                    callbackData: `retry_archive:${entityId}`,
+                    // Route through the unified retry: dispatcher so all
+                    // retry flows share one code path. Legacy retry_archive
+                    // case below remains as a back-compat alias.
+                    callbackData: `retry:confirm_archive:${entityId}`,
                     style: 'primary',
                   },
                   {
@@ -148,20 +151,12 @@ export async function handleCallback(
       }
 
       case 'retry_archive': {
-        const unarchived = deps.archiveTracker.getUnarchived();
-        const email = unarchived.find((e) => e.email_id === entityId);
-        if (email && deps.gmailOps) {
-          await deps.gmailOps.archiveThread(email.account, email.thread_id);
-          deps.archiveTracker.markArchived(entityId, email.action_taken);
-          if (channel?.editMessageTextAndButtons) {
-            await channel.editMessageTextAndButtons(
-              query.chatJid,
-              query.messageId,
-              '✅ Archived',
-              [],
-            );
-          }
-        }
+        // Legacy back-compat alias — re-dispatch through the unified retry.
+        // New callback data uses retry:confirm_archive:<id>.
+        await handleCallback(
+          { ...query, data: `retry:confirm_archive:${entityId}` },
+          deps,
+        );
         break;
       }
 
@@ -526,6 +521,29 @@ export async function handleCallback(
           }
         } else {
           logger.warn('RSVP requested but no calendarOps available');
+        }
+        break;
+      }
+
+      case 'forward_person': {
+        // entityId = action id (transient), extra = URI-encoded person name.
+        // No email in the original question — route back to the agent with
+        // explicit instructions to look up the name and forward.
+        const person = decodeURIComponent(extra || '');
+        if (!person) {
+          logger.warn({ entityId }, 'forward_person missing person name');
+          break;
+        }
+        if (deps.injectUserReply) {
+          deps.injectUserReply(
+            query.chatJid,
+            `✅ Yes — forward it. Look up ${person} via search_contacts to get their email address, then send.`,
+          );
+        }
+        if (channel?.editMessageButtons) {
+          await channel
+            .editMessageButtons(query.chatJid, query.messageId, [])
+            .catch(() => {});
         }
         break;
       }

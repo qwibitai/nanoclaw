@@ -16,6 +16,14 @@ function nextActionId(): string {
 const FORWARD_PATTERN = /forward.*?to\s+(\S+@\S+)/i;
 const FORWARD_ALT_PATTERN = /forward\s+(?:this|it)\s+to\s+(\S+@\S+)/i;
 
+// Person-name forward: captures 1-3 capitalized words (e.g. "Philip Ye",
+// "Dr. Smith", "Alice"). The agent is expected to resolve the name via
+// search_contacts when the button is clicked. Requires the question-mark
+// suffix so we only fire on actual questions like "Want me to forward X
+// to Philip Ye?", not declarative "Forwarded to Philip Ye."
+const FORWARD_PERSON_PATTERN =
+  /forward[^.]*?to\s+((?:[A-Z][A-Za-z.'-]+)(?:\s+[A-Z][A-Za-z.'-]+){0,2})\s*\??$/im;
+
 const RSVP_PATTERNS = [
   /RSVP\b/i,
   /want to attend/i,
@@ -58,6 +66,41 @@ export function detectActions(
             label: `📨 Forward to ${recipient.length > 25 ? recipient.slice(0, 22) + '...' : recipient}`,
             callbackData: `forward:${meta.threadId}:${recipient}:${account}`,
             style: 'primary',
+          },
+        ],
+      });
+    }
+  }
+
+  // Person-name forward: no email in the question, but the agent named a
+  // human. Emit a Yes/No-style button pair that carries the name so the
+  // callback handler can tell the agent "resolve this name to an email
+  // and forward." Only fires when the email-address forward did not match.
+  if (
+    !results.some((r) => r.type === 'forward') &&
+    FORWARD_PERSON_PATTERN.test(tail)
+  ) {
+    const match = tail.match(FORWARD_PERSON_PATTERN);
+    const person = match?.[1]?.trim();
+    // Reject single-word matches that are common false positives (e.g. "Yes",
+    // "Here"). Require either 2+ words OR explicit contact-like suffix.
+    const multiWord = person && /\s/.test(person);
+    if (person && multiWord) {
+      const aid = nextActionId();
+      const shortName = person.length > 25 ? person.slice(0, 22) + '…' : person;
+      results.push({
+        type: 'forward',
+        recipient: person,
+        actions: [
+          {
+            label: `📨 Forward to ${shortName}`,
+            callbackData: `forward_person:${aid}:${encodeURIComponent(person)}`,
+            style: 'primary',
+          },
+          {
+            label: '❌ No',
+            callbackData: `answer:${aid}:no`,
+            style: 'destructive-safe',
           },
         ],
       });
