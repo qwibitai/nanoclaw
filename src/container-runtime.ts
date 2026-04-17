@@ -7,6 +7,7 @@ import os from 'os';
 import path from 'path';
 
 import { logger } from './logger.js';
+import { waitForSidecarReady } from './browser/playwright-client.js';
 
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'docker';
@@ -120,20 +121,27 @@ export function ensureDockerNetwork(name: string): void {
   }
 }
 
-/** Start the browser sidecar via docker compose. */
-export function ensureBrowserSidecar(): void {
+/** Start the browser sidecar via docker compose and wait for CDP to respond. */
+export async function ensureBrowserSidecar(): Promise<void> {
   const composePath = path.join(process.cwd(), 'docker-compose.browser.yml');
   try {
     execSync(`${CONTAINER_RUNTIME_BIN} compose -f ${composePath} up -d`, {
       stdio: 'pipe',
       timeout: 30000,
     });
-    logger.info('Browser sidecar started');
   } catch (err) {
     logger.error(
       { err },
       'Failed to start browser sidecar (non-fatal, continuing without it)',
     );
+    return;
+  }
+  const cdpUrl = process.env.BROWSER_CDP_URL ?? 'http://localhost:9222';
+  const ready = await waitForSidecarReady(cdpUrl, { timeoutMs: 15_000, intervalMs: 250 });
+  if (ready) {
+    logger.info('Browser sidecar started and CDP is ready');
+  } else {
+    logger.warn({ cdpUrl }, 'Browser sidecar started but CDP did not respond within 15s');
   }
 }
 

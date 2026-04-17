@@ -1091,10 +1091,10 @@ function recoverPendingMessages(): void {
   }
 }
 
-function ensureContainerSystemRunning(): void {
+async function ensureContainerSystemRunning(): Promise<void> {
   ensureContainerRuntimeRunning();
   ensureDockerNetwork('nanoclaw');
-  ensureBrowserSidecar();
+  await ensureBrowserSidecar();
   cleanupOrphans();
 }
 
@@ -1130,7 +1130,7 @@ function startSmartDigestCheck(
 }
 
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
+  await ensureContainerSystemRunning();
   initDatabase();
   initKnowledgeStore();
   // Initialize Qdrant collection if configured (non-blocking, non-fatal)
@@ -1914,14 +1914,12 @@ async function main(): Promise<void> {
     setInterval(() => {
       runHealthCheck(BROWSER_CDP_URL, () => {
         logger.error('Browser sidecar unhealthy — attempting restart');
-        try {
-          ensureBrowserSidecar();
-        } catch (err) {
+        ensureBrowserSidecar().catch((err) => {
           logger.error(
             { err: String(err) },
             'Failed to restart browser sidecar',
           );
-        }
+        });
       }).catch((err) => {
         logger.warn({ err: String(err) }, 'Sidecar health check failed');
       });
