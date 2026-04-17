@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 .npm-cache/
+container/agent-runner/.open-agent-sdk-fork/
 # Build output
 dist/
 

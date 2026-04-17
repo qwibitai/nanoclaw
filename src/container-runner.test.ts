@@ -51,6 +51,23 @@ vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts: vi.fn(() => []),
 }));
 
+// Mock provider selection
+const mockContainerProviderEnv: Record<string, string> = {
+  ANTHROPIC_BASE_URL: 'http://host.docker.internal:3001',
+  ANTHROPIC_API_KEY: 'placeholder',
+};
+
+vi.mock('./provider-config.js', () => ({
+  detectActiveProviderConfig: vi.fn(() => ({
+    provider: 'anthropic',
+    usesCredentialProxy: true,
+    allowDirectSecretInjection: false,
+    apiKey: 'sk-ant-real-key',
+    upstreamBaseURL: 'https://api.anthropic.com',
+  })),
+  buildContainerProviderEnv: vi.fn(() => ({ ...mockContainerProviderEnv })),
+}));
+
 // Create a controllable fake ChildProcess
 function createFakeProcess() {
   const proc = new EventEmitter() as EventEmitter & {
@@ -117,6 +134,13 @@ describe('container-runner timeout behavior', () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
+    for (const key of Object.keys(mockContainerProviderEnv)) {
+      delete mockContainerProviderEnv[key];
+    }
+    Object.assign(mockContainerProviderEnv, {
+      ANTHROPIC_BASE_URL: 'http://host.docker.internal:3001',
+      ANTHROPIC_API_KEY: 'placeholder',
+    });
   });
 
   afterEach(() => {
@@ -234,7 +258,7 @@ describe('container-runner timeout behavior', () => {
     const args = spawnCalls[spawnCalls.length - 1][1] as string[];
     const joined = args.join(' ');
     expect(joined).toContain(
-      '/tmp/nanoclaw-test-data/sessions/folder-test-group/.claude:/home/node/.claude',
+      '/tmp/nanoclaw-test-data/sessions/folder-test-group/.claude:/home/bun/.claude',
     );
   });
 
@@ -265,7 +289,7 @@ describe('container-runner timeout behavior', () => {
     const args = spawnCalls[spawnCalls.length - 1][1] as string[];
     const joined = args.join(' ');
     expect(joined).toContain(
-      '/tmp/nanoclaw-test-data/sessions/jid-main%40g.us/.claude:/home/node/.claude',
+      '/tmp/nanoclaw-test-data/sessions/jid-main%40g.us/.claude:/home/bun/.claude',
     );
   });
 
@@ -299,5 +323,91 @@ describe('container-runner timeout behavior', () => {
       '/tmp/nanoclaw-test-groups/test-group:/workspace/group',
     );
     expect(joined).not.toContain('../invalid-folder');
+  });
+
+  it('injects OpenAI placeholder env when provider env mapping switches', async () => {
+    for (const key of Object.keys(mockContainerProviderEnv)) {
+      delete mockContainerProviderEnv[key];
+    }
+    Object.assign(mockContainerProviderEnv, {
+      OPENAI_BASE_URL: 'http://host.docker.internal:3001',
+      OPENAI_API_KEY: 'placeholder',
+    });
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnCalls = vi.mocked(spawn).mock.calls;
+    const args = spawnCalls[spawnCalls.length - 1][1] as string[];
+    const joined = args.join(' ');
+    expect(joined).toContain(
+      '-e OPENAI_BASE_URL=http://host.docker.internal:3001',
+    );
+    expect(joined).toContain('-e OPENAI_API_KEY=placeholder');
+    expect(joined).not.toContain('ANTHROPIC_API_KEY=placeholder');
+  });
+
+  it('injects direct Gemini key when provider env mapping switches', async () => {
+    for (const key of Object.keys(mockContainerProviderEnv)) {
+      delete mockContainerProviderEnv[key];
+    }
+    Object.assign(mockContainerProviderEnv, {
+      GEMINI_API_KEY: 'gemini-real-key',
+    });
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnCalls = vi.mocked(spawn).mock.calls;
+    const args = spawnCalls[spawnCalls.length - 1][1] as string[];
+    const joined = args.join(' ');
+    expect(joined).toContain('-e GEMINI_API_KEY=gemini-real-key');
+    expect(joined).not.toContain('OPENAI_BASE_URL=');
+    expect(joined).not.toContain('ANTHROPIC_BASE_URL=');
+  });
+
+  it('injects Codex oauth json when provider env mapping switches', async () => {
+    for (const key of Object.keys(mockContainerProviderEnv)) {
+      delete mockContainerProviderEnv[key];
+    }
+    Object.assign(mockContainerProviderEnv, {
+      OAS_CODEX_OAUTH_JSON: '{"access":"a","refresh":"r","expires":1}',
+    });
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnCalls = vi.mocked(spawn).mock.calls;
+    const args = spawnCalls[spawnCalls.length - 1][1] as string[];
+    const joined = args.join(' ');
+    expect(joined).toContain(
+      '-e OAS_CODEX_OAUTH_JSON={"access":"a","refresh":"r","expires":1}',
+    );
+    expect(joined).not.toContain('OPENAI_BASE_URL=');
+    expect(joined).not.toContain('ANTHROPIC_BASE_URL=');
   });
 });

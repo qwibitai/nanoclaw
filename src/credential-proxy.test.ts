@@ -85,8 +85,8 @@ function makeRequestUntilDone(
 }
 
 describe('credential-proxy', () => {
-  let proxyServer: http.Server;
-  let upstreamServer: http.Server;
+  let proxyServer: http.Server | undefined;
+  let upstreamServer: http.Server | undefined;
   let proxyPort: number;
   let upstreamPort: number;
   let lastUpstreamHeaders: http.IncomingHttpHeaders;
@@ -107,26 +107,38 @@ describe('credential-proxy', () => {
       upstreamHandler(req, res);
     });
     await new Promise<void>((resolve) =>
-      upstreamServer.listen(0, '127.0.0.1', resolve),
+      upstreamServer!.listen(0, '127.0.0.1', resolve),
     );
-    upstreamPort = (upstreamServer.address() as AddressInfo).port;
+    upstreamPort = (upstreamServer!.address() as AddressInfo).port;
   });
 
   afterEach(async () => {
-    await new Promise<void>((r) => proxyServer?.close(() => r()));
-    await new Promise<void>((r) => upstreamServer?.close(() => r()));
+    if (proxyServer) {
+      await new Promise<void>((r) => proxyServer!.close(() => r()));
+      proxyServer = undefined;
+    }
+    if (upstreamServer) {
+      await new Promise<void>((r) => upstreamServer!.close(() => r()));
+      upstreamServer = undefined;
+    }
     for (const key of Object.keys(mockEnv)) delete mockEnv[key];
   });
 
   async function startProxy(env: Record<string, string>): Promise<number> {
-    Object.assign(mockEnv, env, {
-      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
-    });
+    const mergedEnv = { ...env };
+    if (mergedEnv.ANTHROPIC_API_KEY && !mergedEnv.ANTHROPIC_BASE_URL) {
+      mergedEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${upstreamPort}`;
+    }
+    if (mergedEnv.OPENAI_API_KEY && !mergedEnv.OPENAI_BASE_URL) {
+      mergedEnv.OPENAI_BASE_URL = `http://127.0.0.1:${upstreamPort}`;
+    }
+
+    Object.assign(mockEnv, mergedEnv);
     proxyServer = await startCredentialProxy(0);
-    return (proxyServer.address() as AddressInfo).port;
+    return (proxyServer!.address() as AddressInfo).port;
   }
 
-  it('API-key mode injects x-api-key and strips placeholder', async () => {
+  it('anthropic mode injects x-api-key and strips placeholder', async () => {
     proxyPort = await startProxy({ ANTHROPIC_API_KEY: 'sk-ant-real-key' });
 
     await makeRequest(
@@ -145,16 +157,14 @@ describe('credential-proxy', () => {
     expect(lastUpstreamHeaders['x-api-key']).toBe('sk-ant-real-key');
   });
 
-  it('OAuth mode replaces Authorization when container sends one', async () => {
-    proxyPort = await startProxy({
-      CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
-    });
+  it('openai mode replaces Authorization with Bearer real key', async () => {
+    proxyPort = await startProxy({ OPENAI_API_KEY: 'sk-openai-real-key' });
 
     await makeRequest(
       proxyPort,
       {
         method: 'POST',
-        path: '/api/oauth/claude_cli/create_api_key',
+        path: '/v1/chat/completions',
         headers: {
           'content-type': 'application/json',
           authorization: 'Bearer placeholder',
@@ -164,31 +174,76 @@ describe('credential-proxy', () => {
     );
 
     expect(lastUpstreamHeaders['authorization']).toBe(
-      'Bearer real-oauth-token',
+      'Bearer sk-openai-real-key',
     );
   });
 
-  it('OAuth mode does not inject Authorization when container omits it', async () => {
-    proxyPort = await startProxy({
-      CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
-    });
+  it('openai mode replaces x-api-key when present', async () => {
+    proxyPort = await startProxy({ OPENAI_API_KEY: 'sk-openai-real-key' });
 
-    // Post-exchange: container uses x-api-key only, no Authorization header
     await makeRequest(
       proxyPort,
       {
         method: 'POST',
-        path: '/v1/messages',
+        path: '/v1/chat/completions',
         headers: {
           'content-type': 'application/json',
-          'x-api-key': 'temp-key-from-exchange',
+          'x-api-key': 'placeholder',
         },
       },
       '{}',
     );
 
-    expect(lastUpstreamHeaders['x-api-key']).toBe('temp-key-from-exchange');
-    expect(lastUpstreamHeaders['authorization']).toBeUndefined();
+    expect(lastUpstreamHeaders['x-api-key']).toBe('sk-openai-real-key');
+    expect(lastUpstreamHeaders['authorization']).toBe(
+      'Bearer sk-openai-real-key',
+    );
+  });
+
+  it('returns 503 in disabled mode for direct-injection providers', async () => {
+    proxyPort = await startProxy({
+      GEMINI_API_KEY: 'gem-real-key',
+      ALLOW_DIRECT_SECRET_INJECTION: 'true',
+    });
+
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: { 'content-type': 'application/json' },
+      },
+      '{}',
+    );
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toContain('disabled');
+  });
+
+  it('returns 503 in disabled mode for codex oauth provider', async () => {
+    proxyPort = await startProxy({
+      OAS_CODEX_OAUTH_JSON: '{"access":"a","refresh":"r","expires":1}',
+      ALLOW_DIRECT_SECRET_INJECTION: 'true',
+    });
+
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: { 'content-type': 'application/json' },
+      },
+      '{}',
+    );
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toContain('disabled');
+  });
+
+  it('throws when no supported provider key is configured', () => {
+    expect(() => startCredentialProxy(0)).toThrow(
+      'No supported provider credentials',
+    );
   });
 
   it('strips hop-by-hop headers', async () => {
@@ -218,11 +273,11 @@ describe('credential-proxy', () => {
 
   it('returns 502 when upstream is unreachable', async () => {
     Object.assign(mockEnv, {
-      ANTHROPIC_API_KEY: 'sk-ant-real-key',
-      ANTHROPIC_BASE_URL: 'http://127.0.0.1:59999',
+      OPENAI_API_KEY: 'sk-openai-real-key',
+      OPENAI_BASE_URL: 'http://127.0.0.1:59999',
     });
     proxyServer = await startCredentialProxy(0);
-    proxyPort = (proxyServer.address() as AddressInfo).port;
+    proxyPort = (proxyServer!.address() as AddressInfo).port;
 
     const res = await makeRequest(
       proxyPort,
@@ -239,7 +294,7 @@ describe('credential-proxy', () => {
   });
 
   it('handles upstream error after headers are sent without hanging downstream', async () => {
-    proxyPort = await startProxy({ ANTHROPIC_API_KEY: 'sk-ant-real-key' });
+    proxyPort = await startProxy({ OPENAI_API_KEY: 'sk-openai-real-key' });
 
     upstreamHandler = (req, res) => {
       lastUpstreamHeaders = { ...req.headers };
@@ -262,7 +317,7 @@ describe('credential-proxy', () => {
 
     expect(brokenResponse.statusCode).toBe(200);
     expect(['aborted', 'close', 'end']).toContain(brokenResponse.terminalEvent);
-    expect(proxyServer.listening).toBe(true);
+    expect(proxyServer?.listening).toBe(true);
 
     upstreamHandler = (req, res) => {
       lastUpstreamHeaders = { ...req.headers };

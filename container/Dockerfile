@@ -1,7 +1,7 @@
 # NanoClaw Agent Container
-# Runs Claude Agent SDK in isolated Linux VM with browser automation
+# Runs Open Agent SDK in isolated Linux VM with browser automation
 
-FROM node:22-slim
+FROM oven/bun:1
 
 # Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \
@@ -23,45 +23,48 @@ RUN apt-get update && apt-get install -y \
     libdrm2 \
     libxshmfence1 \
     curl \
-    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install agent-browser globally
+RUN bun add -g agent-browser --trust
 
 # Create app directory
 WORKDIR /app
 
-# Copy package files first for better caching
-COPY agent-runner/package*.json ./
+# Copy package files and pre-built open-agent-sdk tarball (built by setup.sh on host).
+# Using the host-built tarball ensures the integrity hash in bun.lock matches.
+COPY agent-runner/package.json agent-runner/bun.lock ./
+COPY agent-runner/.open-agent-sdk-fork/open-agent-sdk-fork.tgz ./.open-agent-sdk-fork/open-agent-sdk-fork.tgz
 
 # Install dependencies
-RUN npm install
+RUN bun install --frozen-lockfile \
+    && rm -rf /app/node_modules/open-agent-sdk/node_modules
 
 # Copy source code
-COPY agent-runner/ ./
-
-# Build TypeScript
-RUN npm run build
+COPY agent-runner/src ./src
+COPY agent-runner/tsconfig.json ./tsconfig.json
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
 # Create entrypoint script
 # Container input (prompt, group info) is passed via stdin JSON.
-# Credentials are injected by the host's credential proxy — never passed here.
+# Credentials are provider-dependent:
+#   - Anthropic / OpenAI: injected at runtime by the host credential proxy (not passed directly).
+#   - Gemini / Codex: injected directly as env vars (GEMINI_API_KEY / OAS_CODEX_OAUTH_JSON)
+#     because these providers are not routed through the proxy.
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+RUN printf '#!/bin/bash\nset -e\ncd /app\ncat > /tmp/input.json\nbun run /app/src/index.ts < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
-# Set ownership to node user (non-root) for writable directories
-RUN chown -R node:node /workspace && chmod 777 /home/node
+# Set ownership to bun user (non-root) for writable directories
+RUN chown -R bun:bun /workspace && chmod 777 /home/bun
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
-USER node
+USER bun
 
 # Set working directory to group workspace
 WORKDIR /workspace/group

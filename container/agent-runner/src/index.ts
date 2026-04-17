@@ -10,17 +10,22 @@
  *
  * 標準出力プロトコル:
  *   各結果は OUTPUT_START_MARKER / OUTPUT_END_MARKER のペアでラップされる。
- *   複数の結果が出力される場合がある（エージェントチームの結果ごとに 1 つ）。
  *   ループ終了後の最終マーカーが完了の合図。
  */
 
 import fs from 'fs';
 import path from 'path';
 import {
-  query,
-  HookCallback,
-  PreCompactHookInput,
-} from '@anthropic-ai/claude-agent-sdk';
+  createSession,
+  FileStorage,
+  resumeSession,
+  type HookCallback,
+  type HooksConfig,
+  type PreCompactHookInput,
+  type CodexOAuthOptions,
+  type SDKMessage,
+  type Session,
+} from 'open-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -54,69 +59,86 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
-interface SDKUserMessage {
-  type: 'user';
-  message: { role: 'user'; content: string };
-  parent_tool_use_id: null;
-  session_id: string;
+interface ParsedMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+type GroupType = NonNullable<ContainerInput['groupType']>;
+type SessionProvider = 'anthropic' | 'openai' | 'google' | 'codex';
+
+interface CodexOAuthCredentials {
+  access: string;
+  refresh: string;
+  expires: number;
+  accountId?: string;
+}
+
+interface SessionProviderConfig {
+  provider: SessionProvider;
+  model: string;
+  apiKey?: string;
+  baseURL?: string;
+  codexOAuth?: CodexOAuthOptions;
 }
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
-
-/**
- * SDK にユーザーメッセージをストリーミングするためのプッシュベースの非同期イテラブル。
- * end() が呼び出されるまでイテラブルを維持し、isSingleUserTurn を防止します。
- */
-class MessageStream {
-  private queue: SDKUserMessage[] = [];
-  private waiting: (() => void) | null = null;
-  private done = false;
-
-  push(text: string): void {
-    this.queue.push({
-      type: 'user',
-      message: { role: 'user', content: text },
-      parent_tool_use_id: null,
-      session_id: '',
-    });
-    this.waiting?.();
-  }
-
-  end(): void {
-    this.done = true;
-    this.waiting?.();
-  }
-
-  async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
-    while (true) {
-      while (this.queue.length > 0) {
-        yield this.queue.shift()!;
-      }
-      if (this.done) return;
-      await new Promise<void>((r) => {
-        this.waiting = r;
-      });
-      this.waiting = null;
-    }
-  }
-}
+const SESSION_STORAGE_DIR = '/workspace/group/.sessions';
+const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
+const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DEFAULT_MODEL_BY_PROVIDER = {
+  anthropic: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
+  openai: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
+  google: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  codex: process.env.CODEX_MODEL || 'gpt-5.4',
+} as const;
+const ALLOWED_GROUP_TYPES = new Set<GroupType>([
+  'override',
+  'main',
+  'chat',
+  'thread',
+]);
+const ALLOWED_TOOLS = [
+  'Bash',
+  'Read',
+  'Write',
+  'Edit',
+  'Glob',
+  'Grep',
+  'WebSearch',
+  'WebFetch',
+  'Skill',
+  'TaskList',
+  'TaskCreate',
+  'TaskGet',
+  'TaskUpdate',
+  'BashOutput',
+  'KillBash',
+  'mcp_nanoclaw_send_message',
+  'mcp_nanoclaw_schedule_task',
+  'mcp_nanoclaw_list_tasks',
+  'mcp_nanoclaw_pause_task',
+  'mcp_nanoclaw_resume_task',
+  'mcp_nanoclaw_cancel_task',
+  'mcp_nanoclaw_update_task',
+  'mcp_nanoclaw_register_group',
+];
 
 async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
     process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk) => {
+    process.stdin.on('data', (chunk: string) => {
       data += chunk;
     });
     process.stdin.on('end', () => resolve(data));
     process.stdin.on('error', reject);
   });
 }
-
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
@@ -126,6 +148,199 @@ function writeOutput(output: ContainerOutput): void {
 
 function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
+}
+
+function resolveGroupType(rawGroupType: ContainerInput['groupType']): GroupType {
+  if (rawGroupType && ALLOWED_GROUP_TYPES.has(rawGroupType)) {
+    return rawGroupType;
+  }
+  return 'chat';
+}
+
+function isPrivilegedGroup(groupType: GroupType): boolean {
+  return groupType === 'main' || groupType === 'override';
+}
+
+function isUuid(value: string | undefined): value is string {
+  return typeof value === 'string' && UUID_PATTERN.test(value);
+}
+
+function toSdkEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value === 'string') {
+      normalized[key] = value;
+    }
+  }
+  return normalized;
+}
+
+function decodeJwtExpiry(token: string): number | undefined {
+  const parts = token.split('.');
+  if (parts.length !== 3) return undefined;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1]!, 'base64url').toString('utf8'),
+    ) as Record<string, unknown>;
+    const exp = payload.exp;
+    return typeof exp === 'number' ? exp * 1000 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeCodexCliCredentials(
+  value: Record<string, unknown>,
+): CodexOAuthCredentials | undefined {
+  const tokens = value.tokens;
+  if (!tokens || typeof tokens !== 'object') {
+    return undefined;
+  }
+  const t = tokens as Record<string, unknown>;
+  const access = t.access_token;
+  const refresh = t.refresh_token;
+  if (typeof access !== 'string' || typeof refresh !== 'string') {
+    return undefined;
+  }
+  const expires = decodeJwtExpiry(access);
+  if (typeof expires !== 'number') {
+    return undefined;
+  }
+  return {
+    access,
+    refresh,
+    expires,
+    ...(typeof t.account_id === 'string' ? { accountId: t.account_id } : {}),
+  };
+}
+
+function normalizeCodexOAuthCredentials(
+  value: unknown,
+): CodexOAuthCredentials | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const direct = value as Record<string, unknown>;
+
+  // Codex CLI format: { tokens: { access_token, refresh_token, account_id } }
+  const cliFormat = normalizeCodexCliCredentials(direct);
+  if (cliFormat) {
+    return cliFormat;
+  }
+
+  // Direct format: { access, refresh, expires }
+  if (
+    typeof direct.access === 'string' &&
+    typeof direct.refresh === 'string' &&
+    typeof direct.expires === 'number'
+  ) {
+    return {
+      access: direct.access,
+      refresh: direct.refresh,
+      expires: direct.expires,
+      ...(typeof direct.accountId === 'string'
+        ? { accountId: direct.accountId }
+        : {}),
+    };
+  }
+
+  // Provider map format: { "openai-codex": { access, refresh, expires } }
+  const mapped = direct['openai-codex'];
+  if (!mapped || typeof mapped !== 'object') {
+    return undefined;
+  }
+
+  const nested = mapped as Record<string, unknown>;
+  if (
+    typeof nested.access === 'string' &&
+    typeof nested.refresh === 'string' &&
+    typeof nested.expires === 'number'
+  ) {
+    return {
+      access: nested.access,
+      refresh: nested.refresh,
+      expires: nested.expires,
+      ...(typeof nested.accountId === 'string'
+        ? { accountId: nested.accountId }
+        : {}),
+    };
+  }
+
+  return undefined;
+}
+
+function parseCodexOAuthJson(oauthJson: string): CodexOAuthOptions {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(oauthJson);
+  } catch (err) {
+    throw new Error(
+      `OAS_CODEX_OAUTH_JSON is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  const credentials = normalizeCodexOAuthCredentials(parsed);
+  if (!credentials) {
+    throw new Error(
+      'OAS_CODEX_OAUTH_JSON must be an OAuth credentials object or a map containing "openai-codex".',
+    );
+  }
+
+  return { credentials: credentials as CodexOAuthOptions['credentials'] };
+}
+
+function resolveSessionProviderConfig(env: NodeJS.ProcessEnv): SessionProviderConfig {
+  if (env.ANTHROPIC_API_KEY) {
+    return {
+      provider: 'anthropic',
+      model: DEFAULT_MODEL_BY_PROVIDER.anthropic,
+      apiKey: env.ANTHROPIC_API_KEY,
+      baseURL: env.ANTHROPIC_BASE_URL,
+    };
+  }
+
+  if (env.OPENAI_API_KEY) {
+    return {
+      provider: 'openai',
+      model: DEFAULT_MODEL_BY_PROVIDER.openai,
+      apiKey: env.OPENAI_API_KEY,
+      baseURL: env.OPENAI_BASE_URL,
+    };
+  }
+
+  if (env.GEMINI_API_KEY) {
+    return {
+      provider: 'google',
+      model: DEFAULT_MODEL_BY_PROVIDER.google,
+      apiKey: env.GEMINI_API_KEY,
+    };
+  }
+
+  if (env.OAS_CODEX_OAUTH_JSON) {
+    return {
+      provider: 'codex',
+      model: DEFAULT_MODEL_BY_PROVIDER.codex,
+      codexOAuth: parseCodexOAuthJson(env.OAS_CODEX_OAUTH_JSON),
+    };
+  }
+
+  throw new Error(
+    'No provider credentials found. Set one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or OAS_CODEX_OAUTH_JSON.',
+  );
+}
+
+function extractAssistantText(message: SDKMessage): string | null {
+  if (message.type !== 'assistant') {
+    return null;
+  }
+
+  const text = message.message.content
+    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+    .map((block) => block.text)
+    .join('');
+
+  return text || null;
 }
 
 function getSessionSummary(
@@ -159,6 +374,7 @@ function getSessionSummary(
 
 /**
  * コンパクション（要約）の前に、全履歴を conversations/ にアーカイブします。
+ * NOTE: open-agent-sdk 側では PreCompact の自動発火が未実装のため、現時点ではプレースホルダーです。
  */
 function createPreCompactHook(assistantName?: string): HookCallback {
   return async (input, _toolUseId, _context) => {
@@ -208,6 +424,16 @@ function createPreCompactHook(assistantName?: string): HookCallback {
   };
 }
 
+function createHooks(assistantName?: string): HooksConfig {
+  return {
+    PreCompact: [
+      {
+        hooks: [createPreCompactHook(assistantName)],
+      },
+    ],
+  };
+}
+
 function sanitizeFilename(summary: string): string {
   return summary
     .toLowerCase()
@@ -219,11 +445,6 @@ function sanitizeFilename(summary: string): string {
 function generateFallbackName(): string {
   const time = new Date();
   return `conversation-${time.getHours().toString().padStart(2, '0')}${time.getMinutes().toString().padStart(2, '0')}`;
-}
-
-interface ParsedMessage {
-  role: 'user' | 'assistant';
-  content: string;
 }
 
 function parseTranscript(content: string): ParsedMessage[] {
@@ -248,7 +469,9 @@ function parseTranscript(content: string): ParsedMessage[] {
         const text = textParts.join('');
         if (text) messages.push({ role: 'assistant', content: text });
       }
-    } catch {}
+    } catch {
+      // ignore malformed line
+    }
   }
 
   return messages;
@@ -368,11 +591,90 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+async function createOrResumeSession(
+  requestedSessionId: string | undefined,
+  storage: FileStorage,
+  containerInput: ContainerInput,
+  sdkEnv: Record<string, string | undefined>,
+  mcpServerPath: string,
+  groupType: GroupType,
+  systemPrompt: string | undefined,
+): Promise<Session> {
+  const privileged = isPrivilegedGroup(groupType);
+  const providerConfig = resolveSessionProviderConfig(process.env);
+  const hooks = createHooks(containerInput.assistantName);
+
+  if (requestedSessionId) {
+    if (!isUuid(requestedSessionId)) {
+      log(
+        `非 UUID の sessionId (${requestedSessionId}) を受信したため、新規セッションを開始します`,
+      );
+    } else {
+      try {
+        const resumeOptions = {
+          storage,
+          ...(providerConfig.apiKey ? { apiKey: providerConfig.apiKey } : {}),
+          ...(providerConfig.codexOAuth
+            ? { codexOAuth: providerConfig.codexOAuth }
+            : {}),
+          permissionMode: 'bypassPermissions' as const,
+          allowDangerouslySkipPermissions: true,
+          hooks,
+        };
+        const resumed = await resumeSession(requestedSessionId, {
+          ...resumeOptions,
+        });
+        log(`セッションを再開しました: ${resumed.id}`);
+        return resumed;
+      } catch (err) {
+        log(
+          `セッション再開に失敗したため、新規作成へフォールバックします: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
+  const created = await createSession({
+    model: providerConfig.model,
+    provider: providerConfig.provider,
+    ...(providerConfig.apiKey ? { apiKey: providerConfig.apiKey } : {}),
+    ...(providerConfig.baseURL ? { baseURL: providerConfig.baseURL } : {}),
+    ...(providerConfig.codexOAuth
+      ? { codexOAuth: providerConfig.codexOAuth }
+      : {}),
+    storage,
+    cwd: '/workspace/group',
+    env: toSdkEnv(sdkEnv),
+    maxTurns: 50,
+    allowedTools: ALLOWED_TOOLS,
+    systemPrompt,
+    permissionMode: 'bypassPermissions',
+    allowDangerouslySkipPermissions: true,
+    mcpServers: {
+      nanoclaw: {
+        type: 'stdio',
+        command: 'bun',
+        args: [mcpServerPath],
+        env: {
+          NANOCLAW_CHAT_JID: containerInput.chatJid,
+          NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+          NANOCLAW_IS_MAIN: privileged ? '1' : '0',
+          NANOCLAW_GROUP_TYPE: groupType,
+        },
+      },
+    },
+    hooks,
+  });
+
+  log(
+    `新規セッションを作成しました: ${created.id} (provider: ${providerConfig.provider})`,
+  );
+  return created;
+}
+
 /**
- * 単一のクエリを実行し、結果を writeOutput 経由でストリーミングします。
- * MessageStream (AsyncIterable) を使用して isSingleUserTurn=false を維持し、
- * エージェントチームのサブエージェントが完了まで実行されるようにします。
- * また、クエリ実行中に IPC メッセージをストリームにパイプします。
+ * 単一のクエリを実行し、結果を writeOutput 経由で出力します。
+ * open-agent-sdk の Session API (create/resume + send/stream) を使用します。
  */
 async function runQuery(
   prompt: string,
@@ -380,181 +682,185 @@ async function runQuery(
   mcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
-  resumeAt?: string,
 ): Promise<{
   newSessionId?: string;
-  lastAssistantUuid?: string;
-  closedDuringQuery: boolean;
+  shouldExit: boolean;
 }> {
-  const stream = new MessageStream();
-  stream.push(prompt);
+  const groupType = resolveGroupType(containerInput.groupType);
+  const privileged = isPrivilegedGroup(groupType);
 
-  // クエリ実行中に追撃メッセージと _close センチネルを求めて IPC をポーリング
-  let ipcPolling = true;
-  let closedDuringQuery = false;
-  const pollIpcDuringQuery = () => {
-    if (!ipcPolling) return;
-    if (shouldClose()) {
-      log(
-        'クエリ実行中にクローズセンチネルを検出しました。ストリームを終了します',
-      );
-      closedDuringQuery = true;
-      stream.end();
-      ipcPolling = false;
-      return;
-    }
-    const messages = drainIpcInput();
-    for (const text of messages) {
-      log(`実行中のクエリに IPC メッセージをパイプ中 (${text.length} 文字)`);
-      stream.push(text);
-    }
-    setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
-  };
-  setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
-
-  let newSessionId: string | undefined;
-  let lastAssistantUuid: string | undefined;
-  let messageCount = 0;
-  let resultCount = 0;
-
-  // グローバルメモリ（CLAUDE.md）を追加のシステムコンテキストとしてロード（全グループで共有）
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
-  const allowedGroupTypes = new Set(['override', 'main', 'chat', 'thread']);
-  const rawGroupType = containerInput.groupType ?? 'chat';
-  const resolvedGroupType = allowedGroupTypes.has(rawGroupType)
-    ? rawGroupType
-    : 'chat';
-  const isPrivileged =
-    resolvedGroupType === 'main' || resolvedGroupType === 'override';
-  if (!isPrivileged && fs.existsSync(globalClaudeMdPath)) {
+  if (!privileged && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
-  // /workspace/extra/* にマウントされた追加ディレクトリを検出
-  // これらは SDK に渡され、配下の CLAUDE.md ファイルが自動的にロードされます
-  const extraDirs: string[] = [];
-  const extraBase = '/workspace/extra';
-  if (fs.existsSync(extraBase)) {
-    for (const entry of fs.readdirSync(extraBase)) {
-      const fullPath = path.join(extraBase, entry);
-      if (fs.statSync(fullPath).isDirectory()) {
-        extraDirs.push(fullPath);
+  fs.mkdirSync(SESSION_STORAGE_DIR, { recursive: true });
+  const storage = new FileStorage({ directory: SESSION_STORAGE_DIR });
+
+  let session: Session | undefined;
+  let latestAssistantText: string | null = null;
+  let streamedMessageCount = 0;
+  let shouldExit = false;
+  let ipcPollingActive = false;
+  let ipcPollTimer: NodeJS.Timeout | undefined;
+  let followupSendChain = Promise.resolve();
+
+  try {
+    session = await createOrResumeSession(
+      sessionId,
+      storage,
+      containerInput,
+      sdkEnv,
+      mcpServerPath,
+      groupType,
+      globalClaudeMd,
+    );
+
+    const stopIpcPolling = () => {
+      ipcPollingActive = false;
+      if (ipcPollTimer) {
+        clearTimeout(ipcPollTimer);
+        ipcPollTimer = undefined;
+      }
+    };
+
+    const requestExit = (reason: string) => {
+      if (shouldExit) return;
+      shouldExit = true;
+      log(reason);
+      stopIpcPolling();
+      // stream() が次のイベント待ちでブロックしていても、close で早期終了させる。
+      void session
+        ?.close()
+        .catch((err) =>
+          log(
+            `プリエンプション時のセッションクローズに失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
+    };
+
+    const enqueueIpcFollowups = () => {
+      const pending = drainIpcInput();
+      if (pending.length === 0) return;
+
+      const messages = [...pending];
+      followupSendChain = followupSendChain
+        .then(async () => {
+          for (const text of messages) {
+            if (shouldExit) return;
+            log(
+              `実行中セッションに IPC フォローアップを反映します (${text.length} 文字)`,
+            );
+            await session!.send(text);
+          }
+        })
+        .catch((err) => {
+          if (shouldExit) return;
+          log(
+            `実行中 IPC フォローアップ反映に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+    };
+
+    const pollIpcDuringStream = () => {
+      if (!ipcPollingActive || shouldExit) return;
+      if (shouldClose()) {
+        requestExit('_close センチネルを検知したため、実行中クエリを終了します');
+        return;
+      }
+
+      enqueueIpcFollowups();
+      ipcPollTimer = setTimeout(pollIpcDuringStream, IPC_POLL_MS);
+    };
+
+    if (shouldClose()) {
+      requestExit(
+        '_close センチネルを検知したため、クエリ開始前に出力を抑止して終了します',
+      );
+      return { newSessionId: session.id, shouldExit };
+    }
+
+    await session.send(prompt);
+
+    ipcPollingActive = true;
+    ipcPollTimer = setTimeout(pollIpcDuringStream, IPC_POLL_MS);
+
+    // stream が動き始めた直後に到着していた IPC を取りこぼさない。
+    enqueueIpcFollowups();
+
+    try {
+      for await (const message of session.stream()) {
+        if (shouldExit) break;
+
+        streamedMessageCount++;
+        log(`[メッセージ #${streamedMessageCount}] type=${message.type}`);
+
+        const assistantText = extractAssistantText(message);
+        if (assistantText) {
+          latestAssistantText = assistantText;
+        }
+
+        if (shouldClose()) {
+          requestExit(
+            '_close センチネルを検知したため、ストリーミング出力を停止します',
+          );
+          break;
+        }
+
+        // ストリーミング中に届いたフォローアップを都度セッションへ送る。
+        enqueueIpcFollowups();
+      }
+    } catch (err) {
+      if (!shouldExit) {
+        throw err;
+      }
+      log(
+        `プリエンプションによりストリームを終了しました: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    stopIpcPolling();
+    await followupSendChain;
+
+    if (!shouldExit && shouldClose()) {
+      requestExit('_close センチネルを検知したため、クエリ結果出力を抑止します');
+    }
+
+    if (shouldExit) {
+      log(
+        `クエリをプリエンプション終了しました。streamedMessageCount=${streamedMessageCount}`,
+      );
+      return { newSessionId: session.id, shouldExit };
+    }
+
+    writeOutput({
+      status: 'success',
+      result: latestAssistantText,
+      newSessionId: session.id,
+    });
+
+    log(
+      `クエリ終了。streamedMessageCount=${streamedMessageCount}, resultLength=${latestAssistantText?.length || 0}`,
+    );
+    return { newSessionId: session.id, shouldExit: false };
+  } finally {
+    ipcPollingActive = false;
+    if (ipcPollTimer) {
+      clearTimeout(ipcPollTimer);
+      ipcPollTimer = undefined;
+    }
+    await followupSendChain;
+    if (session) {
+      try {
+        await session.close();
+      } catch (err) {
+        log(
+          `セッションクローズに失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
   }
-  if (extraDirs.length > 0) {
-    log(`追加ディレクトリ: ${extraDirs.join(', ')}`);
-  }
-
-  for await (const message of query({
-    prompt: stream,
-    options: {
-      cwd: '/workspace/group',
-      additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
-      resume: sessionId,
-      resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? {
-            type: 'preset' as const,
-            preset: 'claude_code' as const,
-            append: globalClaudeMd,
-          }
-        : undefined,
-      allowedTools: [
-        'Bash',
-        'Read',
-        'Write',
-        'Edit',
-        'Glob',
-        'Grep',
-        'WebSearch',
-        'WebFetch',
-        'Task',
-        'TaskOutput',
-        'TaskStop',
-        'TeamCreate',
-        'TeamDelete',
-        'SendMessage',
-        'TodoWrite',
-        'ToolSearch',
-        'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*',
-      ],
-      env: sdkEnv,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: isPrivileged ? '1' : '0',
-            NANOCLAW_GROUP_TYPE: resolvedGroupType,
-          },
-        },
-      },
-      hooks: {
-        PreCompact: [
-          { hooks: [createPreCompactHook(containerInput.assistantName)] },
-        ],
-      },
-    },
-  })) {
-    messageCount++;
-    const msgType =
-      message.type === 'system'
-        ? `system/${(message as { subtype?: string }).subtype}`
-        : message.type;
-    log(`[メッセージ #${messageCount}] type=${msgType}`);
-
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
-    }
-
-    if (message.type === 'system' && message.subtype === 'init') {
-      newSessionId = message.session_id;
-      log(`セッション初期化完了: ${newSessionId}`);
-    }
-
-    if (
-      message.type === 'system' &&
-      (message as { subtype?: string }).subtype === 'task_notification'
-    ) {
-      const tn = message as {
-        task_id: string;
-        status: string;
-        summary: string;
-      };
-      log(
-        `タスク通知: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`,
-      );
-    }
-
-    if (message.type === 'result') {
-      resultCount++;
-      const textResult =
-        'result' in message ? (message as { result?: string }).result : null;
-      log(
-        `結果 #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
-      );
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId,
-      });
-    }
-  }
-
-  ipcPolling = false;
-  log(
-    `クエリ終了。メッセージ数: ${messageCount}, 結果数: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`,
-  );
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 
 async function main(): Promise<void> {
@@ -578,11 +884,13 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // 認証情報はホストの認証情報プロキシによって ANTHROPIC_BASE_URL 経由で注入されます。コンテナ環境には本物のシークレットは存在しません。
+  // 認証情報はホスト側で注入される。
+  // Anthropic/OpenAI は BASE_URL + placeholder を使ってプロキシ経由、
+  // Gemini/Codex の直接注入は ALLOW_DIRECT_SECRET_INJECTION=true の明示オプトイン時のみ許可される。
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
+  const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.ts');
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -608,12 +916,9 @@ async function main(): Promise<void> {
   }
 
   // クエリループ: クエリ実行 → IPC メッセージ待機 → 新しいクエリ実行 → 繰り返し
-  let resumeAt: string | undefined;
   try {
     while (true) {
-      log(
-        `クエリを開始します (セッション: ${sessionId || '新規'}, resumeAt: ${resumeAt || '最新'})...`,
-      );
+      log(`クエリを開始します (セッション: ${sessionId || '新規'})...`);
 
       const queryResult = await runQuery(
         prompt,
@@ -621,19 +926,20 @@ async function main(): Promise<void> {
         mcpServerPath,
         containerInput,
         sdkEnv,
-        resumeAt,
       );
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
-      if (queryResult.lastAssistantUuid) {
-        resumeAt = queryResult.lastAssistantUuid;
+
+      // runQuery 内で _close を検知した場合は、追加 OUTPUT を出さずに終了する。
+      if (queryResult.shouldExit) {
+        log('runQuery から終了シグナルを受信しました。出力を抑止して終了します');
+        break;
       }
 
-      // クエリ実行中に _close が消費された場合は即座に終了。
-      // セッション更新マーカーを出力しないでください（ホストのアイドルタイマーがリセットされ、次の _close まで 30 分の遅延が発生するため）。
-      if (queryResult.closedDuringQuery) {
-        log('クエリ実行中にクローズセンチネルが消費されました。終了します');
+      // 実行中に _close が置かれた場合、セッション更新マーカーを出す前に終了する
+      if (shouldClose()) {
+        log('クローズセンチネルを受信しました。終了します');
         break;
       }
 

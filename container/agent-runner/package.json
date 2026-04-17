@@ -3,16 +3,16 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Container-side agent runner for NanoClaw",
-  "main": "dist/index.js",
+  "main": "src/index.ts",
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js"
+    "build": "echo 'No build step required; Bun runs TypeScript directly.'",
+    "start": "bun run src/index.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.76",
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "open-agent-sdk": "file:./.open-agent-sdk-fork/open-agent-sdk-fork.tgz",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "cron-parser": "^5.0.0",
-    "zod": "^4.0.0"
+    "zod": "^3.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.7",
