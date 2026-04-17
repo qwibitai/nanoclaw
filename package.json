@@ -28,7 +28,7 @@
   "scripts": {
     "build": "tsc && tsup",
     "start": "node dist/cli.js",
-    "dev": "tsx src/cli.ts",
+    "dev": "tsx src/cli.ts | pino-pretty",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:fix": "prettier --write \"src/**/*.ts\"",
