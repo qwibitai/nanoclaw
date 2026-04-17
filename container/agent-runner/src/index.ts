@@ -831,7 +831,7 @@ async function main(): Promise<void> {
     try {
       // Run loop: process prompt → wait for IPC follow-up → repeat
       // Conversation history is carried across iterations so North remembers context
-      let history: Array<{ role: string; content: string | null; tool_calls?: unknown[]; tool_call_id?: string }> | undefined;
+      let history: unknown[] | undefined;
       while (true) {
         const result = await runOpenAIAgent(prompt, systemPrompt, modelOverride2, mcpConfigs, history as never);
         history = result.history;
@@ -866,9 +866,12 @@ async function main(): Promise<void> {
           fs.mkdirSync(convDir2, { recursive: true });
           const now = new Date();
           const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          const convContent = history
+          const convContent = (history as Array<{ role: string; content: unknown }>)
             .filter(m => m.role === 'user' || (m.role === 'assistant' && m.content))
-            .map(m => `**${m.role}**: ${m.content || '(tool call)'}`)
+            .map(m => {
+              const text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+              return `**${m.role}**: ${text || '(tool call)'}`;
+            })
             .join('\n\n');
           fs.writeFileSync(
             path.join(convDir2, `${ts}-openai-session.md`),

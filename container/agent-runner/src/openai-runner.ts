@@ -36,9 +36,13 @@ interface McpClient {
   buffer: string;
 }
 
+type OpenAIContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
+  content: string | OpenAIContentPart[] | null;
   tool_calls?: Array<{
     id: string;
     type: 'function';
@@ -303,6 +307,55 @@ function callOpenAI(
   });
 }
 
+// --- Image handling ---
+
+const IMAGE_PATTERN = /\[Photo: ([^\]]+)\]/g;
+
+function buildUserContent(text: string): string | OpenAIContentPart[] {
+  const matches = [...text.matchAll(IMAGE_PATTERN)];
+  if (matches.length === 0) return text;
+
+  const parts: OpenAIContentPart[] = [];
+  let lastIndex = 0;
+
+  for (const match of matches) {
+    // Add text before this image
+    const before = text.slice(lastIndex, match.index).trim();
+    if (before) parts.push({ type: 'text', text: before });
+
+    const imagePath = match[1].trim();
+    try {
+      if (fs.existsSync(imagePath)) {
+        const imageData = fs.readFileSync(imagePath);
+        const ext = path.extname(imagePath).toLowerCase();
+        const mimeType =
+          ext === '.png' ? 'image/png' :
+          ext === '.gif' ? 'image/gif' :
+          ext === '.webp' ? 'image/webp' :
+          'image/jpeg';
+        const base64 = imageData.toString('base64');
+        parts.push({
+          type: 'image_url',
+          image_url: { url: `data:${mimeType};base64,${base64}` },
+        });
+        log(`Encoded image: ${imagePath} (${Math.round(base64.length / 1024)}KB base64)`);
+      } else {
+        parts.push({ type: 'text', text: `[Image not found: ${imagePath}]` });
+      }
+    } catch {
+      parts.push({ type: 'text', text: `[Failed to read image: ${imagePath}]` });
+    }
+
+    lastIndex = match.index! + match[0].length;
+  }
+
+  // Add remaining text after last image
+  const after = text.slice(lastIndex).trim();
+  if (after) parts.push({ type: 'text', text: after });
+
+  return parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts;
+}
+
 // --- Agent Loop ---
 
 const BUILTIN_TOOLS = ['Bash', 'Read', 'Write', 'Glob', 'Grep'];
@@ -376,9 +429,10 @@ export async function runOpenAIAgent(
   log(`Total tools: ${tools.length} (${BUILTIN_TOOLS.length} built-in + ${mcpToolMap.size} MCP)`);
 
   // Build messages — carry forward conversation history if provided
+  // Detect [Photo: /path] in user messages and convert to multimodal content
   const messages: OpenAIMessage[] = conversationHistory
-    ? [...conversationHistory, { role: 'user', content: prompt }]
-    : [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }];
+    ? [...conversationHistory, { role: 'user', content: buildUserContent(prompt) }]
+    : [{ role: 'system', content: systemPrompt }, { role: 'user', content: buildUserContent(prompt) }];
 
   // Agent loop
   const MAX_ITERATIONS = 50;
@@ -390,6 +444,20 @@ export async function runOpenAIAgent(
     let response;
     try {
       response = await callOpenAI(messages, tools, model, 8192);
+      // Record token usage directly to the DB
+      if (response.usage) {
+        try {
+          const dbPath = '/workspace/project/store/messages.db';
+          if (fs.existsSync(dbPath)) {
+            const { execSync } = await import('child_process');
+            const containerName = process.env.HOSTNAME || 'openai-runner';
+            const groupFolder = process.env.NANOCLAW_GROUP_FOLDER || 'unknown';
+            execSync(`sqlite3 "${dbPath}" "INSERT INTO token_usage (container_name, group_folder, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, recorded_at) VALUES ('${containerName}', '${groupFolder}', '${model}', ${response.usage.prompt_tokens || 0}, ${response.usage.completion_tokens || 0}, 0, 0, '${new Date().toISOString()}');"`, { timeout: 5000 });
+          }
+        } catch {
+          // Don't let usage tracking break the agent
+        }
+      }
     } catch (err) {
       const errMsg = (err as Error).message;
       log(`OpenAI API error: ${errMsg}`);
@@ -411,7 +479,7 @@ export async function runOpenAIAgent(
 
     // If no tool calls, we're done
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
-      lastResult = msg.content || '';
+      lastResult = typeof msg.content === 'string' ? msg.content : (msg.content ? JSON.stringify(msg.content) : '');
       log(`Final response: ${lastResult.slice(0, 200)}`);
       break;
     }

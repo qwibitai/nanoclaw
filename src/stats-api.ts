@@ -152,7 +152,7 @@ export function startStatsApi(
       }
     });
 
-    server.listen(port, '127.0.0.1', () => {
+    server.listen(port, '0.0.0.0', () => {
       logger.info({ port }, 'Stats API started');
       resolve(server);
     });

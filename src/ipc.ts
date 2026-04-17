@@ -145,6 +145,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
       }
+
     }
 
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
