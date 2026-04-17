@@ -1,3 +1,4 @@
+import path from 'path';
 import { logger } from '../logger.js';
 import { getDb } from '../db.js';
 import { shouldSkip } from './prefilter.js';
@@ -117,6 +118,27 @@ export async function triageEmail(
       JSON.stringify(result.decision.reasons),
       input.trackedItemId,
     );
+
+  if (!shadowMode && result.decision.facts_extracted.length > 0) {
+    try {
+      const { appendExtractedFacts } = await import('./knowledge-append.js');
+      await appendExtractedFacts({
+        groupsRoot: path.resolve(process.cwd(), 'groups'),
+        groupName: 'email-intel',
+        threadId: input.threadId,
+        account: input.account,
+        classificationId: input.trackedItemId,
+        subject: input.subject,
+        sender: input.sender,
+        facts: result.decision.facts_extracted,
+      });
+    } catch (err) {
+      logger.warn(
+        { err: String(err), itemId: input.trackedItemId },
+        'Triage: appendExtractedFacts failed',
+      );
+    }
+  }
 
   if (!shadowMode && result.decision.queue === 'attention') {
     const chatId = process.env.EMAIL_INTEL_TG_CHAT_ID;
