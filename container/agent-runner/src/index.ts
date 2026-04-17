@@ -68,8 +68,8 @@ const IPC_POLL_MS = 500;
 // Per-group agent config. The `.claude` dir is mounted from
 // `data/sessions/{group}/.claude` on the host.
 const GROUP_SETTINGS_PATH = '/home/node/.claude/settings.json';
-const DEFAULT_AGENT_MODEL = 'sonnet[1m]';
-const DEFAULT_AGENT_EFFORT: EffortLevel = 'high';
+const DEFAULT_AGENT_MODEL = 'haiku';
+const DEFAULT_AGENT_EFFORT: EffortLevel = 'medium';
 const VALID_EFFORTS: readonly EffortLevel[] = ['low', 'medium', 'high', 'max'];
 // Model IDs: alias or dated variant, optional [1m] context hint.
 // Length-bounded to prevent pathological strings; no shell/path chars.

@@ -155,9 +155,10 @@ function buildVolumeMounts(
     // users can set one container-level default and have new groups inherit it.
     // Existing groups are never overwritten — the guard above protects them.
     // Edit these per-group after creation to override for just that group.
-    // Include the [1m] suffix on the model to opt in to 1M context.
-    const agentModel = process.env.NANOCLAW_AGENT_MODEL || 'sonnet[1m]';
-    const agentEffort = process.env.NANOCLAW_AGENT_EFFORT || 'high';
+    // Default is haiku for cost; append [1m] on Sonnet (only) to opt in to 1M
+    // context — the 1M beta is Sonnet-only and 400s on other models.
+    const agentModel = process.env.NANOCLAW_AGENT_MODEL || 'haiku';
+    const agentEffort = process.env.NANOCLAW_AGENT_EFFORT || 'medium';
     fs.writeFileSync(
       settingsFile,
       JSON.stringify(
