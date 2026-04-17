@@ -18,7 +18,8 @@
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "triage:bootstrap": "tsx scripts/triage-bootstrap.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.69",
