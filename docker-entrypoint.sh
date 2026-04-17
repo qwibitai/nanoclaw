@@ -3,6 +3,42 @@ set -e
 
 echo "=== NanoClaw startup ==="
 
+# Pre-flight: validate required credentials before touching any state.
+# Exit early so the container can be corrected without leaving behind
+# a partially-initialised data directory that corrupts future starts.
+
+_preflight_ok=1
+
+# Claude API key (required — without this nothing works)
+if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+    echo ""
+    echo "ERROR: No Claude API key found."
+    echo "  Please set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN."
+    _preflight_ok=0
+fi
+
+# At least one channel credential (required — no channel = nothing to respond to)
+if [ -z "$TELEGRAM_BOT_TOKEN" ] && \
+   [ -z "$WHATSAPP_TOKEN" ] && \
+   [ -z "$SLACK_BOT_TOKEN" ] && \
+   [ -z "$DISCORD_BOT_TOKEN" ]; then
+    echo ""
+    echo "ERROR: No channel credentials found."
+    echo "  Please set at least one of the following before starting NanoClaw:"
+    echo "    TELEGRAM_BOT_TOKEN"
+    echo "    WHATSAPP_TOKEN"
+    echo "    SLACK_BOT_TOKEN"
+    echo "    DISCORD_BOT_TOKEN"
+    _preflight_ok=0
+fi
+
+if [ "$_preflight_ok" = "0" ]; then
+    echo ""
+    echo "NanoClaw will not start until the above credentials are configured."
+    echo "Fix the missing variables and restart the container."
+    exit 1
+fi
+
 # Build agent image if not present on host
 if ! docker image inspect nanoclaw-agent:latest > /dev/null 2>&1; then
     echo "Building nanoclaw-agent image..."
