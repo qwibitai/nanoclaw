@@ -1661,7 +1661,7 @@ async function main(): Promise<void> {
       if (!text) return Promise.resolve();
       return channel.sendMessage(jid, text);
     },
-    sendAgentMessage: async (jid, rawText) => {
+    sendAgentMessage: async (jid, rawText, context) => {
       // Agent-authored messages (via container send_message/relay_message IPC
       // tools) must run through the same pipeline as email-trigger results so
       // that Yes/No, forward, RSVP, and open-URL buttons get attached when
@@ -1674,6 +1674,50 @@ async function main(): Promise<void> {
       const { text: formatted, meta } = classifyAndFormat(clean, {
         gmailOpsAvailable,
       });
+
+      // When the agent explicitly tags the message with an email_id, attach
+      // Expand / Full Email / Archive buttons (same set as email triggers).
+      // This lets ad-hoc agent messages about a specific email carry the
+      // same affordances as the original notification.
+      if (context?.emailId) {
+        const emailId = context.emailId;
+        const account = context.emailAccount ?? '';
+        if (
+          gmailOpsAvailable &&
+          !meta.actions.some((a) => a.callbackData?.startsWith('expand:'))
+        ) {
+          meta.actions.push({
+            label: '📧 Expand',
+            callbackData: `expand:${emailId}:${account}`,
+            style: 'secondary' as const,
+          });
+        }
+        if (
+          MINI_APP_URL &&
+          !meta.actions.some((a) => a.webAppUrl?.includes(`/email/${emailId}`))
+        ) {
+          const fullUrl = `${MINI_APP_URL}/email/${emailId}${
+            account ? `?account=${account}` : ''
+          }`;
+          meta.actions.push({
+            label: '🌐 Full Email',
+            callbackData: `noop:${emailId}`,
+            style: 'secondary' as const,
+            webAppUrl: fullUrl,
+          });
+        }
+        if (
+          gmailOpsAvailable &&
+          !meta.actions.some((a) => a.callbackData?.startsWith('archive:'))
+        ) {
+          meta.actions.push({
+            label: '🗄 Archive',
+            callbackData: `archive:${emailId}`,
+            style: 'secondary' as const,
+          });
+        }
+      }
+
       if (
         meta.actions.length > 0 &&
         'sendMessageWithActions' in channel &&

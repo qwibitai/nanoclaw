@@ -64,6 +64,18 @@ Use search_contacts to look up phone numbers before sending iMessage/SMS.`,
       .describe(
         'Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.',
       ),
+    email_id: z
+      .string()
+      .optional()
+      .describe(
+        'Gmail thread ID when this message is about a specific email. Attaching it lets the host add Expand/Full Email/Archive buttons below the message.',
+      ),
+    email_account: z
+      .string()
+      .optional()
+      .describe(
+        'Gmail account (e.g. "personal", "whoisxml") the email_id belongs to. Required alongside email_id for Full Email routing.',
+      ),
   },
   async (args) => {
     // Main group can target any JID; others can only send to their own chat
@@ -76,6 +88,8 @@ Use search_contacts to look up phone numbers before sending iMessage/SMS.`,
       sender: args.sender || undefined,
       groupFolder,
       timestamp: new Date().toISOString(),
+      emailId: args.email_id || undefined,
+      emailAccount: args.email_account || undefined,
     };
 
     writeIpcFile(MESSAGES_DIR, data);

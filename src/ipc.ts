@@ -32,8 +32,15 @@ export interface IpcDeps {
    * forward, RSVP, and open-URL buttons get attached when the text contains
    * a question or actionable item. Falls back to plain sendMessage when the
    * channel doesn't support inline keyboards.
+   *
+   * Pass email context when the message is about a specific email — the host
+   * will attach Expand / 🌐 Full Email / Archive buttons below the message.
    */
-  sendAgentMessage: (jid: string, text: string) => Promise<void>;
+  sendAgentMessage: (
+    jid: string,
+    text: string,
+    context?: { emailId?: string; emailAccount?: string },
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -138,7 +145,16 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendAgentMessage(data.chatJid, data.text);
+                  await deps.sendAgentMessage(data.chatJid, data.text, {
+                    emailId:
+                      typeof data.emailId === 'string'
+                        ? data.emailId
+                        : undefined,
+                    emailAccount:
+                      typeof data.emailAccount === 'string'
+                        ? data.emailAccount
+                        : undefined,
+                  });
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
