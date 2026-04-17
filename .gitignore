@@ -11,16 +11,23 @@ logs/
 
 # Groups - only track base structure and specific CLAUDE.md files
 groups/*
-!groups/main/
 !groups/global/
-groups/main/*
+!groups/whatsapp_main/
+!groups/whatsapp_jaime_assistant/
+!groups/_template/
 groups/global/*
-!groups/main/CLAUDE.md
+groups/whatsapp_main/*
+groups/whatsapp_jaime_assistant/*
+groups/_template/*
 !groups/global/CLAUDE.md
+!groups/whatsapp_main/CLAUDE.md
+!groups/whatsapp_jaime_assistant/CLAUDE.md
+!groups/_template/CLAUDE.md
 
 # Secrets
 *.keys.json
 .env
+*.pem
 
 # Temp files
 .tmp-*
