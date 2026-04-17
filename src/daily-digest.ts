@@ -25,6 +25,26 @@ import { renderArchiveDashboard } from './triage/dashboards.js';
 /** How far back to look for events (24 hours). */
 const DIGEST_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Human-readable label for when the next daily digest will fire.
+ * Digest fires at 8:00 in TIMEZONE once per day; before 8am the next fire
+ * is "today 8am", after 8am it's "tomorrow 8am". Exported for tests.
+ */
+export function describeNextDigest(
+  now: Date = new Date(),
+  timeZone: string = TIMEZONE,
+): string {
+  const localHour = parseInt(
+    now.toLocaleString('en-US', {
+      timeZone,
+      hour: 'numeric',
+      hour12: false,
+    }),
+    10,
+  );
+  return localHour < 8 ? 'today 8am' : 'tomorrow 8am';
+}
+
 export interface DigestDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   getMainGroupJid: () => string | undefined;
@@ -184,7 +204,7 @@ export async function postArchiveDashboard(): Promise<void> {
       chatId,
       counts,
       total,
-      nextDigestHuman: 'tomorrow 8am',
+      nextDigestHuman: describeNextDigest(),
     });
   } catch (err) {
     logger.warn({ err: String(err) }, 'Archive dashboard render failed');

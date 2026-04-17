@@ -51,6 +51,7 @@ import {
   generateDigest,
   runDailyDigest,
   computeArchiveDashboardCounts,
+  describeNextDigest,
 } from '../daily-digest.js';
 import { insertTrackedItem } from '../tracked-items.js';
 
@@ -289,5 +290,24 @@ describe('daily-digest', () => {
     const { counts, total } = computeArchiveDashboardCounts();
     expect(total).toBe(2);
     expect(counts).toEqual({ newsletter: 1, uncategorized: 1 });
+  });
+
+  describe('describeNextDigest', () => {
+    // Use a fixed UTC timezone so the test is reproducible regardless of
+    // the developer's local TZ. The helper takes (now, timeZone) for this.
+    it('returns "today 8am" when current local hour is before 8', () => {
+      // 06:30 UTC → hour 6 → today
+      const now = new Date('2026-04-17T06:30:00Z');
+      expect(describeNextDigest(now, 'UTC')).toBe('today 8am');
+    });
+
+    it('returns "tomorrow 8am" when current local hour is 8 or later', () => {
+      // 08:00 UTC → hour 8 → tomorrow (digest already fired today)
+      const eight = new Date('2026-04-17T08:00:00Z');
+      expect(describeNextDigest(eight, 'UTC')).toBe('tomorrow 8am');
+      // 23:00 UTC → hour 23 → tomorrow
+      const late = new Date('2026-04-17T23:00:00Z');
+      expect(describeNextDigest(late, 'UTC')).toBe('tomorrow 8am');
+    });
   });
 });

@@ -250,6 +250,29 @@ function handleTriagedEmails(data: string, label: string): void {
     const rawEmails = parsed.emails;
     if (!rawEmails || rawEmails.length === 0) return;
 
+    // Upstream data-quality probe. The classifier-pipeline-v1 rollout
+    // revealed that ~99% of SuperPilot SSE events arrive with empty
+    // subject/sender/snippet — the classifier runs before Gmail indexing
+    // catches up. Counting here lets us watch the ratio over time and
+    // decide when/if to request the upstream fix.
+    const n = rawEmails.length;
+    let withSubject = 0;
+    let withSender = 0;
+    let withSnippet = 0;
+    for (const e of rawEmails as Array<{
+      subject?: string;
+      sender?: string;
+      snippet?: string;
+    }>) {
+      if (e.subject && e.subject.length > 0) withSubject++;
+      if (e.sender && e.sender.length > 0) withSender++;
+      if (e.snippet && e.snippet.length > 0) withSnippet++;
+    }
+    logger.info(
+      { label, total: n, withSubject, withSender, withSnippet },
+      'SSE triaged_emails field-presence',
+    );
+
     // Drop test-fixture triggers at the edge. Dev harnesses and QA scripts
     // fire thread_ids like `test-approval-v2`, `test-approval-verify`, etc.
     // that aren't real Gmail threads — processing them wakes the agent for
