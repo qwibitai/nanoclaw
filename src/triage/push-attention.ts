@@ -18,21 +18,21 @@ export async function pushAttentionItem(
 ): Promise<void> {
   const text = `📌 *${input.title}*\nfrom: ${input.sender}\nreason: ${input.reason}`;
 
+  // Two rows of compact emoji-prefixed buttons (was three rows). Keeps all
+  // five actions accessible without the lonely "Move to archive queue" row.
   const keyboard = [
     [
-      { text: 'Snooze 1h', callback_data: `triage:snooze:1h:${input.itemId}` },
+      { text: '⏰ 1h', callback_data: `triage:snooze:1h:${input.itemId}` },
       {
-        text: 'Snooze tomorrow',
+        text: '⏰ Tomorrow',
         callback_data: `triage:snooze:tomorrow:${input.itemId}`,
       },
+      { text: '✕ Dismiss', callback_data: `triage:dismiss:${input.itemId}` },
     ],
     [
-      { text: 'Dismiss', callback_data: `triage:dismiss:${input.itemId}` },
-      { text: 'Archive', callback_data: `triage:archive:${input.itemId}` },
-    ],
-    [
+      { text: '🗃 Archive', callback_data: `triage:archive:${input.itemId}` },
       {
-        text: 'Move to archive queue',
+        text: '→ Archive queue',
         callback_data: `triage:override:archive:${input.itemId}`,
       },
     ],

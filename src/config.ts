@@ -1,7 +1,7 @@
 import os from 'os';
 import path from 'path';
 
-import { readEnvFile } from './env.js';
+import { readEnvFile, readEnvValue } from './env.js';
 import { isValidTimezone } from './timezone.js';
 
 // Read config values from .env (falls back to process.env).
@@ -175,7 +175,10 @@ export const QDRANT_URL = process.env.QDRANT_URL || envConfig.QDRANT_URL || '';
 // Telegram Mini App: public HTTPS URL that Telegram can open.
 // Must point to the Mini App Express server (default local port 3847).
 // Typically exposed via Cloudflare tunnel.
-export const MINI_APP_URL = process.env.MINI_APP_URL || '';
+// readEnvValue bridges process.env -> .env since launchd does not inject
+// .env keys; previously this silently defaulted to '' and the bot's
+// Mini App menu button was never installed.
+export const MINI_APP_URL = readEnvValue('MINI_APP_URL') ?? '';
 
 // Browser sidecar settings
 export const BROWSER_CDP_URL =

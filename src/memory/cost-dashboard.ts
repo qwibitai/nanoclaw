@@ -72,7 +72,8 @@ export function formatCostReport(days: number = 7): string {
 
 export type AssistantCommand =
   | { type: 'cost_report'; days: number }
-  | { type: 'teach'; description: string };
+  | { type: 'teach'; description: string }
+  | { type: 'archive_dashboard' };
 
 /**
  * Parse assistant commands from trigger-stripped message text.
@@ -97,6 +98,11 @@ export function parseAssistantCommand(text: string): AssistantCommand | null {
     return { type: 'teach', description: teachMatch[1].trim() };
   }
 
+  // Archive dashboard: "archive", "/archive", "archive dashboard"
+  if (/^\/?archive(\s+dashboard)?$/.test(lower)) {
+    return { type: 'archive_dashboard' };
+  }
+
   return null;
 }
 
@@ -113,6 +119,16 @@ export function executeAssistantCommand(
 
     case 'teach':
       return handleTeachCommand(command.description, groupId);
+
+    case 'archive_dashboard':
+      // Fire-and-forget: postArchiveDashboard upserts the pinned message and
+      // logs/swallows its own errors. We return an ack string synchronously
+      // so the chat-command router stays sync.
+      void (async () => {
+        const { postArchiveDashboard } = await import('../daily-digest.js');
+        await postArchiveDashboard();
+      })();
+      return '🗂 Posting archive dashboard…';
   }
 }
 
