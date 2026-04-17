@@ -1,8 +1,16 @@
+import type { EmailMeta } from './gmail-ops.js';
+
 /**
- * In-memory cache for fetched email bodies.
- * Key: emailId, Value: { body, fetchedAt }
+ * In-memory cache for fetched email bodies and metadata.
+ * Key: emailId, Value: { body, meta?, fetchedAt }
  */
-const emailCache = new Map<string, { body: string; fetchedAt: number }>();
+interface CacheEntry {
+  body: string;
+  meta?: EmailMeta;
+  fetchedAt: number;
+}
+
+const emailCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 /**
@@ -48,4 +56,24 @@ export function cleanupCache(): void {
       emailCache.delete(id);
     }
   }
+}
+
+/**
+ * Store full email metadata in cache (body is extracted from meta).
+ */
+export function cacheEmailMeta(emailId: string, meta: EmailMeta): void {
+  emailCache.set(emailId, { body: meta.body, meta, fetchedAt: Date.now() });
+}
+
+/**
+ * Get full email metadata from cache, or return null if not cached / expired.
+ */
+export function getCachedEmailMeta(emailId: string): EmailMeta | null {
+  const entry = emailCache.get(emailId);
+  if (!entry) return null;
+  if (Date.now() - entry.fetchedAt > CACHE_TTL_MS) {
+    emailCache.delete(emailId);
+    return null;
+  }
+  return entry.meta || null;
 }
