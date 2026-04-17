@@ -267,6 +267,55 @@ export async function handleCallback(
         break;
       }
 
+      case 'retry_send': {
+        // Retry a failed draft send. entityId = draftId. Account is resolved
+        // from draft_originals (stored when the draft was enriched).
+        if (!deps.db || !deps.gmailOps) {
+          logger.warn({ draftId: entityId }, 'retry_send: db or gmailOps missing');
+          break;
+        }
+        const row = deps.db
+          .prepare('SELECT account FROM draft_originals WHERE draft_id = ?')
+          .get(entityId) as { account: string } | undefined;
+        if (!row) {
+          if (channel?.editMessageTextAndButtons) {
+            await channel.editMessageTextAndButtons(
+              query.chatJid,
+              query.messageId,
+              '⚠️ Draft no longer exists — cannot retry.',
+              [],
+            );
+          }
+          break;
+        }
+        try {
+          await deps.gmailOps.sendDraft(row.account, entityId);
+          if (channel?.editMessageTextAndButtons) {
+            await channel.editMessageTextAndButtons(
+              query.chatJid,
+              query.messageId,
+              '✅ Sent on retry.',
+              [],
+            );
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.error(
+            { draftId: entityId, account: row.account, err },
+            'retry_send failed',
+          );
+          if (channel?.editMessageTextAndButtons) {
+            await channel.editMessageTextAndButtons(
+              query.chatJid,
+              query.messageId,
+              `❌ Retry failed: ${msg}`,
+              [],
+            );
+          }
+        }
+        break;
+      }
+
       case 'revert': {
         if (deps.draftWatcher) {
           const reverted = await deps.draftWatcher.revert(entityId);
