@@ -3,17 +3,30 @@ import { generateText, embed } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { readEnvFile } from '../env.js';
 
 type ProviderFactory = ReturnType<
   typeof createOpenAI | typeof createGoogleGenerativeAI | typeof createAnthropic
 >;
 
+/**
+ * Read an API key from process.env, falling back to the project .env file.
+ * The host process does not auto-load .env into process.env (see env.ts), so
+ * host-side utility LLM calls need this explicit lookup.
+ */
+function readKey(name: string): string | undefined {
+  const fromEnv = process.env[name];
+  if (fromEnv) return fromEnv;
+  const fromFile = readEnvFile([name])[name];
+  return fromFile || undefined;
+}
+
 export function isEmbeddingAvailable(): boolean {
-  return Boolean(process.env.OPENAI_API_KEY);
+  return Boolean(readKey('OPENAI_API_KEY'));
 }
 
 export function resolveUtilityModel(explicit?: string): LanguageModel {
-  const spec = explicit ?? process.env.UTILITY_LLM_MODEL;
+  const spec = explicit ?? readKey('UTILITY_LLM_MODEL');
   if (spec) {
     const [providerName, ...modelParts] = spec.split(':');
     const modelId = modelParts.join(':');
@@ -21,16 +34,17 @@ export function resolveUtilityModel(explicit?: string): LanguageModel {
     return factory(modelId);
   }
 
-  if (process.env.OPENAI_API_KEY) {
-    return createOpenAI({ apiKey: process.env.OPENAI_API_KEY })('gpt-4o-mini');
+  const openaiKey = readKey('OPENAI_API_KEY');
+  if (openaiKey) {
+    return createOpenAI({ apiKey: openaiKey })('gpt-4o-mini');
   }
-  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-    return createGoogleGenerativeAI({
-      apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
-    })('gemini-2.0-flash');
+  const googleKey = readKey('GOOGLE_GENERATIVE_AI_API_KEY');
+  if (googleKey) {
+    return createGoogleGenerativeAI({ apiKey: googleKey })('gemini-2.0-flash');
   }
-  if (process.env.ANTHROPIC_API_KEY) {
-    return createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY })(
+  const anthropicKey = readKey('ANTHROPIC_API_KEY');
+  if (anthropicKey) {
+    return createAnthropic({ apiKey: anthropicKey })(
       'claude-haiku-4-5-20251001',
     );
   }
@@ -43,13 +57,13 @@ export function resolveUtilityModel(explicit?: string): LanguageModel {
 function getFactory(providerName: string): ProviderFactory {
   switch (providerName) {
     case 'openai':
-      return createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      return createOpenAI({ apiKey: readKey('OPENAI_API_KEY') });
     case 'google':
       return createGoogleGenerativeAI({
-        apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+        apiKey: readKey('GOOGLE_GENERATIVE_AI_API_KEY'),
       });
     case 'anthropic':
-      return createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      return createAnthropic({ apiKey: readKey('ANTHROPIC_API_KEY') });
     default:
       throw new Error(`Unknown utility provider: ${providerName}`);
   }
