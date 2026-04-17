@@ -49,6 +49,65 @@ describe('Mini App extended routes', () => {
     );
   });
 
+  it('GET /email/:emailId renders real subject, from, to, date when getMessageMeta available', async () => {
+    const { app, db, mockGmailOps } = setup();
+    const metaMock = vi.fn().mockResolvedValue({
+      subject: 'Hello from Test',
+      from: 'sender@example.com',
+      to: 'receiver@example.com',
+      date: '2026-04-16T10:00:00Z',
+      body: 'Test body content',
+      cc: '',
+    });
+    (mockGmailOps as any).getMessageMeta = metaMock;
+    const app2 = createMiniAppServer({
+      port: 0,
+      db,
+      gmailOps: mockGmailOps as any,
+      draftWatcher: undefined,
+    });
+    const res = await request(app2).get('/email/msg456?account=personal');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('Hello from Test');
+    expect(res.text).toContain('sender@example.com');
+    expect(res.text).toContain('receiver@example.com');
+    expect(res.text).toContain('2026-04-16T10:00:00Z');
+    expect(metaMock).toHaveBeenCalledWith('personal', 'msg456');
+  });
+
+  it('GET /email/:emailId falls back to getMessageBody when getMessageMeta unavailable', async () => {
+    const { app, mockGmailOps } = setup();
+    // mockGmailOps does not have getMessageMeta
+    const res = await request(app).get('/email/msg789?account=personal');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('Full email body for test');
+    expect(mockGmailOps.getMessageBody).toHaveBeenCalledWith(
+      'personal',
+      'msg789',
+    );
+  });
+
+  it('GET /email/:emailId does not render raw script tags in body', async () => {
+    const { app, db } = setup();
+    const xssBody = '<script>alert("xss")</script>';
+    const mockGmailOpsXss = {
+      getMessageBody: vi.fn().mockResolvedValue(xssBody),
+      archiveThread: vi.fn(),
+      listRecentDrafts: vi.fn(),
+      updateDraft: vi.fn(),
+    };
+    const app2 = createMiniAppServer({
+      port: 0,
+      db,
+      gmailOps: mockGmailOpsXss as any,
+      draftWatcher: undefined,
+    });
+    const res = await request(app2).get('/email/xssmsg?account=personal');
+    expect(res.status).toBe(200);
+    expect(res.text).not.toContain('<script>alert');
+    expect(res.text).toContain('sandbox');
+  });
+
   it('GET /draft-diff/:draftId shows diff view', async () => {
     const { app, db } = setup();
     db.prepare(

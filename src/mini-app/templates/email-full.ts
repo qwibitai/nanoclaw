@@ -6,6 +6,8 @@ export interface EmailFullData {
   body: string;
   attachments: Array<{ name: string; size: string }>;
   cc?: string;
+  emailId?: string;
+  account?: string;
 }
 
 function escapeHtml(s: string): string {
@@ -48,7 +50,14 @@ export function renderEmailFull(data: EmailFullData): string {
       <div><b>Date:</b> ${escapeHtml(data.date)}</div>
     </div>
   </div>
-  <div class="body">${data.body}</div>
+  <div class="body">
+  <iframe
+    sandbox=""
+    srcdoc="${escapeHtml(data.body)}"
+    style="width:100%;border:none;min-height:300px;background:#0d1117;color-scheme:dark;"
+    onload="this.style.height=this.contentDocument.body.scrollHeight+'px'"
+  ></iframe>
+</div>
   ${attachmentsHtml}
   <div class="actions">
     <button class="btn" style="background:#276749;color:#c6f6d5;">Archive</button>

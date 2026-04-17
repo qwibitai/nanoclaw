@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3';
 import { renderTaskDetail } from './templates/task-detail.js';
 import { renderEmailFull } from './templates/email-full.js';
 import { renderDraftDiff } from './templates/draft-diff.js';
-import { getCachedEmailBody, cacheEmailBody } from '../email-preview.js';
+import { getCachedEmailBody, cacheEmailBody, getCachedEmailMeta, cacheEmailMeta } from '../email-preview.js';
 import type { GmailOps } from '../gmail-ops.js';
 import type { DraftEnrichmentWatcher } from '../draft-enrichment.js';
 import { logger } from '../logger.js';
@@ -103,26 +103,45 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
     const { emailId } = req.params;
     const account = (req.query.account as string) || '';
 
-    let body = getCachedEmailBody(emailId);
-    if (!body && opts.gmailOps && account) {
+    let meta = getCachedEmailMeta(emailId);
+
+    if (!meta && opts.gmailOps && account) {
       try {
-        body = await opts.gmailOps.getMessageBody(account, emailId);
-        if (body) cacheEmailBody(emailId, body);
+        if ('getMessageMeta' in opts.gmailOps) {
+          meta = await (opts.gmailOps as any).getMessageMeta(account, emailId);
+          if (meta) cacheEmailMeta(emailId, meta);
+        }
       } catch (err) {
-        logger.warn(
-          { emailId, err },
-          'Failed to fetch email body for Mini App',
-        );
+        logger.warn({ emailId, err }, 'Failed to fetch email meta for Mini App');
       }
     }
 
+    if (!meta) {
+      let body = getCachedEmailBody(emailId);
+      if (!body && opts.gmailOps && account) {
+        try {
+          body = await opts.gmailOps.getMessageBody(account, emailId);
+          if (body) cacheEmailBody(emailId, body);
+        } catch (err) {
+          logger.warn(
+            { emailId, err },
+            'Failed to fetch email body for Mini App',
+          );
+        }
+      }
+      meta = { subject: '', from: '', to: '', date: '', body: body || 'Email body could not be loaded.' };
+    }
+
     const html = renderEmailFull({
-      subject: `Email ${emailId}`,
-      from: '',
-      to: '',
-      date: '',
-      body: body || 'Email body could not be loaded.',
+      subject: meta.subject || `Email ${emailId}`,
+      from: meta.from || '',
+      to: meta.to || '',
+      date: meta.date || '',
+      body: meta.body || 'Email body could not be loaded.',
+      cc: meta.cc,
       attachments: [],
+      emailId,
+      account,
     });
     res.type('html').send(html);
   });
