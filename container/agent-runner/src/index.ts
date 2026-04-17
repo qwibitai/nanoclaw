@@ -125,7 +125,11 @@ function resolveAgentConfig(): { model: string; effort: EffortLevel } {
     }
   }
 
-  return { model, effort };
+  const config = { model, effort };
+  console.error(
+    `[nanoclaw] agent config resolved: model=${config.model} effort=${config.effort}`,
+  );
+  return config;
 }
 
 /**
