@@ -98,6 +98,12 @@ function setupLaunchd(
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>EnablePressuredExit</key>
+    <false/>
+    <key>EnableTransactions</key>
+    <false/>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
