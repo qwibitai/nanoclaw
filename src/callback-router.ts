@@ -40,6 +40,13 @@ export interface CallbackRouterDeps {
   draftWatcher?: DraftEnrichmentWatcher;
   db?: Database.Database;
   findChannel: (jid: string) => (Channel & Record<string, any>) | undefined;
+  /**
+   * Inject a synthesized user reply back into the agent session that asked
+   * the question. Used for Yes/No answers so the originating agent learns
+   * the decision and can proceed. Returns true if delivered to an active
+   * container; false falls back to enqueuing a new container run.
+   */
+  injectUserReply?: (jid: string, text: string) => boolean;
 }
 
 /**
@@ -350,6 +357,29 @@ export async function handleCallback(
           logger.info({ questionId }, 'Answer deferred');
         } else {
           deps.statusBar.removePendingItem(questionId);
+          // Route the answer back to the originating agent so it can act on
+          // the decision. Without this, Yes/No buttons are cosmetic — the
+          // agent never learns the user said yes to "should I forward X?".
+          if (deps.injectUserReply) {
+            const reply =
+              answer === 'yes'
+                ? '✅ Yes — proceed.'
+                : answer === 'no'
+                  ? '❌ No — do not proceed.'
+                  : `User answered: ${answer}`;
+            const delivered = deps.injectUserReply(query.chatJid, reply);
+            logger.info(
+              { questionId, answer, delivered, chatJid: query.chatJid },
+              'Answer routed to agent',
+            );
+          }
+          // Acknowledge the click by replacing buttons with a confirmation
+          // line so the user sees the system registered the answer.
+          if (channel?.editMessageButtons) {
+            await channel
+              .editMessageButtons(query.chatJid, query.messageId, [])
+              .catch(() => {});
+          }
         }
         break;
       }

@@ -26,6 +26,14 @@ import { addWatcher } from './watchers/watcher-store.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  /**
+   * Send a message authored by an agent (via the container's send_message or
+   * relay_message MCP tools). Runs through classifyAndFormat so that Yes/No,
+   * forward, RSVP, and open-URL buttons get attached when the text contains
+   * a question or actionable item. Falls back to plain sendMessage when the
+   * channel doesn't support inline keyboards.
+   */
+  sendAgentMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -130,7 +138,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  await deps.sendAgentMessage(data.chatJid, data.text);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
@@ -706,7 +714,7 @@ export async function processTaskIpc(
       }
 
       const [targetJidRelay] = targetEntry;
-      await deps.sendMessage(targetJidRelay, relayText);
+      await deps.sendAgentMessage(targetJidRelay, relayText);
       logger.info(
         {
           targetJid: targetJidRelay,

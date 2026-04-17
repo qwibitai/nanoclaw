@@ -24,6 +24,7 @@ describe('email-trigger pipeline – interface contract', () => {
 
     const stub: IpcDeps = {
       sendMessage: vi.fn(),
+      sendAgentMessage: vi.fn(),
       registeredGroups: vi.fn().mockReturnValue({}),
       registerGroup: vi.fn(),
       syncGroups: vi.fn().mockResolvedValue(undefined),

@@ -86,6 +86,37 @@ describe('handleCallback', () => {
     expect(deps.gmailOps!.archiveThread).not.toHaveBeenCalled();
   });
 
+  it('answer:yes injects synthesized user reply into agent session', async () => {
+    const deps = makeDeps();
+    const injectUserReply = vi.fn().mockReturnValue(true);
+    deps.injectUserReply = injectUserReply;
+    await handleCallback(makeQuery('answer:q_123:yes'), deps);
+    expect(injectUserReply).toHaveBeenCalledWith(
+      'telegram:123',
+      expect.stringMatching(/Yes.*proceed/i),
+    );
+    expect(deps.statusBar.removePendingItem).toHaveBeenCalledWith('q_123');
+  });
+
+  it('answer:no injects synthesized user reply into agent session', async () => {
+    const deps = makeDeps();
+    const injectUserReply = vi.fn().mockReturnValue(true);
+    deps.injectUserReply = injectUserReply;
+    await handleCallback(makeQuery('answer:q_456:no'), deps);
+    expect(injectUserReply).toHaveBeenCalledWith(
+      'telegram:123',
+      expect.stringMatching(/No.*not proceed/i),
+    );
+  });
+
+  it('answer:defer does not inject a reply', async () => {
+    const deps = makeDeps();
+    const injectUserReply = vi.fn();
+    deps.injectUserReply = injectUserReply;
+    await handleCallback(makeQuery('answer:q_789:defer'), deps);
+    expect(injectUserReply).not.toHaveBeenCalled();
+  });
+
   it('expand fetches body and edits message with preview', async () => {
     const deps = makeDeps();
     await handleCallback(makeQuery('expand:msg1:personal'), deps);

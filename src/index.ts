@@ -1568,6 +1568,15 @@ async function main(): Promise<void> {
         draftWatcher,
         db: getDb(),
         findChannel: (jid) => findChannel(channels, jid),
+        injectUserReply: (jid, text) => {
+          // Pipe synthesized Yes/No reply to the active agent container.
+          // If no container is active, enqueue a fresh check so one spins up.
+          const delivered = queue.sendMessage(jid, text);
+          if (!delivered) {
+            queue.enqueueMessageCheck(jid);
+          }
+          return delivered;
+        },
       });
     });
   }
@@ -1651,6 +1660,38 @@ async function main(): Promise<void> {
       const text = formatOutbound(rawText);
       if (!text) return Promise.resolve();
       return channel.sendMessage(jid, text);
+    },
+    sendAgentMessage: async (jid, rawText) => {
+      // Agent-authored messages (via container send_message/relay_message IPC
+      // tools) must run through the same pipeline as email-trigger results so
+      // that Yes/No, forward, RSVP, and open-URL buttons get attached when
+      // the text contains a question or actionable item.
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      const clean = formatOutbound(rawText);
+      if (!clean) return;
+      const gmailOpsAvailable = gmailOpsRouter.accounts.length > 0;
+      const { text: formatted, meta } = classifyAndFormat(clean, {
+        gmailOpsAvailable,
+      });
+      if (
+        meta.actions.length > 0 &&
+        'sendMessageWithActions' in channel &&
+        typeof (channel as { sendMessageWithActions?: unknown })
+          .sendMessageWithActions === 'function'
+      ) {
+        await (
+          channel as Channel & {
+            sendMessageWithActions: (
+              j: string,
+              t: string,
+              a: typeof meta.actions,
+            ) => Promise<number>;
+          }
+        ).sendMessageWithActions(jid, formatted, meta.actions);
+        return;
+      }
+      await channel.sendMessage(jid, formatted);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

@@ -7,6 +7,7 @@ function makeDeps(
 ): IpcDeps {
   return {
     sendMessage: vi.fn().mockResolvedValue(undefined),
+    sendAgentMessage: vi.fn().mockResolvedValue(undefined),
     registeredGroups: () =>
       Object.fromEntries(
         Object.entries(groups).map(([jid, g]) => [
@@ -59,7 +60,7 @@ describe('relay_message IPC', () => {
       deps,
     );
 
-    expect(deps.sendMessage).toHaveBeenCalledWith(
+    expect(deps.sendAgentMessage).toHaveBeenCalledWith(
       'tg:-1002222222222',
       'Hello dev team!',
     );
@@ -77,7 +78,7 @@ describe('relay_message IPC', () => {
       deps,
     );
 
-    expect(deps.sendMessage).toHaveBeenCalledWith(
+    expect(deps.sendAgentMessage).toHaveBeenCalledWith(
       'dc:3333333333',
       'Hi family!',
     );
@@ -95,7 +96,7 @@ describe('relay_message IPC', () => {
       deps,
     );
 
-    expect(deps.sendMessage).toHaveBeenCalledWith(
+    expect(deps.sendAgentMessage).toHaveBeenCalledWith(
       'tg:-1002222222222',
       'lowercase match',
     );
@@ -113,7 +114,7 @@ describe('relay_message IPC', () => {
       deps,
     );
 
-    expect(deps.sendMessage).not.toHaveBeenCalled();
+    expect(deps.sendAgentMessage).not.toHaveBeenCalled();
   });
 
   it('fails gracefully for unknown target group', async () => {
@@ -128,7 +129,7 @@ describe('relay_message IPC', () => {
       deps,
     );
 
-    expect(deps.sendMessage).not.toHaveBeenCalled();
+    expect(deps.sendAgentMessage).not.toHaveBeenCalled();
   });
 
   it('fails gracefully when text is missing', async () => {
@@ -139,7 +140,7 @@ describe('relay_message IPC', () => {
       deps,
     );
 
-    expect(deps.sendMessage).not.toHaveBeenCalled();
+    expect(deps.sendAgentMessage).not.toHaveBeenCalled();
   });
 
   it('fails gracefully when targetGroup is missing', async () => {
@@ -150,6 +151,6 @@ describe('relay_message IPC', () => {
       deps,
     );
 
-    expect(deps.sendMessage).not.toHaveBeenCalled();
+    expect(deps.sendAgentMessage).not.toHaveBeenCalled();
   });
 });
