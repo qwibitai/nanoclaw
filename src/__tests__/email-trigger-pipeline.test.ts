@@ -121,6 +121,43 @@ describe('email-trigger pipeline – interface contract', () => {
     expect(passed).toHaveProperty('subject', email.subject);
     expect(passed).toHaveProperty('sender', email.sender);
   });
+
+  it('email-trigger prompt instructs agent to pass email_id + email_account', async () => {
+    const { processTaskIpc } = await import('../ipc.js');
+    const { stub, calls } = buildStub();
+    // Register a main Telegram group so the handler routes to it.
+    (stub.registeredGroups as any) = vi.fn().mockReturnValue({
+      'tg:1': {
+        name: 'main',
+        folder: 'telegram_main',
+        trigger: '@bot',
+        added_at: new Date().toISOString(),
+        isMain: true,
+      },
+    });
+
+    await processTaskIpc(
+      {
+        type: 'email_trigger',
+        emails: [
+          {
+            thread_id: 't1',
+            account: 'personal',
+            subject: 's',
+            sender: 'x@y',
+          },
+        ],
+      },
+      'telegram_main',
+      true,
+      stub,
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].prompt).toMatch(/email_id/);
+    expect(calls[0].prompt).toMatch(/email_account/);
+    expect(calls[0].prompt).toMatch(/Expand.*Full Email.*Archive/);
+  });
 });
 
 import { classifyAndFormat } from '../router.js';

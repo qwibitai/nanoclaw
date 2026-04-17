@@ -636,7 +636,7 @@ export async function processTaskIpc(
         })
         .join('\n');
 
-      const prompt = `## Email Intelligence Trigger\n\n${emailCount} new email(s) to process:\n\n${emailSummaries}\n\nFollow the Email Intelligence instructions in your CLAUDE.md. For each email:\n1. Check if already processed (search processed_items)\n2. Use superpilot MCP to get full context\n3. Classify action tier (AUTO/PROPOSE/ESCALATE)\n4. Act accordingly\n5. Mark as processed`;
+      const prompt = `## Email Intelligence Trigger\n\n${emailCount} new email(s) to process:\n\n${emailSummaries}\n\nFollow the Email Intelligence instructions in your CLAUDE.md. For each email:\n1. Check if already processed (search processed_items)\n2. Use superpilot MCP to get full context\n3. Classify action tier (AUTO/PROPOSE/ESCALATE)\n4. Act accordingly\n5. Mark as processed\n\nWhen you send a message about a specific email via \`send_message\`, include \`email_id\` (thread_id from above) and \`email_account\` so the user gets Expand / Full Email / Archive buttons. For batch summaries that span multiple emails, omit these fields.`;
 
       // Run the agent on the Telegram JID (primary notification channel)
       // so that user replies on Telegram go to the same container session.

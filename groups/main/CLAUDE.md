@@ -18,6 +18,8 @@ Your output is sent to the user or group.
 
 You also have `mcp__nanoclaw__send_message` which sends a message immediately while you're still working. This is useful when you want to acknowledge a request before starting longer work.
 
+**When the message is about a specific email, always pass `email_id` (the Gmail thread ID) and `email_account` (e.g. `personal`, `whoisxml`).** The host attaches 📧 Expand / 🌐 Full Email / 🗄 Archive buttons to the message when these are set, so the user can act on the email with one tap. Omit them only for messages unrelated to a specific email (status updates, briefings that span multiple threads, general chat).
+
 ### Address every user command
 
 When the user sends multiple messages or commands, you MUST address each one — even if they're unrelated to each other or to your current context. Scan all incoming messages for distinct requests and respond to each. If you can't act on one (e.g. a tool is offline), explicitly say so rather than silently skipping it. Never let a command go unacknowledged.
@@ -348,7 +350,7 @@ When triggered with new emails (prompt starts with `## Email Intelligence Trigge
 4. Classify each email into action tier (AUTO / PROPOSE / ESCALATE)
 5. Execute actions per autonomy rules below
 6. Mark each email as processed
-7. Report results via send_message
+7. Report results via send_message — **pass `email_id` (thread_id) and `email_account` whenever the message is about a single specific email** so the user gets Expand / Full Email / Archive buttons. For batch summaries spanning multiple emails, omit these fields and describe the batch in prose.
 
 ### Evidence discipline (anti-hallucination)
 
