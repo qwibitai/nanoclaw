@@ -62,6 +62,7 @@ import {
   storeMessage,
   getPendingTrustApprovalIds,
   getDb,
+  getLatestInboundMessage,
 } from './db.js';
 import { ExecutorPool } from './executor-pool.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -553,6 +554,28 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           },
         });
         outputSentToUser = true;
+        try {
+          const inbound = getLatestInboundMessage(chatJid, ASSISTANT_NAME);
+          if (inbound) {
+            eventBus.emit('turn.completed', {
+              type: 'turn.completed',
+              source: 'orchestrator',
+              groupId: group.folder,
+              timestamp: Date.now(),
+              payload: {
+                groupName: group.folder,
+                userMessage: inbound.content,
+                agentReply: outText,
+                durationMs: Date.now() - responseStartMs,
+              },
+            });
+          }
+        } catch (emitErr) {
+          logger.warn(
+            { err: emitErr instanceof Error ? emitErr.message : String(emitErr) },
+            'failed to emit turn.completed (per-reply)',
+          );
+        }
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -625,9 +648,6 @@ async function runAgent(
   let realCostUsd = 0;
   let sawRealCost = false;
 
-  // Accumulate agent reply parts for turn.completed event.
-  const replyParts: string[] = [];
-
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
   writeTasksSnapshot(
@@ -663,9 +683,6 @@ async function runAgent(
     if (typeof output.totalCostUsd === 'number') {
       realCostUsd += output.totalCostUsd;
       sawRealCost = true;
-    }
-    if (typeof output.result === 'string' && output.result.length > 0) {
-      replyParts.push(output.result);
     }
     if (onOutput) await onOutput(output);
   };
@@ -857,26 +874,6 @@ async function runAgent(
           );
         }
       }
-    }
-
-    try {
-      eventBus.emit('turn.completed', {
-        type: 'turn.completed',
-        source: 'orchestrator',
-        groupId: group.folder,
-        timestamp: Date.now(),
-        payload: {
-          groupName: group.folder,
-          userMessage: prompt,
-          agentReply: replyParts.join('\n'),
-          durationMs: Date.now() - startMs,
-        },
-      });
-    } catch (emitErr) {
-      logger.warn(
-        { err: emitErr instanceof Error ? emitErr.message : String(emitErr) },
-        'failed to emit turn.completed',
-      );
     }
 
     return 'success';
