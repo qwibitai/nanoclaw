@@ -126,9 +126,9 @@ describe('IPC message authorization', () => {
   });
 
   it('non-main group cannot send to another groups chat', () => {
-    expect(
-      isMessageAuthorized('other-group', false, 'main@g.us', groups),
-    ).toBe(false);
+    expect(isMessageAuthorized('other-group', false, 'main@g.us', groups)).toBe(
+      false,
+    );
     expect(
       isMessageAuthorized('other-group', false, 'third@g.us', groups),
     ).toBe(false);

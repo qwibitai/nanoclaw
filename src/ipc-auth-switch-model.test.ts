@@ -47,7 +47,9 @@ describe('switch_model — set override', () => {
     expect(groups['other@g.us'].pendingModelNotice).toContain(
       'claude-opus-4-20250514',
     );
-    expect(groups['other@g.us'].pendingModelNotice).toContain('agent-initiated');
+    expect(groups['other@g.us'].pendingModelNotice).toContain(
+      'agent-initiated',
+    );
   });
 
   it('sends user notification via deps.sendMessage', async () => {
