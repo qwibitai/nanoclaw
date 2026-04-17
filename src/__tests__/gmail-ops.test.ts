@@ -81,7 +81,9 @@ describe('GmailOpsRouter', () => {
     router.register('personal', channel as any);
     await expect(
       router.archiveThread('nobody@example.com', 'thread1'),
-    ).rejects.toThrow('No Gmail channel registered for account: nobody@example.com');
+    ).rejects.toThrow(
+      'No Gmail channel registered for account: nobody@example.com',
+    );
   });
 
   it('resolves bare email local-part to alias (SSE sends "topcoder1", not "personal")', async () => {

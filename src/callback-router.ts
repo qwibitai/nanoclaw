@@ -170,7 +170,10 @@ export async function handleCallback(
         let body = getCachedEmailBody(entityId);
         if (!body && deps.gmailOps && account) {
           if ('getMessageMeta' in deps.gmailOps) {
-            const meta = await (deps.gmailOps as any).getMessageMeta(account, entityId);
+            const meta = await (deps.gmailOps as any).getMessageMeta(
+              account,
+              entityId,
+            );
             if (meta) {
               cacheEmailMeta(entityId, meta);
               body = meta.body;

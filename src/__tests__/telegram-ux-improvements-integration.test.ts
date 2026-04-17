@@ -44,10 +44,17 @@ describe('Telegram UX Improvements Integration', () => {
 
       // 2. User taps confirm_forward button
       const forwardAction = actions[0].actions[0];
-      const callbackData = forwardAction.callbackData.replace('forward:', 'confirm_forward:');
+      const callbackData = forwardAction.callbackData.replace(
+        'forward:',
+        'confirm_forward:',
+      );
 
       const deps: CallbackRouterDeps = {
-        archiveTracker: { markArchived: vi.fn(), getUnarchived: vi.fn().mockReturnValue([]), recordAction: vi.fn() } as any,
+        archiveTracker: {
+          markArchived: vi.fn(),
+          getUnarchived: vi.fn().mockReturnValue([]),
+          recordAction: vi.fn(),
+        } as any,
         autoApproval: { cancel: vi.fn() } as any,
         statusBar: { removePendingItem: vi.fn() } as any,
         gmailOps: {
@@ -64,7 +71,13 @@ describe('Telegram UX Improvements Integration', () => {
       };
 
       await handleCallback(
-        { id: 'q1', chatJid: 'tg:123', messageId: 42, data: callbackData, senderName: 'User' },
+        {
+          id: 'q1',
+          chatJid: 'tg:123',
+          messageId: 42,
+          data: callbackData,
+          senderName: 'User',
+        },
         deps,
       );
 
@@ -84,8 +97,8 @@ describe('Telegram UX Improvements Integration', () => {
       const hasForward = result.meta.actions.some((a) =>
         a.callbackData?.startsWith('forward:'),
       );
-      const hasGenericYes = result.meta.actions.some(
-        (a) => a.callbackData?.includes(':yes'),
+      const hasGenericYes = result.meta.actions.some((a) =>
+        a.callbackData?.includes(':yes'),
       );
       // Note: forward detection requires threadId on meta, which classifyAndFormat
       // may not set for arbitrary text. This tests the priority logic when both could match.
