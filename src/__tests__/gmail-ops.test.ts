@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { GmailOpsRouter } from '../gmail-ops.js';
+import { GmailOpsRouter, deriveLocalPart } from '../gmail-ops.js';
 import type { DraftInfo } from '../draft-enrichment.js';
 
 describe('GmailOpsRouter', () => {
@@ -82,6 +82,37 @@ describe('GmailOpsRouter', () => {
     await expect(
       router.archiveThread('nobody@example.com', 'thread1'),
     ).rejects.toThrow('No Gmail channel registered for account: nobody@example.com');
+  });
+
+  it('resolves bare email local-part to alias (SSE sends "topcoder1", not "personal")', async () => {
+    const router = new GmailOpsRouter();
+    const channel = makeMockChannel('personal');
+    (channel as any).emailAddress = 'topcoder1@gmail.com';
+    router.register('personal', channel as any);
+    const body = await router.getMessageBody('topcoder1', 'msg1');
+    expect(body).toBe('Hello world');
+    expect(channel.getMessageBody).toHaveBeenCalledWith('msg1');
+  });
+
+  it('derives local-part from email or bare string', () => {
+    expect(deriveLocalPart('topcoder1@gmail.com')).toBe('topcoder1');
+    expect(deriveLocalPart('Topcoder1')).toBe('topcoder1');
+    expect(deriveLocalPart('dev@whoisxmlapi.com')).toBe('dev');
+    expect(deriveLocalPart('')).toBeNull();
+  });
+
+  it('local-part registration does not shadow an existing exact alias', async () => {
+    const router = new GmailOpsRouter();
+    const personal = makeMockChannel('personal');
+    (personal as any).emailAddress = 'dev@gmail.com';
+    const dev = makeMockChannel('dev');
+    (dev as any).emailAddress = 'dev@whoisxmlapi.com';
+    router.register('personal', personal as any);
+    router.register('dev', dev as any);
+    // "dev" is an explicit alias — must win over local-part("dev@gmail.com")
+    await router.getMessageBody('dev', 'm');
+    expect(dev.getMessageBody).toHaveBeenCalledWith('m');
+    expect(personal.getMessageBody).not.toHaveBeenCalled();
   });
 
   it('handles channel without emailAddress gracefully', async () => {
