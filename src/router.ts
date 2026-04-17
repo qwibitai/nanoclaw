@@ -157,45 +157,42 @@ export function classifyAndFormat(rawText: string): ClassifiedMessage {
 
   let displayText = text;
 
-  // Email preview: truncate body and attach expand/full/archive actions
+  // Email: attach action buttons (Full Email always, Expand only for long bodies)
   if (meta.category === 'email') {
-    // Extract account tag from email format: [Email [personal] from ...]
     const accountMatch = text.match(/\[Email(?:\s*\[(\w+)\])?\s+from\s/);
     const account = accountMatch?.[1] || '';
 
-    // Find the body (after double newline following Subject: line)
     const bodyStart = text.indexOf('\n\n');
     if (bodyStart !== -1 && text.length - bodyStart > 302) {
       const header = text.slice(0, bodyStart + 2);
       const body = text.slice(bodyStart + 2);
       displayText = header + truncatePreview(body, 300);
 
-      // Attach email actions if we have an emailId on meta
       if (meta.emailId) {
-        const emailActions: Action[] = [
-          {
-            label: '📧 Expand',
-            callbackData: `expand:${meta.emailId}:${account}`,
-            style: 'secondary' as const,
-          },
-        ];
-        // Tier 3: full email in Mini App (only when tunnel URL is configured)
-        if (MINI_APP_URL) {
-          const fullUrl = `${MINI_APP_URL}/email/${meta.emailId}${account ? `?account=${account}` : ''}`;
-          emailActions.push({
-            label: '🌐 Full Email',
-            callbackData: `noop:${meta.emailId}`,
-            style: 'secondary' as const,
-            webAppUrl: fullUrl,
-          });
-        }
-        emailActions.push({
-          label: '🗄 Archive',
-          callbackData: `archive:${meta.emailId}`,
+        meta.actions.push({
+          label: '📧 Expand',
+          callbackData: `expand:${meta.emailId}:${account}`,
           style: 'secondary' as const,
         });
-        meta.actions = [...meta.actions, ...emailActions];
       }
+    }
+
+    // Always attach Full Email + Archive when we have an emailId
+    if (meta.emailId) {
+      if (MINI_APP_URL) {
+        const fullUrl = `${MINI_APP_URL}/email/${meta.emailId}${account ? `?account=${account}` : ''}`;
+        meta.actions.push({
+          label: '🌐 Full Email',
+          callbackData: `noop:${meta.emailId}`,
+          style: 'secondary' as const,
+          webAppUrl: fullUrl,
+        });
+      }
+      meta.actions.push({
+        label: '🗄 Archive',
+        callbackData: `archive:${meta.emailId}`,
+        style: 'secondary' as const,
+      });
     }
   }
 
