@@ -31,8 +31,7 @@ interface OAuthKeys {
 
 const CALENDAR_SCOPE_READONLY =
   'https://www.googleapis.com/auth/calendar.readonly';
-const CALENDAR_SCOPE_EVENTS =
-  'https://www.googleapis.com/auth/calendar.events';
+const CALENDAR_SCOPE_EVENTS = 'https://www.googleapis.com/auth/calendar.events';
 
 /**
  * Discover which Gmail-MCP accounts have calendar scope authorized.

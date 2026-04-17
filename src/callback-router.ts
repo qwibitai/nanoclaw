@@ -170,7 +170,10 @@ export async function handleCallback(
         let body = getCachedEmailBody(entityId);
         if (!body && deps.gmailOps && account) {
           if ('getMessageMeta' in deps.gmailOps) {
-            const meta = await (deps.gmailOps as any).getMessageMeta(account, entityId);
+            const meta = await (deps.gmailOps as any).getMessageMeta(
+              account,
+              entityId,
+            );
             if (meta) {
               cacheEmailMeta(entityId, meta);
               body = meta.body;
@@ -527,18 +530,70 @@ export async function handleCallback(
         break;
       }
 
+      case 'retry': {
+        // entityId = original action (expand | archive | confirm_archive),
+        // extra/extra2 = params to re-dispatch.
+        const retryAction = entityId;
+        const retryData =
+          retryAction === 'expand'
+            ? `expand:${extra}:${extra2}`
+            : retryAction === 'archive'
+              ? `archive:${extra}`
+              : retryAction === 'confirm_archive'
+                ? `confirm_archive:${extra}`
+                : null;
+        if (!retryData) {
+          logger.warn({ retryAction }, 'Unknown retry action');
+          break;
+        }
+        await handleCallback({ ...query, data: retryData }, deps);
+        break;
+      }
+
+      case 'dismiss_failure': {
+        if (channel?.editMessageButtons) {
+          await channel
+            .editMessageButtons(query.chatJid, query.messageId, [])
+            .catch(() => {});
+        }
+        break;
+      }
+
       default:
         logger.warn({ action, data: query.data }, 'Unknown callback action');
     }
   } catch (err) {
     logger.error({ err, action, entityId }, 'Callback handler failed');
     if (channel?.editMessageTextAndButtons) {
+      const message = `⚠️ ${action} failed: ${err instanceof Error ? err.message : 'Unknown error'}`;
+      // Emit retry buttons for Gmail-backed actions so a transient outage
+      // (token expiry, network blip, channel not yet registered) doesn't
+      // leave the user stuck. entityId + extra preserve the original call.
+      const retryableActions = new Set([
+        'expand',
+        'archive',
+        'confirm_archive',
+      ]);
+      const retryActions: Action[] = retryableActions.has(action)
+        ? [
+            {
+              label: '🔄 Retry',
+              callbackData: `retry:${action}:${entityId}:${extra}`,
+              style: 'primary',
+            },
+            {
+              label: '❌ Dismiss',
+              callbackData: `dismiss_failure:${entityId}`,
+              style: 'secondary',
+            },
+          ]
+        : [];
       await channel
         .editMessageTextAndButtons(
           query.chatJid,
           query.messageId,
-          `⚠️ ${action} failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
-          [],
+          message,
+          retryActions,
         )
         .catch(() => {});
     }

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { GmailOpsRouter, type GmailOpsProvider, type EmailMeta } from '../gmail-ops.js';
+import {
+  GmailOpsRouter,
+  type GmailOpsProvider,
+  type EmailMeta,
+} from '../gmail-ops.js';
 import type { DraftInfo } from '../draft-enrichment.js';
 
 function makeMockProvider(meta: EmailMeta | null = null): GmailOpsProvider {
@@ -58,8 +62,8 @@ describe('GmailOpsRouter.getMessageMeta', () => {
 
   it('throws for unknown account', async () => {
     const router = new GmailOpsRouter();
-    await expect(
-      router.getMessageMeta('unknown', 'msg123'),
-    ).rejects.toThrow('No Gmail channel registered for account: unknown');
+    await expect(router.getMessageMeta('unknown', 'msg123')).rejects.toThrow(
+      'No Gmail channel registered for account: unknown',
+    );
   });
 });

@@ -388,11 +388,13 @@ export class TelegramChannel implements Channel {
                 text: '📱 App',
                 web_app: { url: MINI_APP_URL },
               },
-            }).then(() => {
-              logger.info({ url: MINI_APP_URL }, 'Telegram menu button set');
-            }).catch((err) => {
-              logger.debug({ err }, 'Failed to set menu button (non-fatal)');
-            });
+            })
+              .then(() => {
+                logger.info({ url: MINI_APP_URL }, 'Telegram menu button set');
+              })
+              .catch((err) => {
+                logger.debug({ err }, 'Failed to set menu button (non-fatal)');
+              });
           }
         },
       });
