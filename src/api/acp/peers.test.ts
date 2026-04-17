@@ -17,7 +17,7 @@ describe('codex()', () => {
     expect(peer.name).toBe('codex');
     expect(peer.command).toBe('npx');
     expect(peer.args).toContain('@zed-industries/codex-acp');
-    expect(peer.args).toContain('sandbox_policy="full-access"');
+    expect(peer.args).toContain('sandbox_mode="danger-full-access"');
     expect(peer.args).toContain('approval_policy="never"');
   });
 
@@ -183,7 +183,7 @@ describe('auto()', () => {
     const cc = peers.find((p) => p.name === 'claude-code')!;
     const cx = peers.find((p) => p.name === 'codex')!;
     expect(cc.args).toContain('--dangerously-skip-permissions');
-    expect(cx.args).toContain('sandbox_policy="full-access"');
+    expect(cx.args).toContain('sandbox_mode="danger-full-access"');
   });
 
   it('each returned peer conforms to AcpPeerConfig', () => {
