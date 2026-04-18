@@ -73,6 +73,9 @@ let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
+// Track the most recent thread_id per group so replies land in the correct
+// Telegram forum topic (or similar threaded context).
+let lastThreadId: Record<string, string | undefined> = {};
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
@@ -164,19 +167,38 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   // identity and instructions from the first run.  (Fixes #1391)
   const groupMdFile = path.join(groupDir, 'CLAUDE.md');
   if (!fs.existsSync(groupMdFile)) {
-    const templateFile = path.join(
-      GROUPS_DIR,
-      group.isMain ? 'main' : 'global',
-      'CLAUDE.md',
-    );
-    if (fs.existsSync(templateFile)) {
-      let content = fs.readFileSync(templateFile, 'utf-8');
-      if (ASSISTANT_NAME !== 'Andy') {
-        content = content.replace(/^# Andy$/m, `# ${ASSISTANT_NAME}`);
-        content = content.replace(/You are Andy/g, `You are ${ASSISTANT_NAME}`);
+    // Topic folders get a CLAUDE.md that references the parent group's memory
+    const topicFolderMatch = group.folder.match(/^(.+)_t(\d+)$/);
+    if (topicFolderMatch) {
+      const parentFolder = topicFolderMatch[1];
+      const parentMdPath = path.join(GROUPS_DIR, parentFolder, 'CLAUDE.md');
+      if (fs.existsSync(parentMdPath)) {
+        const parentContent = fs.readFileSync(parentMdPath, 'utf-8');
+        const content = `# Topic ${topicFolderMatch[2]}\n\nThis is an isolated topic conversation with its own context and history.\n\nShared context from the parent group is available at /workspace/parent/CLAUDE.md\n\n---\n\n${parentContent}`;
+        fs.writeFileSync(groupMdFile, content);
+        logger.info(
+          { folder: group.folder, parent: parentFolder },
+          'Created topic CLAUDE.md with parent context',
+        );
       }
-      fs.writeFileSync(groupMdFile, content);
-      logger.info({ folder: group.folder }, 'Created CLAUDE.md from template');
+    } else {
+      const templateFile = path.join(
+        GROUPS_DIR,
+        group.isMain ? 'main' : 'global',
+        'CLAUDE.md',
+      );
+      if (fs.existsSync(templateFile)) {
+        let content = fs.readFileSync(templateFile, 'utf-8');
+        if (ASSISTANT_NAME !== 'Andy') {
+          content = content.replace(/^# Andy$/m, `# ${ASSISTANT_NAME}`);
+          content = content.replace(
+            /You are Andy/g,
+            `You are ${ASSISTANT_NAME}`,
+          );
+        }
+        fs.writeFileSync(groupMdFile, content);
+        logger.info({ folder: group.folder }, 'Created CLAUDE.md from template');
+      }
     }
   }
 
@@ -186,6 +208,31 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   logger.info(
     { jid, name: group.name, folder: group.folder },
     'Group registered',
+  );
+}
+
+/**
+ * Auto-register a Telegram forum topic as a virtual group.
+ * Inherits config from the parent group but gets its own folder and context.
+ */
+function autoRegisterTopic(
+  topicJid: string,
+  parentGroup: RegisteredGroup,
+  threadId: string,
+): void {
+  const topicGroup: RegisteredGroup = {
+    name: `${parentGroup.name} / Topic ${threadId}`,
+    folder: `${parentGroup.folder}_t${threadId}`,
+    trigger: parentGroup.trigger,
+    added_at: new Date().toISOString(),
+    containerConfig: parentGroup.containerConfig,
+    requiresTrigger: parentGroup.requiresTrigger,
+    // Not isMain — only the parent group is main
+  };
+  registerGroup(topicJid, topicGroup);
+  logger.info(
+    { topicJid, parentFolder: parentGroup.folder, topicFolder: topicGroup.folder },
+    'Auto-registered topic group',
   );
 }
 
@@ -253,6 +300,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
+  // For topic virtual JIDs (tg:...:t:42), thread routing is handled by
+  // the JID itself in sendMessage. For non-topic groups, fall back to
+  // thread_id from messages.
+  const isTopicJid = chatJid.includes(':t:');
+  const replyThreadId = isTopicJid
+    ? undefined
+    : (missedMessages[missedMessages.length - 1].thread_id || undefined);
+
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
@@ -261,7 +316,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   saveState();
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length },
+    { group: group.name, messageCount: missedMessages.length, threadId: replyThreadId },
     'Processing messages',
   );
 
@@ -294,7 +349,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        await channel.sendMessage(chatJid, text, replyThreadId);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -514,6 +569,12 @@ async function startMessageLoop(): Promise<void> {
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
+          // Track thread_id for non-topic groups (topic JIDs have it in the JID)
+          const lastMsg = messagesToSend[messagesToSend.length - 1];
+          if (!chatJid.includes(':t:') && lastMsg.thread_id) {
+            lastThreadId[chatJid] = lastMsg.thread_id;
+          }
+
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
               { chatJid, count: messagesToSend.length },
@@ -610,6 +671,8 @@ async function main(): Promise<void> {
     const channel = findChannel(channels, chatJid);
     if (!channel) return;
 
+    const threadId = msg.thread_id;
+
     if (command === '/remote-control') {
       const result = await startRemoteControl(
         msg.sender,
@@ -617,19 +680,20 @@ async function main(): Promise<void> {
         process.cwd(),
       );
       if (result.ok) {
-        await channel.sendMessage(chatJid, result.url);
+        await channel.sendMessage(chatJid, result.url, threadId);
       } else {
         await channel.sendMessage(
           chatJid,
           `Remote Control failed: ${result.error}`,
+          threadId,
         );
       }
     } else {
       const result = stopRemoteControl();
       if (result.ok) {
-        await channel.sendMessage(chatJid, 'Remote Control session ended.');
+        await channel.sendMessage(chatJid, 'Remote Control session ended.', threadId);
       } else {
-        await channel.sendMessage(chatJid, result.error);
+        await channel.sendMessage(chatJid, result.error, threadId);
       }
     }
   }
@@ -637,6 +701,25 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
+      // Auto-register topic groups when parent is registered but topic isn't
+      if (!registeredGroups[chatJid]) {
+        const topicMatch = chatJid.match(/^(tg:-?\d+):t:(\d+)$/);
+        if (topicMatch) {
+          const parentJid = topicMatch[1];
+          const threadId = topicMatch[2];
+          const parentGroup = registeredGroups[parentJid];
+          if (parentGroup) {
+            autoRegisterTopic(chatJid, parentGroup, threadId);
+          }
+        }
+      }
+
+      // Ensure the chat metadata row exists for virtual topic JIDs
+      // (the chats table FK is enforced by better-sqlite3)
+      if (chatJid.includes(':t:')) {
+        storeChatMetadata(chatJid, msg.timestamp, undefined, 'telegram', true);
+      }
+
       // Remote control commands — intercept before storage
       const trimmed = msg.content.trim();
       if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
@@ -709,14 +792,14 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (text) await channel.sendMessage(jid, text, lastThreadId[jid]);
     },
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      return channel.sendMessage(jid, text, lastThreadId[jid]);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

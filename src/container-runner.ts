@@ -133,6 +133,21 @@ function buildVolumeMounts(
         readonly: true,
       });
     }
+
+    // For topic groups, also mount the parent group's folder read-only
+    // so the agent can read shared memory (CLAUDE.md, notes, etc.)
+    const topicMatch = group.folder.match(/^(.+)_t(\d+)$/);
+    if (topicMatch) {
+      const parentFolder = topicMatch[1];
+      const parentDir = path.join(GROUPS_DIR, parentFolder);
+      if (fs.existsSync(parentDir)) {
+        mounts.push({
+          hostPath: parentDir,
+          containerPath: '/workspace/parent',
+          readonly: true,
+        });
+      }
+    }
   }
 
   // Per-group Claude sessions directory (isolated from other groups)
