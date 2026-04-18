@@ -34,7 +34,19 @@ export interface ReconcileDeps {
   gmailOps: Pick<GmailOps, 'getThreadInboxStatus'>;
   now?: () => number;
   logger?: Pick<typeof logger, 'info' | 'warn' | 'error'>;
+  /**
+   * Set of thread IDs observed as 'missing' on the previous tick.
+   * Injected so tests can drive multi-tick behavior; defaults to the
+   * module-level Set used by the production loop.
+   */
+  missingSeen?: Set<string>;
 }
+
+// Tracks threads that returned 'missing' on the previous tick. A thread
+// must be seen missing twice in a row before we resolve it — a single
+// transient 404 from Gmail (rare, but possible during index rebuilds or
+// other edge events) should not permanently mark an item resolved.
+const defaultMissingSeen = new Set<string>();
 
 export interface ReconcileResult {
   checked: number;
@@ -43,10 +55,38 @@ export interface ReconcileResult {
   errors: number;
 }
 
+/**
+ * Last-tick stats for observability. Populated by `reconcileOnce` so the
+ * mini-app (or any other inspector) can read "is the reconciler alive?"
+ * without grepping logs.
+ */
+export interface ReconcilerStatus {
+  lastTickAt: number | null;
+  lastTickDurationMs: number | null;
+  lastResult: ReconcileResult | null;
+  totalTicks: number;
+  totalResolved: number;
+  totalErrors: number;
+}
+
+const status: ReconcilerStatus = {
+  lastTickAt: null,
+  lastTickDurationMs: null,
+  lastResult: null,
+  totalTicks: 0,
+  totalResolved: 0,
+  totalErrors: 0,
+};
+
+export function getReconcilerStatus(): ReconcilerStatus {
+  return { ...status };
+}
+
 interface QueuedRow {
   id: string;
   thread_id: string;
   metadata: string | null;
+  state?: string;
 }
 
 /**
@@ -58,11 +98,17 @@ export async function reconcileOnce(
 ): Promise<ReconcileResult> {
   const now = (deps.now ?? Date.now)();
   const log = deps.logger ?? logger;
+  const tickStartedAt = Date.now();
+  const missingSeen = deps.missingSeen ?? defaultMissingSeen;
 
+  // Covers both lanes:
+  //   - archive queue (state='queued') — out-of-band archives
+  //   - attention queue (state IN 'pushed','pending','held') — user
+  //     archived after replying or otherwise handling in Gmail
   const rows = deps.db
     .prepare(
-      `SELECT id, thread_id, metadata FROM tracked_items
-       WHERE state = 'queued'
+      `SELECT id, thread_id, metadata, state FROM tracked_items
+       WHERE state IN ('queued','pushed','pending','held')
          AND source = 'gmail'
          AND thread_id IS NOT NULL
          AND detected_at < ?
@@ -84,7 +130,7 @@ export async function reconcileOnce(
      SET state = 'resolved',
          resolution_method = 'gmail:external',
          resolved_at = ?
-     WHERE state = 'queued' AND id = ?`,
+     WHERE state IN ('queued','pushed','pending','held') AND id = ?`,
   );
 
   for (const row of rows) {
@@ -108,9 +154,18 @@ export async function reconcileOnce(
         account,
         row.thread_id,
       );
-      if (status === 'in') continue;
-      // 'out' = user archived outside the mini-app
-      // 'missing' = thread deleted; treat as resolved too
+      if (status === 'in') {
+        missingSeen.delete(row.thread_id);
+        continue;
+      }
+      if (status === 'missing' && !missingSeen.has(row.thread_id)) {
+        // First observation — wait one more tick before resolving, to
+        // absorb transient 404s from Gmail's serving layer.
+        missingSeen.add(row.thread_id);
+        continue;
+      }
+      // Either status === 'out', or 'missing' seen twice in a row.
+      missingSeen.delete(row.thread_id);
       resolveStmt.run(now, row.id);
       result.resolved++;
     } catch (err) {
@@ -125,6 +180,14 @@ export async function reconcileOnce(
   if (result.resolved > 0 || result.errors > 0) {
     log.info({ ...result }, 'Gmail reconciler tick');
   }
+
+  status.lastTickAt = tickStartedAt;
+  status.lastTickDurationMs = Date.now() - tickStartedAt;
+  status.lastResult = result;
+  status.totalTicks += 1;
+  status.totalResolved += result.resolved;
+  status.totalErrors += result.errors;
+
   return result;
 }
 

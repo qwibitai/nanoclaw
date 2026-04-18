@@ -376,6 +376,27 @@ ${
     res.json(row);
   });
 
+  // --- Health endpoints ---
+  // Quick liveness check for the Gmail→local reconciler: shows last-tick
+  // timestamp, duration, counts, and totals since process start. Returns
+  // 503 if the reconciler has never run yet.
+  app.get('/api/health/reconciler', async (_req, res) => {
+    const { getReconcilerStatus } = await import(
+      '../triage/gmail-reconciler.js'
+    );
+    const s = getReconcilerStatus();
+    if (s.lastTickAt === null) {
+      res.status(503).json({ status: 'pending', ...s });
+      return;
+    }
+    const ageMs = Date.now() - s.lastTickAt;
+    res.json({
+      status: ageMs < 5 * 60 * 1000 ? 'ok' : 'stale',
+      lastTickAgeMs: ageMs,
+      ...s,
+    });
+  });
+
   // --- Email full view ---
   app.get('/email/:emailId', async (req, res) => {
     const { emailId } = req.params;

@@ -77,6 +77,7 @@ describe('gmail-reconciler', () => {
       db: getDb(),
       gmailOps,
       now: () => now,
+      missingSeen: new Set(),
     });
 
     expect(result).toEqual({
@@ -100,23 +101,105 @@ describe('gmail-reconciler', () => {
     expect(b.state).toBe('queued');
   });
 
-  it('also resolves missing threads (404/deleted)', async () => {
+  it('resolves missing threads only after two consecutive observations', async () => {
     insertTrackedItem(makeGmailItem('item-c', 'thread-c', OLD));
     const gmailOps = {
       getThreadInboxStatus: vi.fn(async () => 'missing' as const),
     };
+    const missingSeen = new Set<string>();
 
+    // First tick: thread seen missing → deferred, not resolved
+    const r1 = await reconcileOnce({
+      db: getDb(),
+      gmailOps,
+      now: () => now,
+      missingSeen,
+    });
+    expect(r1.resolved).toBe(0);
+    expect(missingSeen.has('thread-c')).toBe(true);
+    let c = getDb()
+      .prepare('SELECT state FROM tracked_items WHERE id = ?')
+      .get('item-c') as { state: string };
+    expect(c.state).toBe('queued');
+
+    // Second tick: still missing → resolved
+    const r2 = await reconcileOnce({
+      db: getDb(),
+      gmailOps,
+      now: () => now,
+      missingSeen,
+    });
+    expect(r2.resolved).toBe(1);
+    c = getDb()
+      .prepare('SELECT state FROM tracked_items WHERE id = ?')
+      .get('item-c') as { state: string };
+    expect(c.state).toBe('resolved');
+  });
+
+  it('clears transient missing state when thread reappears in inbox', async () => {
+    insertTrackedItem(makeGmailItem('item-flap', 'thread-flap', OLD));
+    const missingSeen = new Set<string>();
+
+    // Tick 1: missing
+    let status: 'in' | 'out' | 'missing' = 'missing';
+    const gmailOps = {
+      getThreadInboxStatus: vi.fn(async () => status),
+    };
+    await reconcileOnce({
+      db: getDb(),
+      gmailOps,
+      now: () => now,
+      missingSeen,
+    });
+    expect(missingSeen.has('thread-flap')).toBe(true);
+
+    // Tick 2: back in inbox → missingSeen cleared
+    status = 'in';
+    await reconcileOnce({
+      db: getDb(),
+      gmailOps,
+      now: () => now,
+      missingSeen,
+    });
+    expect(missingSeen.has('thread-flap')).toBe(false);
+    const row = getDb()
+      .prepare('SELECT state FROM tracked_items WHERE id = ?')
+      .get('item-flap') as { state: string };
+    expect(row.state).toBe('queued'); // never resolved
+
+    // Tick 3: missing again → deferred again (not resolved), must wait for another tick
+    status = 'missing';
+    const r3 = await reconcileOnce({
+      db: getDb(),
+      gmailOps,
+      now: () => now,
+      missingSeen,
+    });
+    expect(r3.resolved).toBe(0);
+    expect(missingSeen.has('thread-flap')).toBe(true);
+  });
+
+  it('reconciles attention-queue items the same way', async () => {
+    insertTrackedItem({
+      ...makeGmailItem('item-att', 'thread-att', OLD),
+      state: 'pushed',
+      pushed_at: OLD,
+    });
+    const gmailOps = {
+      getThreadInboxStatus: vi.fn(async () => 'out' as const),
+    };
     const result = await reconcileOnce({
       db: getDb(),
       gmailOps,
       now: () => now,
+      missingSeen: new Set(),
     });
-
     expect(result.resolved).toBe(1);
-    const c = getDb()
-      .prepare('SELECT state FROM tracked_items WHERE id = ?')
-      .get('item-c') as { state: string };
-    expect(c.state).toBe('resolved');
+    const row = getDb()
+      .prepare('SELECT state, resolution_method FROM tracked_items WHERE id = ?')
+      .get('item-att') as { state: string; resolution_method: string };
+    expect(row.state).toBe('resolved');
+    expect(row.resolution_method).toBe('gmail:external');
   });
 
   it('skips items inside the race guard window', async () => {
@@ -129,6 +212,7 @@ describe('gmail-reconciler', () => {
       db: getDb(),
       gmailOps,
       now: () => now,
+      missingSeen: new Set(),
     });
 
     expect(result.checked).toBe(0);
@@ -153,6 +237,7 @@ describe('gmail-reconciler', () => {
       db: getDb(),
       gmailOps,
       now: () => now,
+      missingSeen: new Set(),
     });
 
     expect(result.skipped).toBe(1);
@@ -175,6 +260,7 @@ describe('gmail-reconciler', () => {
       db: getDb(),
       gmailOps,
       now: () => now,
+      missingSeen: new Set(),
     });
 
     expect(result).toMatchObject({
@@ -214,6 +300,7 @@ describe('gmail-reconciler', () => {
       db: getDb(),
       gmailOps,
       now: () => now,
+      missingSeen: new Set(),
     });
 
     expect(result.checked).toBe(0);
