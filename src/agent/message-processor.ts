@@ -39,7 +39,6 @@ function hasWakeTrigger(
   );
 }
 
-
 export class MessageProcessor {
   private messageLoopRunning = false;
   private _messageLoopPromise: Promise<void> | null = null;
