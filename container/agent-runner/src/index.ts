@@ -6,6 +6,7 @@
  *   Stdin: Full ContainerInput JSON (read until EOF, like before)
  *   IPC:   Follow-up messages written as JSON files to /workspace/ipc/input/
  *          Files: {type:"message", text:"..."}.json — polled and consumed
+ *                 {type:"reset"}.json — clear sessionId/resumeAt before next query
  *          Sentinel: /workspace/ipc/input/_close — signals session end
  *
  * Stdout protocol:
@@ -289,6 +290,10 @@ function formatTranscriptMarkdown(
   return lines.join('\n');
 }
 
+// Set to true when a {type:"reset"} IPC message is received.
+// Applied by the main loop before the next runQuery call.
+let pendingReset = false;
+
 /**
  * Check for _close sentinel.
  */
@@ -324,6 +329,9 @@ function drainIpcInput(): string[] {
         fs.unlinkSync(filePath);
         if (data.type === 'message' && data.text) {
           messages.push(data.text);
+        } else if (data.type === 'reset') {
+          log('Reset control message received — will clear sessionId/resumeAt before next query');
+          pendingReset = true;
         }
       } catch (err) {
         log(
@@ -678,9 +686,17 @@ async function main(): Promise<void> {
   let resumeAt: string | undefined;
   try {
     while (true) {
-      log(
-        `Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`,
-      );
+      // Apply any pending session reset before starting the next query.
+      // This ensures /new-session takes effect even when the container is
+      // idle-waiting or was mid-query when the reset message arrived.
+      if (pendingReset) {
+        log('Applying pending reset: clearing sessionId and resumeAt for new session');
+        sessionId = undefined;
+        resumeAt = undefined;
+        pendingReset = false;
+      }
+
+      log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
       const queryResult = await runQuery(
         prompt,
