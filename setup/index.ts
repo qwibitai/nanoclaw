@@ -13,6 +13,7 @@ const STEPS: Record<
   environment: () => import('./environment.js'),
   container: () => import('./container.js'),
   register: () => import('./register.js'),
+  'pair-telegram': () => import('./pair-telegram.js'),
   mounts: () => import('./mounts.js'),
   service: () => import('./service.js'),
   verify: () => import('./verify.js'),
