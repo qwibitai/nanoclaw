@@ -17,6 +17,7 @@ import {
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -265,6 +266,51 @@ async function buildContainerArgs(
     logger.warn(
       { containerName },
       'OneCLI gateway not reachable — container will have no credentials',
+    );
+  }
+
+  // Pass through optional integration secrets that the agent-runner uses
+  // to configure additional MCP servers (Parallel AI, Todoist, etc.).
+  // These are NOT routed through the credential proxy — they're plain
+  // env var passthrough. Acceptable because the container is isolated and
+  // the host user is the only consumer.
+  const integrationSecrets = readEnvFile([
+    'PARALLEL_API_KEY',
+    'TODOIST_API_TOKEN',
+    'APIFY_TOKEN',
+    'OPENROUTER_API_KEY',
+    'ZERNIO_API_KEY',
+    'COMPOSIO_API_KEY',
+    'TELEGRAM_SCANNER_PORT',
+  ]);
+  if (integrationSecrets.PARALLEL_API_KEY) {
+    args.push('-e', `PARALLEL_API_KEY=${integrationSecrets.PARALLEL_API_KEY}`);
+  }
+  if (integrationSecrets.TODOIST_API_TOKEN) {
+    args.push(
+      '-e',
+      `TODOIST_API_TOKEN=${integrationSecrets.TODOIST_API_TOKEN}`,
+    );
+  }
+  if (integrationSecrets.APIFY_TOKEN) {
+    args.push('-e', `APIFY_TOKEN=${integrationSecrets.APIFY_TOKEN}`);
+  }
+  if (integrationSecrets.OPENROUTER_API_KEY) {
+    args.push(
+      '-e',
+      `OPENROUTER_API_KEY=${integrationSecrets.OPENROUTER_API_KEY}`,
+    );
+  }
+  if (integrationSecrets.ZERNIO_API_KEY) {
+    args.push('-e', `ZERNIO_API_KEY=${integrationSecrets.ZERNIO_API_KEY}`);
+  }
+  if (integrationSecrets.COMPOSIO_API_KEY) {
+    args.push('-e', `COMPOSIO_API_KEY=${integrationSecrets.COMPOSIO_API_KEY}`);
+  }
+  if (integrationSecrets.TELEGRAM_SCANNER_PORT) {
+    args.push(
+      '-e',
+      `TELEGRAM_SCANNER_PORT=${integrationSecrets.TELEGRAM_SCANNER_PORT}`,
     );
   }
 

@@ -484,6 +484,64 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...(() => {
+          const extra: Record<string, unknown> = {};
+          const composioKey = process.env.COMPOSIO_API_KEY;
+          if (composioKey) {
+            extra['composio'] = {
+              type: 'http',
+              url: 'https://backend.composio.dev/tool_router/trs_o-vfXQTHGBKS/mcp',
+              headers: { 'x-api-key': composioKey },
+            };
+            log('Composio MCP server configured (Gmail + Calendar)');
+          } else {
+            // Fallback to legacy Gmail/Calendar MCP servers
+            extra['gmail'] = {
+              command: 'npx',
+              args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+            };
+            extra['gcal'] = {
+              command: 'npx',
+              args: ['-y', '@cocal/google-calendar-mcp'],
+              env: {
+                GOOGLE_OAUTH_CREDENTIALS:
+                  '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+              },
+            };
+          }
+          const parallelKey = process.env.PARALLEL_API_KEY;
+          if (parallelKey) {
+            extra['parallel-search'] = {
+              type: 'http',
+              url: 'https://search-mcp.parallel.ai/mcp',
+              headers: { Authorization: `Bearer ${parallelKey}` },
+            };
+            extra['parallel-task'] = {
+              type: 'http',
+              url: 'https://task-mcp.parallel.ai/mcp',
+              headers: { Authorization: `Bearer ${parallelKey}` },
+            };
+            log('Parallel AI MCP servers configured');
+          }
+          const todoistToken = process.env.TODOIST_API_TOKEN;
+          if (todoistToken) {
+            extra['todoist'] = {
+              command: 'npx',
+              args: ['-y', 'todoist-mcp'],
+              env: { TODOIST_API_TOKEN: todoistToken },
+            };
+            log('Todoist MCP server configured');
+          }
+          const telegramScannerPort = process.env.TELEGRAM_SCANNER_PORT;
+          if (telegramScannerPort) {
+            extra['telegram-scanner'] = {
+              type: 'http',
+              url: `http://host.containers.internal:${telegramScannerPort}/sse`,
+            };
+            log('Telegram Scanner MCP server configured');
+          }
+          return extra;
+        })(),
       },
       hooks: {
         PreCompact: [
