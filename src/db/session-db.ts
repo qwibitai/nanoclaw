@@ -114,7 +114,7 @@ export function insertTask(
 ): void {
   db.prepare(
     `INSERT INTO messages_in (id, seq, timestamp, status, tries, process_after, recurrence, kind, platform_id, channel_type, thread_id, content, series_id)
-     VALUES (@id, @seq, datetime('now'), 'pending', 0, @processAfter, @recurrence, 'task', @platformId, @channelType, @threadId, @content, @id)`,
+     VALUES (@id, @seq, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 'pending', 0, @processAfter, @recurrence, 'task', @platformId, @channelType, @threadId, @content, @id)`,
   ).run({
     ...task,
     seq: nextEvenSeq(db),
@@ -255,7 +255,7 @@ export function insertRecurrence(
 ): void {
   db.prepare(
     `INSERT INTO messages_in (id, seq, kind, timestamp, status, process_after, recurrence, platform_id, channel_type, thread_id, content, series_id)
-     VALUES (?, ?, ?, datetime('now'), 'pending', ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 'pending', ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     newId,
     nextEvenSeq(db),
@@ -334,13 +334,13 @@ export function getDeliveredIds(db: Database.Database): Set<string> {
 
 export function markDelivered(db: Database.Database, messageOutId: string, platformMessageId: string | null): void {
   db.prepare(
-    "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, ?, 'delivered', datetime('now'))",
+    "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, ?, 'delivered', strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
   ).run(messageOutId, platformMessageId ?? null);
 }
 
 export function markDeliveryFailed(db: Database.Database, messageOutId: string): void {
   db.prepare(
-    "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, NULL, 'failed', datetime('now'))",
+    "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, NULL, 'failed', strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
   ).run(messageOutId);
 }
 
