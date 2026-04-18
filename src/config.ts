@@ -38,7 +38,9 @@ export const SENDER_ALLOWLIST_PATH = path.join(
   'nanoclaw',
   'sender-allowlist.json',
 );
-export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
+export const STORE_DIR = process.env.STORE_DIR
+  ? path.resolve(process.env.STORE_DIR)
+  : path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 

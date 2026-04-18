@@ -147,10 +147,10 @@ Skills we'd like to see:
 ## Architecture
 
 ```
-Channels --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+Channels --> Database --> Polling loop --> Container (Claude Agent SDK) --> Response
 ```
 
-Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
+Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem. Database access goes through an adapter layer; the default database is SQLite (`store/messages.db`).
 
 For the full architecture details, see the [documentation site](https://docs.nanoclaw.dev/concepts/architecture).
 
@@ -162,7 +162,7 @@ Key files:
 - `src/group-queue.ts` - Per-group queue with global concurrency limit
 - `src/container-runner.ts` - Spawns streaming agent containers
 - `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
+- `src/db/` - Database adapter layer (SQLite)
 - `groups/*/CLAUDE.md` - Per-group memory
 
 ## FAQ

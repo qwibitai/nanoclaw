@@ -120,10 +120,10 @@ claude
 ## 架构
 
 ```
-渠道 --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) --> 响应
+渠道 --> 数据库 --> 轮询循环 --> 容器 (Claude Agent SDK) --> 响应
 ```
 
-单一 Node.js 进程。渠道通过技能添加，启动时自注册 — 编排器连接具有凭据的渠道。智能体在具有文件系统隔离的 Linux 容器中执行。每个群组的消息队列带有并发控制。通过文件系统进行 IPC。
+单一 Node.js 进程。渠道通过技能添加，启动时自注册 — 编排器连接具有凭据的渠道。智能体在具有挂载目录与文件系统隔离的 Linux 容器中执行。每个群组的消息队列带有全局并发控制。通过文件系统进行 IPC。数据库通过适配层访问，默认为 SQLite（`store/messages.db`）。
 
 完整架构详情请见 [docs/SPEC.md](docs/SPEC.md)。
 
@@ -135,7 +135,7 @@ claude
 - `src/group-queue.ts` - 带全局并发限制的群组队列
 - `src/container-runner.ts` - 生成流式智能体容器
 - `src/task-scheduler.ts` - 运行计划任务
-- `src/db.ts` - SQLite 操作（消息、群组、会话、状态）
+- `src/db/` - 数据库适配层（SQLite）
 - `groups/*/CLAUDE.md` - 各群组的记忆
 
 ## FAQ

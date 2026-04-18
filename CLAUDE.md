@@ -17,7 +17,9 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/config.ts` | Trigger pattern, paths, intervals |
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
-| `src/db.ts` | SQLite operations |
+| `src/db/index.ts` | Database adapter factory and public API |
+| `src/db/types.ts` | `IDatabaseAdapter` interface and shared types |
+| `src/db/sqlite.ts` | SQLite adapter (default, via better-sqlite3) |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/` | Skills loaded inside agent containers (browser, status, formatting) |
 

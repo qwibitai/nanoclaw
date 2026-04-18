@@ -5,9 +5,6 @@
 import fs from 'fs';
 import path from 'path';
 
-import Database from 'better-sqlite3';
-
-import { STORE_DIR } from '../src/config.js';
 import { logger } from '../src/logger.js';
 import { commandExists, getPlatform, isHeadless, isWSL } from './platform.js';
 import { emitStatus } from './status.js';
@@ -46,23 +43,21 @@ export async function run(_args: string[]): Promise<void> {
   const hasAuth = fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
 
   let hasRegisteredGroups = false;
-  // Check JSON file first (pre-migration)
   if (fs.existsSync(path.join(projectRoot, 'data', 'registered_groups.json'))) {
     hasRegisteredGroups = true;
   } else {
-    // Check SQLite directly using better-sqlite3 (no sqlite3 CLI needed)
-    const dbPath = path.join(STORE_DIR, 'messages.db');
-    if (fs.existsSync(dbPath)) {
+    try {
+      const { initDatabase, getAllRegisteredGroups, closeDatabase } =
+        await import('../src/db/index.js');
+      await initDatabase();
       try {
-        const db = new Database(dbPath, { readonly: true });
-        const row = db
-          .prepare('SELECT COUNT(*) as count FROM registered_groups')
-          .get() as { count: number };
-        if (row.count > 0) hasRegisteredGroups = true;
-        db.close();
-      } catch {
-        // Table might not exist yet
+        const groups = await getAllRegisteredGroups();
+        if (Object.keys(groups).length > 0) hasRegisteredGroups = true;
+      } finally {
+        await closeDatabase();
       }
+    } catch {
+      // Database may not be initialized yet
     }
   }
 

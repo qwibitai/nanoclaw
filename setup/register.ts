@@ -7,11 +7,10 @@
 import fs from 'fs';
 import path from 'path';
 
-import { STORE_DIR } from '../src/config.ts';
-import { initDatabase, setRegisteredGroup } from '../src/db.ts';
-import { isValidGroupFolder } from '../src/group-folder.ts';
-import { logger } from '../src/logger.ts';
-import { emitStatus } from './status.ts';
+import { STORE_DIR } from '../src/config.js';
+import { isValidGroupFolder } from '../src/group-folder.js';
+import { logger } from '../src/logger.js';
+import { emitStatus } from './status.js';
 
 interface RegisterArgs {
   jid: string;
@@ -97,19 +96,23 @@ export async function run(args: string[]): Promise<void> {
   fs.mkdirSync(path.join(projectRoot, 'data'), { recursive: true });
   fs.mkdirSync(STORE_DIR, { recursive: true });
 
-  // Initialize database (creates schema + runs migrations)
-  initDatabase();
-
-  setRegisteredGroup(parsed.jid, {
-    name: parsed.name,
-    folder: parsed.folder,
-    trigger: parsed.trigger,
-    added_at: new Date().toISOString(),
-    requiresTrigger: parsed.requiresTrigger,
-    isMain: parsed.isMain,
-  });
-
-  logger.info('Wrote registration to SQLite');
+  const { initDatabase, setRegisteredGroup, closeDatabase } = await import(
+    '../src/db/index.js'
+  );
+  await initDatabase();
+  try {
+    await setRegisteredGroup(parsed.jid, {
+      name: parsed.name,
+      folder: parsed.folder,
+      trigger: parsed.trigger,
+      added_at: new Date().toISOString(),
+      requiresTrigger: parsed.requiresTrigger,
+      isMain: parsed.isMain,
+    });
+    logger.info('Wrote registration to database');
+  } finally {
+    await closeDatabase();
+  }
 
   // Create group folders
   fs.mkdirSync(path.join(projectRoot, 'groups', parsed.folder, 'logs'), {

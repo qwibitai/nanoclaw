@@ -45,7 +45,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
-} from './db.js';
+} from './db/index.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
@@ -99,17 +99,17 @@ function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
   );
 }
 
-function loadState(): void {
-  lastTimestamp = getRouterState('last_timestamp') || '';
-  const agentTs = getRouterState('last_agent_timestamp');
+async function loadState(): Promise<void> {
+  lastTimestamp = (await getRouterState('last_timestamp')) || '';
+  const agentTs = await getRouterState('last_agent_timestamp');
   try {
     lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
   } catch {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
     lastAgentTimestamp = {};
   }
-  sessions = getAllSessions();
-  registeredGroups = getAllRegisteredGroups();
+  sessions = await getAllSessions();
+  registeredGroups = await getAllRegisteredGroups();
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
@@ -120,29 +120,35 @@ function loadState(): void {
  * Return the message cursor for a group, recovering from the last bot reply
  * if lastAgentTimestamp is missing (new group, corrupted state, restart).
  */
-function getOrRecoverCursor(chatJid: string): string {
+async function getOrRecoverCursor(chatJid: string): Promise<string> {
   const existing = lastAgentTimestamp[chatJid];
   if (existing) return existing;
 
-  const botTs = getLastBotMessageTimestamp(chatJid, ASSISTANT_NAME);
+  const botTs = await getLastBotMessageTimestamp(chatJid, ASSISTANT_NAME);
   if (botTs) {
     logger.info(
       { chatJid, recoveredFrom: botTs },
       'Recovered message cursor from last bot reply',
     );
     lastAgentTimestamp[chatJid] = botTs;
-    saveState();
+    await saveState();
     return botTs;
   }
   return '';
 }
 
-function saveState(): void {
-  setRouterState('last_timestamp', lastTimestamp);
-  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
+async function saveState(): Promise<void> {
+  await setRouterState('last_timestamp', lastTimestamp);
+  await setRouterState(
+    'last_agent_timestamp',
+    JSON.stringify(lastAgentTimestamp),
+  );
 }
 
-function registerGroup(jid: string, group: RegisteredGroup): void {
+async function registerGroup(
+  jid: string,
+  group: RegisteredGroup,
+): Promise<void> {
   let groupDir: string;
   try {
     groupDir = resolveGroupFolderPath(group.folder);
@@ -155,7 +161,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   }
 
   registeredGroups[jid] = group;
-  setRegisteredGroup(jid, group);
+  await setRegisteredGroup(jid, group);
 
   // Create group folder
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
@@ -193,8 +199,10 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
  */
-export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
-  const chats = getAllChats();
+export async function getAvailableGroups(): Promise<
+  import('./container-runner.js').AvailableGroup[]
+> {
+  const chats = await getAllChats();
   const registeredJids = new Set(Object.keys(registeredGroups));
 
   return chats
@@ -230,9 +238,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const isMainGroup = group.isMain === true;
 
-  const missedMessages = getMessagesSince(
+  const missedMessages = await getMessagesSince(
     chatJid,
-    getOrRecoverCursor(chatJid),
+    await getOrRecoverCursor(chatJid),
     ASSISTANT_NAME,
     MAX_MESSAGES_PER_PROMPT,
   );
@@ -258,7 +266,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const previousCursor = lastAgentTimestamp[chatJid] || '';
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
+  await saveState();
 
   logger.info(
     { group: group.name, messageCount: missedMessages.length },
@@ -325,7 +333,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
-    saveState();
+    await saveState();
     logger.warn(
       { group: group.name },
       'Agent error, rolled back message cursor for retry',
@@ -346,7 +354,7 @@ async function runAgent(
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
-  const tasks = getAllTasks();
+  const tasks = await getAllTasks();
   writeTasksSnapshot(
     group.folder,
     isMain,
@@ -363,7 +371,7 @@ async function runAgent(
   );
 
   // Update available groups snapshot (main group only can see all groups)
-  const availableGroups = getAvailableGroups();
+  const availableGroups = await getAvailableGroups();
   writeGroupsSnapshot(
     group.folder,
     isMain,
@@ -376,7 +384,7 @@ async function runAgent(
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          await setSession(group.folder, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -400,7 +408,7 @@ async function runAgent(
 
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      await setSession(group.folder, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -421,7 +429,7 @@ async function runAgent(
           'Stale session detected — clearing for next retry',
         );
         delete sessions[group.folder];
-        deleteSession(group.folder);
+        await deleteSession(group.folder);
       }
 
       logger.error(
@@ -450,7 +458,7 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(
+      const { messages, newTimestamp } = await getNewMessages(
         jids,
         lastTimestamp,
         ASSISTANT_NAME,
@@ -461,7 +469,7 @@ async function startMessageLoop(): Promise<void> {
 
         // Advance the "seen" cursor for all messages immediately
         lastTimestamp = newTimestamp;
-        saveState();
+        await saveState();
 
         // Deduplicate by group
         const messagesByGroup = new Map<string, NewMessage[]>();
@@ -504,9 +512,9 @@ async function startMessageLoop(): Promise<void> {
 
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
-          const allPending = getMessagesSince(
+          const allPending = await getMessagesSince(
             chatJid,
-            getOrRecoverCursor(chatJid),
+            await getOrRecoverCursor(chatJid),
             ASSISTANT_NAME,
             MAX_MESSAGES_PER_PROMPT,
           );
@@ -521,7 +529,7 @@ async function startMessageLoop(): Promise<void> {
             );
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
+            await saveState();
             // Show typing indicator while the container processes the piped message
             channel
               .setTyping?.(chatJid, true)
@@ -545,11 +553,11 @@ async function startMessageLoop(): Promise<void> {
  * Startup recovery: check for unprocessed messages in registered groups.
  * Handles crash between advancing lastTimestamp and processing messages.
  */
-function recoverPendingMessages(): void {
+async function recoverPendingMessages(): Promise<void> {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
-    const pending = getMessagesSince(
+    const pending = await getMessagesSince(
       chatJid,
-      getOrRecoverCursor(chatJid),
+      await getOrRecoverCursor(chatJid),
       ASSISTANT_NAME,
       MAX_MESSAGES_PER_PROMPT,
     );
@@ -570,9 +578,9 @@ function ensureContainerSystemRunning(): void {
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
-  initDatabase();
+  await initDatabase();
   logger.info('Database initialized');
-  loadState();
+  await loadState();
 
   // Ensure OneCLI agents exist for all registered groups.
   // Recovers from missed creates (e.g. OneCLI was down at registration time).
@@ -662,7 +670,9 @@ async function main(): Promise<void> {
           return;
         }
       }
-      storeMessage(msg);
+      void storeMessage(msg).catch((err) =>
+        logger.error({ err, chatJid }, 'storeMessage failed'),
+      );
     },
     onChatMetadata: (
       chatJid: string,
@@ -670,7 +680,11 @@ async function main(): Promise<void> {
       name?: string,
       channel?: string,
       isGroup?: boolean,
-    ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    ) => {
+      void storeChatMetadata(chatJid, timestamp, name, channel, isGroup).catch(
+        (err) => logger.error({ err, chatJid }, 'storeChatMetadata failed'),
+      );
+    },
     registeredGroups: () => registeredGroups,
   };
 
@@ -731,25 +745,26 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
     onTasksChanged: () => {
-      const tasks = getAllTasks();
-      const taskRows = tasks.map((t) => ({
-        id: t.id,
-        groupFolder: t.group_folder,
-        prompt: t.prompt,
-        script: t.script || undefined,
-        schedule_type: t.schedule_type,
-        schedule_value: t.schedule_value,
-        status: t.status,
-        next_run: t.next_run,
-      }));
-      for (const group of Object.values(registeredGroups)) {
-        writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
-      }
+      void getAllTasks().then((tasks) => {
+        const taskRows = tasks.map((t) => ({
+          id: t.id,
+          groupFolder: t.group_folder,
+          prompt: t.prompt,
+          script: t.script || undefined,
+          schedule_type: t.schedule_type,
+          schedule_value: t.schedule_value,
+          status: t.status,
+          next_run: t.next_run,
+        }));
+        for (const group of Object.values(registeredGroups)) {
+          writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
+        }
+      });
     },
   });
   startSessionCleanup();
   queue.setProcessMessagesFn(processGroupMessages);
-  recoverPendingMessages();
+  await recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);

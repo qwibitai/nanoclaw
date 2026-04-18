@@ -4,6 +4,8 @@ import os from 'os';
 import path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { ChatInfo } from './db/types.js';
+
 describe('database migrations', () => {
   it('defaults Telegram backfill chats to direct messages', async () => {
     const repoRoot = process.cwd();
@@ -40,12 +42,12 @@ describe('database migrations', () => {
       legacyDb.close();
 
       vi.resetModules();
-      const { initDatabase, getAllChats, _closeDatabase } =
-        await import('./db.js');
+      const { initDatabase, getAllChats, closeDatabase } =
+        await import('./db/index.js');
 
-      initDatabase();
+      await initDatabase();
 
-      const chats = getAllChats();
+      const chats: ChatInfo[] = await getAllChats();
       expect(chats.find((chat) => chat.jid === 'tg:12345')).toMatchObject({
         channel: 'telegram',
         is_group: 0,
@@ -59,7 +61,7 @@ describe('database migrations', () => {
         is_group: 1,
       });
 
-      _closeDatabase();
+      await closeDatabase();
     } finally {
       process.chdir(repoRoot);
     }
