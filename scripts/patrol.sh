@@ -5,7 +5,7 @@
 STORE_DIR="${NANOCLAW_STORE_DIR:-/Users/dajay/AI_Workspace/nanoclaw/store}"
 GROUPS_DIR="${NANOCLAW_GROUPS_DIR:-/Users/dajay/AI_Workspace/nanoclaw/groups}"
 DB="$STORE_DIR/messages.db"
-TMP_DIR=$(mktemp -d)
+export TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
 if [ ! -f "$DB" ]; then
