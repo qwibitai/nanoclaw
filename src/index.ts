@@ -91,7 +91,7 @@ const queue = new GroupQueue();
 const onecli = new OneCLI({ url: ONECLI_URL });
 
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
-  if (group.isMain) return;
+  // 所有群（包括 main group）都创建独立 agent，防止 rotateAccount fallback 到 Default Agent
   const identifier = group.folder.toLowerCase().replace(/_/g, '-');
   onecli.ensureAgent({ name: group.name, identifier }).then(
     (res) => {
@@ -288,6 +288,49 @@ export function _setRegisteredGroups(
 }
 
 /**
+ * 解析消息文本中的模型/思考前缀。
+ * 返回 override 对象 + 去除前缀后的文本，或 null（无前缀）。
+ *
+ * ! 或 ！ + 空格 → Sonnet 无思考
+ * !! 或 ！！ + 空格 → Sonnet 深度思考
+ * + + 空格 → Opus 深度思考
+ * ~ + 空格 → 关闭思考
+ */
+export function parseModelPrefix(
+  text: string,
+): {
+  override: { model?: string; thinking?: 'adaptive' | 'disabled' };
+  cleanedText: string;
+} | null {
+  const trimmed = text.trim();
+  if (/^[!！]{2}\s/.test(trimmed)) {
+    return {
+      override: { model: 'claude-sonnet-4-6', thinking: 'adaptive' },
+      cleanedText: trimmed.replace(/^[!！]{2}\s*/, ''),
+    };
+  }
+  if (/^[!！]\s/.test(trimmed)) {
+    return {
+      override: { model: 'claude-sonnet-4-6', thinking: 'disabled' },
+      cleanedText: trimmed.replace(/^[!！]\s*/, ''),
+    };
+  }
+  if (/^\+\s/.test(trimmed)) {
+    return {
+      override: { model: 'claude-opus-4-6', thinking: 'adaptive' },
+      cleanedText: trimmed.replace(/^\+\s*/, ''),
+    };
+  }
+  if (/^~\s/.test(trimmed)) {
+    return {
+      override: { thinking: 'disabled' },
+      cleanedText: trimmed.replace(/^~\s*/, ''),
+    };
+  }
+  return null;
+}
+
+/**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  */
@@ -325,36 +368,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   // 模型/思考前缀检测（最后一条消息，单次生效）
-  // ! 或 ！ + 空格 → Sonnet 无思考（最快）
-  // !! 或 ！！ + 空格 → Sonnet 深度思考
-  // - + 空格 → 默认模型 无思考
-  // + + 空格 → Opus 4.6 深度思考
   let modelOverride:
     | { model?: string; thinking?: 'adaptive' | 'disabled' }
     | undefined;
   const lastMsg = missedMessages[missedMessages.length - 1];
   if (lastMsg) {
-    const trimmed = lastMsg.content.trim();
-    if (/^[!！]{2}\s/.test(trimmed)) {
-      // !! → Sonnet + adaptive thinking
-      lastMsg.content = trimmed.replace(/^[!！]{2}\s*/, '');
-      modelOverride = { model: 'claude-sonnet-4-6', thinking: 'adaptive' };
-      logger.info({ chatJid, ...modelOverride }, '模式切换: Sonnet 深度思考');
-    } else if (/^[!！]\s/.test(trimmed)) {
-      // ! → Sonnet + no thinking
-      lastMsg.content = trimmed.replace(/^[!！]\s*/, '');
-      modelOverride = { model: 'claude-sonnet-4-6', thinking: 'disabled' };
-      logger.info({ chatJid, ...modelOverride }, '模式切换: Sonnet 快速');
-    } else if (/^\+\s/.test(trimmed)) {
-      // + → Opus 4.6 + adaptive thinking
-      lastMsg.content = trimmed.replace(/^\+\s*/, '');
-      modelOverride = { model: 'claude-opus-4-6', thinking: 'adaptive' };
-      logger.info({ chatJid, ...modelOverride }, '模式切换: Opus 深度思考');
-    } else if (/^~\s/.test(trimmed)) {
-      // ~ → default model + no thinking
-      lastMsg.content = trimmed.replace(/^~\s*/, '');
-      modelOverride = { thinking: 'disabled' };
-      logger.info({ chatJid, ...modelOverride }, '模式切换: 关闭思考');
+    const parsed = parseModelPrefix(lastMsg.content);
+    if (parsed) {
+      lastMsg.content = parsed.cleanedText;
+      modelOverride = parsed.override;
+      logger.info({ chatJid, ...modelOverride }, '模式切换');
     }
   }
 
@@ -389,9 +412,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let streamingRateLimitDetected = false;
 
   // R8.1: 收集 Agent 回复文本（用于记忆更新）
   const agentReplies: string[] = [];
+  let memoryEnqueued = false; // 标记是否已在 onOutput 中入队记忆
 
   // 取最近消息用于记忆召回（用户+agent 各最多 2 条，拼接提升语义丰富度）
   const recentMsgs = [...missedMessages].reverse();
@@ -455,6 +480,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
         const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
         logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+
+        // Streaming 模式下检测限流文本（"You've hit your limit" 等）
+        // 检测到后不发给用户，后续补偿轮换+重试
+        if (detectRateLimit(raw)) {
+          streamingRateLimitDetected = true;
+          logger.warn(
+            { group: group.name, text: raw.slice(0, 200) },
+            'Streaming 输出检测到限流文本，抑制发送',
+          );
+          return;
+        }
+
         if (text) {
           await channel.setTyping?.(chatJid, false);
           await channel.sendMessage(chatJid, text);
@@ -494,6 +531,32 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             ).cleanupProgressCard(chatJid);
           }
         }
+
+        // R8.1 实时记忆入队：agent 回复完成后立即入队，不等进程退出
+        // agent-runner 完成回复后会进入 IPC 等待循环（可达 8 小时），
+        // 如果等进程退出才入队，记忆会延迟数小时甚至因 SIGTERM 丢失
+        if (!memoryEnqueued && isMemoryEnabled() && agentReplies.length > 0) {
+          const memoryMessages = [
+            ...missedMessages.map((m) => ({
+              content: m.content,
+              sender_name: m.sender_name,
+              is_bot_message: m.is_bot_message,
+              is_from_me: m.is_from_me,
+            })),
+            ...agentReplies.map((text) => ({
+              content: text,
+              is_bot_message: true,
+            })),
+          ];
+          getMemoryQueue().add(
+            group.folder,
+            memoryMessages,
+            sessions[group.folder],
+            memorySenderId,
+          );
+          memoryEnqueued = true;
+        }
+
         queue.notifyIdle(chatJid);
       }
 
@@ -510,10 +573,64 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
+  // Streaming 模式下限流检测：onOutput 回调中发现 "hit your limit" 等文本
+  // 轮换账号并立即重试（保留 session 上下文）
+  if (streamingRateLimitDetected && !output.rotatedTo) {
+    const agentId = group.folder.toLowerCase().replace(/_/g, '-');
+    logger.warn(
+      { group: group.name, agentId },
+      'Streaming 输出包含限流文本，尝试轮换账号并重试',
+    );
+    const rotateResult = rotateAccount(agentId, group.folder);
+    if (rotateResult?.success) {
+      output.rotatedTo = rotateResult.newSecretName;
+      // 重试：用新账号重跑，保留 session 上下文
+      logger.info(
+        { group: group.name, newSecret: rotateResult.newSecretName },
+        'Streaming 限流，已轮换账号，重试中',
+      );
+      const retryOutput = await runAgent(
+        group,
+        prompt,
+        chatJid,
+        async (result) => {
+          if (result.result) {
+            const raw =
+              typeof result.result === 'string'
+                ? result.result
+                : JSON.stringify(result.result);
+            const text = raw
+              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+              .trim();
+            if (text) {
+              await channel.sendMessage(chatJid, text);
+              outputSentToUser = true;
+              agentReplies.push(text);
+            }
+          }
+          if (result.status === 'success') {
+            queue.notifyIdle(chatJid);
+          }
+          if (result.status === 'error') {
+            hadError = true;
+          }
+        },
+        latestUserMessage,
+        memorySenderId,
+        true,
+        modelOverride,
+      );
+      // 合并重试结果
+      if (retryOutput.status === 'error') hadError = true;
+    } else if (rotateResult && !rotateResult.success) {
+      output.allExhausted = true;
+    }
+  }
+
   // 轮换通知
   if (output.rotatedTo) {
     channel
-      .sendMessage(chatJid, `🔄 账号已自动切换到 ${output.rotatedTo}`)
+      .sendMessage(chatJid, `🔄 当前额度已满，已自动切换到备用账号 (${output.rotatedTo})`, { isCommandReply: true })
       .catch(() => {});
   }
   if (output.allExhausted) {
@@ -526,6 +643,27 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
+      // error 但已有回复发给用户：仍然入队记忆（回复内容有价值）
+      if (!memoryEnqueued && isMemoryEnabled() && agentReplies.length > 0) {
+        const memoryMessages = [
+          ...missedMessages.map((m) => ({
+            content: m.content,
+            sender_name: m.sender_name,
+            is_bot_message: m.is_bot_message,
+            is_from_me: m.is_from_me,
+          })),
+          ...agentReplies.map((text) => ({
+            content: text,
+            is_bot_message: true,
+          })),
+        ];
+        getMemoryQueue().add(
+          group.folder,
+          memoryMessages,
+          sessions[group.folder],
+          memorySenderId,
+        );
+      }
       logger.warn(
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
@@ -564,8 +702,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // chatIndex 已在 onOutput 回调中实时索引，此处无需重复
 
-  // R8.1: 对话完成后，收集 Agent 回复 + 用户消息一起入队记忆更新
-  if (isMemoryEnabled()) {
+  // R8.1 兜底：如果 onOutput 中未能入队（如 agent 未发 success 状态），在进程退出后补入队
+  if (!memoryEnqueued && isMemoryEnabled()) {
     const memoryMessages = [
       ...missedMessages.map((m) => ({
         content: m.content,
@@ -711,7 +849,7 @@ async function runAgent(
           { group: group.name, agentId, error: output.error?.slice(0, 200) },
           '检测到限流错误，尝试轮换账号',
         );
-        const rotateResult = rotateAccount(agentId);
+        const rotateResult = rotateAccount(agentId, group.folder);
 
         if (rotateResult && !rotateResult.success) {
           logger.warn({ group: group.name }, '所有账号配额已耗尽');
@@ -719,11 +857,9 @@ async function runAgent(
         }
 
         if (rotateResult && rotateResult.success) {
-          delete sessions[group.folder];
-          deleteSession(group.folder);
           logger.info(
             { group: group.name, newSecret: rotateResult.newSecretName },
-            '429 检测到，已轮换账号，重试中',
+            '429 检测到，已轮换账号，重试中（保留 session）',
           );
           return runAgent(
             group,
@@ -762,7 +898,7 @@ async function runAgent(
         { group: group.name, agentId, result: output.result?.slice(0, 200) },
         '检测到假成功限流（result 包含 rate limit 关键词），尝试轮换',
       );
-      const rotateResult = rotateAccount(agentId);
+      const rotateResult = rotateAccount(agentId, group.folder);
 
       if (rotateResult && !rotateResult.success) {
         logger.warn({ group: group.name }, '所有账号配额已耗尽');
@@ -770,11 +906,9 @@ async function runAgent(
       }
 
       if (rotateResult && rotateResult.success) {
-        delete sessions[group.folder];
-        deleteSession(group.folder);
         logger.info(
           { group: group.name, newSecret: rotateResult.newSecretName },
-          '假成功限流检测到，已轮换账号，重试中',
+          '假成功限流检测到，已轮换账号，重试中（保留 session）',
         );
         return runAgent(
           group,
@@ -815,8 +949,9 @@ async function startMessageLoop(): Promise<void> {
 
   // 启动飞书 OAuth 回调 server（用户点击授权卡片后的回调）
   try {
-    const { startOAuthCallbackServer } =
+    const { startOAuthCallbackServer, startTokenRefreshTimer } =
       await import('./channels/feishu-oauth.js');
+    startTokenRefreshTimer();
     startOAuthCallbackServer(async ({ openId, chatJid }) => {
       logger.info({ openId, chatJid }, '飞书 OAuth 授权成功回调');
       const channel = findChannel(channels, chatJid);

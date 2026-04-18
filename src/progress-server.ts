@@ -150,6 +150,13 @@ export function deleteSession(sessionId: string): void {
   dbDelete(sessionId);
 }
 
+/** @internal - exported for testing */
+export function _getSessionForTest(
+  sessionId: string,
+): { steps: { title: string; detail?: string }[]; completed: boolean } | null {
+  return sessions.get(sessionId) ?? null;
+}
+
 // ---- HTML 渲染 ----
 
 function escHtml(s: string): string {

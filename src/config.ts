@@ -16,6 +16,8 @@ if (process.env.http_proxy || process.env.HTTP_PROXY) {
   );
   locals.add('localhost');
   locals.add('127.0.0.1');
+  locals.add('open.feishu.cn');
+  locals.add('open.larksuite.com');
   const merged = [...locals].join(',');
   process.env.NO_PROXY = merged;
   process.env.no_proxy = merged;

@@ -9,7 +9,11 @@ import os from 'os';
 
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
-import { getFeishuTokenByUserId, setFeishuToken } from '../db.js';
+import {
+  getAllFeishuTokenUsers,
+  getFeishuTokenByUserId,
+  setFeishuToken,
+} from '../db.js';
 
 // ---- 配置 ----
 
@@ -384,4 +388,29 @@ export function startOAuthCallbackServer(
   });
 
   return server;
+}
+
+// ---- 定时主动刷新所有用户 token ----
+
+const REFRESH_INTERVAL_MS = 2 * 60 * 60 * 1000; // 每 2 小时扫一次
+
+export function startTokenRefreshTimer(): void {
+  const tick = async () => {
+    const users = getAllFeishuTokenUsers();
+    for (const { user_id } of users) {
+      try {
+        await getFeishuUserToken(user_id);
+      } catch (err) {
+        logger.warn({ err, userId: user_id }, '飞书 token 定时刷新失败');
+      }
+    }
+    if (users.length > 0) {
+      logger.info({ count: users.length }, '飞书 token 定时刷新完成');
+    }
+  };
+
+  // 启动后 30 秒先跑一次，之后每 2 小时
+  setTimeout(tick, 30_000);
+  setInterval(tick, REFRESH_INTERVAL_MS);
+  logger.info('飞书 token 定时刷新已启动（每 2 小时）');
 }

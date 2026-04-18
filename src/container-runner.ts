@@ -55,15 +55,26 @@ const AGENT_TIMEOUT = parseInt(
 /**
  * 检测容器输出中的 429/rate-limit 错误。
  * 覆盖 Anthropic API 常见错误格式。
+ *
+ * 严格匹配：正常对话中讨论 "429"、"rate limit" 话题不应误触发。
+ * 要求匹配典型 API 错误短语而非单独关键词。
  */
 export function detectRateLimit(text: string): boolean {
   const patterns = [
-    /429/i,
-    /rate.?limit/i,
-    /overloaded/i,
-    /quota.?exceeded/i,
-    /too.?many.?requests/i,
-    /you['\u2019']ve hit your limit/i,
+    // "429 Too Many Requests" / "429 rate limit" 完整短语
+    /\b429\s+(?:too\s+many\s+requests|rate[\s-]?limit)/i,
+    // "Error: 429" / "status 429" / "code 429" / "HTTP 429"
+    /\b(?:error|status|code|http)[\s:=]+429\b/i,
+    // Anthropic API 错误类型字面量
+    /rate_limit_error/,
+    /overloaded_error/,
+    // Claude Code "假成功" 限流提示（强信号）
+    /you['\u2019]ve\s+hit\s+your\s+(?:usage\s+)?limit/i,
+    /you\s+have\s+hit\s+your\s+(?:usage\s+)?limit/i,
+    // 经典限流完整短语
+    /rate[\s-]?limit\s+exceeded/i,
+    /(?:api\s+)?quota\s+exceeded/i,
+    /too\s+many\s+requests/i,
   ];
   return patterns.some((p) => p.test(text));
 }
@@ -76,17 +87,23 @@ const ROTATE_DEBOUNCE_MS = 60 * 1000;
 /**
  * 尝试轮换到下一个 Anthropic 账号。
  * 返回 { success, newSecretName } 或 null（未开启/防抖/全部耗尽）。
+ *
+ * agentId: OneCLI agent identifier（group.folder 派生）
+ * groupFolder: 群目录名，用于 per-group 防抖和 index 隔离
  */
-export function rotateAccount(agentId: string): {
+export function rotateAccount(
+  agentId: string,
+  groupFolder: string,
+): {
   success: boolean;
   newSecretName: string;
 } | null {
   if (!getRotateEnabled()) return null;
 
   const now = Date.now();
-  const lastRotate = getLastRotateAt();
+  const lastRotate = getLastRotateAt(groupFolder);
   if (lastRotate && now - lastRotate < ROTATE_DEBOUNCE_MS) {
-    logger.info('轮换防抖中，跳过');
+    logger.info({ groupFolder }, '轮换防抖中，跳过');
     return null;
   }
 
@@ -105,7 +122,7 @@ export function rotateAccount(agentId: string): {
     return null;
   }
 
-  const currentIndex = getRotateIndex();
+  const currentIndex = getRotateIndex(groupFolder);
   const nextIndex = (currentIndex + 1) % secrets.length;
 
   if (
@@ -113,7 +130,7 @@ export function rotateAccount(agentId: string): {
     lastRotate &&
     now - lastRotate < EXHAUSTED_COOLDOWN_MS
   ) {
-    logger.warn('所有账号配额已耗尽');
+    logger.warn({ groupFolder }, '所有账号配额已耗尽');
     return { success: false, newSecretName: '' };
   }
 
@@ -127,12 +144,14 @@ export function rotateAccount(agentId: string): {
     return null;
   }
 
-  const agent =
-    agents.find((a) => a.identifier === agentId) ||
-    agents.find((a) => 'isDefault' in a && a.isDefault);
+  // 严格匹配 identifier，不 fallback 到 Default Agent（防止误改全局）
+  const agent = agents.find((a) => a.identifier === agentId);
 
   if (!agent) {
-    logger.error({ agentId }, 'rotateAccount: 找不到 agent');
+    logger.error(
+      { agentId, groupFolder },
+      'rotateAccount: 找不到匹配的 agent（不 fallback 到 Default，避免全局污染）',
+    );
     return null;
   }
 
@@ -147,11 +166,11 @@ export function rotateAccount(agentId: string): {
     return null;
   }
 
-  setRotateIndex(nextIndex);
-  setLastRotateAt(now);
+  setRotateIndex(nextIndex, groupFolder);
+  setLastRotateAt(now, groupFolder);
 
   logger.info(
-    { agent: agent.id, secret: nextSecret.name, index: nextIndex },
+    { agent: agent.id, secret: nextSecret.name, index: nextIndex, groupFolder },
     '账号已自动轮换',
   );
 
@@ -384,10 +403,10 @@ export async function getFeishuToken(
 
 /**
  * 获取群对应的 OneCLI agent access token（用于 per-group 账号隔离）。
- * 群的 chatJid 会被转为 identifier（如 fs:oc_xxx → fs-oc-xxx）去匹配 OneCLI agent。
- * 找不到就 fallback 到 Default Agent。
+ * 用 groupFolder 派生 identifier（与 ensureOneCLIAgent 一致）去匹配 OneCLI agent。
+ * 找不到独立 agent 时 fallback 到 Default Agent（运行时兜底）。
  */
-function getAgentAccessToken(chatJid: string): string | undefined {
+function getAgentAccessToken(groupFolder: string): string | undefined {
   try {
     const agents: Array<{
       id: string;
@@ -399,21 +418,21 @@ function getAgentAccessToken(chatJid: string): string | undefined {
       execSync('onecli agents list', { encoding: 'utf-8', timeout: 5000 }),
     );
 
-    // chatJid 如 "fs:oc_59801239..." → identifier "fs-oc-59801239..."
-    const identifier = chatJid.replace(/[^a-zA-Z0-9]/g, '-');
+    // groupFolder 如 "feishu_main" → identifier "feishu-main"（与 ensureOneCLIAgent 一致）
+    const identifier = groupFolder.toLowerCase().replace(/_/g, '-');
     const agent =
       agents.find((a) => a.identifier === identifier) ||
       agents.find((a) => a.isDefault);
 
     if (agent) {
       logger.info(
-        { chatJid, agentName: agent.name, agentId: agent.id },
+        { groupFolder, agentName: agent.name, agentId: agent.id },
         '群账号映射: 使用 OneCLI agent',
       );
       return agent.accessToken;
     }
   } catch (err) {
-    logger.warn({ err, chatJid }, '获取群 OneCLI agent token 失败，将用默认');
+    logger.warn({ err, groupFolder }, '获取群 OneCLI agent token 失败，将用默认');
   }
   return undefined;
 }
@@ -428,7 +447,7 @@ async function buildLocalEnv(
   const staticCreds = getStaticCredentials();
 
   // 按群替换 access token（per-group 账号隔离）
-  const groupToken = getAgentAccessToken(input.chatJid || '');
+  const groupToken = getAgentAccessToken(input.groupFolder || '');
   if (groupToken && proxyEnv.HTTPS_PROXY) {
     // 替换 proxy URL 里的 access token: http://x:<old_token>@host:port → http://x:<group_token>@host:port
     proxyEnv.HTTPS_PROXY = proxyEnv.HTTPS_PROXY.replace(
@@ -719,7 +738,12 @@ export async function runContainerAgent(
               'Agent output received',
             );
             resetTimeout();
-            outputChain = outputChain.then(() => onOutput(parsed));
+            outputChain = outputChain.then(() => onOutput(parsed)).catch((err) => {
+              logger.error(
+                { group: group.name, error: err, status: parsed.status },
+                'onOutput callback failed, message may be lost',
+              );
+            });
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },
@@ -834,6 +858,9 @@ export async function runContainerAgent(
           );
           outputChain.then(() => {
             resolve({ status: 'success', result: null, newSessionId });
+          }).catch((err) => {
+            logger.error({ group: group.name, error: err }, 'outputChain rejected on timeout close');
+            resolve({ status: 'success', result: null, newSessionId });
           });
           return;
         }
@@ -919,6 +946,9 @@ export async function runContainerAgent(
             { group: group.name, duration, newSessionId },
             'Agent completed (streaming mode)',
           );
+          resolve({ status: 'success', result: null, newSessionId });
+        }).catch((err) => {
+          logger.error({ group: group.name, error: err }, 'outputChain rejected on normal close');
           resolve({ status: 'success', result: null, newSessionId });
         });
         return;

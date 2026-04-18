@@ -18,8 +18,7 @@ registerCommand({
     },
   ],
   handler: async (ctx) => {
-    const { args, chatJid, channel, group, sessions, queue, registeredGroups } =
-      ctx;
+    const { args, chatJid, channel, group, queue, registeredGroups } = ctx;
     logger.info({ chatJid, arg: args }, '/account 命令匹配');
 
     if (args === 'auto on') {
@@ -65,6 +64,7 @@ registerCommand({
       }
 
       const agentId = group?.folder.toLowerCase().replace(/_/g, '-') || '';
+      // 优先匹配独立 agent，兜底用 Default（查看操作不改 secret，fallback 安全）
       const currentAgent =
         agents.find((a) => a.identifier === agentId) ||
         agents.find((a) => 'isDefault' in a && a.isDefault);
@@ -143,9 +143,8 @@ registerCommand({
         await channel.sendMessage(chatJid, '❌ 账号操作失败，onecli 不可用');
         return;
       }
-      const agent =
-        agents.find((a) => a.identifier === agentId) ||
-        agents.find((a) => 'isDefault' in a && a.isDefault);
+      // 严格匹配 identifier，不 fallback 到 Default Agent（防止误改全局）
+      const agent = agents.find((a) => a.identifier === agentId);
       if (agent) {
         try {
           execSync(
@@ -157,9 +156,9 @@ registerCommand({
           await channel.sendMessage(chatJid, '❌ 账号切换失败');
           return;
         }
-        // 杀掉旧容器，让新消息用新 key 起新容器（不删 session，保留上下文）
+        // 杀掉旧容器，让新消息用新 key 起新容器
+        // 保留 session（内存+DB），新容器用旧 sessionId 恢复上下文
         if (group) {
-          delete sessions[group.folder];
           queue.killGroup(chatJid);
         }
         await channel.sendMessage(

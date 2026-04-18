@@ -1,5 +1,7 @@
+import { execSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import * as lark from '@larksuiteoapi/node-sdk';
 
@@ -719,18 +721,44 @@ export class FeishuChannel implements Channel {
     await this.extractAndSendMedia(chatId, text, groupFolder);
   }
 
-  /** 修改飞书群名称 */
+  /** 修改飞书群名称，同时生成缩略字头像（仅群聊生效） */
   async renameChat(jid: string, name: string): Promise<void> {
     const chatId = jid.replace(JID_PREFIX, '');
-    logger.info({ jid, chatId, name }, '[rename] 开始修改群名');
+    logger.info({ jid, chatId, name }, '[rename] 开始修改群名+头像');
+
+    // 生成头像（头像失败不影响群名更新）
+    const avatarKey = await this.generateAndUploadAvatar(name);
+
     try {
+      // 先尝试带头像更新（仅群聊支持 avatar）
+      const data: { name: string; avatar?: string } = { name };
+      if (avatarKey) data.avatar = avatarKey;
+
       const resp = await this.client.im.chat.update({
         path: { chat_id: chatId },
-        data: { name },
+        data,
       });
-      logger.info({ jid, name, code: resp?.code }, '[rename] 群名已更新');
-    } catch (err) {
-      logger.warn({ err, jid, name }, '[rename] 修改群名失败');
+      logger.info(
+        { jid, name, avatar: !!avatarKey, code: resp?.code },
+        '[rename] 群名+头像已更新',
+      );
+    } catch (err: any) {
+      // 232008 = 非群聊类型，不支持 avatar，退化为仅改群名
+      const code = err?.response?.data?.code ?? err?.code;
+      if (avatarKey && code === 232008) {
+        logger.info({ jid }, '[rename] 非群聊，退化为仅改群名');
+        try {
+          await this.client.im.chat.update({
+            path: { chat_id: chatId },
+            data: { name },
+          });
+          logger.info({ jid, name }, '[rename] 群名已更新（无头像）');
+        } catch (retryErr) {
+          logger.warn({ err: retryErr, jid, name }, '[rename] 修改群名失败');
+        }
+      } else {
+        logger.warn({ err, jid, name }, '[rename] 修改群名失败');
+      }
     }
   }
 
@@ -772,20 +800,33 @@ export class FeishuChannel implements Channel {
         });
       } else {
         completeSession(progressEntry.sessionId);
-        await this.client.im.message.patch({
-          path: { message_id: progressEntry.messageId },
-          data: {
-            content: buildCompletedCard(
-              progressEntry.steps,
-              undefined,
-              progressEntry.startTime,
-              progressEntry.sessionId,
-            ),
-          },
-        });
+        try {
+          await this.client.im.message.patch({
+            path: { message_id: progressEntry.messageId },
+            data: {
+              content: buildCompletedCard(
+                progressEntry.steps,
+                undefined,
+                progressEntry.startTime,
+                progressEntry.sessionId,
+              ),
+            },
+          });
+        } catch (patchErr) {
+          // patch 失败（常见 200800）→ 删除卡住的卡片，避免永远显示"思考中"
+          logger.warn(
+            { err: patchErr, jid, messageId: progressEntry.messageId },
+            '[cleanup] patch 完成卡片失败，fallback 删除卡片',
+          );
+          await this.client.im.message
+            .delete({ path: { message_id: progressEntry.messageId } })
+            .catch((delErr: unknown) =>
+              logger.warn({ err: delErr, jid }, '[cleanup] 删除卡片也失败'),
+            );
+        }
       }
     } catch (err) {
-      logger.debug({ err }, '飞书进度卡片清理失败（非致命）');
+      logger.warn({ err, jid }, '飞书进度卡片清理失败（兜底 catch）');
     }
   }
 
@@ -1205,6 +1246,160 @@ export class FeishuChannel implements Channel {
       logger.error({ err }, '获取 tenant_access_token 失败');
       return null;
     }
+  }
+
+  /**
+   * 从群名提取缩略字（1-2 个字符），生成彩色头像 PNG，上传到飞书获取 image_key。
+   * 使用 SVG + macOS qlmanage 渲染，无需额外依赖。
+   */
+  private async generateAndUploadAvatar(
+    name: string,
+  ): Promise<string | null> {
+    try {
+      // 提取缩略字：优先取开头英文大写/数字（最多 2 个），否则取前 2 个中文字
+      const abbr = this.extractAbbreviation(name);
+      if (!abbr) return null;
+
+      // 基于名称 hash 选颜色和风格，保证同名群一致
+      const colors = [
+        '#4F46E5', '#7C3AED', '#2563EB', '#0891B2', '#059669',
+        '#D97706', '#DC2626', '#DB2777', '#4338CA', '#0D9488',
+      ];
+      const hash = [...name].reduce((h, c) => h * 31 + c.charCodeAt(0), 0);
+      const absHash = Math.abs(hash);
+      const color = colors[absHash % colors.length];
+      // 两种风格：0=纯色背景白字，1=白底彩色边框+彩色字
+      const style = (absHash >> 4) % 2;
+      const fillColor = style === 0 ? 'white' : color;
+      const bgFill = style === 0 ? color : 'white';
+      const borderSvg =
+        style === 1
+          ? `<circle cx="256" cy="256" r="248" fill="none" stroke="${color}" stroke-width="16"/>`
+          : '';
+
+      // 圆形头像，超过 2 个字竖排换行
+      const size = 512;
+      const r = size / 2;
+
+      let textSvg: string;
+      if (abbr.length <= 2) {
+        const fontSize = abbr.length <= 1 ? 280 : 220;
+        textSvg = `<text x="${r}" y="${r}" font-size="${fontSize}"
+          font-family="PingFang SC,SF Pro Display,Helvetica Neue,sans-serif"
+          fill="${fillColor}" text-anchor="middle" dominant-baseline="central"
+          font-weight="bold">${this.escapeXml(abbr)}</text>`;
+      } else {
+        const line1 = abbr.slice(0, 2);
+        const line2 = abbr.slice(2);
+        const fontSize = 140;
+        const gap = fontSize * 0.25;
+        // 两行总高度 = 2字高 + 行间距，关于圆心垂直居中
+        const totalH = 2 * fontSize + gap;
+        const y1 = r - totalH / 2 + fontSize * 0.85;
+        const y2 = y1 + fontSize + gap;
+        textSvg = `<text font-size="${fontSize}"
+          font-family="PingFang SC,SF Pro Display,Helvetica Neue,sans-serif"
+          fill="${fillColor}" text-anchor="middle" font-weight="bold">
+          <tspan x="${r}" y="${y1}">${this.escapeXml(line1)}</tspan>
+          <tspan x="${r}" y="${y2}">${this.escapeXml(line2)}</tspan>
+        </text>`;
+      }
+
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">
+  <circle cx="${r}" cy="${r}" r="${r}" fill="${bgFill}"/>
+  ${borderSvg}
+  ${textSvg}
+</svg>`;
+
+      const tmpDir = os.tmpdir();
+      const svgPath = path.join(tmpDir, `avatar_${Date.now()}.svg`);
+      fs.writeFileSync(svgPath, svg);
+
+      // qlmanage 渲染 SVG → PNG（macOS 内置，512px 高清）
+      execSync(`qlmanage -t -s 512 -o "${tmpDir}" "${svgPath}"`, {
+        timeout: 5000,
+        stdio: 'pipe',
+      });
+      const pngPath = svgPath + '.png';
+      if (!fs.existsSync(pngPath)) {
+        logger.warn('[avatar] qlmanage 未生成 PNG');
+        return null;
+      }
+
+      // 上传到飞书
+      const token = await this.getTenantAccessToken();
+      if (!token) {
+        logger.warn('[avatar] 无法获取 tenant_access_token');
+        return null;
+      }
+
+      const formData = new FormData();
+      formData.append('image_type', 'avatar');
+      formData.append(
+        'image',
+        new Blob([fs.readFileSync(pngPath)]),
+        'avatar.png',
+      );
+
+      const resp = await fetch(
+        'https://open.feishu.cn/open-apis/im/v1/images',
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        },
+      );
+      const data = (await resp.json()) as {
+        data?: { image_key?: string };
+      };
+
+      // 清理临时文件
+      try {
+        fs.unlinkSync(svgPath);
+        fs.unlinkSync(pngPath);
+      } catch {}
+
+      const imageKey = data?.data?.image_key;
+      if (!imageKey) {
+        logger.warn({ data }, '[avatar] 上传失败，未返回 image_key');
+        return null;
+      }
+
+      logger.info({ abbr, imageKey }, '[avatar] 头像生成并上传成功');
+      return imageKey;
+    } catch (err) {
+      logger.warn({ err }, '[avatar] 头像生成失败，跳过');
+      return null;
+    }
+  }
+
+  /** 从群名提取缩略字（最多 4 个字符） */
+  private extractAbbreviation(name: string): string {
+    // 去掉 (完成) 等前缀标记
+    const clean = name.replace(/^\(.*?\)\s*/, '').trim();
+
+    // 优先取开头的英文大写字母+数字组合（如 "BI查询" → "BI"，"V2 Admin" → "V2"）
+    const upper = clean.match(/^[A-Z0-9]+/)?.[0];
+    if (upper && upper.length >= 1) return upper.slice(0, 4);
+
+    // 否则取前 2-4 个中文字（短名取全，长名取 2 个）
+    const cjk = clean.match(/[\u4e00-\u9fff]/g);
+    if (cjk) {
+      // 群名总中文字数 ≤ 4 就全取，否则取前 2 个
+      return cjk.slice(0, cjk.length <= 4 ? 4 : 2).join('');
+    }
+
+    // fallback: 前 2 个字符
+    return clean.slice(0, 2);
+  }
+
+  /** XML 转义 */
+  private escapeXml(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   /** 下载飞书图片到 group 目录，返回宿主机绝对路径 */
