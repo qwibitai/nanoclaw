@@ -383,12 +383,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
-  // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
+  // Cursor 在回复成功后才推进（而非提前推进），防止进程被杀时消息丢失。
+  // GroupQueue 保证同一群同一时间只跑一个 agent，不会重复处理。
+  const newCursor = missedMessages[missedMessages.length - 1].timestamp;
 
   logger.info(
     { group: group.name, messageCount: missedMessages.length },
@@ -643,7 +640,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
-      // error 但已有回复发给用户：仍然入队记忆（回复内容有价值）
+      // error 但已有回复发给用户：推进 cursor（防止重启后重复回复）+ 入队记忆
+      lastAgentTimestamp[chatJid] = newCursor;
+      saveState();
       if (!memoryEnqueued && isMemoryEnabled() && agentReplies.length > 0) {
         const memoryMessages = [
           ...missedMessages.map((m) => ({
@@ -666,16 +665,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
       logger.warn(
         { group: group.name },
-        'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
+        'Agent error after output was sent, cursor advanced to prevent duplicates',
       );
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
-    lastAgentTimestamp[chatJid] = previousCursor;
-    saveState();
+    // 未发回复 + error：cursor 不推进，重启后会重新处理这些消息
     logger.warn(
       { group: group.name },
-      'Agent error, rolled back message cursor for retry',
+      'Agent error, cursor NOT advanced so messages will be retried',
     );
     return false;
   }
@@ -699,6 +696,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       logger.warn({ err }, 'Bot 回复入库失败，不影响主流程');
     }
   }
+
+  // 成功处理完毕，推进 cursor（在回复入库之后，确保进程被杀时不丢消息）
+  lastAgentTimestamp[chatJid] = newCursor;
+  saveState();
 
   // chatIndex 已在 onOutput 回调中实时索引，此处无需重复
 
