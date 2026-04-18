@@ -4,6 +4,7 @@
  */
 import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -44,6 +45,10 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  providerConfig?: {
+    primary?: 'claude' | 'codex';
+    fallback?: 'codex' | 'none';
+  };
 }
 
 export interface ContainerOutput {
@@ -184,6 +189,22 @@ function buildVolumeMounts(
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+
+  // Per-group Codex sessions directory (isolated from other groups)
+  const groupCodexDir = path.join(DATA_DIR, 'sessions', group.folder, '.codex');
+  fs.mkdirSync(groupCodexDir, { recursive: true });
+  mounts.push({
+    hostPath: groupCodexDir,
+    containerPath: '/home/node/.codex',
+    readonly: false,
+  });
+
+  // Seed OAuth credentials from host if not already present
+  const hostCodexAuth = path.join(os.homedir(), '.codex', 'auth.json');
+  const groupCodexAuth = path.join(groupCodexDir, 'auth.json');
+  if (fs.existsSync(hostCodexAuth) && !fs.existsSync(groupCodexAuth)) {
+    fs.copyFileSync(hostCodexAuth, groupCodexAuth);
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC

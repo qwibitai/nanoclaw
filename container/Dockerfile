@@ -59,6 +59,7 @@ RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
+RUN mkdir -p /home/node/.codex/sessions && chown -R node:node /home/node/.codex
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node
