@@ -68,6 +68,59 @@ server.tool(
 );
 
 server.tool(
+  'send_file',
+  `Send a file (photo, document, PDF, etc.) to the user. The file must exist on disk at the given path.
+
+Use this when you need to deliver downloaded images, generated documents, analysis results, or any other file
+to the user. Photos (.jpg, .jpeg, .png, .webp) are sent as inline images; other files as document attachments.
+
+The optional caption supports Markdown formatting (*bold*, _italic_, \`code\`).`,
+  {
+    file_path: z
+      .string()
+      .describe(
+        'Absolute path to the file inside the container (e.g. /workspace/group/screenshots/page.png)',
+      ),
+    caption: z
+      .string()
+      .max(1024)
+      .optional()
+      .describe('Optional caption for the file (Markdown supported, max 1024 chars).'),
+  },
+  async (args) => {
+    if (!fs.existsSync(args.file_path)) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `File not found: ${args.file_path}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    writeIpcFile(MESSAGES_DIR, {
+      type: 'send_file',
+      chatJid,
+      filePath: args.file_path,
+      caption: args.caption || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `File queued for delivery: ${path.basename(args.file_path)}`,
+        },
+      ],
+    };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 

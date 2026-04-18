@@ -746,6 +746,21 @@ async function main(): Promise<void> {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
       }
     },
+    sendFile: async (jid, filePath, caption) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) {
+        logger.warn({ jid }, 'sendFile: no channel owns JID');
+        return;
+      }
+      if (!channel.sendFile) {
+        logger.warn(
+          { jid, channel: channel.name },
+          'sendFile: channel does not support file sending, dropping',
+        );
+        return;
+      }
+      await channel.sendFile(jid, filePath, caption);
+    },
   });
   startSessionCleanup();
   queue.setProcessMessagesFn(processGroupMessages);
