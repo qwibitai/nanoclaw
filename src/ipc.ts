@@ -60,6 +60,22 @@ export function writeIpcResponse(
 
 let ipcWatcherRunning = false;
 
+// 短窗口去重：防止 session resume 重复执行 send_message
+const recentMessages = new Map<string, number>(); // hash → timestamp
+const DEDUP_WINDOW_MS = 30_000;
+
+function isDuplicateMessage(chatJid: string, text: string): boolean {
+  const key = `${chatJid}:${crypto.createHash('md5').update(text).digest('hex')}`;
+  const now = Date.now();
+  // 清理过期条目
+  for (const [k, t] of recentMessages) {
+    if (now - t > DEDUP_WINDOW_MS) recentMessages.delete(k);
+  }
+  if (recentMessages.has(key)) return true;
+  recentMessages.set(key, now);
+  return false;
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -161,6 +177,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
               }
 
               if (data.type === 'message' && data.chatJid && data.text) {
+                // 短窗口去重：session resume 可能重复执行 send_message
+                if (isDuplicateMessage(data.chatJid, data.text)) {
+                  logger.info(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'IPC message deduplicated (same content within 30s window)',
+                  );
+                  continue;
+                }
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
                 const isCrossGroup = targetGroup && targetGroup.folder !== sourceGroup;
