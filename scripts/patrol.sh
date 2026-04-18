@@ -47,6 +47,7 @@ sqlite3 -json "$DB" "
 " > "$TMP_DIR/stats.json" 2>/dev/null
 
 # 判断"谁在等谁"：最后一条消息是用户发的还是 agent 发的
+# 用 MAX(rowid) 保证每个群只取一行（避免同 timestamp 多行匹配）
 sqlite3 -json "$DB" "
   SELECT
     m.chat_jid,
@@ -55,12 +56,11 @@ sqlite3 -json "$DB" "
     m.timestamp as last_msg_time,
     ROUND((julianday('now') - julianday(m.timestamp)) * 24, 1) as hours_since_last
   FROM messages m
-  INNER JOIN (
-    SELECT chat_jid, MAX(timestamp) as max_ts
-    FROM messages
+  WHERE m.rowid IN (
+    SELECT MAX(rowid) FROM messages
     WHERE chat_jid IN (SELECT jid FROM chats WHERE is_group = 1)
     GROUP BY chat_jid
-  ) latest ON m.chat_jid = latest.chat_jid AND m.timestamp = latest.max_ts;
+  );
 " > "$TMP_DIR/turn.json" 2>/dev/null
 
 # 收集各群的文件系统状态

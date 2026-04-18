@@ -6,6 +6,7 @@ import { CronExpressionParser } from 'cron-parser';
 import crypto from 'crypto';
 
 import {
+  ASSISTANT_NAME,
   CHAT_INDEX_ENABLED,
   DATA_DIR,
   IPC_POLL_INTERVAL,
@@ -170,8 +171,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     storeMessageDirect({
                       id: `ipc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
                       chat_jid: data.chatJid,
-                      sender: data.sender || 'assistant',
-                      sender_name: data.sender || '二狗',
+                      sender: data.sender || ASSISTANT_NAME,
+                      sender_name: data.sender || ASSISTANT_NAME,
                       content: data.text,
                       timestamp: data.timestamp || new Date().toISOString(),
                       is_from_me: true,
