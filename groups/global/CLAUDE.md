@@ -38,6 +38,10 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
 
+## Auto-evo (strategy memory)
+
+Each group has its own **`AUTO_EVO.md`** under `/workspace/group/` (not in global). It is injected at session start for that group. After substantive work there, update that file with distilled lessons. Skill **`auto-evo`** describes the protocol.
+
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.

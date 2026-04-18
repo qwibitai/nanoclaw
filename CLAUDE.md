@@ -19,6 +19,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
+| `groups/{name}/AUTO_EVO.md` | Auto-evo memory (injected at session start; assistant-maintained) |
 | `container/skills/` | Skills loaded inside agent containers (browser, status, formatting) |
 
 ## Secrets / Credentials / Proxy (OneCLI)
