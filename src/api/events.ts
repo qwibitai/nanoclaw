@@ -18,6 +18,17 @@ export interface AgentEvents extends Record<string, any[]> {
   'channel.connected': [payload: { key: string }];
   'channel.disconnected': [payload: { key: string }];
   'group.registered': [payload: GroupRegisteredEvent];
+  'task.created': [payload: TaskCreatedEvent];
+  'task.updated': [payload: TaskUpdatedEvent];
+  'task.deleted': [payload: TaskDeletedEvent];
+  'task.paused': [payload: TaskPausedEvent];
+  'task.resumed': [payload: TaskResumedEvent];
+  'task.terminated': [payload: TaskTerminatedEvent];
+  'task.run.queued': [payload: TaskRunQueuedEvent];
+  'task.run.started': [payload: TaskRunStartedEvent];
+  'task.run.succeeded': [payload: TaskRunSucceededEvent];
+  'task.run.failed': [payload: TaskRunFailedEvent];
+  'task.run.skipped': [payload: TaskRunSkippedEvent];
   started: [];
   stopped: [];
 }
@@ -181,4 +192,113 @@ export interface ChatMetadataEvent {
   channel?: string;
   /** Whether this is a group chat (vs. a direct message). */
   isGroup?: boolean;
+}
+
+// ── Task lifecycle events ────────────────────────────────────────
+
+import type { Task, UpdateTaskOptions } from './task.js';
+
+/** A scheduled task row was created. */
+export interface TaskCreatedEvent {
+  agentId: string;
+  task: Task;
+  timestamp: string;
+}
+
+/** A scheduled task row was updated (prompt/schedule change). */
+export interface TaskUpdatedEvent {
+  agentId: string;
+  id: string;
+  changes: UpdateTaskOptions;
+  task: Task;
+  timestamp: string;
+}
+
+/** A scheduled task row was deleted. */
+export interface TaskDeletedEvent {
+  agentId: string;
+  id: string;
+  timestamp: string;
+}
+
+/** A task transitioned active → paused. */
+export interface TaskPausedEvent {
+  agentId: string;
+  id: string;
+  timestamp: string;
+}
+
+/** A task transitioned paused → active. */
+export interface TaskResumedEvent {
+  agentId: string;
+  id: string;
+  /** The next scheduled run after resume. */
+  nextRun: string | null;
+  timestamp: string;
+}
+
+/** A task reached its terminal status='completed' state (one-shot done). */
+export interface TaskTerminatedEvent {
+  agentId: string;
+  id: string;
+  /** Most recent run result summary. */
+  lastResult: string | null;
+  timestamp: string;
+}
+
+/** A run was enqueued into the group queue (not yet running). */
+export interface TaskRunQueuedEvent {
+  agentId: string;
+  taskId: string;
+  groupFolder: string;
+  jid: string;
+  timestamp: string;
+}
+
+/** A run began execution inside the container. */
+export interface TaskRunStartedEvent {
+  agentId: string;
+  taskId: string;
+  groupFolder: string;
+  jid: string;
+  contextMode: 'group' | 'isolated';
+  timestamp: string;
+}
+
+/** A run completed successfully. */
+export interface TaskRunSucceededEvent {
+  agentId: string;
+  taskId: string;
+  groupFolder: string;
+  jid: string;
+  durationMs: number;
+  result: string | null;
+  /** Next scheduled run after this one, or null if terminal. */
+  nextRun: string | null;
+  timestamp: string;
+}
+
+/** A run failed with an error. */
+export interface TaskRunFailedEvent {
+  agentId: string;
+  taskId: string;
+  groupFolder: string;
+  jid: string;
+  durationMs: number;
+  error: string;
+  /** Next scheduled run after this one, or null if terminal. */
+  nextRun: string | null;
+  timestamp: string;
+}
+
+/** A due fire was dropped without executing. */
+export interface TaskRunSkippedEvent {
+  agentId: string;
+  taskId: string;
+  groupFolder: string;
+  jid: string;
+  reason: 'not_active' | 'group_not_found' | 'invalid_group_folder';
+  /** Optional detail string for the skip reason. */
+  detail?: string;
+  timestamp: string;
 }

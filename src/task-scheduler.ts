@@ -9,10 +9,17 @@ import {
 } from './container-runner.js';
 import type { RuntimeConfig } from './runtime-config.js';
 import type { AgentDb } from './db.js';
+import type { AgentEvents } from './api/events.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+
+/** Minimal emit signature matching agent.emit for task events. */
+export type TaskEventEmitter = <K extends keyof AgentEvents>(
+  event: K,
+  ...args: AgentEvents[K]
+) => boolean;
 
 /**
  * Compute the next run time for a recurring task, anchored to the
@@ -89,6 +96,8 @@ export interface SchedulerDependencies {
     reason?: string;
     exitCode?: number;
   }) => void;
+  /** Emit task lifecycle events up to the agent's event bus. */
+  emit?: TaskEventEmitter;
 }
 
 async function runTask(
@@ -114,6 +123,15 @@ async function runTask(
       status: 'error',
       result: null,
       error,
+    });
+    deps.emit?.('task.run.skipped', {
+      agentId: deps.agentId,
+      taskId: task.id,
+      groupFolder: task.group_folder,
+      jid: task.chat_jid,
+      reason: 'invalid_group_folder',
+      detail: error,
+      timestamp: new Date().toISOString(),
     });
     return;
   }
@@ -142,8 +160,25 @@ async function runTask(
       result: null,
       error: `Group not found: ${task.group_folder}`,
     });
+    deps.emit?.('task.run.skipped', {
+      agentId: deps.agentId,
+      taskId: task.id,
+      groupFolder: task.group_folder,
+      jid: task.chat_jid,
+      reason: 'group_not_found',
+      timestamp: new Date().toISOString(),
+    });
     return;
   }
+
+  deps.emit?.('task.run.started', {
+    agentId: deps.agentId,
+    taskId: task.id,
+    groupFolder: task.group_folder,
+    jid: task.chat_jid,
+    contextMode: task.context_mode,
+    timestamp: new Date().toISOString(),
+  });
 
   // Update tasks snapshot for container to read (filtered by group)
   const isMain = group.isMain === true;
@@ -277,6 +312,42 @@ async function runTask(
       ? result.slice(0, 200)
       : 'Completed';
   deps.db.updateTaskAfterRun(task.id, nextRun, resultSummary);
+
+  const now = new Date().toISOString();
+  if (error) {
+    deps.emit?.('task.run.failed', {
+      agentId: deps.agentId,
+      taskId: task.id,
+      groupFolder: task.group_folder,
+      jid: task.chat_jid,
+      durationMs,
+      error,
+      nextRun,
+      timestamp: now,
+    });
+  } else {
+    deps.emit?.('task.run.succeeded', {
+      agentId: deps.agentId,
+      taskId: task.id,
+      groupFolder: task.group_folder,
+      jid: task.chat_jid,
+      durationMs,
+      result,
+      nextRun,
+      timestamp: now,
+    });
+  }
+
+  // The CASE WHEN in db.updateTaskAfterRun flips status to 'completed' iff
+  // nextRun is null. Mirror that rule here to emit task.terminated once.
+  if (nextRun === null) {
+    deps.emit?.('task.terminated', {
+      agentId: deps.agentId,
+      id: task.id,
+      lastResult: resultSummary,
+      timestamp: now,
+    });
+  }
 }
 
 export function startSchedulerLoop(deps: SchedulerDependencies): {
@@ -297,8 +368,27 @@ export function startSchedulerLoop(deps: SchedulerDependencies): {
         // Re-check task status in case it was paused/cancelled
         const currentTask = deps.db.getTaskById(task.id);
         if (!currentTask || currentTask.status !== 'active') {
+          if (currentTask) {
+            deps.emit?.('task.run.skipped', {
+              agentId: deps.agentId,
+              taskId: currentTask.id,
+              groupFolder: currentTask.group_folder,
+              jid: currentTask.chat_jid,
+              reason: 'not_active',
+              detail: currentTask.status,
+              timestamp: new Date().toISOString(),
+            });
+          }
           continue;
         }
+
+        deps.emit?.('task.run.queued', {
+          agentId: deps.agentId,
+          taskId: currentTask.id,
+          groupFolder: currentTask.group_folder,
+          jid: currentTask.chat_jid,
+          timestamp: new Date().toISOString(),
+        });
 
         deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
           runTask(currentTask, deps),

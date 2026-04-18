@@ -85,7 +85,13 @@ export class TaskManager {
     });
 
     this.refreshTaskSnapshots();
-    return this.getTaskSnapshotOrThrow(taskId);
+    const created = this.getTaskSnapshotOrThrow(taskId);
+    this.ctx.emit('task.created', {
+      agentId: this.ctx.id,
+      task: created,
+      timestamp: new Date().toISOString(),
+    });
+    return created;
   }
 
   /** List scheduled tasks with optional filtering. */
@@ -147,7 +153,15 @@ export class TaskManager {
 
     this.ctx.db.updateTask(taskId, dbUpdates);
     this.refreshTaskSnapshots();
-    return this.getTaskSnapshotOrThrow(taskId);
+    const updatedTask = this.getTaskSnapshotOrThrow(taskId);
+    this.ctx.emit('task.updated', {
+      agentId: this.ctx.id,
+      id: taskId,
+      changes: updates,
+      task: updatedTask,
+      timestamp: new Date().toISOString(),
+    });
+    return updatedTask;
   }
 
   /** Pause an active task. */
@@ -164,7 +178,13 @@ export class TaskManager {
 
     this.ctx.db.updateTask(taskId, { status: 'paused' });
     this.refreshTaskSnapshots();
-    return this.getTaskSnapshotOrThrow(taskId);
+    const paused = this.getTaskSnapshotOrThrow(taskId);
+    this.ctx.emit('task.paused', {
+      agentId: this.ctx.id,
+      id: taskId,
+      timestamp: new Date().toISOString(),
+    });
+    return paused;
   }
 
   /** Resume a paused task. */
@@ -181,7 +201,14 @@ export class TaskManager {
 
     this.ctx.db.updateTask(taskId, { status: 'active' });
     this.refreshTaskSnapshots();
-    return this.getTaskSnapshotOrThrow(taskId);
+    const resumed = this.getTaskSnapshotOrThrow(taskId);
+    this.ctx.emit('task.resumed', {
+      agentId: this.ctx.id,
+      id: taskId,
+      nextRun: resumed.nextRun,
+      timestamp: new Date().toISOString(),
+    });
+    return resumed;
   }
 
   /** Cancel and delete a task. */
@@ -192,6 +219,11 @@ export class TaskManager {
     this.requireExistingTask(taskId);
     this.ctx.db.deleteTask(taskId);
     this.refreshTaskSnapshots();
+    this.ctx.emit('task.deleted', {
+      agentId: this.ctx.id,
+      id: taskId,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   /** Write task snapshots to each group's IPC directory. */
