@@ -32,12 +32,16 @@ export interface ContainerConfig {
   timeout?: number; // Default: 300000 (5 minutes)
 }
 
+import type { MessageRoutingConfig } from './message-routing.js';
+
 export interface RegisteredGroup {
   name: string;
   folder: string;
   trigger: string;
   added_at: string;
   containerConfig?: ContainerConfig;
+  /** Keyword-based pre-turn model routing. See message-routing.ts for config format. */
+  messageRouting?: MessageRoutingConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
 }
