@@ -12,6 +12,10 @@ import {
   MAX_MESSAGES_PER_PROMPT,
   ONECLI_URL,
   CREDENTIAL_PROXY_PORT,
+  PAPERCLIP_WAKE_HOST,
+  PAPERCLIP_WAKE_PORT,
+  PAPERCLIP_WAKE_REPLAY_WINDOW_SECONDS,
+  PAPERCLIP_WAKE_SECRET,
   POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
@@ -50,8 +54,12 @@ import {
   storeMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
-import { resolveGroupFolderPath } from './group-folder.js';
+import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import {
+  PaperclipWakePayload,
+  startPaperclipWakeServer,
+} from './paperclip-wake.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   restoreRemoteControl,
@@ -77,6 +85,7 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+let paperclipWakeServer: import('http').Server | null = null;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -571,6 +580,115 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+/**
+ * Route a verified Paperclip wake to the target group's agent.
+ *
+ * Expects the wake payload to identify the target nanoclaw group via
+ * `context.chatJid` (preferred) or `context.groupFolder`. The wake body is
+ * written into the group's mounted IPC directory so the agent-runner can
+ * read it, and a synthetic inbound message is stored to trigger processing
+ * through the normal router flow.
+ */
+function handlePaperclipWake(
+  payload: PaperclipWakePayload,
+  rawBody: string,
+): void {
+  const ctx = payload.context ?? {};
+  const runId = typeof payload.runId === 'string' ? payload.runId : 'unknown';
+  const agentId =
+    typeof payload.agentId === 'string' ? payload.agentId : 'unknown';
+  const wakeReason =
+    typeof ctx.wakeReason === 'string' ? ctx.wakeReason : 'unknown';
+
+  let chatJid = typeof ctx.chatJid === 'string' ? ctx.chatJid : undefined;
+  if (!chatJid && typeof ctx.groupFolder === 'string') {
+    for (const [jid, group] of Object.entries(registeredGroups)) {
+      if (group.folder === ctx.groupFolder) {
+        chatJid = jid;
+        break;
+      }
+    }
+  }
+
+  if (!chatJid) {
+    logger.warn(
+      { runId, agentId },
+      'paperclip-wake: payload missing context.chatJid / context.groupFolder — dropping',
+    );
+    return;
+  }
+
+  const group = registeredGroups[chatJid];
+  if (!group) {
+    logger.warn(
+      { runId, agentId, chatJid },
+      'paperclip-wake: no registered group for chatJid — dropping',
+    );
+    return;
+  }
+
+  // Drop full payload in the container-visible IPC dir so the agent-runner
+  // can read it with full fidelity (including apiUrl/apiKey if supplied).
+  try {
+    const wakeDir = path.join(
+      resolveGroupIpcPath(group.folder),
+      'paperclip-wakes',
+    );
+    fs.mkdirSync(wakeDir, { recursive: true });
+    const safeRunId = runId.replace(/[^a-zA-Z0-9_-]/g, '-');
+    const file = path.join(wakeDir, `${Date.now()}-${safeRunId}.json`);
+    fs.writeFileSync(file, rawBody);
+  } catch (err) {
+    logger.error(
+      { err, runId, agentId, group: group.name },
+      'paperclip-wake: failed to write wake payload to IPC dir',
+    );
+    // Still fall through to notify the agent — the summary below has enough
+    // info to start a heartbeat.
+  }
+
+  // Inject a synthetic inbound message so the normal processing loop picks
+  // it up. Main groups process unconditionally; non-main groups require a
+  // trigger, so we prefix the assistant trigger for those.
+  const isMain = group.isMain === true;
+  const trigger = isMain ? '' : `${group.trigger || DEFAULT_TRIGGER} `;
+  const summary = [
+    `Paperclip wake (${wakeReason})`,
+    `runId=${runId}`,
+    `agentId=${agentId}`,
+    ctx.taskId ? `taskId=${ctx.taskId}` : null,
+    ctx.wakeCommentId ? `commentId=${ctx.wakeCommentId}` : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const body = `${trigger}${summary}. Full payload: /workspace/ipc/paperclip-wakes/ (latest file).`;
+
+  const syntheticId = `paperclip-wake-${runId}-${Date.now()}`;
+  storeMessage({
+    id: syntheticId,
+    chat_jid: chatJid,
+    sender: 'paperclip',
+    sender_name: 'Paperclip',
+    content: body,
+    timestamp: new Date().toISOString(),
+    is_from_me: false,
+    is_bot_message: false,
+  });
+
+  queue.enqueueMessageCheck(chatJid);
+
+  logger.info(
+    {
+      runId,
+      agentId,
+      wakeReason,
+      chatJid,
+      group: group.name,
+    },
+    'paperclip-wake: routed to group',
+  );
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   if (PROXY_BIND_HOST) {
@@ -591,6 +709,12 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (paperclipWakeServer) {
+      await new Promise<void>((resolve) => {
+        paperclipWakeServer!.close(() => resolve());
+      });
+      paperclipWakeServer = null;
+    }
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -755,6 +879,28 @@ async function main(): Promise<void> {
   });
   startSessionCleanup();
   queue.setProcessMessagesFn(processGroupMessages);
+
+  if (PAPERCLIP_WAKE_SECRET) {
+    try {
+      paperclipWakeServer = await startPaperclipWakeServer({
+        host: PAPERCLIP_WAKE_HOST,
+        port: PAPERCLIP_WAKE_PORT,
+        secret: PAPERCLIP_WAKE_SECRET,
+        replayWindowSeconds: PAPERCLIP_WAKE_REPLAY_WINDOW_SECONDS,
+        onWake: handlePaperclipWake,
+      });
+    } catch (err) {
+      logger.error(
+        { err, host: PAPERCLIP_WAKE_HOST, port: PAPERCLIP_WAKE_PORT },
+        'Failed to start Paperclip wake server — disabling',
+      );
+    }
+  } else {
+    logger.debug(
+      'PAPERCLIP_WAKE_SECRET not set — Paperclip wake webhook disabled',
+    );
+  }
+
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');

@@ -68,6 +68,22 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
 
+// Paperclip wake webhook — https://github.com/uniclawassistant/nanoclaw/docs/paperclip.md
+// When PAPERCLIP_WAKE_SECRET is set, nanoclaw exposes POST /paperclip/wake so a
+// Paperclip `http` adapter can wake a nanoclaw-hosted agent. Unset to disable.
+export const PAPERCLIP_WAKE_SECRET = process.env.PAPERCLIP_WAKE_SECRET || '';
+export const PAPERCLIP_WAKE_HOST =
+  process.env.PAPERCLIP_WAKE_HOST || '127.0.0.1';
+export const PAPERCLIP_WAKE_PORT = Math.max(
+  1,
+  parseInt(process.env.PAPERCLIP_WAKE_PORT || '3002', 10) || 3002,
+);
+export const PAPERCLIP_WAKE_REPLAY_WINDOW_SECONDS = Math.max(
+  1,
+  parseInt(process.env.PAPERCLIP_WAKE_REPLAY_WINDOW_SECONDS || '300', 10) ||
+    300,
+);
+
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
