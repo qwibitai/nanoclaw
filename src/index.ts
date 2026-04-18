@@ -4,6 +4,7 @@ import path from 'path';
 import { OneCLI } from '@onecli-sh/sdk';
 
 import {
+  AGENT_RUNNER,
   ASSISTANT_NAME,
   DEFAULT_TRIGGER,
   getTriggerPattern,
@@ -343,6 +344,12 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
+
+  // Each runner recognises only its own session ID format (OpenCode: 'ses_...',
+  // Anthropic: UUID). If the stored ID belongs to the other runner the container
+  // will report a stale-session error, which the recovery below (lines ~431-444)
+  // detects and clears before retrying fresh. Storing sessions per-runner so
+  // switching back doesn't lose the original session is a future improvement.
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)

@@ -30,8 +30,8 @@ RUN apt-get update && apt-get install -y \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install agent-browser, claude-code, and opencode-ai globally
+RUN npm install -g agent-browser @anthropic-ai/claude-code opencode-ai
 
 # Create app directory
 WORKDIR /app
@@ -50,6 +50,10 @@ RUN npm run build
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+
+# Pre-create XDG directories for OpenCode session state (prevents EACCES errors)
+RUN mkdir -p /home/node/.local/share /home/node/.local/state /home/node/.local/cache \
+    && chown -R node:node /home/node/.local
 
 # Create entrypoint script
 # Container input (prompt, group info) is passed via stdin JSON.

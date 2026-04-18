@@ -24,23 +24,13 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
-interface ContainerInput {
-  prompt: string;
-  sessionId?: string;
-  groupFolder: string;
-  chatJid: string;
-  isMain: boolean;
-  isScheduledTask?: boolean;
-  assistantName?: string;
-  script?: string;
-}
-
-interface ContainerOutput {
-  status: 'success' | 'error';
-  result: string | null;
-  newSessionId?: string;
-  error?: string;
-}
+import {
+  ContainerInput,
+  ContainerOutput,
+  OpenCodeRunner,
+  RunnerOptions,
+  RunnerResult,
+} from './runners/opencode.js';
 
 interface SessionEntry {
   sessionId: string;
@@ -544,6 +534,66 @@ async function runQuery(
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 
+async function runOpenCodeLoop(
+  prompt: string,
+  sessionId: string | undefined,
+  containerInput: ContainerInput,
+  mcpServerPath: string,
+  sdkEnv: Record<string, string | undefined>,
+): Promise<void> {
+  const runner = await OpenCodeRunner.create(mcpServerPath, containerInput);
+
+  const runnerOpts: RunnerOptions = {
+    prompt,
+    sessionId,
+    containerInput,
+    mcpServerPath,
+    sdkEnv,
+    onOutput: (output) => {
+      writeOutput(output);
+    },
+    shouldClose,
+    drainIpcInput,
+    log,
+  };
+
+  try {
+    while (true) {
+      log(`Starting OpenCode query (session: ${sessionId || 'new'})...`);
+
+      const result = await runner.runQuery(runnerOpts);
+      if (result.newSessionId) {
+        sessionId = result.newSessionId;
+        runnerOpts.sessionId = sessionId;
+      }
+
+      if (result.closedDuringQuery) {
+        log('Close sentinel consumed during OpenCode query, exiting');
+        break;
+      }
+
+      writeOutput({
+        status: 'success',
+        result: null,
+        newSessionId: sessionId,
+      });
+
+      log('OpenCode query ended, waiting for next IPC message...');
+
+      const nextMessage = await waitForIpcMessage();
+      if (nextMessage === null) {
+        log('Close sentinel received, exiting');
+        break;
+      }
+
+      log(`Got new message (${nextMessage.length} chars), starting new query`);
+      runnerOpts.prompt = nextMessage;
+    }
+  } finally {
+    runner.close();
+  }
+}
+
 interface ScriptResult {
   wakeAgent: boolean;
   data?: unknown;
@@ -674,6 +724,21 @@ async function main(): Promise<void> {
     prompt = `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}\n\nInstructions:\n${containerInput.prompt}`;
   }
 
+  // Select agent runner
+  const agentRunner = process.env.AGENT_RUNNER || 'anthropic';
+
+  if (agentRunner === 'opencode') {
+    await runOpenCodeLoop(
+      prompt,
+      sessionId,
+      containerInput,
+      mcpServerPath,
+      sdkEnv,
+    );
+    return;
+  }
+
+  // Anthropic/Claude Code runner (default)
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
   try {

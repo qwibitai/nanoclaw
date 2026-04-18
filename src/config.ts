@@ -11,6 +11,7 @@ const envConfig = readEnvFile([
   'ONECLI_URL',
   'ONECLI_API_KEY',
   'TZ',
+  'AGENT_RUNNER',
 ]);
 
 export const ASSISTANT_NAME =
@@ -65,6 +66,10 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
+
+// Global default agent runner (can be overridden per-group via containerConfig)
+export const AGENT_RUNNER =
+  process.env.AGENT_RUNNER || envConfig.AGENT_RUNNER || 'anthropic';
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
