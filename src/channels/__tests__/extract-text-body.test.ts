@@ -67,8 +67,8 @@ describe('GmailChannel.extractTextBody', () => {
 
   it('returns empty when no renderable body is present', () => {
     expect(c.extractTextBody(undefined)).toBe('');
-    expect(
-      c.extractTextBody({ mimeType: 'application/octet-stream' }),
-    ).toBe('');
+    expect(c.extractTextBody({ mimeType: 'application/octet-stream' })).toBe(
+      '',
+    );
   });
 });

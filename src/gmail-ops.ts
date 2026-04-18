@@ -26,6 +26,10 @@ export interface GmailOps {
   updateDraft(account: string, draftId: string, newBody: string): Promise<void>;
   getMessageBody(account: string, messageId: string): Promise<string | null>;
   getMessageMeta(account: string, messageId: string): Promise<EmailMeta | null>;
+  getThreadInboxStatus(
+    account: string,
+    threadId: string,
+  ): Promise<'in' | 'out' | 'missing'>;
   forwardThread(
     account: string,
     threadId: string,
@@ -44,6 +48,9 @@ export interface GmailOpsProvider {
   updateDraft(draftId: string, newBody: string): Promise<void>;
   getMessageBody(messageId: string): Promise<string | null>;
   getMessageMeta(messageId: string): Promise<EmailMeta | null>;
+  getThreadInboxStatus?(
+    threadId: string,
+  ): Promise<'in' | 'out' | 'missing'>;
   forwardThread?(threadId: string, recipient: string): Promise<void>;
   emailAddress?: string;
   getDraftReplyContext(draftId: string): Promise<DraftReplyContext | null>;
@@ -137,6 +144,19 @@ export class GmailOpsRouter implements GmailOps {
     messageId: string,
   ): Promise<EmailMeta | null> {
     return this.getChannel(account).getMessageMeta(messageId);
+  }
+
+  async getThreadInboxStatus(
+    account: string,
+    threadId: string,
+  ): Promise<'in' | 'out' | 'missing'> {
+    const ch = this.getChannel(account);
+    if (!ch.getThreadInboxStatus) {
+      throw new Error(
+        `Gmail channel for ${account} does not support getThreadInboxStatus`,
+      );
+    }
+    return ch.getThreadInboxStatus(threadId);
   }
 
   async forwardThread(

@@ -431,6 +431,35 @@ export class GmailChannel implements Channel {
     logger.info({ threadId, account: this.accountAlias }, 'Thread archived');
   }
 
+  /**
+   * Check current INBOX membership for a thread.
+   * Returns 'in' if any message in the thread still has INBOX,
+   * 'out' if it exists but no message has INBOX,
+   * 'missing' if the thread is not found (deleted / 404).
+   * Used by the reconciler to catch out-of-band archives in Gmail.
+   */
+  async getThreadInboxStatus(
+    threadId: string,
+  ): Promise<'in' | 'out' | 'missing'> {
+    if (!this.gmail) throw new Error('Gmail not connected');
+    try {
+      const res = await this.gmail.users.threads.get({
+        userId: 'me',
+        id: threadId,
+        format: 'metadata',
+      });
+      const messages = res.data.messages || [];
+      for (const m of messages) {
+        if ((m.labelIds || []).includes('INBOX')) return 'in';
+      }
+      return 'out';
+    } catch (err: unknown) {
+      const status = (err as { code?: number; status?: number })?.code;
+      if (status === 404) return 'missing';
+      throw err;
+    }
+  }
+
   async listRecentDrafts(): Promise<
     import('../draft-enrichment.js').DraftInfo[]
   > {
