@@ -449,42 +449,70 @@ async function runQuery(
             append: globalClaudeMd,
           }
         : undefined,
-      allowedTools: [
-        'Bash',
-        'Read',
-        'Write',
-        'Edit',
-        'Glob',
-        'Grep',
-        'WebSearch',
-        'WebFetch',
-        'Task',
-        'TaskOutput',
-        'TaskStop',
-        'TeamCreate',
-        'TeamDelete',
-        'SendMessage',
-        'TodoWrite',
-        'ToolSearch',
-        'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*',
-      ],
+      allowedTools: (() => {
+        const tools = [
+          'Bash',
+          'Read',
+          'Write',
+          'Edit',
+          'Glob',
+          'Grep',
+          'WebSearch',
+          'WebFetch',
+          'Task',
+          'TaskOutput',
+          'TaskStop',
+          'TeamCreate',
+          'TeamDelete',
+          'SendMessage',
+          'TodoWrite',
+          'ToolSearch',
+          'Skill',
+          'NotebookEdit',
+          'mcp__nanoclaw__*',
+        ];
+        // Optional Google Calendar tools — enabled only if the user has
+        // installed the calendar skill and mounted the credentials dir.
+        if (fs.existsSync('/home/node/.config/google-calendar-mcp')) {
+          tools.push('mcp__gcal__*');
+        }
+        return tools;
+      })(),
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      mcpServers: (() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const servers: Record<string, any> = {
+          nanoclaw: {
+            command: 'node',
+            args: [mcpServerPath],
+            env: {
+              NANOCLAW_CHAT_JID: containerInput.chatJid,
+              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+              NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            },
           },
-        },
-      },
+        };
+        // Register @cocal/google-calendar-mcp only if its credentials dir
+        // was mounted from the host. Keys file path is conventional and
+        // documented in .claude/skills/add-calendar/SKILL.md.
+        const gcalCredsPath =
+          '/home/node/.config/google-calendar-mcp/gcp-oauth.keys.json';
+        if (fs.existsSync('/home/node/.config/google-calendar-mcp')) {
+          servers['gcal'] = {
+            command: 'npx',
+            args: ['-y', '@cocal/google-calendar-mcp'],
+            env: {
+              GOOGLE_OAUTH_CREDENTIALS: gcalCredsPath,
+            },
+          };
+          log('Google Calendar MCP server configured');
+        }
+        return servers;
+      })(),
       hooks: {
         PreCompact: [
           { hooks: [createPreCompactHook(containerInput.assistantName)] },
