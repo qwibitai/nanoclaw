@@ -10,12 +10,23 @@
 
 ## 2. 本机终端：把「上游」和「你的 fork」配好
 
-在**已有 clone** 的 nano claw 目录里（本仓库已包含 `skill/auto-evo` 分支与提交时）：
+在**已有 clone** 的 nanoclaw 目录里（需在分支 `skill/auto-evo` 上）。
+
+**一键脚本（推荐）**：先在网页 Fork 好仓库，再执行（把 `你的GitHub用户名` 换成真实用户名）：
+
+```bash
+cd /path/to/nanoclaw
+./contrib/setup_fork_and_push.sh 你的GitHub用户名
+```
+
+脚本会：`git remote add`（或覆盖）你的 fork、`git push -u origin skill/auto-evo`，若已安装并已登录 `gh` 会尝试创建 PR，否则打印浏览器对比链接。
+
+**手动**：
 
 ```bash
 cd /path/to/nanoclaw
 
-# 若 origin 还是 qwibitai，改名为 upstream
+# 若 origin 仍指向 qwibitai，改名为 upstream（本工作区若已执行过可跳过）
 git remote rename origin upstream 2>/dev/null || true
 
 # 加上你的 fork（把 YOUR_USER 换成你的 GitHub 用户名）
