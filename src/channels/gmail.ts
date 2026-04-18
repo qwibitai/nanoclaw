@@ -550,30 +550,57 @@ export class GmailChannel implements Channel {
     );
   }
 
-  async getMessageBody(messageId: string): Promise<string | null> {
+  /**
+   * Resolve an id that may be either a message id or a thread id to a
+   * full message. SuperPilot and nanoclaw's tracked_items store thread
+   * ids (source_id = "gmail:<threadId>"), but the rest of the code path
+   * treats them as message ids. messages.get(id=<threadId>) 404s; fall
+   * back to threads.get and return the latest message.
+   */
+  private async resolveMessage(
+    id: string,
+  ): Promise<gmail_v1.Schema$Message | null> {
     if (!this.gmail) return null;
     try {
-      const msg = await this.gmail.users.messages.get({
+      const r = await this.gmail.users.messages.get({
         userId: 'me',
-        id: messageId,
+        id,
         format: 'full',
       });
-      const body = this.extractTextBody(msg.data.payload);
-      return body || null;
+      return r.data;
+    } catch {
+      // fall through to thread lookup
+    }
+    try {
+      const t = await this.gmail.users.threads.get({
+        userId: 'me',
+        id,
+        format: 'full',
+      });
+      const msgs = t.data.messages || [];
+      return msgs[msgs.length - 1] ?? null;
     } catch (err) {
-      logger.warn({ messageId, err }, 'Failed to fetch message body');
+      logger.warn({ id, err }, 'resolveMessage: neither message nor thread');
       return null;
     }
+  }
+
+  async getMessageBody(messageId: string): Promise<string | null> {
+    const msg = await this.resolveMessage(messageId);
+    if (!msg) return null;
+    const body = this.extractTextBody(msg.payload);
+    return body || null;
   }
 
   async getMessageMeta(messageId: string): Promise<EmailMeta | null> {
     if (!this.gmail) return null;
     try {
-      const msg = await this.gmail.users.messages.get({
-        userId: 'me',
-        id: messageId,
-        format: 'full',
-      });
+      const msgData = await this.resolveMessage(messageId);
+      if (!msgData) return null;
+      // Reshape to match the original messages.get return for the rest
+      // of this function. resolveMessage already returned Schema$Message
+      // so we just wrap it to keep the downstream closure readable.
+      const msg = { data: msgData } as { data: gmail_v1.Schema$Message };
       const headers = msg.data.payload?.headers || [];
       const header = (name: string) =>
         headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())

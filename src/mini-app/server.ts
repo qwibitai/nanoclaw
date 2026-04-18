@@ -381,38 +381,66 @@ ${
     const { emailId } = req.params;
     let account = (req.query.account as string) || '';
 
-    // Telegram-pushed buttons sometimes omit ?account=. Fall back to the
-    // account stored in tracked_items.metadata so the detail page can still
-    // load. Match by thread_id or source_id (either can equal the URL id).
-    if (!account) {
+    // The URL's emailId is usually nanoclaw's internal tracked_items.id
+    // (e.g. "sse-1776537105419-552jdw"), not a Gmail message id. Look the
+    // row up so we can (a) use metadata.account when ?account= is missing,
+    // and (b) extract the real Gmail thread/message id from source_id
+    // ("gmail:19da1d9492...") for the API call below. Match by id first,
+    // then thread_id, then source_id — any of those could be the URL id
+    // depending on how the link was generated.
+    let gmailId: string | null = null;
+    try {
       const row = opts.db
         .prepare(
-          `SELECT metadata FROM tracked_items
-           WHERE thread_id = ? OR source_id = ?
+          `SELECT metadata, source_id, thread_id FROM tracked_items
+           WHERE id = ? OR thread_id = ? OR source_id = ?
            ORDER BY detected_at DESC LIMIT 1`,
         )
-        .get(emailId, emailId) as { metadata: string | null } | undefined;
-      if (row?.metadata) {
-        try {
-          const m = JSON.parse(row.metadata) as { account?: string };
-          if (m.account) account = m.account;
-        } catch {
-          // ignore
+        .get(emailId, emailId, emailId) as
+        | {
+            metadata: string | null;
+            source_id: string | null;
+            thread_id: string | null;
+          }
+        | undefined;
+      if (row) {
+        if (!account && row.metadata) {
+          try {
+            const m = JSON.parse(row.metadata) as { account?: string };
+            if (m.account) account = m.account;
+          } catch {
+            /* ignore */
+          }
         }
+        // source_id is canonical; thread_id is a fallback. Strip the
+        // "gmail:" prefix so the Gmail API accepts it.
+        const raw = row.source_id || row.thread_id || '';
+        gmailId = raw.startsWith('gmail:') ? raw.slice('gmail:'.length) : raw;
       }
+    } catch {
+      // tracked_items table may not exist in minimal test DBs; legacy
+      // callers can still pass a raw Gmail message id in the URL.
     }
 
+    // Cache lookup uses the URL id since that's stable.
     let meta = getCachedEmailMeta(emailId);
 
+    // If we resolved a gmail id and still don't have meta, try it. The
+    // helper tries messages.get first, then falls back to threads.get
+    // when the id is a thread id (which is what source_id carries).
+    const idForGmail = gmailId || emailId;
     if (!meta && opts.gmailOps && account) {
       try {
         if ('getMessageMeta' in opts.gmailOps) {
-          meta = await (opts.gmailOps as any).getMessageMeta(account, emailId);
+          meta = await (opts.gmailOps as any).getMessageMeta(
+            account,
+            idForGmail,
+          );
           if (meta) cacheEmailMeta(emailId, meta);
         }
       } catch (err) {
         logger.warn(
-          { emailId, err },
+          { emailId, idForGmail, err },
           'Failed to fetch email meta for Mini App',
         );
       }
@@ -422,11 +450,11 @@ ${
       let body = getCachedEmailBody(emailId);
       if (!body && opts.gmailOps && account) {
         try {
-          body = await opts.gmailOps.getMessageBody(account, emailId);
+          body = await opts.gmailOps.getMessageBody(account, idForGmail);
           if (body) cacheEmailBody(emailId, body);
         } catch (err) {
           logger.warn(
-            { emailId, err },
+            { emailId, idForGmail, err },
             'Failed to fetch email body for Mini App',
           );
         }
