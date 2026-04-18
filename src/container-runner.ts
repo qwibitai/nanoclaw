@@ -197,6 +197,18 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Shared AgentCash wallet directory — all groups share one wallet for
+  // USDC micropayments. Mounted to the container's home so agentcash finds
+  // its wallet.json and settings.json at the expected ~/.agentcash/ path.
+  const agentCashDir = path.join(DATA_DIR, 'agentcash');
+  if (fs.existsSync(agentCashDir)) {
+    mounts.push({
+      hostPath: agentCashDir,
+      containerPath: '/home/node/.agentcash',
+      readonly: false,
+    });
+  }
+
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
