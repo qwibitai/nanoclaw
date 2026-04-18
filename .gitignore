@@ -41,3 +41,4 @@ groups/global/*
 .agentlite/
 
 agents-sdk-docs
+pnpm-lock.yaml
