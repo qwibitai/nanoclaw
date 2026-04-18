@@ -48,9 +48,7 @@ export interface GmailOpsProvider {
   updateDraft(draftId: string, newBody: string): Promise<void>;
   getMessageBody(messageId: string): Promise<string | null>;
   getMessageMeta(messageId: string): Promise<EmailMeta | null>;
-  getThreadInboxStatus?(
-    threadId: string,
-  ): Promise<'in' | 'out' | 'missing'>;
+  getThreadInboxStatus?(threadId: string): Promise<'in' | 'out' | 'missing'>;
   forwardThread?(threadId: string, recipient: string): Promise<void>;
   emailAddress?: string;
   getDraftReplyContext(draftId: string): Promise<DraftReplyContext | null>;

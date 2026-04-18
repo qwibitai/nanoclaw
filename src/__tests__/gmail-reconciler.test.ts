@@ -19,10 +19,7 @@ vi.mock('../config.js', () => ({
 
 import { _initTestDatabase, _closeDatabase, getDb } from '../db.js';
 import { insertTrackedItem, type TrackedItem } from '../tracked-items.js';
-import {
-  reconcileOnce,
-  RACE_GUARD_MS,
-} from '../triage/gmail-reconciler.js';
+import { reconcileOnce, RACE_GUARD_MS } from '../triage/gmail-reconciler.js';
 
 function makeGmailItem(
   id: string,
@@ -90,7 +87,9 @@ describe('gmail-reconciler', () => {
     });
 
     const a = getDb()
-      .prepare('SELECT state, resolution_method FROM tracked_items WHERE id = ?')
+      .prepare(
+        'SELECT state, resolution_method FROM tracked_items WHERE id = ?',
+      )
       .get('item-a') as { state: string; resolution_method: string };
     expect(a.state).toBe('resolved');
     expect(a.resolution_method).toBe('gmail:external');

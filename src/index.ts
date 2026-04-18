@@ -1720,9 +1720,8 @@ async function main(): Promise<void> {
   // Start Gmail→local reconciler: marks queued items resolved when the
   // user archives directly in Gmail (drift detection).
   {
-    const { startGmailReconciler } = await import(
-      './triage/gmail-reconciler.js'
-    );
+    const { startGmailReconciler } =
+      await import('./triage/gmail-reconciler.js');
     startGmailReconciler({ db: getDb(), gmailOps: gmailOpsRouter });
     logger.info('Gmail→local reconciler started');
   }
