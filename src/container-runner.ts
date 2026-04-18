@@ -106,42 +106,17 @@ function buildVolumeMounts(
     });
   }
 
-  // Global memory directory (read-only for all groups)
-  // Only directory mounts are supported, not file mounts
+  // Global memory directory — read-only for all groups except main.
+  // Main has read-write access to allow updating global CLAUDE.md and
+  // writing to the global mnemon. The global .mnemon uses DELETE journal
+  // mode (not WAL), so no auxiliary files need to be created.
   const globalDir = path.join(GROUPS_DIR, 'global');
   if (fs.existsSync(globalDir)) {
     mounts.push({
       hostPath: globalDir,
       containerPath: '/workspace/global',
-      readonly: true,
+      readonly: !isMain,
     });
-    // WAL-mode SQLite databases require a writable directory even for read-only
-    // access (to create the -shm shared memory file). Override the read-only
-    // parent mount for just the .mnemon subdirectory, and ensure the directories
-    // are world-writable so Docker rootless uid mapping allows the container
-    // node user to create WAL files.
-    const globalMnemonDir = path.join(globalDir, '.mnemon');
-    if (fs.existsSync(globalMnemonDir)) {
-      fs.chmodSync(globalMnemonDir, 0o777);
-      // Recursively chmod data subdirs (data/, data/default/) but not the DB file
-      for (const sub of fs.readdirSync(globalMnemonDir, {
-        recursive: true,
-        withFileTypes: true,
-      })) {
-        if (sub.isDirectory()) {
-          const fullPath = path.join(
-            sub.parentPath ?? (sub as unknown as { path: string }).path,
-            sub.name,
-          );
-          fs.chmodSync(fullPath, 0o777);
-        }
-      }
-      mounts.push({
-        hostPath: globalMnemonDir,
-        containerPath: '/workspace/global/.mnemon',
-        readonly: false,
-      });
-    }
   }
 
   // Per-group Claude sessions directory (isolated from other groups)
@@ -171,6 +146,10 @@ function buildVolumeMounts(
             // Enable Claude's memory feature (persists user preferences between sessions)
             // https://code.claude.com/docs/en/memory#manage-auto-memory
             CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+            // Point mnemon at Ollama on the host — inside the container, localhost is
+            // the container itself, not the Pi. host.docker.internal resolves to the
+            // host's LAN IP via the --add-host flag injected by hostGatewayArgs().
+            OLLAMA_HOST: 'http://host.docker.internal:11434',
           },
           hooks: {
             UserPromptSubmit: [
@@ -225,14 +204,18 @@ function buildVolumeMounts(
   });
 
   // Gmail credentials directory (for Gmail MCP inside the container)
-  const homeDir = os.homedir();
-  const gmailDir = path.join(homeDir, '.gmail-mcp');
-  if (fs.existsSync(gmailDir)) {
-    mounts.push({
-      hostPath: gmailDir,
-      containerPath: '/home/node/.gmail-mcp',
-      readonly: false, // MCP may need to refresh OAuth tokens
-    });
+  // Only mounted for main — non-main groups have no Gmail integration and
+  // should not have access to OAuth tokens.
+  if (isMain) {
+    const homeDir = os.homedir();
+    const gmailDir = path.join(homeDir, '.gmail-mcp');
+    if (fs.existsSync(gmailDir)) {
+      mounts.push({
+        hostPath: gmailDir,
+        containerPath: '/home/node/.gmail-mcp',
+        readonly: false, // MCP may need to refresh OAuth tokens
+      });
+    }
   }
 
   // Per-group IPC namespace: each group gets its own IPC directory
