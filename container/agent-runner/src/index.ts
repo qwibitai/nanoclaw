@@ -23,6 +23,7 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { runCopilotQuery, stopCopilotClient } from './copilot-query.js';
 
 interface ContainerInput {
   prompt: string;
@@ -63,6 +64,12 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+/**
+ * Which SDK to use for agent queries.
+ * Set via NANOCLAW_SDK env var: 'claude' (default) or 'copilot'.
+ */
+const SDK_BACKEND = (process.env.NANOCLAW_SDK || 'claude').toLowerCase();
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -676,20 +683,30 @@ async function main(): Promise<void> {
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
+  log(`Using SDK backend: ${SDK_BACKEND}`);
   try {
     while (true) {
       log(
         `Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`,
       );
 
-      const queryResult = await runQuery(
-        prompt,
-        sessionId,
-        mcpServerPath,
-        containerInput,
-        sdkEnv,
-        resumeAt,
-      );
+      let queryResult: { newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean };
+
+      if (SDK_BACKEND === 'copilot') {
+        queryResult = await runCopilotQuery(
+          prompt, sessionId, mcpServerPath, containerInput, sdkEnv,
+          writeOutput, log, shouldClose, drainIpcInput, IPC_POLL_MS,
+        );
+      } else {
+        queryResult = await runQuery(
+          prompt,
+          sessionId,
+          mcpServerPath,
+          containerInput,
+          sdkEnv,
+          resumeAt,
+        );
+      }
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
@@ -730,6 +747,10 @@ async function main(): Promise<void> {
       error: errorMessage,
     });
     process.exit(1);
+  } finally {
+    if (SDK_BACKEND === 'copilot') {
+      await stopCopilotClient();
+    }
   }
 }
 

@@ -17,8 +17,15 @@ import {
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
+
+const copilotEnv = readEnvFile([
+  'NANOCLAW_SDK',
+  'COPILOT_MODEL',
+  'GITHUB_TOKEN',
+]);
 import {
   CONTAINER_RUNTIME_BIN,
   hostGatewayArgs,
@@ -213,13 +220,21 @@ function buildVolumeMounts(
     'agent-runner-src',
   );
   if (fs.existsSync(agentRunnerSrc)) {
-    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
-    const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
-    const needsCopy =
-      !fs.existsSync(groupAgentRunnerDir) ||
-      !fs.existsSync(cachedIndex) ||
-      (fs.existsSync(srcIndex) &&
-        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
+    let needsCopy = !fs.existsSync(groupAgentRunnerDir);
+    if (!needsCopy) {
+      // Check if any source file is newer than its cached copy
+      for (const file of fs.readdirSync(agentRunnerSrc)) {
+        const srcFile = path.join(agentRunnerSrc, file);
+        const cachedFile = path.join(groupAgentRunnerDir, file);
+        if (
+          !fs.existsSync(cachedFile) ||
+          fs.statSync(srcFile).mtimeMs > fs.statSync(cachedFile).mtimeMs
+        ) {
+          needsCopy = true;
+          break;
+        }
+      }
+    }
     if (needsCopy) {
       fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
     }
@@ -229,6 +244,16 @@ function buildVolumeMounts(
     containerPath: '/app/src',
     readonly: false,
   });
+
+  // Mount Copilot CLI OAuth credentials if available (from `copilot auth login`)
+  const copilotAuthDir = path.join(process.env.HOME || '/root', '.copilot');
+  if (fs.existsSync(copilotAuthDir)) {
+    mounts.push({
+      hostPath: copilotAuthDir,
+      containerPath: '/home/node/.copilot',
+      readonly: true,
+    });
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
@@ -265,6 +290,35 @@ async function buildContainerArgs(
     logger.warn(
       { containerName },
       'OneCLI gateway not reachable — container will have no credentials',
+    );
+  }
+
+  // Pass GITHUB_TOKEN for GitHub Copilot SDK and gh CLI
+  const githubToken = process.env.GITHUB_TOKEN || copilotEnv.GITHUB_TOKEN;
+  if (githubToken) {
+    args.push('-e', `GITHUB_TOKEN=${githubToken}`);
+  }
+
+  // Pass SDK backend selection and Copilot model for container agents
+  const nanoclavSdk = process.env.NANOCLAW_SDK || copilotEnv.NANOCLAW_SDK;
+  if (nanoclavSdk) {
+    args.push('-e', `NANOCLAW_SDK=${nanoclavSdk}`);
+  }
+  const copilotModel = process.env.COPILOT_MODEL || copilotEnv.COPILOT_MODEL;
+  if (copilotModel) {
+    args.push('-e', `COPILOT_MODEL=${copilotModel}`);
+  }
+
+  // Copilot SDK talks to GitHub/Copilot endpoints, not Anthropic.
+  // Bypass the OneCLI proxy for these hosts so requests aren't intercepted.
+  if (nanoclavSdk === 'copilot') {
+    args.push(
+      '-e',
+      'NO_PROXY=api.github.com,*.githubcopilot.com,*.github.com,github.com',
+    );
+    args.push(
+      '-e',
+      'no_proxy=api.github.com,*.githubcopilot.com,*.github.com,github.com',
     );
   }
 

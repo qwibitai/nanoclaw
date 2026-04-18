@@ -140,9 +140,26 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 ## 4. Credential System
 
-The credential system depends on the container runtime chosen in step 3.
+### 4-pre. Choose AI backend
 
-### 4a. Docker → OneCLI
+AskUserQuestion: Which AI backend do you want to use?
+
+1. **Claude (Anthropic)** — description: "Uses Anthropic's Claude models via the Claude Agent SDK. Requires a Claude subscription or Anthropic API key."
+2. **GitHub Copilot** — description: "Uses GitHub Copilot models (GPT-4.1, etc.) via the Copilot SDK. Requires a GitHub Copilot subscription."
+
+Set `NANOCLAW_SDK` in `.env`:
+- Claude: `NANOCLAW_SDK=claude` (or omit — it's the default)
+- Copilot: `NANOCLAW_SDK=copilot`
+
+For Copilot, also ask which model:
+```bash
+grep -q 'COPILOT_MODEL' .env 2>/dev/null || echo 'COPILOT_MODEL=gpt-4.1' >> .env
+```
+
+**If Claude:** continue to 4a.
+**If Copilot:** skip to 4c.
+
+### 4a. Claude + Docker → OneCLI
 
 Install OneCLI and its CLI tool:
 
@@ -213,6 +230,53 @@ Ask them to let you know when done.
 **If the user's response happens to contain a token or key** (starts with `sk-ant-`): handle it gracefully — run the `onecli secrets create` command with that value on their behalf.
 
 **After user confirms:** verify with `onecli secrets list` that an Anthropic secret exists. If not, ask again.
+
+### 4c. GitHub Copilot → Copilot CLI auth
+
+OneCLI is still needed (the container proxy infrastructure requires it), but no Anthropic secret is needed. Install OneCLI if not already installed (same commands as 4a), then configure:
+
+```bash
+grep -q 'ONECLI_URL' .env 2>/dev/null || echo 'ONECLI_URL=http://127.0.0.1:10254' >> .env
+```
+
+#### Copilot authentication
+
+The Copilot SDK reads OAuth credentials from `~/.copilot/config.json`, which is mounted read-only into containers. The user must authenticate with the Copilot CLI.
+
+Check if already authenticated:
+```bash
+test -f ~/.copilot/config.json && node -e "const c=JSON.parse(require('fs').readFileSync(require('os').homedir()+'/.copilot/config.json','utf-8')); console.log(c.copilot_tokens ? 'AUTHENTICATED' : 'NOT_AUTHENTICATED')" 2>/dev/null || echo "NOT_AUTHENTICATED"
+```
+
+**If NOT_AUTHENTICATED:**
+
+Tell the user:
+
+> You need to authenticate with the Copilot CLI. On Linux, the token must be stored as a file (not just in the system keyring) so Docker containers can read it.
+
+**Linux:**
+```bash
+DBUS_SESSION_BUS_ADDRESS= copilot login
+```
+The `DBUS_SESSION_BUS_ADDRESS=` prefix disables the system keyring so the token is saved to `~/.copilot/config.json` as a plain text file.
+
+**macOS:**
+```bash
+copilot login
+```
+macOS Keychain is not accessible from Docker containers, so also use the env var trick:
+```bash
+DBUS_SESSION_BUS_ADDRESS= copilot login
+```
+
+Wait for the user to confirm they've completed the login.
+
+**After login:** verify:
+```bash
+node -e "const c=JSON.parse(require('fs').readFileSync(require('os').homedir()+'/.copilot/config.json','utf-8')); console.log(c.copilot_tokens ? 'OK' : 'MISSING')"
+```
+
+If `MISSING`, ask the user to re-run `copilot login` with the `DBUS_SESSION_BUS_ADDRESS=` prefix.
 
 ### 4b. Apple Container → Native Credential Proxy
 
