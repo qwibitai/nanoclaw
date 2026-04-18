@@ -4,6 +4,14 @@
   "description": "Personal Claude assistant. Lightweight, secure, customizable.",
   "files": [
     "dist",
+    "container/Dockerfile",
+    "container/build.sh",
+    "container/skills",
+    "container/agent-runner/src",
+    "container/agent-runner/dist",
+    "container/agent-runner/package.json",
+    "container/agent-runner/package-lock.json",
+    "container/agent-runner/tsconfig.json",
     "README.md",
     "LICENSE"
   ],
