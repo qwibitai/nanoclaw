@@ -272,11 +272,17 @@ export function validateMount(mount: AdditionalMount): MountValidationResult {
   // Check if under an allowed root
   const allowedRoot = findAllowedRoot(realPath, allowlist.allowedRoots);
   if (allowedRoot === null) {
+    const parentDirectory = path.dirname(realPath);
+    const fileHint =
+      fs.statSync(realPath).isFile() && parentDirectory !== realPath
+        ? ` Only parent directories can be allowlisted, not individual files. Parent directory: "${parentDirectory}".`
+        : '';
+
     return {
       allowed: false,
       reason: `Path "${realPath}" is not under any allowed root. Allowed roots: ${allowlist.allowedRoots
         .map((r) => expandPath(r.path))
-        .join(', ')}`,
+        .join(', ')}.${fileHint}`,
     };
   }
 
