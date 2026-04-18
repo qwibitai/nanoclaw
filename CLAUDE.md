@@ -78,3 +78,12 @@ systemctl --user restart nanoclaw
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+
+## Committing Changes
+
+When creating commits, end the commit message with:
+```
+Co-Authored-By: <MODEL_NAME> <noreply@anthropic.com>
+```
+
+The model name should be determined at runtime from the current assistant's identity (check system prompt or CCR config for the current model).

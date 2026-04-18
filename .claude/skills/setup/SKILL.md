@@ -142,6 +142,15 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 The credential system depends on the container runtime chosen in step 3.
 
+**CCR detection:** Check if `@musistudio/claude-code-router` is installed globally:
+```bash
+npm list -g @musistudio/claude-code-router --depth=0 2>/dev/null || echo "not_found"
+```
+If the package is found, ask: "Which provider do you want to use for Claude API?"
+1. **Anthropic** — description: "Use direct Anthropic API."
+2. **Claude Code Router** — description: "Use CCR as a local proxy. Skip to section 4c."
+If CCR is chosen, jump to section 4c. If Anthropic is chosen, continue with section 4a.
+
 ### 4a. Docker → OneCLI
 
 Install OneCLI and its CLI tool:
@@ -239,6 +248,24 @@ echo 'ANTHROPIC_API_KEY=<their-key>' >> .env
 
 Verify the proxy starts: `npm run dev` should show "Credential proxy listening" in the logs.
 
+### 4c. Multi-Provider Support via Claude Code Router
+
+This is for users who do not have an Anthropic API key or subscription and wish to use a third-party provider via the [claude-code-router](https://github.com/musistudio/claude-code-router).
+
+**Check prerequisites:**
+```bash
+which ccr && test -f ~/.claude-code-router/config.json && echo "OK" || echo "Missing"
+```
+
+If missing, tell the user to install and configure claude-code-router first.
+
+**Apply the native credential proxy:** Invoke `/use-native-credential-proxy` to enable request forwarding to CCR.
+
+**Configure the base URL:** Add to `.env`:
+```bash
+echo 'ANTHROPIC_BASE_URL=http://127.0.0.1:8000' >> .env
+```
+
 ## 5. Set Up Channels
 
 AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
@@ -308,6 +335,14 @@ Replace `USERNAME` with the actual username (from `whoami`). Run the two `sudo` 
 - Linux: check `systemctl --user status nanoclaw`.
 - Re-run the service step after fixing.
 
+### 7a. CCR Service (if using Multi-Provider CCR)
+
+Check if `ANTHROPIC_BASE_URL=http://127.0.0.1:8000` is set in `.env` (user went through section 4c). If so:
+
+Run `npx tsx setup/index.ts --step ccr` and parse the status block.
+
+The CCR service will be installed and started. The NanoClaw service unit will be patched so NanoClaw starts CCR before starting.
+
 ## 8. Verify
 
 Run `npx tsx setup/index.ts --step verify` and parse the status block.
@@ -315,7 +350,7 @@ Run `npx tsx setup/index.ts --step verify` and parse the status block.
 **If STATUS=failed, fix each:**
 - SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
 - SERVICE=not_found → re-run step 7
-- CREDENTIALS=missing → re-run step 4 (Docker: check `onecli secrets list`; Apple Container: check `.env` for credentials)
+- CREDENTIALS=missing → re-run step 4 (Docker: check `onecli secrets list`; Apple Container: check `.env` for credentials). **Exception:** If `ANTHROPIC_BASE_URL=http://127.0.0.1:8000` is set in `.env` (CCR is in use), CREDENTIALS=missing is expected — CCR manages its own credentials. Skip this fix and check the other items instead.
 - CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)
 - REGISTERED_GROUPS=0 → re-invoke the channel skills from step 5
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
