@@ -11,6 +11,7 @@
 #   Todo files:                     3 days
 #   Telemetry:                      7 days
 #   Group logs:                     7 days
+#   Attachments:                   14 days
 
 set -euo pipefail
 
@@ -140,6 +141,12 @@ done
 while IFS= read -r -d '' f; do
   remove "$f"
 done < <(find "$GROUPS_DIR"/*/logs -type f -mtime +7 -print0 2>/dev/null)
+
+# --- Prune attachments (>14 days) ---
+
+while IFS= read -r -d '' f; do
+  remove "$f"
+done < <(find "$GROUPS_DIR"/*/attachments -type f -mtime +14 -print0 2>/dev/null)
 
 # --- Summary ---
 

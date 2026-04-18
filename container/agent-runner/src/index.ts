@@ -33,6 +33,11 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  attachments?: Array<{
+    path: string; // Container-relative: attachments/{uuid}-{filename}
+    mimeType: string;
+    mode: 'inline' | 'file';
+  }>;
 }
 
 interface ContainerOutput {
@@ -53,9 +58,17 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
+type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+type DocumentMediaType = 'application/pdf';
+
+type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: ImageMediaType; data: string } }
+  | { type: 'document'; source: { type: 'base64'; media_type: DocumentMediaType; data: string }; title?: string };
+
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | ContentBlock[] };
   parent_tool_use_id: null;
   session_id: string;
 }
@@ -73,10 +86,10 @@ class MessageStream {
   private waiting: (() => void) | null = null;
   private done = false;
 
-  push(text: string): void {
+  push(content: string | ContentBlock[]): void {
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -384,7 +397,58 @@ async function runQuery(
   closedDuringQuery: boolean;
 }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+
+  // Build initial message: multimodal if inline attachments exist, text-only otherwise
+  const inlineAttachments = containerInput.attachments?.filter((a) => a.mode === 'inline') ?? [];
+  if (inlineAttachments.length === 0) {
+    stream.push(prompt);
+  } else {
+    const blocks: ContentBlock[] = [{ type: 'text', text: prompt }];
+    for (const att of inlineAttachments) {
+      try {
+        const filePath = `/workspace/group/${att.path}`;
+        const isImage = att.mimeType.startsWith('image/');
+        const isText = att.mimeType.startsWith('text/');
+        // Host validates MIME types before sending to container
+        if (isText) {
+          const text = fs.readFileSync(filePath, 'utf-8');
+          const filename = att.path.split('/').pop();
+          blocks.push({ type: 'text', text: `[File: ${filename}]\n${text}` });
+        } else if (isImage) {
+          const data = fs.readFileSync(filePath).toString('base64');
+          blocks.push({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: att.mimeType as ImageMediaType,
+              data,
+            },
+          });
+        } else {
+          // PDF or other document
+          const data = fs.readFileSync(filePath).toString('base64');
+          blocks.push({
+            type: 'document',
+            source: {
+              type: 'base64',
+              media_type: att.mimeType as DocumentMediaType,
+              data,
+            },
+            title: att.path.split('/').pop(),
+          });
+        }
+      } catch (err) {
+        log(
+          `Failed to read attachment ${att.path}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        blocks.push({
+          type: 'text',
+          text: `[Failed to read attachment: ${att.path}]`,
+        });
+      }
+    }
+    stream.push(blocks);
+  }
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;

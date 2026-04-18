@@ -97,3 +97,7 @@ function resolveConfigTimezone(): string {
   return 'UTC';
 }
 export const TIMEZONE = resolveConfigTimezone();
+
+// Attachment handling
+export const ATTACHMENT_MAX_SIZE = 15 * 1024 * 1024; // 15MB per file
+export const ATTACHMENT_MAX_PER_MESSAGE = 5;

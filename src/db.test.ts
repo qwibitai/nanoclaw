@@ -142,6 +142,145 @@ describe('storeMessage', () => {
   });
 });
 
+// --- attachment persistence ---
+
+describe('attachments', () => {
+  it('stores and retrieves attachments via storeMessage', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'att-1',
+      chat_jid: 'group@g.us',
+      sender: '123',
+      sender_name: 'Alice',
+      content: 'Check this out',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      attachments: [
+        { url: 'https://example.com/photo.jpg', filename: 'photo.jpg' },
+      ],
+    });
+
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].attachments).toHaveLength(1);
+    expect(messages[0].attachments![0].filename).toBe('photo.jpg');
+    expect(messages[0].attachments![0].url).toBe(
+      'https://example.com/photo.jpg',
+    );
+  });
+
+  it('returns undefined attachments for messages without them', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    store({
+      id: 'no-att',
+      chat_jid: 'group@g.us',
+      sender: '123',
+      sender_name: 'Alice',
+      content: 'Just text',
+      timestamp: '2024-01-01T00:00:01.000Z',
+    });
+
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].attachments).toBeUndefined();
+  });
+
+  it('retrieves attachment-only messages (empty content)', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'att-only',
+      chat_jid: 'group@g.us',
+      sender: '123',
+      sender_name: 'Alice',
+      content: '',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      attachments: [
+        { url: 'https://example.com/doc.pdf', filename: 'doc.pdf' },
+      ],
+    });
+
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].attachments).toHaveLength(1);
+  });
+
+  it('retrieves attachments via getNewMessages', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'att-2',
+      chat_jid: 'group@g.us',
+      sender: '456',
+      sender_name: 'Bob',
+      content: 'File attached',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      attachments: [
+        {
+          url: 'https://example.com/report.xlsx',
+          filename: 'report.xlsx',
+          mimeType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+      ],
+    });
+
+    const { messages } = getNewMessages(
+      ['group@g.us'],
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].attachments![0].filename).toBe('report.xlsx');
+  });
+});
+
+// --- allowAttachments round-trip ---
+
+describe('registered group allowAttachments', () => {
+  it('persists allowAttachments=true through set/get round-trip', () => {
+    setRegisteredGroup('att-group@g.us', {
+      name: 'Media Group',
+      folder: 'whatsapp_media-group',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      allowAttachments: true,
+    });
+
+    const groups = getAllRegisteredGroups();
+    const group = groups['att-group@g.us'];
+    expect(group).toBeDefined();
+    expect(group.allowAttachments).toBe(true);
+  });
+
+  it('omits allowAttachments for groups without it', () => {
+    setRegisteredGroup('no-att@g.us', {
+      name: 'Text Only',
+      folder: 'whatsapp_text-only',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const groups = getAllRegisteredGroups();
+    const group = groups['no-att@g.us'];
+    expect(group).toBeDefined();
+    expect(group.allowAttachments).toBeUndefined();
+  });
+});
+
 // --- reply context persistence ---
 
 describe('reply context', () => {

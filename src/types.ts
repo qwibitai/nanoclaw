@@ -27,6 +27,14 @@ export interface AllowedRoot {
   description?: string;
 }
 
+export interface Attachment {
+  url: string; // Download URL (channel-specific)
+  filename: string; // Original filename or fallback
+  mimeType?: string; // Channel-reported hint (validated later via magic bytes)
+  size?: number; // Optional size hint
+  authHeaders?: Record<string, string>; // Optional auth headers for download
+}
+
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
@@ -40,6 +48,7 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  allowAttachments?: boolean; // Default: false. Enable to download and process file attachments.
 }
 
 export interface NewMessage {
@@ -51,6 +60,7 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  attachments?: Attachment[];
   thread_id?: string;
   reply_to_message_id?: string;
   reply_to_message_content?: string;
