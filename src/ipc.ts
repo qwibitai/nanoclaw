@@ -13,7 +13,7 @@ import {
 } from './config.js';
 import { getChatIndex } from './chat-index.js';
 import { AvailableGroup, getFeishuToken } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { createTask, deleteTask, getTaskById, storeMessageDirect, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { MemoryStore } from './memory/memory-store.js';
@@ -165,6 +165,21 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
                   await deps.sendMessage(data.chatJid, data.text);
+                  // Bot 的 send_message 也存入 messages.db，供巡检和搜索使用
+                  try {
+                    storeMessageDirect({
+                      id: `ipc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                      chat_jid: data.chatJid,
+                      sender: data.sender || 'assistant',
+                      sender_name: data.sender || '二狗',
+                      content: data.text,
+                      timestamp: data.timestamp || new Date().toISOString(),
+                      is_from_me: true,
+                      is_bot_message: true,
+                    });
+                  } catch (storeErr) {
+                    logger.warn({ storeErr }, 'IPC send_message 入库失败，不影响发送');
+                  }
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
