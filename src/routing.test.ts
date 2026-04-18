@@ -1,4 +1,14 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// Mock browser modules that require optional native dependencies (generic-pool, playwright-core)
+vi.mock('./browser/session-manager.js', () => ({
+  BrowserSessionManager: vi.fn().mockImplementation(() => ({
+    shutdown: vi.fn().mockResolvedValue(undefined),
+  })),
+}));
+vi.mock('./browser/stagehand-bridge.js', () => ({
+  StagehandBridge: vi.fn().mockImplementation(() => ({})),
+}));
 
 import { _initTestDatabase, storeChatMetadata } from './db.js';
 import { getAvailableGroups, _setRegisteredGroups } from './index.js';

@@ -1,0 +1,2 @@
+#!/bin/bash
+exec /opt/homebrew/bin/node /Users/topcoder1/dev/nanoclaw/dist/index.js

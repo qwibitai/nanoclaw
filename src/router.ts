@@ -35,10 +35,62 @@ export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
-export function formatOutbound(rawText: string): string {
+/**
+ * Normalize confidence markers in agent output for channel delivery.
+ *
+ * The agent emits:
+ *   ✓ Verified: ...  — KNOWN fact with a source
+ *   ~ Unverified: ... — REMEMBERED claim
+ *   ? Unknown: ...   — unconfirmed claim
+ *
+ * For channels that support Unicode (WhatsApp, Telegram, Signal, Discord),
+ * the markers pass through unchanged. For plain-text channels, map to text.
+ */
+export function normalizeConfidenceMarkers(
+  text: string,
+  plainText: boolean = false,
+): string {
+  if (!plainText) return text;
+  return text
+    .replace(/^✓ Verified:/gm, '[confirmed]')
+    .replace(/^~ Unverified:/gm, '[from memory]')
+    .replace(/^\? Unknown:/gm, '[uncertain]');
+}
+
+export interface ConfidenceAnnotation {
+  claim: string;
+  confidence: 'verified' | 'unverified' | 'unknown';
+  source?: string;
+}
+
+export function addConfidenceMarkers(
+  text: string,
+  annotations: ConfidenceAnnotation[],
+): string {
+  if (annotations.length === 0) return text;
+
+  const footnotes: string[] = [];
+  for (const ann of annotations) {
+    const marker =
+      ann.confidence === 'verified'
+        ? '✓'
+        : ann.confidence === 'unverified'
+          ? '?'
+          : '~';
+    const sourceInfo = ann.source ? ` (${ann.source})` : '';
+    footnotes.push(`${marker} ${ann.claim}${sourceInfo}`);
+  }
+
+  return text + '\n\n' + footnotes.join('\n');
+}
+
+export function formatOutbound(
+  rawText: string,
+  plainText: boolean = false,
+): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
-  return text;
+  return normalizeConfidenceMarkers(text, plainText);
 }
 
 export function routeOutbound(

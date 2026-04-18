@@ -1,0 +1,43 @@
+# Browser Sidecar for NanoClaw
+#
+# Runs a Playwright server alongside agent containers.
+# Agents connect via Chrome DevTools Protocol at ws://browser-sidecar:9222.
+#
+# Usage:
+#   docker compose -f docker-compose.browser.yml up -d
+#
+# The sidecar exposes CDP on port 9222. Agent containers on the same
+# Docker network can connect to ws://browser-sidecar:9222.
+# From the host, connect to ws://localhost:9222.
+
+services:
+  browser-sidecar:
+    image: mcr.microsoft.com/playwright:v1.52.0-noble
+    command:
+      - npx
+      - playwright
+      - run-server
+      - --port=9222
+      - --host=0.0.0.0
+    ports:
+      - "127.0.0.1:9223:9222"
+    volumes:
+      - browser-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9222/json/version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 1536m
+    networks:
+      - nanoclaw
+
+networks:
+  nanoclaw:
+    name: nanoclaw
+    external: true
+
+volumes:
+  browser-data:

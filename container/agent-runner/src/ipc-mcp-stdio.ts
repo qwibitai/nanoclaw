@@ -41,9 +41,23 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
+  `Send a message immediately. By default sends to the current chat. Main group can send to any channel.
+
+Available channels and JID formats:
+• Telegram (current chat): omit target_jid
+• iMessage/SMS: target_jid = "im:+14155551234" (phone) or "im:user@icloud.com" (Apple ID)
+• Discord: target_jid = "dc:channel_id"
+• Email: use the Gmail MCP tools instead
+
+Use search_contacts to look up phone numbers before sending iMessage/SMS.`,
   {
     text: z.string().describe('The message text to send'),
+    target_jid: z
+      .string()
+      .optional()
+      .describe(
+        'Send to a different channel. E.g. "im:+14155551234" for iMessage/SMS. Main group only.',
+      ),
     sender: z
       .string()
       .optional()
@@ -52,9 +66,12 @@ server.tool(
       ),
   },
   async (args) => {
+    // Main group can target any JID; others can only send to their own chat
+    const targetJid = isMain && args.target_jid ? args.target_jid : chatJid;
+
     const data: Record<string, string | undefined> = {
       type: 'message',
-      chatJid,
+      chatJid: targetJid,
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,
@@ -63,7 +80,57 @@ server.tool(
 
     writeIpcFile(MESSAGES_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    const dest = targetJid === chatJid ? 'current chat' : targetJid;
+    return { content: [{ type: 'text' as const, text: `Message sent to ${dest}.` }] };
+  },
+);
+
+server.tool(
+  'relay_message',
+  `Relay a message to a different group/channel. Main group only.
+
+Use this to forward or send messages across channels — e.g., "send that to the family chat" or "forward this to the dev team".
+
+The target_group can be either the group's display name (e.g., "Family Chat") or its folder name (e.g., "telegram_family-chat"). Case-insensitive matching.`,
+  {
+    target_group: z
+      .string()
+      .describe(
+        'Name or folder of the target group (e.g., "Family Chat" or "telegram_dev-team")',
+      ),
+    text: z.string().describe('The message text to relay'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Only the main group can relay messages to other groups.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'relay_message',
+      targetGroup: args.target_group,
+      text: args.text,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Message relayed to "${args.target_group}".`,
+        },
+      ],
+    };
   },
 );
 
@@ -502,6 +569,149 @@ Use available_groups.json to find the JID for a group. The folder name must be c
     };
   },
 );
+
+server.tool(
+  'toggle_verbose',
+  'Toggle verbose mode for this group. When on, responses include a brief thinking summary before the answer. When off, responses are direct. Returns the new state.',
+  {
+    enabled: z
+      .boolean()
+      .optional()
+      .describe(
+        'Explicitly set verbose on (true) or off (false). Omit to toggle.',
+      ),
+  },
+  async (args) => {
+    const data = {
+      type: 'toggle_verbose',
+      chatJid,
+      groupFolder,
+      enabled: args.enabled,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    const stateLabel =
+      args.enabled === undefined
+        ? 'toggled'
+        : args.enabled
+          ? 'enabled'
+          : 'disabled';
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Verbose mode ${stateLabel}. The change takes effect on the next message.`,
+        },
+      ],
+    };
+  },
+);
+
+// --- Contacts lookup (reads macOS AddressBook mounted at /workspace/contacts) ---
+
+/**
+ * Find the Contacts database. macOS stores it under Sources/{UUID}/AddressBook-v22.abcddb.
+ */
+function findContactsDb(): string | null {
+  const sourcesDir = '/workspace/contacts/Sources';
+  try {
+    for (const entry of fs.readdirSync(sourcesDir)) {
+      const dbPath = path.join(sourcesDir, entry, 'AddressBook-v22.abcddb');
+      if (fs.existsSync(dbPath)) return dbPath;
+    }
+  } catch {
+    // Not mounted or no access
+  }
+  return null;
+}
+
+const contactsDbPath = findContactsDb();
+
+if (contactsDbPath) {
+  server.tool(
+    'search_contacts',
+    'Search the macOS Contacts (address book) for a person by name, phone number, or email. Returns matching contacts with all their phone numbers and email addresses.',
+    {
+      query: z
+        .string()
+        .describe(
+          'Search term — name, phone number, or email address (partial match supported)',
+        ),
+    },
+    async (args) => {
+      try {
+        // Use sqlite3 CLI with parameterized query to prevent SQL injection
+        const { execFileSync } = await import('child_process');
+        const likePattern = `%${args.query}%`;
+        const sql = `SELECT DISTINCT p.ZFIRSTNAME, p.ZLASTNAME, p.ZORGANIZATION,
+                      pn.ZFULLNUMBER, pe.ZADDRESS AS email
+               FROM ZABCDRECORD p
+               LEFT JOIN ZABCDPHONENUMBER pn ON pn.ZOWNER = p.Z_PK
+               LEFT JOIN ZABCDEMAILADDRESS pe ON pe.ZOWNER = p.Z_PK
+               WHERE p.ZFIRSTNAME LIKE :q OR p.ZLASTNAME LIKE :q
+                  OR pn.ZFULLNUMBER LIKE :q OR pe.ZADDRESS LIKE :q
+                  OR p.ZORGANIZATION LIKE :q
+               ORDER BY p.ZLASTNAME, p.ZFIRSTNAME
+               LIMIT 20;`;
+
+        const output = execFileSync('sqlite3', [
+          '-json', '-readonly', contactsDbPath,
+          '-cmd', `.param set :q '${likePattern.replace(/'/g, "''")}'`,
+          sql,
+        ], {
+          encoding: 'utf-8',
+          timeout: 5000,
+        });
+
+        const rows = JSON.parse(output || '[]') as Array<{
+          ZFIRSTNAME: string | null;
+          ZLASTNAME: string | null;
+          ZORGANIZATION: string | null;
+          ZFULLNUMBER: string | null;
+          email: string | null;
+        }>;
+
+        if (rows.length === 0) {
+          return {
+            content: [{ type: 'text' as const, text: `No contacts found for "${args.query}".` }],
+          };
+        }
+
+        // Group by person
+        const contacts = new Map<string, { name: string; org: string | null; phones: string[]; emails: string[] }>();
+        for (const r of rows) {
+          const name = [r.ZFIRSTNAME, r.ZLASTNAME].filter(Boolean).join(' ') || 'Unknown';
+          if (!contacts.has(name)) {
+            contacts.set(name, { name, org: r.ZORGANIZATION, phones: [], emails: [] });
+          }
+          const c = contacts.get(name)!;
+          if (r.ZFULLNUMBER && !c.phones.includes(r.ZFULLNUMBER)) c.phones.push(r.ZFULLNUMBER);
+          if (r.email && !c.emails.includes(r.email)) c.emails.push(r.email);
+        }
+
+        const lines = [...contacts.values()].map((c) => {
+          const parts = [`**${c.name}**`];
+          if (c.org) parts.push(`(${c.org})`);
+          if (c.phones.length > 0) parts.push(`Phone: ${c.phones.join(', ')}`);
+          if (c.emails.length > 0) parts.push(`Email: ${c.emails.join(', ')}`);
+          return parts.join(' — ');
+        });
+
+        return {
+          content: [{ type: 'text' as const, text: `Found ${contacts.size} contact(s):\n\n${lines.join('\n')}` }],
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: 'text' as const, text: `Contacts search error: ${err?.message || String(err)}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+}
 
 // Start the stdio transport
 const transport = new StdioServerTransport();
