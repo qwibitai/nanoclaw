@@ -12,6 +12,7 @@ import {
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
+  DEEP_MODE_MAX_DURATION,
   IDLE_TIMEOUT,
   ONECLI_API_KEY,
   ONECLI_URL,
@@ -44,6 +45,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  deepMode?: boolean;
 }
 
 export interface ContainerOutput {
@@ -443,7 +445,10 @@ export async function runContainerAgent(
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
     // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
     // graceful _close sentinel has time to trigger before the hard kill fires.
-    const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
+    // Deep mode uses a fixed ceiling based on DEEP_MODE_MAX_DURATION.
+    const timeoutMs = input.deepMode
+      ? DEEP_MODE_MAX_DURATION + 60_000
+      : Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
     const killOnTimeout = () => {
       timedOut = true;
@@ -464,11 +469,14 @@ export async function runContainerAgent(
 
     let timeout = setTimeout(killOnTimeout, timeoutMs);
 
-    // Reset the timeout whenever there's activity (streaming output)
-    const resetTimeout = () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(killOnTimeout, timeoutMs);
-    };
+    // Reset the timeout whenever there's activity (streaming output).
+    // In deep mode the ceiling is fixed — no resets (safety max).
+    const resetTimeout = input.deepMode
+      ? () => {}
+      : () => {
+          clearTimeout(timeout);
+          timeout = setTimeout(killOnTimeout, timeoutMs);
+        };
 
     container.on('close', (code) => {
       clearTimeout(timeout);

@@ -6,6 +6,8 @@ import { OneCLI } from '@onecli-sh/sdk';
 import {
   ASSISTANT_NAME,
   DEFAULT_TRIGGER,
+  DEEP_MODE_IDLE_TIMEOUT,
+  DEEP_MODE_MAX_DURATION,
   getTriggerPattern,
   GROUPS_DIR,
   IDLE_TIMEOUT,
@@ -77,6 +79,7 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+const pendingDeepMode = new Set<string>();
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -265,23 +268,48 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Processing messages',
   );
 
-  // Track idle timer for closing stdin when agent is idle
+  // Track idle timer for closing stdin when agent is idle.
+  // Deep mode uses a longer idle timeout to keep the container alive.
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let deepWatchdog: ReturnType<typeof setTimeout> | null = null;
 
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
+    const idleMs = queue.isDeepMode(chatJid)
+      ? DEEP_MODE_IDLE_TIMEOUT
+      : IDLE_TIMEOUT;
     idleTimer = setTimeout(() => {
       logger.debug(
-        { group: group.name },
+        { group: group.name, deepMode: queue.isDeepMode(chatJid) },
         'Idle timeout, closing container stdin',
       );
       queue.closeStdin(chatJid);
-    }, IDLE_TIMEOUT);
+    }, idleMs);
   };
+
+  // Safety watchdog: if deep mode is active, enforce absolute max duration
+  if (queue.isDeepMode(chatJid)) {
+    deepWatchdog = setTimeout(() => {
+      logger.warn(
+        { group: group.name },
+        'Deep mode max duration reached, closing container',
+      );
+      queue.exitDeepMode(chatJid);
+      pendingDeepMode.delete(chatJid);
+      queue.closeStdin(chatJid);
+    }, DEEP_MODE_MAX_DURATION);
+  }
 
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+
+  // Activate pending deep mode when the container starts
+  const isDeep = pendingDeepMode.has(chatJid) || queue.isDeepMode(chatJid);
+  if (pendingDeepMode.has(chatJid)) {
+    pendingDeepMode.delete(chatJid);
+    queue.enterDeepMode(chatJid);
+  }
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -308,10 +336,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (result.status === 'error') {
       hadError = true;
     }
-  });
+  }, isDeep);
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+  if (deepWatchdog) clearTimeout(deepWatchdog);
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -341,6 +370,7 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  deepMode?: boolean,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
@@ -392,6 +422,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        deepMode,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -435,6 +466,48 @@ async function runAgent(
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
+  }
+}
+
+/**
+ * Handle /deep and /end commands — toggle deep mode for a group's container.
+ * Deep mode suppresses idle timeout, keeping the container alive for extended
+ * work sessions (coding, research, document collaboration).
+ */
+async function handleDeepMode(
+  command: string,
+  chatJid: string,
+  channel: Channel,
+): Promise<void> {
+  if (command === '/deep') {
+    if (queue.isDeepMode(chatJid)) {
+      await channel.sendMessage(chatJid, 'Deep mode is already active.');
+      return;
+    }
+    // If no container is running yet, mark as pending so the next
+    // container launch picks it up.
+    pendingDeepMode.add(chatJid);
+    queue.enterDeepMode(chatJid);
+    const maxHours = DEEP_MODE_MAX_DURATION / 3_600_000;
+    await channel.sendMessage(
+      chatJid,
+      `Deep mode activated. Container will stay alive (up to ${maxHours}h). Send /end to exit.`,
+    );
+    logger.info({ chatJid }, 'Deep mode activated via /deep command');
+  } else {
+    // /end
+    if (!queue.isDeepMode(chatJid)) {
+      await channel.sendMessage(chatJid, 'Deep mode is not active.');
+      return;
+    }
+    pendingDeepMode.delete(chatJid);
+    queue.exitDeepMode(chatJid);
+    queue.closeStdin(chatJid);
+    await channel.sendMessage(
+      chatJid,
+      'Deep mode ended. Container will shut down after normal idle timeout.',
+    );
+    logger.info({ chatJid }, 'Deep mode deactivated via /end command');
   }
 }
 
@@ -644,6 +717,20 @@ async function main(): Promise<void> {
           logger.error({ err, chatJid }, 'Remote control command error'),
         );
         return;
+      }
+
+      // Deep mode commands — intercept before storage
+      if (trimmed === '/deep' || trimmed === '/end') {
+        const group = registeredGroups[chatJid];
+        if (group?.isMain || msg.is_from_me) {
+          const ch = findChannel(channels, chatJid);
+          if (ch) {
+            handleDeepMode(trimmed, chatJid, ch).catch((err) =>
+              logger.error({ err, chatJid }, 'Deep mode command error'),
+            );
+            return;
+          }
+        }
       }
 
       // Sender allowlist drop mode: discard messages from denied senders before storing

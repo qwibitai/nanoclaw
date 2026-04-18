@@ -25,6 +25,8 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  deepMode: boolean;
+  deepModeStarted: number;
 }
 
 export class GroupQueue {
@@ -49,6 +51,8 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        deepMode: false,
+        deepModeStarted: 0,
       };
       this.groups.set(groupJid, state);
     }
@@ -104,7 +108,7 @@ export class GroupQueue {
 
     if (state.active) {
       state.pendingTasks.push({ id: taskId, groupJid, fn });
-      if (state.idleWaiting) {
+      if (state.idleWaiting && !state.deepMode) {
         this.closeStdin(groupJid);
       }
       logger.debug({ groupJid, taskId }, 'Container active, task queued');
@@ -193,6 +197,25 @@ export class GroupQueue {
     }
   }
 
+  enterDeepMode(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    state.deepMode = true;
+    state.deepModeStarted = Date.now();
+    logger.info({ groupJid }, 'Deep mode activated');
+  }
+
+  exitDeepMode(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    state.deepMode = false;
+    state.deepModeStarted = 0;
+    logger.info({ groupJid }, 'Deep mode deactivated');
+  }
+
+  isDeepMode(groupJid: string): boolean {
+    const state = this.groups.get(groupJid);
+    return state?.deepMode ?? false;
+  }
+
   private async runForGroup(
     groupJid: string,
     reason: 'messages' | 'drain',
@@ -226,6 +249,8 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.deepMode = false;
+      state.deepModeStarted = 0;
       this.activeCount--;
       this.drainGroup(groupJid);
     }
