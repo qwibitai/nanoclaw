@@ -92,6 +92,7 @@ Skills that run inside the agent container, not on the host. These teach the con
 - Follow the same SKILL.md + frontmatter format
 - Use `allowed-tools` frontmatter to scope tool permissions
 - Keep them focused — the agent's context window is shared across all container skills
+- For persistent data (caches, auth state, preferences), use `$SKILL_DATA_DIR/<skill-name>/` — never write to `/workspace/group/` or `/tmp/` for data that should survive restarts
 
 ### SKILL.md format
 
