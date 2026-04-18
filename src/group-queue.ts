@@ -148,9 +148,10 @@ export class GroupQueue {
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
     state.idleWaiting = true;
-    if (state.pendingTasks.length > 0) {
-      this.closeStdin(groupJid);
-    }
+    // Always write _close so the container's for-await loop can exit its current
+    // query and transition to waitForIpcMessage. Without this the SDK generator
+    // never closes and the container gets stuck after every response.
+    this.closeStdin(groupJid);
   }
 
   /**
