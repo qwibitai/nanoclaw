@@ -21,6 +21,7 @@ import {
   query,
   HookCallback,
   PreCompactHookInput,
+  ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
