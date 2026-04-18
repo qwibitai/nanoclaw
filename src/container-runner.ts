@@ -26,6 +26,7 @@ import {
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
+import { readEnvFile } from './env.js';
 import { RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
@@ -241,6 +242,19 @@ async function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Forward optional API keys from .env to the container
+  const passthroughKeys = [
+    'GEMINI_API_KEY',
+    'BRAVE_SEARCH_API_KEY',
+    'NOTION_API_KEY',
+  ];
+  const passthroughEnv = readEnvFile(passthroughKeys);
+  for (const key of passthroughKeys) {
+    if (passthroughEnv[key]) {
+      args.push('-e', `${key}=${passthroughEnv[key]}`);
+    }
+  }
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.

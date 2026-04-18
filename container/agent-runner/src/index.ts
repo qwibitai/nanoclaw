@@ -470,6 +470,7 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__notion__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -485,6 +486,19 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...(process.env.NOTION_API_KEY
+          ? {
+              notion: {
+                command: 'notion-mcp-server',
+                env: {
+                  OPENAPI_MCP_HEADERS: JSON.stringify({
+                    Authorization: `Bearer ${process.env.NOTION_API_KEY}`,
+                    'Notion-Version': '2022-06-28',
+                  }),
+                },
+              },
+            }
+          : {}),
       },
       hooks: {
         PreCompact: [
