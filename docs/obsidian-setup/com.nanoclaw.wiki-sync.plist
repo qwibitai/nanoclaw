@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nanoclaw.wiki-sync</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <!-- Replace USERNAME with your Mac Mini username (run: echo $USER) -->
+        <string>/Users/USERNAME/wiki-sync.sh</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>120</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/nanoclaw-wiki-sync.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/nanoclaw-wiki-sync.log</string>
+</dict>
+</plist>

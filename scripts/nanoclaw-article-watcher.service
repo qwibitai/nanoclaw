@@ -1,0 +1,14 @@
+[Unit]
+Description=NanoClaw Article Watcher
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/snecvb/vbprojects/nanoclaw/scripts/watch-articles.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
