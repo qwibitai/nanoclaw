@@ -1,11 +1,17 @@
 ---
 name: add-voice-transcription
-description: Add voice message transcription to NanoClaw using OpenAI's Whisper API. Automatically transcribes WhatsApp voice notes so the agent can read and respond to them.
+description: Add voice message transcription to NanoClaw using OpenAI's Whisper API. Automatically transcribes voice notes so the agent can read and respond to them. Supports Telegram and WhatsApp channels.
 ---
 
 # Add Voice Transcription
 
-This skill adds automatic voice message transcription to NanoClaw's WhatsApp channel using OpenAI's Whisper API. When a voice note arrives, it is downloaded, transcribed, and delivered to the agent as `[Voice: <transcript>]`.
+This skill adds automatic voice message transcription to NanoClaw using OpenAI's Whisper API. When a voice note arrives, it is transcribed and delivered to the agent as `[Voice: <transcript>]`.
+
+**Channel support:** Telegram and WhatsApp.
+- **Telegram:** Built into the Telegram channel — no extra code changes needed if `src/transcription.ts` exists.
+- **WhatsApp:** Requires the WhatsApp channel to be installed first (`skill/whatsapp` merged).
+
+> **Prefer local transcription?** Use the `use-local-whisper` skill instead — no API key, no cost, fully on-device via whisper.cpp.
 
 ## Phase 1: Pre-flight
 
@@ -21,7 +27,9 @@ AskUserQuestion: Do you have an OpenAI API key for Whisper transcription?
 
 If yes, collect it now. If no, direct them to create one at https://platform.openai.com/api-keys.
 
-## Phase 2: Apply Code Changes
+## Phase 2: Apply Code Changes (WhatsApp only)
+
+Skip this phase if you are only setting up Telegram — `src/transcription.ts` already handles Telegram via `transcribeAudioBuffer(buffer, filename)`.
 
 **Prerequisite:** WhatsApp must be installed first (`skill/whatsapp` merged). This skill modifies WhatsApp channel files.
 
@@ -49,7 +57,6 @@ git merge whatsapp/skill/voice-transcription || {
 ```
 
 This merges in:
-- `src/transcription.ts` (voice transcription module using OpenAI Whisper)
 - Voice handling in `src/channels/whatsapp.ts` (isVoiceMessage check, transcribeAudioMessage call)
 - Transcription tests in `src/channels/whatsapp.test.ts`
 - `openai` npm dependency in `package.json`
@@ -105,7 +112,7 @@ The container reads environment from `data/env/env`, not `.env` directly.
 ```bash
 npm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+# Linux: kill -TERM $(pgrep -f "nanoclaw/dist/index.js")  # systemd restarts automatically
 ```
 
 ## Phase 4: Verify
@@ -114,7 +121,7 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 
 Tell the user:
 
-> Send a voice note in any registered WhatsApp chat. The agent should receive it as `[Voice: <transcript>]` and respond to its content.
+> Send a voice note in any registered chat. The agent should receive it as `[Voice: <transcript>]` and respond to its content.
 
 ### Check logs if needed
 
