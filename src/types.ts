@@ -82,6 +82,9 @@ export interface TaskRunLog {
   error: string | null;
 }
 
+// LCM types (LcmMessage, LcmSummary) are defined in container/agent-runner/src/lcm-store.ts
+// as the single source of truth — they run inside the container only.
+
 // --- Channel abstraction ---
 
 export interface Channel {
