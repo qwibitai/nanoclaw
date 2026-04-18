@@ -63,6 +63,7 @@ beforeEach(() => {
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
     onTasksChanged: () => {},
+    triggerCompact: async () => {},
   };
 });
 

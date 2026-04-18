@@ -582,6 +582,23 @@ async function runScript(script: string): Promise<ScriptResult | null> {
   });
 }
 
+function healDanglingSession(sessionId: string): void {
+  const sessionPath = `/home/node/.claude/projects/-workspace-group/${sessionId}.jsonl`;
+  if (!fs.existsSync(sessionPath)) return;
+  try {
+    const lines = fs.readFileSync(sessionPath, 'utf-8').split('\n').filter(l => l.trim());
+    if (lines.length === 0) return;
+    const last = JSON.parse(lines[lines.length - 1]);
+    if (last.type === 'user') {
+      log(`Healing dangling session ${sessionId}: removing trailing user turn`);
+      fs.writeFileSync(sessionPath, lines.slice(0, -1).join('\n') + '\n', 'utf-8');
+      log('Session healed');
+    }
+  } catch (err) {
+    log(`Failed to heal session: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 async function main(): Promise<void> {
   let containerInput: ContainerInput;
 
@@ -607,6 +624,32 @@ async function main(): Promise<void> {
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
+  if (sessionId) {
+    const sessionPath = `/home/node/.claude/projects/-workspace-group/${sessionId}.jsonl`;
+    const MAX_SESSION_BYTES = 5 * 1024 * 1024; // 5 MB
+    try {
+      const stat = fs.statSync(sessionPath);
+      if (stat.size > MAX_SESSION_BYTES) {
+        log(`Session JSONL is ${Math.round(stat.size / 1024 / 1024)}MB — exceeds limit, consolidating memory then starting fresh session`);
+        try {
+          await runQuery(
+            'Session is about to be reset due to size. Review this conversation and store any important facts, preferences, decisions, or insights using `mnemon remember "content" --cat <category> --imp <1-5>`. Call it once per distinct item. If nothing notable, just respond "done".',
+            sessionId,
+            mcpServerPath,
+            containerInput,
+            sdkEnv,
+            undefined,
+            true,
+          );
+          log('Pre-reset memory consolidation complete');
+        } catch (err) {
+          log(`Pre-reset memory consolidation failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        sessionId = undefined;
+      }
+    } catch { /* file may not exist yet */ }
+  }
+  if (sessionId) healDanglingSession(sessionId);
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
   // Clean up stale _close sentinel from previous container runs

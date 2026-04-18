@@ -23,6 +23,7 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  triggerCompact: (groupFolder: string) => Promise<void>;
 }
 
 let ipcWatcherRunning = false;
@@ -460,6 +461,11 @@ export async function processTaskIpc(
           'Invalid register_group request - missing required fields',
         );
       }
+      break;
+
+    case 'compact':
+      logger.info({ sourceGroup }, 'Auto-compact requested via Stop hook');
+      await deps.triggerCompact(sourceGroup);
       break;
 
     default:
