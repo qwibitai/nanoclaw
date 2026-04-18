@@ -80,6 +80,36 @@ const queue = new GroupQueue();
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
+// Deduplication: prevent the same message from being sent twice within a short window.
+// This happens when the agent uses send_message (IPC) AND returns the same text as output.
+const recentSends = new Map<string, number>();
+const DEDUP_WINDOW_MS = 5000;
+function deduplicatedSend(
+  jid: string,
+  text: string,
+): Promise<void> | undefined {
+  const key = `${jid}:${text.slice(0, 200)}`;
+  const now = Date.now();
+  const lastSent = recentSends.get(key);
+  if (lastSent && now - lastSent < DEDUP_WINDOW_MS) {
+    logger.debug({ jid }, 'Duplicate message suppressed');
+    return undefined;
+  }
+  recentSends.set(key, now);
+  // Prune old entries
+  if (recentSends.size > 100) {
+    for (const [k, ts] of recentSends) {
+      if (now - ts > DEDUP_WINDOW_MS) recentSends.delete(k);
+    }
+  }
+  const channel = findChannel(channels, jid);
+  if (!channel) {
+    logger.warn({ jid }, 'No channel owns JID, cannot send message');
+    return undefined;
+  }
+  return channel.sendMessage(jid, text);
+}
+
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
   if (group.isMain) return;
   const identifier = group.folder.toLowerCase().replace(/_/g, '-');
@@ -280,6 +310,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   await channel.setTyping?.(chatJid, true);
+  await deduplicatedSend(chatJid, 'Got it, working on it...');
   let hadError = false;
   let outputSentToUser = false;
 
@@ -294,7 +325,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        await deduplicatedSend(chatJid, text);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -703,20 +734,13 @@ async function main(): Promise<void> {
     onProcess: (groupJid, proc, containerName, groupFolder) =>
       queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) {
-        logger.warn({ jid }, 'No channel owns JID, cannot send message');
-        return;
-      }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (text) await deduplicatedSend(jid, text);
     },
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      return deduplicatedSend(jid, text) ?? Promise.resolve();
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
