@@ -1378,6 +1378,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // 启动时同步一次群列表（获取飞书群名等元数据）
+  Promise.all(
+    channels.filter((ch) => ch.syncGroups).map((ch) => ch.syncGroups!(false)),
+  ).catch((err) => logger.warn({ err }, '启动时群列表同步失败'));
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,

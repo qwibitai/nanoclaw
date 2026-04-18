@@ -43,7 +43,7 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
+  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.\n\nMain group only: set target_chat_jid to send a message to a different group (cross-group messaging).",
   {
     text: z.string().describe('The message text to send'),
     sender: z
@@ -52,11 +52,20 @@ server.tool(
       .describe(
         'Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.',
       ),
+    target_chat_jid: z
+      .string()
+      .optional()
+      .describe(
+        '(Main group only) JID of the target group to send the message to. If omitted, sends to the current group.',
+      ),
   },
   async (args) => {
+    // 跨群发消息仅 main group 可用
+    const targetJid = isMain && args.target_chat_jid ? args.target_chat_jid : chatJid;
+
     const data: Record<string, string | undefined> = {
       type: 'message',
-      chatJid,
+      chatJid: targetJid,
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,
@@ -65,7 +74,8 @@ server.tool(
 
     writeIpcFile(MESSAGES_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    const targetNote = targetJid !== chatJid ? ` (to ${targetJid})` : '';
+    return { content: [{ type: 'text' as const, text: `Message sent${targetNote}.` }] };
   },
 );
 
