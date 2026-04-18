@@ -58,6 +58,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  storeMessageDirect,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
@@ -446,6 +447,22 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           ? JSON.stringify({ title: result.result, detail: result.detail })
           : result.result;
         await channel.sendMessage(chatJid, payload);
+        // tool_use 摘要存入 messages.db（供巡检和搜索使用）
+        // result.result 格式如 "🔧 Bash: ls -la"，已含工具名和简短输入
+        if (result.progressType === 'tool_use' && result.result) {
+          try {
+            storeMessageDirect({
+              id: `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              chat_jid: chatJid,
+              sender: ASSISTANT_NAME,
+              sender_name: ASSISTANT_NAME,
+              content: result.result,
+              timestamp: new Date().toISOString(),
+              is_from_me: true,
+              is_bot_message: true,
+            });
+          } catch { /* 入库失败不影响主流程 */ }
+        }
         return;
       }
 
