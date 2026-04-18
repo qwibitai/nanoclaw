@@ -20,7 +20,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "triage:bootstrap": "tsx scripts/triage-bootstrap.ts",
-    "qa:check": "tsx scripts/qa-check.ts"
+    "qa:check": "tsx scripts/qa-check.ts",
+    "qa:monitor": "tsx scripts/qa-monitor.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.69",
