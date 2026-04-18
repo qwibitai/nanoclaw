@@ -44,14 +44,18 @@ Read the allowed tools from your SDK configuration. You always have access to:
 ### 3. MCP server tools
 
 The AgentLite MCP server exposes these tools (via `mcp__agentlite__*` prefix):
-- `send_message` — send a message to the user/group
-- `schedule_task` — schedule a recurring or one-time task
-- `list_tasks` — list scheduled tasks
+- `send_message` — send a message to the user/group immediately (optional `sender` for identity labeling)
+- `schedule_task` — schedule a recurring or one-time task (cron / interval / once; group or isolated context)
+- `list_tasks` — list scheduled tasks (main sees all, other groups see their own)
 - `pause_task` — pause a scheduled task
 - `resume_task` — resume a paused task
 - `cancel_task` — cancel and delete a task
-- `update_task` — update an existing task
+- `update_task` — update an existing task's prompt or schedule
 - `register_group` — register a new chat/group (main only)
+- `search_actions` — discover custom host-side actions (ToolSearch-style query; use before call_action)
+- `call_action` — invoke a host-side action by name with a payload (synchronous; blocks until host returns)
+
+Host-side actions (reached via `search_actions` + `call_action`) include the `acp_*` family when ACP peers are configured. Run `search_actions` with a relevant query to list what's live on this host.
 
 ### 4. Container skills (Bash tools)
 
@@ -84,7 +88,7 @@ Present the report as a clean, readable message. Example:
 • Core: Bash, Read, Write, Edit, Glob, Grep
 • Web: WebSearch, WebFetch
 • Orchestration: Task, TeamCreate, SendMessage
-• MCP: send_message, schedule_task, list_tasks, pause/resume/cancel/update_task, register_group
+• MCP: send_message, schedule_task, list_tasks, pause/resume/cancel/update_task, register_group, search_actions, call_action
 
 *Container Tools:*
 • agent-browser: ✓

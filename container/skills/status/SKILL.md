@@ -50,7 +50,7 @@ Confirm which tool families are available to you:
 - **Core:** Bash, Read, Write, Edit, Glob, Grep
 - **Web:** WebSearch, WebFetch
 - **Orchestration:** Task, TaskOutput, TaskStop, TeamCreate, TeamDelete, SendMessage
-- **MCP:** mcp__agentlite__* (send_message, schedule_task, list_tasks, pause_task, resume_task, cancel_task, update_task, register_group)
+- **MCP:** mcp__agentlite__* (send_message, schedule_task, list_tasks, pause_task, resume_task, cancel_task, update_task, register_group, search_actions, call_action)
 
 ### 4. Container utilities
 
