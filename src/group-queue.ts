@@ -66,6 +66,14 @@ export class GroupQueue {
 
     if (state.active) {
       state.pendingMessages = true;
+      // If a task container is idle, close it so messages can be processed
+      if (state.idleWaiting && state.isTaskContainer) {
+        logger.info(
+          { groupJid },
+          'Closing idle task container for pending messages',
+        );
+        this.closeStdin(groupJid);
+      }
       logger.debug({ groupJid }, 'Container active, message queued');
       return;
     }
