@@ -113,6 +113,8 @@ function startScheduler(
         'team@g.us': TEAM_GROUP,
       },
     getSessions: () => ({}),
+    actionsHttp: agent.actionsHttp,
+    getMcpServers: () => agent.config.mcpServers,
     queue: queue as unknown as import('./group-queue.js').GroupQueue,
     onProcess: () => {},
     sendMessage: vi.fn(async () => {}),
@@ -247,6 +249,8 @@ describe('task lifecycle integration', () => {
       queue: queue as any,
       onProcess: () => {},
       sendMessage,
+      actionsHttp: agent.actionsHttp,
+      getMcpServers: () => agent.config.mcpServers,
     });
 
     try {
@@ -374,6 +378,8 @@ describe('task lifecycle integration', () => {
       onProcess: () => {},
       sendMessage: vi.fn(async () => {}),
       emit: agent.emit.bind(agent) as any,
+      actionsHttp: agent.actionsHttp,
+      getMcpServers: () => agent.config.mcpServers,
     });
 
     try {
@@ -451,6 +457,8 @@ describe('task lifecycle integration', () => {
       onProcess: () => {},
       sendMessage: vi.fn(async () => {}),
       emit: agent.emit.bind(agent) as any,
+      actionsHttp: agent.actionsHttp,
+      getMcpServers: () => agent.config.mcpServers,
     });
 
     try {
@@ -665,5 +673,141 @@ describe('task lifecycle integration', () => {
       },
       task: { prompt: 'revised', scheduleValue: '*/10 * * * *' },
     });
+  });
+
+  // ── Regression: scheduler must pass actions/mcp/agentId to container ──
+  // History: runTask originally omitted these, so scheduled tasks launched
+  // without the actions HTTP channel or user MCP servers, and container
+  // names dropped the agent prefix → collisions in multi-agent setups.
+
+  it('passes actionsAuth, agentId, and mcpServers from scheduler deps to runContainerAgent', async () => {
+    const agent = makeReadyAgent('wired');
+    // Give the agent a custom MCP server so we can see it flow through.
+    (agent.config as { mcpServers: unknown }).mcpServers = {
+      demo: { source: '/tmp/demo', command: 'node', args: ['server.js'] },
+    };
+    // Mint a fake actionsAuth by stubbing the actionsHttp method. The
+    // test doesn't start the actions HTTP listener.
+    const mintSpy = vi
+      .spyOn(agent.actionsHttp, 'mintContainerToken')
+      .mockReturnValue({ url: 'http://10.0.0.7:9999', token: 'tok-test' });
+
+    vi.mocked(runContainerAgent).mockImplementation(async () => ({
+      status: 'success',
+      result: 'ok',
+    }));
+
+    const task = await agent.scheduleTask({
+      jid: 'team@g.us',
+      prompt: 'ping',
+      scheduleType: 'once',
+      scheduleValue: '2024-01-01T00:00:00Z',
+    });
+
+    const queue = immediateQueue();
+    const handle = startScheduler(agent, queue);
+    try {
+      await vi.waitFor(() => {
+        expect(runContainerAgent).toHaveBeenCalled();
+      });
+
+      expect(mintSpy).toHaveBeenCalledWith('team', false);
+
+      const input = vi.mocked(runContainerAgent).mock.calls[0][1];
+      expect(input).toMatchObject({
+        agentId: agent.id,
+        actionsAuth: { url: 'http://10.0.0.7:9999', token: 'tok-test' },
+        isScheduledTask: true,
+      });
+      // buildMcpRuntimeConfig drops `source` and resolves node entries.
+      expect(input.mcpServers).toEqual({
+        demo: {
+          command: 'node',
+          args: ['/home/node/.claude/mcp/demo/server.js'],
+          env: undefined,
+        },
+      });
+      // task.id is unused in the assertion but kept to silence no-unused.
+      expect(task.id).toBeTruthy();
+    } finally {
+      handle.stop();
+    }
+  });
+
+  it('omits actionsAuth when mintContainerToken returns null (server stopped)', async () => {
+    const agent = makeReadyAgent('no-auth');
+    vi.spyOn(agent.actionsHttp, 'mintContainerToken').mockReturnValue(null);
+
+    vi.mocked(runContainerAgent).mockImplementation(async () => ({
+      status: 'success',
+      result: 'ok',
+    }));
+
+    await agent.scheduleTask({
+      jid: 'team@g.us',
+      prompt: 'ping',
+      scheduleType: 'once',
+      scheduleValue: '2024-01-01T00:00:00Z',
+    });
+
+    const queue = immediateQueue();
+    const handle = startScheduler(agent, queue);
+    try {
+      await vi.waitFor(() => {
+        expect(runContainerAgent).toHaveBeenCalled();
+      });
+      const input = vi.mocked(runContainerAgent).mock.calls[0][1];
+      expect(input.actionsAuth).toBeUndefined();
+    } finally {
+      handle.stop();
+    }
+  });
+
+  it('reflects live setMcpServers() changes via the scheduler getMcpServers getter', async () => {
+    // The scheduler reads mcpServers through a getter so runtime mutations
+    // propagate to the next task spawn. We verify both the getter
+    // behavior and the underlying mock call — no scheduler tick dance,
+    // since that's covered by other tests in this file.
+    const agent = makeReadyAgent('live-mcp');
+    vi.spyOn(agent.actionsHttp, 'mintContainerToken').mockReturnValue(null);
+
+    vi.mocked(runContainerAgent).mockImplementation(async () => ({
+      status: 'success',
+      result: 'ok',
+    }));
+
+    // Schedule the task BEFORE starting the loop so the very first poll
+    // picks it up.
+    await agent.scheduleTask({
+      jid: 'team@g.us',
+      prompt: 'first',
+      scheduleType: 'once',
+      scheduleValue: '2024-01-01T00:00:00Z',
+    });
+
+    // Mutate config AFTER scheduling but BEFORE running: the scheduler's
+    // getMcpServers() closure resolves to the live reference.
+    (agent.config as { mcpServers: unknown }).mcpServers = {
+      late: { source: '/tmp/late', command: 'python', args: ['main.py'] },
+    };
+
+    const queue = immediateQueue();
+    const handle = startScheduler(agent, queue);
+    try {
+      await vi.waitFor(() => {
+        expect(runContainerAgent).toHaveBeenCalled();
+      });
+      expect(
+        vi.mocked(runContainerAgent).mock.calls.at(-1)![1].mcpServers,
+      ).toEqual({
+        late: {
+          command: 'python',
+          args: ['main.py'],
+          env: undefined,
+        },
+      });
+    } finally {
+      handle.stop();
+    }
   });
 });
