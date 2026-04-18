@@ -2,8 +2,10 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, execSync, spawn } from 'child_process';
+import { randomUUID } from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -15,7 +17,11 @@ import {
   IDLE_TIMEOUT,
   ONECLI_API_KEY,
   ONECLI_URL,
+  SUPERPILOT_API_URL,
+  SUPERPILOT_MCP_URL,
   TIMEZONE,
+  TRUST_GATEWAY_URL,
+  BROWSER_CDP_URL,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -26,10 +32,16 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
+
+// Track which gmail account directories we've already logged the
+// "skipping mount, no credentials.json" warning for, so the operator
+// gets one nudge per process lifetime instead of one per spawn.
+const gmailSkipLoggedFor = new Set<string>();
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -44,6 +56,10 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  verbose?: boolean;
+  provider?: 'anthropic' | 'openai' | 'google' | 'ollama' | 'groq' | 'together';
+  model?: string;
+  providerBaseUrl?: string;
 }
 
 export interface ContainerOutput {
@@ -51,12 +67,33 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** Real API cost reported by the SDK's result message (USD). */
+  totalCostUsd?: number;
+  /** Token usage reported by the SDK's result message. */
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+  /** Number of turns in this SDK query (for diagnostics). */
+  numTurns?: number;
+  /**
+   * Short human-readable label for in-flight work (e.g. "Reading Gmail
+   * thread"). Emitted when a tool_use block is detected. Host edits the
+   * in-place "⏳ working" message with this. Always paired with result=null.
+   */
+  progressLabel?: string;
 }
 
 interface VolumeMount {
   hostPath: string;
   containerPath: string;
   readonly: boolean;
+  /** If true, mount failure won't prevent container from starting. */
+  optional?: boolean;
+  /** Internal: set to true on retry to skip this mount. */
+  _skip?: boolean;
 }
 
 function buildVolumeMounts(
@@ -185,6 +222,46 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Gmail credentials directories (multi-account: personal, whoisxml/jonathan,
+  // attaxion, dev). Only mount accounts that have a credentials.json — mounting
+  // a directory with only gcp-oauth.keys.json gives the gmail-mcp something
+  // to discover but no usable token, which produces confusing "no credentials"
+  // errors when the agent first tries to call a Gmail tool. Better to omit
+  // the mount entirely so the gmail-mcp never sees a half-configured directory.
+  //
+  // NOTE: The in-container @gongrzhe/server-gmail-autoauth-mcp package is
+  // hard-coded to a single account directory (~/.gmail-mcp), so the jonathan,
+  // attaxion, and dev mounts are reserved for a future per-account MCP launcher
+  // and are currently inert from the agent's perspective. Personal is the only
+  // reachable account today.
+  const homeDir = os.homedir();
+  const gmailDirs = [
+    { hostDir: '.gmail-mcp', containerDir: '.gmail-mcp' },
+    { hostDir: '.gmail-mcp-jonathan', containerDir: '.gmail-mcp-jonathan' },
+    { hostDir: '.gmail-mcp-attaxion', containerDir: '.gmail-mcp-attaxion' },
+    { hostDir: '.gmail-mcp-dev', containerDir: '.gmail-mcp-dev' },
+  ];
+  for (const gd of gmailDirs) {
+    const gmailDir = path.join(homeDir, gd.hostDir);
+    const credsFile = path.join(gmailDir, 'credentials.json');
+    if (fs.existsSync(gmailDir) && fs.existsSync(credsFile)) {
+      mounts.push({
+        hostPath: gmailDir,
+        containerPath: `/home/node/${gd.containerDir}`,
+        readonly: false, // MCP may need to refresh OAuth tokens
+        optional: true,
+      });
+    } else if (fs.existsSync(gmailDir)) {
+      if (!gmailSkipLoggedFor.has(gmailDir)) {
+        gmailSkipLoggedFor.add(gmailDir);
+        logger.info(
+          { gmailDir },
+          'Gmail account directory present but no credentials.json — skipping mount (account not authorized yet; run gmail-mcp auth flow to enable)',
+        );
+      }
+    }
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -230,6 +307,48 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // macOS Contacts database (readonly) — enables contact lookup from agents.
+  // Docker Desktop may not have permission to mount from ~/Library/Application Support.
+  // Export a copy to a Docker-accessible location instead.
+  const addressBookDir = path.join(
+    homeDir,
+    'Library',
+    'Application Support',
+    'AddressBook',
+  );
+  const contactsCacheDir = path.join(DATA_DIR, 'contacts-cache');
+  try {
+    if (fs.existsSync(addressBookDir)) {
+      const sourcesDir = path.join(addressBookDir, 'Sources');
+      const cachedSourcesDir = path.join(contactsCacheDir, 'Sources');
+      if (fs.existsSync(sourcesDir)) {
+        // Only re-copy if the source DB is newer than the cache (staleness check)
+        let needsCopy = !fs.existsSync(cachedSourcesDir);
+        if (!needsCopy) {
+          const srcStat = fs.statSync(sourcesDir);
+          const cacheStat = fs.statSync(cachedSourcesDir);
+          needsCopy = srcStat.mtimeMs > cacheStat.mtimeMs;
+        }
+        if (needsCopy) {
+          fs.mkdirSync(contactsCacheDir, { recursive: true });
+          fs.cpSync(sourcesDir, cachedSourcesDir, { recursive: true });
+          logger.debug('Contacts cache refreshed');
+        }
+        mounts.push({
+          hostPath: contactsCacheDir,
+          containerPath: '/workspace/contacts',
+          readonly: true,
+          optional: true,
+        });
+      }
+    }
+  } catch (err) {
+    logger.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Contacts cache copy failed — search_contacts will be unavailable',
+    );
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -237,34 +356,294 @@ function buildVolumeMounts(
       group.name,
       isMain,
     );
-    mounts.push(...validatedMounts);
+    mounts.push(...validatedMounts.map((m) => ({ ...m, optional: true })));
   }
 
   return mounts;
 }
 
+/**
+ * Usage-aware OAuth token routing across multiple Max subscriptions.
+ * Tracks per-token cost and rate-limit events to distribute load optimally.
+ */
+interface TokenStats {
+  costUsd: number; // Accumulated cost this period
+  requests: number; // Number of container spawns
+  rateLimitedUntil: number; // Timestamp — deprioritize until this time
+  lastUsed: number; // Timestamp of last use
+}
+
+const oauthTokenStats = new Map<string, TokenStats>();
+let oauthTokenCache: { tokens: string[]; expiresAt: number } = {
+  tokens: [],
+  expiresAt: 0,
+};
+const OAUTH_CACHE_TTL_MS = 5 * 60 * 1000;
+const RATE_LIMIT_COOLDOWN_MS = 10 * 60 * 1000; // 10 min cooldown on rate limit
+const COST_RESET_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+let costPeriodStart = Date.now();
+
+function refreshOAuthTokens(): string[] {
+  try {
+    const pids = execSync('pgrep -f "claude"', {
+      encoding: 'utf-8',
+      timeout: 5000,
+    })
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .slice(0, 40);
+
+    const tokens = new Set<string>();
+    for (const pid of pids) {
+      try {
+        const env = execSync(`ps eww ${pid}`, {
+          encoding: 'utf-8',
+          timeout: 3000,
+        });
+        const match = env.match(/CLAUDE_CODE_OAUTH_TOKEN=(sk-ant-oat01-\S+)/);
+        if (match) tokens.add(match[1]);
+      } catch {
+        continue;
+      }
+    }
+    return [...tokens];
+  } catch (err) {
+    logger.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'OAuth token scan failed',
+    );
+    return [];
+  }
+}
+
+function getTokenStats(token: string): TokenStats {
+  let stats = oauthTokenStats.get(token);
+  if (!stats) {
+    stats = { costUsd: 0, requests: 0, rateLimitedUntil: 0, lastUsed: 0 };
+    oauthTokenStats.set(token, stats);
+  }
+  return stats;
+}
+
+export function getNextOAuthToken(): string | null {
+  const now = Date.now();
+
+  // Daily cost reset — prevents routing from converging to random as all
+  // tokens accumulate similar lifetime costs.
+  if (now - costPeriodStart >= COST_RESET_INTERVAL_MS) {
+    for (const stats of oauthTokenStats.values()) {
+      stats.costUsd = 0;
+      stats.requests = 0;
+    }
+    costPeriodStart = now;
+    logger.info('Token cost stats reset (24h period)');
+  }
+
+  if (now >= oauthTokenCache.expiresAt) {
+    const tokens = refreshOAuthTokens();
+    oauthTokenCache = { tokens, expiresAt: now + OAUTH_CACHE_TTL_MS };
+    // Clean up stats for tokens that no longer exist
+    for (const key of oauthTokenStats.keys()) {
+      if (!tokens.includes(key)) oauthTokenStats.delete(key);
+    }
+    if (tokens.length > 0) {
+      logger.info(
+        { count: tokens.length },
+        `Found ${tokens.length} Max subscription OAuth token(s)`,
+      );
+    }
+  }
+
+  const { tokens } = oauthTokenCache;
+  if (tokens.length === 0) return null;
+  if (tokens.length === 1) {
+    const stats = getTokenStats(tokens[0]);
+    stats.requests++;
+    stats.lastUsed = now;
+    return tokens[0];
+  }
+
+  // Pick the token with the lowest effective score.
+  // Score = accumulated cost + rate-limit penalty.
+  // Rate-limited tokens get a large penalty until cooldown expires.
+  let bestToken = tokens[0];
+  let bestScore = Infinity;
+
+  for (const token of tokens) {
+    const stats = getTokenStats(token);
+    let score = stats.costUsd;
+    if (now < stats.rateLimitedUntil) {
+      score += 1000; // Heavy penalty — avoid rate-limited tokens
+    }
+    if (score < bestScore) {
+      bestScore = score;
+      bestToken = token;
+    }
+  }
+
+  const stats = getTokenStats(bestToken);
+  stats.requests++;
+  stats.lastUsed = now;
+  return bestToken;
+}
+
+/**
+ * Report cost for a token after a container run completes.
+ * Called from runContainerAgent to update per-token usage stats.
+ */
+export function reportTokenUsage(token: string, costUsd: number): void {
+  const stats = getTokenStats(token);
+  stats.costUsd += costUsd;
+}
+
+/**
+ * Mark a token as rate-limited. Called when a container error
+ * suggests the token hit a usage or rate limit.
+ */
+export function markTokenRateLimited(token: string): void {
+  const stats = getTokenStats(token);
+  stats.rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+  logger.warn(
+    {
+      tokenPrefix: token.slice(0, 20) + '...',
+      cooldownMs: RATE_LIMIT_COOLDOWN_MS,
+    },
+    'Token rate-limited, deprioritizing',
+  );
+}
+
+/** Check if an error message indicates a rate limit or usage limit. */
+function isRateLimitError(errorMsg: string): boolean {
+  const lower = errorMsg.toLowerCase();
+  return (
+    lower.includes('rate limit') ||
+    lower.includes('rate_limit') ||
+    lower.includes('429') ||
+    lower.includes('too many requests') ||
+    lower.includes('usage limit') ||
+    lower.includes('quota exceeded') ||
+    lower.includes('overloaded')
+  );
+}
+
 async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  isMain: boolean,
   agentIdentifier?: string,
-): Promise<string[]> {
+): Promise<{
+  args: string[];
+  oauthToken: string | null;
+  envFilePath: string | null;
+}> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+
+  // Connect to nanoclaw Docker network for sidecar access
+  args.push('--network', 'nanoclaw');
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // OneCLI gateway handles credential injection — containers never see real secrets.
-  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
+  // Superpilot MCP and service tokens — all groups need these so agents
+  // can access superpilot tools, Discord, and mark items as processed
+  // regardless of which channel the container was spawned from.
+  args.push('-e', `SUPERPILOT_MCP_URL=${SUPERPILOT_MCP_URL}`);
+  args.push('-e', `SUPERPILOT_API_URL=${SUPERPILOT_API_URL}`);
+  // Trust gateway — containers call this before executing write/transact ops
+  args.push('-e', `TRUST_GATEWAY_URL=${TRUST_GATEWAY_URL}`);
+  // Browser sidecar — CDP endpoint for browser automation
+  // Containers on the Docker network connect via the service name, not localhost
+  const containerCdpUrl = BROWSER_CDP_URL.replace(
+    'localhost',
+    'host.docker.internal',
+  );
+  args.push('-e', `BROWSER_CDP_URL=${containerCdpUrl}`);
+  // readEnvFile() is needed because .env values are NOT loaded into process.env.
+  const containerEnv = readEnvFile([
+    'DISCORD_BOT_TOKEN',
+    'NANOCLAW_SERVICE_TOKEN',
+    'GH_TOKEN',
+    'NOTION_TOKEN',
+  ]);
+  const discordToken =
+    process.env.DISCORD_BOT_TOKEN || containerEnv.DISCORD_BOT_TOKEN;
+  if (discordToken) {
+    args.push('-e', `DISCORD_BOT_TOKEN=${discordToken}`);
+  }
+  // Pass only the primary (first) service token to containers.
+  // The env may contain comma-separated tokens with @label suffixes
+  // for multi-account SSE; containers only need the primary token for MCP auth.
+  const rawServiceToken =
+    process.env.NANOCLAW_SERVICE_TOKEN || containerEnv.NANOCLAW_SERVICE_TOKEN;
+  if (rawServiceToken) {
+    const first = rawServiceToken.split(',')[0].trim();
+    const token = first.includes('@')
+      ? first.slice(0, first.indexOf('@'))
+      : first;
+    args.push('-e', `NANOCLAW_SERVICE_TOKEN=${token}`);
+  }
+  // GitHub token for gh CLI and git push (same pattern as GitHub Actions)
+  const ghToken = process.env.GH_TOKEN || containerEnv.GH_TOKEN;
+  if (ghToken) {
+    args.push('-e', `GH_TOKEN=${ghToken}`);
+  }
+  // Notion integration token for Notion MCP server
+  const notionToken = process.env.NOTION_TOKEN || containerEnv.NOTION_TOKEN;
+  if (notionToken) {
+    args.push('-e', `NOTION_TOKEN=${notionToken}`);
+  }
+
+  // Non-Anthropic LLM provider keys
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey) {
+    args.push('-e', `OPENAI_API_KEY=${openaiKey}`);
+  }
+  const googleKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  if (googleKey) {
+    args.push('-e', `GOOGLE_GENERATIVE_AI_API_KEY=${googleKey}`);
+  }
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
+    args.push('-e', `GROQ_API_KEY=${groqKey}`);
+  }
+  const togetherKey = process.env.TOGETHER_AI_API_KEY;
+  if (togetherKey) {
+    args.push('-e', `TOGETHER_AI_API_KEY=${togetherKey}`);
+  }
+
+  // OneCLI gateway handles credential injection for non-Anthropic services
+  // (GitHub, Gmail, etc.) and as fallback for Anthropic if no OAuth token.
   const onecliApplied = await onecli.applyContainerConfig(args, {
     addHostMapping: false, // Nanoclaw already handles host gateway
     agent: agentIdentifier,
   });
-  if (onecliApplied) {
+
+  // Auth strategy: prefer Max subscription OAuth token (free included usage)
+  // over OneCLI API key injection (billed per token).
+  // Applied AFTER OneCLI so our -e flags override OneCLI's ANTHROPIC_BASE_URL.
+  const oauthToken = getNextOAuthToken();
+  if (oauthToken) {
+    args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`);
+    // Override OneCLI's proxy URL — OAuth must talk directly to Anthropic
+    args.push('-e', 'ANTHROPIC_BASE_URL=https://api.anthropic.com');
+    const stats = getTokenStats(oauthToken);
+    logger.info(
+      {
+        containerName,
+        tokenPrefix: oauthToken.slice(0, 20) + '...',
+        totalTokens: oauthTokenCache.tokens.length,
+        tokenCostSoFar: `$${stats.costUsd.toFixed(2)}`,
+        tokenRequests: stats.requests,
+      },
+      'Using Max subscription OAuth token',
+    );
+  } else if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
   } else {
     logger.warn(
       { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
+      'No OAuth token and OneCLI not reachable — container will have no Anthropic credentials',
     );
   }
 
@@ -282,6 +661,7 @@ async function buildContainerArgs(
   }
 
   for (const mount of mounts) {
+    if (mount.optional && mount._skip) continue; // Skipped on retry
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
     } else {
@@ -291,7 +671,55 @@ async function buildContainerArgs(
 
   args.push(CONTAINER_IMAGE);
 
-  return args;
+  // Security: extract secret -e flags into a tmpfile so they're not visible in `ps aux`.
+  // Sensitive keys include our own secrets plus anything OneCLI injected (proxy creds, certs).
+  const SECRET_KEY_PREFIXES = [
+    'DISCORD_BOT_TOKEN=',
+    'NANOCLAW_SERVICE_TOKEN=',
+    'GH_TOKEN=',
+    'NOTION_TOKEN=',
+    'CLAUDE_CODE_OAUTH_TOKEN=',
+    'HTTPS_PROXY=',
+    'HTTP_PROXY=',
+    'https_proxy=',
+    'http_proxy=',
+    'ANTHROPIC_API_KEY=',
+    'OPENAI_API_KEY=',
+    'GOOGLE_GENERATIVE_AI_API_KEY=',
+    'GROQ_API_KEY=',
+    'TOGETHER_AI_API_KEY=',
+  ];
+
+  const secretEnvLines: string[] = [];
+  const cleanedArgs: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-e' && i + 1 < args.length) {
+      const envVal = args[i + 1];
+      if (SECRET_KEY_PREFIXES.some((prefix) => envVal.startsWith(prefix))) {
+        secretEnvLines.push(envVal);
+        i++; // skip the value too
+        continue;
+      }
+    }
+    cleanedArgs.push(args[i]);
+  }
+
+  let envFilePath: string | null = null;
+  if (secretEnvLines.length > 0) {
+    envFilePath = path.join(os.tmpdir(), `nanoclaw-env-${randomUUID()}`);
+    fs.writeFileSync(envFilePath, secretEnvLines.join('\n') + '\n', {
+      mode: 0o600,
+    });
+    // Insert --env-file right after 'run' (before other flags)
+    const runIdx = cleanedArgs.indexOf('run');
+    cleanedArgs.splice(runIdx + 1, 0, '--env-file', envFilePath);
+  }
+
+  // Replace args contents with cleaned version
+  args.length = 0;
+  args.push(...cleanedArgs);
+
+  return { args, oauthToken, envFilePath };
 }
 
 export async function runContainerAgent(
@@ -300,8 +728,6 @@ export async function runContainerAgent(
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
-  const startTime = Date.now();
-
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
@@ -312,39 +738,163 @@ export async function runContainerAgent(
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
-  const containerArgs = await buildContainerArgs(
+
+  const result = await spawnContainerWithRetry(
+    group,
+    input,
     mounts,
     containerName,
     agentIdentifier,
+    onProcess,
+    onOutput,
+  );
+  return result;
+}
+
+/**
+ * Spawn container with automatic retry on mount failures.
+ * If exit code 125 (Docker config error), retry without optional mounts.
+ */
+async function spawnContainerWithRetry(
+  group: RegisteredGroup,
+  input: ContainerInput,
+  mounts: VolumeMount[],
+  containerName: string,
+  agentIdentifier: string | undefined,
+  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onOutput?: (output: ContainerOutput) => Promise<void>,
+): Promise<ContainerOutput> {
+  const {
+    args: containerArgs,
+    oauthToken: selectedToken,
+    envFilePath,
+  } = await buildContainerArgs(
+    mounts,
+    containerName,
+    input.isMain,
+    agentIdentifier,
   );
 
-  logger.debug(
-    {
-      group: group.name,
+  let result: ContainerOutput;
+  try {
+    result = await spawnContainer(
+      group,
+      input,
+      containerArgs,
       containerName,
-      mounts: mounts.map(
-        (m) =>
-          `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
-      ),
-      containerArgs: containerArgs.join(' '),
-    },
-    'Container mount configuration',
-  );
+      selectedToken,
+      onProcess,
+      onOutput,
+    );
+  } finally {
+    // Clean up secrets tmpfile — must run even if spawnContainer throws,
+    // otherwise secret-containing tmpfile is left on disk indefinitely.
+    if (envFilePath) {
+      try {
+        fs.unlinkSync(envFilePath);
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+
+  // If Docker failed with exit code 125 (mount/config error) and we have
+  // optional mounts, retry without them. This prevents optional features
+  // (contacts, gmail, extra dirs) from taking down the entire bot.
+  if (
+    result.status === 'error' &&
+    result.error?.includes('code 125') &&
+    mounts.some((m) => m.optional && !m._skip)
+  ) {
+    const skippedPaths: string[] = [];
+    for (const m of mounts) {
+      if (m.optional) {
+        m._skip = true;
+        skippedPaths.push(m.hostPath);
+      }
+    }
+    logger.warn(
+      { group: group.name, skippedMounts: skippedPaths },
+      'Container failed with mount error — retrying without optional mounts',
+    );
+
+    const retryName = `${containerName}-retry`;
+    const {
+      args: retryArgs,
+      oauthToken: retryToken,
+      envFilePath: retryEnvFilePath,
+    } = await buildContainerArgs(
+      mounts,
+      retryName,
+      input.isMain,
+      agentIdentifier,
+    );
+
+    let retryResult: ContainerOutput;
+    try {
+      retryResult = await spawnContainer(
+        group,
+        input,
+        retryArgs,
+        retryName,
+        retryToken,
+        onProcess,
+        onOutput,
+      );
+    } finally {
+      if (retryEnvFilePath) {
+        try {
+          fs.unlinkSync(retryEnvFilePath);
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+
+    return retryResult;
+  }
+
+  return result;
+}
+
+async function spawnContainer(
+  group: RegisteredGroup,
+  input: ContainerInput,
+  containerArgs: string[],
+  containerName: string,
+  selectedToken: string | null,
+  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onOutput?: (output: ContainerOutput) => Promise<void>,
+): Promise<ContainerOutput> {
+  const startTime = Date.now();
 
   logger.info(
     {
       group: group.name,
       containerName,
-      mountCount: mounts.length,
       isMain: input.isMain,
     },
     'Spawning container agent',
   );
 
+  const groupDir = resolveGroupFolderPath(input.groupFolder);
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
-  return new Promise((resolve) => {
+  // Track per-token cost and accumulate from streamed results
+  let accumulatedCostUsd = 0;
+  const originalOnOutput = onOutput;
+  const trackingOnOutput = onOutput
+    ? async (output: ContainerOutput) => {
+        if (typeof output.totalCostUsd === 'number') {
+          accumulatedCostUsd += output.totalCostUsd;
+        }
+        return originalOnOutput!(output);
+      }
+    : undefined;
+  onOutput = trackingOnOutput;
+
+  const containerPromise = new Promise<ContainerOutput>((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -558,12 +1108,9 @@ export async function runContainerAgent(
           `=== Container Args ===`,
           containerArgs.join(' '),
           ``,
-          `=== Mounts ===`,
-          mounts
-            .map(
-              (m) =>
-                `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
-            )
+          `=== Mounts (from args) ===`,
+          containerArgs
+            .filter((a) => a.includes(':/workspace') || a.includes(':/home'))
             .join('\n'),
           ``,
           `=== Stderr${stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
@@ -578,9 +1125,9 @@ export async function runContainerAgent(
           `Prompt length: ${input.prompt.length} chars`,
           `Session ID: ${input.sessionId || 'new'}`,
           ``,
-          `=== Mounts ===`,
-          mounts
-            .map((m) => `${m.containerPath}${m.readonly ? ' (ro)' : ''}`)
+          `=== Mounts (from args) ===`,
+          containerArgs
+            .filter((a) => a.includes(':/workspace') || a.includes(':/home'))
             .join('\n'),
           ``,
         );
@@ -590,6 +1137,33 @@ export async function runContainerAgent(
       logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
 
       if (code !== 0) {
+        // If we already streamed a successful agent result, a non-zero exit is
+        // almost always a post-response cleanup failure (OOM reaper, runtime
+        // kill, SDK teardown crash). The user already received the response,
+        // so surfacing a "trigger failed" error to them would be wrong.
+        // Log the anomaly but resolve as success.
+        if (hadStreamingOutput) {
+          logger.warn(
+            {
+              group: group.name,
+              containerName,
+              code,
+              duration,
+              stderrTail: stderr.slice(-400),
+              logFile,
+            },
+            'Container exited non-zero after streaming output (treated as post-response cleanup, not an agent failure)',
+          );
+          outputChain.then(() => {
+            resolve({
+              status: 'success',
+              result: null,
+              newSessionId,
+            });
+          });
+          return;
+        }
+
         logger.error(
           {
             group: group.name,
@@ -688,6 +1262,23 @@ export async function runContainerAgent(
       });
     });
   });
+
+  // After container completes, report usage and detect rate limits
+  return containerPromise.then((result) => {
+    if (selectedToken) {
+      if (accumulatedCostUsd > 0) {
+        reportTokenUsage(selectedToken, accumulatedCostUsd);
+      }
+      if (
+        result.status === 'error' &&
+        result.error &&
+        isRateLimitError(result.error)
+      ) {
+        markTokenRateLimited(selectedToken);
+      }
+    }
+    return result;
+  });
 }
 
 export function writeTasksSnapshot(
@@ -753,4 +1344,19 @@ export function writeGroupsSnapshot(
       2,
     ),
   );
+}
+
+/** @internal — test helpers for token cost routing */
+export function _testResetTokenState(): void {
+  oauthTokenStats.clear();
+  oauthTokenCache = { tokens: [], expiresAt: 0 };
+  costPeriodStart = Date.now();
+}
+
+export function _testSetOAuthTokens(tokens: string[]): void {
+  oauthTokenCache = { tokens, expiresAt: Date.now() + 999_999_999 };
+}
+
+export function _testAdvancePeriod(): void {
+  costPeriodStart = Date.now() - COST_RESET_INTERVAL_MS - 1;
 }

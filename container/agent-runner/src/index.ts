@@ -23,6 +23,47 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { runVercelQuery } from './vercel-runner.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Safe Gmail MCP tool suffixes — destructive tools (delete_email,
+ * batch_delete_emails, delete_label, delete_filter) are intentionally
+ * excluded so the agent cannot permanently destroy emails.
+ */
+const SAFE_GMAIL_TOOL_SUFFIXES = [
+  'search_emails',
+  'read_email',
+  'draft_email',
+  'send_email',
+  'modify_email',
+  'batch_modify_emails',
+  'list_email_labels',
+  'download_attachment',
+  'create_label',
+  'update_label',
+  'create_filter',
+  'create_filter_from_template',
+  'get_filter',
+  'get_or_create_label',
+  'list_filters',
+] as const;
+
+const GMAIL_ACCOUNT_NAMES = [
+  'gmail',
+  'gmail-personal',
+  'gmail-whoisxml',
+  'gmail-attaxion',
+  'gmail-dev',
+] as const;
+
+/** Expand safe Gmail tools for all accounts into allowedTools entries */
+function safeGmailTools(): string[] {
+  return GMAIL_ACCOUNT_NAMES.flatMap((acct) =>
+    SAFE_GMAIL_TOOL_SUFFIXES.map((suffix) => `mcp__${acct}__${suffix}`),
+  );
+}
 
 interface ContainerInput {
   prompt: string;
@@ -33,6 +74,10 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  verbose?: boolean;
+  provider?: 'anthropic' | 'openai' | 'google' | 'ollama' | 'groq' | 'together';
+  model?: string;
+  providerBaseUrl?: string;
 }
 
 interface ContainerOutput {
@@ -40,6 +85,24 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** Real API cost reported by the SDK's result message (USD). */
+  totalCostUsd?: number;
+  /** Token usage reported by the SDK's result message. */
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+  /** Number of turns in this SDK query (for diagnostics). */
+  numTurns?: number;
+  /**
+   * Short human-readable label for in-flight work (e.g. "Reading Gmail
+   * thread", "Searching knowledge base"). Emitted when the agent starts
+   * a tool call. Host uses this to update the in-place "⏳ working" message.
+   * Never carries a final result — always paired with result=null.
+   */
+  progressLabel?: string;
 }
 
 interface SessionEntry {
@@ -125,6 +188,75 @@ function writeOutput(output: ContainerOutput): void {
 
 function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
+}
+
+/**
+ * Human-friendly one-liner for a tool name, used in live progress updates.
+ * Avoids leaking raw SDK names like `mcp__superpilot__get_triaged_emails`.
+ *
+ * When `toolInput` is provided, tool-specific details are extracted:
+ * - Bash: uses the `description` field (e.g. "Running tests")
+ * - MCP tools: prefixes with the server name for context
+ */
+function formatToolLabel(
+  toolName: string,
+  toolInput?: Record<string, unknown>,
+): string {
+  // Bash: prefer the description field authored by the agent
+  if (toolName === 'Bash' && toolInput?.description) {
+    return String(toolInput.description);
+  }
+
+  // MCP tools: extract server name for context (mcp__gmail-personal__search_emails)
+  const mcpMatch = toolName.match(/^mcp__([^_]+(?:-[^_]+)*)__(.+)$/);
+  if (mcpMatch) {
+    const server = mcpMatch[1];
+    const tool = mcpMatch[2];
+    const toolWords = tool
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/_/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+    const prettyTool = toolWords
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+    // Use the heuristic map for known MCP tool names
+    const mcpMap: Record<string, string> = {
+      'Search Emails': 'Searching emails',
+      'Read Email': 'Reading email',
+      'Send Email': 'Drafting email',
+      'Get Triaged Emails': 'Fetching triaged emails',
+      'Get Thread Summary': 'Summarizing thread',
+      'Generate Reply': 'Generating reply',
+      'Search Kb': 'Searching KB',
+      'Upload To Kb': 'Saving to KB',
+      'Get Awaiting Reply': 'Fetching awaiting replies',
+      'Send Message': 'Sending message',
+    };
+    const action = mcpMap[prettyTool] || prettyTool;
+    return `${action} (${server})`;
+  }
+
+  // Built-in tools: snake_case/camelCase → Title Case
+  const words = toolName
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  const pretty = words
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+  const map: Record<string, string> = {
+    Read: 'Reading file',
+    Write: 'Writing file',
+    Edit: 'Editing file',
+    Bash: 'Running command',
+    Glob: 'Searching files',
+    Grep: 'Searching code',
+    'Task Create': 'Creating task',
+    'Task List': 'Listing tasks',
+  };
+  return map[pretty] || pretty;
 }
 
 function getSessionSummary(
@@ -419,6 +551,63 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
+  // Append model escalation instructions to the system prompt
+  const escalationInstruction = `\n\n## Model Escalation
+You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` agent (Opus) using the Agent tool.
+
+**Escalate to deep-work when:**
+- Multi-file code changes, refactors, or new features touching 2+ files
+- Debugging that requires hypothesis testing across multiple files
+- PR creation or code review
+- Security analysis
+- Architecture or design decisions
+
+**Handle directly (do NOT escalate):**
+- Simple Q&A, status checks, greetings
+- Single-file edits that are straightforward
+- Scheduling, reminders, routine tool use
+- Email triage and simple replies
+- Reading files, searching code, running commands
+
+**When escalating:**
+1. Send a brief acknowledgment to the user via \`send_message\` — always include "⚡ Opus" so the user knows the model switched. Example: "⚡ Opus — investigating the auth middleware..."
+2. Dispatch to the \`deep-work\` agent with a clear, complete prompt describing the task
+3. Relay the agent's result to the user
+
+**When handling directly (no escalation):**
+- Just respond normally. No model label needed — the user knows Sonnet is the default.
+
+**Progress reporting for multi-step work:**
+- For tasks with multiple independent subtasks (e.g. fixing 5 repos), send incremental progress via \`send_message\` as each subtask completes. Don't wait for all to finish.
+- Format: "✅ 1/5 — fixed auth bug in repo-x (PR #123)" as each one lands.
+- If a subtask fails, report immediately: "❌ Failed: repo-y — GitHub auth error (details...)"
+- When all done, send a summary.`;
+  globalClaudeMd = globalClaudeMd
+    ? globalClaudeMd + escalationInstruction
+    : escalationInstruction;
+
+  // Append fact-classification discipline for self-check verification
+  const factClassification = `\n\n## Fact Classification
+
+Before stating any fact in a response, classify it internally:
+- KNOWN: directly observed in this session (tool result, file content, message text)
+- REMEMBERED: from memory files or prior conversation
+- INFERRED: reasoned from other facts, not directly confirmed
+
+In your final response, prefix claims with a confidence marker:
+- ✓ Verified: [claim] (source: [where you saw it])
+- ~ Unverified: [claim] (source: memory)
+- ? Unknown: [claim] (not confirmed)
+
+Only use ✓ for KNOWN facts with a named source. Use ~ for REMEMBERED claims. Use ? when you cannot confirm. Omit markers entirely for routine, conversational phrases that carry no factual claim.`;
+  globalClaudeMd += factClassification;
+
+  // When verbose mode is on, append thinking instruction to the system prompt
+  if (containerInput.verbose) {
+    const thinkingInstruction = `\n\n## Verbose Mode (Active)\nBefore each response, include a brief 1-2 sentence summary of your reasoning approach as a blockquote. Format:\n> Considering X, checking Y...\n\nKeep the thinking summary concise — one or two lines max. Then continue with your normal response. Do NOT use this for trivial responses (greetings, confirmations). Only include it when there is genuine reasoning or decision-making to surface.`;
+    globalClaudeMd += thinkingInstruction;
+  }
+
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
@@ -442,6 +631,7 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
+      maxThinkingTokens: 16384,
       systemPrompt: globalClaudeMd
         ? {
             type: 'preset' as const,
@@ -450,6 +640,7 @@ async function runQuery(
           }
         : undefined,
       allowedTools: [
+        'Agent',
         'Bash',
         'Read',
         'Write',
@@ -469,22 +660,115 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__notion__*',
+        'mcp__superpilot__*',
+        ...safeGmailTools(),
       ],
+      agents: {
+        'deep-work': {
+          description:
+            'Use for complex tasks requiring deep reasoning: multi-file code changes, debugging, PR creation/review, security analysis, architecture decisions. Do NOT use for simple Q&A, scheduling, single-file edits, or routine tool use.',
+          model: 'opus' as const,
+          tools: [
+            'Bash',
+            'Read',
+            'Write',
+            'Edit',
+            'Glob',
+            'Grep',
+            'WebSearch',
+            'WebFetch',
+            'TodoWrite',
+            'mcp__nanoclaw__*',
+            'mcp__notion__*',
+            'mcp__superpilot__*',
+            ...safeGmailTools(),
+          ],
+          prompt:
+            'You are a deep reasoning agent handling complex development and analysis tasks. Think through problems carefully — check cross-file impacts, consider edge cases, verify assumptions. Your output will be relayed to the user. Write your response as if speaking directly to them.',
+        },
+      },
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      mcpServers: (() => {
+        const servers: Record<string, { command: string; args: string[]; env: Record<string, string> }> = {
+          nanoclaw: {
+            command: 'node',
+            args: [mcpServerPath],
+            env: {
+              NANOCLAW_CHAT_JID: containerInput.chatJid,
+              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+              NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            },
           },
-        },
-      },
+        };
+
+        // Register a Gmail MCP server per account that has credentials mounted.
+        // Each gets its own server name so the agent can distinguish accounts.
+        const gmailAccounts = [
+          { name: 'gmail-personal', dir: '.gmail-mcp' },
+          { name: 'gmail-whoisxml', dir: '.gmail-mcp-jonathan' },
+          { name: 'gmail-attaxion', dir: '.gmail-mcp-attaxion' },
+          { name: 'gmail-dev', dir: '.gmail-mcp-dev' },
+        ];
+        for (const acct of gmailAccounts) {
+          const credsPath = `/home/node/${acct.dir}/credentials.json`;
+          const oauthPath = `/home/node/${acct.dir}/gcp-oauth.keys.json`;
+          if (fs.existsSync(credsPath)) {
+            servers[acct.name] = {
+              command: 'npx',
+              args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+              env: {
+                GMAIL_OAUTH_PATH: oauthPath,
+                GMAIL_CREDENTIALS_PATH: credsPath,
+              },
+            };
+            log(`Gmail account ${acct.name} registered (${acct.dir})`);
+          }
+        }
+        // Backwards compat: also register as plain "gmail" pointing to personal
+        if (servers['gmail-personal']) {
+          servers['gmail'] = servers['gmail-personal'];
+        }
+
+        // Notion MCP server — requires NOTION_TOKEN env var (integration token)
+        const notionToken = process.env.NOTION_TOKEN || process.env.NOTION_API_KEY;
+        if (notionToken) {
+          servers['notion'] = {
+            command: 'npx',
+            args: ['-y', '@notionhq/notion-mcp-server'],
+            env: {
+              OPENAPI_MCP_HEADERS: JSON.stringify({
+                Authorization: `Bearer ${notionToken}`,
+                'Notion-Version': '2022-06-28',
+              }),
+            },
+          };
+          log('Notion MCP server registered');
+        }
+
+        // SuperPilot MCP — local stdio server that proxies to production API
+        const superpilotApiUrl = process.env.SUPERPILOT_API_URL;
+        const serviceToken = process.env.NANOCLAW_SERVICE_TOKEN;
+        if (superpilotApiUrl && serviceToken) {
+          const superpilotMcpPath = path.join(__dirname, 'superpilot-mcp.js');
+          if (fs.existsSync(superpilotMcpPath)) {
+            servers['superpilot'] = {
+              command: 'node',
+              args: [superpilotMcpPath],
+              env: {
+                SUPERPILOT_API_URL: superpilotApiUrl,
+                NANOCLAW_SERVICE_TOKEN: serviceToken,
+              },
+            };
+            log('SuperPilot MCP server registered');
+          }
+        }
+
+        return servers;
+      })(),
       hooks: {
         PreCompact: [
           { hooks: [createPreCompactHook(containerInput.assistantName)] },
@@ -501,6 +785,66 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+
+      // Extract any tool_use blocks from this assistant message and emit
+      // a short progress label so the host can update its in-place status
+      // line. Tool calls are where latency lives — surfacing the current
+      // tool makes the spinner feel alive instead of stalled.
+      try {
+        const asstMsg = message as {
+          message?: {
+            content?: Array<{
+              type?: string;
+              name?: string;
+              input?: Record<string, unknown>;
+            }>;
+          };
+        };
+        const blocks = asstMsg.message?.content || [];
+        const toolBlocks = blocks.filter(
+          (b) => b?.type === 'tool_use' && typeof b.name === 'string',
+        );
+        if (toolBlocks.length > 0) {
+          const label = toolBlocks
+            .map((b) => formatToolLabel(b.name as string, b.input))
+            .join(' · ');
+          writeOutput({
+            status: 'success',
+            result: null,
+            newSessionId,
+            progressLabel: label,
+          });
+        }
+      } catch (err) {
+        log(
+          `Failed to extract tool_use for progress: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // Extract progress info from subagent task_progress messages
+    // to keep the live status line updated during parallel agent work.
+    if (
+      message.type === 'system' &&
+      (message as { subtype?: string }).subtype === 'task_progress'
+    ) {
+      try {
+        const tp = message as {
+          tool_name?: string;
+          task_id?: string;
+        };
+        if (tp.tool_name) {
+          const label = formatToolLabel(tp.tool_name);
+          writeOutput({
+            status: 'success',
+            result: null,
+            newSessionId,
+            progressLabel: `⚡ ${label}`,
+          });
+        }
+      } catch {
+        /* best-effort */
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
@@ -520,19 +864,54 @@ async function runQuery(
       log(
         `Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`,
       );
+
+      // Forward subagent failures to the user immediately via IPC
+      if (tn.status === 'failed' && tn.summary) {
+        const truncatedSummary =
+          tn.summary.length > 200
+            ? tn.summary.slice(0, 200) + '...'
+            : tn.summary;
+        const errorIpc = {
+          type: 'message',
+          chatJid: containerInput.chatJid,
+          text: `❌ Subagent failed: ${truncatedSummary}`,
+          groupFolder: containerInput.groupFolder,
+          timestamp: new Date().toISOString(),
+        };
+        const ipcDir = '/workspace/ipc/messages';
+        try {
+          fs.mkdirSync(ipcDir, { recursive: true });
+          const filename = `${Date.now()}-err-${Math.random().toString(36).slice(2, 6)}.json`;
+          const tmpPath = path.join(ipcDir, `${filename}.tmp`);
+          fs.writeFileSync(tmpPath, JSON.stringify(errorIpc));
+          fs.renameSync(tmpPath, path.join(ipcDir, filename));
+        } catch (err) {
+          log(
+            `Failed to write error IPC: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
     }
 
     if (message.type === 'result') {
       resultCount++;
       const textResult =
         'result' in message ? (message as { result?: string }).result : null;
+      const resultMsg = message as {
+        total_cost_usd?: number;
+        usage?: ContainerOutput['usage'];
+        num_turns?: number;
+      };
       log(
-        `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
+        `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''} cost=${resultMsg.total_cost_usd ?? 'n/a'} turns=${resultMsg.num_turns ?? 'n/a'}`,
       );
       writeOutput({
         status: 'success',
         result: textResult || null,
         newSessionId,
+        totalCostUsd: resultMsg.total_cost_usd,
+        usage: resultMsg.usage,
+        numTurns: resultMsg.num_turns,
       });
     }
   }
@@ -628,7 +1007,6 @@ async function main(): Promise<void> {
     CLAUDE_CODE_AUTO_COMPACT_WINDOW: '165000',
   };
 
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
@@ -672,6 +1050,15 @@ async function main(): Promise<void> {
     // Script says wake agent — enrich prompt with script data
     log(`Script wakeAgent=true, enriching prompt with data`);
     prompt = `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}\n\nInstructions:\n${containerInput.prompt}`;
+  }
+
+  const provider = containerInput.provider ?? 'anthropic';
+
+  if (provider !== 'anthropic') {
+    log(`Using Vercel AI SDK (provider: ${provider}, model: ${containerInput.model ?? 'default'})`);
+    const result = await runVercelQuery(prompt, containerInput);
+    writeOutput(result);
+    process.exit(0);
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat

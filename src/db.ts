@@ -6,7 +6,9 @@ import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  Commitment,
   NewMessage,
+  ProcessedItem,
   RegisteredGroup,
   ScheduledTask,
   TaskRunLog,
@@ -82,6 +84,278 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS processed_items (
+      item_id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      processed_at TEXT NOT NULL,
+      action_taken TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_processed_at ON processed_items(processed_at);
+
+    CREATE TABLE IF NOT EXISTS approval_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action_type TEXT NOT NULL,
+      action_detail TEXT,
+      outcome TEXT NOT NULL,
+      timestamp TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_approval_type ON approval_log(action_type, timestamp);
+
+    CREATE TABLE IF NOT EXISTS commitments (
+      id TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      person TEXT NOT NULL,
+      person_email TEXT,
+      due_date TEXT,
+      source TEXT,
+      status TEXT DEFAULT 'open',
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_commitments_status ON commitments(status);
+    CREATE INDEX IF NOT EXISTS idx_commitments_due ON commitments(due_date);
+
+    CREATE TABLE IF NOT EXISTS contact_activity (
+      contact_email TEXT PRIMARY KEY,
+      contact_name TEXT,
+      last_inbound TEXT,
+      last_outbound TEXT,
+      typical_cadence_days INTEGER,
+      interaction_count INTEGER DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS session_costs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_type TEXT NOT NULL,
+      group_folder TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      duration_ms INTEGER,
+      estimated_cost_usd REAL
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_costs_date ON session_costs(started_at);
+
+    CREATE TABLE IF NOT EXISTS system_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS event_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_type TEXT NOT NULL,
+      source TEXT NOT NULL,
+      group_id TEXT,
+      payload TEXT NOT NULL,
+      timestamp INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_event_log_type_time ON event_log(event_type, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_event_log_group_time ON event_log(group_id, timestamp);
+
+    CREATE TABLE IF NOT EXISTS trust_actions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action_class TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      description TEXT,
+      decision TEXT NOT NULL,
+      outcome TEXT,
+      group_id TEXT NOT NULL,
+      timestamp DATETIME NOT NULL,
+      confidence_level TEXT,
+      was_correct INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_trust_actions_class ON trust_actions(action_class, group_id);
+    CREATE INDEX IF NOT EXISTS idx_trust_actions_time ON trust_actions(timestamp);
+
+    CREATE TABLE IF NOT EXISTS trust_levels (
+      action_class TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      approvals INTEGER NOT NULL DEFAULT 0,
+      denials INTEGER NOT NULL DEFAULT 0,
+      confidence REAL NOT NULL DEFAULT 0.0,
+      threshold REAL NOT NULL DEFAULT 0.8,
+      auto_execute INTEGER NOT NULL DEFAULT 1,
+      last_updated DATETIME NOT NULL,
+      PRIMARY KEY (action_class, group_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS trust_approvals (
+      id TEXT PRIMARY KEY,
+      action_class TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      description TEXT,
+      group_id TEXT NOT NULL,
+      chat_jid TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at DATETIME NOT NULL,
+      resolved_at DATETIME,
+      expires_at DATETIME NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_trust_approvals_status ON trust_approvals(status, expires_at);
+
+    CREATE TABLE IF NOT EXISTS tracked_items (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      group_name TEXT NOT NULL,
+      state TEXT NOT NULL,
+      classification TEXT,
+      superpilot_label TEXT,
+      trust_tier TEXT,
+      title TEXT NOT NULL,
+      summary TEXT,
+      thread_id TEXT,
+      detected_at INTEGER NOT NULL,
+      pushed_at INTEGER,
+      resolved_at INTEGER,
+      resolution_method TEXT,
+      digest_count INTEGER NOT NULL DEFAULT 0,
+      telegram_message_id INTEGER,
+      classification_reason TEXT,
+      metadata TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_tracked_state ON tracked_items(group_name, state);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tracked_source ON tracked_items(source, source_id);
+    CREATE INDEX IF NOT EXISTS idx_tracked_dashboard ON tracked_items(group_name, state, detected_at); -- PERF-1
+
+    CREATE TABLE IF NOT EXISTS threads (
+      id TEXT PRIMARY KEY,
+      group_name TEXT NOT NULL,
+      title TEXT NOT NULL,
+      source_hint TEXT,
+      created_at INTEGER NOT NULL,
+      resolved_at INTEGER,
+      item_count INTEGER NOT NULL DEFAULT 0,
+      state TEXT NOT NULL DEFAULT 'active'
+    );
+    CREATE INDEX IF NOT EXISTS idx_threads_group ON threads(group_name, state);
+
+    CREATE TABLE IF NOT EXISTS calendar_events (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      start_time INTEGER NOT NULL,
+      end_time INTEGER NOT NULL,
+      attendees TEXT NOT NULL DEFAULT '[]',
+      location TEXT,
+      source_account TEXT,
+      fetched_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_calendar_events_time ON calendar_events(start_time, end_time);
+
+    CREATE TABLE IF NOT EXISTS thread_links (
+      thread_id TEXT NOT NULL,
+      item_id TEXT NOT NULL,
+      link_type TEXT NOT NULL,
+      confidence REAL NOT NULL DEFAULT 0.0,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (thread_id, item_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_thread_links_item ON thread_links(item_id);
+
+    CREATE INDEX IF NOT EXISTS idx_tracked_thread ON tracked_items(thread_id);
+
+    CREATE TABLE IF NOT EXISTS digest_state (
+      group_name TEXT PRIMARY KEY,
+      last_digest_at INTEGER,
+      last_dashboard_at INTEGER,
+      queued_count INTEGER NOT NULL DEFAULT 0,
+      last_user_interaction INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS classification_adjustments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      original_classification TEXT NOT NULL,
+      adjusted_classification TEXT NOT NULL,
+      reason TEXT,
+      adjusted_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_class_adj_source ON classification_adjustments(source, source_id);
+
+    CREATE TABLE IF NOT EXISTS classification_behaviors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      sender_pattern TEXT NOT NULL,
+      subject_pattern TEXT,
+      original_classification TEXT NOT NULL,
+      observed_behavior TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 1,
+      adjustment TEXT NOT NULL DEFAULT 'none',
+      confidence REAL NOT NULL DEFAULT 0.0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_class_beh_source ON classification_behaviors(source, sender_pattern);
+
+    CREATE TABLE IF NOT EXISTS delegation_counters (
+      group_name TEXT NOT NULL,
+      action_class TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      last_delegated_at INTEGER,
+      PRIMARY KEY (group_name, action_class)
+    );
+
+    CREATE TABLE IF NOT EXISTS browser_watchers (
+      id TEXT PRIMARY KEY,
+      url TEXT NOT NULL,
+      selector TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      interval_ms INTEGER NOT NULL DEFAULT 60000,
+      label TEXT NOT NULL DEFAULT '',
+      last_value TEXT,
+      checked_at INTEGER,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_browser_watchers_group ON browser_watchers(group_id, enabled);
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS task_detail_state (
+      task_id TEXT PRIMARY KEY,
+      group_jid TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      title TEXT NOT NULL,
+      steps_json TEXT NOT NULL DEFAULT '[]',
+      log_json TEXT NOT NULL DEFAULT '[]',
+      findings_json TEXT NOT NULL DEFAULT '[]',
+      started_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS acted_emails (
+      email_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      account TEXT NOT NULL,
+      action_taken TEXT NOT NULL,
+      acted_at TEXT NOT NULL,
+      archived_at TEXT,
+      PRIMARY KEY (email_id, action_taken)
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS draft_originals (
+      draft_id TEXT PRIMARY KEY,
+      account TEXT NOT NULL,
+      original_body TEXT NOT NULL,
+      enriched_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS ux_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -157,6 +431,29 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* columns already exist */
   }
+
+  // Add verbose column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN verbose INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Add confidence_level column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE trust_actions ADD COLUMN confidence_level TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Add was_correct column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE trust_actions ADD COLUMN was_correct INTEGER`);
+  } catch {
+    // Column already exists — ignore
+  }
 }
 
 export function initDatabase(): void {
@@ -168,6 +465,11 @@ export function initDatabase(): void {
 
   // Migrate from JSON files if they exist
   migrateJsonState();
+}
+
+/** Get the database instance. Must call initDatabase() or _initTestDatabase() first. */
+export function getDb(): Database.Database {
+  return db;
 }
 
 /** @internal - for tests only. Creates a fresh in-memory database. */
@@ -404,6 +706,16 @@ export function getLastBotMessageTimestamp(
   return row?.ts ?? undefined;
 }
 
+export function getMessageContentById(
+  id: string,
+  chatJid: string,
+): string | undefined {
+  const row = db
+    .prepare(`SELECT content FROM messages WHERE id = ? AND chat_jid = ?`)
+    .get(id, chatJid) as { content: string } | undefined;
+  return row?.content;
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
@@ -562,6 +874,28 @@ export function setRouterState(key: string, value: string): void {
   ).run(key, value);
 }
 
+export function deleteRouterState(key: string): void {
+  db.prepare('DELETE FROM router_state WHERE key = ?').run(key);
+}
+
+/**
+ * Find all pending cursors left by interrupted processing.
+ * Returns a map of chatJid → previousCursor to roll back to.
+ */
+export function getPendingCursors(): Map<string, string> {
+  const rows = db
+    .prepare(
+      "SELECT key, value FROM router_state WHERE key LIKE 'pending_cursor:%'",
+    )
+    .all() as Array<{ key: string; value: string }>;
+  const result = new Map<string, string>();
+  for (const row of rows) {
+    const jid = row.key.replace('pending_cursor:', '');
+    result.set(jid, row.value);
+  }
+  return result;
+}
+
 // --- Session accessors ---
 
 export function getSession(groupFolder: string): string | undefined {
@@ -639,8 +973,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, verbose)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -650,6 +984,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
+    group.verbose ? 1 : 0,
   );
 }
 
@@ -663,6 +998,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     container_config: string | null;
     requires_trigger: number | null;
     is_main: number | null;
+    verbose: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -684,9 +1020,261 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,
+      verbose: row.verbose === 1 ? true : undefined,
     };
   }
   return result;
+}
+
+export function setGroupVerbose(jid: string, verbose: boolean): void {
+  db.prepare(`UPDATE registered_groups SET verbose = ? WHERE jid = ?`).run(
+    verbose ? 1 : 0,
+    jid,
+  );
+}
+
+// --- Processed items (email intelligence idempotency) ---
+
+export function isItemProcessed(itemId: string): boolean {
+  const row = db
+    .prepare('SELECT 1 FROM processed_items WHERE item_id = ?')
+    .get(itemId);
+  return !!row;
+}
+
+export function markItemProcessed(item: ProcessedItem): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO processed_items (item_id, source, processed_at, action_taken)
+     VALUES (?, ?, ?, ?)`,
+  ).run(item.item_id, item.source, item.processed_at, item.action_taken);
+}
+
+export function getProcessedItemsSince(since: string): ProcessedItem[] {
+  return db
+    .prepare(
+      'SELECT * FROM processed_items WHERE processed_at > ? ORDER BY processed_at DESC',
+    )
+    .all(since) as ProcessedItem[];
+}
+
+export function cleanupOldProcessedItems(olderThan: string): number {
+  const result = db
+    .prepare('DELETE FROM processed_items WHERE processed_at < ?')
+    .run(olderThan);
+  return result.changes;
+}
+
+// --- Approval log (trust graduation) ---
+
+export function logApproval(
+  actionType: string,
+  actionDetail: string,
+  outcome: string,
+): void {
+  db.prepare(
+    'INSERT INTO approval_log (action_type, action_detail, outcome, timestamp) VALUES (?, ?, ?, ?)',
+  ).run(actionType, actionDetail, outcome, new Date().toISOString());
+}
+
+export function getRecentApprovals(
+  actionType: string,
+  limit: number = 5,
+): Array<{ outcome: string; timestamp: string }> {
+  return db
+    .prepare(
+      'SELECT outcome, timestamp FROM approval_log WHERE action_type = ? ORDER BY timestamp DESC LIMIT ?',
+    )
+    .all(actionType, limit) as Array<{ outcome: string; timestamp: string }>;
+}
+
+export function getGraduationCandidates(): Array<{
+  action_type: string;
+  consecutive_approvals: number;
+}> {
+  return db
+    .prepare(
+      `
+    WITH ranked AS (
+      SELECT action_type, outcome,
+        ROW_NUMBER() OVER (PARTITION BY action_type ORDER BY timestamp DESC) as rn
+      FROM approval_log
+    ),
+    streaks AS (
+      SELECT action_type, COUNT(*) as consecutive_approvals
+      FROM ranked
+      WHERE rn <= 5 AND outcome = 'approved'
+      GROUP BY action_type
+      HAVING COUNT(*) = 5
+    )
+    SELECT * FROM streaks
+  `,
+    )
+    .all() as Array<{ action_type: string; consecutive_approvals: number }>;
+}
+
+// --- Commitments ---
+
+export function createCommitment(c: Omit<Commitment, 'completed_at'>): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO commitments (id, description, direction, person, person_email, due_date, source, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    c.id,
+    c.description,
+    c.direction,
+    c.person,
+    c.person_email,
+    c.due_date,
+    c.source,
+    c.status,
+    c.created_at,
+  );
+}
+
+export function getOpenCommitments(): Commitment[] {
+  return db
+    .prepare(
+      "SELECT * FROM commitments WHERE status = 'open' ORDER BY due_date",
+    )
+    .all() as Commitment[];
+}
+
+export function getOverdueCommitments(): Commitment[] {
+  const now = new Date().toISOString();
+  return db
+    .prepare(
+      "SELECT * FROM commitments WHERE status = 'open' AND due_date IS NOT NULL AND due_date < ? ORDER BY due_date",
+    )
+    .all(now) as Commitment[];
+}
+
+export function completeCommitment(id: string): void {
+  db.prepare(
+    "UPDATE commitments SET status = 'completed', completed_at = ? WHERE id = ?",
+  ).run(new Date().toISOString(), id);
+}
+
+// --- Contact activity (relationship pulse) ---
+
+export function upsertContactActivity(
+  email: string,
+  name: string | null,
+  direction: 'inbound' | 'outbound',
+): void {
+  const now = new Date().toISOString();
+  const field = direction === 'inbound' ? 'last_inbound' : 'last_outbound';
+  db.prepare(
+    `
+    INSERT INTO contact_activity (contact_email, contact_name, ${field}, interaction_count, updated_at)
+    VALUES (?, ?, ?, 1, ?)
+    ON CONFLICT(contact_email) DO UPDATE SET
+      contact_name = COALESCE(excluded.contact_name, contact_name),
+      ${field} = excluded.${field},
+      interaction_count = interaction_count + 1,
+      updated_at = excluded.updated_at
+  `,
+  ).run(email, name, now, now);
+}
+
+export function getStaleContacts(olderThanDays: number): Array<{
+  contact_email: string;
+  contact_name: string | null;
+  last_inbound: string | null;
+  last_outbound: string | null;
+  typical_cadence_days: number | null;
+}> {
+  const cutoff = new Date(Date.now() - olderThanDays * 86400000).toISOString();
+  return db
+    .prepare(
+      `
+    SELECT contact_email, contact_name, last_inbound, last_outbound, typical_cadence_days
+    FROM contact_activity
+    WHERE (last_inbound IS NULL OR last_inbound < ?)
+      AND (last_outbound IS NULL OR last_outbound < ?)
+      AND interaction_count > 3
+    ORDER BY COALESCE(last_inbound, last_outbound) ASC
+  `,
+    )
+    .all(cutoff, cutoff) as any[];
+}
+
+export function getFrequentNewContacts(
+  sinceDays: number,
+  minInteractions: number,
+): Array<{
+  contact_email: string;
+  contact_name: string | null;
+  interaction_count: number;
+}> {
+  const since = new Date(Date.now() - sinceDays * 86400000).toISOString();
+  return db
+    .prepare(
+      `
+    SELECT contact_email, contact_name, interaction_count
+    FROM contact_activity
+    WHERE updated_at > ? AND interaction_count >= ?
+    ORDER BY interaction_count DESC
+  `,
+    )
+    .all(since, minInteractions) as any[];
+}
+
+// --- Session costs ---
+
+export function logSessionCost(entry: {
+  session_type: string;
+  group_folder: string;
+  started_at: string;
+  duration_ms: number;
+  estimated_cost_usd: number;
+}): void {
+  db.prepare(
+    `INSERT INTO session_costs (session_type, group_folder, started_at, duration_ms, estimated_cost_usd)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(
+    entry.session_type,
+    entry.group_folder,
+    entry.started_at,
+    entry.duration_ms,
+    entry.estimated_cost_usd,
+  );
+}
+
+export function getTodaysCost(): number {
+  const today = new Date().toISOString().slice(0, 10);
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(estimated_cost_usd), 0) as total
+       FROM session_costs
+       WHERE started_at >= ?`,
+    )
+    .get(`${today}T00:00:00`) as { total: number } | undefined;
+  return row?.total ?? 0;
+}
+
+export function getWeeklyCost(): number {
+  const weekStart = new Date(Date.now() - 7 * 86400000);
+  const row = db
+    .prepare(
+      'SELECT COALESCE(SUM(estimated_cost_usd), 0) as total FROM session_costs WHERE started_at >= ?',
+    )
+    .get(weekStart.toISOString()) as { total: number };
+  return row.total;
+}
+
+// --- System state ---
+
+export function getSystemState(key: string): string | undefined {
+  const row = db
+    .prepare('SELECT value FROM system_state WHERE key = ?')
+    .get(key) as { value: string } | undefined;
+  return row?.value;
+}
+
+export function setSystemState(key: string, value: string): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO system_state (key, value, updated_at) VALUES (?, ?, ?)',
+  ).run(key, value, new Date().toISOString());
 }
 
 // --- JSON migration ---
@@ -749,4 +1337,188 @@ function migrateJsonState(): void {
       }
     }
   }
+}
+
+// --- Trust engine DB functions ---
+
+export interface TrustAction {
+  id?: number;
+  action_class: string;
+  domain: string;
+  operation: string;
+  description?: string;
+  decision: string;
+  outcome?: string;
+  group_id: string;
+  timestamp: string;
+}
+
+export interface TrustLevel {
+  action_class: string;
+  group_id: string;
+  approvals: number;
+  denials: number;
+  confidence: number;
+  threshold: number;
+  auto_execute: boolean;
+  last_updated: string;
+}
+
+export interface TrustApproval {
+  id: string;
+  action_class: string;
+  tool_name: string;
+  description?: string;
+  group_id: string;
+  chat_jid: string;
+  status: 'pending' | 'approved' | 'denied' | 'timeout';
+  created_at: string;
+  resolved_at?: string;
+  expires_at: string;
+}
+
+export function insertTrustAction(action: Omit<TrustAction, 'id'>): void {
+  db.prepare(
+    `INSERT INTO trust_actions (action_class, domain, operation, description, decision, outcome, group_id, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    action.action_class,
+    action.domain,
+    action.operation,
+    action.description ?? null,
+    action.decision,
+    action.outcome ?? null,
+    action.group_id,
+    action.timestamp,
+  );
+}
+
+export function getTrustLevel(
+  actionClass: string,
+  groupId: string,
+): TrustLevel | undefined {
+  const row = db
+    .prepare(
+      `SELECT action_class, group_id, approvals, denials, confidence, threshold, auto_execute, last_updated
+       FROM trust_levels WHERE action_class = ? AND group_id = ?`,
+    )
+    .get(actionClass, groupId) as
+    | (Omit<TrustLevel, 'auto_execute'> & { auto_execute: number })
+    | undefined;
+  if (!row) return undefined;
+  return { ...row, auto_execute: row.auto_execute === 1 };
+}
+
+export function upsertTrustLevel(level: TrustLevel): void {
+  db.prepare(
+    `INSERT INTO trust_levels (action_class, group_id, approvals, denials, confidence, threshold, auto_execute, last_updated)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(action_class, group_id) DO UPDATE SET
+       approvals = excluded.approvals,
+       denials = excluded.denials,
+       confidence = excluded.confidence,
+       threshold = excluded.threshold,
+       auto_execute = excluded.auto_execute,
+       last_updated = excluded.last_updated`,
+  ).run(
+    level.action_class,
+    level.group_id,
+    level.approvals,
+    level.denials,
+    level.confidence,
+    level.threshold,
+    level.auto_execute ? 1 : 0,
+    level.last_updated,
+  );
+}
+
+export function getAllTrustLevels(groupId: string): TrustLevel[] {
+  const rows = db
+    .prepare(
+      `SELECT action_class, group_id, approvals, denials, confidence, threshold, auto_execute, last_updated
+       FROM trust_levels WHERE group_id = ? ORDER BY action_class`,
+    )
+    .all(groupId) as Array<
+    Omit<TrustLevel, 'auto_execute'> & { auto_execute: number }
+  >;
+  return rows.map((r) => ({ ...r, auto_execute: r.auto_execute === 1 }));
+}
+
+export function resetTrustLevels(groupId: string): void {
+  db.prepare(`DELETE FROM trust_levels WHERE group_id = ?`).run(groupId);
+  db.prepare(
+    `UPDATE trust_approvals SET status = 'timeout', resolved_at = ? WHERE group_id = ? AND status = 'pending'`,
+  ).run(new Date().toISOString(), groupId);
+}
+
+export function setTrustAutoExecute(
+  actionClass: string,
+  groupId: string,
+  autoExecute: boolean,
+  threshold: number,
+): void {
+  db.prepare(
+    `INSERT INTO trust_levels (action_class, group_id, approvals, denials, confidence, threshold, auto_execute, last_updated)
+     VALUES (?, ?, 0, 0, 0.0, ?, ?, ?)
+     ON CONFLICT(action_class, group_id) DO UPDATE SET
+       auto_execute = excluded.auto_execute,
+       threshold = excluded.threshold,
+       last_updated = excluded.last_updated`,
+  ).run(
+    actionClass,
+    groupId,
+    threshold,
+    autoExecute ? 1 : 0,
+    new Date().toISOString(),
+  );
+}
+
+export function insertTrustApproval(approval: TrustApproval): void {
+  db.prepare(
+    `INSERT INTO trust_approvals (id, action_class, tool_name, description, group_id, chat_jid, status, created_at, resolved_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    approval.id,
+    approval.action_class,
+    approval.tool_name,
+    approval.description ?? null,
+    approval.group_id,
+    approval.chat_jid,
+    approval.status,
+    approval.created_at,
+    approval.resolved_at ?? null,
+    approval.expires_at,
+  );
+}
+
+export function getTrustApproval(id: string): TrustApproval | undefined {
+  return db.prepare(`SELECT * FROM trust_approvals WHERE id = ?`).get(id) as
+    | TrustApproval
+    | undefined;
+}
+
+export function resolveTrustApproval(
+  id: string,
+  status: 'approved' | 'denied' | 'timeout',
+): void {
+  db.prepare(
+    `UPDATE trust_approvals SET status = ?, resolved_at = ? WHERE id = ?`,
+  ).run(status, new Date().toISOString(), id);
+}
+
+export function getExpiredTrustApprovals(): TrustApproval[] {
+  return db
+    .prepare(
+      `SELECT * FROM trust_approvals WHERE status = 'pending' AND expires_at < ?`,
+    )
+    .all(new Date().toISOString()) as TrustApproval[];
+}
+
+export function getPendingTrustApprovalIds(chatJid: string): string[] {
+  const rows = db
+    .prepare(
+      `SELECT id FROM trust_approvals WHERE chat_jid = ? AND status = 'pending' AND expires_at > ?`,
+    )
+    .all(chatJid, new Date().toISOString()) as Array<{ id: string }>;
+  return rows.map((r) => r.id);
 }
