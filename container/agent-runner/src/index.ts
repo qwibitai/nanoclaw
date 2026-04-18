@@ -23,6 +23,7 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { createAutoEvoSessionStartHook } from './auto-evo-hook.js';
 
 interface ContainerInput {
   prompt: string;
@@ -488,6 +489,9 @@ async function runQuery(
       hooks: {
         PreCompact: [
           { hooks: [createPreCompactHook(containerInput.assistantName)] },
+        ],
+        SessionStart: [
+          { hooks: [createAutoEvoSessionStartHook(log)] },
         ],
       },
     },

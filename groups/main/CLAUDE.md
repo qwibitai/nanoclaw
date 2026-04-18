@@ -34,6 +34,10 @@ Text inside `<internal>` tags is logged but not sent to the user. If you've alre
 
 When working as a sub-agent or teammate, only use `send_message` if instructed to by the main agent.
 
+## Auto-evo (strategy memory)
+
+**`AUTO_EVO.md`** in this group folder holds distilled lessons across sessions. It is **injected at session start** so you see it early. After substantive tasks, **update** it with short actionable bullets — not transcripts. Run Skill **`auto-evo`** for the full protocol.
+
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
