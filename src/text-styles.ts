@@ -22,9 +22,16 @@ export type ChannelType =
 export function parseTextStyles(text: string, channel: ChannelType): string {
   if (!text) return text;
 
-  // Discord and Signal are passthrough — no marker substitution.
-  // Discord is already Markdown; Signal uses parseSignalStyles() for rich text.
-  if (channel === 'discord' || channel === 'signal') return text;
+  // Passthrough channels — no marker substitution here.
+  //   discord:  already Markdown.
+  //   signal:   uses parseSignalStyles() for rich text.
+  //   telegram: sanitizeTelegramHtml() in the Telegram channel converts
+  //             Markdown → HTML at send time. Running a WhatsApp-style
+  //             substitution here would turn `**bold**` into `*bold*`,
+  //             which the sanitizer then reads as italic — corrupting
+  //             bold into <i>. Let the channel-layer sanitizer handle it.
+  if (channel === 'discord' || channel === 'signal' || channel === 'telegram')
+    return text;
 
   // Split into protected (code) and unprotected regions, transform only the latter.
   const segments = splitProtectedRegions(text);

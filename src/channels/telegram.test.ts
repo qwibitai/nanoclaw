@@ -30,7 +30,14 @@ type Handler = (...args: any[]) => any;
 
 const botRef = vi.hoisted(() => ({ current: null as any }));
 
+// `InputFile` is constructed eagerly in `sendFile` from a path. The real
+// grammy implementation touches the filesystem, which our tests don't
+// stage — mock it to a passthrough wrapper so the sendDocument call
+// site is exercised without hitting disk.
 vi.mock('grammy', () => ({
+  InputFile: class MockInputFile {
+    constructor(public source: string | Buffer) {}
+  },
   Bot: class MockBot {
     token: string;
     commandHandlers = new Map<string, Handler>();
@@ -40,6 +47,7 @@ vi.mock('grammy', () => ({
     api = {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 999 }),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendDocument: vi.fn().mockResolvedValue({ message_id: 1001 }),
     };
 
     constructor(token: string) {
@@ -61,7 +69,13 @@ vi.mock('grammy', () => ({
       this.errorHandler = handler;
     }
 
-    start(opts: { onStart: (botInfo: any) => void }) {
+    async start(opts: { onStart: (botInfo: any) => void }) {
+      // Real grammy Bot.start() returns a Promise; connect() attaches
+      // a `.catch(...)` to it. Returning void would throw TypeError on
+      // `.catch` access synchronously — tests pass today only because
+      // onStart resolves the outer Promise before the TypeError
+      // surfaces. Match the real API shape so stricter runtimes don't
+      // trip.
       opts.onStart({ username: 'andy_ai_bot', id: 12345 });
     }
 
@@ -812,6 +826,118 @@ describe('TelegramChannel', () => {
       await channel.sendMessage('tg:100200300', 'No bot');
 
       // No error, no API call
+    });
+  });
+
+  // --- sendFile ---
+
+  describe('sendFile', () => {
+    it('sends document with HTML-sanitized caption and parse_mode HTML', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendFile(
+        'tg:100200300',
+        '/tmp/nanoclaw-test.png',
+        'feeling _great_ today',
+      );
+
+      expect(currentBot().api.sendDocument).toHaveBeenCalledTimes(1);
+      const call = currentBot().api.sendDocument.mock.calls[0];
+      expect(call[0]).toBe('100200300'); // tg: prefix stripped
+      expect(call[2].parse_mode).toBe('HTML');
+      // sanitizeTelegramHtml rewrites `_great_` → `<i>great</i>` (see
+      // telegram-sanitize.test.ts) — proves the HTML path is active and
+      // the caption went through the sanitizer, not a bypass.
+      expect(call[2].caption).toBe('feeling <i>great</i> today');
+    });
+
+    it('sends without parse_mode when no caption is provided', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendFile('tg:100200300', '/tmp/nanoclaw-test.png');
+
+      expect(currentBot().api.sendDocument).toHaveBeenCalledTimes(1);
+      const options = currentBot().api.sendDocument.mock.calls[0][2];
+      expect(options.caption).toBeUndefined();
+      expect(options.parse_mode).toBeUndefined();
+    });
+
+    it('falls back to plain caption without parse_mode when HTML send fails', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      // First call (HTML attempt) rejects; second call (plain fallback) resolves.
+      currentBot()
+        .api.sendDocument.mockRejectedValueOnce(
+          new Error("can't parse entities"),
+        )
+        .mockResolvedValueOnce({ message_id: 2002 });
+
+      await channel.sendFile(
+        'tg:100200300',
+        '/tmp/nanoclaw-test.png',
+        'feeling _great_ today',
+      );
+
+      expect(currentBot().api.sendDocument).toHaveBeenCalledTimes(2);
+      // Second call sends the ORIGINAL (pre-sanitize) caption with no
+      // parse_mode — so a broken HTML-encoding edge case can't block a
+      // file delivery; the worst case is literal markdown, never a
+      // dropped attachment.
+      const plainOptions = currentBot().api.sendDocument.mock.calls[1][2];
+      expect(plainOptions.parse_mode).toBeUndefined();
+      expect(plainOptions.caption).toBe('feeling _great_ today');
+    });
+
+    it('does not retry sendDocument when no caption was provided', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      // Caption-less sends can't benefit from the plain-caption
+      // fallback (payload would be identical). A retry would just
+      // double API traffic on transient network errors.
+      currentBot().api.sendDocument.mockRejectedValue(
+        new Error('network blip'),
+      );
+
+      // Should not throw — outer catch swallows.
+      await expect(
+        channel.sendFile('tg:100200300', '/tmp/nanoclaw-test.png'),
+      ).resolves.toBeUndefined();
+
+      expect(currentBot().api.sendDocument).toHaveBeenCalledTimes(1);
+    });
+
+    it('includes reply_parameters when replyToMessageId is provided', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendFile(
+        'tg:100200300',
+        '/tmp/nanoclaw-test.png',
+        'hello',
+        '4242',
+      );
+
+      const options = currentBot().api.sendDocument.mock.calls[0][2];
+      expect(options.reply_parameters).toEqual({ message_id: 4242 });
+    });
+
+    it('does nothing when bot is not initialized', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+
+      // Don't connect — bot is null; should exit cleanly, not throw.
+      await expect(
+        channel.sendFile('tg:100200300', '/tmp/nanoclaw-test.png', 'hi'),
+      ).resolves.toBeUndefined();
     });
   });
 

@@ -4,12 +4,15 @@ set -euo pipefail
 # Git memory limits are baked into the image (Dockerfile).
 # Agent-runner is pre-compiled at image build time (/app/dist/).
 
-# Shadow .env so the agent cannot read host secrets (bot tokens, API keys).
-# /workspace/project/ mounts the project root read-only, which includes .env.
-# Without this, subagents can curl the Telegram API directly, bypassing MCP.
-if [ -f /workspace/project/.env ] 2>/dev/null; then
-  mount --bind /dev/null /workspace/project/.env 2>/dev/null || true
-fi
+# Shadow secret files so the agent cannot read host credentials (bot tokens,
+# API keys). The project root is mounted read-only at /workspace/project/
+# and contains .env + data/env/env with all tokens. Without this, subagents
+# can curl the Telegram API directly, bypassing MCP and all logging.
+for secret_file in /workspace/project/.env /workspace/project/data/env/env; do
+  if [ -f "$secret_file" ] 2>/dev/null; then
+    mount --bind /dev/null "$secret_file" 2>/dev/null || true
+  fi
+done
 
 # Wire tessl rules chain into workspace (first-time setup for new groups).
 # .tessl/ and skills/ are populated host-side by container-runner.

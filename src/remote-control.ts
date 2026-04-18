@@ -30,8 +30,14 @@ function saveState(session: RemoteControlSession): void {
 function clearState(): void {
   try {
     fs.unlinkSync(STATE_FILE);
-  } catch {
-    // ignore
+  } catch (err: any) {
+    // ENOENT is expected (no state file to clear); anything else is a real bug.
+    if (err?.code !== 'ENOENT') {
+      logger.warn(
+        { err, path: STATE_FILE },
+        'Failed to clear remote-control state file',
+      );
+    }
   }
 }
 
@@ -67,7 +73,11 @@ export function restoreRemoteControl(): void {
     } else {
       clearState();
     }
-  } catch {
+  } catch (err) {
+    logger.warn(
+      { err, path: STATE_FILE },
+      'Remote Control state file is corrupt; clearing',
+    );
     clearState();
   }
 }

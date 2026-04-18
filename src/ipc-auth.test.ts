@@ -63,7 +63,10 @@ beforeEach(() => {
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
     onTasksChanged: () => {},
-    nukeSession: () => {},
+    nukeSession: (
+      _folder: string,
+      _session: 'default' | 'maintenance' | 'all',
+    ) => {},
   };
 });
 

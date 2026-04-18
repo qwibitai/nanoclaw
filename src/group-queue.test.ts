@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
-import { GroupQueue } from './group-queue.js';
+import {
+  DEFAULT_SESSION_NAME,
+  GroupQueue,
+  MAINTENANCE_SESSION_NAME,
+} from './group-queue.js';
 
 // Mock config to control concurrency limit
 vi.mock('./config.js', () => ({
@@ -125,7 +129,7 @@ describe('GroupQueue', () => {
     const taskFn = vi.fn(async () => {
       executionOrder.push('task');
     });
-    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    queue.enqueueTask('group1@g.us', 'task-1', DEFAULT_SESSION_NAME, taskFn);
     queue.enqueueMessageCheck('group1@g.us');
 
     // Release the first processing
@@ -257,14 +261,14 @@ describe('GroupQueue', () => {
     });
 
     // Start the task (runs immediately — slot available)
-    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    queue.enqueueTask('group1@g.us', 'task-1', DEFAULT_SESSION_NAME, taskFn);
     await vi.advanceTimersByTimeAsync(10);
     expect(taskCallCount).toBe(1);
 
     // Scheduler poll re-discovers the same task while it's running —
     // this must be silently dropped
     const dupFn = vi.fn(async () => {});
-    queue.enqueueTask('group1@g.us', 'task-1', dupFn);
+    queue.enqueueTask('group1@g.us', 'task-1', DEFAULT_SESSION_NAME, dupFn);
     await vi.advanceTimersByTimeAsync(10);
 
     // Duplicate was NOT queued
@@ -300,14 +304,15 @@ describe('GroupQueue', () => {
     // Register a process so closeStdin has a groupFolder
     queue.registerProcess(
       'group1@g.us',
-      {} as any,
+      DEFAULT_SESSION_NAME,
+      {} as unknown as import('child_process').ChildProcess,
       'container-1',
       'test-group',
     );
 
     // Enqueue a task while container is active but NOT idle
     const taskFn = vi.fn(async () => {});
-    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    queue.enqueueTask('group1@g.us', 'task-1', DEFAULT_SESSION_NAME, taskFn);
 
     // _close should NOT have been written (container is working, not idle)
     const writeFileSync = vi.mocked(fs.default.writeFileSync);
@@ -340,7 +345,8 @@ describe('GroupQueue', () => {
     // Register process and mark idle
     queue.registerProcess(
       'group1@g.us',
-      {} as any,
+      DEFAULT_SESSION_NAME,
+      {} as unknown as import('child_process').ChildProcess,
       'container-1',
       'test-group',
     );
@@ -351,7 +357,7 @@ describe('GroupQueue', () => {
     writeFileSync.mockClear();
 
     const taskFn = vi.fn(async () => {});
-    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    queue.enqueueTask('group1@g.us', 'task-1', DEFAULT_SESSION_NAME, taskFn);
 
     // _close SHOULD have been written (container is idle)
     const closeWrites = writeFileSync.mock.calls.filter(
@@ -379,7 +385,8 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
     queue.registerProcess(
       'group1@g.us',
-      {} as any,
+      DEFAULT_SESSION_NAME,
+      {} as unknown as import('child_process').ChildProcess,
       'container-1',
       'test-group',
     );
@@ -395,7 +402,7 @@ describe('GroupQueue', () => {
     writeFileSync.mockClear();
 
     const taskFn = vi.fn(async () => {});
-    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    queue.enqueueTask('group1@g.us', 'task-1', DEFAULT_SESSION_NAME, taskFn);
 
     const closeWrites = writeFileSync.mock.calls.filter(
       (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
@@ -416,11 +423,12 @@ describe('GroupQueue', () => {
     });
 
     // Start a task (sets isTaskContainer = true)
-    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    queue.enqueueTask('group1@g.us', 'task-1', DEFAULT_SESSION_NAME, taskFn);
     await vi.advanceTimersByTimeAsync(10);
     queue.registerProcess(
       'group1@g.us',
-      {} as any,
+      DEFAULT_SESSION_NAME,
+      {} as unknown as import('child_process').ChildProcess,
       'container-1',
       'test-group',
     );
@@ -431,6 +439,246 @@ describe('GroupQueue', () => {
 
     resolveTask!();
     await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- Parallel sessions per group (maintenance vs default) ---
+
+  it('two tasks on the same group with different sessionName run concurrently', async () => {
+    // Proves the core reason the maintenance session exists: a long-running
+    // scheduled task in one session MUST NOT block a user-facing task in
+    // the other session for the same group. Without the session-keyed
+    // queue slots both tasks would serialize.
+    let concurrent = 0;
+    let peak = 0;
+    const release: Array<() => void> = [];
+
+    const makeTask = () =>
+      vi.fn(async () => {
+        concurrent++;
+        peak = Math.max(peak, concurrent);
+        await new Promise<void>((r) => release.push(r));
+        concurrent--;
+      });
+
+    queue.enqueueTask(
+      'group1@g.us',
+      'user-task',
+      DEFAULT_SESSION_NAME,
+      makeTask(),
+    );
+    queue.enqueueTask(
+      'group1@g.us',
+      'maint-task',
+      MAINTENANCE_SESSION_NAME,
+      makeTask(),
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(peak).toBe(2);
+    expect(concurrent).toBe(2);
+
+    // Release both
+    release.forEach((r) => r());
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('closeStdin(default) and closeStdin(maintenance) write to separate input dirs', async () => {
+    // Regression guard: both sessions mount their own per-session input dir
+    // (`input-default/`, `input-maintenance/`). If this test fails, a _close
+    // sentinel written for one session would be visible to — and consumed
+    // by — the other session's container, silently killing parallel work.
+    const fs = await import('fs');
+
+    // Get both sessions into the "active with groupFolder" state that
+    // closeStdin requires to actually write a sentinel.
+    queue.registerProcess(
+      'group1@g.us',
+      DEFAULT_SESSION_NAME,
+      {} as unknown as import('child_process').ChildProcess,
+      'container-default',
+      'test-group',
+    );
+    queue.registerProcess(
+      'group1@g.us',
+      MAINTENANCE_SESSION_NAME,
+      {} as unknown as import('child_process').ChildProcess,
+      'container-maintenance',
+      'test-group',
+    );
+
+    // registerProcess alone doesn't flip `state.active = true`; enqueue a
+    // real task per session so closeStdin has something to close.
+    let releaseDefault: (() => void) | undefined;
+    let releaseMaint: (() => void) | undefined;
+    queue.enqueueTask(
+      'group1@g.us',
+      'default-task',
+      DEFAULT_SESSION_NAME,
+      async () => {
+        await new Promise<void>((r) => {
+          releaseDefault = r;
+        });
+      },
+    );
+    queue.enqueueTask(
+      'group1@g.us',
+      'maint-task',
+      MAINTENANCE_SESSION_NAME,
+      async () => {
+        await new Promise<void>((r) => {
+          releaseMaint = r;
+        });
+      },
+    );
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Re-register now that runTask flipped active=true (runTask cleared
+    // process/groupFolder during its setup path in the test harness).
+    queue.registerProcess(
+      'group1@g.us',
+      DEFAULT_SESSION_NAME,
+      {} as unknown as import('child_process').ChildProcess,
+      'container-default',
+      'test-group',
+    );
+    queue.registerProcess(
+      'group1@g.us',
+      MAINTENANCE_SESSION_NAME,
+      {} as unknown as import('child_process').ChildProcess,
+      'container-maintenance',
+      'test-group',
+    );
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    queue.closeStdin('group1@g.us', DEFAULT_SESSION_NAME);
+    queue.closeStdin('group1@g.us', MAINTENANCE_SESSION_NAME);
+
+    const closeWrites = writeFileSync.mock.calls
+      .map((c) => (typeof c[0] === 'string' ? c[0] : ''))
+      .filter((p) => p.endsWith('_close'));
+
+    expect(closeWrites).toHaveLength(2);
+    expect(closeWrites.some((p) => p.includes('input-default'))).toBe(true);
+    expect(closeWrites.some((p) => p.includes('input-maintenance'))).toBe(true);
+    // Neither sentinel lands in the legacy shared `input/` path.
+    expect(closeWrites.some((p) => /[/\\]input[/\\]_close$/.test(p))).toBe(
+      false,
+    );
+
+    releaseDefault?.();
+    releaseMaint?.();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('drainWaiting under saturation prefers default slots over maintenance', async () => {
+    // MAX_CONCURRENT_CONTAINERS is mocked to 2. Fill both slots with
+    // blocking maintenance tasks, then queue BOTH a maintenance task AND a
+    // user message (for different groups). When ONE slot frees, the queue
+    // must drain the USER-FACING message ahead of the queued maintenance
+    // task — that's the whole point of parallel maintenance: scheduled
+    // work doesn't block user replies under contention.
+    const release: Array<() => void> = [];
+    const blockingTask = () =>
+      vi.fn(async () => {
+        await new Promise<void>((r) => release.push(r));
+      });
+
+    // Fill both concurrent slots.
+    queue.enqueueTask(
+      'a@g.us',
+      'block-a',
+      MAINTENANCE_SESSION_NAME,
+      blockingTask(),
+    );
+    queue.enqueueTask(
+      'b@g.us',
+      'block-b',
+      MAINTENANCE_SESSION_NAME,
+      blockingTask(),
+    );
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Queue maintenance FIRST (older entry), then user message — priority
+    // logic must override FIFO insertion order.
+    let maintRan = false;
+    let msgRan = false;
+    queue.enqueueTask(
+      'c@g.us',
+      'queued-maint',
+      MAINTENANCE_SESSION_NAME,
+      vi.fn(async () => {
+        maintRan = true;
+      }),
+    );
+    // processMessages must block so the freed slot stays occupied while we
+    // observe — otherwise the message finishes synchronously, frees the
+    // slot, and drainWaiting would pick up the maintenance task too.
+    let releaseMsg: (() => void) | undefined;
+    queue.setProcessMessagesFn(async () => {
+      msgRan = true;
+      await new Promise<void>((r) => {
+        releaseMsg = r;
+      });
+      return true;
+    });
+    queue.enqueueMessageCheck('d@g.us');
+
+    // Release ONE blocking slot — only the user message should be drained.
+    release[0]!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(msgRan).toBe(true);
+    expect(maintRan).toBe(false);
+
+    // Release the message, then the second blocking task → maintenance runs.
+    releaseMsg!();
+    release[1]!();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(maintRan).toBe(true);
+  });
+
+  it('two tasks on the same group with the same sessionName serialize', async () => {
+    // Within a session the slot is still single-serial — same as before,
+    // just keyed by (groupJid, sessionName) instead of groupJid alone.
+    const order: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+
+    const first = vi.fn(async () => {
+      order.push('first:start');
+      await new Promise<void>((r) => {
+        releaseFirst = r;
+      });
+      order.push('first:end');
+    });
+    const second = vi.fn(async () => {
+      order.push('second:start');
+      order.push('second:end');
+    });
+
+    queue.enqueueTask('group1@g.us', 'task-A', MAINTENANCE_SESSION_NAME, first);
+    queue.enqueueTask(
+      'group1@g.us',
+      'task-B',
+      MAINTENANCE_SESSION_NAME,
+      second,
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(order).toEqual(['first:start']);
+
+    releaseFirst!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(order).toEqual([
+      'first:start',
+      'first:end',
+      'second:start',
+      'second:end',
+    ]);
   });
 
   it('preempts when idle arrives with pending tasks', async () => {
@@ -453,7 +701,8 @@ describe('GroupQueue', () => {
     // Register process and enqueue a task (no idle yet — no preemption)
     queue.registerProcess(
       'group1@g.us',
-      {} as any,
+      DEFAULT_SESSION_NAME,
+      {} as unknown as import('child_process').ChildProcess,
       'container-1',
       'test-group',
     );
@@ -462,7 +711,7 @@ describe('GroupQueue', () => {
     writeFileSync.mockClear();
 
     const taskFn = vi.fn(async () => {});
-    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    queue.enqueueTask('group1@g.us', 'task-1', DEFAULT_SESSION_NAME, taskFn);
 
     let closeWrites = writeFileSync.mock.calls.filter(
       (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),

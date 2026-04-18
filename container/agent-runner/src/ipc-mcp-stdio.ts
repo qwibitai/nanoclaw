@@ -19,6 +19,11 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+// Which per-group session slot this container occupies. Stamped onto every
+// IPC request so the host responder writes `_script_result_*` replies into
+// the right `input-<session>/` host dir — the one actually bind-mounted at
+// `/workspace/ipc/input/` for this container.
+const sessionName = process.env.NANOCLAW_SESSION_NAME || 'default';
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -26,9 +31,22 @@ function writeIpcFile(dir: string, data: object): string {
   const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
   const filepath = path.join(dir, filename);
 
+  // Stamp `sessionName` onto every request written to TASKS_DIR so the host
+  // responder routes `_script_result_*` replies back into THIS session's
+  // `input-<session>/` dir (which is what's bind-mounted at
+  // `/workspace/ipc/input/` for this container). Non-TASKS writers
+  // (e.g. MESSAGES_DIR) keep their payload as-is.
+  //
+  // Spread order: `sessionName` goes AFTER `...data` so the env-derived
+  // value always wins over any caller-provided field. Without this, a
+  // caller that passes `sessionName` in `data` — even by accident —
+  // could redirect the host's reply to a different session's input dir.
+  const payload =
+    dir === TASKS_DIR ? { ...(data as object), sessionName } : data;
+
   // Atomic write: temp file then rename
   const tempPath = `${filepath}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
+  fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2));
   fs.renameSync(tempPath, filepath);
 
   return filename;
@@ -44,6 +62,8 @@ async function runHostOperation(
   timeoutMs = 180_000,
 ): Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }> {
   const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // `sessionName` is stamped by `writeIpcFile` when dir === TASKS_DIR,
+  // so we don't need to include it in every caller's payload.
   writeIpcFile(TASKS_DIR, {
     type,
     groupFolder,
@@ -621,22 +641,50 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 
 server.tool(
   'nuke_session',
-  'Kill this container and start a fresh session on the next message. Use when context is corrupted, rules are stale, or user asks to start fresh. The current conversation will end immediately.',
-  {},
-  async () => {
+  "Kill this group's container(s) and start fresh on the next message/scheduled tick. Use when context is corrupted, rules are stale, or user asks to start fresh. Parallel-maintenance groups run two containers per group (user-facing `default` + scheduled-task `maintenance`) — pass `session` to narrow the nuke: 'default' keeps maintenance running, 'maintenance' keeps user-facing running, 'all' (default) kills both. Omit `session` for pre-parallel behaviour.",
+  {
+    session: z
+      .enum(['default', 'maintenance', 'all'])
+      .optional()
+      .describe(
+        "Which session slot to kill. 'default' = user-facing container only (preserves scheduled-task session chain). 'maintenance' = scheduled-task container only (preserves user-facing conversation state). 'all' or omitted = both.",
+      ),
+  },
+  async (args) => {
+    const session = args.session ?? 'all';
     const data = {
       type: 'nuke_session',
       groupFolder,
+      session,
       timestamp: new Date().toISOString(),
     };
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: 'Session nuked. Container will be killed. Next message starts fresh.' }] };
+    const scopeText =
+      session === 'all'
+        ? 'Both containers will be killed'
+        : `The ${session} container will be killed`;
+    const nextStartText =
+      session === 'all'
+        ? 'message / scheduled task'
+        : session === 'maintenance'
+          ? 'scheduled task'
+          : 'message';
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Session nuked (scope: ${session}). ${scopeText}. Next ${nextStartText} starts fresh.`,
+        },
+      ],
+    };
   },
 );
 
 // --- Named host operations ---
+
+// --- Smart Home ---
 
 server.tool(
   'github_backup',

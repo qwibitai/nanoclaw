@@ -12,7 +12,12 @@ import {
   TIMEZONE,
 } from './config.js';
 import { sendPoolMessage } from './channels/telegram.js';
-import { AvailableGroup } from './container-runner.js';
+import {
+  AvailableGroup,
+  DEFAULT_SESSION_NAME,
+  sessionInputDirName,
+} from './container-runner.js';
+import { MAINTENANCE_SESSION_NAME } from './group-queue.js';
 import {
   createTask,
   deleteAllSessions,
@@ -23,6 +28,7 @@ import {
 } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { stripInternalTags } from './router.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -55,10 +61,109 @@ export interface IpcDeps {
     isTrusted?: boolean,
   ) => void;
   onTasksChanged: () => void;
-  nukeSession: (groupFolder: string) => void;
+  nukeSession: (
+    groupFolder: string,
+    session: 'default' | 'maintenance' | 'all',
+  ) => void;
 }
 
 let ipcWatcherRunning = false;
+
+/**
+ * Path to the `_script_result_<requestId>.json` reply file the host writes
+ * for an IPC request. Must land in the SAME session's input dir that the
+ * requesting container mounts at `/workspace/ipc/input/` — otherwise the
+ * container polls forever and the IPC call times out.
+ *
+ * The container-side MCP server stamps `sessionName` onto every TASKS_DIR
+ * request (see `container/agent-runner/src/ipc-mcp-stdio.ts`). Older
+ * containers that predate that change (or any request where the field is
+ * missing) fall back to the default session — matches pre-parallel
+ * behavior where only one session existed.
+ */
+// Session names accepted on IPC requests: ONLY the two the orchestrator
+// ever creates. A broader regex (e.g. `[A-Za-z0-9_-]+`) would let a
+// container send distinct valid-looking names and force the host into
+// unbounded `input-<session>/` dir creation below — an empty-dir DoS.
+// Canonical enum is the right level of trust for payload-supplied values.
+const KNOWN_SESSION_NAMES: ReadonlySet<string> = new Set([
+  DEFAULT_SESSION_NAME,
+  MAINTENANCE_SESSION_NAME,
+]);
+const VALID_REQUEST_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * Compute the host path where an IPC response file should land.
+ *
+ * Both `data.sessionName` and `data.requestId` arrive from the container's
+ * IPC payload — treat as untrusted. Without validation, crafted values
+ * like `../default` or `../../etc/passwd` would make `path.join` escape
+ * the expected `<DATA_DIR>/ipc/<sourceGroup>/input-<session>/` subtree.
+ *
+ * Fail-safe strategy, two independent fallbacks:
+ * - Invalid `requestId` → fixed filename `_script_result_invalid.json`.
+ *   Keeps path traversal out of the filename AND prevents a noisy/
+ *   malicious container from filling disk by spamming unique ids —
+ *   at most one orphan file per session's input dir, overwritten in
+ *   place each time. The SESSION dir is still whatever was validated
+ *   from the payload (the `sessionName` check is separate).
+ * - Invalid `sessionName` → fall back to `DEFAULT_SESSION_NAME`. Blocks
+ *   `..`-style path-segment escape into a different group's subtree.
+ *
+ * Both fallbacks log at warn level for auditing. The malformed request
+ * effectively times out (its response lands where no container polls),
+ * which is the correct outcome for a bad payload. This keeps every
+ * caller's `fs.writeFileSync(resultPath, ...)` pattern intact (no null-
+ * checking at 10+ call sites) while still blocking path traversal.
+ */
+function scriptResultPath(
+  sourceGroup: string,
+  data: { sessionName?: string; requestId?: string },
+): string {
+  let requestId: string;
+  if (
+    typeof data.requestId === 'string' &&
+    VALID_REQUEST_ID_RE.test(data.requestId)
+  ) {
+    requestId = data.requestId;
+  } else {
+    logger.warn(
+      { sourceGroup, requestId: data.requestId },
+      'IPC request has missing or invalid requestId — routing response to orphan path',
+    );
+    // Fixed filename for all invalid requests so a noisy/malicious container
+    // can't spam unique requestIds and fill disk with orphan replies. At
+    // most one `_script_result_invalid.json` file exists per input dir, and
+    // it gets overwritten on every subsequent malformed request.
+    requestId = 'invalid';
+  }
+  let session = DEFAULT_SESSION_NAME;
+  if (typeof data.sessionName === 'string' && data.sessionName) {
+    if (KNOWN_SESSION_NAMES.has(data.sessionName)) {
+      session = data.sessionName;
+    } else {
+      logger.warn(
+        { sourceGroup, sessionName: data.sessionName },
+        'IPC request has unknown sessionName — falling back to default',
+      );
+    }
+  }
+  const inputDir = path.join(
+    DATA_DIR,
+    'ipc',
+    sourceGroup,
+    sessionInputDirName(session),
+  );
+  // Ensure the session's input dir exists before the caller writes into it.
+  // In the common path both sessions have already spawned at least once and
+  // the dir exists — but a maintenance-only group (or a container that has
+  // never gone through default) won't have `input-default/`, and our
+  // fallback routes here for malformed payloads. Creating the dir
+  // defensively keeps `fs.writeFileSync(resultPath, ...)` from throwing
+  // ENOENT at every caller.
+  fs.mkdirSync(inputDir, { recursive: true });
+  return path.join(inputDir, `_script_result_${requestId}.json`);
+}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -187,12 +292,44 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   }
 
                   if (fs.existsSync(hostPath)) {
+                    // Strip <internal>…</internal> blocks from the caption
+                    // so agent-written internal reasoning never leaks —
+                    // neither to Telegram (display) nor to messages.db
+                    // (which feeds heartbeat's answered-check accounting).
+                    // Mirrors the message-payload stripping below. If the
+                    // caption is fully internal, send the file with no
+                    // caption; the file itself is still useful payload.
+                    const cleanCaption = data.caption
+                      ? stripInternalTags(data.caption)
+                      : '';
                     await deps.sendFile(
                       data.chatJid,
                       hostPath,
-                      data.caption,
+                      cleanCaption || undefined,
                       data.replyToMessageId,
                     );
+                    // Store the cleaned caption (if any) so the message
+                    // shows up in accounting the same as text messages.
+                    // Without this, `send_file` is a bypass: captions
+                    // reach Telegram but never hit messages.db, so
+                    // heartbeat unanswered-checks think the agent never
+                    // responded. Store the cleaned version — storing the
+                    // raw caption would let a caption whose visible text
+                    // was empty after stripping count as an "answered"
+                    // response.
+                    if (cleanCaption) {
+                      storeMessage({
+                        id: `bot-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                        chat_jid: data.chatJid,
+                        sender: ASSISTANT_NAME,
+                        sender_name: ASSISTANT_NAME,
+                        content: cleanCaption,
+                        timestamp: new Date().toISOString(),
+                        is_from_me: true,
+                        is_bot_message: true,
+                        reply_to_message_id: data.replyToMessageId,
+                      });
+                    }
                     logger.info(
                       { chatJid: data.chatJid, hostPath, sourceGroup },
                       'IPC file sent',
@@ -367,6 +504,9 @@ export async function processTaskIpc(
     slug?: string;
     filter?: Record<string, boolean>;
     dryRun?: boolean;
+    command?: string;
+    payload?: string | Record<string, unknown>;
+    confirm?: boolean;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -678,11 +818,26 @@ export async function processTaskIpc(
 
     case 'nuke_session':
       if (data.groupFolder) {
+        // Optional `session` arg narrows the nuke to one slot. Accepted
+        // values: 'default', 'maintenance', 'all'. Anything else (or
+        // missing) falls back to 'all' — the safe default that preserves
+        // pre-parallel behaviour. The value comes from the container's
+        // IPC payload so we cast from `unknown` and allowlist.
+        const sessionArg = (data as Record<string, unknown>).session;
+        const validSession: 'default' | 'maintenance' | 'all' =
+          sessionArg === 'default' || sessionArg === 'maintenance'
+            ? sessionArg
+            : 'all';
+        // `sourceGroup` is authoritative (derived from the IPC dir the
+        // request arrived in); `data.groupFolder` is only used as a
+        // "yes-really-nuke" opt-in flag above and its value isn't honoured
+        // downstream. Log sourceGroup to avoid misleading audit trails if
+        // they ever differ.
         logger.info(
-          { groupFolder: data.groupFolder, sourceGroup },
+          { sourceGroup, session: validSession },
           'Session nuke requested via IPC',
         );
-        deps.nukeSession(sourceGroup);
+        deps.nukeSession(sourceGroup, validSession);
       }
       break;
 
@@ -696,13 +851,7 @@ export async function processTaskIpc(
           sourceGroup,
           'backup-repo',
         );
-        const resultPath = path.join(
-          DATA_DIR,
-          'ipc',
-          sourceGroup,
-          'input',
-          `_script_result_${data.requestId}.json`,
-        );
+        const resultPath = scriptResultPath(sourceGroup, data);
 
         if (!fs.existsSync(backupDir)) {
           fs.writeFileSync(
@@ -788,13 +937,7 @@ export async function processTaskIpc(
           break;
         }
 
-        const promoteResultPath = path.join(
-          DATA_DIR,
-          'ipc',
-          sourceGroup,
-          'input',
-          `_script_result_${data.requestId}.json`,
-        );
+        const promoteResultPath = scriptResultPath(sourceGroup, data);
 
         const promoteScript = path.join(
           process.cwd(),
@@ -847,7 +990,7 @@ export async function processTaskIpc(
               ...process.env,
               GITHUB_TOKEN: getEnv('GITHUB_TOKEN'),
               TILE_OWNER: getEnv('TILE_OWNER') || 'jbaruch',
-              ASSISTANT_NAME: getEnv('ASSISTANT_NAME') || 'AyeAye',
+              ASSISTANT_NAME: getEnv('ASSISTANT_NAME') || 'Andy',
             },
           },
           (error, stdout, stderr) => {

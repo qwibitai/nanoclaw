@@ -35,6 +35,19 @@ interface ContainerInput {
   assistantName?: string;
   script?: string;
   replyToMessageId?: string;
+  /**
+   * Which per-group session this container run belongs to. Mirrors the
+   * orchestrator-side `ContainerInput.sessionName` in `src/container-runner.ts`.
+   *
+   * Consumed here to set the `NANOCLAW_SESSION_NAME` env var on the MCP
+   * stdio server (see the `mcpServersConfig.nanoclaw.env` block below),
+   * which stamps `sessionName` onto every TASKS_DIR IPC request so the
+   * host responder routes `_script_result_*` replies back to THIS
+   * session's `input-<session>/` dir. Mount-based session isolation
+   * (`groupSessionsDir`, `input/` overlay) is set up by the orchestrator
+   * before spawn; this value flows through to the MCP env at runtime.
+   */
+  sessionName?: string;
 }
 
 interface ContainerOutput {
@@ -499,6 +512,135 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  // Discover installed skill names for subagent definitions.
+  // Subagents spawned via TeamCreate don't inherit the parent's skills
+  // or settingSources — they only get what's explicitly defined here.
+  const skillsDir = '/home/node/.claude/skills';
+  const installedSkills: string[] = [];
+  if (fs.existsSync(skillsDir)) {
+    for (const entry of fs.readdirSync(skillsDir)) {
+      if (fs.statSync(path.join(skillsDir, entry)).isDirectory()) {
+        installedSkills.push(entry);
+      }
+    }
+  }
+  if (installedSkills.length > 0) {
+    log(`Discovered ${installedSkills.length} skills for subagent definitions`);
+  }
+
+  // MCP servers config — shared between main agent and subagents
+  const mcpServersConfig = {
+    nanoclaw: {
+      command: 'node',
+      args: [mcpServerPath],
+      env: {
+        NANOCLAW_CHAT_JID: containerInput.chatJid,
+        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+        // Session identity. The MCP stdio server stamps this onto every
+        // IPC request so the host responder knows which session's
+        // `input-<session>/` dir should receive the `_script_result_*`
+        // reply. Without it, responses to a maintenance container's
+        // requests would land in `input-default/` and never be seen.
+        NANOCLAW_SESSION_NAME: containerInput.sessionName || 'default',
+        ...(containerInput.replyToMessageId
+          ? { NANOCLAW_REPLY_TO_MESSAGE_ID: containerInput.replyToMessageId }
+          : {}),
+      },
+    },
+    ...(process.env.COMPOSIO_API_KEY
+      ? {
+          composio: {
+            type: 'http' as const,
+            url: 'https://connect.composio.dev/mcp',
+            headers: {
+              'x-consumer-api-key': process.env.COMPOSIO_API_KEY,
+            },
+          },
+        }
+      : {}),
+    ...(fs.existsSync('/home/node/.tessl/api-credentials.json')
+      ? {
+          tessl: {
+            command: 'tessl',
+            args: ['mcp', 'start'],
+          },
+        }
+      : {}),
+  };
+
+  // Subagent tools — same as parent minus TeamCreate/TeamDelete (no nesting)
+  const subagentTools = [
+    'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
+    'WebSearch', 'WebFetch', 'TodoWrite', 'ToolSearch',
+    'Skill', 'NotebookEdit', 'mcp__nanoclaw__*',
+  ];
+
+  // Define a general-purpose subagent that inherits all skills and MCP
+  // servers. When the main agent uses TeamCreate, it can reference this
+  // agent type and the subagent will have full access to skills/rules.
+  // Build subagent prompt with all rules and behavioral instructions.
+  // Subagents don't inherit settingSources, CLAUDE.md, or .tessl/RULES.md
+  // from the parent — they only get what's in their prompt + skills array.
+  // Read all rule/context files and inject them into the subagent prompt.
+  const subagentPromptParts: string[] = [
+    'You are a background agent with the same capabilities as the main agent.',
+    'Follow ALL rules below. Use skills via the Skill tool.',
+    'Report results via mcp__nanoclaw__send_message.',
+  ];
+
+  // Load rules chain: CLAUDE.md → AGENTS.md → .tessl/RULES.md
+  const ruleFiles = [
+    '/workspace/group/CLAUDE.md',
+    '/workspace/group/.tessl/RULES.md',
+    soulMdPath,
+    globalClaudeMdPath,
+  ];
+  for (const rulePath of ruleFiles) {
+    if (fs.existsSync(rulePath)) {
+      const content = fs.readFileSync(rulePath, 'utf-8').trim();
+      if (content) {
+        subagentPromptParts.push(`\n---\n# ${path.basename(rulePath)}\n${content}`);
+      }
+    }
+  }
+
+  // Also load individual rule files referenced in RULES.md
+  const tesslTilesDir = '/home/node/.claude/.tessl/tiles';
+  if (fs.existsSync(tesslTilesDir)) {
+    const walkRules = (dir: string) => {
+      for (const entry of fs.readdirSync(dir)) {
+        const fullPath = path.join(dir, entry);
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          walkRules(fullPath);
+        } else if (entry.endsWith('.md') && fullPath.includes('/rules/')) {
+          const content = fs.readFileSync(fullPath, 'utf-8').trim();
+          if (content) {
+            subagentPromptParts.push(`\n---\n# Rule: ${entry}\n${content}`);
+          }
+        }
+      }
+    };
+    walkRules(tesslTilesDir);
+  }
+
+  const subagentPrompt = subagentPromptParts.join('\n');
+  log(`Subagent prompt built: ${subagentPrompt.length} chars, ${installedSkills.length} skills`);
+
+  const agentDefinitions = {
+    'general-purpose': {
+      description:
+        'General-purpose agent with full access to all skills, MCP tools, ' +
+        'and rules. Use for any background task that needs the same ' +
+        'capabilities as the main agent (heartbeat, research, analysis, etc.).',
+      prompt: subagentPrompt,
+      tools: subagentTools,
+      skills: installedSkills,
+      mcpServers: Object.keys(mcpServersConfig),
+    },
+  };
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -559,43 +701,12 @@ async function runQuery(
         'NotebookEdit',
         'mcp__nanoclaw__*',
       ],
+      agents: agentDefinitions,
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-            ...(containerInput.replyToMessageId
-              ? { NANOCLAW_REPLY_TO_MESSAGE_ID: containerInput.replyToMessageId }
-              : {}),
-          },
-        },
-        ...(process.env.COMPOSIO_API_KEY
-          ? {
-              composio: {
-                type: 'http' as const,
-                url: 'https://connect.composio.dev/mcp',
-                headers: {
-                  'x-consumer-api-key': process.env.COMPOSIO_API_KEY,
-                },
-              },
-            }
-          : {}),
-        ...(fs.existsSync('/home/node/.tessl/api-credentials.json')
-          ? {
-              tessl: {
-                command: 'tessl',
-                args: ['mcp', 'start'],
-              },
-            }
-          : {}),
-      },
+      mcpServers: mcpServersConfig,
       hooks: {
         PreCompact: [
           { hooks: [createPreCompactHook(containerInput.assistantName)] },

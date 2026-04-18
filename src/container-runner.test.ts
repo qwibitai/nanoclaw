@@ -38,7 +38,13 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
-// Mock fs
+// Mock fs. Several `fs.*` functions are mocked as no-ops because the
+// scripts-dir publish path in container-runner.ts calls them on paths
+// that were never created (mkdirSync is mocked). The symlink-based
+// atomic publish added in the CodeQL-fix commit exercises symlinkSync/
+// lstatSync/readlinkSync, so those need no-op mocks too. `lstatSync`
+// throws ENOENT by default so the publish takes the first-install path
+// (no prior groupScriptsDir) instead of trying to stat a mock-only path.
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
@@ -52,6 +58,15 @@ vi.mock('fs', async () => {
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      renameSync: vi.fn(),
+      rmSync: vi.fn(),
+      symlinkSync: vi.fn(),
+      readlinkSync: vi.fn(() => ''),
+      lstatSync: vi.fn(() => {
+        const err = new Error('ENOENT') as NodeJS.ErrnoException;
+        err.code = 'ENOENT';
+        throw err;
+      }),
     },
   };
 });

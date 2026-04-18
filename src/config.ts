@@ -106,6 +106,7 @@ export function getTriggerPattern(trigger?: string): RegExp {
 
 export const TRIGGER_PATTERN = buildTriggerPattern(DEFAULT_TRIGGER);
 
+
 // Tile owner namespace for tessl registry (e.g., "jbaruch" → "jbaruch/nanoclaw-core")
 export const TILE_OWNER =
   process.env.TILE_OWNER || envConfig.TILE_OWNER || 'nanoclaw';

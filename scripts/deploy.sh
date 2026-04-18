@@ -30,6 +30,7 @@ echo ""
 # 1. Pull
 if [[ "$TILES_ONLY" == false ]]; then
     echo "1. Pulling latest code..."
+    # `git stash` exits non-zero when there's nothing to stash — expected case on a clean tree.
     git stash 2>/dev/null || true
     git pull --no-rebase origin main
     echo ""
@@ -65,8 +66,11 @@ echo ""
 
 # 5. Kill ALL agent containers
 echo "5. Killing all agent containers..."
+# `grep` exits 1 when no agents match — the empty-string case is handled by the `-n` check below.
 AGENTS=$(docker ps --format '{{.Names}}' | grep '^nanoclaw-' | grep -v '^nanoclaw$' || true)
 if [[ -n "$AGENTS" ]]; then
+    # A container may exit between the `docker ps` above and the kill below;
+    # `docker kill` on an already-dead container is a benign race, not a failure.
     echo "$AGENTS" | xargs docker kill 2>/dev/null || true
     echo "  killed: $(echo "$AGENTS" | wc -l | tr -d ' ') containers"
 else

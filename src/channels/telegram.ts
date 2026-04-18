@@ -10,6 +10,7 @@ import { getLatestMessage, getMessageById, storeReaction } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+import { sanitizeTelegramHtml } from './telegram-sanitize.js';
 import {
   Channel,
   OnChatMetadata,
@@ -38,14 +39,21 @@ async function sendTelegramMessage(
     reply_parameters?: { message_id: number };
   } = {},
 ): Promise<number | undefined> {
+  // Idempotent Markdown→HTML pass — agents sometimes produce `**bold**` or
+  // `[text](url)` despite being told to use HTML. Well-formed HTML passes
+  // through unchanged; URLs/emails/existing tags are protected.
+  const sanitized = sanitizeTelegramHtml(text);
   try {
-    const msg = await api.sendMessage(chatId, text, {
+    const msg = await api.sendMessage(chatId, sanitized, {
       ...options,
       parse_mode: 'HTML',
     });
     return msg.message_id;
   } catch (err) {
-    // Fallback: send as plain text if HTML parsing fails
+    // Fallback: HTML parsing failed — send the ORIGINAL text without
+    // parse_mode. Sending `sanitized` here would render raw `<b>…</b>`
+    // tags literally to the user, which is strictly worse than the raw
+    // Markdown the agent produced.
     logger.debug({ err }, 'HTML send failed, falling back to plain text');
     const msg = await api.sendMessage(chatId, text, options);
     return msg.message_id;
@@ -939,21 +947,66 @@ export class TelegramChannel implements Channel {
     if (!this.bot) return;
     try {
       const numericId = jid.replace(/^tg:/, '');
+      // Sanitize the caption same as `sendTelegramMessage` does for text:
+      // Markdown → HTML, then parse_mode: 'HTML'. Without this, an agent
+      // that invokes `mcp__nanoclaw__send_file` with a Markdown caption
+      // gets the Markdown rendered literally on Telegram — and bypasses
+      // our sanitizer entirely. Captions previously shipped as plain text
+      // with no parse_mode, so `_heartbeat_` rendered as `_heartbeat_`.
+      const sanitizedCaption = caption
+        ? sanitizeTelegramHtml(caption)
+        : undefined;
       const options: {
         caption?: string;
+        parse_mode?: 'HTML';
         reply_parameters?: { message_id: number };
       } = {};
-      if (caption) options.caption = caption;
+      if (sanitizedCaption) {
+        options.caption = sanitizedCaption;
+        options.parse_mode = 'HTML';
+      }
       if (replyToMessageId) {
         options.reply_parameters = {
           message_id: parseInt(replyToMessageId, 10),
         };
       }
-      await this.bot.api.sendDocument(
-        numericId,
-        new InputFile(filePath),
-        options,
-      );
+      try {
+        await this.bot.api.sendDocument(
+          numericId,
+          new InputFile(filePath),
+          options,
+        );
+      } catch (err) {
+        // Fallback only makes sense when the first attempt used
+        // `parse_mode: 'HTML'` — i.e. a caption was provided and
+        // sanitized. Without that, the retry payload would be
+        // identical to the first attempt, so retrying just doubles
+        // API traffic on transient/network failures. Let the error
+        // bubble to the outer catch/logger instead.
+        if (options.parse_mode !== 'HTML') throw err;
+        // Mirror sendTelegramMessage's fallback: if HTML parse fails on the
+        // caption, resend with the ORIGINAL caption and no parse_mode. Raw
+        // text is strictly better than literal `<b>…</b>` tags in the UI.
+        logger.debug(
+          { err },
+          'HTML caption parse failed, falling back to plain caption',
+        );
+        const plainOptions: {
+          caption?: string;
+          reply_parameters?: { message_id: number };
+        } = {};
+        if (caption) plainOptions.caption = caption;
+        if (replyToMessageId) {
+          plainOptions.reply_parameters = {
+            message_id: parseInt(replyToMessageId, 10),
+          };
+        }
+        await this.bot.api.sendDocument(
+          numericId,
+          new InputFile(filePath),
+          plainOptions,
+        );
+      }
       logger.info({ jid, filePath, caption }, 'Telegram file sent');
     } catch (err) {
       logger.error({ jid, filePath, err }, 'Failed to send Telegram file');

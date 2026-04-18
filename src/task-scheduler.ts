@@ -8,11 +8,13 @@ import {
   runContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { MAINTENANCE_SESSION_NAME } from './group-queue.js';
 import {
   getAllTasks,
   getDueTasks,
   getTaskById,
   logTaskRun,
+  setSession,
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
@@ -64,10 +66,17 @@ export function computeNextRun(task: ScheduledTask): string | null {
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
-  getSessions: () => Record<string, string>;
+  /**
+   * Nested session cache: `folder → sessionName → sessionId`.
+   * Scheduled tasks look up the MAINTENANCE slot's sessionId here so
+   * consecutive heartbeat/nightly runs resume their own prior session
+   * chain, not the user-facing default container's.
+   */
+  getSessions: () => Record<string, Record<string, string>>;
   queue: GroupQueue;
   onProcess: (
     groupJid: string,
+    sessionName: string,
     proc: ChildProcess,
     containerName: string,
     groupFolder: string,
@@ -151,14 +160,21 @@ async function runTask(
   let result: string | null = null;
   let error: string | null = null;
 
-  // For group context mode, use the group's current session
+  // Scheduled tasks resume THEIR OWN session chain from the `maintenance`
+  // slot. The sessions map is keyed by `(groupFolder, sessionName)` —
+  // maintenance has its own per-session `.claude/` mount, so its
+  // sessionIds are stored and resumed separately from the user-facing
+  // default container. `context_mode: 'isolated'` starts fresh each run.
   const sessions = deps.getSessions();
   const sessionId =
-    task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+    task.context_mode === 'group'
+      ? sessions[task.group_folder]?.[MAINTENANCE_SESSION_NAME]
+      : undefined;
 
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
   // query loop to time out. A short delay handles any final MCP calls.
+  // The kill grace after close sentinel is handled by GroupQueue.closeStdin().
   const TASK_CLOSE_DELAY_MS = 10000;
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -166,7 +182,7 @@ async function runTask(
     if (closeTimer) return; // already scheduled
     closeTimer = setTimeout(() => {
       logger.debug({ taskId: task.id }, 'Closing task container after result');
-      deps.queue.closeStdin(task.chat_jid);
+      deps.queue.closeStdin(task.chat_jid, MAINTENANCE_SESSION_NAME);
     }, TASK_CLOSE_DELAY_MS);
   };
 
@@ -182,10 +198,35 @@ async function runTask(
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
         script: task.script || undefined,
+        // Route every scheduled task into the parallel `maintenance` slot so
+        // it runs concurrently with user-facing work. Sole writer of this
+        // value — inbound paths route to `'default'` instead.
+        sessionName: MAINTENANCE_SESSION_NAME,
       },
       (proc, containerName) =>
-        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+        deps.onProcess(
+          task.chat_jid,
+          MAINTENANCE_SESSION_NAME,
+          proc,
+          containerName,
+          task.group_folder,
+        ),
       async (streamedOutput: ContainerOutput) => {
+        // Persist the maintenance session's own sessionId so the NEXT
+        // scheduled task on this group can resume the same chain. Only
+        // for `context_mode: 'group'` tasks — an isolated task wants a
+        // fresh SDK session and its newSessionId would otherwise overwrite
+        // the slot and contaminate the next 'group' task's resume.
+        if (streamedOutput.newSessionId && task.context_mode === 'group') {
+          const groupSessions =
+            sessions[task.group_folder] ?? (sessions[task.group_folder] = {});
+          groupSessions[MAINTENANCE_SESSION_NAME] = streamedOutput.newSessionId;
+          setSession(
+            task.group_folder,
+            MAINTENANCE_SESSION_NAME,
+            streamedOutput.newSessionId,
+          );
+        }
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Strip <internal> tags — suppress entirely if nothing remains
@@ -199,7 +240,11 @@ async function runTask(
           // Close only on final 'success' status below.
         }
         if (streamedOutput.status === 'success') {
-          deps.queue.notifyIdle(task.chat_jid);
+          // No `notifyIdle` here — `notifyIdle` targets the `default` slot
+          // only, so calling it from a maintenance-routed task would flip
+          // the wrong container's state and could preempt active user work.
+          // `scheduleClose` already winds this container down; when runTask
+          // finishes, `drainGroup` chains any pending maintenance task.
           scheduleClose();
         }
         if (streamedOutput.status === 'error') {
@@ -209,6 +254,20 @@ async function runTask(
     );
 
     if (closeTimer) clearTimeout(closeTimer);
+
+    // Same write-back path for the terminal `output` (non-streaming case).
+    // Same `'group'`-only gate as the streaming path above — don't let an
+    // isolated task overwrite the maintenance slot's session chain.
+    if (output.newSessionId && task.context_mode === 'group') {
+      const groupSessions =
+        sessions[task.group_folder] ?? (sessions[task.group_folder] = {});
+      groupSessions[MAINTENANCE_SESSION_NAME] = output.newSessionId;
+      setSession(
+        task.group_folder,
+        MAINTENANCE_SESSION_NAME,
+        output.newSessionId,
+      );
+    }
 
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
@@ -280,8 +339,11 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           updateTask(currentTask.id, { status: 'completed' });
         }
 
-        deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
-          runTask(currentTask, deps),
+        deps.queue.enqueueTask(
+          currentTask.chat_jid,
+          currentTask.id,
+          MAINTENANCE_SESSION_NAME,
+          () => runTask(currentTask, deps),
         );
       }
     } catch (err) {

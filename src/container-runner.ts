@@ -97,8 +97,14 @@ const AGENT_EFFORT = process.env.AGENT_EFFORT || 'xhigh';
 /**
  * Create a filtered copy of messages.db containing only one group's messages.
  * Returns the path to the filtered DB, or null if the source DB doesn't exist.
+ *
+ * @internal Exported for tests only — untrusted-group DB isolation is
+ *   security-critical and must be pinned by regression tests.
  */
-function createFilteredDb(chatJid: string, groupFolder: string): string | null {
+export function createFilteredDb(
+  chatJid: string,
+  groupFolder: string,
+): string | null {
   const srcDb = path.join(STORE_DIR, 'messages.db');
   if (!fs.existsSync(srcDb)) return null;
 
@@ -158,6 +164,18 @@ export interface ContainerInput {
   assistantName?: string;
   script?: string;
   replyToMessageId?: string;
+  /**
+   * Which per-group session this container run belongs to. Drives the
+   * `.claude/` dir location and the group-queue slot key.
+   * - `'default'` (omitted): user-facing Andy, serves inbound IPC messages.
+   * - `'maintenance'`: scheduled Andy, runs scheduled_tasks (heartbeat,
+   *   nightly, weekly, reminders). Runs in parallel with `'default'` for the
+   *   same group so maintenance never blocks user replies.
+   *
+   * Invariant: inbound Telegram/etc. messages ALWAYS route to `'default'`.
+   * `src/task-scheduler.ts` is the sole writer of `'maintenance'`.
+   */
+  sessionName?: string;
 }
 
 export interface ContainerOutput {
@@ -175,21 +193,36 @@ interface VolumeMount {
 }
 
 /**
- * Translate a local container path to a host path for docker -v arguments.
- * In Docker-out-of-Docker, the orchestrator's filesystem (/app/...) differs
- * from the host's (HOST_PROJECT_ROOT/...). Mount paths must use host paths.
+ * Recursively chown a host-side directory, NEVER following symlinks.
+ *
+ * Security: earlier implementation used `fs.chownSync` which follows
+ * symlinks. If a container could create a symlink inside one of its
+ * writable mounts (e.g. `shared-memory/evil` → `/etc/passwd`), the next
+ * spawn's chown would change ownership of the target — a privilege
+ * escalation path out of the container into the host. `lchownSync`
+ * operates on the link itself; `withFileTypes: true` + `entry.isDirectory()`
+ * only recurses into real directories, so symlinks are chowned but not
+ * traversed.
  */
 function chownRecursive(dir: string, uid: number, gid: number): void {
-  fs.chownSync(dir, uid, gid);
+  fs.lchownSync(dir, uid, gid);
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const fullPath = path.join(dir, entry.name);
-    fs.chownSync(fullPath, uid, gid);
+    fs.lchownSync(fullPath, uid, gid);
+    // `isDirectory()` returns false for symlinks (even symlinks to dirs)
+    // because we used `withFileTypes: true`, which reads the dirent type
+    // without resolving the link. Recursion is therefore symlink-safe.
     if (entry.isDirectory()) {
       chownRecursive(fullPath, uid, gid);
     }
   }
 }
 
+/**
+ * Translate a local container path to a host path for docker -v arguments.
+ * In Docker-out-of-Docker, the orchestrator's filesystem (/app/...) differs
+ * from the host's (HOST_PROJECT_ROOT/...). Mount paths must use host paths.
+ */
 function toHostPath(localPath: string): string {
   const projectRoot = process.cwd();
   if (HOST_PROJECT_ROOT === projectRoot) return localPath; // running directly on host
@@ -198,11 +231,94 @@ function toHostPath(localPath: string): string {
   return path.join(HOST_PROJECT_ROOT, rel);
 }
 
-function buildVolumeMounts(
+/**
+ * Files in the project root that contain secrets (bot tokens, API keys).
+ * Main-group containers get `/dev/null` mounted over each of these so agents
+ * can't read tokens and bypass the credential proxy.
+ *
+ * Security-critical: adding a new secret file ANYWHERE in the repo requires
+ * adding it to this list, or an agent in the main group can read it.
+ */
+export const SECRET_FILES = [
+  '.env',
+  '.env.bak',
+  'data/env/env',
+  'scripts/heartbeat-external.conf',
+] as const;
+
+/**
+ * Default `sessionName` when callers don't pass one. User-facing paths
+ * (inbound IPC messages) resolve here. Scheduled tasks pass `'maintenance'`
+ * to get a parallel container slot. See `ContainerInput.sessionName` docs.
+ */
+export const DEFAULT_SESSION_NAME = 'default';
+
+/**
+ * Per-session subdir name under `<DATA_DIR>/ipc/<folder>/` for the input
+ * side of the IPC channel. Each session gets its own subdir so `_close`
+ * sentinels and follow-up JSON messages written for one session never
+ * leak into the other session's container.
+ *
+ * Exported so group-queue writes to the same path the container-runner
+ * mounted — both must agree on the location. Kept in sync at compile time.
+ *
+ * Session name is validated here so every caller (orchestrator-trusted
+ * and IPC-untrusted alike) gets the same guard. A malicious container
+ * that manages to stamp `sessionName: "../default"` onto its IPC request
+ * would, without this check, redirect `scriptResultPath` or mount
+ * construction into a directory outside the expected `ipc/<group>/`
+ * subtree. The allowlist pattern is deliberately narrow — `default`,
+ * `maintenance`, and any hypothetical future slot all fit within
+ * `[A-Za-z0-9_-]+`.
+ */
+const VALID_SESSION_NAME_RE = /^[A-Za-z0-9_-]+$/;
+export function sessionInputDirName(sessionName: string): string {
+  if (!VALID_SESSION_NAME_RE.test(sessionName)) {
+    throw new Error(
+      `Invalid session name: ${JSON.stringify(sessionName)} — must match ${VALID_SESSION_NAME_RE}`,
+    );
+  }
+  return `input-${sessionName}`;
+}
+
+/**
+ * Claude Code's SDK slugifies each project's working directory path into a
+ * subdirectory name under `~/.claude/projects/`. For our container the
+ * project root is `/workspace/group`, so the slug is `-workspace-group`
+ * (slashes replaced with leading dashes). The SDK writes transcripts,
+ * feedback, and memory under this path.
+ *
+ * We bind-mount a shared `memory/` subdir inside it (see `buildVolumeMounts`)
+ * so auto-memory is owner-level state, not per-session — otherwise feedback
+ * written to one session's `.claude/` is invisible to the other.
+ *
+ * If Claude Code ever changes its slug convention, update this const.
+ * Graceful degradation if it does drift: the mount target mismatches the
+ * SDK's path and auto-memory falls back to per-session (pre-PR-#57
+ * behaviour) — annoying, not broken.
+ */
+const CLAUDE_PROJECT_SLUG = '-workspace-group';
+
+/**
+ * @internal Exported for tests only — mount-list construction is
+ *   security-critical (trust tiers, secret shadowing, untrusted read-only).
+ */
+export function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
   chatJid: string,
+  sessionName: string = DEFAULT_SESSION_NAME,
 ): VolumeMount[] {
+  // Validate `sessionName` at the earliest point it's used as a filesystem
+  // path segment. The same allowlist `sessionInputDirName` enforces — kept
+  // in sync so no mount can be built with a name that would later be
+  // rejected at IPC time, and no caller can smuggle `..` into the sessions
+  // dir path (which happens BEFORE `sessionInputDirName` is reached).
+  if (!VALID_SESSION_NAME_RE.test(sessionName)) {
+    throw new Error(
+      `Invalid session name: ${JSON.stringify(sessionName)} — must match ${VALID_SESSION_NAME_RE}`,
+    );
+  }
   const mounts: VolumeMount[] = [];
   const groupDir = resolveGroupFolderPath(group.folder);
 
@@ -223,6 +339,20 @@ function buildVolumeMounts(
       containerPath: '/workspace/project',
       readonly: true,
     });
+    // Shadow ALL files containing secrets so agents can't read bot tokens.
+    // Without this, subagents curl the Telegram API directly, bypassing MCP.
+    // mount --bind inside the container doesn't work (needs CAP_SYS_ADMIN),
+    // so we mount /dev/null over every secret file from the orchestrator.
+    for (const relPath of SECRET_FILES) {
+      const absPath = path.join(process.cwd(), relPath);
+      if (fs.existsSync(absPath)) {
+        mounts.push({
+          hostPath: '/dev/null',
+          containerPath: `/workspace/project/${relPath}`,
+          readonly: true,
+        });
+      }
+    }
   }
 
   // Group folder mount. Untrusted groups get read-only (disk exhaustion protection).
@@ -303,11 +433,15 @@ function buildVolumeMounts(
     }
   }
 
-  // Per-group Claude sessions directory (isolated from other groups)
+  // Per-group-per-session Claude sessions directory. The extra `sessionName`
+  // segment isolates the user-facing (`default`) and scheduled (`maintenance`)
+  // Andys so their SDK transcripts, `settings.json`, skills/ and .tessl/
+  // trees never collide when both run concurrently for the same group.
   const groupSessionsDir = path.join(
     DATA_DIR,
     'sessions',
     group.folder,
+    sessionName,
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
@@ -366,59 +500,210 @@ function buildVolumeMounts(
     'tiles',
     TILE_OWNER,
   );
+
+  // Build the group's tile-managed scripts/ in a sibling tmp dir, then
+  // publish it atomically via a symlink flip (see the swap block below).
+  // Writing directly into `groups/<folder>/scripts/` would create two
+  // separate problems the moment two sessions run concurrently:
+  //   1. Stale scripts from removed-in-new-tile skills lingered (the bug
+  //      that drove the "DB size crossed N MB" rogue-heartbeat behaviour).
+  //   2. A naive `rmSync(groupScriptsDir)` before the copy loop opens a
+  //      race window where the other session reads a half-populated dir.
+  // Tmp-then-publish gives both sessions a valid snapshot at all times:
+  // whichever session finishes last wins the publish, and both end states
+  // are equivalent (same installed tile version).
+  const groupScriptsDir = path.join(groupDir, 'scripts');
   const rulesContent: string[] = [];
-  for (const tileName of tilesToInstall) {
-    const tileSrc = path.join(registryTiles, tileName);
-    if (!fs.existsSync(tileSrc)) {
-      logger.warn(
-        { tileName, path: tileSrc },
-        'Tile not found — run tessl install in orchestrator',
-      );
-      continue;
-    }
+  // Registry-availability guard: if not a single tile in `tilesToInstall`
+  // actually exists under `registryTiles`, skip the whole build-and-swap.
+  // Otherwise the tmpdir + atomic flip would publish an EMPTY scripts/
+  // symlink, wiping the previous version — which is worse than stale.
+  // Root causes this defends against: tessl install failed on this spawn,
+  // the registry mount glitched, a first-boot race. The per-tile
+  // `fs.existsSync(tileSrc)` check inside the loop still handles partial
+  // degradation (some tiles present, others missing).
+  const anyTileAvailable = tilesToInstall.some((tileName) =>
+    fs.existsSync(path.join(registryTiles, tileName)),
+  );
+  if (!anyTileAvailable) {
+    logger.warn(
+      { registryTiles, tilesToInstall, groupScriptsDir },
+      'No tile sources available — keeping existing groupScriptsDir and .tessl/RULES.md intact. Investigate tessl install state.',
+    );
+  } else {
+    const scriptsTmpSuffix = `${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+    const tmpScriptsDir = `${groupScriptsDir}.new.${scriptsTmpSuffix}`;
+    fs.mkdirSync(tmpScriptsDir, { recursive: true });
 
-    const dstTileDir = path.join(dstTessl, 'tiles', TILE_OWNER, tileName);
-
-    // Copy rules
-    const rulesDir = path.join(tileSrc, 'rules');
-    if (fs.existsSync(rulesDir)) {
-      for (const ruleFile of fs.readdirSync(rulesDir)) {
-        if (!ruleFile.endsWith('.md')) continue;
-        const ruleSrcFile = path.join(rulesDir, ruleFile);
-        const ruleDst = path.join(dstTileDir, 'rules', ruleFile);
-        fs.mkdirSync(path.dirname(ruleDst), { recursive: true });
-        fs.cpSync(ruleSrcFile, ruleDst);
-        rulesContent.push(fs.readFileSync(ruleSrcFile, 'utf8'));
+    for (const tileName of tilesToInstall) {
+      const tileSrc = path.join(registryTiles, tileName);
+      if (!fs.existsSync(tileSrc)) {
+        logger.warn(
+          { tileName, path: tileSrc },
+          'Tile not found — run tessl install in orchestrator',
+        );
+        continue;
       }
-    }
 
-    // Copy skills and their scripts
-    const tileSkillsDir = path.join(tileSrc, 'skills');
-    if (fs.existsSync(tileSkillsDir)) {
-      for (const skillDir of fs.readdirSync(tileSkillsDir)) {
-        const skillSrcDir = path.join(tileSkillsDir, skillDir);
-        if (!fs.statSync(skillSrcDir).isDirectory()) continue;
-        fs.cpSync(skillSrcDir, path.join(dstTileDir, 'skills', skillDir), {
-          recursive: true,
-        });
-        fs.cpSync(skillSrcDir, path.join(skillsDst, `tessl__${skillDir}`), {
-          recursive: true,
-        });
-        // Copy bundled scripts to group's scripts/ dir (used by named host operations)
-        const skillScriptsDir = path.join(skillSrcDir, 'scripts');
-        if (fs.existsSync(skillScriptsDir)) {
-          const groupScriptsDir = path.join(groupDir, 'scripts');
-          fs.mkdirSync(groupScriptsDir, { recursive: true });
-          for (const scriptFile of fs.readdirSync(skillScriptsDir)) {
-            fs.cpSync(
-              path.join(skillScriptsDir, scriptFile),
-              path.join(groupScriptsDir, scriptFile),
-            );
+      const dstTileDir = path.join(dstTessl, 'tiles', TILE_OWNER, tileName);
+
+      // Copy rules
+      const rulesDir = path.join(tileSrc, 'rules');
+      if (fs.existsSync(rulesDir)) {
+        for (const ruleFile of fs.readdirSync(rulesDir)) {
+          if (!ruleFile.endsWith('.md')) continue;
+          const ruleSrcFile = path.join(rulesDir, ruleFile);
+          const ruleDst = path.join(dstTileDir, 'rules', ruleFile);
+          fs.mkdirSync(path.dirname(ruleDst), { recursive: true });
+          fs.cpSync(ruleSrcFile, ruleDst);
+          rulesContent.push(fs.readFileSync(ruleSrcFile, 'utf8'));
+        }
+      }
+
+      // Copy skills and their scripts
+      const tileSkillsDir = path.join(tileSrc, 'skills');
+      if (fs.existsSync(tileSkillsDir)) {
+        for (const skillDir of fs.readdirSync(tileSkillsDir)) {
+          const skillSrcDir = path.join(tileSkillsDir, skillDir);
+          if (!fs.statSync(skillSrcDir).isDirectory()) continue;
+          fs.cpSync(skillSrcDir, path.join(dstTileDir, 'skills', skillDir), {
+            recursive: true,
+          });
+          fs.cpSync(skillSrcDir, path.join(skillsDst, `tessl__${skillDir}`), {
+            recursive: true,
+          });
+          // Copy bundled scripts into the tmp scripts dir; swap happens below,
+          // after all tiles' skills are processed. Scripts at this path are
+          // used by named host operations and referenced from skills as
+          // `/workspace/group/scripts/<name>`.
+          const skillScriptsDir = path.join(skillSrcDir, 'scripts');
+          if (fs.existsSync(skillScriptsDir)) {
+            for (const scriptFile of fs.readdirSync(skillScriptsDir)) {
+              fs.cpSync(
+                path.join(skillScriptsDir, scriptFile),
+                path.join(tmpScriptsDir, scriptFile),
+              );
+            }
           }
         }
       }
     }
-  }
+
+    // Atomic symlink-based publish for `groups/<folder>/scripts/`. Readers
+    // must ALWAYS find `groupScriptsDir` present — the previous "rename old
+    // aside, rename new into place" design had a brief ENOENT window between
+    // the two renames where a concurrent agent running `/workspace/group/
+    // scripts/<file>` would fail (CodeQL correctness finding).
+    //
+    // New layout:
+    //   groups/<folder>/scripts             ──► symlink
+    //   groups/<folder>/scripts.version.<id> ──► real directory (one per publish)
+    //
+    // Publish steps:
+    //   1. rename `tmpScriptsDir` → `scripts.version.<id>` (a unique sibling)
+    //   2. create a temporary symlink `scripts.link.<id>` → that version
+    //   3. atomically rename the symlink over `groupScriptsDir` (POSIX rename
+    //      on a symlink replaces an existing symlink atomically)
+    //   4. delete the previous version dir (if any)
+    //
+    // First-install path: no `groupScriptsDir` exists; we just rename the
+    // temp symlink into place — still atomic, no window.
+    //
+    // Legacy path: pre-this-commit installs have a REAL directory at
+    // `groupScriptsDir` (not a symlink). We can't atomically replace a
+    // non-empty directory with a symlink. For that one-time transition we
+    // do `rm -rf <dir>` + `symlink` — has a brief window, but runs exactly
+    // once per group, ever, and is bounded.
+    const RACE_CODES = new Set(['EEXIST', 'ENOTEMPTY']);
+    const swapId = `${Date.now()}.${process.pid}.${Math.random().toString(36).slice(2, 10)}`;
+    const newVersionDir = `${groupScriptsDir}.version.${swapId}`;
+    const tmpLink = `${groupScriptsDir}.link.${swapId}`;
+    let previousVersionDir: string | null = null;
+
+    const rmBestEffort = (target: string): void => {
+      try {
+        fs.rmSync(target, { recursive: true, force: true });
+      } catch {
+        /* ignore — orphaned artefacts don't affect correctness */
+      }
+    };
+
+    try {
+      // 1. Publish our tmp build as a versioned sibling.
+      fs.renameSync(tmpScriptsDir, newVersionDir);
+
+      // 2. Inspect what's currently at `groupScriptsDir` (symlink, real dir,
+      //    or missing).
+      let liveStat: fs.Stats | null = null;
+      try {
+        liveStat = fs.lstatSync(groupScriptsDir);
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') throw err;
+      }
+      if (liveStat && liveStat.isSymbolicLink()) {
+        // Remember the previous version so we can clean it up after the flip.
+        try {
+          const currentTarget = fs.readlinkSync(groupScriptsDir);
+          previousVersionDir = path.isAbsolute(currentTarget)
+            ? currentTarget
+            : path.resolve(path.dirname(groupScriptsDir), currentTarget);
+        } catch {
+          /* ignore — if we can't read the link we just won't clean it up */
+        }
+      }
+
+      // 3. Create the temp symlink. Relative target so moves of the parent
+      //    dir don't break the link. `'dir'` hint matters only on Windows.
+      fs.symlinkSync(path.basename(newVersionDir), tmpLink, 'dir');
+
+      if (liveStat && !liveStat.isSymbolicLink()) {
+        // Legacy layout: real dir at `groupScriptsDir`. Can't atomically
+        // replace a non-empty directory with a symlink; remove it first.
+        // This is the one-time per-group transition; steady state uses
+        // the pure atomic rename below.
+        fs.rmSync(groupScriptsDir, { recursive: true, force: true });
+      }
+
+      // 4. Atomic flip: POSIX rename on a symlink replaces an existing
+      //    symlink atomically. On the first-install path (no prior
+      //    symlink) this just creates the symlink. Either way
+      //    `groupScriptsDir` resolves to a valid versioned dir from
+      //    here on.
+      fs.renameSync(tmpLink, groupScriptsDir);
+
+      // 5. Clean up the previous versioned dir (if any).
+      if (previousVersionDir) rmBestEffort(previousVersionDir);
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const isRace = code ? RACE_CODES.has(code) : false;
+
+      // Always drop our publish artefacts: if the race winner placed a
+      // correct `groupScriptsDir` our versioned dir is redundant; on a
+      // real error we can't trust our partial build.
+      rmBestEffort(tmpLink);
+      rmBestEffort(newVersionDir);
+      rmBestEffort(tmpScriptsDir);
+
+      if (isRace) {
+        logger.debug(
+          { err, groupScriptsDir },
+          'scripts/ publish raced with concurrent setup; keeping winning copy',
+        );
+      } else {
+        logger.error(
+          { err, code, groupScriptsDir },
+          'scripts/ publish failed unexpectedly (not a race)',
+        );
+        // Rethrow non-race errors so the spawn fails loudly. Unlike the
+        // previous design, `groupScriptsDir` (if it existed) is still
+        // present — either still a symlink pointing at the previous
+        // version, or still the legacy real dir — so even a failed
+        // publish doesn't leave the group with missing scripts.
+        throw err;
+      }
+    }
+  } // end registry-availability guard
 
   // Write aggregated RULES.md
   if (rulesContent.length > 0) {
@@ -460,7 +745,7 @@ function buildVolumeMounts(
     }
   }
 
-  // AyeAye-created skills (staging) — override tile skills if names collide
+  // Andy-created skills (staging) — override tile skills if names collide
   const groupSkillsDir = path.join(groupDir, 'skills');
   if (fs.existsSync(groupSkillsDir)) {
     const stagingSkills = fs.readdirSync(groupSkillsDir).filter((d) => {
@@ -501,12 +786,151 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Shared auto-memory mount (issue #57). Claude Code's SDK writes
+  // accumulated feedback and owner-profile memory to
+  // ~/.claude/projects/<slug>/memory/. PR #55 mounted `.claude/` per-session,
+  // which also split memory between `default` and `maintenance` — feedback
+  // from one was invisible to the other. Memory describes the owner, not a
+  // session, so it belongs shared.
+  //
+  // Overlay pattern: the per-session `.claude/` mount above gives each
+  // container its own `projects/<slug>/*.jsonl` transcripts. This second
+  // bind mount overlays only the `memory/` subdirectory with the shared
+  // dir. Docker applies nested bind mounts in order; the later mount
+  // replaces the contents at its path. Result: transcripts stay
+  // per-session, memory is shared.
+  //
+  // Trust-tier gate: settings.json above sets
+  // `CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1'` on untrusted containers to
+  // block persistent prompt injection. We must NOT give those containers
+  // a shared writable owner-state dir — an untrusted container that
+  // bypassed the env var (direct fs write, SDK bug, etc.) would poison
+  // the owner-memory that main/trusted containers read. Gate the mount,
+  // mkdir, migration, and chown behind the same trust condition.
+  const autoMemoryEnabled = isMain || !!group.containerConfig?.trusted;
+  if (autoMemoryEnabled) {
+    const sharedMemoryDir = path.join(
+      DATA_DIR,
+      'sessions',
+      group.folder,
+      'shared-memory',
+    );
+    fs.mkdirSync(sharedMemoryDir, { recursive: true });
+
+    // Pre-create the overlay mount target inside the `.claude` bind. Docker
+    // applies the shared-memory mount at
+    // `/home/node/.claude/projects/<slug>/memory` on top of the outer `.claude`
+    // mount, which requires the mountpoint path to exist on the lower
+    // filesystem. Without this pre-creation Docker auto-mkdirs the missing
+    // ancestors as uid 0, leaving `projects/` and `projects/<slug>/` root-owned
+    // on the host — which breaks node-user writes to per-session transcripts
+    // that the SDK writes alongside `memory/` (e.g. `projects/<slug>/*.jsonl`).
+    // The outer `chownRecursive(groupSessionsDir, ...)` above already ran, so
+    // we chown the new subtree explicitly here.
+    const projectsDir = path.join(groupSessionsDir, 'projects');
+    const memoryMountTarget = path.join(
+      projectsDir,
+      CLAUDE_PROJECT_SLUG,
+      'memory',
+    );
+    fs.mkdirSync(memoryMountTarget, { recursive: true });
+    if (sessionUid !== 0) {
+      try {
+        chownRecursive(projectsDir, sessionUid, sessionGid);
+      } catch (err: unknown) {
+        logger.warn(
+          { err, projectsDir },
+          'Failed to chown projects/ overlay mount-target tree',
+        );
+      }
+    }
+
+    // One-shot migration: for installations upgrading from PR #55 (per-session
+    // memory) to #57 (shared memory), scan each per-session `memory/` dir for
+    // files that haven't made it into shared-memory yet and copy them over.
+    // Shared-memory wins on conflict (it's the newer source of truth); the
+    // per-session copy is left in place but orphaned — subsequent reads go
+    // through the shared mount. Safe to run every spawn: only acts on files
+    // that exist per-session but NOT in shared.
+    // Hardcoded rather than importing MAINTENANCE_SESSION_NAME from
+    // group-queue (that would add a circular dep — group-queue already
+    // imports from here). These are the two session names that existed
+    // before this migration lands, so the list is fixed by history.
+    for (const otherSession of ['default', 'maintenance']) {
+      const perSessionMemoryDir = path.join(
+        DATA_DIR,
+        'sessions',
+        group.folder,
+        otherSession,
+        '.claude',
+        'projects',
+        CLAUDE_PROJECT_SLUG,
+        'memory',
+      );
+      if (!fs.existsSync(perSessionMemoryDir)) continue;
+      let entries: string[];
+      try {
+        entries = fs.readdirSync(perSessionMemoryDir);
+      } catch {
+        continue;
+      }
+      for (const file of entries) {
+        const src = path.join(perSessionMemoryDir, file);
+        const dst = path.join(sharedMemoryDir, file);
+        if (fs.existsSync(dst)) continue;
+        try {
+          fs.cpSync(src, dst, { recursive: true, force: false });
+          logger.info(
+            { group: group.folder, file, fromSession: otherSession },
+            'Migrated per-session memory file to shared-memory',
+          );
+        } catch (err: unknown) {
+          const code = (err as NodeJS.ErrnoException).code;
+          // EEXIST / ERR_FS_CP_EEXIST: another session spawning concurrently
+          // won the cpSync — our copy is redundant, their content is valid
+          // (same source file, same target). Expected race in steady state;
+          // log at debug so parallel startup doesn't spam warn logs.
+          if (code === 'EEXIST' || code === 'ERR_FS_CP_EEXIST') {
+            logger.debug(
+              { src, dst },
+              'Concurrent session won the shared-memory migration — keeping winner',
+            );
+          } else {
+            logger.warn(
+              { err, src, dst },
+              'Failed to migrate per-session memory file',
+            );
+          }
+        }
+      }
+    }
+
+    if (sessionUid !== 0) {
+      try {
+        chownRecursive(sharedMemoryDir, sessionUid, sessionGid);
+      } catch (err: unknown) {
+        logger.warn(
+          { err, sharedMemoryDir },
+          'Failed to chown shared-memory dir',
+        );
+      }
+    }
+    mounts.push({
+      hostPath: toHostPath(sharedMemoryDir),
+      containerPath: `/home/node/.claude/projects/${CLAUDE_PROJECT_SLUG}/memory`,
+      readonly: false,
+    });
+  } // end autoMemoryEnabled
+
   // Claude Code config file — lives at /home/node/.claude.json (outside .claude/).
   // Read-only rootfs can't create it, so we bind-mount it from the sessions dir.
+  // Kept alongside the per-session `.claude/` dir so default and maintenance
+  // Andys don't share Claude Code's per-session config.
   const claudeJsonPath = path.join(
     DATA_DIR,
     'sessions',
     group.folder,
+    sessionName,
     '.claude.json',
   );
   if (!fs.existsSync(claudeJsonPath)) {
@@ -528,11 +952,16 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Per-group IPC namespace
+  // Per-group IPC namespace. `input/` is per-session so parallel default
+  // and maintenance containers don't step on each other's _close sentinel
+  // or follow-up JSON files. `messages/` and `tasks/` stay shared — they're
+  // outbound from the container and the host aggregates both sessions' output.
   const groupIpcDir = resolveGroupIpcPath(group.folder);
+  const sessionInputSubdir = sessionInputDirName(sessionName);
+  const sessionInputDir = path.join(groupIpcDir, sessionInputSubdir);
   const isTrustedIpc = isMain || !!group.containerConfig?.trusted;
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  fs.mkdirSync(sessionInputDir, { recursive: true });
   if (isTrustedIpc) {
     fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   }
@@ -542,8 +971,8 @@ function buildVolumeMounts(
   if (ipcUid !== 0) {
     try {
       const subsToChown = isTrustedIpc
-        ? ['', 'messages', 'tasks', 'input']
-        : ['messages', 'input'];
+        ? ['', 'messages', 'tasks', sessionInputSubdir]
+        : ['messages', sessionInputSubdir];
       for (const sub of subsToChown) {
         fs.chownSync(path.join(groupIpcDir, sub), ipcUid, ipcGid);
       }
@@ -553,22 +982,31 @@ function buildVolumeMounts(
   }
 
   if (isTrustedIpc) {
-    // Trusted/main: single mount for entire IPC directory
+    // Trusted/main: mount the whole IPC dir at /workspace/ipc, then overlay
+    // the per-session input dir onto /workspace/ipc/input. Docker applies
+    // nested bind mounts in order — the second mount replaces the dir entry
+    // from the first, giving the container a session-isolated input/ while
+    // the shared messages/tasks/ and IPC root files remain aggregated.
     mounts.push({
       hostPath: toHostPath(groupIpcDir),
       containerPath: '/workspace/ipc',
       readonly: false,
     });
+    mounts.push({
+      hostPath: toHostPath(sessionInputDir),
+      containerPath: '/workspace/ipc/input',
+      readonly: false,
+    });
   } else {
-    // Untrusted: split mounts — messages/ writable, input/ read-only, no tasks/
-    // No root IPC files (available_groups.json, current_tasks.json)
+    // Untrusted: split mounts — messages/ writable, input/ read-only, no tasks/.
+    // Per-session input dir isolates _close sentinels between sessions.
     mounts.push({
       hostPath: toHostPath(path.join(groupIpcDir, 'messages')),
       containerPath: '/workspace/ipc/messages',
       readonly: false,
     });
     mounts.push({
-      hostPath: toHostPath(path.join(groupIpcDir, 'input')),
+      hostPath: toHostPath(sessionInputDir),
       containerPath: '/workspace/ipc/input',
       readonly: true,
     });
@@ -722,12 +1160,19 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  // Clean up stale _reply_to file from previous container runs.
-  // Scheduled tasks have no replyToMessageId — a leftover file would
-  // cause the MCP server to quote a random old message.
+  const sessionName = input.sessionName ?? DEFAULT_SESSION_NAME;
+
+  // Clean up stale _reply_to file from previous container runs in THIS
+  // session. The file must match the path the container reads — with
+  // per-session input dirs the container's `/workspace/ipc/input/_reply_to`
+  // maps to `<ipc>/<group>/input-<sessionName>/_reply_to`, so the cleanup
+  // must target the same session-scoped path. A cleanup against the legacy
+  // shared `input/` path would leave the real file in place, and a
+  // scheduled task with no replyToMessageId would quote a random old
+  // message from a prior run.
   const replyToFile = path.join(
     resolveGroupIpcPath(group.folder),
-    'input',
+    sessionInputDirName(sessionName),
     '_reply_to',
   );
   try {
@@ -736,9 +1181,20 @@ export async function runContainerAgent(
     /* file doesn't exist — fine */
   }
 
-  const mounts = buildVolumeMounts(group, input.isMain, input.chatJid);
+  const mounts = buildVolumeMounts(
+    group,
+    input.isMain,
+    input.chatJid,
+    sessionName,
+  );
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const containerName = `nanoclaw-${safeName}-${Date.now()}`;
+  // Suffix the container name with sessionName (when non-default) so that
+  // `docker ps` makes it obvious which slot a running container occupies.
+  // Main-group parallelism means two containers can share the group folder;
+  // the sessionName tag distinguishes them.
+  const sessionSuffix =
+    sessionName === DEFAULT_SESSION_NAME ? '' : `-${sessionName}`;
+  const containerName = `nanoclaw-${safeName}${sessionSuffix}-${Date.now()}`;
   const containerArgs = buildContainerArgs(
     mounts,
     containerName,
