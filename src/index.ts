@@ -677,6 +677,9 @@ async function main(): Promise<void> {
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
   // Factories return null when credentials are missing, so unconfigured channels are skipped.
+  // A connect() failure in one channel must not crash the whole service —
+  // e.g. expired OAuth tokens in a single channel should not take down
+  // WhatsApp/Discord/etc. that would otherwise still work.
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
     const channel = factory(channelOpts);
@@ -687,8 +690,15 @@ async function main(): Promise<void> {
       );
       continue;
     }
-    channels.push(channel);
-    await channel.connect();
+    try {
+      await channel.connect();
+      channels.push(channel);
+    } catch (err) {
+      logger.error(
+        { channel: channelName, err },
+        'Channel connect failed — continuing without it. Re-run the channel skill or refresh credentials to restore.',
+      );
+    }
   }
   if (channels.length === 0) {
     logger.fatal('No channels connected');
