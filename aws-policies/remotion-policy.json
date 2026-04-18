@@ -1,0 +1,10 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["lambda:*", "s3:*", "iam:GetRole", "iam:PassRole", "logs:*", "cloudwatch:*"],
+      "Resource": "*"
+    }
+  ]
+}
