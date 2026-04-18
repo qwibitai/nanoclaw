@@ -16,12 +16,21 @@ vi.mock('child_process', () => ({
   execSync: (...args: unknown[]) => mockExecSync(...args),
 }));
 
+// Mock playwright-client so ensureBrowserSidecar doesn't hit the network
+const mockWaitForSidecarReady = vi.fn().mockResolvedValue(true);
+vi.mock('./browser/playwright-client.js', () => ({
+  waitForSidecarReady: (...args: unknown[]) => mockWaitForSidecarReady(...args),
+}));
+
 import {
   CONTAINER_RUNTIME_BIN,
   readonlyMountArgs,
   stopContainer,
   ensureContainerRuntimeRunning,
   cleanupOrphans,
+  ensureDockerNetwork,
+  ensureBrowserSidecar,
+  stopBrowserSidecar,
 } from './container-runtime.js';
 import { logger } from './logger.js';
 
@@ -158,5 +167,74 @@ describe('cleanupOrphans', () => {
       { count: 2, names: ['nanoclaw-a-1', 'nanoclaw-b-2'] },
       'Stopped orphaned containers',
     );
+  });
+});
+
+describe('ensureDockerNetwork', () => {
+  it('creates network if it does not exist', () => {
+    mockExecSync.mockReturnValueOnce('');
+    ensureDockerNetwork('nanoclaw');
+    expect(mockExecSync).toHaveBeenCalledWith(
+      `${CONTAINER_RUNTIME_BIN} network create nanoclaw`,
+      expect.objectContaining({ stdio: 'pipe', timeout: 10000 }),
+    );
+  });
+
+  it('ignores "already exists" error', () => {
+    const err = new Error('network with name nanoclaw already exists');
+    mockExecSync.mockImplementationOnce(() => {
+      throw err;
+    });
+    expect(() => ensureDockerNetwork('nanoclaw')).not.toThrow();
+  });
+
+  it('re-throws non-duplicate errors', () => {
+    const err = new Error('permission denied');
+    mockExecSync.mockImplementationOnce(() => {
+      throw err;
+    });
+    expect(() => ensureDockerNetwork('nanoclaw')).toThrow('permission denied');
+  });
+});
+
+describe('ensureBrowserSidecar', () => {
+  it('runs docker compose up and waits for CDP', async () => {
+    mockExecSync.mockReturnValueOnce('');
+    await ensureBrowserSidecar();
+    expect(mockExecSync).toHaveBeenCalledWith(
+      expect.stringContaining('compose -f'),
+      expect.any(Object),
+    );
+    expect(mockExecSync).toHaveBeenCalledWith(
+      expect.stringContaining('docker-compose.browser.yml'),
+      expect.any(Object),
+    );
+    expect(mockWaitForSidecarReady).toHaveBeenCalled();
+  });
+
+  it('returns early without waiting for CDP when compose fails', async () => {
+    mockExecSync.mockImplementationOnce(() => {
+      throw new Error('compose failed');
+    });
+    await ensureBrowserSidecar();
+    expect(mockWaitForSidecarReady).not.toHaveBeenCalled();
+  });
+});
+
+describe('stopBrowserSidecar', () => {
+  it('runs docker compose down', () => {
+    mockExecSync.mockReturnValueOnce('');
+    stopBrowserSidecar();
+    expect(mockExecSync).toHaveBeenCalledWith(
+      expect.stringContaining('compose -f'),
+      expect.any(Object),
+    );
+  });
+
+  it('does not throw on failure', () => {
+    mockExecSync.mockImplementationOnce(() => {
+      throw new Error('failed');
+    });
+    expect(() => stopBrowserSidecar()).not.toThrow();
   });
 });

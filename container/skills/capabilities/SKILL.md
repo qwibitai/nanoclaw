@@ -44,7 +44,7 @@ Read the allowed tools from your SDK configuration. You always have access to:
 ### 3. MCP server tools
 
 The NanoClaw MCP server exposes these tools (via `mcp__nanoclaw__*` prefix):
-- `send_message` — send a message to the user/group
+- `send_message` — send a message to the user/group. Pass `email_id` + `email_account` when the message is about one specific email so the host attaches Expand / Full Email / Archive buttons.
 - `schedule_task` — schedule a recurring or one-time task
 - `list_tasks` — list scheduled tasks
 - `pause_task` — pause a scheduled task

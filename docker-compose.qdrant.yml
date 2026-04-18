@@ -1,0 +1,18 @@
+# Optional Qdrant service for semantic vector memory.
+# Start with: docker compose -f docker-compose.qdrant.yml up -d
+# Then set QDRANT_URL=http://localhost:6333 in your .env
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.14.0
+    container_name: nanoclaw-qdrant
+    ports:
+      - '6333:6333'  # REST API
+      - '6334:6334'  # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:

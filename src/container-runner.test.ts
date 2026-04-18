@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
+import fs from 'fs';
 
 // Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -16,7 +17,11 @@ vi.mock('./config.js', () => ({
   IDLE_TIMEOUT: 1800000, // 30min
   ONECLI_API_KEY: '',
   ONECLI_URL: 'http://localhost:10254',
+  SUPERPILOT_MCP_URL: 'http://localhost:8100',
+  SUPERPILOT_API_URL: 'http://localhost:8101',
   TIMEZONE: 'America/Los_Angeles',
+  TRUST_GATEWAY_URL: 'http://host.docker.internal:10255',
+  BROWSER_CDP_URL: 'http://localhost:9223',
 }));
 
 // Mock logger
@@ -103,6 +108,10 @@ vi.mock('child_process', async () => {
         return new EventEmitter();
       },
     ),
+    // Mock execSync to prevent OAuth token scanning from reading real process list
+    execSync: vi.fn(() => {
+      throw new Error('no processes');
+    }),
   };
 });
 
@@ -226,5 +235,175 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('container-runner secret env-file security', () => {
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    // Set secret env vars so buildContainerArgs will push -e flags for them
+    for (const key of [
+      'DISCORD_BOT_TOKEN',
+      'NANOCLAW_SERVICE_TOKEN',
+      'GH_TOKEN',
+      'NOTION_TOKEN',
+    ]) {
+      savedEnv[key] = process.env[key];
+      process.env[key] = `fake-${key}-value`;
+    }
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    // Restore env
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+  });
+
+  it('secrets are moved to --env-file and not passed as -e flags', async () => {
+    const { spawn } = await import('child_process');
+    const spawnMock = spawn as unknown as ReturnType<typeof vi.fn>;
+    const callCountBefore = spawnMock.mock.calls.length;
+
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    // Let async buildContainerArgs settle
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Inspect the args passed to spawn (use the latest call, not index 0)
+    expect(spawnMock.mock.calls.length).toBeGreaterThan(callCountBefore);
+    const spawnArgs: string[] =
+      spawnMock.mock.calls[spawnMock.mock.calls.length - 1][1];
+
+    // Secret keys must NOT appear as -e flag values
+    const SECRET_KEYS = [
+      'DISCORD_BOT_TOKEN=',
+      'NANOCLAW_SERVICE_TOKEN=',
+      'GH_TOKEN=',
+      'NOTION_TOKEN=',
+      'CLAUDE_CODE_OAUTH_TOKEN=',
+      'ANTHROPIC_API_KEY=',
+    ];
+
+    for (let i = 0; i < spawnArgs.length; i++) {
+      if (spawnArgs[i] === '-e' && i + 1 < spawnArgs.length) {
+        const val = spawnArgs[i + 1];
+        for (const secretPrefix of SECRET_KEYS) {
+          expect(val.startsWith(secretPrefix)).toBe(false);
+        }
+      }
+    }
+
+    // --env-file must be present in args
+    expect(spawnArgs).toContain('--env-file');
+
+    // The env file should have been written with mode 0o600
+    const writeFileSyncMock = fs.writeFileSync as unknown as ReturnType<
+      typeof vi.fn
+    >;
+    const envFileCall = writeFileSyncMock.mock.calls.find(
+      (call: unknown[]) =>
+        typeof call[0] === 'string' &&
+        (call[0] as string).includes('nanoclaw-env-'),
+    );
+    expect(envFileCall).toBeDefined();
+
+    // Verify the file contents contain the secrets
+    const envFileContent = envFileCall![1] as string;
+    expect(envFileContent).toContain(
+      'DISCORD_BOT_TOKEN=fake-DISCORD_BOT_TOKEN-value',
+    );
+    expect(envFileContent).toContain(
+      'NANOCLAW_SERVICE_TOKEN=fake-NANOCLAW_SERVICE_TOKEN-value',
+    );
+    expect(envFileContent).toContain('GH_TOKEN=fake-GH_TOKEN-value');
+    expect(envFileContent).toContain('NOTION_TOKEN=fake-NOTION_TOKEN-value');
+
+    // Verify file permissions
+    expect(envFileCall![2]).toEqual({ mode: 0o600 });
+
+    // Non-secret env vars should still be -e flags
+    const eFlags: string[] = [];
+    for (let i = 0; i < spawnArgs.length; i++) {
+      if (spawnArgs[i] === '-e' && i + 1 < spawnArgs.length) {
+        eFlags.push(spawnArgs[i + 1]);
+      }
+    }
+    expect(eFlags.some((f) => f.startsWith('TZ='))).toBe(true);
+    expect(eFlags.some((f) => f.startsWith('SUPERPILOT_MCP_URL='))).toBe(true);
+
+    // Clean up: emit output and close the container
+    emitOutputMarker(fakeProc, { status: 'success', result: 'done' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+  });
+
+  it('includes --network nanoclaw in container args', async () => {
+    const { spawn } = await import('child_process');
+    const spawnMock = spawn as unknown as ReturnType<typeof vi.fn>;
+    const callCountBefore = spawnMock.mock.calls.length;
+
+    const onOutput = vi.fn(async () => {});
+    runContainerAgent(testGroup, testInput, () => {}, onOutput);
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(spawnMock.mock.calls.length).toBeGreaterThan(callCountBefore);
+    const spawnArgs: string[] =
+      spawnMock.mock.calls[spawnMock.mock.calls.length - 1][1];
+
+    const netIdx = spawnArgs.indexOf('--network');
+    expect(netIdx).toBeGreaterThan(-1);
+    expect(spawnArgs[netIdx + 1]).toBe('nanoclaw');
+  });
+});
+
+describe('token cost daily reset', () => {
+  it('should reset token costs after 24 hours', async () => {
+    const {
+      reportTokenUsage,
+      getNextOAuthToken,
+      _testResetTokenState,
+      _testSetOAuthTokens,
+      _testAdvancePeriod,
+    } = await import('./container-runner.js');
+
+    // Reset internal state for clean test
+    _testResetTokenState();
+
+    // Inject two known tokens via the cache
+    _testSetOAuthTokens(['token-a', 'token-b']);
+
+    // Accumulate cost on token-a
+    reportTokenUsage('token-a', 25.0);
+    reportTokenUsage('token-b', 5.0);
+
+    // token-b should be preferred (lower cost)
+    let next = getNextOAuthToken();
+    expect(next).toBe('token-b');
+
+    // Advance time past 24h
+    _testAdvancePeriod();
+
+    // After reset, costs are zero — first token in array wins (both are 0)
+    next = getNextOAuthToken();
+    expect(next).toBe('token-a');
+
+    // Cleanup
+    _testResetTokenState();
   });
 });

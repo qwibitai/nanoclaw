@@ -4,8 +4,11 @@
  */
 import { execSync } from 'child_process';
 import os from 'os';
+import path from 'path';
 
+import { BROWSER_CDP_URL } from './config.js';
 import { logger } from './logger.js';
+import { waitForSidecarReady } from './browser/playwright-client.js';
 
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'docker';
@@ -98,5 +101,66 @@ export function cleanupOrphans(): void {
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');
+  }
+}
+
+/** Create a Docker network if it doesn't already exist. */
+export function ensureDockerNetwork(name: string): void {
+  try {
+    execSync(`${CONTAINER_RUNTIME_BIN} network create ${name}`, {
+      stdio: 'pipe',
+      timeout: 10000,
+    });
+    logger.info({ network: name }, 'Docker network created');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('already exists')) {
+      logger.debug({ network: name }, 'Docker network already exists');
+      return;
+    }
+    throw err;
+  }
+}
+
+/** Start the browser sidecar via docker compose and wait for CDP to respond. */
+export async function ensureBrowserSidecar(): Promise<void> {
+  const composePath = path.join(process.cwd(), 'docker-compose.browser.yml');
+  try {
+    execSync(`${CONTAINER_RUNTIME_BIN} compose -f ${composePath} up -d`, {
+      stdio: 'pipe',
+      timeout: 30000,
+    });
+  } catch (err) {
+    logger.error(
+      { err },
+      'Failed to start browser sidecar (non-fatal, continuing without it)',
+    );
+    return;
+  }
+  const ready = await waitForSidecarReady(BROWSER_CDP_URL, {
+    timeoutMs: 15_000,
+    intervalMs: 250,
+  });
+  if (ready) {
+    logger.info('Browser sidecar started and CDP is ready');
+  } else {
+    logger.warn(
+      { cdpUrl: BROWSER_CDP_URL },
+      'Browser sidecar started but CDP did not respond within 15s',
+    );
+  }
+}
+
+/** Stop the browser sidecar. */
+export function stopBrowserSidecar(): void {
+  const composePath = path.join(process.cwd(), 'docker-compose.browser.yml');
+  try {
+    execSync(`${CONTAINER_RUNTIME_BIN} compose -f ${composePath} down`, {
+      stdio: 'pipe',
+      timeout: 15000,
+    });
+    logger.info('Browser sidecar stopped');
+  } catch (err) {
+    logger.warn({ err }, 'Failed to stop browser sidecar');
   }
 }

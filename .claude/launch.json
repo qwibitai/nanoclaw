@@ -1,0 +1,74 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nanoclaw-dev",
+      "description": "Main NanoClaw orchestrator — hot-reload via tsx. Hosts the mini-app (3847), trust-gateway (10255), webhook (8090), and browser-sidecar subprocesses. Note: conflicts with the production launchd instance — stop it first with `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist`.",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/topcoder1/dev/nanoclaw"
+    },
+    {
+      "name": "nanoclaw-build",
+      "description": "One-shot TypeScript compile (tsc) — not a server, useful for verifying changes before committing.",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "build"],
+      "cwd": "/Users/topcoder1/dev/nanoclaw"
+    },
+    {
+      "name": "mini-app",
+      "description": "Telegram Mini App server (Express). Serves email/task/draft-diff routes. Normally started inside the main NanoClaw process, but can be run standalone for UI work.",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["dist/mini-app/standalone.js"],
+      "port": 3847,
+      "cwd": "/Users/topcoder1/dev/nanoclaw"
+    },
+    {
+      "name": "miniapp-tunnel",
+      "description": "Cloudflare tunnel exposing localhost:3847 as https://miniapp.inboxsuperpilot.com.",
+      "runtimeExecutable": "cloudflared",
+      "runtimeArgs": [
+        "tunnel",
+        "--config",
+        "/Users/topcoder1/.cloudflared/config-nanoclaw-miniapp.yml",
+        "run"
+      ]
+    },
+    {
+      "name": "whatsapp-auth",
+      "description": "One-shot WhatsApp pairing worker (pairing code mode). Run only when re-authenticating.",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/whatsapp-auth.ts",
+        "--pairing-code",
+        "--phone",
+        "16263483472"
+      ],
+      "cwd": "/Users/topcoder1/dev/nanoclaw"
+    },
+    {
+      "name": "test-watch",
+      "description": "Vitest in watch mode — re-runs unit tests on file changes.",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "test:watch"],
+      "cwd": "/Users/topcoder1/dev/nanoclaw"
+    },
+    {
+      "name": "webhook-server",
+      "description": "Standalone webhook event source (GitHub/Notion/generic). Normally embedded in NanoClaw; this entry is for reference.",
+      "port": 8090,
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["dist/watchers/webhook-server-standalone.js"],
+      "cwd": "/Users/topcoder1/dev/nanoclaw"
+    },
+    {
+      "name": "trust-gateway",
+      "description": "Trust gateway for container-to-host HTTPS proxy. Normally embedded in NanoClaw; reference entry.",
+      "port": 10255,
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["dist/trust-gateway-standalone.js"],
+      "cwd": "/Users/topcoder1/dev/nanoclaw"
+    }
+  ]
+}

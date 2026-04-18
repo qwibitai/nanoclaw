@@ -2,7 +2,10 @@ import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
+import { isBudgetExceeded } from './budget.js';
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { generateMorningDashboard } from './digest-engine.js';
+import { eventBus } from './event-bus.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -12,10 +15,12 @@ import {
   getAllTasks,
   getDueTasks,
   getTaskById,
+  logSessionCost,
   logTaskRun,
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
+import { refreshGmailTokens } from './gmail-token-refresh.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -103,10 +108,76 @@ async function runTask(
   }
   fs.mkdirSync(groupDir, { recursive: true });
 
+  if (isBudgetExceeded()) {
+    logger.warn({ taskId: task.id }, 'Task blocked by budget ceiling');
+    logTaskRun({
+      task_id: task.id,
+      run_at: new Date().toISOString(),
+      duration_ms: 0,
+      status: 'skipped',
+      result: null,
+      error: 'Daily budget exceeded',
+    });
+    // Still compute next run so task resumes tomorrow
+    const nextRun = computeNextRun(task);
+    updateTaskAfterRun(task.id, nextRun, 'Budget exceeded');
+    return;
+  }
+
   logger.info(
     { taskId: task.id, group: task.group_folder },
     'Running scheduled task',
   );
+
+  // If this is the morning briefing task, send the orchestrator's dashboard first
+  const isMorningBriefing =
+    task.prompt.toLowerCase().includes('morning briefing') ||
+    task.prompt.toLowerCase().includes('morning dashboard');
+
+  if (isMorningBriefing) {
+    try {
+      const dashboard = generateMorningDashboard(task.group_folder);
+      await deps.sendMessage(task.chat_jid, dashboard);
+      logger.info({ taskId: task.id }, 'Sent orchestrator morning dashboard');
+      eventBus.emit('digest.sent', {
+        type: 'digest.sent',
+        source: 'digest-engine',
+        timestamp: Date.now(),
+        payload: {
+          groupName: task.group_folder,
+          itemCount: 0,
+          digestType: 'morning',
+        },
+      });
+    } catch (err) {
+      logger.error(
+        { err, taskId: task.id },
+        'Failed to generate morning dashboard, falling back to container briefing',
+      );
+    }
+  }
+
+  // Pre-refresh Gmail tokens for tasks that may touch email (morning
+  // briefing, weekly review). Cheap and harmless for tasks that don't
+  // touch Gmail; the refresh script is fast and only does network work
+  // when something is actually about to expire. We don't gate this on
+  // task name because users can rename briefings.
+  const gmailRefresh = await refreshGmailTokens();
+  if (gmailRefresh.status === 'error') {
+    logger.warn(
+      {
+        taskId: task.id,
+        group: task.group_folder,
+        summary: gmailRefresh.summary,
+      },
+      'Gmail token refresh failed before scheduled task — Gmail-dependent sections may degrade',
+    );
+  } else if (gmailRefresh.status === 'missing') {
+    logger.debug(
+      { taskId: task.id, group: task.group_folder },
+      'Gmail accounts not yet authorized — proceeding with available accounts',
+    );
+  }
 
   const groups = deps.registeredGroups();
   const group = Object.values(groups).find(
@@ -149,6 +220,9 @@ async function runTask(
 
   let result: string | null = null;
   let error: string | null = null;
+  // Real API cost accumulated across SDK result messages (USD).
+  let realCostUsd = 0;
+  let sawRealCost = false;
 
   // For group context mode, use the group's current session
   const sessions = deps.getSessions();
@@ -181,10 +255,15 @@ async function runTask(
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
         script: task.script || undefined,
+        verbose: group.verbose,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
+        if (typeof streamedOutput.totalCostUsd === 'number') {
+          realCostUsd += streamedOutput.totalCostUsd;
+          sawRealCost = true;
+        }
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting)
@@ -229,6 +308,16 @@ async function runTask(
     status: error ? 'error' : 'success',
     result,
     error,
+  });
+
+  logSessionCost({
+    session_type: 'task',
+    group_folder: task.group_folder,
+    started_at: new Date(startTime).toISOString(),
+    duration_ms: durationMs,
+    estimated_cost_usd: sawRealCost
+      ? realCostUsd
+      : (durationMs / 10_000) * 0.01,
   });
 
   const nextRun = computeNextRun(task);

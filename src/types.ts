@@ -27,9 +27,17 @@ export interface AllowedRoot {
   description?: string;
 }
 
+export interface LlmConfig {
+  provider?: 'anthropic' | 'openai' | 'google' | 'ollama' | 'groq' | 'together';
+  model?: string;
+  escalationModel?: string;
+  providerBaseUrl?: string;
+}
+
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  llm?: LlmConfig;
 }
 
 export interface RegisteredGroup {
@@ -40,6 +48,7 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  verbose?: boolean; // When true, agent prefixes responses with a brief thinking summary
 }
 
 export interface NewMessage {
@@ -77,12 +86,47 @@ export interface TaskRunLog {
   task_id: string;
   run_at: string;
   duration_ms: number;
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'skipped';
   result: string | null;
   error: string | null;
 }
 
 // --- Channel abstraction ---
+
+export type ActionStyle =
+  | 'primary'
+  | 'destructive-safe'
+  | 'plan-execution'
+  | 'secondary'
+  | 'timed-auto';
+
+export interface Action {
+  label: string;
+  callbackData: string;
+  style?: ActionStyle;
+  confirmRequired?: boolean;
+  webAppUrl?: string;
+}
+
+export interface CallbackQuery {
+  id: string;
+  chatJid: string;
+  messageId: number;
+  data: string;
+  senderName: string;
+}
+
+/**
+ * Opaque handle to an in-flight progress message. Returned by
+ * `Channel.sendProgress`. Callers use it to update or remove the message
+ * as work advances. Non-supporting channels may return a no-op handle.
+ */
+export interface ProgressHandle {
+  /** Replace the message's text in place (edit-in-place on Telegram). */
+  update(text: string): Promise<void>;
+  /** Delete the message, or if the channel doesn't support deletion, no-op. */
+  clear(): Promise<void>;
+}
 
 export interface Channel {
   name: string;
@@ -95,6 +139,19 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  /**
+   * Optional: send a progress message that can be updated in place as
+   * work advances. Channels that support edit-in-place (Telegram,
+   * Discord) should implement this. Others can omit it — callers will
+   * fall back to sendMessage.
+   */
+  sendProgress?(jid: string, text: string): Promise<ProgressHandle>;
+  sendMessageWithActions?(
+    jid: string,
+    text: string,
+    actions: Action[],
+  ): Promise<number>;
+  onCallbackQuery?(handler: (query: CallbackQuery) => void): void;
 }
 
 // Callback type that channels use to deliver inbound messages
@@ -110,3 +167,52 @@ export type OnChatMetadata = (
   channel?: string,
   isGroup?: boolean,
 ) => void;
+
+export interface ProcessedItem {
+  item_id: string; // e.g., "email:thread_abc123" or "discord:msg_456"
+  source: string; // "superpilot" | "discord" | "poll"
+  processed_at: string; // ISO timestamp
+  action_taken: string; // "auto:calendar" | "propose:reply" | "escalate" | "skip"
+}
+
+export interface Commitment {
+  id: string;
+  description: string;
+  direction: 'mine' | 'theirs';
+  person: string;
+  person_email: string | null;
+  due_date: string | null;
+  source: string;
+  status: string;
+  created_at: string;
+  completed_at: string | null;
+}
+
+// --- Agentic UX types ---
+
+export type MessageCategory =
+  | 'financial'
+  | 'security'
+  | 'email'
+  | 'team'
+  | 'account'
+  | 'auto-handled';
+
+export type MessageUrgency =
+  | 'info'
+  | 'attention'
+  | 'action-required'
+  | 'urgent';
+
+export interface MessageMeta {
+  category: MessageCategory;
+  urgency: MessageUrgency;
+  actions: Action[];
+  batchable: boolean;
+  miniAppUrl?: string;
+  emailId?: string;
+  threadId?: string;
+  account?: string;
+  questionType?: 'yes-no' | 'financial-confirm' | 'multi-option';
+  questionId?: string;
+}

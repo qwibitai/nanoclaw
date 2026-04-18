@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import {
   _initTestDatabase,
+  _closeDatabase,
   createTask,
   deleteTask,
   getAllChats,
@@ -10,10 +11,29 @@ import {
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  isItemProcessed,
+  markItemProcessed,
+  getProcessedItemsSince,
+  cleanupOldProcessedItems,
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
   updateTask,
+  logApproval,
+  getRecentApprovals,
+  getGraduationCandidates,
+  createCommitment,
+  getOpenCommitments,
+  getOverdueCommitments,
+  completeCommitment,
+  upsertContactActivity,
+  getStaleContacts,
+  getFrequentNewContacts,
+  logSessionCost,
+  getTodaysCost,
+  getWeeklyCost,
+  getSystemState,
+  setSystemState,
 } from './db.js';
 import { formatMessages } from './router.js';
 
@@ -648,5 +668,233 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+describe('processed_items', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('returns false for unprocessed item', () => {
+    expect(isItemProcessed('email:thread_123')).toBe(false);
+  });
+
+  it('returns true after marking processed', () => {
+    markItemProcessed({
+      item_id: 'email:thread_123',
+      source: 'superpilot',
+      processed_at: '2026-04-10T10:00:00Z',
+      action_taken: 'propose:reply',
+    });
+    expect(isItemProcessed('email:thread_123')).toBe(true);
+  });
+
+  it('getProcessedItemsSince filters by timestamp', () => {
+    markItemProcessed({
+      item_id: 'email:old',
+      source: 'superpilot',
+      processed_at: '2026-04-09T10:00:00Z',
+      action_taken: 'skip',
+    });
+    markItemProcessed({
+      item_id: 'email:new',
+      source: 'superpilot',
+      processed_at: '2026-04-10T10:00:00Z',
+      action_taken: 'propose:reply',
+    });
+    const items = getProcessedItemsSince('2026-04-09T12:00:00Z');
+    expect(items).toHaveLength(1);
+    expect(items[0].item_id).toBe('email:new');
+  });
+
+  it('cleanupOldProcessedItems removes old entries', () => {
+    markItemProcessed({
+      item_id: 'email:ancient',
+      source: 'superpilot',
+      processed_at: '2026-03-01T10:00:00Z',
+      action_taken: 'auto:archive',
+    });
+    markItemProcessed({
+      item_id: 'email:recent',
+      source: 'superpilot',
+      processed_at: '2026-04-10T10:00:00Z',
+      action_taken: 'propose:reply',
+    });
+    const deleted = cleanupOldProcessedItems('2026-04-01T00:00:00Z');
+    expect(deleted).toBe(1);
+    expect(isItemProcessed('email:ancient')).toBe(false);
+    expect(isItemProcessed('email:recent')).toBe(true);
+  });
+});
+
+describe('approval_log', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('logs and retrieves approvals', () => {
+    logApproval('reply:meeting', 'reply to meeting request', 'approved');
+    logApproval('reply:meeting', 'reply to pricing email', 'approved');
+    const recent = getRecentApprovals('reply:meeting', 5);
+    expect(recent).toHaveLength(2);
+    expect(recent[0].outcome).toBe('approved');
+  });
+
+  it('identifies graduation candidates with 5 consecutive approvals', () => {
+    for (let i = 0; i < 5; i++) {
+      logApproval('reply:meeting', `meeting reply ${i}`, 'approved');
+    }
+    const candidates = getGraduationCandidates();
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].action_type).toBe('reply:meeting');
+    expect(candidates[0].consecutive_approvals).toBe(5);
+  });
+
+  it('does not graduate if a rejection breaks the streak', () => {
+    for (let i = 0; i < 4; i++) {
+      logApproval('reply:meeting', `meeting reply ${i}`, 'approved');
+    }
+    logApproval('reply:meeting', 'bad reply', 'rejected');
+    const candidates = getGraduationCandidates();
+    expect(candidates).toHaveLength(0);
+  });
+});
+
+describe('commitments', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('creates and retrieves open commitments', () => {
+    createCommitment({
+      id: 'c1',
+      description: 'Send proposal',
+      direction: 'mine',
+      person: 'David',
+      person_email: 'david@example.com',
+      due_date: '2026-04-15T17:00:00Z',
+      source: 'email:thread_1',
+      status: 'open',
+      created_at: '2026-04-10T10:00:00Z',
+    });
+    const open = getOpenCommitments();
+    expect(open).toHaveLength(1);
+    expect(open[0].description).toBe('Send proposal');
+  });
+
+  it('completes a commitment', () => {
+    createCommitment({
+      id: 'c2',
+      description: 'Review PR',
+      direction: 'mine',
+      person: 'Sarah',
+      person_email: null,
+      due_date: null,
+      source: 'discord:msg_1',
+      status: 'open',
+      created_at: '2026-04-10T10:00:00Z',
+    });
+    completeCommitment('c2');
+    expect(getOpenCommitments()).toHaveLength(0);
+  });
+
+  it('finds overdue commitments', () => {
+    createCommitment({
+      id: 'c3',
+      description: 'Send specs',
+      direction: 'theirs',
+      person: 'Mike',
+      person_email: 'mike@example.com',
+      due_date: '2026-04-01T17:00:00Z',
+      source: 'email:thread_2',
+      status: 'open',
+      created_at: '2026-03-28T10:00:00Z',
+    });
+    const overdue = getOverdueCommitments();
+    expect(overdue).toHaveLength(1);
+    expect(overdue[0].person).toBe('Mike');
+  });
+});
+
+describe('contact_activity', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('tracks contact activity', () => {
+    upsertContactActivity('mike@example.com', 'Mike', 'inbound');
+    upsertContactActivity('mike@example.com', 'Mike', 'outbound');
+    // Should have 2 interactions
+    const stale = getStaleContacts(0); // 0 days = everything is stale
+    // Won't appear because interaction_count (2) < 3 threshold
+    expect(stale).toHaveLength(0);
+  });
+
+  it('increments interaction_count on upsert', () => {
+    upsertContactActivity('alice@example.com', 'Alice', 'inbound');
+    upsertContactActivity('alice@example.com', 'Alice', 'inbound');
+    upsertContactActivity('alice@example.com', 'Alice', 'outbound');
+    upsertContactActivity('alice@example.com', 'Alice', 'outbound');
+    // 4 interactions — above the >3 threshold; use a future cutoff (negative offset trick)
+    // getStaleContacts(0) sets cutoff = now, records set to now are not < now.
+    // Use getFrequentNewContacts to verify the count instead.
+    const frequent = getFrequentNewContacts(1, 4);
+    expect(frequent).toHaveLength(1);
+    expect(frequent[0].contact_email).toBe('alice@example.com');
+    expect(frequent[0].interaction_count).toBe(4);
+  });
+
+  it('getFrequentNewContacts returns contacts with enough interactions', () => {
+    upsertContactActivity('bob@example.com', 'Bob', 'inbound');
+    upsertContactActivity('bob@example.com', 'Bob', 'inbound');
+    upsertContactActivity('bob@example.com', 'Bob', 'inbound');
+    upsertContactActivity('bob@example.com', 'Bob', 'inbound');
+    // 4 interactions, updated just now
+    const frequent = getFrequentNewContacts(1, 4);
+    expect(frequent).toHaveLength(1);
+    expect(frequent[0].contact_email).toBe('bob@example.com');
+    expect(frequent[0].interaction_count).toBe(4);
+  });
+
+  it('getFrequentNewContacts excludes contacts below minInteractions', () => {
+    upsertContactActivity('carol@example.com', 'Carol', 'inbound');
+    upsertContactActivity('carol@example.com', 'Carol', 'inbound');
+    const frequent = getFrequentNewContacts(1, 4);
+    expect(frequent).toHaveLength(0);
+  });
+});
+
+describe('session_costs', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('logs and sums session costs', () => {
+    logSessionCost({
+      session_type: 'email_trigger',
+      group_folder: 'main',
+      started_at: new Date().toISOString(),
+      duration_ms: 30000,
+      estimated_cost_usd: 0.5,
+    });
+    logSessionCost({
+      session_type: 'scheduled',
+      group_folder: 'main',
+      started_at: new Date().toISOString(),
+      duration_ms: 60000,
+      estimated_cost_usd: 1.0,
+    });
+    const total = getTodaysCost();
+    expect(total).toBe(1.5);
+  });
+});
+
+describe('system_state', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('stores and retrieves state', () => {
+    setSystemState('superpilot_last_ok', '2026-04-10T10:00:00Z');
+    expect(getSystemState('superpilot_last_ok')).toBe('2026-04-10T10:00:00Z');
+  });
+
+  it('returns undefined for missing keys', () => {
+    expect(getSystemState('nonexistent')).toBeUndefined();
   });
 });

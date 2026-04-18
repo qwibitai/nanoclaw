@@ -1,0 +1,54 @@
+# Browser Sidecar for NanoClaw
+#
+# Runs headless Chromium with Chrome DevTools Protocol (CDP) enabled.
+# Agents connect via CDP at ws://browser-sidecar:9223.
+#
+# Usage:
+#   docker compose -f docker-compose.browser.yml up -d
+#
+# Chromium binds CDP to 127.0.0.1:9222 inside the container.
+# A Node.js TCP proxy on 0.0.0.0:9223 makes it accessible externally.
+# From the host, connect to ws://localhost:9223.
+# From Docker containers on the nanoclaw network: ws://browser-sidecar:9223.
+
+services:
+  browser-sidecar:
+    image: mcr.microsoft.com/playwright:v1.52.0-noble
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        /ms-playwright/chromium_headless_shell-1169/chrome-linux/headless_shell \
+          --no-sandbox --disable-gpu --disable-dev-shm-usage \
+          --remote-debugging-port=9222 &
+        sleep 2
+        node -e "
+          const net = require('net');
+          net.createServer(c => {
+            const s = net.connect(9222, '127.0.0.1', () => { c.pipe(s); s.pipe(c); });
+            s.on('error', () => c.destroy());
+            c.on('error', () => s.destroy());
+          }).listen(9223, '0.0.0.0');
+        "
+    ports:
+      - "127.0.0.1:9223:9223"
+    volumes:
+      - browser-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9222/json/version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 1536m
+    shm_size: 512m
+    networks:
+      - nanoclaw
+
+networks:
+  nanoclaw:
+    name: nanoclaw
+    external: true
+
+volumes:
+  browser-data:
