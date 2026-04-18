@@ -1,0 +1,16 @@
+{
+  "name": "empty-attention-dashboard-no-edit",
+  "description": "renderAttentionDashboard with items=[] must NOT touch Telegram. Before the fix this was spamming 'Attention — 0 open' refreshes on every archive-classified event.",
+  "trigger": {
+    "type": "renderAttentionDashboard",
+    "args": {
+      "chatId": "12345",
+      "items": []
+    }
+  },
+  "expect": {
+    "outbound": {
+      "totalCalls": 0
+    }
+  }
+}

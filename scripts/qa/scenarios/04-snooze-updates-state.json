@@ -1,0 +1,33 @@
+{
+  "name": "snooze-1h-updates-state-and-sets-until",
+  "description": "handleSnooze('1h') must (a) set state='held', (b) write snoozed_until ~1h in the future into metadata. Regression guard for the snooze button path.",
+  "setup": {
+    "insertTrackedItems": [
+      {
+        "classification": "push",
+        "queue": "attention",
+        "state": "pushed",
+        "sender": "carlos@jpmorgan.com",
+        "title": "Sign SBLOC docs",
+        "model_tier": 2,
+        "confidence": 0.55
+      }
+    ]
+  },
+  "trigger": {
+    "type": "handleSnooze",
+    "args": { "itemId": "$fixture:0", "duration": "1h" }
+  },
+  "expect": {
+    "db": [
+      {
+        "query": "SELECT COUNT(*) AS n FROM tracked_items WHERE id = $fixture:0 AND state = 'held'",
+        "expectCount": 1
+      },
+      {
+        "query": "SELECT COUNT(*) AS n FROM tracked_items WHERE id = $fixture:0 AND CAST(json_extract(metadata, '$.snoozed_until') AS INTEGER) > strftime('%s','now')*1000",
+        "expectCount": 1
+      }
+    ]
+  }
+}

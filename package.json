@@ -21,7 +21,9 @@
     "test:watch": "vitest",
     "triage:bootstrap": "tsx scripts/triage-bootstrap.ts",
     "qa:check": "tsx scripts/qa-check.ts",
-    "qa:monitor": "tsx scripts/qa-monitor.ts"
+    "qa:monitor": "tsx scripts/qa-monitor.ts",
+    "qa:scenarios": "tsx scripts/qa/scenarios.ts",
+    "qa:all": "npm run qa:check && npm run qa:scenarios"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.69",

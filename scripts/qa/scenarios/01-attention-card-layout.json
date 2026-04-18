@@ -1,0 +1,31 @@
+{
+  "name": "attention-card-has-4-buttons-1-row",
+  "description": "pushAttentionItem must produce exactly 1 row of 4 compact buttons (⏰1h, ⏰Tomorrow, ✕Dismiss, 🗃Archive) — no more 'Move to archive queue' row, no 3-row layout.",
+  "trigger": {
+    "type": "pushAttentionItem",
+    "args": {
+      "chatId": "12345",
+      "itemId": "scn-attn-1",
+      "title": "Chase account alert",
+      "reason": "high-priority financial",
+      "sender": "alerts@chase.com"
+    }
+  },
+  "expect": {
+    "outbound": {
+      "totalCalls": 1,
+      "kinds": ["sendMessage"],
+      "keyboard": {
+        "rows": 1,
+        "buttons": 4,
+        "callbackDataContains": [
+          "triage:snooze:1h:scn-attn-1",
+          "triage:snooze:tomorrow:scn-attn-1",
+          "triage:dismiss:scn-attn-1",
+          "triage:archive:scn-attn-1"
+        ],
+        "callbackDataExcludes": ["triage:override:archive"]
+      }
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "archive-from-attention-records-negative-example",
+  "description": "handleArchive on a triage-classified attention item must (a) resolve the row, (b) record a NEGATIVE example for the learning loop (because archiving attention is effectively saying the classifier overreached), and (c) promote skip-list for the sender after enough hits.",
+  "setup": {
+    "insertTrackedItems": [
+      {
+        "classification": "push",
+        "queue": "attention",
+        "state": "pushed",
+        "sender": "noreply@example.com",
+        "title": "We thought you wanted to see this",
+        "model_tier": 1,
+        "confidence": 0.9
+      }
+    ]
+  },
+  "trigger": {
+    "type": "handleArchive",
+    "args": { "itemId": "$fixture:0" }
+  },
+  "expect": {
+    "db": [
+      {
+        "query": "SELECT COUNT(*) AS n FROM tracked_items WHERE id = $fixture:0 AND state = 'resolved' AND resolution_method = 'manual:button'",
+        "expectCount": 1
+      },
+      {
+        "query": "SELECT COUNT(*) AS n FROM triage_examples WHERE tracked_item_id = $fixture:0 AND kind = 'negative' AND user_queue = 'archive_candidate'",
+        "expectCount": 1
+      },
+      {
+        "query": "SELECT COUNT(*) AS n FROM triage_examples WHERE tracked_item_id = $fixture:0 AND kind = 'positive'",
+        "expectCount": 0
+      }
+    ]
+  }
+}

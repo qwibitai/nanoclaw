@@ -668,6 +668,27 @@ async function callBotApi<T>(
   return json.result as T;
 }
 
+// QA capture hook. When set, outbound Telegram Bot API calls are
+// intercepted and routed to the hook function instead of hitting the
+// network. Used by the scenario runner in scripts/qa/scenarios.ts to
+// assert on reply_markup / text / editMessage flows without a real bot.
+// Production path is unchanged when the hook is null.
+export interface QACapturedCall {
+  kind: 'sendMessage' | 'editMessage' | 'pinMessage';
+  chatId: string | number;
+  messageId?: number;
+  text?: string;
+  opts?: { parse_mode?: string; reply_markup?: unknown };
+}
+let qaCaptureHook:
+  | ((call: QACapturedCall) => Promise<{ message_id: number }>)
+  | null = null;
+export function __setTelegramQACapture(
+  hook: typeof qaCaptureHook,
+): void {
+  qaCaptureHook = hook;
+}
+
 /**
  * Send a plain Telegram message via the Bot API. Returns the sent message id.
  * Thin wrapper intended for module-level callers (e.g., triage dashboards)
@@ -678,6 +699,9 @@ export async function sendTelegramMessage(
   text: string,
   opts: { parse_mode?: string; reply_markup?: unknown } = {},
 ): Promise<{ message_id: number }> {
+  if (qaCaptureHook) {
+    return qaCaptureHook({ kind: 'sendMessage', chatId, text, opts });
+  }
   const body: Record<string, unknown> = {
     chat_id: normalizeChatId(chatId),
     text,
@@ -696,6 +720,15 @@ export async function editTelegramMessage(
   text: string,
   opts: { parse_mode?: string; reply_markup?: unknown } = {},
 ): Promise<{ message_id: number }> {
+  if (qaCaptureHook) {
+    return qaCaptureHook({
+      kind: 'editMessage',
+      chatId,
+      messageId,
+      text,
+      opts,
+    });
+  }
   const body: Record<string, unknown> = {
     chat_id: normalizeChatId(chatId),
     message_id: messageId,
@@ -713,6 +746,10 @@ export async function pinTelegramMessage(
   chatId: string | number,
   messageId: number,
 ): Promise<{ ok: true }> {
+  if (qaCaptureHook) {
+    await qaCaptureHook({ kind: 'pinMessage', chatId, messageId });
+    return { ok: true };
+  }
   await callBotApi<boolean>('pinChatMessage', {
     chat_id: normalizeChatId(chatId),
     message_id: messageId,

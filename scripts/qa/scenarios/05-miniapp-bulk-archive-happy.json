@@ -1,0 +1,16 @@
+{
+  "name": "miniapp-bulk-archive-endpoint-rejects-empty",
+  "description": "Integration: POST /api/archive/bulk with {} must return 400, not crash. Sanity-check that the endpoint stays up and validates inputs. (Happy-path bulk archiving is covered by production mini-app traffic + the DB invariants; this scenario is the narrow guard for the validation path.)",
+  "trigger": {
+    "type": "http",
+    "method": "POST",
+    "path": "/api/archive/bulk",
+    "body": {}
+  },
+  "expect": {
+    "http": {
+      "status": 400,
+      "bodyContains": ["itemIds"]
+    }
+  }
+}
