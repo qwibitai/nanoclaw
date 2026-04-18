@@ -46,22 +46,22 @@ sqlite3 -json "$DB" "
   GROUP BY chat_jid;
 " > "$TMP_DIR/stats.json" 2>/dev/null
 
-# 统计待处理消息（agent 最后回复后的用户消息数）
+# 判断"谁在等谁"：最后一条消息是用户发的还是 agent 发的
 sqlite3 -json "$DB" "
   SELECT
     m.chat_jid,
-    COUNT(*) as pending
+    m.is_from_me OR m.is_bot_message as last_is_bot,
+    m.sender_name as last_sender,
+    m.timestamp as last_msg_time,
+    ROUND((julianday('now') - julianday(m.timestamp)) * 24, 1) as hours_since_last
   FROM messages m
-  WHERE m.is_from_me = 0
-    AND m.is_bot_message = 0
-    AND m.chat_jid IN (SELECT jid FROM chats WHERE is_group = 1)
-    AND m.timestamp > COALESCE(
-      (SELECT MAX(m2.timestamp) FROM messages m2
-       WHERE m2.chat_jid = m.chat_jid AND (m2.is_from_me = 1 OR m2.is_bot_message = 1)),
-      '1970-01-01'
-    )
-  GROUP BY m.chat_jid;
-" > "$TMP_DIR/pending.json" 2>/dev/null
+  INNER JOIN (
+    SELECT chat_jid, MAX(timestamp) as max_ts
+    FROM messages
+    WHERE chat_jid IN (SELECT jid FROM chats WHERE is_group = 1)
+    GROUP BY chat_jid
+  ) latest ON m.chat_jid = latest.chat_jid AND m.timestamp = latest.max_ts;
+" > "$TMP_DIR/turn.json" 2>/dev/null
 
 # 收集各群的文件系统状态
 echo "[]" > "$TMP_DIR/fs_info.json"
@@ -109,7 +109,7 @@ def load(name):
 chats = load("chats.json")
 last_msgs = {m["chat_jid"]: m for m in load("last_messages.json")}
 stats = {s["chat_jid"]: s for s in load("stats.json")}
-pending = {p["chat_jid"]: p for p in load("pending.json")}
+turn = {t["chat_jid"]: t for t in load("turn.json")}
 fs_info = {f["jid"]: f for f in load("fs_info.json")}
 
 groups = []
@@ -127,8 +127,11 @@ for c in chats:
     if jid in stats:
         g["msgs_1h"] = stats[jid].get("msgs_1h", 0)
         g["msgs_24h"] = stats[jid].get("msgs_24h", 0)
-    if jid in pending:
-        g["pending_user_msgs"] = pending[jid].get("pending", 0)
+    if jid in turn:
+        t = turn[jid]
+        # waiting_for: "bot"=用户发了消息等agent回, "user"=agent回了等用户
+        g["waiting_for"] = "user" if t.get("last_is_bot") else "bot"
+        g["hours_idle"] = t.get("hours_since_last", 0)
     if jid in fs_info:
         fi = fs_info[jid]
         g["folder"] = fi.get("folder", "")
