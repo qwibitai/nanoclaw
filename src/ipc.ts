@@ -106,7 +106,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              const raw = fs.readFileSync(filePath, 'utf-8');
+              // 先删除文件再处理，防止 async 操作期间下一个 poll cycle 重复读取
+              fs.unlinkSync(filePath);
+              const data = JSON.parse(raw);
               if (data.type === 'message' && data.chatJid && data.text) {
                 // 飞书授权请求 — text 中包含 feishu_auth_request JSON
                 let isAuthRequest = false;
@@ -128,7 +131,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
                       'Feishu auth request processed',
                     );
                   }
-                  fs.unlinkSync(filePath);
                   continue;
                 }
               }
@@ -155,7 +157,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC rename_chat blocked',
                   );
                 }
-                fs.unlinkSync(filePath);
                 continue;
               }
 
@@ -202,7 +203,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   );
                 }
               }
-              fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
