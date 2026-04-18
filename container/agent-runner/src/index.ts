@@ -534,6 +534,10 @@ async function runQuery(
         result: textResult || null,
         newSessionId,
       });
+      // Break so control returns to the outer while(true) loop where
+      // waitForIpcMessage() handles follow-ups. Without this, the
+      // for-await iterator hangs and IPC messages are silently lost.
+      break;
     }
   }
 
