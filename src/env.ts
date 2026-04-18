@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { logger } from './logger.js';
+import { PROJECT_ROOT } from './paths.js';
 
 /**
  * Parse the .env file and return values for the requested keys.
@@ -9,7 +10,7 @@ import { logger } from './logger.js';
  * so they don't leak to child processes.
  */
 export function readEnvFile(keys: string[]): Record<string, string> {
-  const envFile = path.join(process.cwd(), '.env');
+  const envFile = path.join(PROJECT_ROOT, '.env');
   let content: string;
   try {
     content = fs.readFileSync(envFile, 'utf-8');

@@ -19,6 +19,7 @@ import {
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { PROJECT_ROOT } from './paths.js';
 import {
   CONTAINER_RUNTIME_BIN,
   hostGatewayArgs,
@@ -64,7 +65,6 @@ function buildVolumeMounts(
   isMain: boolean,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
-  const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
@@ -74,14 +74,14 @@ function buildVolumeMounts(
     // (src/, dist/, package.json, etc.) which would bypass the sandbox
     // entirely on next restart.
     mounts.push({
-      hostPath: projectRoot,
+      hostPath: PROJECT_ROOT,
       containerPath: '/workspace/project',
       readonly: true,
     });
 
     // Shadow .env so the agent cannot read secrets from the mounted project root.
     // Credentials are injected by the OneCLI gateway, never exposed to containers.
-    const envFile = path.join(projectRoot, '.env');
+    const envFile = path.join(PROJECT_ROOT, '.env');
     if (fs.existsSync(envFile)) {
       mounts.push({
         hostPath: '/dev/null',
@@ -92,7 +92,7 @@ function buildVolumeMounts(
 
     // Main gets writable access to the store (SQLite DB) so it can
     // query and write to the database directly.
-    const storeDir = path.join(projectRoot, 'store');
+    const storeDir = path.join(PROJECT_ROOT, 'store');
     mounts.push({
       hostPath: storeDir,
       containerPath: '/workspace/project/store',
@@ -169,7 +169,7 @@ function buildVolumeMounts(
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
-  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
+  const skillsSrc = path.join(PROJECT_ROOT, 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
     for (const skillDir of fs.readdirSync(skillsSrc)) {
@@ -201,7 +201,7 @@ function buildVolumeMounts(
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
   const agentRunnerSrc = path.join(
-    projectRoot,
+    PROJECT_ROOT,
     'container',
     'agent-runner',
     'src',
