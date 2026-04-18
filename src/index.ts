@@ -30,21 +30,27 @@ import {
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
 import {
+  expireStaleDelegations,
   getAllChats,
+  getAllDelegations,
   getAllRegisteredGroups,
   getAllSessions,
   deleteSession,
   getAllTasks,
+  getGroupByFolder,
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
   getRouterState,
   initDatabase,
+  sessionKey,
+  SessionDelegation,
   setRegisteredGroup,
   setRouterState,
   setSession,
   storeChatMetadata,
   storeMessage,
+  touchDelegation,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -70,8 +76,9 @@ import { logger } from './logger.js';
 export { escapeXml, formatMessages } from './router.js';
 
 let lastTimestamp = '';
-let sessions: Record<string, string> = {};
+let sessions: Record<string, string> = {}; // key: "folder\tchatJid"
 let registeredGroups: Record<string, RegisteredGroup> = {};
+let activeDelegations: Record<string, SessionDelegation> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
@@ -110,10 +117,38 @@ function loadState(): void {
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
+  activeDelegations = getAllDelegations();
   logger.info(
-    { groupCount: Object.keys(registeredGroups).length },
+    {
+      groupCount: Object.keys(registeredGroups).length,
+      delegationCount: Object.keys(activeDelegations).length,
+    },
     'State loaded',
   );
+}
+
+/**
+ * Resolve which group should handle messages for a JID.
+ * Checks delegations first, then falls back to registered groups.
+ */
+function resolveGroupForJid(chatJid: string): RegisteredGroup | undefined {
+  const delegation = activeDelegations[chatJid];
+  if (delegation) {
+    const group = getGroupByFolder(delegation.targetFolder);
+    if (group) return group;
+    logger.warn(
+      { chatJid, targetFolder: delegation.targetFolder },
+      'Delegation target folder not found, falling back to registered group',
+    );
+  }
+  return registeredGroups[chatJid];
+}
+
+/**
+ * Check if a JID should receive messages (registered or delegated).
+ */
+function isActiveJid(jid: string): boolean {
+  return Boolean(registeredGroups[jid] || activeDelegations[jid]);
 }
 
 /**
@@ -219,8 +254,13 @@ export function _setRegisteredGroups(
  * Called by the GroupQueue when it's this group's turn.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
-  const group = registeredGroups[chatJid];
+  const group = resolveGroupForJid(chatJid);
   if (!group) return true;
+
+  // Keep delegation alive while user is chatting
+  if (activeDelegations[chatJid]) {
+    touchDelegation(chatJid);
+  }
 
   const channel = findChannel(channels, chatJid);
   if (!channel) {
@@ -239,8 +279,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // For non-main groups, check if trigger is required and present
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  // For non-main groups, check if trigger is required and present.
+  // Delegated JIDs bypass trigger — the Router already classified intent.
+  const isDelegated = Boolean(activeDelegations[chatJid]);
+  if (!isMainGroup && !isDelegated && group.requiresTrigger !== false) {
     const triggerPattern = getTriggerPattern(group.trigger);
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
@@ -343,7 +385,8 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const sKey = sessionKey(group.folder, chatJid);
+  const sessionId = sessions[sKey];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -375,8 +418,8 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          sessions[sKey] = output.newSessionId;
+          setSession(group.folder, chatJid, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -394,20 +437,17 @@ async function runAgent(
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
+        queue.registerProcess(chatJid, proc, containerName, group.folder, chatJid),
       wrappedOnOutput,
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      sessions[sKey] = output.newSessionId;
+      setSession(group.folder, chatJid, output.newSessionId);
     }
 
     if (output.status === 'error') {
       // Detect stale/corrupt session — clear it so the next retry starts fresh.
-      // The session .jsonl can go missing after a crash mid-write, manual
-      // deletion, or disk-full. The existing backoff in group-queue.ts
-      // handles the retry; we just need to remove the broken session ID.
       const isStaleSession =
         sessionId &&
         output.error &&
@@ -420,8 +460,8 @@ async function runAgent(
           { group: group.name, staleSessionId: sessionId, error: output.error },
           'Stale session detected — clearing for next retry',
         );
-        delete sessions[group.folder];
-        deleteSession(group.folder);
+        delete sessions[sKey];
+        deleteSession(group.folder, chatJid);
       }
 
       logger.error(
@@ -447,9 +487,25 @@ async function startMessageLoop(): Promise<void> {
 
   logger.info(`NanoClaw running (default trigger: ${DEFAULT_TRIGGER})`);
 
+  const DELEGATION_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
+  let lastDelegationCleanup = Date.now();
+
   while (true) {
     try {
-      const jids = Object.keys(registeredGroups);
+      // Expire idle delegations every 60 seconds
+      if (Date.now() - lastDelegationCleanup > 60_000) {
+        lastDelegationCleanup = Date.now();
+        const expired = expireStaleDelegations(DELEGATION_IDLE_TIMEOUT_MS);
+        for (const jid of expired) {
+          delete activeDelegations[jid];
+          logger.info({ jid }, 'Delegation expired (idle timeout)');
+        }
+      }
+
+      // Include both registered JIDs and delegated JIDs in message fetch
+      const registeredJids = Object.keys(registeredGroups);
+      const delegatedJids = Object.keys(activeDelegations);
+      const jids = [...new Set([...registeredJids, ...delegatedJids])];
       const { messages, newTimestamp } = getNewMessages(
         jids,
         lastTimestamp,
@@ -475,7 +531,7 @@ async function startMessageLoop(): Promise<void> {
         }
 
         for (const [chatJid, groupMessages] of messagesByGroup) {
-          const group = registeredGroups[chatJid];
+          const group = resolveGroupForJid(chatJid);
           if (!group) continue;
 
           const channel = findChannel(channels, chatJid);
@@ -485,7 +541,9 @@ async function startMessageLoop(): Promise<void> {
           }
 
           const isMainGroup = group.isMain === true;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+          const isDelegated = Boolean(activeDelegations[chatJid]);
+          // Delegated JIDs bypass trigger — the Router already classified intent.
+          const needsTrigger = !isMainGroup && !isDelegated && group.requiresTrigger !== false;
 
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
@@ -647,7 +705,7 @@ async function main(): Promise<void> {
       }
 
       // Sender allowlist drop mode: discard messages from denied senders before storing
-      if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
+      if (!msg.is_from_me && !msg.is_bot_message && isActiveJid(chatJid)) {
         const cfg = loadSenderAllowlist();
         if (
           shouldDropMessage(chatJid, cfg) &&
@@ -672,6 +730,7 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+    activeDelegations: () => activeDelegations,
   };
 
   // Create and connect all registered channels.
@@ -720,6 +779,36 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
+    // Delegation callbacks
+    onDelegateSession: (jid, targetFolder, originalFolder, delegatedBy, replayFrom, replayMessages) => {
+      activeDelegations[jid] = {
+        targetFolder,
+        originalFolder,
+        delegatedAt: new Date().toISOString(),
+        delegatedBy,
+      };
+      // Close the delegating container so the JID becomes available
+      // for the target agent. Without this, the GroupQueue considers the
+      // JID "active" (router container idle) and won't spawn the target.
+      queue.closeStdin(jid);
+
+      if (replayMessages) {
+        // Reset cursor so the delegated agent receives all
+        // unprocessed messages (including what the Router just consumed).
+        delete lastAgentTimestamp[jid];
+        saveState();
+        logger.info({ jid, targetFolder }, 'Delegation with message replay — cursor reset');
+      } else if (replayFrom) {
+        lastAgentTimestamp[jid] = replayFrom;
+        saveState();
+      }
+      queue.enqueueMessageCheck(jid);
+      logger.info({ jid, targetFolder, delegatedBy }, 'Session delegated');
+    },
+    onEndDelegation: (jid) => {
+      delete activeDelegations[jid];
+      logger.info({ jid }, 'Delegation ended');
+    },
     syncGroups: async (force: boolean) => {
       await Promise.all(
         channels

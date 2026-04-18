@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { sanitizeJid } from './container-runner.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -24,6 +25,7 @@ interface GroupState {
   process: ChildProcess | null;
   containerName: string | null;
   groupFolder: string | null;
+  chatJid: string | null;
   retryCount: number;
 }
 
@@ -48,6 +50,7 @@ export class GroupQueue {
         process: null,
         containerName: null,
         groupFolder: null,
+        chatJid: null,
         retryCount: 0,
       };
       this.groups.set(groupJid, state);
@@ -134,11 +137,13 @@ export class GroupQueue {
     proc: ChildProcess,
     containerName: string,
     groupFolder?: string,
+    chatJid?: string,
   ): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
     if (groupFolder) state.groupFolder = groupFolder;
+    if (chatJid) state.chatJid = chatJid;
   }
 
   /**
@@ -163,7 +168,11 @@ export class GroupQueue {
       return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
+    // Use per-user IPC input path if chatJid is available
+    const jidSlug = state.chatJid ? sanitizeJid(state.chatJid) : null;
+    const inputDir = jidSlug
+      ? path.join(DATA_DIR, 'ipc', state.groupFolder, jidSlug, 'input')
+      : path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
@@ -184,7 +193,10 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder) return;
 
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
+    const jidSlug = state.chatJid ? sanitizeJid(state.chatJid) : null;
+    const inputDir = jidSlug
+      ? path.join(DATA_DIR, 'ipc', state.groupFolder, jidSlug, 'input')
+      : path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
       fs.writeFileSync(path.join(inputDir, '_close'), '');
@@ -226,6 +238,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.chatJid = null;
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -255,6 +268,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.chatJid = null;
       this.activeCount--;
       this.drainGroup(groupJid);
     }

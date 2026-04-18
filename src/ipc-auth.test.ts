@@ -62,6 +62,8 @@ beforeEach(() => {
     syncGroups: async () => {},
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
+    onDelegateSession: () => {},
+    onEndDelegation: () => {},
     onTasksChanged: () => {},
   };
 });

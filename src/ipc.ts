@@ -5,7 +5,15 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  deleteDelegation,
+  getDelegation,
+  getTaskById,
+  setDelegation,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -14,6 +22,15 @@ export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
+  onDelegateSession: (
+    jid: string,
+    targetFolder: string,
+    originalFolder: string,
+    delegatedBy: string,
+    replayFrom?: string,
+    replayMessages?: boolean,
+  ) => void;
+  onEndDelegation: (jid: string) => void;
   syncGroups: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
@@ -173,6 +190,10 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For delegate_session / end_delegation
+    targetFolder?: string;
+    replayFrom?: string;
+    replayMessages?: boolean;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -459,6 +480,96 @@ export async function processTaskIpc(
           { data },
           'Invalid register_group request - missing required fields',
         );
+      }
+      break;
+
+    case 'delegate_session':
+      if (data.jid && data.targetFolder) {
+        // Validate target folder exists as a registered group
+        const allGroups = deps.registeredGroups();
+        const targetExists = Object.values(allGroups).some(
+          (g) => g.folder === data.targetFolder,
+        );
+        if (!targetExists) {
+          logger.warn(
+            { sourceGroup, targetFolder: data.targetFolder },
+            'delegate_session: target folder not registered',
+          );
+          break;
+        }
+        if (!isValidGroupFolder(data.targetFolder!)) {
+          logger.warn(
+            { sourceGroup, targetFolder: data.targetFolder },
+            'delegate_session: invalid target folder name',
+          );
+          break;
+        }
+        // Resolve original folder for this JID (to restore on end_delegation)
+        const originalGroup = allGroups[data.jid];
+        const originalFolder = originalGroup?.folder ?? sourceGroup;
+
+        // Store delegation in DB
+        setDelegation(
+          data.jid,
+          data.targetFolder!,
+          originalFolder,
+          sourceGroup,
+        );
+        // Notify index.ts to update in-memory state
+        deps.onDelegateSession(
+          data.jid,
+          data.targetFolder!,
+          originalFolder,
+          sourceGroup,
+          data.replayFrom,
+          data.replayMessages,
+        );
+        logger.info(
+          {
+            jid: data.jid,
+            targetFolder: data.targetFolder,
+            sourceGroup,
+            replayFrom: (data as { replayFrom?: string }).replayFrom,
+          },
+          'Session delegated via IPC',
+        );
+      } else {
+        logger.warn(
+          { data },
+          'Invalid delegate_session request - missing jid or targetFolder',
+        );
+      }
+      break;
+
+    case 'end_delegation':
+      if (data.jid) {
+        const existing = getDelegation(data.jid);
+        if (!existing) {
+          logger.warn(
+            { jid: data.jid, sourceGroup },
+            'end_delegation: no active delegation for JID',
+          );
+          break;
+        }
+        // Allow the delegated agent OR the original group to end delegation
+        if (
+          existing.delegatedBy !== sourceGroup &&
+          existing.targetFolder !== sourceGroup
+        ) {
+          logger.warn(
+            { jid: data.jid, sourceGroup, delegatedBy: existing.delegatedBy },
+            'end_delegation: unauthorized (not delegator or target)',
+          );
+          break;
+        }
+        deleteDelegation(data.jid);
+        deps.onEndDelegation(data.jid);
+        logger.info(
+          { jid: data.jid, sourceGroup },
+          'Delegation ended via IPC',
+        );
+      } else {
+        logger.warn({ data }, 'Invalid end_delegation request - missing jid');
       }
       break;
 
