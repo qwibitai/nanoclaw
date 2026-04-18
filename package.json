@@ -2,6 +2,11 @@
   "name": "@boxlite-ai/agentlite",
   "version": "1.2.25",
   "description": "Personal Claude assistant. Lightweight, secure, customizable.",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "main": "dist/api/sdk.js",
   "bin": {
