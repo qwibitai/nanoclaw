@@ -568,6 +568,38 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+/**
+ * Retry connecting a channel with exponential backoff (5s -> 10s -> 20s ... cap 5min).
+ * Once connected, pushes into the live channels array so message routing picks it up.
+ */
+function retryChannelConnect(channel: Channel, liveChannels: Channel[]): void {
+  const MAX_DELAY_MS = 5 * 60 * 1000;
+  let delay = 5000;
+
+  const attempt = () => {
+    setTimeout(async () => {
+      try {
+        await channel.connect();
+        liveChannels.push(channel);
+        logger.info({ channel: channel.name }, 'Channel connected after retry');
+      } catch (err) {
+        logger.warn(
+          {
+            channel: channel.name,
+            err,
+            nextRetryMs: Math.min(delay * 2, MAX_DELAY_MS),
+          },
+          'Channel retry failed -- will try again',
+        );
+        delay = Math.min(delay * 2, MAX_DELAY_MS);
+        attempt();
+      }
+    }, delay);
+  };
+
+  attempt();
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
@@ -677,6 +709,9 @@ async function main(): Promise<void> {
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
   // Factories return null when credentials are missing, so unconfigured channels are skipped.
+  // Channels that fail to connect are retried in the background with exponential backoff
+  // so the service stays alive even if the network is temporarily down.
+  let configuredChannelCount = 0;
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
     const channel = factory(channelOpts);
@@ -687,11 +722,20 @@ async function main(): Promise<void> {
       );
       continue;
     }
-    channels.push(channel);
-    await channel.connect();
+    configuredChannelCount++;
+    try {
+      await channel.connect();
+      channels.push(channel);
+    } catch (err) {
+      logger.warn(
+        { channel: channelName, err },
+        'Channel failed to connect -- will retry in background',
+      );
+      retryChannelConnect(channel, channels);
+    }
   }
-  if (channels.length === 0) {
-    logger.fatal('No channels connected');
+  if (configuredChannelCount === 0) {
+    logger.fatal('No channels configured');
     process.exit(1);
   }
 
