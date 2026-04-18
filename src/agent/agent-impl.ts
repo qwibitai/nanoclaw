@@ -520,7 +520,9 @@ export class AgentImpl
           exitCode,
         });
       },
-      emit: this.emit.bind(this) as import('../task-scheduler.js').TaskEventEmitter,
+      emit: this.emit.bind(
+        this,
+      ) as import('../task-scheduler.js').TaskEventEmitter,
     });
 
     // Outbound ACP client — only constructed if peers are configured.

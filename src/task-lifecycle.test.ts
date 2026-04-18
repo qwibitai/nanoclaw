@@ -542,8 +542,9 @@ describe('task lifecycle integration', () => {
       handle.stop();
     }
 
-    const succeeded = events.find((e) => e.name === 'task.run.succeeded')!
-      .payload;
+    const succeeded = events.find(
+      (e) => e.name === 'task.run.succeeded',
+    )!.payload;
     expect(succeeded.taskId).toBe(task.id);
     expect(succeeded.nextRun).not.toBeNull(); // recurring → next fire computed
     expect(succeeded.result).toBe('tick');
@@ -665,5 +666,4 @@ describe('task lifecycle integration', () => {
       task: { prompt: 'revised', scheduleValue: '*/10 * * * *' },
     });
   });
-
 });
