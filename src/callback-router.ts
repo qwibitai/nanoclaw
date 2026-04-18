@@ -35,6 +35,7 @@ import {
   handleSnooze as handleTriageSnooze,
   handleOverride as handleTriageOverride,
 } from './triage/queue-actions.js';
+import { handleQaCallback } from './qa-approval.js';
 
 export interface CallbackRouterDeps {
   archiveTracker: ArchiveTracker;
@@ -662,6 +663,17 @@ export async function handleCallback(
         if (channel?.editMessageButtons) {
           await channel.editMessageButtons(query.chatJid, query.messageId, []);
         }
+        break;
+      }
+
+      case 'qa': {
+        // QA autopilot approval-flow callbacks. Format:
+        //   qa:merge:<proposalId>    ff-merge branch to main, push, restart
+        //   qa:close:<proposalId>    delete branch + worktree, drop proposal
+        //   qa:details:<proposalId>  send full agent transcript
+        const sub = entityId;
+        const proposalId = extra;
+        await handleQaCallback(sub, proposalId, query, channel);
         break;
       }
 

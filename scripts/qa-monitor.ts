@@ -167,6 +167,43 @@ async function main(): Promise<void> {
     await sendTelegram(chatId, message);
   }
 
+  // Auto-dispatch propose-fix on regressions (not recoveries). Fire-and-
+  // forget: the propose-fix script posts its own Telegram card when done.
+  // Disabled via QA_AUTO_PROPOSE_FIX=0.
+  if (
+    regressed.length > 0 &&
+    !dryRun &&
+    readEnvValue('QA_AUTO_PROPOSE_FIX') !== '0'
+  ) {
+    const report = {
+      source: 'invariants' as const,
+      failures: regressed.map((r) => ({
+        name: r.name,
+        message: r.message,
+        category: r.category,
+        details: r.details,
+      })),
+    };
+    try {
+      const { spawn } = await import('node:child_process');
+      const child = spawn(
+        '/opt/homebrew/bin/npm',
+        ['--prefix', process.cwd(), 'run', 'qa:propose-fix'],
+        { detached: true, stdio: ['pipe', 'ignore', 'ignore'] },
+      );
+      child.stdin.write(JSON.stringify(report));
+      child.stdin.end();
+      child.unref();
+      process.stdout.write(
+        `qa-monitor: dispatched propose-fix for ${regressed.length} regression(s)\n`,
+      );
+    } catch (err) {
+      process.stderr.write(
+        `qa-monitor: propose-fix dispatch failed: ${err instanceof Error ? err.message : err}\n`,
+      );
+    }
+  }
+
   // Always log to stdout so launchd logs capture the run.
   const pass = results.filter((r) => r.ok).length;
   const fail = results.length - pass;
