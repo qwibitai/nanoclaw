@@ -117,6 +117,7 @@ interface AcpRunArtifact {
 }
 
 const ACP_RUN_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const ACP_RUN_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 
 // ACP ContentBlock — inline discriminated union matching the spec.
 // We accept the full shape; the peer errors if a kind exceeds its advertised
@@ -146,6 +147,7 @@ export class AcpOutboundClient {
   private readonly sessions = new Map<string, SessionState>();
   /** Active background prompts keyed by internal run id. */
   private readonly pendingRuns = new Map<string, PendingRun>();
+  private sweepTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly deps: AcpOutboundDeps) {
     for (const peer of deps.peers) {
@@ -159,6 +161,13 @@ export class AcpOutboundClient {
     }
     this.recoverAbandonedArtifacts();
     this.sweepExpiredArtifacts();
+    if (ACP_RUN_SWEEP_INTERVAL_MS > 0) {
+      this.sweepTimer = setInterval(
+        () => this.sweepExpiredArtifacts(),
+        ACP_RUN_SWEEP_INTERVAL_MS,
+      );
+      this.sweepTimer.unref?.();
+    }
   }
 
   /** Public peer directory snapshot. */
@@ -744,6 +753,10 @@ export class AcpOutboundClient {
 
   /** Graceful shutdown: kill all peer children, clear session tracking. */
   async shutdown(): Promise<void> {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
     this.sessions.clear();
     for (const peer of this.peers.values()) {
       if (peer.child && !peer.child.killed) {
