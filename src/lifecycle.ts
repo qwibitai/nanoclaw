@@ -43,6 +43,7 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import { startMessageApi, stopMessageApi } from './message-api.js';
 import { initSkillRegistry, shutdownSkillRegistry } from './skill-registry.js';
 import {
   startDispatchLoop,
@@ -222,6 +223,11 @@ export async function initApp(): Promise<void> {
         details: 'Shutdown requested.',
       });
       setSubsystemState('stall-detector', {
+        state: 'disabled',
+        details: 'Shutdown requested.',
+      });
+      await stopMessageApi();
+      setSubsystemState('message-api', {
         state: 'disabled',
         details: 'Shutdown requested.',
       });
@@ -469,4 +475,19 @@ export async function initApp(): Promise<void> {
     state: 'running',
     details: 'Filesystem IPC watcher active.',
   });
+
+  // Start message API (POST /api/v1/messages for proactive messaging)
+  try {
+    await startMessageApi(() => channels);
+    setSubsystemState('message-api', {
+      state: 'running',
+      details: 'POST /api/v1/messages endpoint active.',
+    });
+  } catch (err) {
+    setSubsystemState('message-api', {
+      state: 'degraded',
+      details: err instanceof Error ? err.message : 'Failed to start.',
+    });
+    logger.error({ err }, 'Failed to start message API');
+  }
 }

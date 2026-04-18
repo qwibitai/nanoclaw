@@ -8,6 +8,7 @@ import { _setDispatchSlotsDb } from './dispatch-slots.js';
 import { _setGroupsDb } from './groups.js';
 import { _setMessagesDb } from './messages.js';
 import { migrateJsonState, runMigrations } from './migrations.js';
+import { _setOutboundMessagesDb } from './outbound-messages.js';
 import { _setSessionsDb } from './sessions.js';
 import { _setTasksDb } from './tasks.js';
 
@@ -17,6 +18,7 @@ function setAllDbs(database: Database.Database): void {
   _setGroupsDb(database);
   _setTasksDb(database);
   _setDispatchSlotsDb(database);
+  _setOutboundMessagesDb(database);
 }
 
 export function initDatabase(): void {
@@ -97,3 +99,16 @@ export {
   transitionToFree,
   transitionToReleasing,
 } from './dispatch-slots.js';
+
+export {
+  MessagePriority,
+  MessageStatus,
+  MessageTemplate,
+  OutboundMessage,
+  countRecentMessages,
+  getBatchedMessages,
+  getOutboundMessage,
+  getPendingMessages,
+  insertOutboundMessage,
+  updateMessageStatus,
+} from './outbound-messages.js';
