@@ -307,6 +307,25 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'error') {
       hadError = true;
+      // Surface a friendly error to the user so failures aren't silent.
+      // The agent-runner's classifyApiError() produces userMessage for
+      // Anthropic SDK errors; fall back to a generic message for anything
+      // that slipped through unclassified.
+      //
+      // Intentionally does NOT set outputSentToUser = true: that flag
+      // controls cursor-rollback for retry, and we want the existing
+      // retry logic to run unchanged. Each retry attempt will surface
+      // its own error message if it also fails.
+      const userMessage =
+        result.userMessage ?? 'Something went wrong. Please try again.';
+      try {
+        await channel.sendMessage(chatJid, `⚠️ ${userMessage}`);
+      } catch (sendErr) {
+        logger.warn(
+          { chatJid, err: sendErr },
+          'Failed to deliver user-facing error message to channel',
+        );
+      }
     }
   });
 
