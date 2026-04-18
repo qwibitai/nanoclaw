@@ -24,6 +24,7 @@
   "dependencies": {
     "@chat-adapter/discord": "^4.26.0",
     "@chat-adapter/telegram": "4.26.0",
+    "@nanoco/nanoclaw-dashboard": "^0.3.0",
     "@onecli-sh/sdk": "^0.3.1",
     "better-sqlite3": "11.10.0",
     "chat": "^4.24.0",

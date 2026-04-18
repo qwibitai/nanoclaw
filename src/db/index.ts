@@ -58,3 +58,11 @@ export {
   deletePendingApproval,
   getPendingApprovalsByAction,
 } from './sessions.js';
+export {
+  createDestination,
+  getDestinations,
+  getDestinationByName,
+  getDestinationByTarget,
+  hasDestination,
+  deleteDestination,
+} from './agent-destinations.js';
