@@ -45,7 +45,7 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:fix": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
-    "prepare": "husky",
+    "prepare": "bash -c 'if bash ./scripts/check-is-in-git-install.sh; then npm run build; else husky || true; fi'",
     "setup": "tsx setup/index.ts",
     "auth": "tsx src/whatsapp-auth.ts",
     "test:e2e:tasks": "tsx scripts/test-task-sdk-e2e.ts",
