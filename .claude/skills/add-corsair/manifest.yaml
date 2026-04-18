@@ -1,0 +1,33 @@
+skill: add-corsair
+version: 1.0.0
+description: "Installs the Corsair integration SDK with MCP server, webhook handler, and permission approval flow"
+core_version: 0.1.0
+adds:
+  - src/corsair.ts
+  - src/corsair-mcp.ts
+  - src/corsair-webhooks.ts
+  - src/webhook-server.ts
+modifies:
+  - src/container-runner.ts
+  - src/ipc.ts
+  - src/index.ts
+  - container/agent-runner/src/index.ts
+  - container/agent-runner/src/ipc-mcp-stdio.ts
+structured:
+  npm_dependencies:
+    corsair: "latest"
+    express: "^4.18.2"
+    better-sqlite3: "^11.8.1"
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  npm_dev_dependencies:
+    "@types/express": "^5.0.0"
+    "@types/better-sqlite3": "^7.6.12"
+  env_additions:
+    - CORSAIR_KEK
+    - WEBHOOK_PORT
+    - CORSAIR_MCP_PORT
+    - CORSAIR_MCP_URL
+    - WEBHOOK_URL
+conflicts: []
+depends: []
+test: "npx vitest run .claude/skills/add-corsair/tests/corsair.test.ts"
