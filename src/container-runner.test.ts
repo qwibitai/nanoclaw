@@ -581,6 +581,89 @@ describe('container-runner with BoxLite', () => {
     expect(result.status).toBe('success');
   });
 
+  // ── actionsAuth transport ──────────────────────────────────────
+  // These tests lock in the contract that actions auth travels as a
+  // first-class field of the ContainerInput JSON — not as env vars on
+  // the box. See docs: "Unify actions-auth transport" plan.
+
+  it('serializes actionsAuth into the stdin JSON payload', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        actionsAuth: { url: 'http://10.0.0.1:7777', token: 'tok-abc' },
+      },
+      testRuntimeConfig,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
+
+    // spawnBox(groupName, containerName, mounts, boxEnv, userStr, stdinJson, rc)
+    expect(mockSpawnBox).toHaveBeenCalled();
+    const stdinJson = mockSpawnBox.mock.calls.at(-1)![5] as string;
+    const parsed = JSON.parse(stdinJson);
+    expect(parsed.actionsAuth).toEqual({
+      url: 'http://10.0.0.1:7777',
+      token: 'tok-abc',
+    });
+
+    // Cleanup
+    mockExec.closeStdout();
+    mockExec.closeStderr();
+    mockExec.resolveWait(0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it('does not set AGENTLITE_ACTIONS_URL/TOKEN env vars on the box', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        actionsAuth: { url: 'http://10.0.0.1:7777', token: 'tok-xyz' },
+      },
+      testRuntimeConfig,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
+
+    const boxEnv = mockSpawnBox.mock.calls.at(-1)![3] as Record<string, string>;
+    expect(boxEnv).not.toHaveProperty('AGENTLITE_ACTIONS_URL');
+    expect(boxEnv).not.toHaveProperty('AGENTLITE_ACTIONS_TOKEN');
+
+    mockExec.closeStdout();
+    mockExec.closeStderr();
+    mockExec.resolveWait(0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it('omits actionsAuth from stdin JSON when the caller passes none', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      testRuntimeConfig,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
+
+    const stdinJson = mockSpawnBox.mock.calls.at(-1)![5] as string;
+    const parsed = JSON.parse(stdinJson);
+    expect(parsed.actionsAuth).toBeUndefined();
+
+    mockExec.closeStdout();
+    mockExec.closeStderr();
+    mockExec.resolveWait(0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
   it('does not extract newSessionId from sdk_message events', async () => {
     const onOutput = vi.fn(async () => {});
     const resultPromise = runContainerAgent(

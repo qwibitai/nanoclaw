@@ -21,11 +21,9 @@ import type { AgentContext } from './agent-context.js';
 import type { ChannelManager } from './channel-manager.js';
 import type { GroupManager } from './group-manager.js';
 import type { TaskManager } from './task-manager.js';
+import { buildMcpRuntimeConfig } from './mcp-runtime.js';
 
-// MCP sources are copied per-group into /home/node/.claude/mcp/{name}/.
-// A host-created symlink node_modules → /app/node_modules resolves inside
-// the container for ESM import resolution. Verified by e2e test.
-const CONTAINER_MCP_DIR = '/home/node/.claude/mcp';
+export { buildMcpRuntimeConfig };
 
 function hasWakeTrigger(
   messages: Array<{ content: string; sender: string; is_from_me?: boolean }>,
@@ -38,54 +36,6 @@ function hasWakeTrigger(
       isAcpNoticeMessage(m) ||
       (triggerPattern.test(m.content.trim()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg))),
-  );
-}
-
-/**
- * Build the runtime MCP server configs for ContainerInput.
- *
- * Transforms user-facing McpServerConfig into container-ready runtime configs:
- * - Strips `source` (host path) — not needed at runtime
- * - For `node` commands: resolves entry file to /tmp/mcp/{name}/ (prepared by entrypoint),
- *   injects --experimental-transform-types for .ts files (Node 22+)
- * - For other commands (npx, python): passes args through unchanged
- */
-export function buildMcpRuntimeConfig(
-  mcpServers: Record<
-    string,
-    {
-      source: string;
-      command: string;
-      args?: string[];
-      env?: Record<string, string>;
-    }
-  > | null,
-): Record<
-  string,
-  { command: string; args?: string[]; env?: Record<string, string> }
-> | null {
-  if (!mcpServers) return null;
-  return Object.fromEntries(
-    Object.entries(mcpServers).map(([name, cfg]) => {
-      const mcpDir = `${CONTAINER_MCP_DIR}/${name}`;
-      const isNode = cfg.command === 'node';
-      const entry = cfg.args?.[0];
-
-      // For node commands, resolve first arg (entry file) to the prepared
-      // /tmp/mcp/{name}/ dir (writable, with node_modules symlinked).
-      // Inject --experimental-transform-types for .ts files (Node 22+).
-      // For other commands (npx, python), pass args through unchanged.
-      let args = cfg.args;
-      if (isNode && entry && !entry.startsWith('/')) {
-        const resolvedEntry = `${mcpDir}/${entry}`;
-        const rest = cfg.args!.slice(1);
-        args = entry.endsWith('.ts')
-          ? ['--experimental-transform-types', resolvedEntry, ...rest]
-          : [resolvedEntry, ...rest];
-      }
-
-      return [name, { command: cfg.command, args, env: cfg.env }];
-    }),
   );
 }
 
@@ -434,8 +384,9 @@ export class MessageProcessor {
           credentialResolver: this.ctx.credentialResolver ?? undefined,
           mountAllowlist: this.ctx.resolvedMountAllowlist,
           mcpServers: buildMcpRuntimeConfig(this.ctx.config.mcpServers),
-          actionsUrl: actionAuth?.url,
-          actionsToken: actionAuth?.token,
+          actionsAuth: actionAuth
+            ? { url: actionAuth.url, token: actionAuth.token }
+            : undefined,
         },
         this.ctx.runtimeConfig,
         (boxName, _containerName) =>

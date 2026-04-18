@@ -39,6 +39,8 @@ interface ContainerInput {
   assistantName?: string;
   /** Custom MCP server runtime configs. Sources are at /workspace/agent/mcp/{name}/. */
   mcpServers?: Record<string, McpServerRuntimeConfig> | null;
+  /** Host-side actions HTTP server coordinates for the built-in MCP shim. */
+  actionsAuth?: { url: string; token: string } | null;
 }
 
 // ── Container lifecycle events (not SDK) ─────────────────────────
@@ -565,6 +567,12 @@ async function runQuery(
             AGENTLITE_CHAT_JID: containerInput.chatJid,
             AGENTLITE_GROUP_FOLDER: containerInput.groupFolder,
             AGENTLITE_IS_MAIN: containerInput.isMain ? '1' : '0',
+            ...(containerInput.actionsAuth
+              ? {
+                  AGENTLITE_ACTIONS_URL: containerInput.actionsAuth.url,
+                  AGENTLITE_ACTIONS_TOKEN: containerInput.actionsAuth.token,
+                }
+              : {}),
           },
         },
         ...Object.fromEntries(

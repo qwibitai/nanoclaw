@@ -499,6 +499,8 @@ export class AgentImpl
       dataDir: this.config.dataDir,
       credentialResolver: this.credentialResolver ?? undefined,
       mountAllowlist: this.resolvedMountAllowlist,
+      actionsHttp: this.actionsHttp,
+      getMcpServers: () => this.config.mcpServers,
       registeredGroups: () => this.registeredGroups,
       getSessions: () => this.sessions,
       queue: this.queue,

@@ -14,6 +14,9 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+import type { ActionsHttp } from './agent/actions-http.js';
+import type { McpServerConfig } from './api/options.js';
+import { buildMcpRuntimeConfig } from './agent/mcp-runtime.js';
 
 /** Minimal emit signature matching agent.emit for task events. */
 export type TaskEventEmitter = <K extends keyof AgentEvents>(
@@ -78,6 +81,13 @@ export interface SchedulerDependencies {
   dataDir: string;
   credentialResolver?: import('./container-runner.js').CredentialResolver;
   mountAllowlist?: import('./types.js').MountAllowlist | null;
+  /** Host-side actions HTTP server. Used to mint per-task bearer tokens. */
+  actionsHttp: ActionsHttp;
+  /**
+   * Live view of the agent's custom MCP servers. Invoked per task so that
+   * setMcpServers() at runtime is reflected in newly spawned task containers.
+   */
+  getMcpServers: () => Record<string, McpServerConfig> | null;
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
@@ -220,6 +230,11 @@ async function runTask(
     }, TASK_CLOSE_DELAY_MS);
   };
 
+  const actionAuth = deps.actionsHttp.mintContainerToken(
+    task.group_folder,
+    isMain,
+  );
+
   try {
     const output = await runContainerAgent(
       group,
@@ -231,11 +246,16 @@ async function runTask(
         isMain,
         isScheduledTask: true,
         assistantName: deps.assistantName,
+        agentId: deps.agentId,
         workDir: deps.workDir,
         groupsDir: deps.groupsDir,
         dataDir: deps.dataDir,
         credentialResolver: deps.credentialResolver,
         mountAllowlist: deps.mountAllowlist,
+        mcpServers: buildMcpRuntimeConfig(deps.getMcpServers()),
+        actionsAuth: actionAuth
+          ? { url: actionAuth.url, token: actionAuth.token }
+          : undefined,
       },
       deps.runtimeConfig,
       (boxName, containerName) =>
