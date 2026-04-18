@@ -652,12 +652,25 @@ export class GmailChannel implements Channel {
     if (payload.mimeType === 'text/plain' && payload.body?.data) {
       return Buffer.from(payload.body.data, 'base64').toString('utf-8');
     }
+    // Direct text/html body — many transactional emails (GoDaddy,
+    // Amazon, DocuSign, banking alerts) are HTML-only with no text
+    // alternative. The mini-app renders body via an iframe srcdoc so
+    // HTML is fine to return as-is.
+    if (payload.mimeType === 'text/html' && payload.body?.data) {
+      return Buffer.from(payload.body.data, 'base64').toString('utf-8');
+    }
 
     // Multipart: search parts recursively
     if (payload.parts) {
       // Prefer text/plain
       for (const part of payload.parts) {
         if (part.mimeType === 'text/plain' && part.body?.data) {
+          return Buffer.from(part.body.data, 'base64').toString('utf-8');
+        }
+      }
+      // Then text/html
+      for (const part of payload.parts) {
+        if (part.mimeType === 'text/html' && part.body?.data) {
           return Buffer.from(part.body.data, 'base64').toString('utf-8');
         }
       }
