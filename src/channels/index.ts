@@ -12,3 +12,6 @@ import './gmail.js';
 
 // whatsapp
 import './whatsapp.js';
+
+// emacs
+import './emacs.js';
