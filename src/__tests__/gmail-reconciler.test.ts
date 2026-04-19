@@ -19,7 +19,11 @@ vi.mock('../config.js', () => ({
 
 import { _initTestDatabase, _closeDatabase, getDb } from '../db.js';
 import { insertTrackedItem, type TrackedItem } from '../tracked-items.js';
-import { reconcileOnce, RACE_GUARD_MS } from '../triage/gmail-reconciler.js';
+import {
+  reconcileOnce,
+  RACE_GUARD_MS,
+  getReconcilerStatus,
+} from '../triage/gmail-reconciler.js';
 
 function makeGmailItem(
   id: string,
@@ -336,5 +340,27 @@ describe('gmail-reconciler', () => {
 
     expect(result.checked).toBe(0);
     expect(gmailOps.getThreadInboxStatus).not.toHaveBeenCalled();
+  });
+
+  it('advances tick stats even when the queue is empty', async () => {
+    // No items inserted — queue is empty. Without this, lastTickAt
+    // stalls whenever the inbox is quiet and the health watcher trips
+    // a false "stale" alarm.
+    const before = getReconcilerStatus().totalTicks;
+    const gmailOps = {
+      getThreadInboxStatus: vi.fn(),
+    };
+
+    const result = await reconcileOnce({
+      db: getDb(),
+      gmailOps,
+      now: () => now,
+      missingSeen: new Set(),
+    });
+
+    expect(result.checked).toBe(0);
+    const after = getReconcilerStatus();
+    expect(after.totalTicks).toBe(before + 1);
+    expect(after.lastTickAt).not.toBeNull();
   });
 });

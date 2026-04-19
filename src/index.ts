@@ -1725,9 +1725,8 @@ async function main(): Promise<void> {
     startGmailReconciler({ db: getDb(), gmailOps: gmailOpsRouter });
     logger.info('Gmail→local reconciler started');
 
-    const { startReconcilerHealthWatcher } = await import(
-      './triage/reconciler-health.js'
-    );
+    const { startReconcilerHealthWatcher } =
+      await import('./triage/reconciler-health.js');
     startReconcilerHealthWatcher();
     logger.info('Reconciler health watcher started');
   }

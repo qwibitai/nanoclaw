@@ -103,11 +103,7 @@ interface QueuedRow {
   state?: string;
 }
 
-function withTimeout<T>(
-  p: Promise<T>,
-  ms: number,
-  label: string,
-): Promise<T> {
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`timeout after ${ms}ms: ${label}`));
@@ -159,7 +155,16 @@ export async function reconcileOnce(
     errors: 0,
   };
 
-  if (rows.length === 0) return result;
+  if (rows.length === 0) {
+    // Empty queue still counts as a tick for observability — otherwise
+    // the health watcher alarms false-positive "stale" whenever the
+    // inbox is clear for longer than the stale threshold.
+    status.lastTickAt = tickStartedAt;
+    status.lastTickDurationMs = Date.now() - tickStartedAt;
+    status.lastResult = result;
+    status.totalTicks += 1;
+    return result;
+  }
 
   const resolveStmt = deps.db.prepare(
     `UPDATE tracked_items
