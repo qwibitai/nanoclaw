@@ -1,57 +1,51 @@
-import fs from 'fs';
 import http from 'http';
-import path from 'path';
 
-import { ASSISTANT_NAME, GROUPS_DIR } from '../config.js';
-import {
-  DisplayMessage,
-  getAllRegisteredGroups,
-  getMessagesForDisplay,
-  setRegisteredGroup,
-} from '../db.js';
+import { ASSISTANT_NAME } from '../config.js';
+import { getAllRegisteredGroups, getMessagesForDisplay } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
-import { Channel, RegisteredGroup } from '../types.js';
+import { Channel } from '../types.js';
 import { ChannelOpts, registerChannel } from './registry.js';
 
-const WEB_JID = 'web:main';
-const POLL_MS = 2000;
 const HISTORY_LIMIT = 100;
 
 export class WebChannel implements Channel {
   name = 'web';
   private server: http.Server | null = null;
-  private sseClients = new Set<http.ServerResponse>();
-  private pollTimer: NodeJS.Timeout | null = null;
-  private lastPollAt: string;
 
   constructor(
     private port: number,
     private token: string | null,
     private opts: ChannelOpts,
-  ) {
-    this.lastPollAt = new Date().toISOString();
-  }
+  ) {}
 
   async connect(): Promise<void> {
-    this.ensureGroupRegistered();
-    this.ensureSymlink();
-
     this.server = http.createServer((req, res) => {
       if (!this.checkAuth(req, res)) return;
 
-      const url = new URL(req.url ?? '/', `http://localhost`);
+      const url = new URL(req.url ?? '/', 'http://localhost');
+      const parts = url.pathname.split('/').filter(Boolean);
+      // GET /                        → conversation index
+      // GET /c/<folder>              → chat UI
+      // GET /c/<folder>/history      → history API
+      // POST /c/<folder>/send        → send API
+      // GET /manifest.json           → PWA manifest
 
       if (req.method === 'GET' && url.pathname === '/') {
-        this.serveUI(res);
+        this.serveIndex(res);
       } else if (req.method === 'GET' && url.pathname === '/manifest.json') {
         this.serveManifest(res);
-      } else if (req.method === 'GET' && url.pathname === '/history') {
-        this.serveHistory(req, res);
-      } else if (req.method === 'GET' && url.pathname === '/events') {
-        this.handleSSE(req, res);
-      } else if (req.method === 'POST' && url.pathname === '/send') {
-        this.handleSend(req, res);
+      } else if (parts[0] === 'c' && parts[1]) {
+        const folder = parts[1];
+        if (req.method === 'GET' && parts.length === 2) {
+          this.serveChat(res, folder);
+        } else if (req.method === 'GET' && parts[2] === 'history') {
+          this.serveHistory(req, res, folder);
+        } else if (req.method === 'POST' && parts[2] === 'send') {
+          this.handleSend(req, res, folder);
+        } else {
+          res.writeHead(404).end('Not found');
+        }
       } else {
         res.writeHead(404).end('Not found');
       }
@@ -64,23 +58,9 @@ export class WebChannel implements Channel {
       });
       this.server!.once('error', reject);
     });
-
-    this.pollTimer = setInterval(() => this.pollMessages(), POLL_MS);
   }
 
   async disconnect(): Promise<void> {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
-    for (const client of this.sseClients) {
-      try {
-        client.end();
-      } catch {
-        /* ignore */
-      }
-    }
-    this.sseClients.clear();
     if (this.server) {
       await new Promise<void>((resolve) => this.server!.close(() => resolve()));
       this.server = null;
@@ -88,70 +68,39 @@ export class WebChannel implements Channel {
     logger.info('Web channel stopped');
   }
 
-  async sendMessage(_jid: string, _text: string): Promise<void> {
-    // Web messages are injected into the main channel's JID, so the owning
-    // channel (e.g. WhatsApp) handles sending and storage. Nothing to do here.
-  }
+  async sendMessage(_jid: string, _text: string): Promise<void> {}
 
   isConnected(): boolean {
     return this.server?.listening ?? false;
   }
 
   ownsJid(jid: string): boolean {
-    return jid === WEB_JID;
+    return jid.startsWith('web:');
   }
 
   // --- Private ---
 
-  private allJidsForTarget(): string[] {
-    const targetFolder = this.targetFolder();
+  private conversations(): Array<{ folder: string; name: string }> {
     const groups = getAllRegisteredGroups();
-    const jids = Object.entries(groups)
-      .filter(([, g]) => g.folder === targetFolder)
-      .map(([jid]) => jid);
-    // Always include web:main (may not be registered yet on first call)
-    if (!jids.includes(WEB_JID)) jids.push(WEB_JID);
-    return jids;
+    return Object.entries(groups)
+      .filter(([jid]) => !jid.startsWith('web:'))
+      .map(([, g]) => ({ folder: g.folder, name: g.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  private targetFolder(): string {
-    const groups = this.opts.registeredGroups();
-    const main = Object.values(groups).find(
-      (g) => g.isMain && g.folder !== 'web',
-    );
-    return main?.folder ?? 'main';
-  }
-
-  // The real channel JID to route messages through (e.g. the WhatsApp main JID).
-  // Web messages injected here so the owning channel (WhatsApp) handles delivery,
-  // making the response appear in both WhatsApp and web history.
-  private targetJid(): string {
+  private targetJid(folder: string): string | null {
     const groups = this.opts.registeredGroups();
     const entry = Object.entries(groups).find(
-      ([jid, g]) => g.isMain && jid !== WEB_JID,
+      ([jid, g]) => g.folder === folder && !jid.startsWith('web:'),
     );
-    return entry?.[0] ?? WEB_JID;
+    return entry?.[0] ?? null;
   }
 
-  private pollMessages(): void {
-    const since = this.lastPollAt;
-    this.lastPollAt = new Date().toISOString();
-    const jids = this.allJidsForTarget();
-    const msgs = getMessagesForDisplay(jids, since);
-    for (const msg of msgs) {
-      this.pushSSE(msg);
-    }
-  }
-
-  private pushSSE(msg: DisplayMessage): void {
-    const payload = `data: ${JSON.stringify(msg)}\n\n`;
-    for (const client of [...this.sseClients]) {
-      try {
-        client.write(payload);
-      } catch {
-        this.sseClients.delete(client);
-      }
-    }
+  private jidsForFolder(folder: string): string[] {
+    const groups = getAllRegisteredGroups();
+    return Object.entries(groups)
+      .filter(([jid, g]) => g.folder === folder && !jid.startsWith('web:'))
+      .map(([jid]) => jid);
   }
 
   private checkAuth(
@@ -159,13 +108,11 @@ export class WebChannel implements Channel {
     res: http.ServerResponse,
   ): boolean {
     if (!this.token) return true;
-    const url = new URL(req.url ?? '/', `http://localhost`);
-    const queryToken = url.searchParams.get('token');
-    const authHeader = req.headers['authorization'] ?? '';
+    const url = new URL(req.url ?? '/', 'http://localhost');
     const cookie = this.parseCookie(req.headers['cookie'] ?? '');
     if (
-      queryToken === this.token ||
-      authHeader === `Bearer ${this.token}` ||
+      url.searchParams.get('token') === this.token ||
+      (req.headers['authorization'] ?? '') === `Bearer ${this.token}` ||
       cookie['nc_token'] === this.token
     ) {
       return true;
@@ -184,64 +131,74 @@ export class WebChannel implements Channel {
     );
   }
 
-  private serveUI(res: http.ServerResponse): void {
+  private cookieHeader(): Record<string, string> {
+    return this.token
+      ? {
+          'Set-Cookie': `nc_token=${this.token}; Path=/; HttpOnly; SameSite=Strict`,
+        }
+      : {};
+  }
+
+  private serveIndex(res: http.ServerResponse): void {
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-store',
-      ...(this.token
-        ? {
-            'Set-Cookie': `nc_token=${this.token}; Path=/; HttpOnly; SameSite=Strict`,
-          }
-        : {}),
+      ...this.cookieHeader(),
     });
-    res.end(buildUI(ASSISTANT_NAME));
+    res.end(buildIndex(ASSISTANT_NAME, this.conversations()));
+  }
+
+  private serveChat(res: http.ServerResponse, folder: string): void {
+    const groups = getAllRegisteredGroups();
+    const entry = Object.entries(groups).find(
+      ([jid, g]) => g.folder === folder && !jid.startsWith('web:'),
+    );
+    if (!entry) {
+      res.writeHead(404).end('Conversation not found');
+      return;
+    }
+    const [, g] = entry;
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      ...this.cookieHeader(),
+    });
+    res.end(buildChat(ASSISTANT_NAME, folder, g.name));
   }
 
   private serveManifest(res: http.ServerResponse): void {
-    const manifest = {
-      name: ASSISTANT_NAME,
-      short_name: ASSISTANT_NAME,
-      start_url: '/',
-      display: 'standalone',
-      background_color: '#0f172a',
-      theme_color: '#0f172a',
-      icons: [],
-    };
-    res
-      .writeHead(200, { 'Content-Type': 'application/manifest+json' })
-      .end(JSON.stringify(manifest));
+    res.writeHead(200, { 'Content-Type': 'application/manifest+json' }).end(
+      JSON.stringify({
+        name: ASSISTANT_NAME,
+        short_name: ASSISTANT_NAME,
+        start_url: '/',
+        display: 'standalone',
+        background_color: '#0f172a',
+        theme_color: '#0f172a',
+        icons: [],
+      }),
+    );
   }
 
   private serveHistory(
     req: http.IncomingMessage,
     res: http.ServerResponse,
+    folder: string,
   ): void {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const since = url.searchParams.get('since') ?? new Date(0).toISOString();
     const limit = since === new Date(0).toISOString() ? HISTORY_LIMIT : 50;
-    const jids = this.allJidsForTarget();
+    const jids = this.jidsForFolder(folder);
     const msgs = getMessagesForDisplay(jids, since, limit);
     res
       .writeHead(200, { 'Content-Type': 'application/json' })
       .end(JSON.stringify(msgs));
   }
 
-  private handleSSE(req: http.IncomingMessage, res: http.ServerResponse): void {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    res.write(':\n\n');
-    this.sseClients.add(res);
-    req.on('close', () => this.sseClients.delete(res));
-    req.on('error', () => this.sseClients.delete(res));
-  }
-
   private handleSend(
     req: http.IncomingMessage,
     res: http.ServerResponse,
+    folder: string,
   ): void {
     let body = '';
     req.on('data', (chunk) => (body += chunk));
@@ -253,9 +210,16 @@ export class WebChannel implements Channel {
           return;
         }
 
+        const routeJid = this.targetJid(folder);
+        if (!routeJid) {
+          res
+            .writeHead(404)
+            .end(JSON.stringify({ error: 'conversation not found' }));
+          return;
+        }
+
         const timestamp = new Date().toISOString();
         const msgId = `web-${Date.now()}`;
-        const routeJid = this.targetJid();
 
         this.opts.onChatMetadata(routeJid, timestamp, 'Web', 'web', false);
         this.opts.onMessage(routeJid, {
@@ -278,63 +242,65 @@ export class WebChannel implements Channel {
       }
     });
   }
-
-  private ensureGroupRegistered(): void {
-    const groups = this.opts.registeredGroups();
-    if (groups[WEB_JID]) return;
-
-    const newGroup: RegisteredGroup = {
-      name: 'Web',
-      folder: 'web',
-      trigger: '',
-      added_at: new Date().toISOString(),
-      requiresTrigger: false,
-      isMain: true,
-    };
-
-    try {
-      setRegisteredGroup(WEB_JID, newGroup);
-      groups[WEB_JID] = newGroup;
-      logger.info('Web group auto-registered');
-    } catch (err) {
-      logger.error({ err }, 'Web channel: failed to auto-register group');
-    }
-  }
-
-  private ensureSymlink(): void {
-    const webDir = path.join(GROUPS_DIR, 'web');
-    const targetFolder = this.targetFolder();
-    const targetDir = path.join(GROUPS_DIR, targetFolder);
-
-    try {
-      const stat = fs.lstatSync(webDir);
-      if (stat.isSymbolicLink()) return;
-      logger.debug(
-        { webDir },
-        'Web groups/web dir already exists as a directory — leaving it',
-      );
-      return;
-    } catch {
-      // Does not exist — create symlink
-    }
-
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
-    }
-
-    try {
-      fs.symlinkSync(targetDir, webDir);
-      logger.info(
-        { target: targetDir },
-        'Web channel: created groups/web symlink',
-      );
-    } catch (err) {
-      logger.error({ err }, 'Web channel: failed to create groups/web symlink');
-    }
-  }
 }
 
-function buildUI(assistantName: string): string {
+function esc(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function buildIndex(
+  assistantName: string,
+  convs: Array<{ folder: string; name: string }>,
+): string {
+  const items = convs
+    .map(
+      (c) =>
+        `<a href="/c/${esc(c.folder)}" class="conv"><span class="cname">${esc(c.name)}</span><span class="cfolder">${esc(c.folder)}</span></a>`,
+    )
+    .join('');
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.json">
+<title>${esc(assistantName)}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0f172a;--surface:#1e293b;--text:#f1f5f9;--muted:#64748b;--border:#334155;--accent:#2563eb}
+html,body{min-height:100dvh;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+#app{max-width:480px;margin:0 auto;padding:32px 16px}
+h1{font-size:22px;font-weight:700;margin-bottom:8px}
+.sub{color:var(--muted);font-size:14px;margin-bottom:28px}
+.conv{display:flex;flex-direction:column;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:12px;text-decoration:none;color:var(--text);margin-bottom:10px;gap:3px;transition:border-color .15s}
+.conv:hover,.conv:focus{border-color:var(--accent);outline:none}
+.cname{font-weight:600}
+.cfolder{font-size:12px;color:var(--muted);font-family:'SF Mono','Fira Code',monospace}
+.empty{color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>${esc(assistantName)}</h1>
+  <p class="sub">Choose a conversation</p>
+  ${items || '<p class="empty">No conversations registered yet.</p>'}
+</div>
+</body>
+</html>`;
+}
+
+function buildChat(
+  assistantName: string,
+  folder: string,
+  groupName: string,
+): string {
+  const histUrl = `/c/${esc(folder)}/history`;
+  const sendUrl = `/c/${esc(folder)}/send`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -342,16 +308,21 @@ function buildUI(assistantName: string): string {
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="${assistantName}">
+<meta name="apple-mobile-web-app-title" content="${esc(assistantName)}">
 <link rel="manifest" href="/manifest.json">
-<title>${assistantName}</title>
+<title>${esc(groupName)} — ${esc(assistantName)}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#0f172a;--surface:#1e293b;--user:#2563eb;--bot:#1e293b;--text:#f1f5f9;--muted:#64748b;--border:#334155}
+:root{--bg:#0f172a;--surface:#1e293b;--user:#2563eb;--text:#f1f5f9;--muted:#64748b;--border:#334155}
 html,body{height:100dvh;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 #app{display:flex;flex-direction:column;height:100dvh;max-width:680px;margin:0 auto}
-#hdr{padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));background:var(--surface);border-bottom:1px solid var(--border);font-weight:600;display:flex;align-items:center;gap:8px}
-#dot{width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;transition:background .3s}
+#hdr{padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+#back{color:var(--muted);text-decoration:none;font-size:22px;line-height:1;flex-shrink:0;padding:0 4px}
+#back:hover{color:var(--text)}
+#hdr-info{display:flex;flex-direction:column;flex:1;min-width:0}
+#hdr-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#hdr-sub{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
+#dot{width:7px;height:7px;border-radius:50%;background:#22c55e;flex-shrink:0;transition:background .3s}
 #dot.off{background:var(--muted)}
 #msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
 .m{max-width:82%;display:flex;flex-direction:column;gap:3px}
@@ -376,93 +347,61 @@ html,body{height:100dvh;background:var(--bg);color:var(--text);font:15px/1.5 -ap
 </head>
 <body>
 <div id="app">
-  <div id="hdr"><div id="dot" class="off"></div>${assistantName}</div>
+  <div id="hdr">
+    <a id="back" href="/" title="All conversations">‹</a>
+    <div id="hdr-info">
+      <div id="hdr-name">${esc(groupName)}</div>
+      <div id="hdr-sub"><div id="dot" class="off"></div><span id="st">connecting…</span></div>
+    </div>
+  </div>
   <div id="msgs"></div>
   <form id="frm"><div id="ftr"><textarea id="inp" placeholder="Message…" rows="1"></textarea><button type="submit" id="btn" class="dim">↑</button></div></form>
 </div>
 <script>
-// Minimal markdown renderer — no external dependencies
-// Uses \\x60 (hex for backtick) in regexes to avoid template-literal conflicts in the host .ts file
-function md(src) {
-  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const blocks = [];
-  // Code blocks: match triple-backtick fences
-  src = src.replace(/\x60\x60\x60([\s\S]*?)\x60\x60\x60/g, (_,c) => {
-    blocks.push('<pre><code>'+esc(c.replace(/^[a-z]+\\n/,''))+'</code></pre>');
-    return '\x01'+(blocks.length-1)+'\x01';
-  });
-  const inline = s => s
-    .replace(/\x60([^\x60]+)\x60/g, (_,c) => '<code>'+esc(c)+'</code>')
-    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g,'<em>$1</em>');
-  const lines = src.split('\\n');
-  const out = []; let listBuf = [], listType = null;
-  const flushList = () => { if(listBuf.length){out.push('<'+listType+'>'+listBuf.map(x=>'<li>'+x+'</li>').join('')+'</'+listType+'>'); listBuf=[]; listType=null;} };
-  for (const raw of lines) {
-    const bm = raw.match(/^([-*\u2022]) (.+)/); const om = raw.match(/^\d+\. (.+)/);
-    if (bm) { if(listType&&listType!=='ul') flushList(); listType='ul'; listBuf.push(inline(bm[2])); continue; }
-    if (om) { if(listType&&listType!=='ol') flushList(); listType='ol'; listBuf.push(inline(om[1])); continue; }
-    flushList();
-    const t = raw.trim();
-    if (!t) { out.push(''); continue; }
-    if (/^#{1,3} /.test(t)) { const [,...rest]=t.split(' '); out.push('<strong>'+inline(rest.join(' '))+'</strong>'); continue; }
+const HIST='${histUrl}',SEND='${sendUrl}';
+function md(src){
+  const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const blocks=[];
+  src=src.replace(/\x60\x60\x60([\s\S]*?)\x60\x60\x60/g,(_,c)=>{blocks.push('<pre><code>'+esc(c.replace(/^[a-z]+\\n/,''))+'</code></pre>');return '\x01'+(blocks.length-1)+'\x01';});
+  const inline=s=>s.replace(/\x60([^\x60]+)\x60/g,(_,c)=>'<code>'+esc(c)+'</code>').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>');
+  const lines=src.split('\\n'),out=[];let lb=[],lt=null;
+  const fl=()=>{if(lb.length){out.push('<'+lt+'>'+lb.map(x=>'<li>'+x+'</li>').join('')+'</'+lt+'>');lb=[];lt=null;}};
+  for(const raw of lines){
+    const bm=raw.match(/^([-*\u2022]) (.+)/),om=raw.match(/^\d+\. (.+)/);
+    if(bm){if(lt&&lt!=='ul')fl();lt='ul';lb.push(inline(bm[2]));continue;}
+    if(om){if(lt&&lt!=='ol')fl();lt='ol';lb.push(inline(om[1]));continue;}
+    fl();const t=raw.trim();if(!t){out.push('');continue;}
+    if(/^#{1,3} /.test(t)){const[,...r]=t.split(' ');out.push('<strong>'+inline(r.join(' '))+'</strong>');continue;}
     out.push(inline(t));
   }
-  flushList();
-  let html = out.join('\\n').replace(/\x01(\d+)\x01/g, (_,i)=>blocks[+i]);
-  html = html.replace(/([^\\n<][^\\n]+)/g, s => s.startsWith('<') ? s : '<p>'+s+'</p>');
+  fl();let html=out.join('\\n').replace(/\x01(\d+)\x01/g,(_,i)=>blocks[+i]);
+  html=html.replace(/([^\\n<][^\\n]+)/g,s=>s.startsWith('<')?s:'<p>'+s+'</p>');
   return html.replace(/\\n/g,'');
 }
-
-const msgs = document.getElementById('msgs');
-const inp = document.getElementById('inp');
-const btn = document.getElementById('btn');
-const dot = document.getElementById('dot');
-const seen = new Set();
-
-function fmt(ts){ try { return new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); } catch(e){ return ''; } }
-
-function addMsg(isBot, content, ts, id) {
-  if(id && seen.has(id)) return; if(id) seen.add(id);
-  const wrap = document.createElement('div'); wrap.className = 'm '+(isBot?'a':'u');
-  const b = document.createElement('div'); b.className = 'b';
-  if(isBot) { try { b.innerHTML = md(content||''); } catch(e) { b.textContent = content||''; } } else b.textContent = content||'';
-  const t = document.createElement('div'); t.className = 'ts'; t.textContent = fmt(ts);
-  wrap.appendChild(b); wrap.appendChild(t); msgs.appendChild(wrap);
-  msgs.scrollTop = msgs.scrollHeight;
+const msgs=document.getElementById('msgs'),inp=document.getElementById('inp'),btn=document.getElementById('btn'),dot=document.getElementById('dot'),st=document.getElementById('st'),seen=new Set();
+function fmt(ts){try{return new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
+function addMsg(isBot,content,ts,id){
+  if(id&&seen.has(id))return;if(id)seen.add(id);
+  const w=document.createElement('div');w.className='m '+(isBot?'a':'u');
+  const b=document.createElement('div');b.className='b';
+  if(isBot){try{b.innerHTML=md(content||'');}catch(e){b.textContent=content||'';}}else b.textContent=content||'';
+  const t=document.createElement('div');t.className='ts';t.textContent=fmt(ts);
+  w.appendChild(b);w.appendChild(t);msgs.appendChild(w);msgs.scrollTop=msgs.scrollHeight;
 }
-
-// Load history then poll for new messages every 2s
-let lastTs = '1970-01-01T00:00:00.000Z';
-
-function poll() {
-  fetch('/history?since='+encodeURIComponent(lastTs))
-    .then(r => { dot.classList.toggle('off', !r.ok); return r.json(); })
-    .then(ms => {
-      for(const m of ms) {
-        if(m.timestamp > lastTs) lastTs = m.timestamp;
-        try { addMsg(!!m.is_bot_message, m.content, m.timestamp, m.id); } catch(e) {}
-      }
-    })
-    .catch(() => dot.classList.add('off'));
+let lastTs='1970-01-01T00:00:00.000Z';
+function poll(){
+  fetch(HIST+'?since='+encodeURIComponent(lastTs))
+    .then(r=>{const ok=r.ok;dot.classList.toggle('off',!ok);st.textContent=ok?'connected':'reconnecting…';return r.json();})
+    .then(ms=>{for(const m of ms){if(m.timestamp>lastTs)lastTs=m.timestamp;try{addMsg(!!m.is_bot_message,m.content,m.timestamp,m.id);}catch(e){}}})
+    .catch(()=>{dot.classList.add('off');st.textContent='offline';});
 }
-
-poll();
-setInterval(poll, 2000);
-
-// Input auto-resize and button state
-function updateBtn(){ btn.classList.toggle('dim', !inp.value.trim()); }
-inp.addEventListener('input', () => { inp.style.height='auto'; inp.style.height=Math.min(inp.scrollHeight,160)+'px'; updateBtn(); });
-inp.addEventListener('keyup', updateBtn);
-inp.addEventListener('change', updateBtn);
-inp.addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();} });
-document.getElementById('frm').addEventListener('submit', e => { e.preventDefault(); send(); });
-
-function send() {
-  const text=inp.value.trim(); if(!text) return;
-  inp.value=''; inp.style.height='auto'; btn.classList.add('dim');
-  fetch('/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}).catch(()=>{});
-}
+poll();setInterval(poll,2000);
+function upd(){btn.classList.toggle('dim',!inp.value.trim());}
+inp.addEventListener('input',()=>{inp.style.height='auto';inp.style.height=Math.min(inp.scrollHeight,160)+'px';upd();});
+inp.addEventListener('keyup',upd);inp.addEventListener('change',upd);
+inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
+document.getElementById('frm').addEventListener('submit',e=>{e.preventDefault();send();});
+function send(){const text=inp.value.trim();if(!text)return;inp.value='';inp.style.height='auto';btn.classList.add('dim');fetch(SEND,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}).catch(()=>{});}
 </script>
 </body>
 </html>`;

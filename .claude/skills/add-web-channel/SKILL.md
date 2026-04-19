@@ -1,13 +1,13 @@
 ---
 name: add-web-channel
-description: Add a browser-based web channel. Serves a mobile-friendly chat UI directly from NanoClaw — no Redis, no separate app. Acts as a portal into your existing main group conversation, sharing its CLAUDE.md and memory. Works as a fallback when other channels (e.g. WhatsApp) are unavailable.
+description: Add a browser-based web channel. Serves a mobile-friendly chat UI directly from NanoClaw — no Redis, no separate app. The index page lists all registered conversations; each opens as a full-screen portal sharing history and memory with its source channel (WhatsApp, Telegram, etc).
 ---
 
 # Add Web Channel
 
 This skill adds a browser-based chat interface to NanoClaw. The web UI is served directly by NanoClaw on a configurable port, requires no external services, and is installable as a PWA on iOS and Android.
 
-**Design:** The web channel is a portal — it shares the same CLAUDE.md, mnemon memory, and conversation history as your main group. Open it on any device via Tailscale (or your LAN) and you see the same assistant, the same context, the full history from all channels.
+**Design:** The web channel is a multi-conversation portal. The index page at `/` lists every registered group. Tapping a conversation opens `/c/<folder>` — a full-screen chat that shares the same CLAUDE.md, mnemon memory, and message history as the source channel. Open it on any device via Tailscale (or your LAN) and you see the same assistant, the same context, the full history from all channels.
 
 ## Phase 1: Pre-flight
 
@@ -68,28 +68,44 @@ tail -20 logs/nanoclaw.log | grep "Web channel"
 # Expected: Web channel listening  {"port": 3080}
 ```
 
-Open in browser: `http://<your-pi-ip>:3080` (or `http://<tailscale-hostname>:3080`)
+Open in browser: `http://<your-pi-ip>:3080`
 
-If you set a token: `http://<host>:3080/?token=<your-token>`
+If you set a token, add it once as a query parameter — the server sets a session cookie so you don't need it again:
 
-Bookmark that URL. On iPhone/iPad: tap Share → Add to Home Screen for a full-screen PWA.
+```
+http://<host>:3080/?token=<your-token>
+```
 
-## How it works
+You should see the conversation index. Tap any group to open its chat.
 
-- `GET /` — chat UI (vanilla HTML/JS, no build step, no CDN dependencies)
-- `GET /history` — loads recent messages from `messages.db`, including messages from all channels (WhatsApp, Telegram, etc.) that share the same group folder
-- `GET /events` — Server-Sent Events stream; pushes new messages in real time
-- `POST /send` — sends a message into the agent pipeline
-- `GET /manifest.json` — PWA manifest for home screen installation
+Bookmark individual conversation URLs for quick access. On iPhone/iPad: tap Share → Add to Home Screen for a full-screen PWA.
 
-The web channel symlinks `groups/web/` to the main group's folder, so it shares CLAUDE.md, mnemon memory, and agent behaviour. It has its own session context (conversation history in the active agent window) but full access to long-term mnemon memory.
+## URL structure
+
+```
+GET /                      — conversation index (list of registered groups)
+GET /c/<folder>            — chat UI for a specific group
+GET /c/<folder>/history    — message history API (?since=<ISO timestamp>)
+POST /c/<folder>/send      — send a message into the agent pipeline
+GET /manifest.json         — PWA manifest
+```
+
+Messages sent from the web UI are routed through the group's real channel JID (e.g. the WhatsApp main JID), so the agent responds in its native context. Bot responses appear in both the web UI and the source channel.
+
+## Trigger behaviour for non-main groups
+
+Non-main groups with `requires_trigger = true` (the default) still require the trigger word (e.g. `@vbotpi`) in web messages. Main groups and groups with `requires_trigger = false` respond to all messages without a trigger.
 
 ## Troubleshooting
 
 **Port already in use:** Change `WEB_CHANNEL_PORT` in `.env` and restart.
 
-**401 Unauthorized:** Your token in the URL doesn't match `WEB_CHANNEL_TOKEN`. Re-check `.env` and the bookmarked URL.
+**401 Unauthorized:** Pass `?token=<token>` once in the URL — the cookie is then set for the session.
 
-**Messages not appearing in real time:** The SSE connection may have dropped. Reload the page — history loads on every open, so you won't miss anything.
+**Conversation not found (404):** The folder name in the URL must match a registered group's `folder` field in the DB. Check with:
 
-**WhatsApp messages not showing in web UI:** The history query pulls messages for all JIDs that share the main group's folder. Confirm the main group is registered in the DB with `is_main = 1`.
+```bash
+sqlite3 store/messages.db "SELECT folder, name FROM registered_groups;"
+```
+
+**Messages from other channels not showing:** The history query pulls all messages for JIDs matching the group's folder. Confirm the group is registered with the correct folder name.
