@@ -7,6 +7,8 @@
 
 import { getDb } from '../db.js';
 import { DAILY_BUDGET_USD } from '../config.js';
+import type { GmailOps } from '../gmail-ops.js';
+import { logger } from '../logger.js';
 import { saveProcedure } from './procedure-store.js';
 
 interface CostBreakdown {
@@ -115,11 +117,19 @@ export function parseAssistantCommand(text: string): AssistantCommand | null {
 
 /**
  * Execute an assistant command and return the response text.
+ *
+ * `gmailOps` is required for the Gmail-first invariant on `archive_all`:
+ * every gmail-sourced row is archived in Gmail before its local state is
+ * resolved. Callers that can't supply gmailOps should not invoke
+ * archive_all — it returns an error string rather than silently
+ * local-resolving, which would put us back in the split-brain state the
+ * reconciler was designed to avoid.
  */
-export function executeAssistantCommand(
+export async function executeAssistantCommand(
   command: AssistantCommand,
   groupId?: string,
-): string {
+  gmailOps?: Pick<GmailOps, 'archiveThread'>,
+): Promise<string> {
   switch (command.type) {
     case 'cost_report':
       return formatCostReport(command.days);
@@ -129,39 +139,116 @@ export function executeAssistantCommand(
 
     case 'archive_dashboard':
       // Fire-and-forget: postArchiveDashboard upserts the pinned message and
-      // logs/swallows its own errors. We return an ack string synchronously
-      // so the chat-command router stays sync.
+      // logs/swallows its own errors. We return an ack string so the
+      // chat-command router can respond immediately.
       void (async () => {
         const { postArchiveDashboard } = await import('../daily-digest.js');
         await postArchiveDashboard();
       })();
       return '🗂 Posting archive dashboard…';
 
-    case 'archive_all': {
-      // Mass-archive every currently-queued archive_candidate item. Sync
-      // DB sweep (cheap) + fire-and-forget dashboard refresh. Returns the
-      // affected count so the user sees immediate feedback.
-      const info = getDb()
-        .prepare(
-          `UPDATE tracked_items
-           SET state = 'resolved',
-               resolution_method = 'manual:archive_all',
-               resolved_at = ?
-           WHERE state = 'queued'
-             AND (queue = 'archive_candidate'
-                  OR (queue IS NULL AND classification = 'digest'))`,
-        )
-        .run(Date.now());
-      const n = info.changes;
-      void (async () => {
-        const { postArchiveDashboard } = await import('../daily-digest.js');
-        await postArchiveDashboard();
-      })();
-      return n === 0
-        ? '🗂 Archive queue is already empty.'
-        : `🗂 Archived ${n} item${n === 1 ? '' : 's'}.`;
+    case 'archive_all':
+      return archiveAllQueueItems(gmailOps);
+  }
+}
+
+/**
+ * Shared between callback-router (Telegram button) and the chat-command
+ * entrypoint. Mirrors the Gmail-first invariant: archive each gmail-sourced
+ * row in Gmail before local-resolving, leave failed rows queued so the
+ * user can retry — the reconciler would re-surface them anyway if we
+ * local-resolved without archiving in Gmail.
+ */
+async function archiveAllQueueItems(
+  gmailOps?: Pick<GmailOps, 'archiveThread'>,
+): Promise<string> {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT id, source, thread_id, metadata FROM tracked_items
+       WHERE state = 'queued'
+         AND (queue = 'archive_candidate'
+              OR (queue IS NULL AND classification = 'digest'))`,
+    )
+    .all() as Array<{
+    id: string;
+    source: string;
+    thread_id: string | null;
+    metadata: string | null;
+  }>;
+
+  if (rows.length === 0) return '🗂 Archive queue is already empty.';
+
+  const succeededIds: string[] = [];
+  let failed = 0;
+
+  for (const row of rows) {
+    let account: string | null = null;
+    if (row.metadata) {
+      try {
+        const m = JSON.parse(row.metadata) as { account?: string };
+        account = typeof m.account === 'string' ? m.account : null;
+      } catch {
+        // malformed metadata — treat as missing account
+      }
+    }
+
+    // Non-gmail items: resolve locally with no Gmail call.
+    if (row.source !== 'gmail' || !row.thread_id) {
+      succeededIds.push(row.id);
+      continue;
+    }
+
+    if (!gmailOps || !account) {
+      failed++;
+      continue;
+    }
+
+    try {
+      await gmailOps.archiveThread(account, row.thread_id);
+      succeededIds.push(row.id);
+    } catch (err) {
+      failed++;
+      logger.warn(
+        {
+          itemId: row.id,
+          account,
+          threadId: row.thread_id,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'archive_all (chat): Gmail archive failed, leaving item queued',
+      );
     }
   }
+
+  let archived = 0;
+  if (succeededIds.length > 0) {
+    const ph = succeededIds.map(() => '?').join(',');
+    const info = db
+      .prepare(
+        `UPDATE tracked_items
+         SET state = 'resolved',
+             resolution_method = 'manual:archive_all',
+             resolved_at = ?
+         WHERE state = 'queued'
+           AND id IN (${ph})`,
+      )
+      .run(Date.now(), ...succeededIds);
+    archived = info.changes;
+  }
+
+  void (async () => {
+    const { postArchiveDashboard } = await import('../daily-digest.js');
+    await postArchiveDashboard();
+  })();
+
+  const base =
+    archived === 0
+      ? '🗂 Archive queue unchanged.'
+      : `🗂 Archived ${archived} item${archived === 1 ? '' : 's'}.`;
+  return failed > 0
+    ? `${base} ${failed} item${failed === 1 ? '' : 's'} failed in Gmail and stayed queued — retry later.`
+    : base;
 }
 
 /**

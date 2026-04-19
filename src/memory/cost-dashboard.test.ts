@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-import { _initTestDatabase, logSessionCost } from '../db.js';
+import { _initTestDatabase, getDb, logSessionCost } from '../db.js';
+import { insertTrackedItem, type TrackedItem } from '../tracked-items.js';
 import {
   getCostBreakdown,
   formatCostReport,
@@ -117,15 +118,114 @@ describe('parseAssistantCommand', () => {
 });
 
 describe('executeAssistantCommand', () => {
-  it('executes cost report command', () => {
-    const result = executeAssistantCommand({ type: 'cost_report', days: 7 });
+  it('executes cost report command', async () => {
+    const result = await executeAssistantCommand({
+      type: 'cost_report',
+      days: 7,
+    });
     expect(result).toContain('Cost report');
   });
 
-  it('teaches a procedure scoped to a group', () => {
+  it('teaches a procedure scoped to a group', async () => {
     const cmd = parseAssistantCommand('teach: check PR status');
     expect(cmd).toEqual({ type: 'teach', description: 'check PR status' });
-    const result = executeAssistantCommand(cmd!, 'test-group');
+    const result = await executeAssistantCommand(cmd!, 'test-group');
     expect(result).toContain('Learned');
+  });
+
+  describe('archive_all', () => {
+    function queuedGmailItem(
+      id: string,
+      threadId: string,
+      account = 'topcoder1@gmail.com',
+    ): TrackedItem {
+      return {
+        id,
+        source: 'gmail',
+        source_id: `gmail:${threadId}`,
+        group_name: 'main',
+        state: 'queued',
+        classification: 'digest',
+        superpilot_label: null,
+        trust_tier: null,
+        title: 'Test email',
+        summary: null,
+        thread_id: threadId,
+        detected_at: Date.now(),
+        pushed_at: null,
+        resolved_at: null,
+        resolution_method: null,
+        digest_count: 0,
+        telegram_message_id: null,
+        classification_reason: null,
+        metadata: { account },
+      };
+    }
+
+    it('archives in Gmail before resolving locally', async () => {
+      insertTrackedItem(queuedGmailItem('a', 'thread-a'));
+      insertTrackedItem(queuedGmailItem('b', 'thread-b'));
+
+      const archiveThread = vi.fn().mockResolvedValue(undefined);
+      const result = await executeAssistantCommand(
+        { type: 'archive_all' },
+        undefined,
+        { archiveThread },
+      );
+
+      expect(archiveThread).toHaveBeenCalledTimes(2);
+      expect(result).toMatch(/Archived 2/);
+      const rows = getDb()
+        .prepare(
+          `SELECT id, state, resolution_method FROM tracked_items ORDER BY id`,
+        )
+        .all() as Array<{ id: string; state: string; resolution_method: string }>;
+      for (const r of rows) {
+        expect(r.state).toBe('resolved');
+        expect(r.resolution_method).toBe('manual:archive_all');
+      }
+    });
+
+    it('leaves items queued when Gmail archive fails', async () => {
+      insertTrackedItem(queuedGmailItem('fail', 'thread-fail'));
+      insertTrackedItem(queuedGmailItem('ok', 'thread-ok'));
+
+      const archiveThread = vi.fn(async (_acct: string, tid: string) => {
+        if (tid === 'thread-fail') throw new Error('gmail 500');
+      });
+      const result = await executeAssistantCommand(
+        { type: 'archive_all' },
+        undefined,
+        { archiveThread },
+      );
+
+      expect(result).toMatch(/Archived 1/);
+      expect(result).toMatch(/1 item.*failed/);
+      const fail = getDb()
+        .prepare('SELECT state FROM tracked_items WHERE id = ?')
+        .get('fail') as { state: string };
+      const ok = getDb()
+        .prepare('SELECT state FROM tracked_items WHERE id = ?')
+        .get('ok') as { state: string };
+      expect(fail.state).toBe('queued'); // stays queued — retry later
+      expect(ok.state).toBe('resolved');
+    });
+
+    it('does not local-resolve gmail items when gmailOps is absent', async () => {
+      // Safety net: if the chat-command path is wired up without a
+      // gmailOps handle, we must NOT silently local-resolve — that's
+      // the split-brain bug the PR review gate is designed to catch.
+      insertTrackedItem(queuedGmailItem('x', 'thread-x'));
+      const result = await executeAssistantCommand(
+        { type: 'archive_all' },
+        undefined,
+        undefined,
+      );
+      expect(result).toMatch(/failed/i);
+      const row = getDb()
+        .prepare('SELECT state FROM tracked_items WHERE id = ?')
+        .get('x') as { state: string };
+      expect(row.state).toBe('queued');
+    });
   });
 });

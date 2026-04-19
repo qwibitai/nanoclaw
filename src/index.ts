@@ -208,6 +208,13 @@ let messageLoopRunning = false;
 let proactiveSuggestionTimer: ReturnType<typeof setInterval> | null = null;
 let lastSuggestionAt = 0;
 
+// Mutable handle so module-level functions (e.g. startMessageLoop) can
+// reach the gmailOpsRouter that's constructed inside main() after
+// channels have connected. Set once at startup; never swap accounts.
+const gmailOpsRouterRef: { current: GmailOpsRouter | undefined } = {
+  current: undefined,
+};
+
 const channels: Channel[] = [];
 const queue = new ExecutorPool();
 queue.initWarmPool();
@@ -1018,18 +1025,23 @@ async function startMessageLoop(): Promise<void> {
             // Assistant commands: cost report, teach, etc.
             const assistantCmd = parseAssistantCommand(strippedText);
             if (assistantCmd) {
-              const response = executeAssistantCommand(
-                assistantCmd,
-                group.folder,
-              );
-              channel
-                .sendMessage(chatJid, response)
-                .catch((err) =>
+              // Fire-and-forget: archive_all awaits Gmail per-item and
+              // we don't want to block the message-loop iteration.
+              void (async () => {
+                try {
+                  const response = await executeAssistantCommand(
+                    assistantCmd,
+                    group.folder,
+                    gmailOpsRouterRef.current,
+                  );
+                  await channel.sendMessage(chatJid, response);
+                } catch (err) {
                   logger.warn(
                     { chatJid, err },
                     'Failed to send assistant command response',
-                  ),
-                );
+                  );
+                }
+              })();
               interceptedMessageIds.add(msg.id);
               const idx = groupMessages.indexOf(msg);
               if (idx >= 0) groupMessages.splice(idx, 1);
@@ -1450,6 +1462,7 @@ async function main(): Promise<void> {
 
   // --- GmailOps router: expose Gmail API operations to UX modules ---
   const gmailOpsRouter = new GmailOpsRouter();
+  gmailOpsRouterRef.current = gmailOpsRouter;
   for (const ch of channels) {
     if (ch.name.startsWith('gmail')) {
       const alias =
