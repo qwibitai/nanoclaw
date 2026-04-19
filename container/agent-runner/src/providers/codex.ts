@@ -49,25 +49,31 @@ const TURN_TIMEOUT_MS = 5 * 60 * 1000;
 const STALE_THREAD_RE = /thread\s+not\s+found|unknown\s+thread|thread[_\s]id|no such thread/i;
 
 // ── System-prompt assembly ──────────────────────────────────────────────────
-// Codex's app-server doesn't read CLAUDE.md/AGENT.md from cwd the way Claude
-// Code does. We have to load it and pass it in as `baseInstructions`. The
-// addendum from the poll-loop (destinations syntax, etc.) is appended.
+// Codex's app-server doesn't expand Claude Code's `@-import` syntax in
+// CLAUDE.md, so we load group + global explicitly and pass the combined text
+// as `baseInstructions`. Mirrors the OpenCode provider's readClaudeMdForPrompt
+// so non-Claude providers behave the same way. The literal `@./.claude-global.md`
+// line in group CLAUDE.md is left in place — it's harmless context for the
+// model and strips on an agent-side convention upstream may change.
 
-function loadAgentBaseInstructions(): string | undefined {
-  const candidates = ['/workspace/agent/CLAUDE.md', '/workspace/agent/AGENT.md'];
-  const parts: string[] = [];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      parts.push(fs.readFileSync(p, 'utf-8'));
-      break;
-    }
+function readAgentAndGlobalClaudeMd(): string | undefined {
+  const groupPath = '/workspace/agent/CLAUDE.md';
+  const globalPath = '/workspace/global/CLAUDE.md';
+  let content = '';
+  if (fs.existsSync(groupPath)) {
+    content += fs.readFileSync(groupPath, 'utf-8');
   }
-  return parts.length > 0 ? parts.join('\n\n') : undefined;
+  const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+  if (!isMain && fs.existsSync(globalPath)) {
+    if (content) content += '\n\n---\n\n';
+    content += fs.readFileSync(globalPath, 'utf-8');
+  }
+  return content || undefined;
 }
 
 function composeBaseInstructions(promptAddendum: string | undefined): string | undefined {
-  const agentMd = loadAgentBaseInstructions();
-  const pieces = [agentMd, promptAddendum].filter((s): s is string => Boolean(s));
+  const claudeMd = readAgentAndGlobalClaudeMd();
+  const pieces = [claudeMd, promptAddendum].filter((s): s is string => Boolean(s));
   return pieces.length > 0 ? pieces.join('\n\n---\n\n') : undefined;
 }
 
