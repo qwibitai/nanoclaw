@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  An AI assistant that runs agents securely in their own containers. Lightweight, built to be easily understood and completely customized for your needs.
+  エージェントを独自のコンテナで安全に実行するAIアシスタント。軽量で、簡単に理解でき、あなたのニーズに完全にカスタマイズ可能。
 </p>
 
 <p align="center">
@@ -16,31 +16,33 @@
 ---
 
 <h2 align="center">🐳 Docker Sandboxes & 🍎 Apple Container</h2>
-<p align="center">Every agent gets its own isolated container.<br>Run with hypervisor-level isolation via Docker Sandboxes, or native lightweight macOS isolation via Apple Container. Millisecond startup. No complex setup.</p>
+<p align="center">すべてのエージェントが独自の隔離コンテナで実行されます。<br>Docker Sandboxesによるハイパーバイザー レベルの隔離、またはApple Containerによるネイティブで軽量なmacOS隔離を選択できます。ミリ秒単位の起動。複雑な設定は不要です。</p>
 
 **macOS (Apple Silicon)**
+
 ```bash
 curl -fsSL https://nanoclaw.dev/install-docker-sandboxes.sh | bash
 ```
 
 **Windows (WSL)**
+
 ```bash
 curl -fsSL https://nanoclaw.dev/install-docker-sandboxes-windows.sh | bash
 ```
 
-> Currently supported on macOS (Apple Silicon) and Windows (x86). Linux support coming soon.
+> 現在、macOS (Apple Silicon) と Windows (x86) をサポートしています。Linux対応は近日公開予定です。
 
-<p align="center"><a href="https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes">Read the announcement →</a>&nbsp; · &nbsp;<a href="docs/docker-sandboxes.md">Manual setup guide →</a></p>
+<p align="center"><a href="https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes">お知らせを読む →</a>&nbsp; · &nbsp;<a href="docs/docker-sandboxes.md">マニュアル設定ガイド →</a></p>
 
 ---
 
-## Why I Built NanoClaw
+## NanoClawを作った理由
 
-[OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
+[OpenClaw](https://github.com/openclaw/openclaw) は素晴らしいプロジェクトですが、私が理解できない複雑なソフトウェアに人生への完全なアクセス権を与えていたら、眠れなかったでしょう。OpenClawには約50万行のコード、53個の設定ファイル、70以上の依存関係があります。そのセキュリティはアプリケーションレベル（許可リスト、ペアリングコード）であり、真のOSレベルの隔離ではありません。すべてが共有メモリを持つ1つのNodeプロセスで実行されています。
 
-NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. Claude agents run in their own Linux containers with filesystem isolation, not merely behind permission checks.
+NanoClawは同じコア機能を提供しますが、理解しやすい規模のコードベースで実現しています：1つのプロセスと少数のファイルだけです。Claudeエージェントは独自のLinuxコンテナでファイルシステム隔離付きで実行され、単なる権限チェックの裏側ではありません。
 
-## Quick Start
+## クイックスタート
 
 ```bash
 gh repo fork qwibitai/nanoclaw --clone
@@ -49,183 +51,189 @@ claude
 ```
 
 <details>
-<summary>Without GitHub CLI</summary>
+<summary>GitHub CLIを使わない場合</summary>
 
-1. Fork [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) on GitHub (click the Fork button)
+1. GitHubで [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) をフォーク（Forkボタンをクリック）
 2. `git clone https://github.com/<your-username>/nanoclaw.git`
 3. `cd nanoclaw`
 4. `claude`
 
 </details>
 
-Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup and service configuration.
+その後 `/setup` を実行してください。Claude Codeがすべてを処理します：依存関係、認証、コンテナ設定、サービス設定。
 
-> **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal. If you don't have Claude Code installed, get it at [claude.com/product/claude-code](https://claude.com/product/claude-code).
+> **注：** `/` で始まるコマンド（`/setup`、`/add-whatsapp` など）は [Claude Codeスキル](https://code.claude.com/docs/en/skills) です。通常のターミナルではなく、`claude` CLIプロンプト内で入力してください。Claude Codeがインストールされていない場合は、[claude.com/product/claude-code](https://claude.com/product/claude-code) から入手してください。
 
-## Philosophy
+## 哲学
 
-**Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NanoClaw codebase, just ask Claude Code to walk you through it.
+**理解できる規模。** 1つのプロセス、少数のソースファイル、マイクロサービスなし。NanoClawのコードベース全体を理解したい場合は、Claude Codeに説明を依頼するだけです。
 
-**Secure by isolation.** Agents run in Linux containers (Apple Container on macOS, or Docker) and they can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
+**隔離によるセキュリティ。** エージェントはLinuxコンテナ（macOSではApple Container、またはDocker）で実行され、明示的にマウントされたもののみが見えます。Bashアクセスは安全です。コマンドはホストではなくコンテナ内で実行されるからです。
 
-**Built for the individual user.** NanoClaw isn't a monolithic framework; it's software that fits each user's exact needs. Instead of becoming bloatware, NanoClaw is designed to be bespoke. You make your own fork and have Claude Code modify it to match your needs.
+**個人ユーザー向けに構築。** NanoClawは巨大なフレームワークではなく、各ユーザーの正確なニーズに合わせたソフトウェアです。肥大化するのではなく、NanoClawはオーダーメイドになるように設計されています。独自のフォークを作成し、Claude Codeに変更を加えてニーズに合わせてください。
 
-**Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that it's safe to make changes.
+**カスタマイズ = コード変更。** 設定の肥大化はありません。違う動作が欲しい？コードを変更してください。コードベースは小さく、変更しても安全です。
 
-**AI-native.**
-- No installation wizard; Claude Code guides setup.
-- No monitoring dashboard; ask Claude what's happening.
-- No debugging tools; describe the problem and Claude fixes it.
+**AIネイティブ。**
 
-**Skills over features.** Instead of adding features (e.g. support for Telegram) to the codebase, contributors submit [claude code skills](https://code.claude.com/docs/en/skills) like `/add-telegram` that transform your fork. You end up with clean code that does exactly what you need.
+- インストールウィザードはなし。Claude Codeが設定をガイドします。
+- モニタリングダッシュボードはなし。Claudeに状況を尋ねてください。
+- デバッグツールはなし。問題を説明すればClaudeが修正します。
 
-**Best harness, best model.** NanoClaw runs on the Claude Agent SDK, which means you're running Claude Code directly. Claude Code is highly capable and its coding and problem-solving capabilities allow it to modify and expand NanoClaw and tailor it to each user.
+**機能よりスキル。** Telegram対応などの機能をコードベースに追加するのではなく、貢献者は `/add-telegram` のような [claude codeスキル](https://code.claude.com/docs/en/skills) を提出します。正確に必要なことを行うクリーンなコードが手に入ります。
 
-## What It Supports
+**最高のハーネス、最高のモデル。** NanoClawはClaude Agent SDK上で実行され、Claude Codeを直接実行しています。Claude Codeは高度に capable であり、そのコーディングと問題解決能力により、NanoClawを変更・拡張し、各ユーザーに合わせて調整できます。
 
-- **Multi-channel messaging** - Talk to your assistant from WhatsApp, Telegram, Discord, Slack, or Gmail. Add channels with skills like `/add-whatsapp` or `/add-telegram`. Run one or many at the same time.
-- **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
-- **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
-- **Web access** - Search and fetch content from the Web
-- **Container isolation** - Agents are sandboxed in [Docker Sandboxes](https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes) (micro VM isolation), Apple Container (macOS), or Docker (macOS/Linux)
-- **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks
-- **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
+## サポートしている機能
 
-## Usage
+- **マルチチャンネルメッセージング** - WhatsApp、Telegram、Discord、Slack、Gmailからアシスタントと会話できます。`/add-whatsapp` や `/add-telegram` のようなスキルでチャンネルを追加。1つまたは複数を同時に実行できます。
+- **隔離されたグループコンテキスト** - 各グループは独自の `CLAUDE.md` メモリ、隔離されたファイルシステムを持ち、そのファイルシステムのみがマウントされたコンテナサンドボックスで実行されます。
+- **メインチャンネル** - 管理用のプライベートチャンネル（セルフチャット）。すべてのグループは完全に隔離されています
+- **スケジュールされたタスク** - Claudeを実行し、メッセージを返信できる定期ジョブ
+- **Webアクセス** - Webからコンテンツを検索・取得
+- **コンテナ隔離** - エージェントは [Docker Sandboxes](https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes)（マイクロVM隔離）、Apple Container（macOS）、またはDocker（macOS/Linux）でサンドボックス化されます
+- **エージェントスワーム** - 複雑なタスクに協力する専門エージェントのチームを立ち上げる
+- **オプションの統合** - Gmail（`/add-gmail`）などをスキル経由で追加
 
-Talk to your assistant with the trigger word (default: `@Andy`):
+## 使い方
+
+トリガーワード（デフォルト：`@Andy`）でアシスタントと会話します：
 
 ```
-@Andy send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
-@Andy review the git history for the past week each Friday and update the README if there's drift
-@Andy every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
+@Andy 平日の朝9時にセールスパイプラインの概要を送信してください（Obsidian vaultフォルダへのアクセス権あり）
+@Andy 毎週金曜日に過去1週間のgit履歴をレビューし、ドリフトがあればREADMEを更新してください
+@Andy 毎週月曜日の朝8時に、Hacker NewsとTechCrunchからAI開発に関するニュースをまとめてブリーフィングを送信してください
 ```
 
-From the main channel (your self-chat), you can manage groups and tasks:
+メインチャンネル（セルフチャット）から、グループとタスクを管理できます：
+
 ```
-@Andy list all scheduled tasks across groups
-@Andy pause the Monday briefing task
-@Andy join the Family Chat group
+@Andy すべてのグループのスケジュールされたタスクを一覧表示
+@Andy 月曜日のブリーフィングタスクを一時停止
+@Andy Family Chatグループに参加
 ```
 
-## Customizing
+## カスタマイズ
 
-NanoClaw doesn't use configuration files. To make changes, just tell Claude Code what you want:
+NanoClawは設定ファイルを使用しません。変更を加えるには、Claude Codeに望みを伝えるだけです：
 
-- "Change the trigger word to @Bob"
-- "Remember in the future to make responses shorter and more direct"
-- "Add a custom greeting when I say good morning"
-- "Store conversation summaries weekly"
+- 「トリガーワードを @Bob に変更して」
+- 「今後はレスポンスを短く直接的にしてほしい」
+- 「おはようと言ったときにカスタム挨拶を追加して」
+- 「会話の要約を毎週保存して」
 
-Or run `/customize` for guided changes.
+または `/customize` を実行してガイド付きの変更を行ってください。
 
-The codebase is small enough that Claude can safely modify it.
+コードベースは小さく、Claudeが安全に変更できる規模です。
 
-## Contributing
+## 貢献
 
-**Don't add features. Add skills.**
+**機能を追加するのではなく、スキルを追加してください。**
 
-If you want to add Telegram support, don't create a PR that adds Telegram to the core codebase. Instead, fork NanoClaw, make the code changes on a branch, and open a PR. We'll create a `skill/telegram` branch from your PR that other users can merge into their fork.
+Telegram対応を追加したい場合、コアコードベースにTelegramを追加するPRを作成しないでください。代わりに、NanoClawをフォークし、ブランチでコード変更を行い、PRを開いてください。他のユーザーがフォークにマージできる `skill/telegram` ブランチを作成します。
 
-Users then run `/add-telegram` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
+ユーザーはフォークで `/add-telegram` を実行し、すべてのユースケースをサポートしようとする肥大化したシステムではなく、正確に必要なことを行うクリーンなコードを手に入れます。
 
-### RFS (Request for Skills)
+### RFS（スキルのリクエスト）
 
-Skills we'd like to see:
+以下のスキルを募集しています：
 
-**Communication Channels**
-- `/add-signal` - Add Signal as a channel
+**コミュニケーションチャンネル**
 
-**Session Management**
-- `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
+- `/add-signal` - Signalをチャンネルとして追加
 
-## Requirements
+**セッション管理**
 
-- macOS or Linux
+- `/clear` - 会話をコンパクト化する `/clear` コマンドを追加（同じセッション内で重要な情報を保持しながらコンテキストを要約）。Claude Agent SDK経由でプログラム的にコンパクションをトリガーする方法を解決する必要があります。
+
+## 要件
+
+- macOS または Linux
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+- [Apple Container](https://github.com/apple/container)（macOS）または [Docker](https://docker.com/products/docker-desktop)（macOS/Linux）
 
-## Architecture
+## アーキテクチャ
 
 ```
 Channels --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
 ```
 
-Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
+単一のNode.jsプロセス。チャンネルはスキル経由で追加され、起動時に自己登録します — オーケストレーターは認証情報が存在するものを接続します。エージェントはファイルシステム隔離付きの隔離されたLinuxコンテナで実行されます。マウントされたディレクトリのみがアクセス可能です。ファイルシステム経由のIPC。並行性制御付きのグループごとのメッセージキュー。
 
-For the full architecture details, see [docs/SPEC.md](docs/SPEC.md).
+詳細なアーキテクチャについては、[docs/SPEC.md](docs/SPEC.md) を参照してください。
 
-Key files:
-- `src/index.ts` - Orchestrator: state, message loop, agent invocation
-- `src/channels/registry.ts` - Channel registry (self-registration at startup)
-- `src/ipc.ts` - IPC watcher and task processing
-- `src/router.ts` - Message formatting and outbound routing
-- `src/group-queue.ts` - Per-group queue with global concurrency limit
-- `src/container-runner.ts` - Spawns streaming agent containers
-- `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
-- `groups/*/CLAUDE.md` - Per-group memory
+主要ファイル：
+
+- `src/index.ts` - オーケストレーター：状態、メッセージループ、エージェント呼び出し
+- `src/channels/registry.ts` - チャンネルレジストリ（起動時の自己登録）
+- `src/ipc.ts` - IPCウォッチャーとタスク処理
+- `src/router.ts` - メッセージフォーマットとアウトバウンドルーティング
+- `src/group-queue.ts` - グローバル並行性制限付きのグループごとキュー
+- `src/container-runner.ts` - ストリーミングエージェントコンテナの生成
+- `src/task-scheduler.ts` - スケジュールされたタスクの実行
+- `src/db.ts` - SQLite操作（メッセージ、グループ、セッション、状態）
+- `groups/*/CLAUDE.md` - グループごとのメモリ
 
 ## FAQ
 
-**Why Docker?**
+**なぜDocker？**
 
-Docker provides cross-platform support (macOS, Linux and even Windows via WSL2) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime.
+Dockerはクロスプラットフォーム対応（macOS、Linux、さらにはWSL2経由のWindows）と成熟したエコシステムを提供します。macOSでは、より軽量なネイティブランタイムのために `/convert-to-apple-container` 経由でオプションでApple Containerに切り替えることができます。
 
-**Can I run this on Linux?**
+**Linuxで実行できますか？**
 
-Yes. Docker is the default runtime and works on both macOS and Linux. Just run `/setup`.
+はい。Dockerはデフォルトのランタイムで、macOSとLinuxの両方で動作します。`/setup` を実行するだけです。
 
-**Is this secure?**
+**これは安全ですか？**
 
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. You should still review what you're running, but the codebase is small enough that you actually can. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
+エージェントはアプリケーションレベルの権限チェックの後ろではなく、コンテナ内で実行されます。明示的にマウントされたディレクトリのみにアクセスできます。実行内容はレビューすべきですが、コードベースは小さく、実際にレビューできます。完全なセキュリティモデルについては [docs/SECURITY.md](docs/SECURITY.md) を参照してください。
 
-**Why no configuration files?**
+**なぜ設定ファイルがないの？**
 
-We don't want configuration sprawl. Every user should customize NanoClaw so that the code does exactly what they want, rather than configuring a generic system. If you prefer having config files, you can tell Claude to add them.
+設定の肥大化は避けたいからです。すべてのユーザーは、ジェネリックなシステムを設定するのではなく、コードが正確に望むことを行うようにNanoClawをカスタマイズすべきです。設定ファイルを使いたい場合は、Claudeに追加するように依頼できます。
 
-**Can I use third-party or open-source models?**
+**サードパーティまたはオープンソースのモデルを使えますか？**
 
-Yes. NanoClaw supports any Claude API-compatible model endpoint. Set these environment variables in your `.env` file:
+はい。NanoClawはClaude API互換のモデルエンドポイントをサポートしています。`.env` ファイルに以下の環境変数を設定してください：
 
 ```bash
 ANTHROPIC_BASE_URL=https://your-api-endpoint.com
 ANTHROPIC_AUTH_TOKEN=your-token-here
 ```
 
-This allows you to use:
-- Local models via [Ollama](https://ollama.ai) with an API proxy
-- Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
-- Custom model deployments with Anthropic-compatible APIs
+これにより以下が使用できます：
 
-Note: The model must support the Anthropic API format for best compatibility.
+- APIプロキシ経由の [Ollama](https://ollama.ai) のローカルモデル
+- [Together AI](https://together.ai)、[Fireworks](https://fireworks.ai) などでホストされるオープンソースモデル
+- Anthropic互換APIを持つカスタムモデルデプロイメント
 
-**How do I debug issues?**
+注：モデルはAnthropic API形式をサポートしている必要があります。
 
-Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies NanoClaw.
+**問題をデバッグするには？**
 
-**Why isn't the setup working for me?**
+Claude Codeに尋ねてください。「スケジューラーが実行されていないのはなぜ？」「最近のログには何がある？」「なぜこのメッセージに応答がない？」これがNanoClawの基盤となるAIネイティブなアプローチです。
 
-If you have issues, during setup, Claude will try to dynamically fix them. If that doesn't work, run `claude`, then run `/debug`. If Claude finds an issue that is likely affecting other users, open a PR to modify the setup SKILL.md.
+**セットアップがうまくいきません**
 
-**What changes will be accepted into the codebase?**
+問題がある場合、セットアップ中にClaudeが動的に修正しようとします。それでも機能しない場合は、`claude` を実行してから `/debug` を実行してください。Claudeが他のユーザーも影響を受けている可能性のある問題を見つけた場合は、セットアップSKILL.mdを修正するPRを開いてください。
 
-Only security fixes, bug fixes, and clear improvements will be accepted to the base configuration. That's all.
+**コードベースにどのような変更が受け入れられますか？**
 
-Everything else (new capabilities, OS compatibility, hardware support, enhancements) should be contributed as skills.
+セキュリティ修正、バグ修正、明確な改善のみがベース設定に受け入れられます。以上です。
 
-This keeps the base system minimal and lets every user customize their installation without inheriting features they don't want.
+その他すべて（新機能、OS互換性、ハードウェアサポート、機能強化）はスキルとして貢献すべきです。
 
-## Community
+これによりベースシステムは最小限に保たれ、すべてのユーザーが不要な機能を継承することなく、インストールをカスタマイズできます。
 
-Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
+## コミュニティ
 
-## Changelog
+質問？アイデア？[Discordに参加](https://discord.gg/VDdww8qS42)。
 
-See [CHANGELOG.md](CHANGELOG.md) for breaking changes and migration notes.
+## 変更履歴
 
-## License
+重大な変更と移行ノートについては [CHANGELOG.md](CHANGELOG.md) を参照してください。
+
+## ライセンス
 
 MIT
