@@ -9,4 +9,7 @@
 
 // telegram
 
+// webhook
+import './webhook.js';
+
 // whatsapp
