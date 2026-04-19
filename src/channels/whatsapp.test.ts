@@ -234,7 +234,6 @@ describe('WhatsAppChannel', () => {
     });
   });
 
-
   // --- Connection lifecycle ---
 
   describe('connection lifecycle', () => {
