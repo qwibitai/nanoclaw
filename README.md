@@ -50,6 +50,14 @@ npm run dev
 - [Claude Code](https://claude.ai/download)
 - [Apple Container](https://github.com/apple/container) または [Docker](https://docker.com/products/docker-desktop)
 
+## クレジット・インスパイア元
+
+このプロジェクトは以下の素晴らしいプロジェクトからインスパイアされています：
+
+- **[VRC-AI-Bot](https://github.com/Esurugi/VRC-AI-Bot)** - VRChat向けAIボット。Discord連携やチャットボットの実装に影響を受けています
+- **[open-agent-sdk](https://github.com/OasAIStudio/open-agent-sdk)** ([fork](https://github.com/shin902/open-agent-sdk)) - オープンソースのエージェントSDK。アーキテクチャ設計の参考にしています
+- **[NanoClaw](https://github.com/qwibitai/nanoclaw)** ([fork](https://github.com/shin902/nanoclaw)) - パーソナルAIエージェントのベースプロジェクト。チャンネルシステムとスキルアーキテクチャの核となる部分を継承しています
+
 ## ライセンス
 
 MIT
