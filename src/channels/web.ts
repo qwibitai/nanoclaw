@@ -8,7 +8,6 @@ import {
   getAllRegisteredGroups,
   getMessagesForDisplay,
   setRegisteredGroup,
-  storeMessageDirect,
 } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
@@ -89,18 +88,9 @@ export class WebChannel implements Channel {
     logger.info('Web channel stopped');
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
-    storeMessageDirect({
-      id: `web-bot-${Date.now()}`,
-      chat_jid: jid,
-      sender: 'bot',
-      sender_name: ASSISTANT_NAME,
-      content: text,
-      timestamp: new Date().toISOString(),
-      is_from_me: true,
-      is_bot_message: true,
-    });
-    // pollMessages will pick this up and push it to SSE clients
+  async sendMessage(_jid: string, _text: string): Promise<void> {
+    // Web messages are injected into the main channel's JID, so the owning
+    // channel (e.g. WhatsApp) handles sending and storage. Nothing to do here.
   }
 
   isConnected(): boolean {
@@ -126,8 +116,19 @@ export class WebChannel implements Channel {
 
   private targetFolder(): string {
     const groups = this.opts.registeredGroups();
-    const main = Object.values(groups).find((g) => g.isMain);
+    const main = Object.values(groups).find((g) => g.isMain && g.folder !== 'web');
     return main?.folder ?? 'main';
+  }
+
+  // The real channel JID to route messages through (e.g. the WhatsApp main JID).
+  // Web messages injected here so the owning channel (WhatsApp) handles delivery,
+  // making the response appear in both WhatsApp and web history.
+  private targetJid(): string {
+    const groups = this.opts.registeredGroups();
+    const entry = Object.entries(groups).find(
+      ([jid, g]) => g.isMain && jid !== WEB_JID,
+    );
+    return entry?.[0] ?? WEB_JID;
   }
 
   private pollMessages(): void {
@@ -209,12 +210,16 @@ export class WebChannel implements Channel {
       .end(JSON.stringify(manifest));
   }
 
-  private serveHistory(req: http.IncomingMessage, res: http.ServerResponse): void {
+  private serveHistory(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const since = url.searchParams.get('since') ?? new Date(0).toISOString();
     const limit = since === new Date(0).toISOString() ? HISTORY_LIMIT : 50;
     const jids = this.allJidsForTarget();
-    const msgs = getMessagesForDisplay(jids, since, limit);
+    const msgs = getMessagesForDisplay(jids, since, limit)
+      .filter((m) => !m.content.startsWith('\uD83D\uDCAC '));
     res
       .writeHead(200, { 'Content-Type': 'application/json' })
       .end(JSON.stringify(msgs));
@@ -249,11 +254,19 @@ export class WebChannel implements Channel {
 
         const timestamp = new Date().toISOString();
         const msgId = `web-${Date.now()}`;
+        const routeJid = this.targetJid();
 
-        this.opts.onChatMetadata(WEB_JID, timestamp, 'Web', 'web', false);
-        this.opts.onMessage(WEB_JID, {
+        // Echo web message into the owning channel (e.g. WhatsApp) so it appears
+        // in both portals. is_bot_message=true ensures the main loop won't
+        // re-process this echo as a new user message.
+        if (routeJid !== WEB_JID && this.opts.sendViaJid) {
+          this.opts.sendViaJid(routeJid, `💬 ${text}`).catch(() => {});
+        }
+
+        this.opts.onChatMetadata(routeJid, timestamp, 'Web', 'web', false);
+        this.opts.onMessage(routeJid, {
           id: msgId,
-          chat_jid: WEB_JID,
+          chat_jid: routeJid,
           sender: 'web',
           sender_name: 'You',
           content: text,
@@ -454,8 +467,6 @@ document.getElementById('frm').addEventListener('submit', e => { e.preventDefaul
 function send() {
   const text=inp.value.trim(); if(!text) return;
   inp.value=''; inp.style.height='auto'; btn.classList.add('dim');
-  const ts=new Date().toISOString();
-  addMsg(false, text, ts);
   fetch('/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}).catch(()=>{});
 }
 </script>

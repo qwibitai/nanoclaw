@@ -9,6 +9,9 @@ export interface ChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  // Send a message via the channel that owns the given JID (e.g. to echo a
+  // web message into WhatsApp so it appears in both portals).
+  sendViaJid?: (jid: string, text: string) => Promise<void>;
 }
 
 export type ChannelFactory = (opts: ChannelOpts) => Channel | null;
