@@ -94,6 +94,12 @@ export async function runScheduledTask(
     group: task.group_folder,
   });
 
+  // /orchestrate tasks come from the dev-inbox dispatch loop and are internal
+  // orchestration commands. Their results are written back to Agency HQ by
+  // the dispatch loop (dispatch-loop.ts), so we must NOT forward them to the
+  // CEO group chat — doing so would spam the CEO with raw /orchestrate output.
+  const isOrchestrateTask = task.prompt.startsWith('/orchestrate ');
+
   let groupDir: string;
   try {
     groupDir = resolveGroupFolderPath(task.group_folder);
@@ -113,14 +119,17 @@ export async function runScheduledTask(
       result: null,
       error,
     });
-    await deps
-      .sendMessage(
-        task.chat_jid,
-        `⚠️ *Scheduled task failed*\nTask: \`${task.id}\`\nError: ${error}`,
-      )
-      .catch((alertErr) =>
-        log.warn({ alertErr }, 'Failed to send task failure alert'),
-      );
+    // Skip sending error alerts for /orchestrate tasks — results go to Agency HQ, not CEO chat.
+    if (!isOrchestrateTask) {
+      await deps
+        .sendMessage(
+          task.chat_jid,
+          `⚠️ *Scheduled task failed*\nTask: \`${task.id}\`\nError: ${error}`,
+        )
+        .catch((alertErr) =>
+          log.warn({ alertErr }, 'Failed to send task failure alert'),
+        );
+    }
     return { result: null, error };
   }
   fs.mkdirSync(groupDir, { recursive: true });
@@ -150,14 +159,17 @@ export async function runScheduledTask(
       },
       error: `Group not found: ${task.group_folder}`,
     });
-    await deps
-      .sendMessage(
-        task.chat_jid,
-        `⚠️ *Scheduled task failed*\nTask: \`${task.id}\`\nError: Group not found: ${task.group_folder}`,
-      )
-      .catch((alertErr) =>
-        log.warn({ alertErr }, 'Failed to send task failure alert'),
-      );
+    // Skip sending error alerts for /orchestrate tasks — results go to Agency HQ, not CEO chat.
+    if (!isOrchestrateTask) {
+      await deps
+        .sendMessage(
+          task.chat_jid,
+          `⚠️ *Scheduled task failed*\nTask: \`${task.id}\`\nError: Group not found: ${task.group_folder}`,
+        )
+        .catch((alertErr) =>
+          log.warn({ alertErr }, 'Failed to send task failure alert'),
+        );
+    }
     return { result: null, error: `Group not found: ${task.group_folder}` };
   }
 
@@ -217,8 +229,11 @@ export async function runScheduledTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Forward result to user — but skip for /orchestrate tasks whose
+          // results are written back to Agency HQ by the dispatch loop.
+          if (!isOrchestrateTask) {
+            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          }
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
@@ -290,14 +305,17 @@ export async function runScheduledTask(
       error.length > 300 ? `${error.slice(0, 297)}...` : error;
     const truncatedPrompt =
       task.prompt.length > 80 ? `${task.prompt.slice(0, 77)}...` : task.prompt;
-    await deps
-      .sendMessage(
-        task.chat_jid,
-        `⚠️ *Scheduled task failed*\nTask: \`${task.id}\`\nPrompt: ${truncatedPrompt}\nError: ${truncatedError}`,
-      )
-      .catch((alertErr) =>
-        log.warn({ alertErr }, 'Failed to send task failure alert'),
-      );
+    // Skip sending error alerts for /orchestrate tasks — results go to Agency HQ, not CEO chat.
+    if (!isOrchestrateTask) {
+      await deps
+        .sendMessage(
+          task.chat_jid,
+          `⚠️ *Scheduled task failed*\nTask: \`${task.id}\`\nPrompt: ${truncatedPrompt}\nError: ${truncatedError}`,
+        )
+        .catch((alertErr) =>
+          log.warn({ alertErr }, 'Failed to send task failure alert'),
+        );
+    }
   }
 
   return { result, error };
