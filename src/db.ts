@@ -404,6 +404,37 @@ export function getLastBotMessageTimestamp(
   return row?.ts ?? undefined;
 }
 
+export interface DisplayMessage {
+  id: string;
+  chat_jid: string;
+  sender: string;
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_from_me: number;
+  is_bot_message: number;
+}
+
+export function getMessagesForDisplay(
+  jids: string[],
+  since: string,
+  limit: number = 100,
+): DisplayMessage[] {
+  if (jids.length === 0) return [];
+  const placeholders = jids.map(() => '?').join(',');
+  const sql = `
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message
+      FROM messages
+      WHERE chat_jid IN (${placeholders}) AND timestamp > ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
+  `;
+  return db.prepare(sql).all(...jids, since, limit) as DisplayMessage[];
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
