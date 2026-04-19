@@ -116,7 +116,9 @@ export class WebChannel implements Channel {
 
   private targetFolder(): string {
     const groups = this.opts.registeredGroups();
-    const main = Object.values(groups).find((g) => g.isMain && g.folder !== 'web');
+    const main = Object.values(groups).find(
+      (g) => g.isMain && g.folder !== 'web',
+    );
     return main?.folder ?? 'main';
   }
 
@@ -218,8 +220,7 @@ export class WebChannel implements Channel {
     const since = url.searchParams.get('since') ?? new Date(0).toISOString();
     const limit = since === new Date(0).toISOString() ? HISTORY_LIMIT : 50;
     const jids = this.allJidsForTarget();
-    const msgs = getMessagesForDisplay(jids, since, limit)
-      .filter((m) => !m.content.startsWith('\uD83D\uDCAC '));
+    const msgs = getMessagesForDisplay(jids, since, limit);
     res
       .writeHead(200, { 'Content-Type': 'application/json' })
       .end(JSON.stringify(msgs));
@@ -255,13 +256,6 @@ export class WebChannel implements Channel {
         const timestamp = new Date().toISOString();
         const msgId = `web-${Date.now()}`;
         const routeJid = this.targetJid();
-
-        // Echo web message into the owning channel (e.g. WhatsApp) so it appears
-        // in both portals. is_bot_message=true ensures the main loop won't
-        // re-process this echo as a new user message.
-        if (routeJid !== WEB_JID && this.opts.sendViaJid) {
-          this.opts.sendViaJid(routeJid, `💬 ${text}`).catch(() => {});
-        }
 
         this.opts.onChatMetadata(routeJid, timestamp, 'Web', 'web', false);
         this.opts.onMessage(routeJid, {
