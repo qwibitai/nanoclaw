@@ -15,3 +15,6 @@ import './whatsapp.js';
 
 // emacs
 import './emacs.js';
+
+// web
+import './web.js';
