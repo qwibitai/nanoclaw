@@ -17,13 +17,7 @@ This skill installs OneCLI, configures the Agent Vault gateway, and migrates any
 onecli version 2>/dev/null
 ```
 
-If the command succeeds, OneCLI is installed. Check if the gateway is reachable:
-
-```bash
-curl -sf http://127.0.0.1:10254/health
-```
-
-If both succeed, check for an Anthropic secret:
+If the command succeeds, OneCLI is installed, check for an Anthropic secret:
 
 ```bash
 onecli secrets list
@@ -81,16 +75,16 @@ Re-verify with `onecli version`.
 
 ### Configure the CLI
 
-Point the CLI at the local OneCLI instance:
+Point the CLI at the local OneCLI instance, the ONECLI_URL was output from the install script above:
 
 ```bash
-onecli config set api-host http://127.0.0.1:10254
+onecli config set api-host ${ONECLI_URL}
 ```
 
 ### Set ONECLI_URL in .env
 
 ```bash
-grep -q 'ONECLI_URL' .env 2>/dev/null || echo 'ONECLI_URL=http://127.0.0.1:10254' >> .env
+grep -q 'ONECLI_URL' .env 2>/dev/null || echo 'ONECLI_URL=${ONECLI_URL}' >> .env
 ```
 
 ### Wait for gateway readiness
@@ -99,7 +93,7 @@ The gateway may take a moment to start after installation. Poll for up to 15 sec
 
 ```bash
 for i in $(seq 1 15); do
-  curl -sf http://127.0.0.1:10254/health && break
+  curl -sf ${ONECLI_URL}/health && break
   sleep 1
 done
 ```
@@ -214,7 +208,7 @@ Tell the user to run `claude setup-token` in another terminal and copy the token
 
 Once they have the token, AskUserQuestion with two options:
 
-1. **Dashboard** — description: "Best if you have a browser on this machine. Open http://127.0.0.1:10254 and add the secret in the UI. Use type 'anthropic' and paste your token as the value."
+1. **Dashboard** — description: "Best if you have a browser on this machine. Open ${ONECLI_URL} and add the secret in the UI. Use type 'anthropic' and paste your token as the value."
 2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_TOKEN --host-pattern api.anthropic.com`"
 
 #### API key path
@@ -223,7 +217,7 @@ Tell the user to get an API key from https://console.anthropic.com/settings/keys
 
 AskUserQuestion with two options:
 
-1. **Dashboard** — description: "Best if you have a browser on this machine. Open http://127.0.0.1:10254 and add the secret in the UI."
+1. **Dashboard** — description: "Best if you have a browser on this machine. Open ${ONECLI_URL} and add the secret in the UI."
 2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_KEY --host-pattern api.anthropic.com`"
 
 #### After either path
@@ -262,12 +256,12 @@ If the service is running and a channel is configured, tell the user to send a t
 Tell the user:
 - OneCLI Agent Vault is now managing credentials
 - Agents never see raw API keys — credentials are injected at the gateway level
-- To manage secrets: `onecli secrets list`, or open http://127.0.0.1:10254
+- To manage secrets: `onecli secrets list`, or open ${ONECLI_URL}
 - To add rate limits or policies: `onecli rules create --help`
 
 ## Troubleshooting
 
-**"OneCLI gateway not reachable" in logs:** The gateway isn't running. Check with `curl -sf http://127.0.0.1:10254/health`. Start it with `onecli start` if needed.
+**"OneCLI gateway not reachable" in logs:** The gateway isn't running. Check with `curl -sf ${ONECLI_URL}/health`. Start it with `onecli start` if needed.
 
 **Container gets no credentials:** Verify `ONECLI_URL` is set in `.env` and the gateway has an Anthropic secret (`onecli secrets list`).
 
