@@ -280,6 +280,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   await channel.setTyping?.(chatJid, true);
+  const typingInterval = setInterval(() => {
+    channel.setTyping?.(chatJid, true);
+  }, 4000);
   let hadError = false;
   let outputSentToUser = false;
 
@@ -308,6 +311,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (result.status === 'error') {
       hadError = true;
     }
+  }).finally(() => {
+    clearInterval(typingInterval);
   });
 
   await channel.setTyping?.(chatJid, false);
