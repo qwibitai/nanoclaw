@@ -73,14 +73,20 @@ export interface SchedulerDependencies {
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
 
+export interface ScheduledTaskResult {
+  result: string | null;
+  error: string | null;
+}
+
 /**
  * Run a single scheduled task. Exported for use by the cron subscriber.
- * Returns the result string (or null) so callers can act on it (e.g. write-back).
+ * Returns the result string and any error so callers can act on it
+ * (e.g. write-back to Agency HQ with correct status).
  */
 export async function runScheduledTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
-): Promise<string | null> {
+): Promise<ScheduledTaskResult> {
   const startTime = Date.now();
   const log = createCorrelationLogger(undefined, {
     op: 'scheduled-task',
@@ -115,7 +121,7 @@ export async function runScheduledTask(
       .catch((alertErr) =>
         log.warn({ alertErr }, 'Failed to send task failure alert'),
       );
-    return null;
+    return { result: null, error };
   }
   fs.mkdirSync(groupDir, { recursive: true });
 
@@ -152,7 +158,7 @@ export async function runScheduledTask(
       .catch((alertErr) =>
         log.warn({ alertErr }, 'Failed to send task failure alert'),
       );
-    return null;
+    return { result: null, error: `Group not found: ${task.group_folder}` };
   }
 
   // Update tasks snapshot for container to read (filtered by group)
@@ -216,6 +222,10 @@ export async function runScheduledTask(
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
+          // Clear any prior transient error — the agent recovered and
+          // produced a successful output, so the overall task should not
+          // be recorded as failed.
+          error = null;
           deps.queue.notifyIdle(task.chat_jid);
           scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
         }
@@ -290,7 +300,7 @@ export async function runScheduledTask(
       );
   }
 
-  return result;
+  return { result, error };
 }
 
 /**

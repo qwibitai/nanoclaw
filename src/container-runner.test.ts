@@ -182,6 +182,89 @@ describe('tmux session runner', () => {
     );
   });
 
+  it('does not flag stderr containing only agent-runner logs as error', async () => {
+    // Session exits after first poll
+    let pollCount = 0;
+    vi.mocked(hasSession).mockImplementation(() => {
+      pollCount++;
+      return pollCount <= 1;
+    });
+
+    // Agent-runner logs to stderr via console.error (prefixed with [agent-runner])
+    const agentRunnerStderr = [
+      '[agent-runner] Received input for group: test-group',
+      '[agent-runner] Starting query (session: new)...',
+      '[agent-runner] Close sentinel received, exiting',
+    ].join('\n');
+
+    // No streaming output markers in stdout — session ran but produced
+    // no output (e.g. an IPC-only task). Without the stderr fix this
+    // would be mis-detected as an error because stderr is non-empty.
+    vi.mocked(fs.statSync).mockReturnValue({
+      size: 0,
+      isDirectory: () => false,
+    } as fs.Stats);
+
+    // readFileSync returns agent-runner logs for stderr file
+    vi.mocked(fs.readFileSync).mockImplementation(((
+      path: string,
+    ) => {
+      if (String(path).includes('stderr')) return agentRunnerStderr;
+      return '';
+    }) as typeof fs.readFileSync);
+
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const result = await resultPromise;
+    // Should NOT be an error — agent-runner log lines are expected on stderr
+    // and should be filtered out from the error detection
+    expect(result.status).toBe('success');
+  });
+
+  it('flags stderr with non-agent-runner errors as error', async () => {
+    // Session exits after first poll
+    let pollCount = 0;
+    vi.mocked(hasSession).mockImplementation(() => {
+      pollCount++;
+      return pollCount <= 1;
+    });
+
+    const realErrorStderr = 'Error: Cannot find module /app/src/nonexistent.js';
+
+    vi.mocked(fs.statSync).mockReturnValue({
+      size: 0,
+      isDirectory: () => false,
+    } as fs.Stats);
+
+    vi.mocked(fs.readFileSync).mockImplementation(((
+      path: string,
+    ) => {
+      if (String(path).includes('stderr')) return realErrorStderr;
+      return '';
+    }) as typeof fs.readFileSync);
+
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const result = await resultPromise;
+    // Should be an error — genuine error on stderr
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('Cannot find module');
+  });
+
   it('timeout with no output resolves as error', async () => {
     // Session stays alive until timeout
     vi.mocked(hasSession).mockReturnValue(true);

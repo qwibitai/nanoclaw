@@ -9,7 +9,11 @@ import {
 } from './agency-hq-client.js';
 import { dispatchTime } from './stall-detector.js';
 import { createCorrelationLogger } from './logger.js';
-import { SchedulerDependencies, runScheduledTask } from './task-scheduler.js';
+import {
+  SchedulerDependencies,
+  runScheduledTask,
+  type ScheduledTaskResult,
+} from './task-scheduler.js';
 import {
   claimSlot,
   freeSlot,
@@ -530,17 +534,26 @@ async function dispatchTask(
         await markSlotExecuting(capturedClaim.slotId, task.id);
       }
 
-      const result = await runScheduledTask(localTask, deps);
+      const taskResult: ScheduledTaskResult = await runScheduledTask(
+        localTask,
+        deps,
+      );
 
       // --- Phase 3: Releasing (writing results back to Agency HQ) ---
       if (capturedClaim) {
         await markSlotReleasing(capturedClaim.slotId, task.id);
       }
 
-      // Write result back to Agency HQ (programmatic — doesn't rely on agent)
-      const resultPayload = result
-        ? { summary: result.slice(0, 2000) }
-        : { summary: 'Task completed (no output captured)' };
+      // Write result back to Agency HQ (programmatic — doesn't rely on agent).
+      // Use actual task outcome to determine AHQ status: only mark 'done'
+      // when the worker succeeded, otherwise report the error so the task
+      // record accurately reflects what happened.
+      const taskSucceeded = taskResult.error === null;
+      const resultPayload = taskResult.result
+        ? { summary: taskResult.result.slice(0, 2000) }
+        : taskSucceeded
+          ? { summary: 'Task completed (no output captured)' }
+          : { summary: `Error: ${taskResult.error}` };
 
       // Fetch existing context so we merge rather than replace
       let existingContext: Record<string, unknown> = {};
@@ -567,11 +580,15 @@ async function dispatchTask(
 
       const mergedContext = { ...existingContext, result: resultPayload };
 
+      // Report correct status: 'done' for success, 'ready' for failure
+      // (so the task can be retried by the next dispatch tick).
+      const ahqStatus = taskSucceeded ? 'done' : 'ready';
+
       try {
         const res = await agencyFetch(`/tasks/${task.id}`, {
           method: 'PUT',
           body: JSON.stringify({
-            status: 'done',
+            status: ahqStatus,
             context: mergedContext,
           }),
         });
@@ -582,7 +599,10 @@ async function dispatchTask(
             'Failed to write result back to Agency HQ',
           );
         } else {
-          log.info({ taskId: task.id }, 'Result written back to Agency HQ');
+          log.info(
+            { taskId: task.id, ahqStatus },
+            'Result written back to Agency HQ',
+          );
         }
       } catch (err) {
         log.error(
@@ -591,10 +611,17 @@ async function dispatchTask(
         );
       }
 
-      // Clean up dispatch tracking (task succeeded — clear all backoff state)
-      dispatchRetryCount.delete(task.id);
-      dispatchSkipTicks.delete(task.id);
-      dispatchTime.delete(task.id);
+      if (taskSucceeded) {
+        // Clean up dispatch tracking (task succeeded — clear all backoff state)
+        dispatchRetryCount.delete(task.id);
+        dispatchSkipTicks.delete(task.id);
+        dispatchTime.delete(task.id);
+      } else {
+        log.warn(
+          { taskId: task.id, error: taskResult.error },
+          'Task completed with error, reverted to ready for retry',
+        );
+      }
     } finally {
       // --- Phase 4: Free slot (from any state) ---
       if (capturedClaim) {

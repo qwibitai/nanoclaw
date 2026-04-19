@@ -394,11 +394,19 @@ export async function runContainerAgent(
         ``,
       ];
 
-      // Determine exit status from whether we got output or not
+      // Determine exit status from whether we got output or not.
+      // Filter out agent-runner's own log lines (written to stderr via
+      // console.error) so that normal operational logging doesn't trigger
+      // a false error. Only genuine error output should count.
+      const unexpectedStderr = stderr
+        .split('\n')
+        .filter((line) => line.length > 0 && !line.startsWith('[agent-runner]'))
+        .join('\n');
+
       const isError =
         !readerState.hadStreamingOutput &&
         readerState.stdout.indexOf(OUTPUT_START_MARKER) === -1 &&
-        stderr.length > 0;
+        unexpectedStderr.length > 0;
 
       if (isVerbose || isError) {
         logLines.push(
@@ -440,7 +448,7 @@ export async function runContainerAgent(
         log.error(
           {
             duration,
-            stderr: stderr.slice(-500),
+            stderr: unexpectedStderr.slice(-500),
             logFile,
           },
           'Session exited with error',
@@ -449,7 +457,7 @@ export async function runContainerAgent(
         resolve({
           status: 'error',
           result: null,
-          error: `Session exited with error: ${stderr.slice(-200)}`,
+          error: `Session exited with error: ${unexpectedStderr.slice(-200)}`,
         });
         return;
       }

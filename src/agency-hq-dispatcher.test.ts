@@ -4,7 +4,7 @@ vi.mock('./task-scheduler.js', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    runScheduledTask: vi.fn().mockResolvedValue(null),
+    runScheduledTask: vi.fn().mockResolvedValue({ result: null, error: null }),
   };
 });
 
@@ -15,6 +15,7 @@ import {
   startStallDetector,
   stopAgencyHqSubsystems,
 } from './agency-hq-dispatcher.js';
+import { runScheduledTask } from './task-scheduler.js';
 import type { SchedulerDependencies } from './task-scheduler.js';
 import type { GroupQueue } from './group-queue.js';
 
@@ -335,6 +336,127 @@ describe('agency-hq-dispatcher', () => {
       // Should still have result even though GET failed
       expect(body.context.result).toBeDefined();
       expect(body.context.result.summary).toContain('Task completed');
+    });
+
+    it('reverts task to ready when worker reports error', async () => {
+      // Make runScheduledTask return an error result
+      vi.mocked(runScheduledTask).mockResolvedValueOnce({
+        result: null,
+        error: 'Session exited with error: module not found',
+      });
+
+      // GET ready tasks
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 't-error',
+              title: 'Error Task',
+              description: 'will fail',
+              status: 'ready',
+            },
+          ],
+        }),
+      );
+      // PUT in-progress
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+      // GET persona
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({ data: { value: '# Persona' } }),
+      );
+
+      const deps = makeMockDeps();
+      const enqueueTask = deps.queue.enqueueTask as ReturnType<typeof vi.fn>;
+
+      await dispatchReadyTasks(deps);
+      expect(enqueueTask).toHaveBeenCalledTimes(1);
+
+      // Extract and run the enqueued callback
+      const callback = enqueueTask.mock.calls[0][2] as () => Promise<void>;
+
+      // GET task (for context merge)
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          success: true,
+          data: { id: 't-error', context: {} },
+        }),
+      );
+      // PUT result write-back
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+
+      await callback();
+
+      // Find the result write-back PUT (last PUT call)
+      const putCalls = fetchMock.mock.calls.filter(
+        (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === 'PUT',
+      );
+      const resultPut = putCalls[putCalls.length - 1];
+      expect(resultPut).toBeDefined();
+
+      const body = JSON.parse(resultPut![1]!.body as string);
+      // Should revert to 'ready' (not 'done') so the task can be retried
+      expect(body.status).toBe('ready');
+      // Error should be captured in context
+      expect(body.context.result.summary).toContain('Error:');
+    });
+
+    it('writes status done when worker succeeds', async () => {
+      // Make runScheduledTask return a success result
+      vi.mocked(runScheduledTask).mockResolvedValueOnce({
+        result: 'Task completed successfully',
+        error: null,
+      });
+
+      // GET ready tasks
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 't-success',
+              title: 'Success Task',
+              description: 'will succeed',
+              status: 'ready',
+            },
+          ],
+        }),
+      );
+      // PUT in-progress
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+      // GET persona
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({ data: { value: '# Persona' } }),
+      );
+
+      const deps = makeMockDeps();
+      const enqueueTask = deps.queue.enqueueTask as ReturnType<typeof vi.fn>;
+
+      await dispatchReadyTasks(deps);
+      const callback = enqueueTask.mock.calls[0][2] as () => Promise<void>;
+
+      // GET task (for context merge)
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          success: true,
+          data: { id: 't-success', context: {} },
+        }),
+      );
+      // PUT result write-back
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+
+      await callback();
+
+      const putCalls = fetchMock.mock.calls.filter(
+        (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === 'PUT',
+      );
+      const resultPut = putCalls[putCalls.length - 1];
+      expect(resultPut).toBeDefined();
+
+      const body = JSON.parse(resultPut![1]!.body as string);
+      // Should be 'done' on success
+      expect(body.status).toBe('done');
+      expect(body.context.result.summary).toContain(
+        'Task completed successfully',
+      );
     });
 
     it('marks task blocked after 3 failed dispatch retries', async () => {
