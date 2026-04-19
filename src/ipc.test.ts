@@ -51,6 +51,7 @@ vi.mock('./db.js', () => ({
   deleteTask: (...args: unknown[]) => mockDeleteTask(...args),
   getTaskById: (...args: unknown[]) => mockGetTaskById(...args),
   updateTask: (...args: unknown[]) => mockUpdateTask(...args),
+  storeMessageDirect: vi.fn(),
 }));
 
 vi.mock('./group-folder.js', () => ({
@@ -85,7 +86,7 @@ vi.mock('./memory/extract-fact.js', () => ({
   extractAndRefine: (...args: unknown[]) => mockExtractAndRefine(...args),
 }));
 
-import { writeIpcResponse, processTaskIpc, IpcDeps } from './ipc.js';
+import { writeIpcResponse, processTaskIpc, isDuplicateMessage, recentMessages, IpcDeps } from './ipc.js';
 import type { RegisteredGroup } from './types.js';
 
 // ---- helpers ----
@@ -327,5 +328,49 @@ describe('processTaskIpc - unknown type', () => {
       'main_group', true, deps,
     );
     // 只要不抛异常就好
+  });
+});
+
+// ---- isDuplicateMessage ----
+
+describe('isDuplicateMessage', () => {
+  beforeEach(() => {
+    recentMessages.clear();
+  });
+
+  it('首次消息 → 不重复', () => {
+    expect(isDuplicateMessage('jid1', 'hello')).toBe(false);
+  });
+
+  it('30 秒内相同消息 → 重复', () => {
+    isDuplicateMessage('jid1', 'hello');
+    expect(isDuplicateMessage('jid1', 'hello')).toBe(true);
+  });
+
+  it('不同 JID 的相同内容 → 不重复', () => {
+    isDuplicateMessage('jid1', 'hello');
+    expect(isDuplicateMessage('jid2', 'hello')).toBe(false);
+  });
+
+  it('相同 JID 的不同内容 → 不重复', () => {
+    isDuplicateMessage('jid1', 'hello');
+    expect(isDuplicateMessage('jid1', 'world')).toBe(false);
+  });
+
+  it('过期条目被清理', () => {
+    // 手动设一条过期条目
+    const key = 'jid1:' + require('crypto').createHash('md5').update('old').digest('hex');
+    recentMessages.set(key, Date.now() - 60_000); // 60 秒前
+    isDuplicateMessage('jid1', 'new'); // 触发清理
+    expect(recentMessages.has(key)).toBe(false);
+  });
+
+  it('超过 1000 条时全部清空', () => {
+    for (let i = 0; i < 1001; i++) {
+      recentMessages.set(`key-${i}`, Date.now());
+    }
+    isDuplicateMessage('jid1', 'trigger-cleanup');
+    // 清空后只有刚加的一条
+    expect(recentMessages.size).toBe(1);
   });
 });

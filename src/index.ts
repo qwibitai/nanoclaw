@@ -362,8 +362,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
-        triggerPattern.test(m.content.trim()) &&
-        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+        m.is_from_me || // 跨群/系统消息直接绕过 trigger 检查
+        (triggerPattern.test(m.content.trim()) &&
+          isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
   }
@@ -1087,8 +1088,8 @@ async function startMessageLoop(): Promise<void> {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                triggerPattern.test(m.content.trim()) &&
-                (m.is_from_me ||
+                m.is_from_me || // 跨群/系统消息直接绕过 trigger 检查
+                (triggerPattern.test(m.content.trim()) &&
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
             if (!hasTrigger) continue;

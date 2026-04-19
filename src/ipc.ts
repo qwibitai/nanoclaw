@@ -61,16 +61,19 @@ export function writeIpcResponse(
 let ipcWatcherRunning = false;
 
 // 短窗口去重：防止 session resume 重复执行 send_message
-const recentMessages = new Map<string, number>(); // hash → timestamp
+/** @internal Exported for testing only */
+export const recentMessages = new Map<string, number>(); // hash → timestamp
 const DEDUP_WINDOW_MS = 30_000;
 
-function isDuplicateMessage(chatJid: string, text: string): boolean {
+/** @internal Exported for testing only */
+export function isDuplicateMessage(chatJid: string, text: string): boolean {
   const key = `${chatJid}:${crypto.createHash('md5').update(text).digest('hex')}`;
   const now = Date.now();
-  // 清理过期条目
+  // 清理过期条目 + 防无限增长
   for (const [k, t] of recentMessages) {
     if (now - t > DEDUP_WINDOW_MS) recentMessages.delete(k);
   }
+  if (recentMessages.size > 1000) recentMessages.clear();
   if (recentMessages.has(key)) return true;
   recentMessages.set(key, now);
   return false;
@@ -187,7 +190,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 }
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
-                const isCrossGroup = targetGroup && targetGroup.folder !== sourceGroup;
+                const isSameGroup = targetGroup && targetGroup.folder === sourceGroup;
+                const isCrossGroup = !isSameGroup;
                 if (
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
@@ -202,7 +206,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                       sender_name: data.sender || ASSISTANT_NAME,
                       content: data.text,
                       timestamp: data.timestamp || new Date().toISOString(),
-                      is_from_me: !isCrossGroup,
+                      // 跨群消息：is_from_me=true 绕过 trigger 检查，is_bot_message=false 让 agent 处理
+                      is_from_me: true,
                       is_bot_message: !isCrossGroup,
                     });
                   } catch (storeErr) {
@@ -232,12 +237,15 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 { file, sourceGroup, err },
                 'Error processing IPC message',
               );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
+              // 文件可能已被 unlinkSync 删除，只在文件仍存在时移到 errors
+              if (fs.existsSync(filePath)) {
+                const errorDir = path.join(ipcBaseDir, 'errors');
+                fs.mkdirSync(errorDir, { recursive: true });
+                fs.renameSync(
+                  filePath,
+                  path.join(errorDir, `${sourceGroup}-${file}`),
+                );
+              }
             }
           }
         }

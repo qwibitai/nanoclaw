@@ -76,6 +76,10 @@ export class GroupQueue {
         },
         'Container active, message queued',
       );
+      // idle 容器需要被唤醒来处理新消息，否则会卡到超时
+      if (state.idleWaiting) {
+        this.closeStdin(groupJid);
+      }
       return;
     }
 

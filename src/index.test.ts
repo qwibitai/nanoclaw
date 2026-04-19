@@ -13,15 +13,15 @@ vi.mock('./config.js', () => ({
   MAX_MESSAGES_PER_PROMPT: 20,
   IDLE_TIMEOUT: 1800000,
   DEFAULT_TRIGGER: '@test-bot',
-  TRIGGER_PATTERN: /^@test-bot(?=[\s\p{P}]|$)/iu,
+  TRIGGER_PATTERN: /@test-bot(?=[\s\p{P}]|$)/iu,
   getTriggerPattern: (trigger?: string) =>
     new RegExp(
-      `^${(trigger || '@test-bot').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[\\s\\p{P}]|$)`,
+      `${(trigger || '@test-bot').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[\\s\\p{P}]|$)`,
       'iu',
     ),
   buildTriggerPattern: (trigger: string) =>
     new RegExp(
-      `^${trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[\\s\\p{P}]|$)`,
+      `${trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[\\s\\p{P}]|$)`,
       'iu',
     ),
   ONECLI_URL: 'http://localhost:10254',
@@ -257,9 +257,9 @@ describe('buildTriggerPattern', () => {
     expect(pattern.test('@大狗 你好')).toBe(true);
   });
 
-  it('仅前缀匹配，中间不匹配', () => {
+  it('结尾 @大狗 也匹配', () => {
     const pattern = buildTriggerPattern('@大狗');
-    expect(pattern.test('你好 @大狗')).toBe(false);
+    expect(pattern.test('你好 @大狗')).toBe(true);
   });
 
   it('后面无空格/标点也匹配（行尾）', () => {
