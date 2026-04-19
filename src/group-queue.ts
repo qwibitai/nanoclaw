@@ -142,6 +142,16 @@ export class GroupQueue {
   }
 
   /**
+   * Return the name of the currently-running container for this group,
+   * or null if no container is active.
+   */
+  getActiveContainerName(groupJid: string): string | null {
+    const state = this.groups.get(groupJid);
+    if (!state || !state.active) return null;
+    return state.containerName;
+  }
+
+  /**
    * Mark the container as idle-waiting (finished work, waiting for IPC input).
    * If tasks are pending, preempt the idle container immediately.
    */
