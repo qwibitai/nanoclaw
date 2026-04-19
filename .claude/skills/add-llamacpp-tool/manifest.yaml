@@ -1,0 +1,17 @@
+skill: llamacpp
+version: 1.0.0
+description: "Local llama.cpp model inference via MCP server"
+core_version: 0.1.0
+adds:
+  - container/agent-runner/src/llamacpp-mcp-stdio.ts
+  - scripts/llamacpp-watch.sh
+modifies:
+  - container/agent-runner/src/index.ts
+  - src/container-runner.ts
+structured:
+  npm_dependencies: {}
+  env_additions:
+    - LLAMACPP_HOST
+conflicts: []
+depends: []
+test: "npm run build"
