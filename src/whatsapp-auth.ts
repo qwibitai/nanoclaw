@@ -9,16 +9,36 @@
 import fs from 'fs';
 import path from 'path';
 import pino from 'pino';
+// @ts-expect-error no type declarations
 import qrcode from 'qrcode-terminal';
 import readline from 'readline';
 
-import makeWASocket, {
+import {
+  makeWASocket,
   Browsers,
   DisconnectReason,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
+
+// Fix Baileys 6.x bug: getPlatformId sends charCode (49) instead of enum value (1).
+// Fixed in Baileys 7.x but not backported. Without this, pairing codes fail with
+// "couldn't link device" because WhatsApp receives an invalid platform ID.
+// NOTE: Must use createRequire — ESM `import *` creates a read-only namespace.
+import { createRequire } from 'module';
+const _require = createRequire(import.meta.url);
+const _generics = _require(
+  '@whiskeysockets/baileys/lib/Utils/generics',
+) as Record<string, unknown>;
+const { proto } = _require('@whiskeysockets/baileys') as { proto: any };
+_generics.getPlatformId = (browser: string): string => {
+  const platformType =
+    proto.DeviceProps.PlatformType[
+      browser.toUpperCase() as keyof typeof proto.DeviceProps.PlatformType
+    ];
+  return platformType ? platformType.toString() : '1';
+};
 
 const AUTH_DIR = './store/auth';
 const QR_FILE = './store/qr-data.txt';
