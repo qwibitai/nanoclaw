@@ -14,6 +14,7 @@ const STEPS: Record<
   container: () => import('./container.js'),
   groups: () => import('./groups.js'),
   register: () => import('./register.js'),
+  'register-task': () => import('./register-task.js'),
   mounts: () => import('./mounts.js'),
   service: () => import('./service.js'),
   verify: () => import('./verify.js'),

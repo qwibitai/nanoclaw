@@ -11,11 +11,10 @@ vi.mock('./config.js', () => ({
   CONTAINER_IMAGE: 'nanoclaw-agent:latest',
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min
+  CREDENTIAL_PROXY_PORT: 3001,
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
-  ONECLI_API_KEY: '',
-  ONECLI_URL: 'http://localhost:10254',
   TIMEZONE: 'America/Los_Angeles',
 }));
 
@@ -55,20 +54,21 @@ vi.mock('./mount-security.js', () => ({
 // Mock container-runtime
 vi.mock('./container-runtime.js', () => ({
   CONTAINER_RUNTIME_BIN: 'docker',
+  CONTAINER_HOST_GATEWAY: 'host.docker.internal',
   hostGatewayArgs: () => [],
   readonlyMountArgs: (h: string, c: string) => ['-v', `${h}:${c}:ro`],
   stopContainer: vi.fn(),
 }));
 
-// Mock OneCLI SDK
-vi.mock('@onecli-sh/sdk', () => ({
-  OneCLI: class {
-    applyContainerConfig = vi.fn().mockResolvedValue(true);
-    createAgent = vi.fn().mockResolvedValue({ id: 'test' });
-    ensureAgent = vi
-      .fn()
-      .mockResolvedValue({ name: 'test', identifier: 'test', created: true });
-  },
+// Mock credential-proxy
+vi.mock('./credential-proxy.js', () => ({
+  detectAuthMode: vi.fn(() => 'api-key'),
+}));
+
+// Mock env-forward — default to no forwarded vars
+const mockGetForwardedEnv = vi.fn(() => ({} as Record<string, string>));
+vi.mock('./env-forward.js', () => ({
+  getForwardedEnv: () => mockGetForwardedEnv(),
 }));
 
 // Create a controllable fake ChildProcess
@@ -108,6 +108,7 @@ vi.mock('child_process', async () => {
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
+import { spawn } from 'child_process';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -226,5 +227,117 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('container-runner env forwarding', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    mockGetForwardedEnv.mockReturnValue({});
+  });
+
+  function captureSpawnArgs(): Promise<string[]> {
+    return new Promise((resolve) => {
+      (spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        (_bin: string, args: string[]) => {
+          resolve(args);
+          return fakeProc;
+        },
+      );
+    });
+  }
+
+  async function spawnAndClose(
+    forwardedEnv: Record<string, string>,
+  ): Promise<string[]> {
+    mockGetForwardedEnv.mockReturnValue(forwardedEnv);
+    const argsPromise = captureSpawnArgs();
+
+    const containerPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+    );
+
+    const args = await argsPromise;
+
+    // Settle the container (clean exit)
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await containerPromise;
+
+    return args;
+  }
+
+  it('emits no -e flags when forward-list is empty', async () => {
+    const args = await spawnAndClose({});
+
+    // Collect all -e values
+    const envFlags: string[] = [];
+    for (let i = 0; i < args.length - 1; i++) {
+      if (args[i] === '-e') envFlags.push(args[i + 1]);
+    }
+
+    // Only the standard nanoclaw env vars should be present
+    const forwardedFlags = envFlags.filter(
+      (f) =>
+        !f.startsWith('TZ=') &&
+        !f.startsWith('ANTHROPIC_BASE_URL=') &&
+        !f.startsWith('ANTHROPIC_API_KEY=') &&
+        !f.startsWith('CLAUDE_CODE_OAUTH_TOKEN=') &&
+        !f.startsWith('HOME='),
+    );
+    expect(forwardedFlags).toEqual([]);
+  });
+
+  it('emits -e KEY=VAL for each var in the forwarded env', async () => {
+    const args = await spawnAndClose({ NOTION_API_KEY: 'secret-token' });
+
+    // Find the pair -e NOTION_API_KEY=secret-token
+    const idx = args.indexOf('NOTION_API_KEY=secret-token');
+    expect(idx).toBeGreaterThan(0);
+    expect(args[idx - 1]).toBe('-e');
+  });
+
+  it('emits forwarded env flags in alphabetical order', async () => {
+    const args = await spawnAndClose({
+      ZEBRA_TOKEN: 'z',
+      ALPHA_KEY: 'a',
+      MIDDLE_VAR: 'm',
+    });
+
+    const forwardedFlags: string[] = [];
+    for (let i = 0; i < args.length - 1; i++) {
+      if (
+        args[i] === '-e' &&
+        (args[i + 1].startsWith('ZEBRA_') ||
+          args[i + 1].startsWith('ALPHA_') ||
+          args[i + 1].startsWith('MIDDLE_'))
+      ) {
+        forwardedFlags.push(args[i + 1]);
+      }
+    }
+
+    expect(forwardedFlags).toEqual([
+      'ALPHA_KEY=a',
+      'MIDDLE_VAR=m',
+      'ZEBRA_TOKEN=z',
+    ]);
+  });
+
+  it('forwarded env flags appear before volume mounts', async () => {
+    const args = await spawnAndClose({ NOTION_API_KEY: 'tok' });
+
+    const envFlagIdx = args.indexOf('NOTION_API_KEY=tok') - 1;
+    const firstVolumeIdx = args.indexOf('-v');
+
+    expect(envFlagIdx).toBeGreaterThan(0);
+    expect(firstVolumeIdx).toBeGreaterThan(0);
+    expect(envFlagIdx).toBeLessThan(firstVolumeIdx);
   });
 });
