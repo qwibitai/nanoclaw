@@ -8,6 +8,7 @@ import {
   getAllRegisteredGroups,
   getMessagesForDisplay,
   setRegisteredGroup,
+  storeMessageDirect,
 } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
@@ -47,7 +48,7 @@ export class WebChannel implements Channel {
       } else if (req.method === 'GET' && url.pathname === '/manifest.json') {
         this.serveManifest(res);
       } else if (req.method === 'GET' && url.pathname === '/history') {
-        this.serveHistory(res);
+        this.serveHistory(req, res);
       } else if (req.method === 'GET' && url.pathname === '/events') {
         this.handleSSE(req, res);
       } else if (req.method === 'POST' && url.pathname === '/send') {
@@ -88,9 +89,18 @@ export class WebChannel implements Channel {
     logger.info('Web channel stopped');
   }
 
-  async sendMessage(_jid: string, _text: string): Promise<void> {
-    // DB polling (pollMessages) handles pushing new messages to SSE clients,
-    // including bot responses. No direct push needed here.
+  async sendMessage(jid: string, text: string): Promise<void> {
+    storeMessageDirect({
+      id: `web-bot-${Date.now()}`,
+      chat_jid: jid,
+      sender: 'bot',
+      sender_name: ASSISTANT_NAME,
+      content: text,
+      timestamp: new Date().toISOString(),
+      is_from_me: true,
+      is_bot_message: true,
+    });
+    // pollMessages will pick this up and push it to SSE clients
   }
 
   isConnected(): boolean {
@@ -141,7 +151,10 @@ export class WebChannel implements Channel {
     }
   }
 
-  private checkAuth(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  private checkAuth(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): boolean {
     if (!this.token) return true;
     const url = new URL(req.url ?? '/', `http://localhost`);
     const queryToken = url.searchParams.get('token');
@@ -171,6 +184,7 @@ export class WebChannel implements Channel {
   private serveUI(res: http.ServerResponse): void {
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
       ...(this.token
         ? {
             'Set-Cookie': `nc_token=${this.token}; Path=/; HttpOnly; SameSite=Strict`,
@@ -195,9 +209,12 @@ export class WebChannel implements Channel {
       .end(JSON.stringify(manifest));
   }
 
-  private serveHistory(res: http.ServerResponse): void {
+  private serveHistory(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const since = url.searchParams.get('since') ?? new Date(0).toISOString();
+    const limit = since === new Date(0).toISOString() ? HISTORY_LIMIT : 50;
     const jids = this.allJidsForTarget();
-    const msgs = getMessagesForDisplay(jids, new Date(0).toISOString(), HISTORY_LIMIT);
+    const msgs = getMessagesForDisplay(jids, since, limit);
     res
       .writeHead(200, { 'Content-Type': 'application/json' })
       .end(JSON.stringify(msgs));
@@ -216,7 +233,10 @@ export class WebChannel implements Channel {
     req.on('error', () => this.sseClients.delete(res));
   }
 
-  private handleSend(req: http.IncomingMessage, res: http.ServerResponse): void {
+  private handleSend(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
     let body = '';
     req.on('data', (chunk) => (body += chunk));
     req.on('end', () => {
@@ -282,7 +302,10 @@ export class WebChannel implements Channel {
     try {
       const stat = fs.lstatSync(webDir);
       if (stat.isSymbolicLink()) return;
-      logger.debug({ webDir }, 'Web groups/web dir already exists as a directory — leaving it');
+      logger.debug(
+        { webDir },
+        'Web groups/web dir already exists as a directory — leaving it',
+      );
       return;
     } catch {
       // Does not exist — create symlink
@@ -294,7 +317,10 @@ export class WebChannel implements Channel {
 
     try {
       fs.symlinkSync(targetDir, webDir);
-      logger.info({ target: targetDir }, 'Web channel: created groups/web symlink');
+      logger.info(
+        { target: targetDir },
+        'Web channel: created groups/web symlink',
+      );
     } catch (err) {
       logger.error({ err }, 'Web channel: failed to create groups/web symlink');
     }
@@ -338,14 +364,14 @@ html,body{height:100dvh;background:var(--bg);color:var(--text);font:15px/1.5 -ap
 #inp{flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:20px;padding:10px 16px;font-size:15px;resize:none;min-height:42px;max-height:160px;outline:none;line-height:1.4;font-family:inherit}
 #inp:focus{border-color:var(--user)}
 #btn{width:42px;height:42px;border-radius:50%;background:var(--user);color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;transition:opacity .15s}
-#btn:disabled{opacity:.35;cursor:default}
+#btn.dim{opacity:.35}
 </style>
 </head>
 <body>
 <div id="app">
   <div id="hdr"><div id="dot" class="off"></div>${assistantName}</div>
   <div id="msgs"></div>
-  <div id="ftr"><textarea id="inp" placeholder="Message…" rows="1"></textarea><button id="btn" disabled>↑</button></div>
+  <form id="frm"><div id="ftr"><textarea id="inp" placeholder="Message…" rows="1"></textarea><button type="submit" id="btn" class="dim">↑</button></div></form>
 </div>
 <script>
 // Minimal markdown renderer — no external dependencies
@@ -355,14 +381,14 @@ function md(src) {
   const blocks = [];
   // Code blocks: match triple-backtick fences
   src = src.replace(/\x60\x60\x60([\s\S]*?)\x60\x60\x60/g, (_,c) => {
-    blocks.push('<pre><code>'+esc(c.replace(/^[a-z]+\n/,''))+'</code></pre>');
+    blocks.push('<pre><code>'+esc(c.replace(/^[a-z]+\\n/,''))+'</code></pre>');
     return '\x01'+(blocks.length-1)+'\x01';
   });
   const inline = s => s
     .replace(/\x60([^\x60]+)\x60/g, (_,c) => '<code>'+esc(c)+'</code>')
     .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
     .replace(/\*(.+?)\*/g,'<em>$1</em>');
-  const lines = src.split('\n');
+  const lines = src.split('\\n');
   const out = []; let listBuf = [], listType = null;
   const flushList = () => { if(listBuf.length){out.push('<'+listType+'>'+listBuf.map(x=>'<li>'+x+'</li>').join('')+'</'+listType+'>'); listBuf=[]; listType=null;} };
   for (const raw of lines) {
@@ -376,9 +402,9 @@ function md(src) {
     out.push(inline(t));
   }
   flushList();
-  let html = out.join('\n').replace(/\x01(\d+)\x01/g, (_,i)=>blocks[+i]);
-  html = html.replace(/([^\n<][^\n]+)/g, s => s.startsWith('<') ? s : '<p>'+s+'</p>');
-  return html.replace(/\n/g,'');
+  let html = out.join('\\n').replace(/\x01(\d+)\x01/g, (_,i)=>blocks[+i]);
+  html = html.replace(/([^\\n<][^\\n]+)/g, s => s.startsWith('<') ? s : '<p>'+s+'</p>');
+  return html.replace(/\\n/g,'');
 }
 
 const msgs = document.getElementById('msgs');
@@ -387,41 +413,47 @@ const btn = document.getElementById('btn');
 const dot = document.getElementById('dot');
 const seen = new Set();
 
-function fmt(ts){ const d=new Date(ts); return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
+function fmt(ts){ try { return new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); } catch(e){ return ''; } }
 
 function addMsg(isBot, content, ts, id) {
   if(id && seen.has(id)) return; if(id) seen.add(id);
   const wrap = document.createElement('div'); wrap.className = 'm '+(isBot?'a':'u');
   const b = document.createElement('div'); b.className = 'b';
-  if(isBot) b.innerHTML = md(content); else b.textContent = content;
-  const t = document.createElement('div'); t.className = 'ts'; t.textContent = fmt(ts||new Date());
+  if(isBot) { try { b.innerHTML = md(content||''); } catch(e) { b.textContent = content||''; } } else b.textContent = content||'';
+  const t = document.createElement('div'); t.className = 'ts'; t.textContent = fmt(ts);
   wrap.appendChild(b); wrap.appendChild(t); msgs.appendChild(wrap);
   msgs.scrollTop = msgs.scrollHeight;
 }
 
-// History
-fetch('/history').then(r=>r.json()).then(ms => {
-  for(const m of ms) addMsg(!!m.is_bot_message, m.content, m.timestamp, m.id);
-}).catch(()=>{});
+// Load history then poll for new messages every 2s
+let lastTs = '1970-01-01T00:00:00.000Z';
 
-// SSE
-const es = new EventSource('/events');
-es.onopen = () => dot.classList.remove('off');
-es.onerror = () => dot.classList.add('off');
-es.onmessage = e => { const d=JSON.parse(e.data); addMsg(!!d.is_bot_message, d.content, d.timestamp, d.id); };
+function poll() {
+  fetch('/history?since='+encodeURIComponent(lastTs))
+    .then(r => { dot.classList.toggle('off', !r.ok); return r.json(); })
+    .then(ms => {
+      for(const m of ms) {
+        if(m.timestamp > lastTs) lastTs = m.timestamp;
+        try { addMsg(!!m.is_bot_message, m.content, m.timestamp, m.id); } catch(e) {}
+      }
+    })
+    .catch(() => dot.classList.add('off'));
+}
 
-// Input auto-resize
-inp.addEventListener('input', () => {
-  inp.style.height='auto';
-  inp.style.height=Math.min(inp.scrollHeight,160)+'px';
-  btn.disabled=!inp.value.trim();
-});
+poll();
+setInterval(poll, 2000);
+
+// Input auto-resize and button state
+function updateBtn(){ btn.classList.toggle('dim', !inp.value.trim()); }
+inp.addEventListener('input', () => { inp.style.height='auto'; inp.style.height=Math.min(inp.scrollHeight,160)+'px'; updateBtn(); });
+inp.addEventListener('keyup', updateBtn);
+inp.addEventListener('change', updateBtn);
 inp.addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();} });
-btn.addEventListener('click', send);
+document.getElementById('frm').addEventListener('submit', e => { e.preventDefault(); send(); });
 
 function send() {
   const text=inp.value.trim(); if(!text) return;
-  inp.value=''; inp.style.height='auto'; btn.disabled=true;
+  inp.value=''; inp.style.height='auto'; btn.classList.add('dim');
   const ts=new Date().toISOString();
   addMsg(false, text, ts);
   fetch('/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}).catch(()=>{});
@@ -433,7 +465,10 @@ function send() {
 
 registerChannel('web', (opts: ChannelOpts) => {
   const env = readEnvFile(['WEB_CHANNEL_PORT', 'WEB_CHANNEL_TOKEN']);
-  const port = parseInt(process.env.WEB_CHANNEL_PORT || env.WEB_CHANNEL_PORT || '3080', 10);
+  const port = parseInt(
+    process.env.WEB_CHANNEL_PORT || env.WEB_CHANNEL_PORT || '3080',
+    10,
+  );
   const token = process.env.WEB_CHANNEL_TOKEN || env.WEB_CHANNEL_TOKEN || null;
   return new WebChannel(port, token, opts);
 });
