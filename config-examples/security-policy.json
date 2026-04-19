@@ -1,0 +1,36 @@
+{
+  "trust": {
+    "owner_ids": ["YOUR_DISCORD_USER_ID_OR_WHATSAPP_JID"],
+    "trusted_members": []
+  },
+
+  "tools": {
+    "blocked": [
+      "Task", "TaskOutput", "TaskStop",
+      "TeamCreate", "TeamDelete", "SendMessage"
+    ],
+    "blocked_untrusted": []
+  },
+
+  "bash": {
+    "blocked_env_vars": [
+      "MY_SECRET_API_KEY",
+      "DATABASE_PASSWORD"
+    ],
+    "blocked_url_patterns": []
+  },
+
+  "webfetch": {
+    "blocked_url_patterns": []
+  },
+
+  "write": {
+    "trust_required_paths": ["/data/", "/ipc/tasks/"]
+  },
+
+  "killswitch": {
+    "file": "killswitch.txt",
+    "running_value": "running",
+    "message": "I'm currently disabled by the kill switch."
+  }
+}
