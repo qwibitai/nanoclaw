@@ -115,13 +115,72 @@ function setupLaunchd(
   fs.writeFileSync(plistPath, plist);
   logger.info({ plistPath }, 'Wrote launchd plist');
 
-  try {
-    execSync(`launchctl load ${JSON.stringify(plistPath)}`, {
-      stdio: 'ignore',
-    });
-    logger.info('launchctl load succeeded');
-  } catch {
-    logger.warn('launchctl load failed (may already be loaded)');
+  // Stop any manually started instances before (re)registering launchd service.
+  // Without this, running `node dist/index.js` by hand can leave duplicate
+  // orchestrator processes that each spawn their own container workers.
+  killOrphanedProcesses(projectRoot);
+
+  const uid = process.getuid?.();
+  const domain = uid != null ? `gui/${uid}` : null;
+  const label = domain ? `${domain}/com.nanoclaw` : null;
+
+  if (domain && label) {
+    try {
+      execSync(
+        `launchctl bootout ${JSON.stringify(domain)} ${JSON.stringify(plistPath)}`,
+        {
+          stdio: 'ignore',
+        },
+      );
+      logger.info({ domain, plistPath }, 'launchctl bootout succeeded');
+    } catch {
+      try {
+        execSync(`launchctl bootout ${JSON.stringify(label)}`, {
+          stdio: 'ignore',
+        });
+        logger.info({ label }, 'launchctl bootout succeeded via label');
+      } catch {
+        logger.info({ label }, 'launchctl bootout skipped (job not loaded)');
+      }
+    }
+
+    let bootstrapSucceeded = false;
+    try {
+      execSync(
+        `launchctl bootstrap ${JSON.stringify(domain)} ${JSON.stringify(plistPath)}`,
+        { stdio: 'ignore' },
+      );
+      bootstrapSucceeded = true;
+      logger.info({ domain }, 'launchctl bootstrap succeeded');
+    } catch (err) {
+      logger.error({ err, domain, plistPath }, 'launchctl bootstrap failed');
+    }
+
+    try {
+      execSync(`launchctl kickstart -k ${JSON.stringify(label)}`, {
+        stdio: 'ignore',
+      });
+      logger.info({ label }, 'launchctl kickstart succeeded');
+    } catch {
+      if (bootstrapSucceeded) {
+        logger.warn({ label }, 'launchctl kickstart failed');
+      } else {
+        logger.warn(
+          { label },
+          'launchctl kickstart failed after bootstrap error',
+        );
+      }
+    }
+  } else {
+    // Fallback for environments where process.getuid is unavailable.
+    try {
+      execSync(`launchctl load ${JSON.stringify(plistPath)}`, {
+        stdio: 'ignore',
+      });
+      logger.info('launchctl load succeeded');
+    } catch {
+      logger.warn('launchctl load failed (may already be loaded)');
+    }
   }
 
   // Verify
