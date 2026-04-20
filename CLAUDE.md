@@ -38,6 +38,7 @@ Four types of skills exist in NanoClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) f
 |-------|-------------|
 | `/setup` | First-time installation, authentication, service configuration |
 | `/deploy-digitalocean` | Provision a DigitalOcean droplet and install NanoClaw end-to-end from Claude Code |
+| `/add-almanda-core` | Install Almanda persona: rename Andy→Almanda, global operating rules, capability index, main-group systemPrompt fix |
 | `/add-identity` | Install cross-channel identity layer: maps @almalabs.ai employees to Slack/Telegram IDs |
 | `/add-policy` | Install role-based capability layer: admin/member roles, policy.json, checkCapability enforcement |
 | `/customize` | Adding channels, integrations, changing behavior |
