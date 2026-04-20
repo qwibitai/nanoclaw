@@ -75,7 +75,7 @@ cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub
 
 Ask the user for the target region. Suggest `nyc3` (New York), `fra1` (Frankfurt), or `sfo3` (San Francisco). Default to `nyc3` if no preference is given.
 
-Ask the user for the desired droplet size. Recommend `s-4vcpu-8gb` for a 30-user company assistant. `s-2vcpu-4gb` is the minimum. See `references/do-sizing.md` for the full sizing table.
+Ask the user for the desired droplet size. Recommend `s-4vcpu-8gb` for a 30-user company assistant. `s-2vcpu-4gb` is the minimum. See `references/operations.md` for the full sizing table.
 
 Add the SSH public key to DigitalOcean under the name `nanoclaw-key`. Skip the import if a key with that name is already registered:
 
@@ -108,16 +108,23 @@ The `--wait` flag blocks until the droplet transitions to `active`. After it ret
 doctl compute droplet get nanoclaw --format Status --no-header
 ```
 
-Retrieve the public IP and save it for all subsequent SSH commands:
+Retrieve the public IP and persist it to disk so all subsequent steps can read it (shell variables do not persist between tool invocations):
 
 ```bash
 IP=$(doctl compute droplet get nanoclaw --format PublicIPv4 --no-header)
+echo "$IP" > /tmp/nanoclaw-ip.txt
 echo "Droplet IP: $IP"
 ```
 
-Keep `$IP` in scope throughout the remaining steps. If the shell session is interrupted, retrieve it again with the `doctl compute droplet get` command above.
+If a previous run already wrote the IP, retrieve it with `IP=$(cat /tmp/nanoclaw-ip.txt)` and confirm it still matches the live droplet.
 
 ## 3. Bootstrap Droplet
+
+Read the droplet IP saved in step 2:
+
+```bash
+IP=$(cat /tmp/nanoclaw-ip.txt)
+```
 
 Run the bootstrap script over SSH. The script installs Node 22, Docker, configures the firewall (SSH only — no inbound HTTP/HTTPS needed since channels use outbound WebSockets), sets up logrotate, and prepares the system:
 
@@ -130,6 +137,12 @@ The bootstrap takes 2–5 minutes. Wait for the SSH command to exit before proce
 If the bootstrap script is not present locally (it lives at `scripts/bootstrap-droplet.sh` in this repo), report the missing file to the user and stop. The script must exist before this step can run.
 
 ## 4. Clone and Setup
+
+Read the droplet IP:
+
+```bash
+IP=$(cat /tmp/nanoclaw-ip.txt)
+```
 
 Ask the user for their NanoClaw fork URL (e.g. `https://github.com/<org>/nanoclaw.git`).
 
@@ -158,10 +171,22 @@ If the container build fails, check the SSH output for the error. Common causes:
 
 ## 5. Credential System
 
-Install OneCLI (the credential gateway) and its CLI on the droplet. OneCLI intercepts outbound API calls from agent containers and injects secrets at the gateway level, so raw API keys never appear inside containers:
+Read the droplet IP:
 
 ```bash
-ssh root@$IP "curl -fsSL onecli.sh/install | sh && curl -fsSL onecli.sh/cli/install | sh"
+IP=$(cat /tmp/nanoclaw-ip.txt)
+```
+
+Install OneCLI (the credential gateway) and its CLI on the droplet. OneCLI intercepts outbound API calls from agent containers and injects secrets at the gateway level, so raw API keys never appear inside containers. Capture the URL printed by the install script in the same SSH session:
+
+```bash
+ONECLI_URL=$(ssh root@$IP "curl -fsSL onecli.sh/install | sh && curl -fsSL onecli.sh/cli/install | sh" 2>&1 | grep -oP 'http://[^\s]+' | tail -1)
+```
+
+If the grep produces no output, query the running gateway directly:
+
+```bash
+ONECLI_URL=$(ssh root@$IP "onecli system info --json 2>/dev/null | jq -r '.url' 2>/dev/null || echo 'http://localhost:31457'")
 ```
 
 Verify the installation — the CLI may land in `~/.local/bin/` on the first install:
@@ -170,17 +195,16 @@ Verify the installation — the CLI may land in `~/.local/bin/` on the first ins
 ssh root@$IP "onecli version 2>/dev/null || ~/.local/bin/onecli version"
 ```
 
-Ensure `ONECLI_URL` is written to `.env` so NanoClaw can reach the gateway at runtime. The install script prints the URL; capture it:
+Write `ONECLI_URL` to `.env` (idempotent):
 
 ```bash
-ssh root@$IP "grep ONECLI_URL nanoclaw/.env 2>/dev/null || (ONECLI_URL=\$(onecli config get api-host 2>/dev/null) && echo \"ONECLI_URL=\$ONECLI_URL\" >> nanoclaw/.env)"
+ssh root@$IP "grep -q ONECLI_URL nanoclaw/.env 2>/dev/null || echo 'ONECLI_URL=$ONECLI_URL' >> nanoclaw/.env"
 ```
 
-Instruct the user to vault their Anthropic API key. Run this on the droplet (substituting the actual key):
+Register the Anthropic API key with OneCLI. AskUserQuestion with two options:
 
-```bash
-ssh root@$IP "onecli secrets create --name Anthropic --type anthropic --value <api-key> --host-pattern api.anthropic.com"
-```
+1. **Dashboard** — description: "Open $ONECLI_URL in a browser and add the secret via the UI (avoids shell history). Use type 'anthropic', name 'Anthropic', host-pattern 'api.anthropic.com'."
+2. **CLI** — description: "Headless/remote server. Run: `ssh root@$IP 'onecli secrets create --name Anthropic --type anthropic --value YOUR_KEY --host-pattern api.anthropic.com'` — replace YOUR_KEY with the actual key."
 
 Confirm the secret was registered:
 
@@ -191,6 +215,12 @@ ssh root@$IP "onecli secrets list"
 Refer to the `/init-onecli` skill for the full credential registration flow, including Claude subscription (OAuth token) as an alternative to an API key.
 
 ## 6. Service Setup
+
+Read the droplet IP:
+
+```bash
+IP=$(cat /tmp/nanoclaw-ip.txt)
+```
 
 Run the service step to generate and load the systemd user unit:
 
@@ -206,13 +236,21 @@ ssh root@$IP "systemctl --user status nanoclaw"
 
 ## 7. Concurrent Container Limit
 
-Set `MAX_CONCURRENT_CONTAINERS` to match the droplet size. The default of `5` is appropriate for `s-2vcpu-4gb`; set it to `15` for `s-4vcpu-8gb` (30-user deployments):
+Read the droplet IP:
 
 ```bash
-ssh root@$IP "echo 'MAX_CONCURRENT_CONTAINERS=15' >> nanoclaw/.env"
+IP=$(cat /tmp/nanoclaw-ip.txt)
 ```
 
-Adjust this value based on the chosen droplet size — see `references/do-sizing.md` for the recommended mapping.
+Look up the correct `MAX_CONCURRENT_CONTAINERS` value for the droplet size chosen in step 2 from `references/operations.md`. Use the value from the sizing table (e.g. `5` for `s-2vcpu-4gb`, `15` for `s-4vcpu-8gb`, `30` for `s-8vcpu-16gb`).
+
+Set the value idempotently — skip the append if the key already exists:
+
+```bash
+ssh root@$IP "grep -q MAX_CONCURRENT_CONTAINERS nanoclaw/.env || echo 'MAX_CONCURRENT_CONTAINERS=<N>' >> nanoclaw/.env"
+```
+
+Replace `<N>` with the value from the sizing table.
 
 Restart the service to apply the new value:
 
@@ -221,6 +259,12 @@ ssh root@$IP "systemctl --user restart nanoclaw"
 ```
 
 ## 8. Verify
+
+Read the droplet IP:
+
+```bash
+IP=$(cat /tmp/nanoclaw-ip.txt)
+```
 
 Run the NanoClaw verify step:
 
