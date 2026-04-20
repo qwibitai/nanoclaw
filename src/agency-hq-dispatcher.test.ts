@@ -882,11 +882,7 @@ describe('agency-hq-dispatcher', () => {
       );
       // First PUT returns 422 (ready transition rejected)
       fetchMock.mockResolvedValueOnce(
-        mockFetchResponse(
-          { error: 'target_sprint must be set' },
-          false,
-          422,
-        ),
+        mockFetchResponse({ error: 'target_sprint must be set' }, false, 422),
       );
       // Fallback PUT (penalty-only, no status change) succeeds
       fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
