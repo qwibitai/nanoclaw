@@ -6,7 +6,7 @@ NanoClaw runs on a single DigitalOcean droplet as a systemd user service managed
 
 | Size | RAM | vCPU | Max concurrent agents | Recommended for |
 |------|-----|------|----------------------|-----------------|
-| `s-2vcpu-4gb` | 4 GB | 2 | 5 | Dev/testing only |
+| `s-2vcpu-4gb` | 4 GB | 2 | 5 | Up to 15 users (small teams) |
 | `s-4vcpu-8gb` | 8 GB | 4 | 15 | Up to 30 users (recommended) |
 | `s-8vcpu-16gb` | 16 GB | 8 | 30 | High-load / future growth |
 
