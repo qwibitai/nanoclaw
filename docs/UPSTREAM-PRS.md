@@ -24,3 +24,15 @@ Once accepted upstream, the corresponding `.nanoclaw-migrations/guide.md` entry 
 **Status:** Not yet submitted  
 **Proposal:** Pass `NANOCLAW_CALLER_ID` and `NANOCLAW_CALLER_ROLES` env vars into agent containers from `ContainerInput`.  
 **Upstream benefit:** MCP servers inside containers can authorize tool calls based on the triggering user's identity.
+
+## Policy Layer
+
+### 5. Policy anchor in src/ipc.ts
+**Status:** Not yet submitted  
+**Proposal:** Add `callerId?`/`callerRoles?` to processTaskIpc data, `callerCanDo(capability)` helper, and replace isMain checks with capability checks.  
+**Upstream benefit:** Any fork wanting RBAC on IPC operations can add it without patching the monolith.
+
+### 6. Policy anchor in src/index.ts::handleRemoteControl
+**Status:** Not yet submitted  
+**Proposal:** OR-gate `checkCapability` alongside `group.isMain` in handleRemoteControl.  
+**Upstream benefit:** Remote-control access can be granted to non-main-group admin users.
