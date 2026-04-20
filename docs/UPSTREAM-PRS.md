@@ -36,3 +36,10 @@ Once accepted upstream, the corresponding `.nanoclaw-migrations/guide.md` entry 
 **Status:** Not yet submitted  
 **Proposal:** OR-gate `checkCapability` alongside `group.isMain` in handleRemoteControl.  
 **Upstream benefit:** Remote-control access can be granted to non-main-group admin users.
+
+## Almanda Persona Layer
+
+### 7. Global CLAUDE.md for all groups (container/agent-runner/src/index.ts)
+**Status:** Not yet submitted  
+**Proposal:** Remove `!containerInput.isMain` guard so `groups/global/CLAUDE.md` is appended to `systemPrompt` for all groups, including main.  
+**Upstream benefit:** Forks wanting a shared persona or global operating rules across all groups (main + non-main) can do so without forking the agent runner per-group. The current guard silently skips the global file for main with no log indication — a footgun for forks that rely on global CLAUDE.md for shared behavior.
