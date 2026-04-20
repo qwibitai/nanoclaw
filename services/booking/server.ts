@@ -44,6 +44,7 @@ const envKeys = [
   'GOOGLE_SERVICE_ACCOUNT_KEY',
   'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM',
   'BOOKING_PORT', 'BOOKING_ALLOWED_ORIGIN', 'BOOKING_CONFIRMATION_URL',
+  'OWNER_EMAIL',
 ];
 
 function loadEnv(): void {
@@ -90,25 +91,34 @@ function cors(req: http.IncomingMessage, res: http.ServerResponse): void {
 // ── Rate Limiting ───────────────────────────────────────────────────
 
 const rateMap = new Map<string, { count: number; ts: number }>();
+const checkoutRateMap = new Map<string, { count: number; ts: number }>();
 const RATE_WINDOW = 60_000;
 const RATE_MAX = 20;
+const CHECKOUT_RATE_MAX = 5;
 
-function isRateLimited(ip: string): boolean {
+function bumpRate(bucket: Map<string, { count: number; ts: number }>, ip: string, max: number): boolean {
   const now = Date.now();
-  const entry = rateMap.get(ip);
+  const entry = bucket.get(ip);
   if (!entry || now - entry.ts > RATE_WINDOW) {
-    rateMap.set(ip, { count: 1, ts: now });
+    bucket.set(ip, { count: 1, ts: now });
     return false;
   }
   entry.count++;
-  return entry.count > RATE_MAX;
+  return entry.count > max;
+}
+
+function isRateLimited(ip: string): boolean {
+  return bumpRate(rateMap, ip, RATE_MAX);
+}
+
+function isCheckoutRateLimited(ip: string): boolean {
+  return bumpRate(checkoutRateMap, ip, CHECKOUT_RATE_MAX);
 }
 
 setInterval(() => {
   const cutoff = Date.now() - RATE_WINDOW * 2;
-  for (const [ip, entry] of rateMap) {
-    if (entry.ts < cutoff) rateMap.delete(ip);
-  }
+  for (const [ip, entry] of rateMap) if (entry.ts < cutoff) rateMap.delete(ip);
+  for (const [ip, entry] of checkoutRateMap) if (entry.ts < cutoff) checkoutRateMap.delete(ip);
 }, 300_000);
 
 // ── Handlers ────────────────────────────────────────────────────────
@@ -190,14 +200,21 @@ async function handleCheckout(req: http.IncomingMessage, res: http.ServerRespons
       return;
     }
   }
+  // Honeypot: the form's hidden "website" field must be empty. Bots fill it.
+  if (typeof (body as any).website === 'string' && (body as any).website.trim() !== '') {
+    json(res, 200, { bookingId: 'hp', paymentUrl: '', pricing: null });
+    return;
+  }
   if (!body.customer?.firstName || !body.customer?.lastName) {
     json(res, 400, { error: 'Customer name required' });
     return;
   }
-  if (!body.customer?.email?.includes('@')) {
+  const email = (body.customer?.email || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
     json(res, 400, { error: 'Valid email required' });
     return;
   }
+  body.customer.email = email;
   if (!body.customer?.phone) {
     json(res, 400, { error: 'Phone number required' });
     return;
@@ -307,10 +324,8 @@ async function handleCheckout(req: http.IncomingMessage, res: http.ServerRespons
     }
   }
 
-  // Send owner notification (don't block response)
-  sendOwnerNotification(booking).catch(err =>
-    console.error('[checkout] Email error:', err.message),
-  );
+  // Owner notification is sent from the Square webhook after payment is confirmed.
+  // This avoids alerting on abandoned carts and bot submissions.
 
   json(res, 200, {
     bookingId: booking.id,
@@ -429,12 +444,13 @@ async function handleSquareWebhook(req: http.IncomingMessage, res: http.ServerRe
     // Refresh booking with updated fields
     const updatedBooking = getBooking(booking.id)!;
 
-    // Send emails (non-blocking)
+    // Send emails (non-blocking). Owner gets the full-detail notification only
+    // after payment is confirmed — prevents spam/abandoned-cart alerts.
     sendCustomerConfirmation(updatedBooking).catch(err =>
       console.error(`[webhook] CRITICAL: Customer confirmation email failed after retries: ${err.message}. Booking ${updatedBooking.id} — manual follow-up required.`),
     );
-    sendPaymentReceivedNotification(updatedBooking).catch(err =>
-      console.error(`[webhook] CRITICAL: Owner payment notification email failed after retries: ${err.message}. Booking ${updatedBooking.id} — manual follow-up required.`),
+    sendOwnerNotification(updatedBooking).catch(err =>
+      console.error(`[webhook] CRITICAL: Owner notification email failed after retries: ${err.message}. Booking ${updatedBooking.id} — manual follow-up required.`),
     );
 
   } catch (err: any) {
@@ -791,6 +807,10 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 
     // POST /api/checkout
     if (req.method === 'POST' && url === '/api/checkout') {
+      if (isCheckoutRateLimited(ip)) {
+        json(res, 429, { error: 'Too many checkout attempts. Please wait a minute and try again.' });
+        return;
+      }
       await handleCheckout(req, res);
       return;
     }

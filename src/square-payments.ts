@@ -35,8 +35,11 @@ const BASE_URL =
     : 'https://connect.squareupsandbox.com';
 
 // ── SMTP config ─────────────────────────────────────────────────
-const smtpConfig = readEnvFile(['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM']);
-const BUSINESS_EMAIL = 'info@sheridantrailerrentals.us';
+const smtpConfig = readEnvFile(['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'OWNER_EMAIL']);
+function getBusinessEmail(): string {
+  return process.env.OWNER_EMAIL || smtpConfig.OWNER_EMAIL || 'sheridantrailerrentals@gmail.com';
+}
+const BUSINESS_EMAIL = getBusinessEmail();
 
 // ── Google Calendar + Sheets config ─────────────────────────────
 const gcalConfig = readEnvFile(['GOOGLE_SERVICE_ACCOUNT_KEY', 'SHERIDAN_SPREADSHEET_ID']);
@@ -475,14 +478,14 @@ async function sendConfirmationEmails(
   const sends = [
     transporter.sendMail({
       from: `"Sheridan Rentals" <${from}>`,
-      replyTo: 'info@sheridantrailerrentals.us',
+      replyTo: BUSINESS_EMAIL,
       to: customer.email.trim(),
       subject: `Booking Confirmed — ${eqLabel} (${dateNote}) | ${bookingId}`,
       html: customerHtml,
     }),
     transporter.sendMail({
       from: `"Sheridan Rentals Booking" <${from}>`,
-      replyTo: 'info@sheridantrailerrentals.us',
+      replyTo: BUSINESS_EMAIL,
       to: BUSINESS_EMAIL,
       subject: `New Booking: ${name} — ${eqLabel} (${dateNote}) [${bookingId}]`,
       html: bizHtml,
