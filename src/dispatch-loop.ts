@@ -469,11 +469,29 @@ async function dispatchTask(
     // Update targetJid to the claimed slot's JID
     targetJid = claim.slotJid;
 
+    // Resolve the worker slot's group folder so the task executes in an
+    // isolated worker context instead of the CEO/main group folder.
+    const groups = deps.registeredGroups();
+    const slotGroup = groups[claim.slotJid];
+    if (slotGroup) {
+      targetFolder = slotGroup.folder;
+    } else {
+      log.warn(
+        { slotJid: claim.slotJid, taskId: task.id },
+        'No registered group for worker slot JID, falling back to target folder',
+      );
+    }
+
     // Keep in-memory set in sync for the optimistic pre-check
     lockedWorkerSlots.add(claim.slotJid);
 
     log.debug(
-      { taskId: task.id, workerSlot: claim.slotJid, slotId: claim.slotId },
+      {
+        taskId: task.id,
+        workerSlot: claim.slotJid,
+        slotId: claim.slotId,
+        targetFolder,
+      },
       'Worker slot acquired',
     );
   }
