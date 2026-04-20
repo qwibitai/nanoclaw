@@ -23,7 +23,9 @@ export function formatMessages(
       m.reply_to_message_content && m.reply_to_sender_name
         ? `\n  <quoted_message from="${escapeXml(m.reply_to_sender_name)}">${escapeXml(m.reply_to_message_content)}</quoted_message>`
         : '';
-    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}"${replyAttr}>${replySnippet}${escapeXml(m.content)}</message>`;
+    const idAttr = m.canonical_id ? ` id="${escapeXml(m.canonical_id)}"` : '';
+    const rolesAttr = m.roles?.length ? ` roles="${escapeXml(m.roles.join(','))}"` : '';
+    return `<message sender="${escapeXml(m.sender_name)}"${idAttr}${rolesAttr} time="${escapeXml(displayTime)}"${replyAttr}>${replySnippet}${escapeXml(m.content)}</message>`;
   });
 
   const header = `<context timezone="${escapeXml(timezone)}" />\n`;

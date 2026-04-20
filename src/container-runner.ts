@@ -44,6 +44,8 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  callerId?: string;      // canonical_id of the user who triggered this run
+  callerRoles?: string[]; // roles of the triggering user
 }
 
 export interface ContainerOutput {
@@ -247,6 +249,7 @@ async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentIdentifier?: string,
+  callerEnv?: { callerId?: string; callerRoles?: string[] },
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -289,6 +292,12 @@ async function buildContainerArgs(
     }
   }
 
+  // Caller identity for MCP tool authorization
+  if (callerEnv) {
+    if (callerEnv.callerId) args.push('-e', `NANOCLAW_CALLER_ID=${callerEnv.callerId}`);
+    if (callerEnv.callerRoles?.length) args.push('-e', `NANOCLAW_CALLER_ROLES=${callerEnv.callerRoles.join(',')}`);
+  }
+
   args.push(CONTAINER_IMAGE);
 
   return args;
@@ -316,6 +325,7 @@ export async function runContainerAgent(
     mounts,
     containerName,
     agentIdentifier,
+    { callerId: input.callerId, callerRoles: input.callerRoles },
   );
 
   logger.debug(

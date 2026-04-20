@@ -18,7 +18,6 @@ export function wrapChannelFactory(
         const identity = resolved ?? getDefaultIdentity(cfg);
         return originalOnMessage(chatJid, {
           ...msg,
-          // @ts-expect-error — canonical_id and roles added by identity layer; type updated in Task 6
           canonical_id: identity.canonical_id,
           roles: identity.roles,
         });
