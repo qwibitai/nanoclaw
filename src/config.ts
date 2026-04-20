@@ -10,6 +10,9 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
   'ONECLI_API_KEY',
+  'PROXY_BIND_HOST',
+  'YOUTUBE_HOST',
+  'YOUTUBE_HISTORY_PORT',
   'TZ',
 ]);
 
@@ -55,6 +58,32 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
 export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
 export const ONECLI_API_KEY =
   process.env.ONECLI_API_KEY || envConfig.ONECLI_API_KEY;
+function resolveDefaultProxyBindHost(): string {
+  if (process.platform !== 'linux') return '127.0.0.1';
+  const interfaces = os.networkInterfaces();
+  for (const [name, addresses] of Object.entries(interfaces)) {
+    if (!addresses) continue;
+    const looksLikeBridge = name === 'docker0' || name.startsWith('br-');
+    if (!looksLikeBridge) continue;
+    const ipv4 = addresses.find(
+      (addr) => addr.family === 'IPv4' && !addr.internal,
+    );
+    if (ipv4?.address) return ipv4.address;
+  }
+  return '127.0.0.1';
+}
+export const PROXY_BIND_HOST =
+  process.env.PROXY_BIND_HOST ||
+  envConfig.PROXY_BIND_HOST ||
+  resolveDefaultProxyBindHost();
+export const YOUTUBE_HISTORY_PORT = parseInt(
+  process.env.YOUTUBE_HISTORY_PORT || envConfig.YOUTUBE_HISTORY_PORT || '3002',
+  10,
+);
+export const YOUTUBE_HOST =
+  process.env.YOUTUBE_HOST ||
+  envConfig.YOUTUBE_HOST ||
+  `http://host.docker.internal:${YOUTUBE_HISTORY_PORT}`;
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,

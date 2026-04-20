@@ -12,7 +12,9 @@ import {
   MAX_MESSAGES_PER_PROMPT,
   ONECLI_URL,
   POLL_INTERVAL,
+  PROXY_BIND_HOST,
   TIMEZONE,
+  YOUTUBE_HISTORY_PORT,
 } from './config.js';
 import './channels/index.js';
 import {
@@ -65,6 +67,7 @@ import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { startYouTubeHistoryService } from './youtube-history-service.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -570,6 +573,7 @@ function ensureContainerSystemRunning(): void {
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
+  await startYouTubeHistoryService(YOUTUBE_HISTORY_PORT, PROXY_BIND_HOST);
   initDatabase();
   logger.info('Database initialized');
   loadState();
