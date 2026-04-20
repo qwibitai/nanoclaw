@@ -108,6 +108,9 @@ vi.mock('child_process', async () => {
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
+import { spawn } from 'child_process';
+import fs from 'fs';
+import { logger } from './logger.js';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -226,5 +229,98 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('NANOCLAW_EXTRA_MOUNTS parsing', () => {
+  const originalExtraMounts = process.env.NANOCLAW_EXTRA_MOUNTS;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(spawn).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    if (originalExtraMounts !== undefined) {
+      process.env.NANOCLAW_EXTRA_MOUNTS = originalExtraMounts;
+    } else {
+      delete process.env.NANOCLAW_EXTRA_MOUNTS;
+    }
+  });
+
+  function getSpawnArgs(): string[] {
+    const call = vi.mocked(spawn).mock.calls[0];
+    return call ? (call[1] as string[]) : [];
+  }
+
+  async function runOnce() {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  }
+
+  it('parses a single readonly mount correctly', async () => {
+    process.env.NANOCLAW_EXTRA_MOUNTS = '/mnt/cache/logs:/central-logs:ro';
+
+    await runOnce();
+
+    const args = getSpawnArgs();
+    // readonlyMountArgs mock returns ['-v', 'host:container:ro']
+    expect(args).toContain('-v');
+    expect(args).toContainEqual('/mnt/cache/logs:/central-logs:ro');
+  });
+
+  it('parses multiple mounts with mixed modes correctly', async () => {
+    process.env.NANOCLAW_EXTRA_MOUNTS =
+      '/mnt/cache/logs:/central-logs:ro,/mnt/data:/data:rw';
+
+    await runOnce();
+
+    const args = getSpawnArgs();
+    // ro mount goes through readonlyMountArgs mock → 'host:container:ro'
+    expect(args).toContainEqual('/mnt/cache/logs:/central-logs:ro');
+    // rw mount → 'host:container'
+    expect(args).toContainEqual('/mnt/data:/data');
+  });
+
+  it('adds no extra mounts when env var is not set', async () => {
+    delete process.env.NANOCLAW_EXTRA_MOUNTS;
+
+    await runOnce();
+
+    const args = getSpawnArgs();
+    expect(args.join(' ')).not.toContain('/central-logs');
+  });
+
+  it('skips malformed entries with a warning', async () => {
+    process.env.NANOCLAW_EXTRA_MOUNTS = 'bad-entry,:/also-bad,:';
+
+    await runOnce();
+
+    expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+      expect.objectContaining({ entry: expect.any(String) }),
+      expect.stringContaining('malformed'),
+    );
+  });
+
+  it('defaults to readonly when mode is not specified', async () => {
+    process.env.NANOCLAW_EXTRA_MOUNTS = '/mnt/share:/share';
+
+    await runOnce();
+
+    const args = getSpawnArgs();
+    // No mode specified → readonly → goes through readonlyMountArgs mock → ':ro'
+    expect(args).toContainEqual('/mnt/share:/share:ro');
   });
 });

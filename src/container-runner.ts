@@ -240,6 +240,31 @@ function buildVolumeMounts(
     mounts.push(...validatedMounts);
   }
 
+  // NANOCLAW_EXTRA_MOUNTS: user-defined volume mounts from environment
+  // Format: "hostpath:containerpath[:mode],hostpath2:containerpath2[:mode]"
+  // Mode defaults to "ro" when omitted. Malformed entries are skipped
+  // with a warning rather than crashing the container launch.
+  const extraMountsEnv = process.env.NANOCLAW_EXTRA_MOUNTS;
+  if (extraMountsEnv) {
+    for (const entry of extraMountsEnv.split(',')) {
+      const trimmed = entry.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split(':');
+      if (parts.length < 2 || !parts[0] || !parts[1]) {
+        logger.warn(
+          { entry: trimmed },
+          'NANOCLAW_EXTRA_MOUNTS: skipping malformed entry (need hostpath:containerpath[:mode])',
+        );
+        continue;
+      }
+      const hostPath = parts[0];
+      const containerPath = parts[1];
+      const mode = parts[2]?.toLowerCase();
+      const readonly = mode !== 'rw';
+      mounts.push({ hostPath, containerPath, readonly });
+    }
+  }
+
   return mounts;
 }
 
