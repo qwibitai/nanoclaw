@@ -375,6 +375,7 @@ async function runQuery(
   prompt: string,
   sessionId: string | undefined,
   mcpServerPath: string,
+  tailscaleMcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
@@ -469,6 +470,7 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__tailscale__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -482,6 +484,16 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+          },
+        },
+        tailscale: {
+          command: 'node',
+          args: [tailscaleMcpServerPath],
+          env: {
+            TS_API_KEY: sdkEnv.TS_API_KEY ?? '',
+            TS_API_CLIENT_ID: sdkEnv.TS_API_CLIENT_ID ?? '',
+            TS_API_CLIENT_SECRET: sdkEnv.TS_API_CLIENT_SECRET ?? '',
+            TS_API_TAILNET: sdkEnv.TS_API_TAILNET ?? '-',
           },
         },
       },
@@ -630,6 +642,7 @@ async function main(): Promise<void> {
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
+  const tailscaleMcpServerPath = path.join(__dirname, 'tailscale-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -686,6 +699,7 @@ async function main(): Promise<void> {
         prompt,
         sessionId,
         mcpServerPath,
+        tailscaleMcpServerPath,
         containerInput,
         sdkEnv,
         resumeAt,
