@@ -39,6 +39,10 @@ Four types of skills exist in NanoClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) f
 | `/setup` | First-time installation, authentication, service configuration |
 | `/deploy-digitalocean` | Provision a DigitalOcean droplet and install NanoClaw end-to-end from Claude Code |
 | `/add-almanda-core` | Install Almanda persona: rename Andy→Almanda, global operating rules, capability index, main-group systemPrompt fix |
+| `/add-company-kb` | Wire Alma Labs internal knowledge base MCP (company Q&A, teammates, products, policies) |
+| `/add-linear-ops` | Add Linear read + write (issues, projects, cycles, teams) — writes require user approval |
+| `/add-github-ops` | Add GitHub read + write (code search, PRs, issues, files) — writes require user approval |
+| `/add-slack-intel` | Add Slack read access (channels, history, threads, user directory, search) |
 | `/add-identity` | Install cross-channel identity layer: maps @almalabs.ai employees to Slack/Telegram IDs |
 | `/add-policy` | Install role-based capability layer: admin/member roles, policy.json, checkCapability enforcement |
 | `/customize` | Adding channels, integrations, changing behavior |

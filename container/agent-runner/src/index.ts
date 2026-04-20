@@ -469,6 +469,10 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__alma-library__*',
+        'mcp__linear__*',
+        'mcp__github__*',
+        'mcp__slack-intel__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -484,6 +488,50 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...(process.env.ALMA_LIBRARY_API_KEY
+          ? {
+              'alma-library': {
+                type: 'http' as const,
+                url: 'https://alma-library.vercel.app/api/mcp',
+                headers: {
+                  Authorization: `Bearer ${process.env.ALMA_LIBRARY_API_KEY}`,
+                },
+              },
+            }
+          : {}),
+        ...(process.env.LINEAR_API_TOKEN
+          ? {
+              linear: {
+                command: 'npx',
+                args: ['-y', '@tacticlaunch/mcp-linear@1.0.12'],
+                env: { LINEAR_API_TOKEN: process.env.LINEAR_API_TOKEN },
+              },
+            }
+          : {}),
+        ...(process.env.GITHUB_PERSONAL_ACCESS_TOKEN
+          ? {
+              github: {
+                command: 'npx',
+                args: ['-y', '@modelcontextprotocol/server-github@2025.4.8'],
+                env: {
+                  GITHUB_PERSONAL_ACCESS_TOKEN:
+                    process.env.GITHUB_PERSONAL_ACCESS_TOKEN,
+                },
+              },
+            }
+          : {}),
+        ...(process.env.SLACK_BOT_TOKEN
+          ? {
+              'slack-intel': {
+                command: 'npx',
+                args: ['-y', 'slack-mcp-server@latest'],
+                env: {
+                  SLACK_MCP_XOXB_TOKEN: process.env.SLACK_BOT_TOKEN,
+                  SLACK_MCP_ADD_MESSAGE_TOOL: 'false',
+                },
+              },
+            }
+          : {}),
       },
       hooks: {
         PreCompact: [

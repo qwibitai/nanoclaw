@@ -256,6 +256,19 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // MCP API keys — forwarded from host .env so the agent-runner can configure
+  // optional MCP servers at startup. Each key is only passed if set on the host.
+  const mcpEnvVars = [
+    'ALMA_LIBRARY_API_KEY',
+    'LINEAR_API_TOKEN',
+    'GITHUB_PERSONAL_ACCESS_TOKEN',
+    'SLACK_BOT_TOKEN',
+  ] as const;
+  for (const key of mcpEnvVars) {
+    const val = process.env[key];
+    if (val) args.push('-e', `${key}=${val}`);
+  }
+
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
   const onecliApplied = await onecli.applyContainerConfig(args, {

@@ -43,3 +43,10 @@ Once accepted upstream, the corresponding `.nanoclaw-migrations/guide.md` entry 
 **Status:** Not yet submitted  
 **Proposal:** Remove `!containerInput.isMain` guard so `groups/global/CLAUDE.md` is appended to `systemPrompt` for all groups, including main.  
 **Upstream benefit:** Forks wanting a shared persona or global operating rules across all groups (main + non-main) can do so without forking the agent runner per-group. The current guard silently skips the global file for main with no log indication — a footgun for forks that rely on global CLAUDE.md for shared behavior.
+
+## MCP Integration Layer
+
+### 8. Optional MCP env-var forwarding (src/container-runner.ts)
+**Status:** Not yet submitted  
+**Proposal:** Add a typed `mcpEnvVars` array near the TZ forwarding block that passes named env vars to the container via `-e` when set on the host. Forks can add to the array without touching the surrounding logic.  
+**Upstream benefit:** Currently the only way to pass credentials to container-side MCP servers is OneCLI. Forks without OneCLI (dev setups, self-hosted deployments) have no clean hook to forward their own API keys. A small extension-point array keeps the change minimal and makes the pattern visible rather than scattered.
