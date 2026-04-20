@@ -1850,32 +1850,38 @@ export class FeishuChannel implements Channel {
 
   /**
    * 根据 open_id 获取飞书用户姓名，带内存缓存。
-   * 首次查询调飞书 contact API，后续从缓存读取。
+   * 通过群成员 API 批量获取该群所有成员姓名并缓存。
    */
-  private async getUserName(openId: string): Promise<string> {
+  private async getUserName(openId: string, chatId?: string): Promise<string> {
     if (!openId || openId === 'unknown') return openId;
 
     const cached = this.userNameCache.get(openId);
     if (cached) return cached;
 
-    try {
-      const resp = await this.client.contact.user.get({
-        path: { user_id: openId },
-        params: { user_id_type: 'open_id' },
-      });
-      const name = resp?.data?.user?.name;
-      if (name) {
-        this.userNameCache.set(openId, name);
-        return name;
+    // 通过群成员 API 批量加载该群所有成员的姓名
+    if (chatId) {
+      try {
+        const resp = await this.client.im.chatMembers.get({
+          path: { chat_id: chatId },
+          params: { member_id_type: 'open_id' },
+        });
+        const items = resp?.data?.items;
+        if (items && items.length > 0) {
+          for (const member of items) {
+            if (member.member_id && member.name) {
+              this.userNameCache.set(member.member_id, member.name);
+            }
+          }
+          const name = this.userNameCache.get(openId);
+          if (name) return name;
+        }
+      } catch (err) {
+        logger.warn({ err, openId, chatId }, '获取群成员列表失败');
       }
-      // API 成功但 name 为空（离职/外部用户），缓存 open_id 避免反复调用
-      logger.warn({ openId, code: resp?.code }, '飞书用户信息无 name 字段');
-      this.userNameCache.set(openId, openId);
-    } catch (err) {
-      // API 异常不缓存，下次重试
-      logger.warn({ err, openId }, '获取飞书用户信息失败');
     }
 
+    // 群成员 API 也没拿到，缓存 open_id 避免反复调用
+    this.userNameCache.set(openId, openId);
     return openId;
   }
 
@@ -2045,7 +2051,7 @@ export class FeishuChannel implements Channel {
       message.chat_type === 'group',
     );
 
-    const senderName = await this.getUserName(senderId);
+    const senderName = await this.getUserName(senderId, message.chat_id);
 
     // 获取被回复消息的内容和发送者
     let replyContent: string | undefined;

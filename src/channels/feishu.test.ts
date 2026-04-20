@@ -31,10 +31,10 @@ vi.mock('@larksuiteoapi/node-sdk', () => {
         delete: mockReactionDelete,
       },
       chat: { list: mockChatList },
-    };
-    contact = {
-      user: {
-        get: vi.fn().mockResolvedValue({ data: { user: { name: '测试用户' } } }),
+      chatMembers: {
+        get: vi.fn().mockResolvedValue({
+          data: { items: [{ member_id: 'ou_test_user', name: '测试用户' }] },
+        }),
       },
     };
   }
