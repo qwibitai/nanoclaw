@@ -375,6 +375,7 @@ async function runQuery(
   prompt: string,
   sessionId: string | undefined,
   mcpServerPath: string,
+  youtubeMcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
@@ -469,6 +470,7 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__youtube__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -482,6 +484,14 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+          },
+        },
+        youtube: {
+          command: 'node',
+          args: [youtubeMcpServerPath],
+          env: {
+            YOUTUBE_HOST:
+              process.env.YOUTUBE_HOST || 'http://host.docker.internal:3002',
           },
         },
       },
@@ -630,6 +640,10 @@ async function main(): Promise<void> {
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
+  const youtubeMcpServerPath = path.join(
+    __dirname,
+    'youtube-mcp-stdio.js',
+  );
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -686,6 +700,7 @@ async function main(): Promise<void> {
         prompt,
         sessionId,
         mcpServerPath,
+        youtubeMcpServerPath,
         containerInput,
         sdkEnv,
         resumeAt,

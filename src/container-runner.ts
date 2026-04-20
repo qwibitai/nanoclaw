@@ -16,6 +16,7 @@ import {
   ONECLI_API_KEY,
   ONECLI_URL,
   TIMEZONE,
+  YOUTUBE_HOST,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -252,6 +253,7 @@ async function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+  args.push('-e', `YOUTUBE_HOST=${YOUTUBE_HOST}`);
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
