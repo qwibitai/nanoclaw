@@ -13,10 +13,16 @@ logs/
 groups/*
 !groups/main/
 !groups/global/
+!groups/slack_main/
+!groups/tg_andrey/
 groups/main/*
 groups/global/*
+groups/slack_main/*
+groups/tg_andrey/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
+!groups/slack_main/CLAUDE.md
+!groups/tg_andrey/CLAUDE.md
 
 # Secrets
 *.keys.json
