@@ -10,9 +10,10 @@ export function applyIdentitySchema(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS person_channels (
       channel TEXT NOT NULL,
       channel_user_id TEXT NOT NULL,
-      canonical_id TEXT NOT NULL REFERENCES people(canonical_id),
+      canonical_id TEXT NOT NULL REFERENCES people(canonical_id) ON DELETE CASCADE,
       PRIMARY KEY (channel, channel_user_id)
     );
+    CREATE INDEX IF NOT EXISTS idx_person_channels_canonical ON person_channels(canonical_id);
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ts TEXT NOT NULL DEFAULT (datetime('now')),
@@ -22,5 +23,6 @@ export function applyIdentitySchema(database: Database.Database): void {
       context TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
+    CREATE INDEX IF NOT EXISTS idx_audit_canonical_id ON audit_log(canonical_id);
   `);
 }

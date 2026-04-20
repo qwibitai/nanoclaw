@@ -57,8 +57,17 @@ function isValidPerson(entry: unknown): entry is Person {
     return false;
   if (!e.channels || typeof e.channels !== 'object' || Array.isArray(e.channels))
     return false;
+  if (
+    !Object.values(e.channels as object).every(
+      (v) => typeof v === 'string' && v.length > 0,
+    )
+  )
+    return false;
   return true;
 }
+
+export const UNKNOWN_CANONICAL_ID = 'unknown';
+export const UNKNOWN_DISPLAY_NAME = 'Unknown';
 
 export function loadPeopleConfig(pathOverride?: string): PeopleConfig {
   const filePath = pathOverride ?? PEOPLE_CONFIG_PATH;
@@ -121,8 +130,8 @@ export function resolvePerson(
 
 export function getDefaultIdentity(cfg: PeopleConfig): ResolvedIdentity {
   return {
-    canonical_id: 'unknown',
-    display_name: 'Unknown',
+    canonical_id: UNKNOWN_CANONICAL_ID,
+    display_name: UNKNOWN_DISPLAY_NAME,
     roles: [cfg.default_role],
   };
 }

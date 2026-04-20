@@ -1,6 +1,7 @@
 import { ChannelFactory, ChannelOpts } from '../channels/registry.js';
 import { PeopleConfig, resolvePerson, getDefaultIdentity } from './people.js';
 
+/** Wrap a channel factory once per channel — wrapping twice wastes a config load per message. */
 export function wrapChannelFactory(
   channelName: string,
   factory: ChannelFactory,
@@ -17,9 +18,8 @@ export function wrapChannelFactory(
         const identity = resolved ?? getDefaultIdentity(cfg);
         return originalOnMessage(chatJid, {
           ...msg,
-          // @ts-ignore — canonical_id added by identity layer; type updated in Task 6
+          // @ts-expect-error — canonical_id and roles added by identity layer; type updated in Task 6
           canonical_id: identity.canonical_id,
-          // @ts-ignore — roles added by identity layer; type updated in Task 6
           roles: identity.roles,
         });
       },
