@@ -1,0 +1,15 @@
+skill: add-docker-cli
+version: 1.0.0
+description: "Add Docker CLI access so the container agent can manage host containers"
+core_version: 1.2.10
+adds:
+  - container/skills/docker/SKILL.md
+modifies:
+  - container/Dockerfile
+  - src/container-runner.ts
+structured:
+  npm_dependencies: {}
+  env_additions: []
+conflicts: []
+depends: []
+test: "npx vitest run --config vitest.skills.config.ts .claude/skills/add-docker-cli/tests/docker-cli.test.ts"
