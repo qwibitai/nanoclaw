@@ -60,6 +60,9 @@ const MCP_SKILL_ENV_KEYS = [
   'PAPERCLIP_AGENT_JWT_SECRET',
   'PAPERCLIP_AGENT_ID',
   'PAPERCLIP_COMPANY_ID',
+  // Vikunja
+  'VIKUNJA_URL',
+  'VIKUNJA_TOKEN',
 ];
 
 // Env keys whose values must never appear in logs.
@@ -70,6 +73,7 @@ const SECRET_ENV_KEYS = new Set<string>([
   'LITELLM_MASTER_KEY',
   'UNRAIDCLAW_API_KEY',
   'PAPERCLIP_AGENT_JWT_SECRET',
+  'VIKUNJA_TOKEN',
 ]);
 
 /**
