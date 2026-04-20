@@ -4,6 +4,7 @@
  */
 import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -64,7 +65,16 @@ function buildVolumeMounts(
   isMain: boolean,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
-  const projectRoot = process.cwd();
+  const containerRoot = process.cwd();
+  const hostRoot = process.env.HOST_PROJECT_ROOT ?? containerRoot;
+  // Translate internal container paths to host paths for Docker volume mounts.
+  // File system operations (mkdirSync, cpSync) use the raw path; only hostPath
+  // values passed to `docker run -v` need to reference the host filesystem.
+  const toHostPath = (p: string) =>
+    hostRoot !== containerRoot && p.startsWith(containerRoot)
+      ? hostRoot + p.slice(containerRoot.length)
+      : p;
+  const projectRoot = hostRoot;
   const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
@@ -74,7 +84,7 @@ function buildVolumeMounts(
     // (src/, dist/, package.json, etc.) which would bypass the sandbox
     // entirely on next restart.
     mounts.push({
-      hostPath: projectRoot,
+      hostPath: toHostPath(projectRoot),
       containerPath: '/workspace/project',
       readonly: true,
     });
@@ -101,7 +111,7 @@ function buildVolumeMounts(
 
     // Main also gets its group folder as the working directory
     mounts.push({
-      hostPath: groupDir,
+      hostPath: toHostPath(groupDir),
       containerPath: '/workspace/group',
       readonly: false,
     });
@@ -118,7 +128,7 @@ function buildVolumeMounts(
   } else {
     // Other groups only get their own folder
     mounts.push({
-      hostPath: groupDir,
+      hostPath: toHostPath(groupDir),
       containerPath: '/workspace/group',
       readonly: false,
     });
@@ -128,7 +138,7 @@ function buildVolumeMounts(
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
-        hostPath: globalDir,
+        hostPath: toHostPath(globalDir),
         containerPath: '/workspace/global',
         readonly: true,
       });
@@ -180,8 +190,64 @@ function buildVolumeMounts(
     }
   }
   mounts.push({
-    hostPath: groupSessionsDir,
+    hostPath: toHostPath(groupSessionsDir),
     containerPath: '/home/node/.claude',
+    readonly: false,
+  });
+
+  // Provide a .claude.json at the container home so claude-code considers
+  // itself logged in. Copy non-sensitive account metadata from the host's
+  // ~/.claude.json (oauthAccount, onboarding flags) — no tokens or API keys.
+  const sessionDotClaudeJson = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    '.claude.json',
+  );
+  const hostDotClaudeJson = path.join(os.homedir(), '.claude.json');
+  if (!fs.existsSync(sessionDotClaudeJson)) {
+    let claudeJsonContent: Record<string, unknown> = {
+      hasCompletedOnboarding: true,
+      lastOnboardingVersion: '2.1.76',
+      oauthAccount: {
+        accountUuid: '00000000-0000-0000-0000-000000000000',
+        emailAddress: 'agent@nanoclaw.local',
+        organizationUuid: '00000000-0000-0000-0000-000000000000',
+        displayName: 'NanoClaw Agent',
+        organizationRole: 'admin',
+        organizationName: 'NanoClaw',
+      },
+    };
+    if (fs.existsSync(hostDotClaudeJson)) {
+      try {
+        const host = JSON.parse(fs.readFileSync(hostDotClaudeJson, 'utf-8'));
+        // Copy only non-sensitive identity/onboarding fields — never tokens
+        for (const key of [
+          'oauthAccount',
+          'hasCompletedOnboarding',
+          'lastOnboardingVersion',
+          'hasSeenTasksHint',
+          'userID',
+        ]) {
+          if (host[key] !== undefined) claudeJsonContent[key] = host[key];
+        }
+      } catch {
+        // ignore — use defaults
+      }
+    }
+    fs.writeFileSync(
+      sessionDotClaudeJson,
+      JSON.stringify(claudeJsonContent, null, 2) + '\n',
+    );
+    try {
+      fs.chmodSync(sessionDotClaudeJson, 0o666);
+    } catch {
+      // ignore
+    }
+  }
+  mounts.push({
+    hostPath: toHostPath(sessionDotClaudeJson),
+    containerPath: '/home/node/.claude.json',
     readonly: false,
   });
 
@@ -192,7 +258,7 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
   mounts.push({
-    hostPath: groupIpcDir,
+    hostPath: toHostPath(groupIpcDir),
     containerPath: '/workspace/ipc',
     readonly: false,
   });
@@ -201,7 +267,7 @@ function buildVolumeMounts(
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
   const agentRunnerSrc = path.join(
-    projectRoot,
+    containerRoot,
     'container',
     'agent-runner',
     'src',
@@ -225,7 +291,7 @@ function buildVolumeMounts(
     }
   }
   mounts.push({
-    hostPath: groupAgentRunnerDir,
+    hostPath: toHostPath(groupAgentRunnerDir),
     containerPath: '/app/src',
     readonly: false,
   });
