@@ -1,0 +1,1038 @@
+#!/usr/bin/env python3
+"""
+nanoclaw — NanoClaw CLI
+Run a NanoClaw agent container from the command line.
+
+Usage:
+  nanoclaw "What is 2+2?"
+  nanoclaw -g <channel_name> "Review this code"
+  nanoclaw -g "<channel name with spaces>" "What's the latest issue?"
+  nanoclaw -j "<chatJid>" "Hello"
+  nanoclaw -g <channel_name> -s <session-id> "Continue"
+  nanoclaw --list-groups
+  echo "prompt text" | nanoclaw --pipe -g <channel_name>
+  cat prompt.txt | nanoclaw --pipe
+  nanoclaw -f tasks.txt               Read prompt from a file
+  nanoclaw ps                         List running NanoClaw containers
+  nanoclaw ps [filter]                Filter containers by name substring
+  nanoclaw ps --all                   Also show unnamed/zombie containers
+  nanoclaw ps --logs [filter]         Dump logs for matching containers
+  nanoclaw ps --tail [filter]         Follow logs (multiplexed, Ctrl-C to stop)
+  nanoclaw ps --kill-zombies          Stop and remove unnamed containers
+  nanoclaw ps --restart <name>        Stop and remove a specific named container
+  nanoclaw sessions [filter]          List groups with a saved session ID
+  nanoclaw history [-g group] [-n N]  Print recent messages for a group
+  nanoclaw watch [-g group]           Poll DB for new messages in real time
+  nanoclaw groups                     List registered groups
+  nanoclaw groups add <jid> --name .. Register a new group
+  nanoclaw groups remove <name>       Unregister a group
+  nanoclaw rebuild [--tag TAG]        Build the nanoclaw-agent container image
+  nanoclaw molt export [--out <file.molt>]         Export this install to a bundle
+  nanoclaw molt import <file.molt> [--rename k=v]  Import bundle into this install
+  nanoclaw molt archs                              List installed molt drivers
+  nanoclaw molt <args...>                          Passthrough to molt binary
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+
+# ── Globals ─────────────────────────────────────────────────────────────────
+
+VERBOSE = False
+
+def dbg(*args):
+    if VERBOSE:
+        print("»", *args, file=sys.stderr)
+
+# ── Config ──────────────────────────────────────────────────────────────────
+
+def _find_nanoclaw_dir() -> Path:
+    """Locate the NanoClaw installation directory.
+
+    Resolution order:
+    1. NANOCLAW_DIR env var
+    2. The directory containing this script (if it looks like a NanoClaw install)
+    3. ~/src/nanoclaw (legacy default)
+    """
+    if env := os.environ.get("NANOCLAW_DIR"):
+        return Path(env).expanduser()
+    # If this script lives inside the NanoClaw tree (e.g. scripts/claw), walk up
+    here = Path(__file__).resolve()
+    for parent in [here.parent, here.parent.parent]:
+        if (parent / "store" / "messages.db").exists() or (parent / ".env").exists():
+            return parent
+    return Path.home() / "src" / "nanoclaw"
+
+NANOCLAW_DIR = _find_nanoclaw_dir()
+DB_PATH      = NANOCLAW_DIR / "store" / "messages.db"
+ENV_FILE     = NANOCLAW_DIR / ".env"
+IMAGE        = "nanoclaw-agent:latest"
+
+SECRET_KEYS = [
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "OLLAMA_HOST",
+]
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def detect_runtime(preference: str | None) -> str:
+    if preference:
+        dbg(f"runtime: forced to {preference}")
+        return preference
+    for rt in ("container", "docker"):
+        result = subprocess.run(["which", rt], capture_output=True)
+        if result.returncode == 0:
+            dbg(f"runtime: auto-detected {rt} at {result.stdout.decode().strip()}")
+            return rt
+    sys.exit("error: neither 'container' nor 'docker' found. Install one or pass --runtime.")
+
+
+def read_secrets(env_file: Path) -> dict:
+    secrets = {}
+    if not env_file.exists():
+        return secrets
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, val = line.partition("=")
+            key = key.strip()
+            if key in SECRET_KEYS:
+                secrets[key] = val.strip()
+    return secrets
+
+
+def get_groups(db: Path) -> list[dict]:
+    conn = sqlite3.connect(db)
+    rows = conn.execute(
+        "SELECT jid, name, folder, is_main FROM registered_groups ORDER BY name"
+    ).fetchall()
+    conn.close()
+    return [{"jid": r[0], "name": r[1], "folder": r[2], "is_main": bool(r[3])} for r in rows]
+
+
+def find_group(groups: list[dict], query: str) -> dict | None:
+    q = query.lower()
+    # Exact name match
+    for g in groups:
+        if g["name"].lower() == q or g["folder"].lower() == q:
+            return g
+    # Partial match
+    matches = [g for g in groups if q in g["name"].lower() or q in g["folder"].lower()]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        names = ", ".join(f'"{g["name"]}"' for g in matches)
+        sys.exit(f"error: ambiguous group '{query}'. Matches: {names}")
+    return None
+
+
+def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -> None:
+    cmd = [runtime, "run", "-i", "--rm", image]
+    dbg(f"cmd: {' '.join(cmd)}")
+
+    # Show payload sans secrets
+    if VERBOSE:
+        safe = {k: v for k, v in payload.items() if k != "secrets"}
+        safe["secrets"] = {k: "***" for k in payload.get("secrets", {})}
+        dbg(f"payload: {json.dumps(safe, indent=2)}")
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    dbg(f"container pid: {proc.pid}")
+
+    # Write JSON payload and close stdin
+    proc.stdin.write(json.dumps(payload).encode())
+    proc.stdin.close()
+    dbg("stdin closed, waiting for response...")
+
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    done = threading.Event()
+
+    def stream_stderr():
+        for raw in proc.stderr:
+            line = raw.decode(errors="replace").rstrip()
+            if line.startswith("npm notice"):
+                continue
+            stderr_lines.append(line)
+            print(line, file=sys.stderr)
+
+    def stream_stdout():
+        for raw in proc.stdout:
+            line = raw.decode(errors="replace").rstrip()
+            stdout_lines.append(line)
+            dbg(f"stdout: {line}")
+            # Kill the container as soon as we see the closing sentinel —
+            # the Node.js event loop often keeps the process alive indefinitely.
+            if line.strip() == "---NANOCLAW_OUTPUT_END---":
+                dbg("output sentinel found, terminating container")
+                done.set()
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                return
+
+    t_err = threading.Thread(target=stream_stderr, daemon=True)
+    t_out = threading.Thread(target=stream_stdout, daemon=True)
+    t_err.start()
+    t_out.start()
+
+    # Wait for sentinel or timeout
+    if not done.wait(timeout=timeout):
+        # Also check if process exited naturally
+        t_out.join(timeout=2)
+        if not done.is_set():
+            proc.kill()
+            sys.exit(f"error: container timed out after {timeout}s (no output sentinel received)")
+
+    t_err.join(timeout=5)
+    t_out.join(timeout=5)
+    proc.wait()
+    dbg(f"container done (rc={proc.returncode}), {len(stdout_lines)} stdout lines")
+    stdout = "\n".join(stdout_lines)
+
+    # Parse output block
+    match = re.search(
+        r"---NANOCLAW_OUTPUT_START---\n(.*?)\n---NANOCLAW_OUTPUT_END---",
+        stdout,
+        re.DOTALL,
+    )
+    if match:
+        try:
+            data = json.loads(match.group(1))
+            status = data.get("status", "unknown")
+            if status == "success":
+                print(data.get("result", ""))
+                session_id = data.get("newSessionId") or data.get("sessionId")
+                if session_id:
+                    print(f"\n[session: {session_id}]", file=sys.stderr)
+            else:
+                print(f"[{status}] {data.get('result', '')}", file=sys.stderr)
+                sys.exit(1)
+        except json.JSONDecodeError:
+            print(match.group(1))
+    else:
+        # No structured output — print raw stdout
+        print(stdout)
+
+    # If we killed the container ourselves (sentinel found), a non-zero returncode
+    # is expected (SIGKILL → -9 on Linux) and should not propagate as failure.
+    if proc.returncode not in (0, None) and not done.is_set():
+        sys.exit(proc.returncode)
+
+
+# ── molt wrapper (claw molt) ─────────────────────────────────────────────────
+
+def find_molt() -> str:
+    """Locate the molt binary, or exit with a helpful message."""
+    if path := shutil.which("molt"):
+        return path
+    # Check well-known locations relative to the NanoClaw install
+    for candidate in [
+        NANOCLAW_DIR / "bin" / "molt",
+        Path.home() / ".molt" / "molt",
+        Path.home() / "go" / "bin" / "molt",
+    ]:
+        if candidate.exists():
+            return str(candidate)
+    sys.exit(
+        "error: 'molt' not found in PATH.\n"
+        "Install molt: https://github.com/kenbolton/molt"
+    )
+
+
+def cmd_molt(molt_args: list[str]) -> None:
+    """Dispatch to molt, filling in smart defaults for this NanoClaw install."""
+    molt = find_molt()
+
+    if not molt_args or molt_args[0] in ("-h", "--help"):
+        result = subprocess.run([molt] + molt_args)
+        sys.exit(result.returncode)
+
+    subcmd = molt_args[0]
+    rest = molt_args[1:]
+
+    if subcmd == "export":
+        # Insert NANOCLAW_DIR as source if no positional arg was given.
+        positionals = [a for a in rest if not a.startswith("-")]
+        if not positionals:
+            rest = [str(NANOCLAW_DIR)] + rest
+        result = subprocess.run([molt, "export"] + rest)
+        sys.exit(result.returncode)
+
+    if subcmd == "import":
+        # Parse just enough to fill in defaults; pass everything else through.
+        imp = argparse.ArgumentParser(prog="nanoclaw molt import", add_help=False)
+        imp.add_argument("bundle")
+        imp.add_argument("dest", nargs="?")
+        imp.add_argument("--arch")
+        imp.add_argument("--rename", action="append", default=[])
+        imp.add_argument("--dry-run", dest="dry_run", action="store_true")
+        imp.add_argument("-v", "--verbose", action="store_true")
+        parsed, extra = imp.parse_known_args(rest)
+
+        dest = parsed.dest or str(NANOCLAW_DIR)
+        arch = parsed.arch or "nanoclaw"
+        cmd = [molt, "import", parsed.bundle, dest, "--arch", arch]
+        for r in parsed.rename:
+            cmd += ["--rename", r]
+        if parsed.dry_run:
+            cmd.append("--dry-run")
+        if parsed.verbose:
+            cmd.append("--verbose")
+        cmd += extra
+        result = subprocess.run(cmd)
+        sys.exit(result.returncode)
+
+    # Passthrough for: archs, upgrade, and anything else.
+    result = subprocess.run([molt, subcmd] + rest)
+    sys.exit(result.returncode)
+
+
+# ── Message watcher (claw watch) ─────────────────────────────────────────────
+
+_GROUP_FOLDER_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
+
+
+def cmd_watch(group: str | None, jid: str | None, interval: float) -> None:
+    """Poll the database for new messages and print them as they arrive."""
+    if not DB_PATH.exists():
+        sys.exit(f"error: database not found at {DB_PATH}")
+    groups = get_groups(DB_PATH)
+    agent_name = "Agent"
+
+    if group:
+        g = find_group(groups, group)
+        if g is None:
+            sys.exit(f"error: group '{group}' not found. Run --list-groups to see options.")
+        target_jid = g["jid"]
+        label = g["name"]
+        agent_name = g.get("agent_name") or "Agent"
+    elif jid:
+        target_jid = jid
+        label = jid
+    else:
+        mains = [g for g in groups if g["is_main"]]
+        if not mains:
+            sys.exit("error: no main group found. Use -g or -j.")
+        target_jid = mains[0]["jid"]
+        label = mains[0]["name"]
+        agent_name = mains[0].get("agent_name") or "Agent"
+
+    print(f"Watching {label} (Ctrl-C to stop)...", file=sys.stderr)
+    last_ts = datetime.utcnow().isoformat() + "Z"
+    try:
+        while True:
+            conn = sqlite3.connect(DB_PATH)
+            rows = conn.execute(
+                """
+                SELECT sender_name, content, timestamp, is_from_me, is_bot_message
+                FROM messages
+                WHERE chat_jid = ? AND timestamp > ?
+                ORDER BY timestamp ASC
+                """,
+                (target_jid, last_ts),
+            ).fetchall()
+            conn.close()
+            for sender_name, content, ts, is_from_me, is_bot in rows:
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    ts_str = dt.strftime("%H:%M:%S")
+                except Exception:
+                    ts_str = (ts or "")[:8]
+                if is_bot:
+                    who = agent_name
+                elif is_from_me:
+                    who = sender_name or "You"
+                else:
+                    who = sender_name or "?"
+                display = (content or "").replace("\n", " ")
+                if len(display) > 120:
+                    display = display[:117] + "..."
+                print(f"[{ts_str}] {who}: {display}")
+                last_ts = ts
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        pass
+
+
+# ── Group management (claw groups) ───────────────────────────────────────────
+
+
+def _derive_folder(name: str) -> str:
+    """Derive a valid group folder name from a display name."""
+    folder = re.sub(r'[^a-z0-9_-]', '', name.lower().replace(' ', '-'))
+    folder = folder.lstrip('-_')[:64]
+    return folder
+
+
+def _validate_folder(folder: str) -> str | None:
+    """Return an error message if folder is invalid, else None."""
+    if not _GROUP_FOLDER_PATTERN.match(folder):
+        return f"invalid folder '{folder}': must match [A-Za-z0-9][A-Za-z0-9_-]{{0,63}}"
+    if folder.lower() == "global":
+        return "folder name 'global' is reserved"
+    return None
+
+
+def cmd_groups(subcmd: str | None, args) -> None:
+    """List, add, or remove registered groups."""
+    if not DB_PATH.exists():
+        sys.exit(f"error: database not found at {DB_PATH}")
+
+    if subcmd is None or subcmd == "list":
+        groups = get_groups(DB_PATH)
+        if not groups:
+            print("No groups registered.")
+            return
+        print(f"{'NAME':<35} {'FOLDER':<30} {'JID'}")
+        print("-" * 100)
+        for g in groups:
+            tag = " [main]" if g["is_main"] else ""
+            print(f"{g['name']:<35} {g['folder']:<30} {g['jid']}{tag}")
+        return
+
+    if subcmd == "add":
+        folder = args.folder or _derive_folder(args.name)
+        if err := _validate_folder(folder):
+            sys.exit(f"error: {err}")
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO registered_groups
+              (jid, name, folder, trigger_pattern, added_at, agent_name, requires_trigger, is_main)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                args.jid,
+                args.name,
+                folder,
+                args.trigger,
+                datetime.utcnow().isoformat() + "Z",
+                args.agent_name or None,
+                0,          # requires_trigger=0: respond to all messages
+                1 if args.main else 0,
+            ),
+        )
+        conn.commit()
+        conn.close()
+        logs_dir = NANOCLAW_DIR / "groups" / folder / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Registered '{args.name}' → folder: {folder}")
+        if args.main:
+            print("  (marked as main group)")
+        return
+
+    if subcmd == "remove":
+        groups = get_groups(DB_PATH)
+        g = find_group(groups, args.name)
+        if g is None:
+            sys.exit(f"error: group '{args.name}' not found.")
+        answer = input(f"Remove '{g['name']}' ({g['folder']})? [y/N] ").strip().lower()
+        if answer != "y":
+            print("Cancelled.")
+            return
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("DELETE FROM registered_groups WHERE jid = ?", (g["jid"],))
+        conn.commit()
+        conn.close()
+        print(f"Removed '{g['name']}'. Group folder {NANOCLAW_DIR / 'groups' / g['folder']} was not deleted.")
+        return
+
+    sys.exit(f"error: unknown groups subcommand '{subcmd}'. Use: list, add, remove")
+
+
+# ── Session listing (claw sessions) ─────────────────────────────────────────
+
+
+def cmd_sessions(filt: str | None) -> None:
+    """List groups that have a saved session ID."""
+    if not DB_PATH.exists():
+        sys.exit(f"error: database not found at {DB_PATH}")
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        """
+        SELECT s.group_folder, rg.name, s.session_id
+        FROM sessions s
+        LEFT JOIN registered_groups rg ON rg.folder = s.group_folder
+        ORDER BY s.group_folder
+        """
+    ).fetchall()
+    conn.close()
+    if filt:
+        q = filt.lower()
+        rows = [r for r in rows if q in r[0].lower() or (r[1] and q in r[1].lower())]
+    if not rows:
+        print("No sessions found." if not filt else f'No sessions matching "{filt}".')
+        return
+    col_w = max(len(r[0]) for r in rows) + 2
+    name_w = max((len(r[1] or "") for r in rows), default=0) + 2
+    print(f"{'FOLDER':<{col_w}} {'NAME':<{name_w}} SESSION ID")
+    print("-" * (col_w + name_w + 38))
+    for folder, name, sid in rows:
+        print(f"{folder:<{col_w}} {(name or ''):<{name_w}} {sid}")
+
+
+# ── Message history (claw history) ───────────────────────────────────────────
+
+
+def cmd_history(group: str | None, jid: str | None, count: int) -> None:
+    """Print recent messages for a group from the local database."""
+    if not DB_PATH.exists():
+        sys.exit(f"error: database not found at {DB_PATH}")
+    groups = get_groups(DB_PATH)
+    agent_name = "Agent"
+
+    if group:
+        g = find_group(groups, group)
+        if g is None:
+            sys.exit(f"error: group '{group}' not found. Run --list-groups to see options.")
+        target_jid = g["jid"]
+        label = g["name"]
+        agent_name = g.get("agent_name") or "Agent"
+    elif jid:
+        target_jid = jid
+        label = jid
+    else:
+        mains = [g for g in groups if g["is_main"]]
+        if not mains:
+            sys.exit("error: no main group found. Use -g or -j.")
+        target_jid = mains[0]["jid"]
+        label = mains[0]["name"]
+        agent_name = mains[0].get("agent_name") or "Agent"
+
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        """
+        SELECT sender_name, content, timestamp, is_from_me, is_bot_message
+        FROM messages
+        WHERE chat_jid = ?
+        ORDER BY timestamp DESC
+        LIMIT ?
+        """,
+        (target_jid, count),
+    ).fetchall()
+    conn.close()
+
+    rows = list(reversed(rows))
+    print(f"Last {len(rows)} messages — {label}")
+    print("-" * 60)
+    for sender_name, content, ts, is_from_me, is_bot in rows:
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            ts_str = dt.strftime("%m-%d %H:%M")
+        except Exception:
+            ts_str = (ts or "")[:16]
+        if is_bot:
+            who = agent_name
+        elif is_from_me:
+            who = sender_name or "You"
+        else:
+            who = sender_name or "?"
+        display = (content or "").replace("\n", " ")
+        if len(display) > 120:
+            display = display[:117] + "..."
+        print(f"[{ts_str}] {who}: {display}")
+
+
+# ── Container rebuild (claw rebuild) ─────────────────────────────────────────
+
+
+def cmd_rebuild(tag: str, clean: bool, runtime: str) -> None:
+    """Build (or rebuild) the nanoclaw-agent container image."""
+    build_sh = NANOCLAW_DIR / "container" / "build.sh"
+    if not build_sh.exists():
+        sys.exit(f"error: build script not found at {build_sh}")
+    if clean:
+        print(f"Pruning {runtime} builder cache...")
+        subprocess.run([runtime, "builder", "prune", "-f"], check=True)
+    env = os.environ.copy()
+    env["CONTAINER_RUNTIME"] = runtime
+    result = subprocess.run([str(build_sh), tag], env=env)
+    sys.exit(result.returncode)
+
+
+# ── Container listing (claw ps) ──────────────────────────────────────────────
+
+# Apple Container timestamps are seconds since 2001-01-01 (Core Data epoch).
+_APPLE_EPOCH_OFFSET = 978307200
+
+
+def human_age(secs: float) -> str:
+    secs = int(max(0, secs))  # guard against clock skew / negative values
+    if secs < 60:
+        return f"{secs}s"
+    if secs < 3600:
+        m, s = secs // 60, secs % 60
+        return f"{m}m {s:02d}s"
+    if secs < 86400:
+        h, m = secs // 3600, (secs % 3600) // 60
+        return f"{h}h {m:02d}m"
+    d, h = secs // 86400, (secs % 86400) // 3600
+    return f"{d}d {h:02d}h"
+
+
+def fetch_containers(runtime: str) -> list[dict]:
+    """Return normalized NanoClaw containers from the active runtime.
+
+    Each dict: id, state, age, named (bool).
+    """
+    if runtime == "container":
+        result = subprocess.run(
+            ["container", "ls", "--format", "json"],
+            capture_output=True, text=True,
+        )
+        try:
+            data = json.loads(result.stdout or "[]")
+        except json.JSONDecodeError:
+            return []
+        now = time.time()
+        containers = []
+        for c in data:
+            config = c.get("configuration") or {}
+            cid = config.get("id") or ""
+            image = (config.get("image") or {}).get("reference") or ""
+            state = c.get("status") or "?"
+            sd = c.get("startedDate")
+            try:
+                age = human_age(now - (float(sd) + _APPLE_EPOCH_OFFSET)) if sd is not None else "?"
+            except Exception:
+                age = "?"
+            if "nanoclaw-agent" not in image and not cid.startswith("nanoclaw-"):
+                continue
+            containers.append({"id": cid, "state": state, "age": age,
+                                "named": cid.startswith("nanoclaw-")})
+        return containers
+    else:
+        # Docker returns NDJSON (one JSON object per line).
+        # Requires Docker 25+ for --format json; older versions use --format '{{json .}}'.
+        result = subprocess.run(
+            ["docker", "ps", "--filter", "name=nanoclaw-", "--format", "json"],
+            capture_output=True, text=True,
+        )
+        containers = []
+        for line in (result.stdout or "").splitlines():
+            if not line.strip():
+                continue
+            try:
+                c = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            cid = c.get("Names") or c.get("ID") or ""
+            image = c.get("Image") or ""
+            s = (c.get("State") or c.get("Status") or "?").lower()
+            state = "running" if "running" in s else s
+            age = (c.get("RunningFor") or "?")
+            if age.endswith(" ago"):
+                age = age[:-4]
+            if "nanoclaw-agent" not in image and not cid.startswith("nanoclaw-"):
+                continue
+            containers.append({"id": cid, "state": state, "age": age,
+                                "named": cid.startswith("nanoclaw-")})
+        return containers
+
+
+def cmd_ps(ps_args: argparse.Namespace, runtime: str) -> None:
+    containers = fetch_containers(runtime)
+    filt = ps_args.filter or ""
+    named = [c for c in containers if c["named"]]
+    unnamed = [c for c in containers if not c["named"]]
+
+    if ps_args.logs:
+        # --all is silently ignored with --logs (zombie containers don't have useful logs)
+        matches = [c for c in named if not filt or filt in c["id"]]
+        if not matches:
+            print("No matching containers.")
+            return
+        for c in matches:
+            print(f"=== {c['id']} ===")
+            subprocess.run([runtime, "logs", c["id"]], stderr=subprocess.STDOUT)
+            print()
+        return
+
+    if ps_args.tail:
+        # --all is silently ignored with --tail (zombie containers don't have useful logs)
+        matches = [c for c in named if not filt or filt in c["id"]]
+        if not matches:
+            print("No matching containers.")
+            return
+        procs = []
+        for c in matches:
+            label = c["id"].removeprefix("nanoclaw-")
+            proc = subprocess.Popen(
+                [runtime, "logs", "-f", c["id"]],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            procs.append(proc)
+
+            def _stream(p=proc, lbl=label):
+                for raw in p.stdout:
+                    print(f"[{lbl}] {raw.decode(errors='replace').rstrip()}")
+
+            threading.Thread(target=_stream, daemon=True).start()
+        try:
+            for p in procs:
+                p.wait()
+        except KeyboardInterrupt:
+            for p in procs:
+                try:
+                    p.terminate()
+                except ProcessLookupError:
+                    pass
+        return
+
+    if ps_args.restart:
+        name = ps_args.restart
+        matches = [c for c in named if name in c["id"]]
+        if not matches:
+            print(f'No running container matching "{name}".')
+            return
+        if len(matches) > 1:
+            names = ", ".join(c["id"] for c in matches)
+            sys.exit(f"error: ambiguous match '{name}'. Matches: {names}")
+        cid = matches[0]["id"]
+        print(f"Stopping {cid}...")
+        subprocess.run([runtime, "stop", cid], capture_output=True)
+        rm = subprocess.run([runtime, "rm", cid], capture_output=True)
+        if rm.returncode == 0:
+            print(f"Removed {cid}.")
+        else:
+            print(f"warning: stop succeeded but rm failed for {cid}", file=sys.stderr)
+        return
+
+    if ps_args.kill_zombies:
+        if not unnamed:
+            print("No zombie containers to remove.")
+            return
+        log_path = NANOCLAW_DIR / "logs" / "nanoclaw.log"
+        count = 0
+        for c in unnamed:
+            cid = c["id"]
+            print(f"Stopping {cid}...")
+            subprocess.run([runtime, "stop", cid], capture_output=True)
+            rm_result = subprocess.run([runtime, "rm", cid], capture_output=True)
+            if rm_result.returncode == 0:
+                count += 1
+                try:
+                    ts = datetime.now().strftime("%H:%M:%S.000")
+                    with open(log_path, "a") as f:
+                        f.write(f"[{ts}] INFO (claw ps): Removed zombie container {cid}\n")
+                except OSError:
+                    pass
+            else:
+                print(f"  warning: failed to remove {cid}", file=sys.stderr)
+        print(f"Removed {count} zombie container(s).")
+        return
+
+    # Default: list named containers
+    visible = [c for c in named if not filt or filt in c["id"]]
+    if visible:
+        col_w = max((len(c["id"]) for c in visible), default=9) + 2
+        print(f"{'CONTAINER':<{col_w}} {'STATUS':<10} AGE")
+        print("-" * (col_w + 20))
+        for c in sorted(visible, key=lambda x: x["id"]):
+            print(f"{c['id']:<{col_w}} {c['state']:<10} {c['age']}")
+    elif filt:
+        print(f'No containers matching "{filt}".')
+    else:
+        print("No named NanoClaw containers running.")
+
+    if unnamed:
+        n = len(unnamed)
+        print(f"\nZombies: {n} unnamed container(s)  [use --all to list, --kill-zombies to remove]")
+        if ps_args.all:
+            for c in unnamed:
+                print(f"  {c['id']}  {c['state']}  {c['age']}")
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+def main():
+    global VERBOSE
+
+    # ── claw molt subcommand ──────────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "molt":
+        cmd_molt(sys.argv[2:])
+        return  # unreachable (cmd_molt calls sys.exit)
+
+    # ── claw sessions subcommand ──────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "sessions":
+        filt = sys.argv[2] if len(sys.argv) > 2 else None
+        cmd_sessions(filt)
+        return
+
+    # ── claw history subcommand ───────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "history":
+        hist_parser = argparse.ArgumentParser(
+            prog="nanoclaw history",
+            description="Print recent messages for a group from the local database.",
+        )
+        hist_parser.add_argument("-g", "--group", help="Group name or folder (fuzzy match)")
+        hist_parser.add_argument("-j", "--jid", help="Chat JID (exact)")
+        hist_parser.add_argument("-n", "--count", type=int, default=20, metavar="N",
+                                 help="Number of messages to show (default: 20)")
+        hist_args = hist_parser.parse_args(sys.argv[2:])
+        cmd_history(hist_args.group, hist_args.jid, hist_args.count)
+        return
+
+    # ── claw watch subcommand ─────────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "watch":
+        watch_parser = argparse.ArgumentParser(
+            prog="nanoclaw watch",
+            description="Poll the database for new messages and print them as they arrive.",
+        )
+        watch_parser.add_argument("-g", "--group", help="Group name or folder (fuzzy match)")
+        watch_parser.add_argument("-j", "--jid", help="Chat JID (exact)")
+        watch_parser.add_argument("-n", "--interval", type=float, default=2.0, metavar="SECS",
+                                  help="Poll interval in seconds (default: 2)")
+        watch_args = watch_parser.parse_args(sys.argv[2:])
+        cmd_watch(watch_args.group, watch_args.jid, watch_args.interval)
+        return
+
+    # ── claw groups subcommand ────────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "groups":
+        groups_parser = argparse.ArgumentParser(
+            prog="nanoclaw groups",
+            description="List, add, or remove registered groups.",
+        )
+        groups_sub = groups_parser.add_subparsers(dest="subcmd")
+
+        groups_sub.add_parser("list", help="List registered groups (default)")
+
+        add_p = groups_sub.add_parser("add", help="Register a new group")
+        add_p.add_argument("jid", help="Chat JID (e.g. 120363...@g.us)")
+        add_p.add_argument("--name", required=True, help="Display name")
+        add_p.add_argument("--folder", help="Folder name (default: derived from --name)")
+        add_p.add_argument("--trigger", default=".*",
+                           help="Trigger regex (default: .* — respond to all messages)")
+        add_p.add_argument("--agent-name", dest="agent_name", help="Agent display name")
+        add_p.add_argument("--main", action="store_true", help="Mark as the main group")
+
+        rm_p = groups_sub.add_parser("remove", help="Unregister a group")
+        rm_p.add_argument("name", help="Group name or folder (fuzzy match)")
+
+        groups_args = groups_parser.parse_args(sys.argv[2:])
+        cmd_groups(groups_args.subcmd, groups_args)
+        return
+
+    # ── claw rebuild subcommand ───────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "rebuild":
+        rb_parser = argparse.ArgumentParser(
+            prog="nanoclaw rebuild",
+            description="Build the nanoclaw-agent container image.",
+        )
+        rb_parser.add_argument("--tag", default="latest", help="Image tag (default: latest)")
+        rb_parser.add_argument("--clean", action="store_true",
+                               help="Prune builder cache before building")
+        rb_parser.add_argument("--runtime", choices=["docker", "container"],
+                               help="Container runtime (default: auto-detect)")
+        rb_args = rb_parser.parse_args(sys.argv[2:])
+        runtime = detect_runtime(rb_args.runtime)
+        cmd_rebuild(rb_args.tag, rb_args.clean, runtime)
+        return  # unreachable (cmd_rebuild calls sys.exit)
+
+    # ── claw ps subcommand ────────────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "ps":
+        ps_parser = argparse.ArgumentParser(
+            prog="nanoclaw ps",
+            description="List and manage running NanoClaw containers.",
+        )
+        ps_parser.add_argument("filter", nargs="?", help="Substring filter for container names")
+        ps_parser.add_argument("--all", action="store_true",
+                               help="Show unnamed/zombie containers (ignored with --logs/--tail)")
+        mode = ps_parser.add_mutually_exclusive_group()
+        mode.add_argument("--logs", action="store_true",
+                          help="Dump logs for matching containers (ignores --all)")
+        mode.add_argument("--tail", action="store_true",
+                          help="Follow logs, multiplexed with [label] prefix (ignores --all; Ctrl-C to stop)")
+        mode.add_argument("--kill-zombies", dest="kill_zombies", action="store_true",
+                          help="Stop and remove unnamed nanoclaw-agent containers")
+        mode.add_argument("--restart", metavar="NAME",
+                          help="Stop and remove a specific named container by name substring")
+        ps_parser.add_argument("--runtime", choices=["docker", "container"],
+                               help="Container runtime (default: auto-detect)")
+        ps_parser.add_argument("-v", "--verbose", action="store_true")
+        ps_args = ps_parser.parse_args(sys.argv[2:])
+        VERBOSE = ps_args.verbose
+        runtime = detect_runtime(ps_args.runtime)
+        cmd_ps(ps_args, runtime)
+        return
+
+    # ── claw agent subcommand ─────────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "agent":
+        sys.argv.pop(1)  # strip "agent"; remaining args parsed by argparse below
+    elif len(sys.argv) == 1:
+        # bare claw with no args: show help and exit cleanly
+        _help_parser = argparse.ArgumentParser(
+            prog="nanoclaw",
+            usage=(
+                "%(prog)s [options] [prompt]\n"
+                "       %(prog)s agent [options] [prompt]\n"
+                "       %(prog)s ps [--logs|--tail|--kill-zombies|--restart NAME] [filter]\n"
+                "       %(prog)s sessions|history|watch|groups|rebuild|molt [args]"
+            ),
+            description="Send a prompt to a NanoClaw agent, or manage your install.",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            add_help=False,
+            epilog=(
+                "subcommands:\n"
+                "  nanoclaw agent [options] [prompt]      send a prompt (explicit form)\n"
+                "  nanoclaw ps [filter]                   list/manage running containers  (ps --help)\n"
+                "  nanoclaw ps --logs/--tail [filter]     dump or follow container logs\n"
+                "  nanoclaw ps --restart <name>           stop and remove a stuck container\n"
+                "  nanoclaw sessions [filter]             list saved session IDs\n"
+                "  nanoclaw history [-g group] [-n N]     show recent messages from the DB\n"
+                "  nanoclaw watch [-g group]              tail messages in real time\n"
+                "  nanoclaw groups [add|remove] ...       register or remove groups  (groups --help)\n"
+                "  nanoclaw rebuild [--tag TAG] [--clean] build nanoclaw-agent image\n"
+                "  nanoclaw molt <subcommand>             export/import via molt  (molt --help)\n"
+            ),
+        )
+        _help_parser.print_help()
+        sys.exit(0)
+    # else: flag or prompt passed directly — fall through to argparse (backward compat)
+
+    parser = argparse.ArgumentParser(
+        prog="nanoclaw",
+        usage=(
+            "%(prog)s [options] [prompt]\n"
+            "       %(prog)s agent [options] [prompt]\n"
+            "       %(prog)s ps [--logs|--tail|--kill-zombies|--restart NAME] [filter]\n"
+            "       %(prog)s sessions|history|watch|groups|rebuild|molt [args]"
+        ),
+        description="Send a prompt to a NanoClaw agent.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False,
+        epilog=(
+            "subcommands:\n"
+            "  nanoclaw agent [options] [prompt]      send a prompt (explicit form)\n"
+            "  nanoclaw ps [filter]                   list/manage running containers  (ps --help)\n"
+            "  nanoclaw ps --logs/--tail [filter]     dump or follow container logs\n"
+            "  nanoclaw ps --restart <name>           stop and remove a stuck container\n"
+            "  nanoclaw sessions [filter]             list saved session IDs\n"
+            "  nanoclaw history [-g group] [-n N]     show recent messages from the DB\n"
+            "  nanoclaw watch [-g group]              tail messages in real time\n"
+            "  nanoclaw groups [add|remove] ...       register or remove groups  (groups --help)\n"
+            "  nanoclaw rebuild [--tag TAG] [--clean] build nanoclaw-agent image\n"
+            "  nanoclaw molt <subcommand>             export/import via molt  (molt --help)\n"
+        ),
+    )
+
+    send = parser.add_argument_group("send a prompt")
+    send.add_argument("prompt", nargs="?", help="Prompt text (default target: main group)")
+    send.add_argument("-g", "--group", metavar="GROUP", help="Target group by name or folder (fuzzy match)")
+    send.add_argument("-j", "--jid", metavar="JID", help="Target group by exact JID")
+    send.add_argument("-s", "--session", metavar="ID", help="Session ID to resume")
+    send.add_argument("-f", "--file", metavar="PATH", help="Read prompt from a file (combinable with prompt as prefix)")
+    send.add_argument("-p", "--pipe", action="store_true", help="Read prompt from stdin (combinable with prompt as prefix)")
+
+    opts = parser.add_argument_group("options")
+    opts.add_argument("--runtime", choices=["docker", "container"], help="Container runtime (default: auto-detect)")
+    opts.add_argument("--image", default=IMAGE, metavar="IMAGE", help=f"Container image (default: {IMAGE})")
+    opts.add_argument("--timeout", type=int, default=300, metavar="SECS", help="Max seconds to wait for a response (default: 300)")
+    opts.add_argument("--list-groups", action="store_true", help="List registered groups and exit")
+    opts.add_argument("--raw", action="store_true", help="Print raw JSON output")
+    opts.add_argument("-v", "--verbose", action="store_true", help="Show debug info: cmd, payload (secrets redacted), exit code")
+    opts.add_argument("-h", "--help", action="help", default=argparse.SUPPRESS, help="Show this help message and exit")
+
+    args = parser.parse_args()
+
+    VERBOSE = args.verbose
+
+    groups = get_groups(DB_PATH) if DB_PATH.exists() else []
+
+    if args.list_groups:
+        print(f"{'NAME':<35} {'FOLDER':<30} {'JID'}")
+        print("-" * 100)
+        for g in groups:
+            main_tag = " [main]" if g["is_main"] else ""
+            print(f"{g['name']:<35} {g['folder']:<30} {g['jid']}{main_tag}")
+        return
+
+    # Resolve prompt: --file or --pipe reads external content, optionally prepended with positional arg
+    if args.file:
+        file_path = Path(args.file).expanduser()
+        if not file_path.exists():
+            sys.exit(f"error: file not found: {args.file}")
+        file_text = file_path.read_text().strip()
+        prompt = f"{args.prompt}\n\n{file_text}" if args.prompt else file_text
+    elif args.pipe or (not sys.stdin.isatty() and not args.prompt):
+        stdin_text = sys.stdin.read().strip()
+        if args.prompt:
+            prompt = f"{args.prompt}\n\n{stdin_text}"
+        else:
+            prompt = stdin_text
+    else:
+        prompt = args.prompt
+
+    if not prompt:
+        parser.print_help()
+        sys.exit(1)
+
+    # Resolve group → jid
+    jid = args.jid
+    group_name = None
+    is_main = False
+
+    if args.group:
+        g = find_group(groups, args.group)
+        if g is None:
+            sys.exit(f"error: group '{args.group}' not found. Run --list-groups to see options.")
+        jid = g["jid"]
+        group_name = g["name"]
+        is_main = g["is_main"]
+    elif not jid:
+        # Default: main group
+        mains = [g for g in groups if g["is_main"]]
+        if mains:
+            jid = mains[0]["jid"]
+            group_name = mains[0]["name"]
+            is_main = True
+        else:
+            sys.exit("error: no group specified and no main group found. Use -g or -j.")
+
+    runtime = detect_runtime(args.runtime)
+    secrets = read_secrets(ENV_FILE)
+
+    if not secrets:
+        print("warning: no secrets found in .env — agent may not be authenticated", file=sys.stderr)
+
+    payload: dict = {
+        "prompt": prompt,
+        "chatJid": jid,
+        "isMain": is_main,
+        "secrets": secrets,
+    }
+    if group_name:
+        payload["groupFolder"] = group_name
+    if args.session:
+        payload["sessionId"] = args.session
+        payload["resumeAt"] = "latest"
+
+    print(f"[{group_name or jid}] running via {runtime}...", file=sys.stderr)
+    run_container(runtime, args.image, payload, timeout=args.timeout)
+
+
+if __name__ == "__main__":
+    main()

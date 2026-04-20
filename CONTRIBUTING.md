@@ -56,7 +56,7 @@ Standalone tools that ship code files alongside the SKILL.md. The SKILL.md tells
 
 **Location:** `.claude/skills/<name>/` with supporting files
 
-**Examples:** `/claw` (Python CLI in `scripts/claw`)
+**Examples:** `/nanoclaw` (Python CLI in `scripts/nanoclaw`)
 
 **Key difference from feature skills:** No branch merge needed. The code is self-contained in the skill directory and gets copied into place during installation.
 
