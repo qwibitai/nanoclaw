@@ -226,7 +226,7 @@ export class WebChannel implements Channel {
           id: msgId,
           chat_jid: routeJid,
           sender: 'web',
-          sender_name: 'You',
+          sender_name: 'Web User',
           content: text,
           timestamp,
           is_from_me: false,
@@ -335,9 +335,19 @@ html,body{height:100dvh;background:var(--bg);color:var(--text);font:15px/1.5 -ap
 .b pre{background:#0f172a;border:1px solid var(--border);border-radius:6px;padding:10px;overflow-x:auto;margin:8px 0;font-size:13px}
 .b code{font-family:'SF Mono','Fira Code',monospace;font-size:13px;background:#0f172a;padding:1px 4px;border-radius:4px}
 .b pre code{background:none;padding:0}
-.b p{margin:4px 0}.b p:first-child{margin-top:0}.b p:last-child{margin-bottom:0}
+.b p{margin:6px 0}.b p:first-child{margin-top:0}.b p:last-child{margin-bottom:0}
 .b ul,.b ol{padding-left:20px;margin:4px 0}
 .b strong{font-weight:600}
+.b h1,.b h2,.b h3{font-weight:700;margin:10px 0 4px;line-height:1.3}
+.b h1{font-size:1.2em}.b h2{font-size:1.1em}.b h3{font-size:1em}
+.b table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13px}
+.b th,.b td{border:1px solid var(--border);padding:6px 10px;text-align:left;vertical-align:top}
+.b th{background:rgba(255,255,255,.06);font-weight:600}
+.b blockquote{border-left:3px solid var(--muted);margin:6px 0;padding:2px 12px;opacity:.8}
+.b blockquote p{margin:2px 0}
+.b hr{border:none;border-top:1px solid var(--border);margin:8px 0}
+.b a{color:#60a5fa;text-decoration:underline}
+.b img{max-width:100%;border-radius:6px;margin:4px 0}
 #ftr{padding:12px max(16px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));background:var(--surface);border-top:1px solid var(--border);display:flex;gap:8px;align-items:flex-end}
 #inp{flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:20px;padding:10px 16px;font-size:15px;resize:none;min-height:42px;max-height:160px;outline:none;line-height:1.4;font-family:inherit}
 #inp:focus{border-color:var(--user)}
@@ -357,34 +367,16 @@ html,body{height:100dvh;background:var(--bg);color:var(--text);font:15px/1.5 -ap
   <div id="msgs"></div>
   <form id="frm"><div id="ftr"><textarea id="inp" placeholder="Message…" rows="1"></textarea><button type="submit" id="btn" class="dim">↑</button></div></form>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
 const HIST='${histUrl}',SEND='${sendUrl}';
-function md(src){
-  const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const blocks=[];
-  src=src.replace(/\x60\x60\x60([\s\S]*?)\x60\x60\x60/g,(_,c)=>{blocks.push('<pre><code>'+esc(c.replace(/^[a-z]+\\n/,''))+'</code></pre>');return '\x01'+(blocks.length-1)+'\x01';});
-  const inline=s=>s.replace(/\x60([^\x60]+)\x60/g,(_,c)=>'<code>'+esc(c)+'</code>').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>');
-  const lines=src.split('\\n'),out=[];let lb=[],lt=null;
-  const fl=()=>{if(lb.length){out.push('<'+lt+'>'+lb.map(x=>'<li>'+x+'</li>').join('')+'</'+lt+'>');lb=[];lt=null;}};
-  for(const raw of lines){
-    const bm=raw.match(/^([-*\u2022]) (.+)/),om=raw.match(/^\d+\. (.+)/);
-    if(bm){if(lt&&lt!=='ul')fl();lt='ul';lb.push(inline(bm[2]));continue;}
-    if(om){if(lt&&lt!=='ol')fl();lt='ol';lb.push(inline(om[1]));continue;}
-    fl();const t=raw.trim();if(!t){out.push('');continue;}
-    if(/^#{1,3} /.test(t)){const[,...r]=t.split(' ');out.push('<strong>'+inline(r.join(' '))+'</strong>');continue;}
-    out.push(inline(t));
-  }
-  fl();let html=out.join('\\n').replace(/\x01(\d+)\x01/g,(_,i)=>blocks[+i]);
-  html=html.replace(/([^\\n<][^\\n]+)/g,s=>s.startsWith('<')?s:'<p>'+s+'</p>');
-  return html.replace(/\\n/g,'');
-}
 const msgs=document.getElementById('msgs'),inp=document.getElementById('inp'),btn=document.getElementById('btn'),dot=document.getElementById('dot'),st=document.getElementById('st'),seen=new Set();
 function fmt(ts){try{return new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
 function addMsg(isBot,content,ts,id){
   if(id&&seen.has(id))return;if(id)seen.add(id);
   const w=document.createElement('div');w.className='m '+(isBot?'a':'u');
   const b=document.createElement('div');b.className='b';
-  if(isBot){try{b.innerHTML=md(content||'');}catch(e){b.textContent=content||'';}}else b.textContent=content||'';
+  if(isBot){try{b.innerHTML=typeof marked!=='undefined'?marked.parse(content||'',{gfm:true}):(content||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');}catch(e){b.textContent=content||'';}}else b.textContent=content||'';
   const t=document.createElement('div');t.className='ts';t.textContent=fmt(ts);
   w.appendChild(b);w.appendChild(t);msgs.appendChild(w);msgs.scrollTop=msgs.scrollHeight;
 }
