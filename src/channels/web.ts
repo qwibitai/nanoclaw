@@ -376,7 +376,7 @@ function addMsg(isBot,content,ts,id){
   if(id&&seen.has(id))return;if(id)seen.add(id);
   const w=document.createElement('div');w.className='m '+(isBot?'a':'u');
   const b=document.createElement('div');b.className='b';
-  if(isBot){try{b.innerHTML=typeof marked!=='undefined'?marked.parse(content||'',{gfm:true}):(content||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');}catch(e){b.textContent=content||'';}}else b.textContent=content||'';
+  if(isBot){try{b.innerHTML=typeof marked!=='undefined'?marked.parse(content||'',{gfm:true}):(content||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');}catch(e){b.textContent=content||'';}}else b.textContent=content||'';
   const t=document.createElement('div');t.className='ts';t.textContent=fmt(ts);
   w.appendChild(b);w.appendChild(t);msgs.appendChild(w);msgs.scrollTop=msgs.scrollHeight;
 }
