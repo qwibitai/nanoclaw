@@ -54,8 +54,11 @@ async function sendWithRetry(
   throw lastError || new Error('Email send failed after retries');
 }
 
-const OWNER_EMAIL = 'info@sheridantrailerrentals.us';
 const FROM_NAME = 'Sheridan Rentals';
+
+function getOwnerEmail(): string {
+  return process.env.OWNER_EMAIL || 'sheridantrailerrentals@gmail.com';
+}
 
 function getFrom(): string {
   const user = process.env.SMTP_USER || '';
@@ -75,7 +78,7 @@ export async function sendOwnerNotification(booking: Booking): Promise<void> {
 
   await sendWithRetry(t, {
     from: getFrom(),
-    to: OWNER_EMAIL,
+    to: getOwnerEmail(),
     subject: `New Booking: ${booking.equipmentLabel} — ${dateRange} [${statusLabel}]`,
     html: `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto;">
@@ -202,7 +205,7 @@ export async function sendPaymentReceivedNotification(booking: Booking): Promise
 
   await sendWithRetry(t, {
     from: getFrom(),
-    to: OWNER_EMAIL,
+    to: getOwnerEmail(),
     subject: `${booking.balance > 0 ? 'Deposit' : 'Full Payment'} Received: ${booking.equipmentLabel} — ${booking.customer.firstName} ${booking.customer.lastName} ($${(booking.balance > 0 ? booking.deposit : booking.subtotal + booking.deposit).toFixed(2)})`,
     html: `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto;">

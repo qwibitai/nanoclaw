@@ -12,9 +12,11 @@ function daysFromNow(n: number): string {
 // ── calculatePrice — basic pricing ───────────────────────────────────
 
 describe('calculatePrice — basic', () => {
-  it('calculates RV price for 3 nights', () => {
+  it('calculates RV price for 3 nights (pricing-only — $250 equipment default)', () => {
     const result = calculatePrice('rv', 3);
     expect(result.subtotal).toBe(150 * 3);
+    // Pricing uses the equipment default; the server layer enforces that RV must include
+    // delivery (or an explicit promo override), so an un-configured RV never reaches Square.
     expect(result.deposit).toBe(250);
     expect(result.numDays).toBe(3);
     expect(result.equipment.key).toBe('rv');
@@ -28,8 +30,8 @@ describe('calculatePrice — basic', () => {
 
   it('includes valid add-ons', () => {
     const result = calculatePrice('rv', 3, ['generator', 'delivery']);
-    // Base: 150*3 = 450, Generator: 100*3 = 300, Delivery: 250 flat
-    expect(result.subtotal).toBe(450 + 300 + 250);
+    // Base: 150*3 = 450, Generator: 85*3 = 255, Delivery: 250 flat
+    expect(result.subtotal).toBe(450 + 255 + 250);
     expect(result.addOns).toEqual(['generator', 'delivery']);
     expect(result.lineItems).toHaveLength(3);
   });
@@ -143,9 +145,9 @@ describe('buildSquareLineItems — full mode', () => {
     // Generator add-on
     expect(items[1].name).toContain('Generator');
     expect(items[1].quantity).toBe('3');
-    expect(items[1].base_price_money.amount).toBe(100 * 100);
+    expect(items[1].base_price_money.amount).toBe(85 * 100);
 
-    // Deposit
+    // Deposit — equipment default $250 (server layer forces delivery add-on for real bookings)
     expect(items[2].name).toBe('Refundable Security Deposit');
     expect(items[2].quantity).toBe('1');
     expect(items[2].base_price_money.amount).toBe(250 * 100);
@@ -174,6 +176,7 @@ describe('buildSquareLineItems — deposit mode', () => {
     expect(items[0].name).toContain('Refundable Security Deposit');
     expect(items[0].name).toContain('balance');
     expect(items[0].quantity).toBe('1');
+    // Equipment default $250 (server enforces delivery for real RV bookings)
     expect(items[0].base_price_money.amount).toBe(250 * 100);
   });
 
@@ -235,12 +238,111 @@ describe('Integration — booking flow', () => {
     const pricing = calculatePrice('rv', 2, ['generator', 'delivery'], { dates });
 
     expect(pricing.paymentMode).toBe('full');
-    // Base: 150*2=300, Generator: 100*2=200, Delivery: 250 flat
-    expect(pricing.subtotal).toBe(300 + 200 + 250);
-    expect(pricing.chargeNow).toBe(750 + 250); // subtotal + deposit
+    // Base: 150*2=300, Generator: 85*2=170, Delivery: 250 flat
+    expect(pricing.subtotal).toBe(300 + 170 + 250);
+    expect(pricing.chargeNow).toBe(300 + 170 + 250 + 250); // subtotal + deposit
     expect(pricing.deposit).toBe(250);
 
     const items = buildSquareLineItems(pricing);
     expect(items).toHaveLength(4); // base + generator + delivery + deposit
+  });
+});
+
+// ── Holiday pricing (RV only) ────────────────────────────────────────
+
+describe('calculatePrice — RV holiday pricing', () => {
+  it('all-regular dates use base rate', () => {
+    // Pick far-future non-holiday dates
+    const dates = ['2035-03-10', '2035-03-11', '2035-03-12'];
+    const pricing = calculatePrice('rv', 3, [], { dates, paymentMode: 'full' });
+    expect(pricing.subtotal).toBe(150 * 3);
+    expect(pricing.lineItems[0].unitPrice).toBe(150);
+  });
+
+  it('all-holiday dates use $175/night', () => {
+    // July 4th weekend 2035
+    const dates = ['2035-07-03', '2035-07-04', '2035-07-05'];
+    const pricing = calculatePrice('rv', 3, [], { dates, paymentMode: 'full' });
+    expect(pricing.subtotal).toBe(175 * 3);
+    expect(pricing.lineItems[0].unitPrice).toBe(175);
+    expect(pricing.lineItems[0].name).toContain('holiday');
+  });
+
+  it('mixed holiday + regular dates split into two line items', () => {
+    // Jul 4 (holiday) + Jul 6 (regular). Two line items.
+    const dates = ['2035-07-04', '2035-07-06'];
+    const pricing = calculatePrice('rv', 2, [], { dates, paymentMode: 'full' });
+    // 1 regular @ $150 + 1 holiday @ $175 = $325
+    expect(pricing.subtotal).toBe(150 + 175);
+    expect(pricing.lineItems).toHaveLength(2);
+    expect(pricing.lineItems.some(li => li.unitPrice === 150)).toBe(true);
+    expect(pricing.lineItems.some(li => li.unitPrice === 175)).toBe(true);
+  });
+
+  it('does not apply holiday pricing to carhauler', () => {
+    const dates = ['2035-07-04', '2035-07-05'];
+    const pricing = calculatePrice('carhauler', 2, [], { dates });
+    expect(pricing.subtotal).toBe(65 * 2);
+  });
+});
+
+// ── Promo code (RIVER) ───────────────────────────────────────────────
+
+describe('calculatePrice — RIVER promo', () => {
+  it('applies $175 flat rate, removes delivery, $500 deposit', () => {
+    const dates = ['2035-07-04', '2035-07-05']; // even on holiday
+    const pricing = calculatePrice('rv', 2, ['delivery', 'generator'], {
+      dates,
+      paymentMode: 'full',
+      promoCode: 'RIVER',
+    });
+    expect(pricing.subtotal).toBe(175 * 2 + 85 * 2); // rental + generator (delivery removed)
+    expect(pricing.deposit).toBe(500);
+    expect(pricing.addOns).not.toContain('delivery');
+    expect(pricing.addOns).toContain('generator');
+    // Rate is flat $175/night, not split into holiday/regular
+    expect(pricing.lineItems[0].unitPrice).toBe(175);
+  });
+
+  it('applies $175 on non-holiday dates too (flat rate)', () => {
+    const dates = ['2035-03-10', '2035-03-11'];
+    const pricing = calculatePrice('rv', 2, [], {
+      dates,
+      paymentMode: 'full',
+      promoCode: 'RIVER',
+    });
+    expect(pricing.subtotal).toBe(175 * 2);
+    expect(pricing.deposit).toBe(500);
+  });
+
+  it('is case-insensitive', () => {
+    const dates = ['2035-03-10'];
+    const pricing = calculatePrice('rv', 1, [], {
+      dates,
+      paymentMode: 'full',
+      promoCode: 'river',
+    });
+    expect(pricing.subtotal).toBe(175);
+  });
+
+  it('does not apply to carhauler', () => {
+    const dates = ['2035-03-10'];
+    const pricing = calculatePrice('carhauler', 1, [], {
+      dates,
+      promoCode: 'RIVER',
+    });
+    expect(pricing.subtotal).toBe(65);
+    expect(pricing.deposit).toBe(50);
+  });
+
+  it('unknown promo code is silently ignored', () => {
+    const dates = ['2035-03-10'];
+    const pricing = calculatePrice('rv', 1, [], {
+      dates,
+      paymentMode: 'full',
+      promoCode: 'NOPE',
+    });
+    expect(pricing.subtotal).toBe(150);
+    expect(pricing.deposit).toBe(250); // equipment default; server rejects missing delivery
   });
 });

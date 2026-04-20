@@ -23,18 +23,20 @@ import { readEnvFile } from './env.js';
 
 const DB_PATH = path.join(process.cwd(), 'services', 'booking', 'data', 'bookings.db');
 const DRY_RUN = process.argv.includes('--dry-run');
-const OWNER_EMAIL = 'info@sheridantrailerrentals.us';
 
 // ── Load env ────────────────────────────────────────────────────────
 
 const envKeys = [
   'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM',
   'SQUARE_ACCESS_TOKEN', 'SQUARE_LOCATION_ID', 'SQUARE_ENVIRONMENT',
+  'OWNER_EMAIL',
 ];
 const env = readEnvFile(envKeys);
 for (const [k, v] of Object.entries(env)) {
   if (!process.env[k]) process.env[k] = v;
 }
+
+const OWNER_EMAIL = process.env.OWNER_EMAIL || 'sheridantrailerrentals@gmail.com';
 
 // ── Database ────────────────────────────────────────────────────────
 
