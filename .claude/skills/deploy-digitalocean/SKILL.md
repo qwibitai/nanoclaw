@@ -228,10 +228,20 @@ Run the service step to generate and load the systemd user unit:
 ssh root@$IP "cd nanoclaw && npx tsx setup/index.ts --step service"
 ```
 
-This step creates a systemd user service with `Restart=always` and runs `loginctl enable-linger` so the service survives user logouts. Verify the service loaded:
+This step creates a systemd user service with `Restart=always` and runs `loginctl enable-linger` so the service survives user logouts.
+
+**Important for root deployments:** When NanoClaw runs as root, IPC files are created with root ownership. The agent containers run as the `node` user (UID 1000) and cannot delete root-owned IPC files, causing follow-up messages to fail silently. Fix by adding `UMask=0000` to the service file immediately after setup:
 
 ```bash
-ssh root@$IP "systemctl --user status nanoclaw"
+ssh root@$IP "sed -i '/\[Service\]/a UMask=0000' /etc/systemd/system/nanoclaw.service && systemctl daemon-reload && systemctl restart nanoclaw"
+```
+
+This makes IPC files world-writable so containers can clean up after themselves.
+
+Verify the service loaded:
+
+```bash
+ssh root@$IP "systemctl status nanoclaw | head -6"
 ```
 
 ## 7. Concurrent Container Limit
