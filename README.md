@@ -17,6 +17,22 @@
 
 ---
 
+> **🔥 New Version Preview: Chat SDK + Approval Dialogs**
+>
+> A new version of NanoClaw is available for preview, featuring Vercel Chat SDK integration (15 messaging platforms from one codebase) and one-tap approval dialogs for sensitive agent actions. [Read the announcement →](https://venturebeat.com/orchestration/should-my-enterprise-ai-agent-do-that-nanoclaw-and-vercel-launch-easier-agentic-policy-setting-and-approval-dialogs-across-15-messaging-apps)
+>
+> <details>
+> <summary>Try the preview</summary>
+>
+> ```bash
+> gh repo fork qwibitai/nanoclaw --clone && cd nanoclaw
+> git checkout v2
+> claude
+> ```
+> Then run `/setup`. Feedback welcome on [Discord](https://discord.gg/VDdww8qS42). Expect breaking changes before merge to main.
+>
+> </details>
+
 ## Why I Built NanoClaw
 
 [OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
