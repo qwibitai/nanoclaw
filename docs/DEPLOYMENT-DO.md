@@ -6,11 +6,11 @@ NanoClaw runs on a single DigitalOcean droplet as a systemd user service managed
 
 | Size | RAM | vCPU | Max concurrent agents | Recommended for |
 |------|-----|------|----------------------|-----------------|
-| `s-2vcpu-4gb` | 4 GB | 2 | 5 | Dev/testing |
+| `s-2vcpu-4gb` | 4 GB | 2 | 5 | Dev/testing only |
 | `s-4vcpu-8gb` | 8 GB | 4 | 15 | Up to 30 users (recommended) |
 | `s-8vcpu-16gb` | 16 GB | 8 | 30 | High-load / future growth |
 
-Set `MAX_CONCURRENT_CONTAINERS` in `nanoclaw/.env` to match the chosen size. Formula: `(RAM_GB - 1) * 3`, rounded down for margin.
+Set `MAX_CONCURRENT_CONTAINERS` in `nanoclaw/.env` to match the chosen size. Formula: `(RAM_GB - 1) * 3`, rounded down for margin. (Apply ~30% reduction for safety margin; table values already include this.)
 
 ## Initial Setup
 
@@ -42,12 +42,18 @@ tail -f ~/nanoclaw/logs/nanoclaw.log
 
 Run `/update-nanoclaw` in Claude Code. It:
 
-1. Fetches upstream main
-2. Merges (with conflict resolution if needed)
-3. Rebuilds the agent container
-4. Restarts the service
+1. Fetches upstream main and previews changes
+2. Merges (with conflict resolution guidance if needed)
+3. Runs `npm run build` and `npm test`
 
-After upgrading, verify that identity and policy skills still apply cleanly. Run `/migrate-nanoclaw` if customizations need replaying on the new base.
+After the skill completes, run these manually:
+
+```bash
+./container/build.sh          # rebuild agent container image
+systemctl --user restart nanoclaw
+```
+
+Run `/migrate-nanoclaw` if customizations need replaying on the new upstream base.
 
 ## Database Backup
 
@@ -55,10 +61,10 @@ NanoClaw state is stored in `~/nanoclaw/store/messages.db` (SQLite). Recommended
 
 ```bash
 # Manual backup
-cp ~/nanoclaw/store/messages.db ~/nanoclaw/store/messages.db.bak.$(date +%Y%m%d)
+sqlite3 ~/nanoclaw/store/messages.db ".backup $HOME/nanoclaw/store/messages.db.$(date +%Y%m%d)"
 
 # Cron job (add via crontab -e):
-0 2 * * * cp ~/nanoclaw/store/messages.db ~/nanoclaw/store/messages.db.$(date +\%Y\%m\%d) && find ~/nanoclaw/store/ -name 'messages.db.*' -mtime +30 -delete
+0 2 * * * sqlite3 ~/nanoclaw/store/messages.db ".backup $HOME/nanoclaw/store/messages.db.$(date +\%Y\%m\%d)" && find ~/nanoclaw/store/ -name 'messages.db.[0-9]*' -mtime +30 -delete
 
 # Restore from backup
 systemctl --user stop nanoclaw
