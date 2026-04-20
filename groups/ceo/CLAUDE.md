@@ -187,6 +187,10 @@ Update this file with decisions, patterns, and context you learn over time. This
 
 2026-03-27-28 (Sprints 46-48): Session observer (GET /tasks/:id/logs), dashboard task inspector (live log panel), capability map (GET /api/v1/services), DB query instrumentation (p50/p95/p99 via AsyncLocalStorage), feature flags (boolean registry + Telegram toggle), Meeting Arena visualization.
 
+2026-04-19 (Sprint 164): Shipped 2 task(s) — Debug Price Trend Analytics Task Failure, Flights — Weekly Best Deals Digest. Key decisions: none.
+
+2026-04-19 (Sprint 166): Shipped 1 task(s) — NanoClaw — Fix Scheduled Task Routing to CEO. Key decisions: none.
+
 ### Current State (as of Sprint 48)
 
 *Live infrastructure:*

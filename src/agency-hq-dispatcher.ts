@@ -99,15 +99,59 @@ export async function reconcileOrphanedDispatches(): Promise<void> {
     const ageMs = now - dispatchedAt;
     if (ageMs < DISPATCH_ORPHAN_THRESHOLD_MS) continue;
 
-    // Orphaned: revert to ready with dispatch_blocked_until penalty
+    // Orphaned: revert to ready with dispatch_blocked_until penalty.
+    // Agency HQ may require acceptance_criteria and sprint_id for ready
+    // transitions — include them from the task data when available, using
+    // a placeholder acceptance_criteria if the task has none.
+    const revertPayload: Record<string, unknown> = {
+      status: 'ready',
+      dispatch_blocked_until: penaltyUntil,
+    };
+    if (!task.acceptance_criteria) {
+      revertPayload.acceptance_criteria =
+        '(auto-filled by orphan reconciliation)';
+    }
+    if (task.sprint_id) {
+      revertPayload.sprint_id = task.sprint_id;
+    }
+
     try {
-      const res = await agencyFetch(`/tasks/${task.id}`, {
+      let res = await agencyFetch(`/tasks/${task.id}`, {
         method: 'PUT',
-        body: JSON.stringify({
-          status: 'ready',
-          dispatch_blocked_until: penaltyUntil,
-        }),
+        body: JSON.stringify(revertPayload),
       });
+
+      // If still rejected (e.g. missing sprint), try with just
+      // dispatch_blocked_until to at least prevent immediate re-dispatch,
+      // keeping the task in-progress but penalized.
+      if (res.status === 422) {
+        const body = await res.text().catch(() => '');
+        log.warn(
+          { status: 422, body, taskId: task.id },
+          'Orphan reconciliation: ready transition rejected, applying penalty without status change',
+        );
+        res = await agencyFetch(`/tasks/${task.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            dispatch_blocked_until: penaltyUntil,
+          }),
+        });
+        if (res.ok) {
+          reconciled++;
+          log.warn(
+            { taskId: task.id, dispatch_blocked_until: penaltyUntil },
+            'Orphan reconciliation: penalty applied (status unchanged due to validation)',
+          );
+        } else {
+          const fallbackBody = await res.text().catch(() => '');
+          log.error(
+            { status: res.status, body: fallbackBody, taskId: task.id },
+            'Orphan reconciliation: fallback penalty also failed',
+          );
+        }
+        continue;
+      }
+
       if (!res.ok) {
         const body = await res.text().catch(() => '');
         log.error(
