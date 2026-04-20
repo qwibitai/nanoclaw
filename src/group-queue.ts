@@ -9,6 +9,8 @@ interface QueuedTask {
   id: string;
   groupJid: string;
   fn: () => Promise<void>;
+  retryCount: number;
+  enqueuedAt: Date;
 }
 
 const MAX_RETRIES = 5;
@@ -34,6 +36,9 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+  // Issue #830: O(1) duplicate detection using Set
+  private pendingTaskIds = new Set<string>();
+  private static readonly MAX_TASK_RETRIES = 3;
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -90,42 +95,80 @@ export class GroupQueue {
   enqueueTask(groupJid: string, taskId: string, fn: () => Promise<void>): void {
     if (this.shuttingDown) return;
 
-    const state = this.getGroup(groupJid);
+    // Issue #830: O(1) duplicate detection using Set
+    const taskKey = `${groupJid}:${taskId}`;
+    if (this.pendingTaskIds.has(taskKey)) {
+      logger.debug({ groupJid, taskId }, 'Task already queued or running, skipping');
+      return;
+    }
 
-    // Prevent double-queuing: check both pending and currently-running task
+    const state = this.getGroup(groupJid);
     if (state.runningTaskId === taskId) {
       logger.debug({ groupJid, taskId }, 'Task already running, skipping');
       return;
     }
-    if (state.pendingTasks.some((t) => t.id === taskId)) {
-      logger.debug({ groupJid, taskId }, 'Task already queued, skipping');
-      return;
-    }
 
+    // Issue #830: Queue-first principle - always queue before deciding execution
+    const task: QueuedTask = {
+      id: taskId,
+      groupJid,
+      fn,
+      retryCount: 0,
+      enqueuedAt: new Date(),
+    };
+    state.pendingTasks.push(task);
+    this.pendingTaskIds.add(taskKey);
+    logger.debug({ groupJid, taskId, pendingCount: state.pendingTasks.length }, 'Task queued');
+
+    // Now decide execution strategy based on state
     if (state.active) {
-      state.pendingTasks.push({ id: taskId, groupJid, fn });
       if (state.idleWaiting) {
         this.closeStdin(groupJid);
       }
-      logger.debug({ groupJid, taskId }, 'Container active, task queued');
       return;
     }
 
     if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
-      state.pendingTasks.push({ id: taskId, groupJid, fn });
       if (!this.waitingGroups.includes(groupJid)) {
         this.waitingGroups.push(groupJid);
       }
       logger.debug(
         { groupJid, taskId, activeCount: this.activeCount },
-        'At concurrency limit, task queued',
+        'At concurrency limit, task waiting',
       );
       return;
     }
 
-    // Run immediately
-    this.runTask(groupJid, { id: taskId, groupJid, fn }).catch((err) =>
-      logger.error({ groupJid, taskId, err }, 'Unhandled error in runTask'),
+    // Run immediately - task is already queued, so if it fails we can re-queue
+    setImmediate(() => {
+      this.runTask(groupJid, task).catch((err) => {
+        logger.error({ groupJid, taskId, err }, 'Unhandled error in runTask');
+        this.handleTaskFailure(groupJid, task, err);
+      });
+    });
+  }
+
+  // Issue #830: Handle task failure with re-queueing up to max retries
+  private handleTaskFailure(groupJid: string, task: QueuedTask, error: unknown): void {
+    const state = this.getGroup(groupJid);
+    const taskKey = `${groupJid}:${task.id}`;
+
+    if (task.retryCount >= GroupQueue.MAX_TASK_RETRIES) {
+      logger.error(
+        { groupJid, taskId: task.id, retryCount: task.retryCount, error },
+        'Task exceeded max retries, dropping',
+      );
+      this.pendingTaskIds.delete(taskKey);
+      return;
+    }
+
+    // Re-queue with incremented retry count
+    task.retryCount++;
+    task.enqueuedAt = new Date();
+    state.pendingTasks.push(task);
+    logger.info(
+      { groupJid, taskId: task.id, retryCount: task.retryCount },
+      'Task re-queued after failure',
     );
   }
 
@@ -248,6 +291,7 @@ export class GroupQueue {
       await task.fn();
     } catch (err) {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
+      throw err; // Re-throw for error handling in caller
     } finally {
       state.active = false;
       state.isTaskContainer = false;
@@ -291,12 +335,23 @@ export class GroupQueue {
     // Tasks first (they won't be re-discovered from SQLite like messages)
     if (state.pendingTasks.length > 0) {
       const task = state.pendingTasks.shift()!;
-      this.runTask(groupJid, task).catch((err) =>
-        logger.error(
-          { groupJid, taskId: task.id, err },
-          'Unhandled error in runTask (drain)',
-        ),
-      );
+      const taskKey = `${groupJid}:${task.id}`;
+      this.pendingTaskIds.delete(taskKey);
+
+      setImmediate(() => {
+        this.runTask(groupJid, task)
+          .catch((err) => {
+            logger.error(
+              { groupJid, taskId: task.id, err },
+              'Error running task from drain',
+            );
+            this.handleTaskFailure(groupJid, task, err);
+          })
+          .finally(() => {
+            // Issue #830: Drain waiting groups after task completes
+            this.drainWaiting();
+          });
+      });
       return;
     }
 
@@ -326,12 +381,24 @@ export class GroupQueue {
       // Prioritize tasks over messages
       if (state.pendingTasks.length > 0) {
         const task = state.pendingTasks.shift()!;
-        this.runTask(nextJid, task).catch((err) =>
-          logger.error(
-            { groupJid: nextJid, taskId: task.id, err },
-            'Unhandled error in runTask (waiting)',
-          ),
-        );
+        const taskKey = `${nextJid}:${task.id}`;
+        this.pendingTaskIds.delete(taskKey);
+
+        setImmediate(() => {
+          this.runTask(nextJid, task)
+            .catch((err) => {
+              logger.error(
+                { groupJid: nextJid, taskId: task.id, err },
+                'Error running task from waiting',
+              );
+              this.handleTaskFailure(nextJid, task, err);
+            })
+            .finally(() => {
+              // Continue draining waiting groups
+              this.drainWaiting();
+            });
+        });
+        return; // Return after starting task, will continue on next completion
       } else if (state.pendingMessages) {
         this.runForGroup(nextJid, 'drain').catch((err) =>
           logger.error(
