@@ -10,7 +10,9 @@ vi.mock('./container-runner.js', async (importOriginal) => {
 });
 
 vi.mock('./group-folder.js', () => ({
-  resolveGroupFolderPath: vi.fn().mockReturnValue('/tmp/nanoclaw-test/groups/main'),
+  resolveGroupFolderPath: vi
+    .fn()
+    .mockReturnValue('/tmp/nanoclaw-test/groups/main'),
   resolveGroupIpcPath: vi.fn().mockReturnValue('/tmp/nanoclaw-test/ipc/main'),
 }));
 
@@ -58,7 +60,9 @@ function makeTask(overrides?: Partial<ScheduledTask>): ScheduledTask {
   return task;
 }
 
-function makeDeps(overrides?: Partial<SchedulerDependencies>): SchedulerDependencies {
+function makeDeps(
+  overrides?: Partial<SchedulerDependencies>,
+): SchedulerDependencies {
   return {
     registeredGroups: () => ({
       'ceo@g.us': {
@@ -185,10 +189,7 @@ describe('task scheduler', () => {
 
       await runScheduledTask(task, deps);
 
-      expect(deps.sendMessage).toHaveBeenCalledWith(
-        'ceo@g.us',
-        'Sunny today!',
-      );
+      expect(deps.sendMessage).toHaveBeenCalledWith('ceo@g.us', 'Sunny today!');
     });
 
     it('suppresses result sendMessage for /orchestrate tasks', async () => {
@@ -199,7 +200,10 @@ describe('task scheduler', () => {
 
       vi.mocked(runContainerAgent).mockImplementation(
         async (_group, _input, _onProcess, onOutput) => {
-          await onOutput?.({ status: 'success', result: 'Task dispatched to sub-agent' });
+          await onOutput?.({
+            status: 'success',
+            result: 'Task dispatched to sub-agent',
+          });
           return { status: 'success', result: 'Task dispatched to sub-agent' };
         },
       );

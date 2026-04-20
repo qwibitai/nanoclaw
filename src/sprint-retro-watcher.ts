@@ -95,12 +95,7 @@ function buildSnapshot(
   sprint: SprintSummary,
   tasks: Array<{ id: string; status: string }>,
 ): SprintSnapshot {
-  const completedStatuses = new Set([
-    'done',
-    'completed',
-    'shipped',
-    'closed',
-  ]);
+  const completedStatuses = new Set(['done', 'completed', 'shipped', 'closed']);
   return {
     sprintId: sprint.id,
     sprintName: sprint.name,
@@ -142,7 +137,8 @@ export function detectSprintChanges(
 
       if (taskDelta > 0) parts.push(`${taskDelta} new task(s)`);
       if (taskDelta < 0) parts.push(`${Math.abs(taskDelta)} task(s) removed`);
-      if (completionDelta > 0) parts.push(`${completionDelta} task(s) completed`);
+      if (completionDelta > 0)
+        parts.push(`${completionDelta} task(s) completed`);
       if (parts.length === 0) parts.push('task status changed');
 
       const pctNow =

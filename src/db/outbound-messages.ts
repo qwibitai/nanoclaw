@@ -57,9 +57,9 @@ export function insertOutboundMessage(
 }
 
 export function getOutboundMessage(id: string): OutboundMessage | undefined {
-  return db
-    .prepare('SELECT * FROM outbound_messages WHERE id = ?')
-    .get(id) as OutboundMessage | undefined;
+  return db.prepare('SELECT * FROM outbound_messages WHERE id = ?').get(id) as
+    | OutboundMessage
+    | undefined;
 }
 
 /** Get pending messages ready to send, ordered by priority then age. */

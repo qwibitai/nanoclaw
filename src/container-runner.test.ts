@@ -206,9 +206,7 @@ describe('tmux session runner', () => {
     } as fs.Stats);
 
     // readFileSync returns agent-runner logs for stderr file
-    vi.mocked(fs.readFileSync).mockImplementation(((
-      path: string,
-    ) => {
+    vi.mocked(fs.readFileSync).mockImplementation(((path: string) => {
       if (String(path).includes('stderr')) return agentRunnerStderr;
       return '';
     }) as typeof fs.readFileSync);
@@ -243,9 +241,7 @@ describe('tmux session runner', () => {
       isDirectory: () => false,
     } as fs.Stats);
 
-    vi.mocked(fs.readFileSync).mockImplementation(((
-      path: string,
-    ) => {
+    vi.mocked(fs.readFileSync).mockImplementation(((path: string) => {
       if (String(path).includes('stderr')) return realErrorStderr;
       return '';
     }) as typeof fs.readFileSync);

@@ -275,9 +275,7 @@ describe('sprint-retro-watcher', () => {
       // Active sprints fetch
       fetchMock.mockResolvedValueOnce(
         mockFetchResponse({
-          data: [
-            { id: 's1', name: 'Sprint 1', status: 'active' },
-          ],
+          data: [{ id: 's1', name: 'Sprint 1', status: 'active' }],
         }),
       );
       // Sprint tasks fetch
@@ -289,9 +287,7 @@ describe('sprint-retro-watcher', () => {
         }),
       );
       // Completed sprints fetch (for checkForCompletedSprints)
-      fetchMock.mockResolvedValueOnce(
-        mockFetchResponse({ data: [] }),
-      );
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({ data: [] }));
 
       const deps = makeMockDeps();
       await checkSprintStatus(deps, () => false);
@@ -336,7 +332,9 @@ describe('sprint-retro-watcher', () => {
       );
       fetchMock.mockResolvedValueOnce(
         mockFetchResponse({
-          data: [{ id: 't1', title: 'Task 1', status: 'ready', description: '' }],
+          data: [
+            { id: 't1', title: 'Task 1', status: 'ready', description: '' },
+          ],
         }),
       );
       fetchMock.mockResolvedValueOnce(mockFetchResponse({ data: [] }));
@@ -353,7 +351,9 @@ describe('sprint-retro-watcher', () => {
       );
       fetchMock.mockResolvedValueOnce(
         mockFetchResponse({
-          data: [{ id: 't1', title: 'Task 1', status: 'done', description: '' }],
+          data: [
+            { id: 't1', title: 'Task 1', status: 'done', description: '' },
+          ],
         }),
       );
       fetchMock.mockResolvedValueOnce(mockFetchResponse({ data: [] }));
@@ -378,9 +378,7 @@ describe('sprint-retro-watcher', () => {
 
     it('handles API errors gracefully without sending', async () => {
       // Active sprints fetch fails
-      fetchMock.mockResolvedValueOnce(
-        mockFetchResponse({}, false, 500),
-      );
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}, false, 500));
       // Completed sprints fetch
       fetchMock.mockResolvedValueOnce(mockFetchResponse({ data: [] }));
 

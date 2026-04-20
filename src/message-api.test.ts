@@ -302,15 +302,10 @@ describe('message-api', () => {
     });
 
     it('GET /api/v1/messages/:id returns message status', async () => {
-      const postRes = await makeRequest(
-        testPort,
-        'POST',
-        '/api/v1/messages',
-        {
-          recipient: 'tg:12345',
-          content: 'Check status',
-        },
-      );
+      const postRes = await makeRequest(testPort, 'POST', '/api/v1/messages', {
+        recipient: 'tg:12345',
+        content: 'Check status',
+      });
 
       const postBody = postRes.body as { id: string };
       const getRes = await makeRequest(

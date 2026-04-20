@@ -29,14 +29,8 @@ import { Channel } from './types.js';
 
 // --- Config ---
 
-const MESSAGE_API_PORT = parseInt(
-  process.env.MESSAGE_API_PORT || '3003',
-  10,
-);
-const RATE_LIMIT_MAX = parseInt(
-  process.env.MESSAGE_RATE_LIMIT_MAX || '10',
-  10,
-);
+const MESSAGE_API_PORT = parseInt(process.env.MESSAGE_API_PORT || '3003', 10);
+const RATE_LIMIT_MAX = parseInt(process.env.MESSAGE_RATE_LIMIT_MAX || '10', 10);
 const RATE_LIMIT_WINDOW_MS = parseInt(
   process.env.MESSAGE_RATE_LIMIT_WINDOW_MS || '60000',
   10,
@@ -46,15 +40,13 @@ const DEFAULT_BATCH_WINDOW_MS = 300_000; // 5 minutes
 
 // --- Template rendering ---
 
-const TEMPLATE_RENDERERS: Record<
-  MessageTemplate,
-  (content: string) => string
-> = {
-  alert: (content) => `🚨 *Alert*\n\n${content}`,
-  digest: (content) => `📋 *Digest*\n\n${content}`,
-  notification: (content) => `🔔 ${content}`,
-  custom: (content) => content,
-};
+const TEMPLATE_RENDERERS: Record<MessageTemplate, (content: string) => string> =
+  {
+    alert: (content) => `🚨 *Alert*\n\n${content}`,
+    digest: (content) => `📋 *Digest*\n\n${content}`,
+    notification: (content) => `🔔 ${content}`,
+    custom: (content) => content,
+  };
 
 export function renderTemplate(
   template: MessageTemplate,
@@ -127,7 +119,10 @@ function validateRequest(
   }
 
   if (obj.scheduled_for !== undefined) {
-    if (typeof obj.scheduled_for !== 'string' || isNaN(Date.parse(obj.scheduled_for))) {
+    if (
+      typeof obj.scheduled_for !== 'string' ||
+      isNaN(Date.parse(obj.scheduled_for))
+    ) {
       return {
         ok: false,
         error: 'scheduled_for must be a valid ISO 8601 date string',
@@ -195,7 +190,9 @@ async function flushBatch(
   }
 
   for (const [recipientId, msgs] of byRecipient) {
-    const rendered = msgs.map((m) => renderTemplate(m.template as MessageTemplate, m.content));
+    const rendered = msgs.map((m) =>
+      renderTemplate(m.template as MessageTemplate, m.content),
+    );
     const combined =
       rendered.length === 1
         ? rendered[0]
@@ -212,10 +209,7 @@ async function flushBatch(
       const errMsg =
         err instanceof Error ? err.message : 'Unknown delivery error';
       for (const m of msgs) updateMessageStatus(m.id, 'failed', errMsg);
-      logger.error(
-        { batchKey, recipientId, err },
-        'Batch delivery failed',
-      );
+      logger.error({ batchKey, recipientId, err }, 'Batch delivery failed');
     }
   }
 }
@@ -231,10 +225,7 @@ async function deliverWithRetry(
   msg: OutboundMessage,
   sendFn: (jid: string, text: string) => Promise<void>,
 ): Promise<void> {
-  const text = renderTemplate(
-    msg.template as MessageTemplate,
-    msg.content,
-  );
+  const text = renderTemplate(msg.template as MessageTemplate, msg.content);
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -281,9 +272,7 @@ function createSendFn(
 ): (jid: string, text: string) => Promise<void> {
   return async (jid: string, text: string) => {
     const channels = channelProvider();
-    const channel = channels.find(
-      (c) => c.ownsJid(jid) && c.isConnected(),
-    );
+    const channel = channels.find((c) => c.ownsJid(jid) && c.isConnected());
     if (!channel) {
       throw new Error(`No connected channel for recipient: ${jid}`);
     }
@@ -347,10 +336,7 @@ async function handlePostMessage(
   const data = validation.data;
 
   // Rate limiting
-  const recentCount = countRecentMessages(
-    data.recipient,
-    RATE_LIMIT_WINDOW_MS,
-  );
+  const recentCount = countRecentMessages(data.recipient, RATE_LIMIT_WINDOW_MS);
   if (recentCount >= RATE_LIMIT_MAX) {
     jsonResponse(res, 429, {
       error: `Rate limit exceeded: max ${RATE_LIMIT_MAX} messages per ${RATE_LIMIT_WINDOW_MS / 1000}s for this recipient`,
@@ -434,10 +420,7 @@ export function startMessageApi(
       }
 
       // GET /api/v1/messages/:id — check message status
-      if (
-        req.method === 'GET' &&
-        req.url?.startsWith('/api/v1/messages/')
-      ) {
+      if (req.method === 'GET' && req.url?.startsWith('/api/v1/messages/')) {
         const id = req.url.slice('/api/v1/messages/'.length);
         if (!id) {
           jsonResponse(res, 400, { error: 'Message ID required' });

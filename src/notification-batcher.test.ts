@@ -277,9 +277,9 @@ describe('NotificationBatcher', () => {
     it('does not throw when sendFn rejects for immediate delivery', async () => {
       sendFn.mockRejectedValueOnce(new Error('send failed'));
 
-      await expect(
-        batcher.send('jid:1', 'msg', 'critical'),
-      ).rejects.toThrow('send failed');
+      await expect(batcher.send('jid:1', 'msg', 'critical')).rejects.toThrow(
+        'send failed',
+      );
     });
 
     it('handles sendFn rejection during flush gracefully', async () => {
