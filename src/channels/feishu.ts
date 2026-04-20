@@ -369,6 +369,9 @@ export class FeishuChannel implements Channel {
   private thinkingMode = new Map<string, 'adaptive' | 'disabled'>();
   private pendingUsage = new Map<string, ContainerOutput['usage']>();
 
+  // open_id → 用户姓名缓存，避免重复调飞书 API
+  private userNameCache = new Map<string, string>();
+
   // Spinner 自动刷新定时器（每个 chat 一个）
   private spinnerTimers = new Map<string, NodeJS.Timeout>();
   // 停止标记：clearSpinnerTimer 设置后，正在运行的 callback 检测到后不再调度下一轮
@@ -1845,6 +1848,37 @@ export class FeishuChannel implements Channel {
     }
   }
 
+  /**
+   * 根据 open_id 获取飞书用户姓名，带内存缓存。
+   * 首次查询调飞书 contact API，后续从缓存读取。
+   */
+  private async getUserName(openId: string): Promise<string> {
+    if (!openId || openId === 'unknown') return openId;
+
+    const cached = this.userNameCache.get(openId);
+    if (cached) return cached;
+
+    try {
+      const resp = await this.client.contact.user.get({
+        path: { user_id: openId },
+        params: { user_id_type: 'open_id' },
+      });
+      const name = resp?.data?.user?.name;
+      if (name) {
+        this.userNameCache.set(openId, name);
+        return name;
+      }
+      // API 成功但 name 为空（离职/外部用户），缓存 open_id 避免反复调用
+      logger.warn({ openId, code: resp?.code }, '飞书用户信息无 name 字段');
+      this.userNameCache.set(openId, openId);
+    } catch (err) {
+      // API 异常不缓存，下次重试
+      logger.warn({ err, openId }, '获取飞书用户信息失败');
+    }
+
+    return openId;
+  }
+
   private async handleMessage(data: {
     sender: {
       sender_id?: { union_id?: string; user_id?: string; open_id?: string };
@@ -2011,9 +2045,7 @@ export class FeishuChannel implements Channel {
       message.chat_type === 'group',
     );
 
-    const senderName =
-      message.mentions?.find((m) => m.id.open_id === senderId)?.name ??
-      senderId;
+    const senderName = await this.getUserName(senderId);
 
     // 获取被回复消息的内容和发送者
     let replyContent: string | undefined;

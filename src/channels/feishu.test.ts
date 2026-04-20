@@ -32,6 +32,11 @@ vi.mock('@larksuiteoapi/node-sdk', () => {
       },
       chat: { list: mockChatList },
     };
+    contact = {
+      user: {
+        get: vi.fn().mockResolvedValue({ data: { user: { name: '测试用户' } } }),
+      },
+    };
   }
   class MockWSClient {
     close = vi.fn();
