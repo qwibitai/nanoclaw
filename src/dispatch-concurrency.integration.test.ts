@@ -496,6 +496,80 @@ describe('Scenario 4: kill switch toggles to sequential — correct dispatch tar
     expect(calledJid).not.toBe('main@g.us');
   });
 
+  it('resolves targetFolder from the worker slot registered group, not the main/CEO folder', async () => {
+    const mockFetch = vi.mocked(agencyFetch);
+    const task = makeAhqTask({ id: 'task-folder-resolve' });
+
+    mockFetch.mockImplementation(async (path: string) => {
+      if (path === '/tasks?status=ready')
+        return mockResponse({ success: true, data: [task] });
+      return mockResponse({ success: true });
+    });
+
+    // Register worker slot groups so dispatchTask can resolve their folders.
+    const deps = {
+      ...makeMockDeps(),
+      registeredGroups: () => ({
+        'main@g.us': {
+          isMain: true as const,
+          folder: 'main',
+          name: 'Main',
+          trigger: '',
+          added_at: '',
+        },
+        'internal:dev-inbox:0': {
+          folder: 'devworker0',
+          name: 'Dev Worker 0',
+          trigger: '',
+          added_at: '',
+        },
+        'internal:dev-inbox:1': {
+          folder: 'devworker1',
+          name: 'Dev Worker 1',
+          trigger: '',
+          added_at: '',
+        },
+        'internal:dev-inbox:2': {
+          folder: 'devworker2',
+          name: 'Dev Worker 2',
+          trigger: '',
+          added_at: '',
+        },
+        'internal:dev-inbox:3': {
+          folder: 'devworker3',
+          name: 'Dev Worker 3',
+          trigger: '',
+          added_at: '',
+        },
+      }),
+    };
+    enableParallelDispatch();
+
+    await dispatchReadyTasks(deps, () => false);
+
+    expect(deps.queue.enqueueTask).toHaveBeenCalledTimes(1);
+
+    // The local task created by dispatchTask is stored in SQLite. Verify its
+    // group_folder is a devworker folder, NOT 'main' or 'ceo'.
+    const calledJid = deps.queue.enqueueTask.mock.calls[0][0] as string;
+    expect(calledJid).toMatch(/^internal:dev-inbox:\d+$/);
+
+    // Extract the slot index from the JID and verify the folder matches.
+    const slotIndex = parseInt(calledJid.split(':')[2], 10);
+    const expectedFolder = `devworker${slotIndex}`;
+
+    // Read the created task from SQLite to verify its group_folder.
+    const { getAllTasks } = await import('./db/index.js');
+    const tasks = getAllTasks();
+    const dispatchedTask = tasks.find((t) =>
+      t.id.startsWith('ahq-task-folder-resolve-'),
+    );
+    expect(dispatchedTask).toBeDefined();
+    expect(dispatchedTask!.group_folder).toBe(expectedFolder);
+    expect(dispatchedTask!.group_folder).not.toBe('main');
+    expect(dispatchedTask!.group_folder).not.toBe('ceo');
+  });
+
   it('reverts to sequential dispatch after kill switch is toggled off mid-session', async () => {
     const mockFetch = vi.mocked(agencyFetch);
     const deps = makeMockDeps();
