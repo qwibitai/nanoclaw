@@ -55,100 +55,134 @@ const server = new McpServer({
   version: '1.0.0',
 });
 
+const searchSchema = {
+  query: z.string().describe('Search query text'),
+  max_results: z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe('Maximum number of results to return (default 20)'),
+};
+
+async function runSearch(args: { query: string; max_results?: number }) {
+  const payload = await requestJson<{
+    count: number;
+    items: unknown[];
+  }>('POST', '/api/search', {
+    query: args.query,
+    maxResults: args.max_results,
+  });
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify(
+          {
+            count: payload.count,
+            items: payload.items,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+  };
+}
+
+const recentSchema = {
+  max_results: z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe('Maximum number of results to return (default 20)'),
+};
+
+async function runRecent(args: { max_results?: number }) {
+  const limit = args.max_results || 20;
+  const payload = await requestJson<{
+    count: number;
+    items: unknown[];
+  }>('GET', `/api/recent?limit=${encodeURIComponent(String(limit))}`);
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify(
+          {
+            count: payload.count,
+            items: payload.items,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+  };
+}
+
+async function runStatus() {
+  const payload = await requestJson<{
+    browserRunning: boolean;
+    loggedIn: boolean;
+    profileDir: string;
+  }>('GET', '/api/status');
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify(payload, null, 2),
+      },
+    ],
+  };
+}
+
+server.tool(
+  'youtube_search_history',
+  'Search YouTube watch history by query text and return matched watched videos.',
+  searchSchema,
+  runSearch,
+);
+
+// Backward-compatible alias.
 server.tool(
   'search_history',
   'Search YouTube watch history by query text and return matched watched videos.',
-  {
-    query: z.string().describe('Search query text'),
-    max_results: z
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .optional()
-      .describe('Maximum number of results to return (default 20)'),
-  },
-  async (args) => {
-    const payload = await requestJson<{
-      count: number;
-      items: unknown[];
-    }>('POST', '/api/search', {
-      query: args.query,
-      maxResults: args.max_results,
-    });
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: JSON.stringify(
-            {
-              count: payload.count,
-              items: payload.items,
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
-  },
+  searchSchema,
+  runSearch,
 );
 
 server.tool(
-  'recent_history',
+  'youtube_recent_history',
   'Fetch most recent YouTube watch history entries.',
-  {
-    max_results: z
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .optional()
-      .describe('Maximum number of results to return (default 20)'),
-  },
-  async (args) => {
-    const limit = args.max_results || 20;
-    const payload = await requestJson<{
-      count: number;
-      items: unknown[];
-    }>('GET', `/api/recent?limit=${encodeURIComponent(String(limit))}`);
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: JSON.stringify(
-            {
-              count: payload.count,
-              items: payload.items,
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
-  },
+  recentSchema,
+  runRecent,
 );
 
+// Backward-compatible alias.
+server.tool(
+  'recent_history',
+  'Fetch most recent YouTube watch history entries.',
+  recentSchema,
+  runRecent,
+);
+
+server.tool(
+  'youtube_status',
+  'Check YouTube history service status and whether login cookies are available.',
+  {},
+  runStatus,
+);
+
+// Backward-compatible alias.
 server.tool(
   'status',
   'Check YouTube history service status and whether login cookies are available.',
   {},
-  async () => {
-    const payload = await requestJson<{
-      browserRunning: boolean;
-      loggedIn: boolean;
-      profileDir: string;
-    }>('GET', '/api/status');
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: JSON.stringify(payload, null, 2),
-        },
-      ],
-    };
-  },
+  runStatus,
 );
 
 const transport = new StdioServerTransport();
