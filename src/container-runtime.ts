@@ -24,7 +24,7 @@ export function readonlyMountArgs(
   hostPath: string,
   containerPath: string,
 ): string[] {
-  return ['-v', `${hostPath}:${containerPath}:ro`];
+  return ['-v', `${hostPath}:${containerPath}:ro,z`];
 }
 
 /** Stop a container by name. Uses execFileSync to avoid shell injection. */
