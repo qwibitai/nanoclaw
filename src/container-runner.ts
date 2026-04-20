@@ -268,16 +268,6 @@ async function buildContainerArgs(
     );
   }
 
-  // Forward Vikunja MCP skill credentials into the agent container when
-  // set on the host. Only forwarded if non-empty so empty values don't
-  // override the MCP server's "not configured" error path.
-  if (process.env.VIKUNJA_URL) {
-    args.push('-e', `VIKUNJA_URL=${process.env.VIKUNJA_URL}`);
-  }
-  if (process.env.VIKUNJA_TOKEN) {
-    args.push('-e', `VIKUNJA_TOKEN=${process.env.VIKUNJA_TOKEN}`);
-  }
-
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
