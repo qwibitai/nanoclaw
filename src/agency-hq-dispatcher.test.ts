@@ -11,6 +11,7 @@ vi.mock('./task-scheduler.js', async (importOriginal) => {
 import { _initTestDatabase } from './db/index.js';
 import {
   _testInternals,
+  reconcileOrphanedDispatches,
   startDispatchLoop,
   startStallDetector,
   stopAgencyHqSubsystems,
@@ -777,6 +778,151 @@ describe('agency-hq-dispatcher', () => {
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(deps.sendMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reconcileOrphanedDispatches', () => {
+    it('reverts orphaned in-progress tasks to ready', async () => {
+      const oldTime = new Date(Date.now() - 10 * 60_000).toISOString(); // 10 min ago
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 'orphan-1',
+              title: 'Orphan',
+              description: 'stuck',
+              status: 'in-progress',
+              dispatched_at: oldTime,
+            },
+          ],
+        }),
+      );
+      // PUT ready
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+
+      await reconcileOrphanedDispatches();
+
+      const putCall = fetchMock.mock.calls.find(
+        (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === 'PUT',
+      );
+      expect(putCall).toBeDefined();
+      const body = JSON.parse(putCall![1]!.body as string);
+      expect(body.status).toBe('ready');
+      expect(body.dispatch_blocked_until).toBeDefined();
+    });
+
+    it('fills placeholder acceptance_criteria when task has none', async () => {
+      const oldTime = new Date(Date.now() - 10 * 60_000).toISOString();
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 'orphan-no-ac',
+              title: 'No AC',
+              description: 'stuck',
+              status: 'in-progress',
+              dispatched_at: oldTime,
+              acceptance_criteria: undefined,
+            },
+          ],
+        }),
+      );
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+
+      await reconcileOrphanedDispatches();
+
+      const putCall = fetchMock.mock.calls.find(
+        (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === 'PUT',
+      );
+      const body = JSON.parse(putCall![1]!.body as string);
+      expect(body.acceptance_criteria).toContain('orphan reconciliation');
+    });
+
+    it('includes sprint_id when task has one', async () => {
+      const oldTime = new Date(Date.now() - 10 * 60_000).toISOString();
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 'orphan-sprint',
+              title: 'With Sprint',
+              description: 'stuck',
+              status: 'in-progress',
+              dispatched_at: oldTime,
+              sprint_id: 'sprint-42',
+            },
+          ],
+        }),
+      );
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+
+      await reconcileOrphanedDispatches();
+
+      const putCall = fetchMock.mock.calls.find(
+        (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === 'PUT',
+      );
+      const body = JSON.parse(putCall![1]!.body as string);
+      expect(body.sprint_id).toBe('sprint-42');
+    });
+
+    it('falls back to penalty-only when ready transition returns 422', async () => {
+      const oldTime = new Date(Date.now() - 10 * 60_000).toISOString();
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 'orphan-422',
+              title: 'Validation fail',
+              description: 'stuck',
+              status: 'in-progress',
+              dispatched_at: oldTime,
+            },
+          ],
+        }),
+      );
+      // First PUT returns 422 (ready transition rejected)
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse(
+          { error: 'target_sprint must be set' },
+          false,
+          422,
+        ),
+      );
+      // Fallback PUT (penalty-only, no status change) succeeds
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+
+      await reconcileOrphanedDispatches();
+
+      // Should have made 3 fetch calls: GET + PUT(422) + PUT(penalty)
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+
+      // The fallback PUT should only set dispatch_blocked_until, not status
+      const fallbackCall = fetchMock.mock.calls[2];
+      const body = JSON.parse(fallbackCall![1]!.body as string);
+      expect(body.dispatch_blocked_until).toBeDefined();
+      expect(body.status).toBeUndefined();
+    });
+
+    it('skips tasks dispatched within threshold', async () => {
+      const recentTime = new Date(Date.now() - 60_000).toISOString(); // 1 min ago
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 'orphan-recent',
+              title: 'Recent',
+              description: 'still running',
+              status: 'in-progress',
+              dispatched_at: recentTime,
+            },
+          ],
+        }),
+      );
+
+      await reconcileOrphanedDispatches();
+
+      // Only the GET, no PUT
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 

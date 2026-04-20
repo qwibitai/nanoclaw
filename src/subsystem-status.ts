@@ -94,6 +94,13 @@ const subsystemDefaults: Array<Omit<SubsystemStatus, 'updatedAt'>> = [
     details: 'Not started yet.',
   },
   {
+    id: 'message-api',
+    label: 'Message API',
+    classification: 'production',
+    state: 'disabled',
+    details: 'Not started yet.',
+  },
+  {
     id: 'meeting-engine',
     label: 'Meeting engine',
     classification: 'experimental',
