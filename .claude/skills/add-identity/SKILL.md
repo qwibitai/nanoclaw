@@ -1,11 +1,11 @@
 ---
 name: add-identity
-description: This skill should be used when the user wants to "add identity resolution", "set up people.json", "configure who can use the assistant", "map employees to channels", "add cross-channel identity", "install the identity layer", or "run add-identity". Installs and configures the NanoClaw cross-channel identity layer: maps @almalab.ai employees to their Slack/Telegram IDs, seeds people.json, wires setIdentityWrapper into src/index.ts, applies the identity DB schema, and verifies cross-channel resolution.
+description: This skill should be used when the user wants to "add identity resolution", "set up people.json", "configure who can use the assistant", "map employees to channels", "add cross-channel identity", "install the identity layer", or "run add-identity". Installs and configures the NanoClaw cross-channel identity layer: maps @almalabs.ai employees to their Slack/Telegram IDs, seeds people.json, wires setIdentityWrapper into src/index.ts, applies the identity DB schema, and verifies cross-channel resolution.
 ---
 
 # Add Cross-Channel Identity
 
-The identity layer resolves inbound messages to a canonical `@almalab.ai` email (the `canonical_id`), attaches it and the person's roles to every message before the agent sees it, and injects `NANOCLAW_CALLER_ID` / `NANOCLAW_CALLER_ROLES` into agent containers for MCP tool authorization. Without this layer all senders are anonymous; with it, the agent knows who triggered each request and MCP servers can gate privileged operations by role.
+The identity layer resolves inbound messages to a canonical `@almalabs.ai` email (the `canonical_id`), attaches it and the person's roles to every message before the agent sees it, and injects `NANOCLAW_CALLER_ID` / `NANOCLAW_CALLER_ROLES` into agent containers for MCP tool authorization. Without this layer all senders are anonymous; with it, the agent knows who triggered each request and MCP servers can gate privileged operations by role.
 
 ## Prerequisites
 
@@ -39,7 +39,7 @@ cat > ~/.config/nanoclaw/people.json << 'EOF'
   "default_role": "member",
   "people": [
     {
-      "canonical_id": "you@almalab.ai",
+      "canonical_id": "you@almalabs.ai",
       "display_name": "Your Name",
       "roles": ["admin"],
       "channels": {
@@ -54,7 +54,7 @@ EOF
 
 Ask the user: "Does people.json exist and is it seeded with at least one admin?" Replace the placeholder values with real data for each person who will use the assistant. Each person needs:
 
-- `canonical_id` — the person's `@almalab.ai` email address; this is the stable key across all channels.
+- `canonical_id` — the person's `@almalabs.ai` email address; this is the stable key across all channels.
 - `display_name` — human-readable name used in logs and agent context.
 - `roles` — array of `"admin"` or `"member"` (or both). Admin status gates privileged slash commands.
 - `channels.slack` — Slack member ID, always starts with `U` (find it via Slack profile → three-dot menu → Copy member ID).

@@ -1,6 +1,6 @@
 # Adding People to people.json
 
-`~/.config/nanoclaw/people.json` is the source of truth for cross-channel identity. Each entry maps a person's `@almalab.ai` email to their channel-specific user IDs. Changes take effect on the next service restart — the config is loaded once at startup.
+`~/.config/nanoclaw/people.json` is the source of truth for cross-channel identity. Each entry maps a person's `@almalabs.ai` email to their channel-specific user IDs. Changes take effect on the next service restart — the config is loaded once at startup.
 
 ## Finding a Slack User ID
 
@@ -22,7 +22,7 @@ To find someone else's Telegram ID, forward one of their messages to `@userinfob
 
 ```json
 {
-  "canonical_id": "alice@almalab.ai",
+  "canonical_id": "alice@almalabs.ai",
   "display_name": "Alice Chen",
   "roles": ["admin"],
   "channels": {
@@ -36,7 +36,7 @@ Fields:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `canonical_id` | yes | `@almalab.ai` email — used as the stable identifier across all channels |
+| `canonical_id` | yes | `@almalabs.ai` email — used as the stable identifier across all channels |
 | `display_name` | yes | Human-readable name shown in logs and agent context |
 | `roles` | yes | Array of `"admin"` or `"member"` — controls which tools and commands the person can access |
 | `channels.slack` | no | Slack member ID (`U...`). Omit if the person does not use Slack. |
@@ -48,7 +48,7 @@ Open `~/.config/nanoclaw/people.json` and append a new object to the `people` ar
 
 ```json
 {
-  "canonical_id": "bob@almalab.ai",
+  "canonical_id": "bob@almalabs.ai",
   "display_name": "Bob Smith",
   "roles": ["member"],
   "channels": {
@@ -73,7 +73,7 @@ Assign multiple roles when a person fills more than one function:
 
 ```json
 {
-  "canonical_id": "carol@almalab.ai",
+  "canonical_id": "carol@almalabs.ai",
   "display_name": "Carol Liu",
   "roles": ["admin", "eng"],
   "channels": {
