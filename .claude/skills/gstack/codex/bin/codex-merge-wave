@@ -161,13 +161,34 @@ if [ -n "$ONLY_TASK" ]; then
   canary_test="$(jq -r '.test_command' "$PLAN_JSON")"
   canary_total_tasks="$(jq '.tasks | length' "$PLAN_JSON")"
   if [ -n "$canary_test" ] && [ "$canary_test" != "null" ] && [ "$canary_total_tasks" != "1" ]; then
-    # Multi-task plan: plan-level test typically needs peer tasks to have
-    # run; under --only-task those are skipped by design. Don't fail the
-    # canary on that condition — just warn + preserve the worktree so
-    # the user can inspect, but keep exit code 0 so tooling can chain.
+    # Multi-task plan: a failing plan-level test is only acceptable if
+    # it's because peer tasks haven't merged yet. Check whether EVERY
+    # task other than the canary is already in terminal-good state; if
+    # so, a failing plan test is a real bug and must be fatal. Otherwise
+    # preserve the worktree + exit 0 with a warning.
     if ! bash -c "$canary_test" >/dev/null 2>&1; then
+      peers_all_merged=1
+      peer_nums="$(jq -r --argjson me "$ONLY_TASK" '.tasks[].num | select(. != $me)' "$PLAN_JSON")"
+      for pn in $peer_nums; do
+        peer_status="$(jq -r --argjson n "$pn" \
+          '.waves[].tasks[] | select(.num == $n) | .status' \
+          "$STATE_JSON" 2>/dev/null || echo "")"
+        case "$peer_status" in
+          merged|passed-gate) : ;;
+          *) peers_all_merged=0 ;;
+        esac
+      done
+      if [ "$peers_all_merged" -eq 1 ]; then
+        echo "ESCALATE --only-task canary: plan-level test failed." >&2
+        echo "  All peer tasks are already merged, so this failure is a" >&2
+        echo "  real bug — not a 'peers not run yet' case." >&2
+        echo "  Squash commit is already on $BASE. Inspect and use" >&2
+        echo "  codex-implement --rollback if you want to revert." >&2
+        echo "  Worktree preserved at $WORK/<slug>." >&2
+        exit 2
+      fi
       echo "WARNING: plan-level test failed under --only-task on a multi-task plan." >&2
-      echo "  This is usually expected — peer tasks haven't merged yet." >&2
+      echo "  Peer tasks haven't all merged yet, so this may be expected." >&2
       echo "  Worktree preserved at $WORK/<slug> for inspection." >&2
       # Preserve worktree; don't tear down; exit 0.
       exit 0

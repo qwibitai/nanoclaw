@@ -218,12 +218,23 @@ process_one() {
   # existing (or pending) fallback result directly. The in-progress subagent
   # edits live in $wt; the marker files may or may not already exist.
   if [ "$resume_fallback" -eq 1 ]; then
-    # If the needs-claude-fallback marker is missing (the prior run had
-    # already consumed it and written a result), we're good. If the result
-    # is missing too, re-emit the request marker so Claude's poll loop
-    # picks it up.
+    # Try to re-gate the existing worktree first. If the prior run was
+    # interrupted right after removing claude-fallback-result but before
+    # codex-gate updated the task status, the subagent's edits are
+    # already in $wt and a fresh gate pass is all we need — no point
+    # re-queueing a fallback request.
     if [ ! -r "$WORK/claude-fallback-result.$WAVE.$num.json" ] && \
        [ ! -r "$WORK/needs-claude-fallback.$WAVE.$num.json" ]; then
+      GATE_ATTEMPT="4-resume-regate" \
+      gate_status="$("$BIN/codex-gate" \
+        --worktree "$wt" --work-dir "$WORK" \
+        --wave "$WAVE" --task "$num" --task-slug "$slug" \
+        --base "$BASE" --test-cmd "$test_cmd" 2>/dev/null || echo FAIL)"
+      if [ "$gate_status" = "PASS" ]; then
+        "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status passed-gate
+        return 0
+      fi
+      # Gate still red → re-queue a fresh fallback request.
       jq -n \
         --argjson w "$WAVE" --argjson t "$num" \
         --arg slug "$slug" --arg wt "$wt" \

@@ -172,6 +172,21 @@ if [ "$ROLLBACK" -eq 1 ]; then
   for s in $shas; do
     git revert --no-edit "$s"
   done
+  # Tear down any sub-worktrees that were preserved by the deferred-teardown
+  # policy, then delete their task branches. Without this, a subsequent run
+  # of the same plan would fail in codex-worktree setup with
+  # "fatal: a branch named codex/<plan>/<slug> already exists".
+  for sl in $(jq -r '.tasks[].slug' "$PLAN_JSON" 2>/dev/null); do
+    [ -z "$sl" ] && continue
+    if [ -d "$WORK/$sl" ]; then
+      "$BIN/codex-worktree" teardown "$WORK" "$sl" > /dev/null 2>&1 || true
+    fi
+    # codex-worktree teardown should delete the branch too; belt-and-braces
+    # in case it didn't (e.g., worktree dir was already gone).
+    if git show-ref --verify --quiet "refs/heads/codex/$plan_slug/$sl"; then
+      git branch -D "codex/$plan_slug/$sl" > /dev/null 2>&1 || true
+    fi
+  done
   rm -rf "$WORK"
   echo "rollback complete; state dir removed"
   exit 0
