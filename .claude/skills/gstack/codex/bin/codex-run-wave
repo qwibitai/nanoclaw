@@ -189,8 +189,26 @@ process_one() {
   resume_fallback=0
   case "$prior_status" in
     claude-fallback)
-      resume_fallback=1
-      # Do NOT touch worktree or fallback marker files.
+      # Normally we preserve everything and resume the fallback flow.
+      # BUT if the worktree is gone (e.g. --resume --force-clean, or the
+      # user manually deleted \$WORK/\<slug\>), the subagent's edits are
+      # already gone — there's nothing to resume. Wipe stale fallback
+      # markers and fall through to a fresh dispatch from attempt 1.
+      if [ -d "$wt" ]; then
+        resume_fallback=1
+        # Do NOT touch worktree or fallback marker files.
+      else
+        rm -f "$sid_file" "$prompt_file" 2>/dev/null || true
+        rm -f "$WORK"/needs-spec-check.$WAVE.$num.*.json \
+              "$WORK"/spec-check-result.$WAVE.$num.*.json \
+              "$WORK"/needs-claude-fallback.$WAVE.$num.json \
+              "$WORK"/claude-fallback-result.$WAVE.$num.json \
+              "$WORK"/findings.$WAVE.$num.*.txt \
+              "$WORK"/findings.$WAVE.$num.*.txt.review \
+              "$WORK"/diff.$WAVE.$num.txt \
+              2>/dev/null || true
+        "$BIN/codex-worktree" setup "$WORK" "$slug" "$BASE" > /dev/null
+      fi
       ;;
     dispatched|gate-check)
       if [ -d "$wt" ]; then
