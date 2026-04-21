@@ -292,14 +292,21 @@ process_one() {
       fb_result="$(echo "$fb_marker" | sed 's/needs-claude-fallback/claude-fallback-result/')"
       [ -r "$fb_result" ] || fb_result=""
     else
-      # No marker: check if a matching result without a surviving marker
-      # is present (marker could have been rm'd by the worker). Use the
-      # NEWEST result file if multiple exist — older ones are stale replies.
-      fb_result="$(find "$WORK" -maxdepth 1 -type f \
+      # No marker: we CANNOT safely pick a result by mtime because a
+      # delayed reply from an older generation might be newer than the
+      # correct current-generation result (or vice versa). Without the
+      # marker to anchor which generation is authoritative, any existing
+      # result file is suspect. Treat this as 'no reply' — the no-marker-
+      # no-result branch below will re-gate (which covers the common
+      # 'prior run consumed the reply but crashed before state update'
+      # case) and only emit a fresh fallback request on gate failure.
+      # Also delete any dangling result files so they can't be consumed
+      # on a later attempt.
+      find "$WORK" -maxdepth 1 -type f \
         \( -name "claude-fallback-result.$WAVE.$num.*.json" \
            -o -name "claude-fallback-result.$WAVE.$num.json" \) \
-        -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -n1)"
-      [ -n "$fb_result" ] && [ -r "$fb_result" ] || fb_result=""
+        -print0 2>/dev/null | xargs -0 rm -f 2>/dev/null || true
+      fb_result=""
     fi
 
     # If no marker AND no result survived, or if a marker survived with no

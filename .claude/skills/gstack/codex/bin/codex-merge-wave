@@ -157,7 +157,21 @@ if [ -z "$ONLY_TASK" ]; then
       global_test=""
     fi
     if [ -n "$global_test" ] && [ "$global_test" != "null" ]; then
-      if ! bash -c "$global_test"; then
+      # Run in a disposable worktree so side-effecting tests that mutate
+      # files before failing don't leave the main checkout dirty (which
+      # would block the next --resume on its clean-tree preflight).
+      final_commit_sha="$(git rev-parse HEAD)"
+      fin_wt="$WORK/.final-test.$$"
+      rm -rf "$fin_wt" 2>/dev/null || true
+      fin_passes=0
+      if git worktree add -q --detach "$fin_wt" "$final_commit_sha" 2>/dev/null; then
+        if (cd "$fin_wt" && bash -c "$global_test"); then
+          fin_passes=1
+        fi
+        git worktree remove -f "$fin_wt" 2>/dev/null || rm -rf "$fin_wt" 2>/dev/null || true
+        git worktree prune 2>/dev/null || true
+      fi
+      if [ "$fin_passes" -eq 0 ]; then
         "$BIN/codex-state" set-wave-status "$WORK" --wave "$WAVE" --status in_progress
         echo "ESCALATE wave=$WAVE reason=post-wave-global-test-failed" >&2
         echo "" >&2
