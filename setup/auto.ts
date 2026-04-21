@@ -7,8 +7,12 @@
  * module check). This driver picks up from there.
  *
  * Config via env:
- *   NANOCLAW_DISPLAY_NAME  operator name for the CLI agent (default: $USER)
- *   NANOCLAW_AGENT_NAME    agent persona name (default: display name)
+ *   NANOCLAW_DISPLAY_NAME  operator name for the CLI agent (default: $USER).
+ *                          Initial value only — after a successful end-to-end
+ *                          ping, the user is prompted to confirm or override
+ *                          (with a probe-inferred name as the default).
+ *   NANOCLAW_AGENT_NAME    agent persona name (default: display name). Same
+ *                          confirm-or-override prompt fires post-ping.
  *   NANOCLAW_SKIP          comma-separated step names to skip
  *                          (environment|container|onecli|auth|
  *                           mounts|service|cli-agent|verify)
@@ -118,6 +122,81 @@ function runBashScript(relPath: string): Promise<number> {
   return new Promise((resolve) => {
     const child = spawn('bash', [relPath], { stdio: 'inherit' });
     child.on('close', (code) => resolve(code ?? 1));
+  });
+}
+
+/**
+ * Resolve the operator's display name from host signals, matching the chain
+ * probe.sh uses for INFERRED_DISPLAY_NAME on the /new-setup path: git global
+ * user.name → platform record (macOS `id -F`, Linux/WSL getent GECOS) →
+ * $USER → "User". Empty strings and "root" are rejected at each step.
+ */
+function inferDisplayName(): string {
+  const accept = (s: string | undefined): string | undefined => {
+    const t = s?.trim();
+    if (!t || t === 'root') return undefined;
+    return t;
+  };
+
+  const git = spawnSync('git', ['config', '--global', 'user.name'], {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  const gitName = accept(git.status === 0 ? git.stdout : undefined);
+  if (gitName) return gitName;
+
+  const user =
+    accept(process.env.USER) ??
+    accept(spawnSync('id', ['-un'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).stdout);
+
+  if (user) {
+    if (process.platform === 'darwin') {
+      const res = spawnSync('id', ['-F', user], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const name = accept(res.status === 0 ? res.stdout : undefined);
+      if (name) return name;
+    } else if (process.platform === 'linux') {
+      // getent ships with glibc — present on WSL Ubuntu/Debian too. On a default
+      // WSL user the GECOS field is empty, so this falls through to $USER.
+      const res = spawnSync('getent', ['passwd', user], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      if (res.status === 0 && res.stdout) {
+        const gecos = res.stdout.split(':')[4] ?? '';
+        const name = accept(gecos.split(',')[0]);
+        if (name) return name;
+      }
+    }
+  }
+
+  return user ?? 'User';
+}
+
+async function promptNames(inferred: string): Promise<{ displayName: string; agentName: string }> {
+  const readline = await import('node:readline/promises');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const dAns = (await rl.question(`\nWhat should your agent call you? [${inferred}] `)).trim();
+    const displayName = dAns || inferred;
+    const aAns = (await rl.question(`What would you like to call your agent? [${displayName}] `)).trim();
+    const agentName = aAns || displayName;
+    return { displayName, agentName };
+  } finally {
+    rl.close();
+  }
+}
+
+function runPing(): Promise<boolean> {
+  return new Promise((resolve) => {
+    console.log(
+      '\n── ping ────────────────────────────────────\n' +
+        '[setup:auto] Sending ping — first container boot can take ~60s…',
+    );
+    const child = spawn('pnpm', ['run', 'chat', 'ping'], { stdio: 'inherit' });
+    child.on('close', (code) => resolve(code === 0));
   });
 }
 
@@ -237,6 +316,30 @@ async function main(): Promise<void> {
         'CLI agent wiring failed',
         'Re-run `pnpm exec tsx scripts/init-cli-agent.ts --display-name "<your name>"` to fix.',
       );
+    }
+  }
+
+  if (!skip.has('finalize') && !skip.has('cli-agent')) {
+    const pingOk = await runPing();
+    if (!pingOk) {
+      console.warn(
+        '\n[setup:auto] CLI agent did not respond to ping. The agent group is\n' +
+          '             wired, but the pipeline may be stuck — check\n' +
+          '             logs/nanoclaw.log. Skipping name prompts.',
+      );
+    } else if (process.stdin.isTTY && process.stdout.isTTY) {
+      const { displayName, agentName } = await promptNames(inferDisplayName());
+      const res = await runStep('rename-agent', [
+        '--display-name',
+        displayName,
+        '--agent-name',
+        agentName,
+      ]);
+      if (!res.ok && res.fields.STATUS !== 'skipped') {
+        console.warn(
+          '[setup:auto] rename-agent step failed — CLI agent keeps its current names.',
+        );
+      }
     }
   }
 
