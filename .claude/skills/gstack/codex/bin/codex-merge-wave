@@ -311,6 +311,47 @@ if [ -n "$ONLY_TASK" ]; then
       # will re-check and complete the plan.
     else
       "$BIN/codex-state" set-wave-status "$WORK" --wave "$WAVE" --status completed
+      # If this non-final-wave merge happens to complete the whole plan
+      # (user canaried a later wave first, then circled back to the
+      # remaining earlier tasks), finalize the plan here: mark the final
+      # wave completed and run the plan-wide cleanup. Otherwise the
+      # previously-canaried final wave would stay in_progress with
+      # preserved worktrees forever, requiring an extra --resume to
+      # finish a plan whose commits are already all on BASE.
+      plan_all_merged_now=1
+      for tn in $(jq -r '.tasks[].num' "$PLAN_JSON"); do
+        tstat="$(jq -r --argjson n "$tn" \
+          '.waves[].tasks[] | select(.num == $n) | .status' \
+          "$STATE_JSON" 2>/dev/null || echo "")"
+        [ "$tstat" = "merged" ] || { plan_all_merged_now=0; break; }
+      done
+      if [ "$plan_all_merged_now" -eq 1 ]; then
+        final_state="$(jq -r --argjson w "$last_wave" \
+          '.waves[] | select(.wave == $w) | .status' \
+          "$STATE_JSON" 2>/dev/null || echo "")"
+        if [ "$final_state" != "completed" ]; then
+          # Run the plan test (canary already passed if canary_plan_test_passed,
+          # else run it now as the whole-plan gate).
+          plan_test="$(jq -r '.test_command' "$PLAN_JSON")"
+          plan_test_ok=1
+          if [ -n "$plan_test" ] && [ "$plan_test" != "null" ] && \
+             [ "$canary_plan_test_passed" -ne 1 ]; then
+            if ! bash -c "$plan_test" >/dev/null 2>&1; then plan_test_ok=0; fi
+          fi
+          if [ "$plan_test_ok" -eq 1 ]; then
+            "$BIN/codex-state" set-wave-status "$WORK" --wave "$last_wave" --status completed
+            teardown_all_plan_worktrees
+          else
+            echo "ESCALATE reason=post-wave-global-test-failed (under --only-task, non-final wave completing plan)" >&2
+            echo "  Plan-level test failed after the last --only-task merge." >&2
+            echo "  Fix and re-run 'codex-implement --resume <plan>'." >&2
+            exit 2
+          fi
+        else
+          # Final wave already completed (canaried earlier). Just clean up.
+          teardown_all_plan_worktrees
+        fi
+      fi
     fi
   fi
 elif [ "$is_final_wave" -eq 1 ]; then
