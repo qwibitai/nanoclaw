@@ -82,12 +82,17 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
-async function sendWithTts(channel: Channel, jid: string, text: string): Promise<void> {
+async function sendWithTts(
+  channel: Channel,
+  jid: string,
+  text: string,
+): Promise<void> {
   const directive = extractTtsDirective(text);
   if (directive && channel.sendVoice) {
     const audio = await synthesize(directive.ttsText);
     if (audio) await channel.sendVoice(jid, audio);
-    if (directive.cleanText) await channel.sendMessage(jid, directive.cleanText);
+    if (directive.cleanText)
+      await channel.sendMessage(jid, directive.cleanText);
   } else {
     await channel.sendMessage(jid, text);
   }

@@ -34,10 +34,7 @@ function getKeys(): { openai?: string; google?: string } {
   };
 }
 
-async function synthesizeGemini(
-  text: string,
-  apiKey: string,
-): Promise<Buffer> {
+async function synthesizeGemini(text: string, apiKey: string): Promise<Buffer> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts-preview:generateContent?key=${apiKey}`;
 
   const resp = await fetch(url, {
@@ -98,10 +95,7 @@ function pcmToOggOpus(pcm: Buffer): Buffer {
   );
 }
 
-async function synthesizeOpenAI(
-  text: string,
-  apiKey: string,
-): Promise<Buffer> {
+async function synthesizeOpenAI(text: string, apiKey: string): Promise<Buffer> {
   const resp = await fetch('https://api.openai.com/v1/audio/speech', {
     method: 'POST',
     headers: {
@@ -130,7 +124,10 @@ export async function synthesize(text: string): Promise<Buffer | null> {
   if (keys.google) {
     try {
       const audio = await synthesizeGemini(text, keys.google);
-      logger.info({ provider: 'gemini', chars: text.length }, 'TTS synthesized');
+      logger.info(
+        { provider: 'gemini', chars: text.length },
+        'TTS synthesized',
+      );
       return audio;
     } catch (err) {
       logger.warn({ err }, 'Gemini TTS failed, trying OpenAI fallback');
@@ -140,7 +137,10 @@ export async function synthesize(text: string): Promise<Buffer | null> {
   if (keys.openai) {
     try {
       const audio = await synthesizeOpenAI(text, keys.openai);
-      logger.info({ provider: 'openai', chars: text.length }, 'TTS synthesized');
+      logger.info(
+        { provider: 'openai', chars: text.length },
+        'TTS synthesized',
+      );
       return audio;
     } catch (err) {
       logger.error({ err }, 'OpenAI TTS failed');
@@ -148,7 +148,9 @@ export async function synthesize(text: string): Promise<Buffer | null> {
   }
 
   if (!keys.google && !keys.openai) {
-    logger.warn('TTS: no API keys configured (GOOGLE_AI_API_KEY / OPENAI_TTS_API_KEY)');
+    logger.warn(
+      'TTS: no API keys configured (GOOGLE_AI_API_KEY / OPENAI_TTS_API_KEY)',
+    );
   }
 
   return null;
