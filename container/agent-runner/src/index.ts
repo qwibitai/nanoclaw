@@ -412,10 +412,13 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
-  // Load global CLAUDE.md as additional system context (shared across all groups)
+  // Load global CLAUDE.md as additional system context (shared across all groups).
+  // Main channels also need this — it's where enforcement rules (email draft approval,
+  // memory system, Notion open items, Snowflake access) live. Previously main channels
+  // were excluded here, causing silent rule drops for the primary user.
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
+  if (fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
@@ -440,8 +443,7 @@ async function runQuery(
     options: {
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
-      resume: sessionId,
-      resumeSessionAt: resumeAt,
+      ...(sessionId ? { resume: sessionId, resumeSessionAt: resumeAt } : {}),
       systemPrompt: globalClaudeMd
         ? {
             type: 'preset' as const,
@@ -475,6 +477,7 @@ async function runQuery(
         'mcp__googleworkspace__*',
         'mcp__notion__*',
         'mcp__granola__*',
+        'mcp__snowflake__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -523,6 +526,23 @@ async function runQuery(
             args: ['/usr/local/lib/granola-mcp-server.js'],
             env: {
               GRANOLA_API_KEY: process.env.GRANOLA_API_KEY,
+            },
+          },
+        } : {}),
+        ...(process.env.SNOWFLAKE_ACCOUNT && process.env.SNOWFLAKE_PRIVATE_KEY_FILE ? {
+          snowflake: {
+            command: '/opt/snowflake-mcp-venv/bin/snowflake-labs-mcp',
+            args: [
+              '--service-config-file',
+              '/etc/snowflake-tools-config.yaml',
+            ],
+            env: {
+              SNOWFLAKE_ACCOUNT: process.env.SNOWFLAKE_ACCOUNT,
+              SNOWFLAKE_USER: process.env.SNOWFLAKE_USER || '',
+              SNOWFLAKE_ROLE: process.env.SNOWFLAKE_ROLE || '',
+              SNOWFLAKE_WAREHOUSE: process.env.SNOWFLAKE_WAREHOUSE || '',
+              SNOWFLAKE_AUTHENTICATOR: 'SNOWFLAKE_JWT',
+              SNOWFLAKE_PRIVATE_KEY_FILE: process.env.SNOWFLAKE_PRIVATE_KEY_FILE,
             },
           },
         } : {}),

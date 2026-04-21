@@ -49,6 +49,18 @@ RUN git clone --depth 1 https://github.com/VolksRat71/google-workspace-mcp.git /
 # Copy Granola MCP server (lightweight custom server, no npm package)
 COPY patches/granola-mcp-server.js /usr/local/lib/granola-mcp-server.js
 
+# Install Python + Snowflake MCP server (Snowflake-Labs/mcp). Uses a venv to
+# keep system Python clean. Pinned snowflake-labs-mcp to avoid surprise
+# upgrades breaking the agent's tool calls.
+RUN apt-get update && apt-get install -y python3 python3-venv python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+RUN python3 -m venv /opt/snowflake-mcp-venv \
+    && /opt/snowflake-mcp-venv/bin/pip install --no-cache-dir snowflake-labs-mcp
+
+# Tools config driving which Snowflake capabilities the MCP exposes. Mounted
+# as read-only so the agent can't mutate it.
+COPY patches/snowflake-tools-config.yaml /etc/snowflake-tools-config.yaml
+
 # Create app directory
 WORKDIR /app
 

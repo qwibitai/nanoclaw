@@ -99,6 +99,17 @@ function buildVolumeMounts(
       readonly: false,
     });
 
+    // COO pre-fetch cache — writable so the coo-prefetch skill can save
+    // ProfitSword/Snowflake/Toast data to disk for the 3:45am briefing.
+    const cooPrefetchDir = path.join(projectRoot, 'data', 'coo-prefetch');
+    if (!fs.existsSync(cooPrefetchDir))
+      fs.mkdirSync(cooPrefetchDir, { recursive: true });
+    mounts.push({
+      hostPath: cooPrefetchDir,
+      containerPath: '/workspace/project/data/coo-prefetch',
+      readonly: false,
+    });
+
     // Main also gets its group folder as the working directory
     mounts.push({
       hostPath: groupDir,
@@ -226,6 +237,21 @@ function buildVolumeMounts(
     });
   }
 
+  // Snowflake private key (single file, read-only). Container uses it to sign
+  // JWTs for Snowflake key-pair authentication.
+  const snowflakeKey = path.join(
+    homeDir,
+    '.snowflake',
+    'perplexity_computer_use.p8',
+  );
+  if (fs.existsSync(snowflakeKey)) {
+    mounts.push({
+      hostPath: snowflakeKey,
+      containerPath: '/home/node/.snowflake/perplexity_computer_use.p8',
+      readonly: true,
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -289,6 +315,11 @@ function buildContainerArgs(
   containerName: string,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+
+  // Cap memory per container so a runaway container hits a predictable limit
+  // rather than triggering the kernel OOM killer against unrelated processes.
+  // 2GB is ~3x current peak usage (~600MB). OOMKilled containers exit 137.
+  args.push('--memory=2g', '--memory-swap=2g');
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -359,6 +390,42 @@ function buildContainerArgs(
   const granolaEnv = readEnvFile(['GRANOLA_API_KEY']);
   if (granolaEnv.GRANOLA_API_KEY) {
     args.push('-e', `GRANOLA_API_KEY=${granolaEnv.GRANOLA_API_KEY}`);
+  }
+
+  // Toast POS API credentials (for F&B revenue in COO briefing)
+  const toastEnv = readEnvFile(['TOAST_CLIENT_ID', 'TOAST_CLIENT_SECRET']);
+  if (toastEnv.TOAST_CLIENT_ID) {
+    args.push('-e', `TOAST_CLIENT_ID=${toastEnv.TOAST_CLIENT_ID}`);
+    args.push(
+      '-e',
+      `TOAST_CLIENT_SECRET=${toastEnv.TOAST_CLIENT_SECRET || ''}`,
+    );
+  }
+
+  // Snowflake MCP: pass connection params via env, mount private key file read-only.
+  // We never ship the key as an env var (it'd leak into process listings / logs).
+  const snowflakeKeyPath = path.join(
+    os.homedir(),
+    '.snowflake',
+    'perplexity_computer_use.p8',
+  );
+  if (fs.existsSync(snowflakeKeyPath)) {
+    const sfEnv = readEnvFile([
+      'SNOWFLAKE_ACCOUNT',
+      'SNOWFLAKE_USER',
+      'SNOWFLAKE_ROLE',
+      'SNOWFLAKE_WAREHOUSE',
+    ]);
+    if (sfEnv.SNOWFLAKE_ACCOUNT) {
+      args.push('-e', `SNOWFLAKE_ACCOUNT=${sfEnv.SNOWFLAKE_ACCOUNT}`);
+      args.push('-e', `SNOWFLAKE_USER=${sfEnv.SNOWFLAKE_USER || ''}`);
+      args.push('-e', `SNOWFLAKE_ROLE=${sfEnv.SNOWFLAKE_ROLE || ''}`);
+      args.push('-e', `SNOWFLAKE_WAREHOUSE=${sfEnv.SNOWFLAKE_WAREHOUSE || ''}`);
+      args.push(
+        '-e',
+        'SNOWFLAKE_PRIVATE_KEY_FILE=/home/node/.snowflake/perplexity_computer_use.p8',
+      );
+    }
   }
 
   // Runtime-specific args for host gateway resolution
