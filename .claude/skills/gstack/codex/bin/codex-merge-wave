@@ -105,15 +105,24 @@ done
 # invariant, and other tasks still need to run later). Also don't tear down
 # worktrees for the unmerged tasks in that wave.
 if [ -z "$ONLY_TASK" ]; then
-  global_test="$(jq -r '.test_command' "$PLAN_JSON")"
-  if [ -n "$global_test" ] && [ "$global_test" != "null" ]; then
-    if ! bash -c "$global_test"; then
-      "$BIN/codex-state" set-wave-status "$WORK" --wave "$WAVE" --status in_progress
-      echo "ESCALATE wave=$WAVE reason=post-wave-global-test-failed" >&2
-      echo "  task worktrees preserved at $WORK/<slug> for inspection." >&2
-      echo "  After fixing the underlying cause, re-run with --resume to" >&2
-      echo "  retry the global test." >&2
-      exit 2
+  # Only run the plan-level test_command after the FINAL wave. Running it
+  # between waves would break any plan where a later wave produces the
+  # artifact the test inspects (e.g. Wave 2 derives dst.txt from Wave 1's
+  # src.txt). Per-wave invariants are the plan author's responsibility via
+  # per-task Run: lines and codex review. The plan-level command is the
+  # whole-plan acceptance test.
+  last_wave="$(jq -r '[.waves[].wave] | max' "$PLAN_JSON")"
+  if [ "$WAVE" = "$last_wave" ]; then
+    global_test="$(jq -r '.test_command' "$PLAN_JSON")"
+    if [ -n "$global_test" ] && [ "$global_test" != "null" ]; then
+      if ! bash -c "$global_test"; then
+        "$BIN/codex-state" set-wave-status "$WORK" --wave "$WAVE" --status in_progress
+        echo "ESCALATE wave=$WAVE reason=post-wave-global-test-failed" >&2
+        echo "  task worktrees preserved at $WORK/<slug> for inspection." >&2
+        echo "  After fixing the underlying cause, re-run with --resume to" >&2
+        echo "  retry the global test." >&2
+        exit 2
+      fi
     fi
   fi
   "$BIN/codex-state" set-wave-status "$WORK" --wave "$WAVE" --status completed
