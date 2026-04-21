@@ -166,10 +166,7 @@ export class SlackChannel implements Channel {
           const att = await processImageBuffer(buf, file.mimetype);
           if (att) images.push(att);
         } catch (err) {
-          logger.warn(
-            { fileId: file.id, err },
-            'Slack image processing error',
-          );
+          logger.warn({ fileId: file.id, err }, 'Slack image processing error');
         }
       }
 
