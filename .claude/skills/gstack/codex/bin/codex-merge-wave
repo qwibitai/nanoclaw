@@ -105,22 +105,25 @@ done
 # invariant, and other tasks still need to run later). Also don't tear down
 # worktrees for the unmerged tasks in that wave.
 if [ -z "$ONLY_TASK" ]; then
-  # Only run the plan-level test_command after the FINAL wave. Running it
-  # between waves would break any plan where a later wave produces the
-  # artifact the test inspects (e.g. Wave 2 derives dst.txt from Wave 1's
-  # src.txt). Per-wave invariants are the plan author's responsibility via
-  # per-task Run: lines and codex review. The plan-level command is the
-  # whole-plan acceptance test.
-  last_wave="$(jq -r '[.waves[].wave] | max' "$PLAN_JSON")"
-  if [ "$WAVE" = "$last_wave" ]; then
+  # Plan-level test_command runs only after the LAST declared wave (waves
+  # execute in declaration order, not numeric order — so use the last
+  # element of .waves[], not max of .waves[].wave). Running the test
+  # earlier would break any plan where a later wave produces the artifact
+  # the test inspects.
+  last_wave="$(jq -r '.waves[-1].wave' "$PLAN_JSON")"
+  is_final_wave=0
+  if [ "$WAVE" = "$last_wave" ]; then is_final_wave=1; fi
+
+  if [ "$is_final_wave" -eq 1 ]; then
     global_test="$(jq -r '.test_command' "$PLAN_JSON")"
     if [ -n "$global_test" ] && [ "$global_test" != "null" ]; then
       if ! bash -c "$global_test"; then
         "$BIN/codex-state" set-wave-status "$WORK" --wave "$WAVE" --status in_progress
         echo "ESCALATE wave=$WAVE reason=post-wave-global-test-failed" >&2
-        echo "  task worktrees preserved at $WORK/<slug> for inspection." >&2
-        echo "  After fixing the underlying cause, re-run with --resume to" >&2
-        echo "  retry the global test." >&2
+        echo "  task worktrees preserved at $WORK/<slug> for inspection" >&2
+        echo "  (this includes tasks from every wave in the plan, because" >&2
+        echo "  the plan-level test could fail due to a bug merged in any" >&2
+        echo "  earlier wave). After fixing, re-run with --resume." >&2
         exit 2
       fi
     fi
@@ -128,27 +131,50 @@ if [ -z "$ONLY_TASK" ]; then
   "$BIN/codex-state" set-wave-status "$WORK" --wave "$WAVE" --status completed
 fi
 
-# Global test green (or no global test, or --only-task): safe to tear down
-# the worktrees/branches we merged this run. Also tear down any slugs that
-# were merged on a prior --resume (task status=merged) whose worktree
-# directory still exists — they were deferred because that earlier run hit
-# the failed-test path and never got here.
-if [ -z "$ONLY_TASK" ]; then
-  deferred_slugs="$(jq -r --argjson w "$WAVE" \
-    '.waves[] | select(.wave == $w) | .tasks[] | select(.status == "merged") | .slug' \
-    "$STATE_JSON" 2>/dev/null || true)"
-  for sl in $merged_this_run_slugs $deferred_slugs; do
+# Teardown policy:
+#   * `--only-task`: only the single merged task's worktree goes; every other
+#     slug is untouched. BUT we also run the plan-level test as a minimum
+#     sanity gate — a canary run with no Run: line and no plan-level check
+#     would otherwise land with zero verification. If the plan-level test
+#     fails under --only-task, leave the worktree in place and escalate.
+#   * Full plan, non-final wave: preserve every merged-this-wave worktree.
+#     If a later wave's plan-level test fails, we want earlier-wave
+#     worktrees still inspectable / repairable.
+#   * Full plan, final wave, plan test green: tear down EVERY slug in the
+#     whole plan that still has a worktree (accumulated across all waves).
+if [ -n "$ONLY_TASK" ]; then
+  # --only-task sanity gate: run the plan-level test for extra safety.
+  # If it fails for reasons unrelated to the missing peer tasks, that's
+  # a real signal. If it fails because of missing peers, the user knew
+  # they were canary-running a single task and can inspect the worktree.
+  # Non-fatal: we still tear down on pass, preserve on fail.
+  canary_test="$(jq -r '.test_command' "$PLAN_JSON")"
+  canary_pass=1
+  if [ -n "$canary_test" ] && [ "$canary_test" != "null" ]; then
+    if ! bash -c "$canary_test" >/dev/null 2>&1; then
+      canary_pass=0
+      echo "WARNING: plan-level test failed under --only-task." >&2
+      echo "  This may be expected (peer tasks haven't run yet)." >&2
+      echo "  Worktree preserved at $WORK/<slug> for inspection." >&2
+    fi
+  fi
+  if [ "$canary_pass" -eq 1 ]; then
+    for sl in $merged_this_run_slugs; do
+      [ -z "$sl" ] && continue
+      "$BIN/codex-worktree" teardown "$WORK" "$sl" > /dev/null 2>&1 || true
+    done
+  fi
+elif [ "$is_final_wave" -eq 1 ]; then
+  # Final wave green: tear down every worktree accumulated across the plan.
+  all_slugs="$(jq -r '.tasks[].slug' "$PLAN_JSON")"
+  for sl in $all_slugs; do
     [ -z "$sl" ] && continue
     if [ -d "$WORK/$sl" ]; then
       "$BIN/codex-worktree" teardown "$WORK" "$sl" > /dev/null 2>&1 || true
     fi
   done
-else
-  # --only-task: tear down only the single task we merged (if any).
-  for sl in $merged_this_run_slugs; do
-    [ -z "$sl" ] && continue
-    "$BIN/codex-worktree" teardown "$WORK" "$sl" > /dev/null 2>&1 || true
-  done
 fi
+# Non-final wave (full plan): do NOT tear down any worktrees; preserve
+# them so a later final-wave test failure remains recoverable.
 
 exit 0
