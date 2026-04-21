@@ -165,14 +165,13 @@ if [ -z "$ONLY_TASK" ]; then
         echo "  (every wave in the plan — the plan test could fail on a bug" >&2
         echo "  from any earlier wave)." >&2
         echo "" >&2
-        echo "  TO REPAIR:" >&2
-        echo "  (a) edit the code and commit the fix directly on $BASE," >&2
-        echo "      then run 'codex-implement --resume <plan>'. Resume" >&2
-        echo "      re-runs ONLY the plan-level test; it does not" >&2
-        echo "      re-dispatch or re-squash merged tasks." >&2
-        echo "  (b) run 'codex-implement --rollback <plan>' to revert every" >&2
-        echo "      squash commit from this plan, then re-run from scratch" >&2
-        echo "      after fixing the plan itself." >&2
+        echo "  TO REPAIR: run 'codex-implement --rollback <plan>' to revert" >&2
+        echo "  every squash commit from this plan, then fix the plan itself" >&2
+        echo "  (per-task Run: lines, plan-level Test command:, task specs)" >&2
+        echo "  and re-run from scratch. Direct ad-hoc commits on $BASE are" >&2
+        echo "  NOT tracked by --rollback and can leave orphan changes or" >&2
+        echo "  cause revert conflicts on a later rollback; fix the plan so" >&2
+        echo "  its own tasks produce the correct acceptance state." >&2
         exit 2
       fi
       # Plan test just passed — persist the flag so later --resume runs
@@ -301,6 +300,21 @@ if [ -n "$ONLY_TASK" ]; then
       echo "  Peer tasks likely haven't all merged yet. Worktree preserved" >&2
       echo "  at $WORK/<slug> for inspection." >&2
       rm -f "$post_output_file" "$pre_output_file" 2>/dev/null || true
+      # Peer-missing at PLAN level doesn't mean peer-missing at WAVE level.
+      # If this canary merge completes the current wave's own tasks, mark
+      # the wave completed so later --resume doesn't revisit it (the plan
+      # as a whole is incomplete, but THIS WAVE is done).
+      wave_all_merged_pm=1
+      for tn in $(jq -r --argjson w "$WAVE" \
+        '.waves[] | select(.wave == $w) | .tasks[]' "$PLAN_JSON"); do
+        tstat_pm="$(jq -r --argjson n "$tn" \
+          '.waves[].tasks[] | select(.num == $n) | .status' \
+          "$STATE_JSON" 2>/dev/null || echo "")"
+        [ "$tstat_pm" = "merged" ] || { wave_all_merged_pm=0; break; }
+      done
+      if [ "$wave_all_merged_pm" -eq 1 ] && [ "$is_final_wave" -ne 1 ]; then
+        "$BIN/codex-state" set-wave-status "$WORK" --wave "$WAVE" --status completed
+      fi
       # Preserve worktree; don't tear down; exit 0.
       exit 0
     else
