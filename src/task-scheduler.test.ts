@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { _initTestDatabase, createTask, getTaskById } from './db.js';
+import { runContainerAgent } from './container-runner.js';
 import {
   _resetSchedulerLoopForTests,
   computeNextRun,
   startSchedulerLoop,
 } from './task-scheduler.js';
+
+vi.mock('./container-runner.js', () => ({
+  runContainerAgent: vi.fn(),
+  writeTasksSnapshot: vi.fn(),
+}));
 
 describe('task scheduler', () => {
   beforeEach(() => {
@@ -125,5 +131,59 @@ describe('task scheduler', () => {
     const offset =
       (new Date(nextRun!).getTime() - new Date(scheduledTime).getTime()) % ms;
     expect(offset).toBe(0);
+  });
+
+  it('closes silent scheduled-task containers after success', async () => {
+    createTask({
+      id: 'task-silent-success',
+      group_folder: 'main',
+      chat_jid: 'feishu:test',
+      prompt: 'silent task',
+      schedule_type: 'once',
+      schedule_value: '2026-03-09T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-03-09T00:00:00.000Z',
+    });
+
+    vi.mocked(runContainerAgent).mockImplementation(
+      async (_group, _input, _onProcess, onOutput) => {
+        await onOutput?.({ status: 'success', result: null });
+        await new Promise((resolve) => setTimeout(resolve, 11_000));
+        return { status: 'success', result: null };
+      },
+    );
+
+    const closeStdin = vi.fn();
+    const notifyIdle = vi.fn();
+    const enqueueTask = vi.fn(
+      async (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+        await fn();
+      },
+    );
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'feishu:test': {
+          name: 'Feishu Private',
+          folder: 'main',
+          trigger: '@Andy',
+          added_at: '2026-03-09T00:00:00.000Z',
+          requiresTrigger: false,
+          isMain: true,
+        },
+      }),
+      getSessions: () => ({}),
+      queue: { enqueueTask, closeStdin, notifyIdle } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(notifyIdle).toHaveBeenCalledWith('feishu:test');
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(closeStdin).toHaveBeenCalledWith('feishu:test');
   });
 });
