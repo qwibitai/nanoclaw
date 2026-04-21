@@ -88,11 +88,23 @@ stage_spec() {
   local diff_file="$WORK/diff.$WAVE.$TASK.txt"
   (cd "$WT" && git diff "$BASE"...HEAD 2>/dev/null) > "$diff_file" || true
 
+  # PROTOCOL.md says the marker should carry plan_goal, plan_architecture, and
+  # task_body so a Claude Task() spec-reviewer can render the spec-reviewer
+  # prompt without re-reading plan.json. Include them if we can find plan.json.
+  local plan_json="$WORK/plan.json"
+  local goal="" arch="" task_body=""
+  if [ -r "$plan_json" ]; then
+    goal="$(jq -r '.goal // ""' "$plan_json" 2>/dev/null)"
+    arch="$(jq -r '.architecture // ""' "$plan_json" 2>/dev/null)"
+    task_body="$(jq -r --argjson n "$TASK" '.tasks[] | select(.num == $n) | .body // ""' "$plan_json" 2>/dev/null)"
+  fi
+
   jq -n \
     --argjson w "$WAVE" --argjson t "$TASK" \
     --arg base "$BASE" --arg wt "$WT" \
     --arg diff "$diff_file" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{wave:$w, task:$t, base:$base, worktree_path:$wt, diff_file:$diff, requested_at:$now}' \
+    --arg goal "$goal" --arg arch "$arch" --arg body "$task_body" \
+    '{wave:$w, task:$t, task_body:$body, plan_goal:$goal, plan_architecture:$arch, base:$base, worktree_path:$wt, diff_file:$diff, requested_at:$now}' \
     > "$MARKER_IN.tmp"
   mv "$MARKER_IN.tmp" "$MARKER_IN"
 
