@@ -17,9 +17,25 @@ echo "=== Backup run: $(date) ==="
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
 
+# Integrity-check source before backing up. A corrupt DB should fail loudly,
+# not get silently mirrored off-site for 14 days until the local copy is gone too.
+SOURCE_CHECK=$(sqlite3 "${PROJECT_DIR}/store/messages.db" "PRAGMA integrity_check;" 2>&1 | head -1)
+if [ "$SOURCE_CHECK" != "ok" ]; then
+  echo "ERROR: source DB integrity_check failed: $SOURCE_CHECK"
+  echo "Aborting off-site backup. Run .recover manually and inspect."
+  exit 2
+fi
+
 # Use SQLite .backup to get a consistent snapshot of the live database
 sqlite3 "${PROJECT_DIR}/store/messages.db" ".backup '${STAGING_DIR}/messages.db'"
 echo "SQLite snapshot: $(ls -lh ${STAGING_DIR}/messages.db | awk '{print $5}')"
+
+# Verify the snapshot before shipping it to Drive
+SNAPSHOT_CHECK=$(sqlite3 "${STAGING_DIR}/messages.db" "PRAGMA integrity_check;" 2>&1 | head -1)
+if [ "$SNAPSHOT_CHECK" != "ok" ]; then
+  echo "ERROR: snapshot failed integrity_check: $SNAPSHOT_CHECK"
+  exit 3
+fi
 
 # Copy critical configuration files
 cp "${PROJECT_DIR}/.env" "${STAGING_DIR}/.env" 2>/dev/null || echo "WARN: .env not found"

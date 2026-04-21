@@ -29,7 +29,16 @@ if (!clientId || !tenantId) {
   process.exit(1);
 }
 
-const scopes = ['Mail.Read', 'Mail.Send', 'User.Read', 'offline_access'];
+const scopes = [
+  'Mail.Read', 'Mail.ReadWrite', 'Mail.Send',
+  'User.Read',
+  'Calendars.Read', 'Calendars.ReadWrite',
+  'Contacts.Read', 'Contacts.ReadWrite',
+  'Tasks.Read', 'Tasks.ReadWrite',
+  'Files.Read.All',
+  'Sites.Read.All',
+  'offline_access',
+];
 
 const pca = new PublicClientApplication({
   auth: {
@@ -41,6 +50,7 @@ const pca = new PublicClientApplication({
 async function main() {
   const request: DeviceCodeRequest = {
     scopes,
+    extraQueryParameters: { prompt: 'consent' },
     deviceCodeCallback: (response) => {
       console.log('\n' + response.message + '\n');
     },
