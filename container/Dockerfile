@@ -3,7 +3,7 @@
 
 FROM node:22-slim
 
-# Install system dependencies for Chromium
+# Install system dependencies for Chromium and PDF processing
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
@@ -24,7 +24,21 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    poppler-utils \
+    qpdf \
+    python3 \
+    python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Python libraries for the pdf container skill.
+# Anthropic's pdf skill (container/skills/pdf/) uses pypdf for basic
+# operations and pdfplumber for text/table extraction. Both are small,
+# pure-Python packages. Installed into a shared venv so the agent can
+# invoke them via `/opt/pdf-venv/bin/python`.
+RUN python3 -m venv /opt/pdf-venv \
+    && /opt/pdf-venv/bin/pip install --no-cache-dir pypdf pdfplumber reportlab \
+    && ln -s /opt/pdf-venv/bin/python /usr/local/bin/pdf-python
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
