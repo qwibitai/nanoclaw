@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 import { App, LogLevel } from '@slack/bolt';
 import type { GenericMessageEvent, BotMessageEvent } from '@slack/types';
 
@@ -36,7 +39,15 @@ export class SlackChannel implements Channel {
   private app: App;
   private botUserId: string | undefined;
   private connected = false;
-  private outgoingQueue: Array<{ jid: string; text: string }> = [];
+  private outgoingQueue: Array<
+    | { kind: 'text'; jid: string; text: string }
+    | {
+        kind: 'image';
+        jid: string;
+        imagePaths: string[];
+        caption?: string;
+      }
+  > = [];
   private flushing = false;
   private userNameCache = new Map<string, string>();
   private botToken: string;
@@ -214,7 +225,7 @@ export class SlackChannel implements Channel {
     const channelId = jid.replace(/^slack:/, '');
 
     if (!this.connected) {
-      this.outgoingQueue.push({ jid, text });
+      this.outgoingQueue.push({ kind: 'text', jid, text });
       logger.info(
         { jid, queueSize: this.outgoingQueue.length },
         'Slack disconnected, message queued',
@@ -236,10 +247,43 @@ export class SlackChannel implements Channel {
       }
       logger.info({ jid, length: text.length }, 'Slack message sent');
     } catch (err) {
-      this.outgoingQueue.push({ jid, text });
+      this.outgoingQueue.push({ kind: 'text', jid, text });
       logger.warn(
         { jid, err, queueSize: this.outgoingQueue.length },
         'Failed to send Slack message, queued',
+      );
+    }
+  }
+
+  async sendImage(
+    jid: string,
+    imagePaths: string[],
+    caption?: string,
+  ): Promise<void> {
+    const channelId = jid.replace(/^slack:/, '');
+    if (!this.connected) {
+      this.outgoingQueue.push({ kind: 'image', jid, imagePaths, caption });
+      logger.info(
+        { jid, count: imagePaths.length, queueSize: this.outgoingQueue.length },
+        'Slack disconnected, image queued',
+      );
+      return;
+    }
+    try {
+      await this.app.client.files.uploadV2({
+        channel_id: channelId,
+        initial_comment: caption,
+        file_uploads: imagePaths.map((p) => ({
+          file: fs.createReadStream(p),
+          filename: path.basename(p),
+        })),
+      });
+      logger.info({ jid, count: imagePaths.length }, 'Slack image(s) sent');
+    } catch (err) {
+      this.outgoingQueue.push({ kind: 'image', jid, imagePaths, caption });
+      logger.warn(
+        { jid, err, queueSize: this.outgoingQueue.length },
+        'Failed to send Slack image, queued',
       );
     }
   }
@@ -326,14 +370,29 @@ export class SlackChannel implements Channel {
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
         const channelId = item.jid.replace(/^slack:/, '');
-        await this.app.client.chat.postMessage({
-          channel: channelId,
-          text: item.text,
-        });
-        logger.info(
-          { jid: item.jid, length: item.text.length },
-          'Queued Slack message sent',
-        );
+        if (item.kind === 'text') {
+          await this.app.client.chat.postMessage({
+            channel: channelId,
+            text: item.text,
+          });
+          logger.info(
+            { jid: item.jid, length: item.text.length },
+            'Queued Slack text sent',
+          );
+        } else {
+          await this.app.client.files.uploadV2({
+            channel_id: channelId,
+            initial_comment: item.caption,
+            file_uploads: item.imagePaths.map((p) => ({
+              file: fs.createReadStream(p),
+              filename: path.basename(p),
+            })),
+          });
+          logger.info(
+            { jid: item.jid, count: item.imagePaths.length },
+            'Queued Slack image(s) sent',
+          );
+        }
       }
     } finally {
       this.flushing = false;
