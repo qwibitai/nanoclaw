@@ -216,11 +216,15 @@ if [ -n "$ONLY_TASK" ]; then
     [ -z "$sl" ] && continue
     "$BIN/codex-worktree" teardown "$WORK" "$sl" > /dev/null 2>&1 || true
   done
-  # Wave completion after a successful --only-task canary: check whether
-  # every task IN THIS CURRENT WAVE is now in state 'merged'. If so, mark
-  # the wave completed so subsequent --resume runs don't revisit it.
-  # (We don't care about peers in other waves here — that's their wave's
-  # responsibility to complete.)
+  # Wave completion after a successful --only-task canary. Two cases:
+  # (a) This is NOT the final wave: mark completed once its own tasks are
+  #     all merged. The plan-level test isn't run here — that's the
+  #     final wave's job.
+  # (b) This IS the final wave: only mark completed if EVERY task across
+  #     the whole plan is now merged AND the plan-level test passes.
+  #     Otherwise a canary run of just the final wave's tasks would skip
+  #     the plan test and be recorded as completed, so a later --resume
+  #     of the earlier waves would bypass plan validation entirely.
   wave_all_merged=1
   for tn in $(jq -r --argjson w "$WAVE" \
     '.waves[] | select(.wave == $w) | .tasks[]' "$PLAN_JSON"); do
@@ -230,7 +234,36 @@ if [ -n "$ONLY_TASK" ]; then
     [ "$tstat" = "merged" ] || { wave_all_merged=0; break; }
   done
   if [ "$wave_all_merged" -eq 1 ]; then
-    "$BIN/codex-state" set-wave-status "$WORK" --wave "$WAVE" --status completed
+    if [ "$is_final_wave" -eq 1 ]; then
+      # Require all plan tasks merged + plan test green before completion.
+      plan_all_merged=1
+      for tn in $(jq -r '.tasks[].num' "$PLAN_JSON"); do
+        tstat="$(jq -r --argjson n "$tn" \
+          '.waves[].tasks[] | select(.num == $n) | .status' \
+          "$STATE_JSON" 2>/dev/null || echo "")"
+        [ "$tstat" = "merged" ] || { plan_all_merged=0; break; }
+      done
+      if [ "$plan_all_merged" -eq 1 ]; then
+        plan_test="$(jq -r '.test_command' "$PLAN_JSON")"
+        plan_test_ok=1
+        if [ -n "$plan_test" ] && [ "$plan_test" != "null" ]; then
+          if ! bash -c "$plan_test" >/dev/null 2>&1; then plan_test_ok=0; fi
+        fi
+        if [ "$plan_test_ok" -eq 1 ]; then
+          "$BIN/codex-state" set-wave-status "$WORK" --wave "$WAVE" --status completed
+        else
+          echo "ESCALATE wave=$WAVE reason=post-wave-global-test-failed (under --only-task)" >&2
+          echo "  Plan-level test failed after the last --only-task merge." >&2
+          echo "  Fix and re-run 'codex-implement --resume <plan>'." >&2
+          exit 2
+        fi
+      fi
+      # Otherwise: earlier waves still have unmerged peers. Leave the
+      # final wave in_progress; a later invocation that merges those peers
+      # will re-check and complete the plan.
+    else
+      "$BIN/codex-state" set-wave-status "$WORK" --wave "$WAVE" --status completed
+    fi
   fi
 elif [ "$is_final_wave" -eq 1 ]; then
   # Final wave green: tear down every worktree accumulated across the plan.
