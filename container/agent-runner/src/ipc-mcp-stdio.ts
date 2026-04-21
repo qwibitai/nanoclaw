@@ -11,9 +11,32 @@ import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
+export function validateImagePath(
+  input: string,
+  workspaceRoot: string,
+  fsImpl: { existsSync: (p: string) => boolean } = fs,
+):
+  | { ok: true; absolute: string; relative: string }
+  | { ok: false; error: string } {
+  const abs = path.resolve(workspaceRoot, input);
+  if (abs !== workspaceRoot && !abs.startsWith(workspaceRoot + path.sep)) {
+    return { ok: false, error: `Path escapes group workspace: ${input}` };
+  }
+  if (!fsImpl.existsSync(abs)) {
+    return { ok: false, error: `File not found: ${input}` };
+  }
+  return {
+    ok: true,
+    absolute: abs,
+    relative: path.relative(workspaceRoot, abs),
+  };
+}
+
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const IMAGES_DIR = path.join(IPC_DIR, 'images');
+const WORKSPACE_ROOT = '/workspace/group';
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -64,6 +87,52 @@ server.tool(
     writeIpcFile(MESSAGES_DIR, data);
 
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+  },
+);
+
+server.tool(
+  'send_image',
+  "Send one or more images to the user or group. Images must be files that already exist inside your group workspace (/workspace/group/**). Pass a single path or an array of up to 10 paths; an array produces a single message with multiple image attachments (album). Paths may be relative to /workspace/group/ or absolute within it. Optional caption appears alongside the image(s). Do not delete the files immediately after calling — delivery may be queued briefly if the channel is reconnecting.",
+  {
+    path: z
+      .union([z.string(), z.array(z.string()).min(1).max(10)])
+      .describe(
+        'Path(s) to image file(s). Relative paths resolve against /workspace/group/. Absolute paths must be inside /workspace/group/; paths outside are rejected.',
+      ),
+    caption: z
+      .string()
+      .optional()
+      .describe('Optional caption shown with the image(s)'),
+  },
+  async (args) => {
+    const rawPaths = Array.isArray(args.path) ? args.path : [args.path];
+    const relatives: string[] = [];
+    for (const p of rawPaths) {
+      const v = validateImagePath(p, WORKSPACE_ROOT);
+      if (!v.ok) {
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: v.error }],
+        };
+      }
+      relatives.push(v.relative);
+    }
+    writeIpcFile(IMAGES_DIR, {
+      type: 'image',
+      chatJid,
+      groupFolder,
+      paths: relatives,
+      caption: args.caption,
+      timestamp: new Date().toISOString(),
+    });
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `${relatives.length} image(s) queued for delivery.`,
+        },
+      ],
+    };
   },
 );
 

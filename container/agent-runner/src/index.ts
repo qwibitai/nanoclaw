@@ -23,6 +23,7 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { MessageStream, type ImageAttachment } from './message-stream.js';
 
 interface ContainerInput {
   prompt: string;
@@ -33,6 +34,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  images?: ImageAttachment[];
 }
 
 interface ContainerOutput {
@@ -53,54 +55,9 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
-interface SDKUserMessage {
-  type: 'user';
-  message: { role: 'user'; content: string };
-  parent_tool_use_id: null;
-  session_id: string;
-}
-
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
-
-/**
- * Push-based async iterable for streaming user messages to the SDK.
- * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
- */
-class MessageStream {
-  private queue: SDKUserMessage[] = [];
-  private waiting: (() => void) | null = null;
-  private done = false;
-
-  push(text: string): void {
-    this.queue.push({
-      type: 'user',
-      message: { role: 'user', content: text },
-      parent_tool_use_id: null,
-      session_id: '',
-    });
-    this.waiting?.();
-  }
-
-  end(): void {
-    this.done = true;
-    this.waiting?.();
-  }
-
-  async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
-    while (true) {
-      while (this.queue.length > 0) {
-        yield this.queue.shift()!;
-      }
-      if (this.done) return;
-      await new Promise<void>((r) => {
-        this.waiting = r;
-      });
-      this.waiting = null;
-    }
-  }
-}
 
 async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -308,7 +265,7 @@ function shouldClose(): boolean {
  * Drain all pending IPC input messages.
  * Returns messages found, or empty array.
  */
-function drainIpcInput(): string[] {
+function drainIpcInput(): Array<{ text: string; images?: ImageAttachment[] }> {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
     const files = fs
@@ -316,14 +273,17 @@ function drainIpcInput(): string[] {
       .filter((f) => f.endsWith('.json'))
       .sort();
 
-    const messages: string[] = [];
+    const messages: Array<{ text: string; images?: ImageAttachment[] }> = [];
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         fs.unlinkSync(filePath);
         if (data.type === 'message' && data.text) {
-          messages.push(data.text);
+          messages.push({
+            text: data.text,
+            images: Array.isArray(data.images) ? data.images : undefined,
+          });
         }
       } catch (err) {
         log(
@@ -345,9 +305,11 @@ function drainIpcInput(): string[] {
 
 /**
  * Wait for a new IPC message or _close sentinel.
- * Returns the messages as a single string, or null if _close.
+ * Returns the messages as an array, or null if _close.
  */
-function waitForIpcMessage(): Promise<string | null> {
+function waitForIpcMessage(): Promise<
+  Array<{ text: string; images?: ImageAttachment[] }> | null
+> {
   return new Promise((resolve) => {
     const poll = () => {
       if (shouldClose()) {
@@ -356,7 +318,7 @@ function waitForIpcMessage(): Promise<string | null> {
       }
       const messages = drainIpcInput();
       if (messages.length > 0) {
-        resolve(messages.join('\n'));
+        resolve(messages);
         return;
       }
       setTimeout(poll, IPC_POLL_MS);
@@ -378,13 +340,18 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
+  images?: ImageAttachment[],
+  followUps?: Array<{ text: string; images?: ImageAttachment[] }>,
 ): Promise<{
   newSessionId?: string;
   lastAssistantUuid?: string;
   closedDuringQuery: boolean;
 }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+  stream.push(prompt, images);
+  for (const m of followUps ?? []) {
+    stream.push(m.text, m.images);
+  }
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -399,9 +366,11 @@ async function runQuery(
       return;
     }
     const messages = drainIpcInput();
-    for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
+    for (const m of messages) {
+      log(
+        `Piping IPC message into active query (${m.text.length} chars, ${m.images?.length ?? 0} images)`,
+      );
+      stream.push(m.text, m.images);
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
@@ -647,6 +616,9 @@ async function main(): Promise<void> {
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
+  let initialImages: ImageAttachment[] | undefined;
+  let pendingFollowUps: Array<{ text: string; images?: ImageAttachment[] }> =
+    [];
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
   // Clean up stale _close sentinel from previous container runs
@@ -664,7 +636,15 @@ async function main(): Promise<void> {
   const pending = drainIpcInput();
   if (pending.length > 0) {
     log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + pending.join('\n');
+    prompt += '\n' + pending.map((p) => p.text).join('\n');
+    const pendingImages = pending.flatMap((p) => p.images ?? []);
+    if (pendingImages.length) {
+      initialImages = [...(containerInput.images ?? []), ...pendingImages];
+    } else {
+      initialImages = containerInput.images;
+    }
+  } else {
+    initialImages = containerInput.images;
   }
 
   // Script phase: run script before waking agent
@@ -704,7 +684,12 @@ async function main(): Promise<void> {
         containerInput,
         sdkEnv,
         resumeAt,
+        initialImages,
+        pendingFollowUps,
       );
+      // Consumed — clear so next loop iteration gets fresh state from the IPC poll
+      initialImages = undefined;
+      pendingFollowUps = [];
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
@@ -726,14 +711,20 @@ async function main(): Promise<void> {
       log('Query ended, waiting for next IPC message...');
 
       // Wait for the next message or _close sentinel
-      const nextMessage = await waitForIpcMessage();
-      if (nextMessage === null) {
+      const nextMessages = await waitForIpcMessage();
+      if (nextMessages === null) {
         log('Close sentinel received, exiting');
         break;
       }
 
-      log(`Got new message (${nextMessage.length} chars), starting new query`);
-      prompt = nextMessage;
+      log(
+        `Got ${nextMessages.length} new message(s), starting new query`,
+      );
+      // First message becomes the new turn's prompt + initial images.
+      prompt = nextMessages[0].text;
+      initialImages = nextMessages[0].images;
+      // Remaining messages are queued to be pushed into the stream after runQuery starts.
+      pendingFollowUps = nextMessages.slice(1);
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

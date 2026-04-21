@@ -3,7 +3,7 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { DATA_DIR, GROUPS_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -12,6 +12,7 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendImage: (jid: string, paths: string[], caption?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -144,6 +145,47 @@ export function startIpcWatcher(deps: IpcDeps): void {
         }
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+      }
+
+      // Process image IPC files from this group's IPC directory
+      const imagesDir = path.join(ipcBaseDir, sourceGroup, 'images');
+      try {
+        if (fs.existsSync(imagesDir)) {
+          const imageFiles = fs
+            .readdirSync(imagesDir)
+            .filter((f) => f.endsWith('.json'));
+          for (const file of imageFiles) {
+            const filePath = path.join(imagesDir, file);
+            try {
+              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              await processImageIpcFile(
+                data,
+                sourceGroup,
+                isMain,
+                registeredGroups,
+                GROUPS_DIR,
+                deps.sendImage,
+              );
+              fs.unlinkSync(filePath);
+            } catch (err) {
+              logger.error(
+                { file, sourceGroup, err },
+                'Error processing IPC image',
+              );
+              const errorDir = path.join(ipcBaseDir, 'errors');
+              fs.mkdirSync(errorDir, { recursive: true });
+              fs.renameSync(
+                filePath,
+                path.join(errorDir, `${sourceGroup}-${file}`),
+              );
+            }
+          }
+        }
+      } catch (err) {
+        logger.error(
+          { err, sourceGroup },
+          'Error reading IPC images directory',
+        );
       }
     }
 
@@ -464,5 +506,70 @@ export async function processTaskIpc(
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
+  }
+}
+
+export interface ImageIpcPayload {
+  type?: string;
+  chatJid?: string;
+  groupFolder?: string;
+  paths?: string[];
+  caption?: string;
+  timestamp?: string;
+}
+
+export async function processImageIpcFile(
+  data: ImageIpcPayload,
+  sourceGroup: string,
+  isMain: boolean,
+  registeredGroups: Record<string, RegisteredGroup>,
+  groupsRoot: string,
+  sendImage: (jid: string, paths: string[], caption?: string) => Promise<void>,
+): Promise<void> {
+  if (
+    data.type !== 'image' ||
+    !data.chatJid ||
+    !Array.isArray(data.paths) ||
+    data.paths.length === 0
+  ) {
+    return;
+  }
+
+  const targetGroup = registeredGroups[data.chatJid];
+  if (!(isMain || (targetGroup && targetGroup.folder === sourceGroup))) {
+    logger.warn(
+      { chatJid: data.chatJid, sourceGroup },
+      'Unauthorized IPC image attempt blocked',
+    );
+    return;
+  }
+
+  const groupRoot = path.join(groupsRoot, sourceGroup);
+  const absolute: string[] = [];
+  for (const rel of data.paths) {
+    const abs = path.resolve(groupRoot, rel);
+    if (abs !== groupRoot && !abs.startsWith(groupRoot + path.sep)) {
+      logger.warn(
+        { rel, sourceGroup },
+        'IPC image path escapes group root, skipped',
+      );
+      continue;
+    }
+    if (!fs.existsSync(abs)) {
+      logger.warn(
+        { abs, sourceGroup },
+        'IPC image file missing on host, skipped',
+      );
+      continue;
+    }
+    absolute.push(abs);
+  }
+
+  if (absolute.length) {
+    await sendImage(data.chatJid, absolute, data.caption);
+    logger.info(
+      { chatJid: data.chatJid, count: absolute.length, sourceGroup },
+      'IPC image delivered',
+    );
   }
 }

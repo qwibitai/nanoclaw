@@ -42,6 +42,11 @@ export interface RegisteredGroup {
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
 }
 
+export interface ImageAttachment {
+  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  data: string; // base64, already resized + encoded by the inbound channel
+}
+
 export interface NewMessage {
   id: string;
   chat_jid: string;
@@ -55,6 +60,7 @@ export interface NewMessage {
   reply_to_message_id?: string;
   reply_to_message_content?: string;
   reply_to_sender_name?: string;
+  images?: ImageAttachment[];
 }
 
 export interface ScheduledTask {
@@ -95,6 +101,12 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: send image. Channels that support image delivery implement it.
+  sendImage?(
+    jid: string,
+    imagePaths: string[],
+    caption?: string,
+  ): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
