@@ -147,8 +147,12 @@ fi
 #     would otherwise land with zero verification. If the plan-level test
 #     fails under --only-task, leave the worktree in place and escalate.
 #   * Full plan, non-final wave: preserve every merged-this-wave worktree.
-#     If a later wave's plan-level test fails, we want earlier-wave
-#     worktrees still inspectable / repairable.
+#     If the final-wave plan test fails, these earlier-wave worktrees are
+#     still inspectable (read-only — see what each task originally
+#     produced). Actual repair goes through `git commit` directly on
+#     $BASE; --resume re-runs only the plan test, it does not re-squash
+#     edits made inside a preserved task worktree (merged tasks are
+#     skipped by both run-wave and merge-wave).
 #   * Full plan, final wave, plan test green: tear down EVERY slug in the
 #     whole plan that still has a worktree (accumulated across all waves).
 if [ -n "$ONLY_TASK" ]; then
