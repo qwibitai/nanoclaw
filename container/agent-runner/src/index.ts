@@ -340,13 +340,18 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
+  images?: ImageAttachment[],
+  followUps?: Array<{ text: string; images?: ImageAttachment[] }>,
 ): Promise<{
   newSessionId?: string;
   lastAssistantUuid?: string;
   closedDuringQuery: boolean;
 }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+  stream.push(prompt, images);
+  for (const m of followUps ?? []) {
+    stream.push(m.text, m.images);
+  }
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -679,7 +684,12 @@ async function main(): Promise<void> {
         containerInput,
         sdkEnv,
         resumeAt,
+        initialImages,
+        pendingFollowUps,
       );
+      // Consumed — clear so next loop iteration gets fresh state from the IPC poll
+      initialImages = undefined;
+      pendingFollowUps = [];
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
