@@ -234,8 +234,9 @@ if [ -n "$ONLY_TASK" ]; then
     post_wt="$WORK/.canary-post.$$"
     rm -rf "$post_wt" 2>/dev/null || true
     post_passes=0
+    post_output_file="$WORK/.canary-post-output.$$"
     if git worktree add -q --detach "$post_wt" "$canary_commit_sha" 2>/dev/null; then
-      if (cd "$post_wt" && bash -c "$canary_test") >/dev/null 2>&1; then
+      if (cd "$post_wt" && bash -c "$canary_test") > "$post_output_file" 2>&1; then
         post_passes=1
       fi
       git worktree remove -f "$post_wt" 2>/dev/null || rm -rf "$post_wt" 2>/dev/null || true
@@ -244,18 +245,32 @@ if [ -n "$ONLY_TASK" ]; then
 
     if [ "$post_passes" -eq 0 ]; then
       pre_canary_passes=0
+      pre_output_file="$WORK/.canary-pre-output.$$"
       if [ -n "$pre_canary_sha" ]; then
         pre_wt="$WORK/.canary-pre.$$"
         rm -rf "$pre_wt" 2>/dev/null || true
         if git worktree add -q --detach "$pre_wt" "$pre_canary_sha" 2>/dev/null; then
-          if (cd "$pre_wt" && bash -c "$canary_test") >/dev/null 2>&1; then
+          if (cd "$pre_wt" && bash -c "$canary_test") > "$pre_output_file" 2>&1; then
             pre_canary_passes=1
           fi
           git worktree remove -f "$pre_wt" 2>/dev/null || rm -rf "$pre_wt" 2>/dev/null || true
           git worktree prune 2>/dev/null || true
         fi
       fi
-      if [ "$pre_canary_passes" -eq 1 ]; then
+      # If both probes fail, compare the OUTPUT. If it differs substantively,
+      # the canary introduced a NEW failure mode on top of the peer-missing
+      # one and we must still treat it as a regression.
+      canary_introduced_new_failure=0
+      if [ "$pre_canary_passes" -eq 0 ] && [ -r "$post_output_file" ] && [ -r "$pre_output_file" ]; then
+        # Ignore paths and git shas that legitimately differ across worktrees.
+        if ! diff -q \
+          <(sed -E "s|$WORK/[^ ]*||g; s|[0-9a-f]{7,40}|<sha>|g" "$pre_output_file") \
+          <(sed -E "s|$WORK/[^ ]*||g; s|[0-9a-f]{7,40}|<sha>|g" "$post_output_file") \
+          > /dev/null 2>&1; then
+          canary_introduced_new_failure=1
+        fi
+      fi
+      if [ "$pre_canary_passes" -eq 1 ] || [ "$canary_introduced_new_failure" -eq 1 ]; then
         echo "ESCALATE --only-task canary: plan-level test passed on BASE but" >&2
         echo "  fails after this canary merged. The canary task itself broke" >&2
         echo "  an existing invariant. Undoing the squash commit…" >&2
@@ -275,17 +290,21 @@ if [ -n "$ONLY_TASK" ]; then
         # --rollback doesn't try to revert a commit that no longer exists.
         "$BIN/codex-state" set-task-commit "$WORK" --wave "$WAVE" --task "$ONLY_TASK" --sha ""
         "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$ONLY_TASK" --status escalated
+        rm -f "$post_output_file" "$pre_output_file" 2>/dev/null || true
         echo "  Worktree preserved at $WORK/<slug>." >&2
         exit 2
       fi
-      # Pre-canary also failed → peer-missing, expected.
+      # Pre-canary also failed with the SAME output → peer-missing, expected.
       echo "WARNING: plan-level test failed under --only-task on a multi-task plan," >&2
-      echo "  but was also failing on BASE before this canary merged." >&2
+      echo "  but was also failing on BASE before this canary merged with" >&2
+      echo "  substantively identical output." >&2
       echo "  Peer tasks likely haven't all merged yet. Worktree preserved" >&2
       echo "  at $WORK/<slug> for inspection." >&2
+      rm -f "$post_output_file" "$pre_output_file" 2>/dev/null || true
       # Preserve worktree; don't tear down; exit 0.
       exit 0
     else
+      rm -f "$post_output_file" 2>/dev/null || true
       canary_plan_test_passed=1
       # Do NOT write the sentinel here. The canary's plan test passed
       # with SOME tasks still unmerged; the sentinel is reserved for

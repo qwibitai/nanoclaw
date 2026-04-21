@@ -30,14 +30,14 @@ import re
 
 plan_file = sys.argv[1]
 with open(plan_file) as f:
-    content = f.read()
+    original_content = f.read()
 
-# Strip fenced code blocks (``` ... ```) before scanning for task headings.
-# Otherwise a plan that shows an example like ``### Task 99: example`` inside
-# a code fence would be mis-parsed as a real task and either fail validation
-# ("tasks declared but not referenced in Parallelization") or materialize a
-# phantom task body. Replace each fenced block with blank lines so line
-# numbers are preserved for any subsequent error messages.
+# Strip fenced code blocks (``` ... ```) for HEADING/PARALLELIZATION
+# DETECTION only — a plan that shows `### Task 99: example` inside a code
+# fence would otherwise be mis-parsed as a real task. Task BODIES are
+# extracted from the original content so fenced examples (SQL, JSON, shell
+# commands, etc.) land intact in plan.json and the implementer prompt /
+# Stage-3 spec check see the full instructions.
 def _strip_fences(text):
     out = []
     in_fence = False
@@ -49,7 +49,7 @@ def _strip_fences(text):
         out.append("" if in_fence else line)
     return "\n".join(out)
 
-content = _strip_fences(content)
+content = _strip_fences(original_content)
 
 def extract_header(label):
     """Extract the value from a **Label:** line (case-insensitive).
@@ -86,12 +86,29 @@ file_re = re.compile(
 )
 
 tasks = []
+# Offsets from task_matches are into the fence-STRIPPED `content`. But we
+# want task BODIES sliced from the fence-PRESERVED `original_content` so
+# fenced examples survive into plan.json. Since _strip_fences preserves
+# line count (fence lines → blank lines), we can map match-line-numbers
+# back to the same lines in the original.
+stripped_lines = content.split("\n")
+original_lines = original_content.split("\n")
 for i, m in enumerate(task_matches):
     num = int(m.group(1))
     heading = m.group(2).strip()
-    body_start = m.end()
-    body_end = task_matches[i + 1].start() if i + 1 < len(task_matches) else len(content)
-    body = content[body_start:body_end]
+    # Find the heading's line number in the stripped content.
+    heading_line = content.count("\n", 0, m.start())
+    next_heading_line = (
+        content.count("\n", 0, task_matches[i + 1].start())
+        if i + 1 < len(task_matches)
+        else len(original_lines)
+    )
+    # Body is everything AFTER the heading line up to (not including) the
+    # next heading line, extracted from the ORIGINAL content so fenced
+    # blocks survive.
+    body = "\n".join(original_lines[heading_line + 1:next_heading_line])
+    if body and not body.endswith("\n"):
+        body += "\n"
 
     files = file_re.findall(body)
     run_matches = re.findall(r'(?m)^Run:\s+`?([^`\n]+)`?\s*$', body)

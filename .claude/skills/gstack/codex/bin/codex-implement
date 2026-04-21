@@ -257,6 +257,39 @@ if [ -n "$ONLY_TASK" ]; then
     echo "ERROR: --only-task $ONLY_TASK does not match any task in the plan" >&2
     exit 2
   fi
+  # Reject --only-task targeting a wave whose prerequisite waves haven't
+  # fully merged. The task worktree is built from BASE; if Wave 1's
+  # commits aren't on BASE yet, a Wave 2 task targeting files Wave 1
+  # introduced would fail or merge stale state.
+  wave_seq="$(jq -r '.waves[].wave' "$PLAN_JSON")"
+  found_self=0
+  blocking_waves=""
+  for w in $wave_seq; do
+    if [ "$w" = "$only_wave" ]; then
+      found_self=1
+      break
+    fi
+    # Check every task in wave $w is merged.
+    for tn in $(jq -r --argjson w "$w" \
+      '.waves[] | select(.wave == $w) | .tasks[]' "$PLAN_JSON"); do
+      tstat="$(jq -r --argjson n "$tn" \
+        '.waves[].tasks[] | select(.num == $n) | .status' \
+        "$STATE" 2>/dev/null || echo "")"
+      if [ "$tstat" != "merged" ]; then
+        case " $blocking_waves " in *" $w "*) : ;; *) blocking_waves="$blocking_waves $w" ;; esac
+      fi
+    done
+  done
+  if [ -n "$blocking_waves" ]; then
+    echo "ERROR: --only-task $ONLY_TASK targets wave $only_wave, but earlier" >&2
+    echo "       wave(s) still have unmerged tasks: $(echo $blocking_waves | tr ' ' ',')" >&2
+    echo "       Running this canary would build the task worktree from BASE" >&2
+    echo "       without the earlier-wave commits, so any cross-wave dependency" >&2
+    echo "       would fail or produce a bad merge." >&2
+    echo "       Finish the earlier waves first (run without --only-task, or" >&2
+    echo "       --only-task each of their tasks) before canarying wave $only_wave." >&2
+    exit 2
+  fi
   echo "only-task mode: running task $ONLY_TASK in wave $only_wave; all other waves skipped"
 fi
 
