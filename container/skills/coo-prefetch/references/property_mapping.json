@@ -1,0 +1,113 @@
+{
+  "properties": [
+    {
+      "code": "SMP",
+      "full_name": "Santa Monica Proper Hotel",
+      "profitsword_site_tag": 112,
+      "alice_name": "Santa Monica Proper Hotel",
+      "revinate_name": "Santa Monica Proper",
+      "duetto_hotel_code": "SM_PROPER",
+      "sharepoint_gm_weekly_code": "SMP",
+      "sharepoint_site": "Finance-Proper"
+    },
+    {
+      "code": "DTLA",
+      "full_name": "Downtown L.A. Proper Hotel",
+      "profitsword_site_tag": 102,
+      "alice_name": "Proper DTLA",
+      "revinate_name": "DTLA Proper",
+      "duetto_hotel_code": "PROPER_DTLA",
+      "sharepoint_gm_weekly_code": "DTLA"
+    },
+    {
+      "code": "HJL",
+      "full_name": "Hotel June West LA",
+      "profitsword_site_tag": 104,
+      "alice_name": "Hotel June LA",
+      "revinate_name": "Hotel June",
+      "duetto_hotel_code": "JUNE_WEST_LA",
+      "sharepoint_gm_weekly_code": "HJLA"
+    },
+    {
+      "code": "HJM",
+      "full_name": "Hotel June Malibu",
+      "profitsword_site_tag": 106,
+      "alice_name": null,
+      "revinate_name": "June Malibu",
+      "duetto_hotel_code": "JUNE_MALIBU",
+      "sharepoint_gm_weekly_code": "HJM"
+    },
+    {
+      "code": "ATX",
+      "full_name": "Austin Proper Hotel",
+      "profitsword_site_tag": 107,
+      "alice_name": "Austin Proper",
+      "revinate_name": "Austin Proper",
+      "duetto_hotel_code": "AUSTIN_PROPER",
+      "sharepoint_gm_weekly_code": "ATX"
+    },
+    {
+      "code": "SFP",
+      "full_name": "San Francisco Proper Hotel",
+      "profitsword_site_tag": 108,
+      "alice_name": "San Francisco Proper Hotel",
+      "revinate_name": "San Francisco Proper Hotel",
+      "duetto_hotel_code": "SF_PROPER",
+      "sharepoint_gm_weekly_code": "SFP"
+    },
+    {
+      "code": "SHEL",
+      "full_name": "Shelborne South Beach",
+      "profitsword_site_tag": 114,
+      "alice_name": "Shelborne South Beach",
+      "revinate_name": "Shelborne",
+      "duetto_hotel_code": "SHELBORNE",
+      "sharepoint_gm_weekly_code": "SMB"
+    },
+    {
+      "code": "MYC",
+      "full_name": "Montauk Yacht Club",
+      "profitsword_site_tag": 115,
+      "alice_name": "Montauk Yacht Club",
+      "revinate_name": "Montauk Yacht Club",
+      "duetto_hotel_code": "MONTAUK_YC",
+      "sharepoint_gm_weekly_code": "MYC"
+    },
+    {
+      "code": "TCH",
+      "full_name": "The Culver Hotel",
+      "profitsword_site_tag": 111,
+      "alice_name": "The Culver Hotel",
+      "revinate_name": "The Culver Hotel",
+      "duetto_hotel_code": "CULVER",
+      "sharepoint_gm_weekly_code": "TCH"
+    },
+    {
+      "code": "ING",
+      "full_name": "Ingleside Estate",
+      "profitsword_site_tag": 109,
+      "alice_name": "Ingleside Estate",
+      "revinate_name": "Ingleside Inn",
+      "duetto_hotel_code": "INGLESIDE",
+      "sharepoint_gm_weekly_code": "ING"
+    },
+    {
+      "code": "AVBH",
+      "full_name": "Avalon Hotel Beverly Hills",
+      "profitsword_site_tag": 105,
+      "alice_name": "Avalon Beverly Hills",
+      "revinate_name": "Avalon Hotel Beverly Hills",
+      "duetto_hotel_code": "AVALON_BH",
+      "sharepoint_gm_weekly_code": "ABH"
+    },
+    {
+      "code": "AVPS",
+      "full_name": "Avalon Hotel & Bungalows Palm Springs",
+      "profitsword_site_tag": 110,
+      "alice_name": "Avalon Hotel and Bungalows - Palm Springs",
+      "revinate_name": "Avalon Hotel & Bungalows Palm Springs",
+      "duetto_hotel_code": "AVALON_PS",
+      "sharepoint_gm_weekly_code": "APS"
+    }
+  ]
+}
