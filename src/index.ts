@@ -49,7 +49,12 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
+import {
+  findChannel,
+  formatMessages,
+  formatOutbound,
+  routeOutboundImage,
+} from './router.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -761,6 +766,8 @@ async function main(): Promise<void> {
     sendMessage: (jid, text) => {
       return deduplicatedSend(jid, text) ?? Promise.resolve();
     },
+    sendImage: (jid, paths, caption) =>
+      routeOutboundImage(channels, jid, paths, caption),
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroups: async (force: boolean) => {
