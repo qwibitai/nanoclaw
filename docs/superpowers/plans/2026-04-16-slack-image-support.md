@@ -69,6 +69,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
+    passWithNoTests: true, // Task 0 scaffolds the runner before Tasks 9/14 drop the first test files
   },
 });
 ```
@@ -2196,6 +2197,7 @@ If inbound fetch fails with 403/401, verify the Slack app has both `files:read` 
 - **Non-main groups:** IPC watcher only accepts image sends for the non-main group's own jid (authorization mirrors `messages`).
 - **Queue persistence:** The `outgoingQueue` is in-memory; restarts drop queued images. Matches current text behavior; out of scope to fix here.
 - **File lifecycle:** Neither the MCP tool nor the host watcher deletes the agent's source file after upload. Agent is responsible for cleanup if desired.
+- **Container image size (pre-existing issue surfaced by Task 0):** `container/Dockerfile:49` runs `npm install` without `--omit=dev`, so Task 0's vitest devDep (and its ~78 transitive packages) will ship into the container image. Not a correctness bug, but worth addressing as a separate cleanup before the next release — add `--omit=dev` to the Dockerfile's agent-runner install step. This applies equally to pre-existing devDeps (`@types/node`, `typescript`) and is not introduced by this plan.
 
 ---
 
