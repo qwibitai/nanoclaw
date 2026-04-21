@@ -217,38 +217,40 @@ if [ -n "$ONLY_TASK" ]; then
   canary_plan_test_passed=0
   [ -r "$PLAN_TEST_OK_SENTINEL" ] && canary_plan_test_passed=1
   if [ -n "$canary_test" ] && [ "$canary_test" != "null" ] && [ "$canary_total_tasks" != "1" ]; then
-    # Multi-task plan: a failing plan-level test is only acceptable if
-    # it's because peer tasks haven't merged yet. Check whether EVERY
-    # task other than the canary is already in terminal-good state; if
-    # so, a failing plan test is a real bug and must be fatal. Otherwise
-    # preserve the worktree + exit 0 with a warning.
+    # Multi-task plan: a failing plan-level test could be either
+    #   (a) expected (peer tasks haven't merged yet), or
+    #   (b) a real regression introduced by the canary task itself.
+    # Distinguish by running the test on BASE~1 (the state BEFORE this
+    # canary merge). If the pre-merge state ALSO fails, the failure is
+    # peer-missing. If the pre-merge state passes, the canary
+    # introduced the regression — FAIL and revert the squash commit.
     if ! bash -c "$canary_test" >/dev/null 2>&1; then
-      peers_all_merged=1
-      peer_nums="$(jq -r --argjson me "$ONLY_TASK" '.tasks[].num | select(. != $me)' "$PLAN_JSON")"
-      for pn in $peer_nums; do
-        peer_status="$(jq -r --argjson n "$pn" \
-          '.waves[].tasks[] | select(.num == $n) | .status' \
-          "$STATE_JSON" 2>/dev/null || echo "")"
-        # Only `merged` means the peer's squash commit is on BASE.
-        # `passed-gate` is a pre-merge state where the gate passed but
-        # codex-merge-wave hasn't run on that peer yet — its changes are
-        # NOT in the plan-level test target.
-        if [ "$peer_status" != "merged" ]; then
-          peers_all_merged=0
+      # Stash the current HEAD, step back one commit (the base before
+      # the canary squash), run the test, step back.
+      canary_commit_sha="$(git rev-parse HEAD)"
+      pre_canary_sha="$(git rev-parse HEAD~1 2>/dev/null || echo '')"
+      pre_canary_passes=0
+      if [ -n "$pre_canary_sha" ]; then
+        git checkout -q "$pre_canary_sha"
+        if bash -c "$canary_test" >/dev/null 2>&1; then
+          pre_canary_passes=1
         fi
-      done
-      if [ "$peers_all_merged" -eq 1 ]; then
-        echo "ESCALATE --only-task canary: plan-level test failed." >&2
-        echo "  All peer tasks are already merged, so this failure is a" >&2
-        echo "  real bug — not a 'peers not run yet' case." >&2
-        echo "  Squash commit is already on $BASE. Inspect and use" >&2
-        echo "  codex-implement --rollback if you want to revert." >&2
+        git checkout -q "$canary_commit_sha"
+      fi
+      if [ "$pre_canary_passes" -eq 1 ]; then
+        echo "ESCALATE --only-task canary: plan-level test passed on BASE but" >&2
+        echo "  fails after this canary merged. The canary task itself broke" >&2
+        echo "  an existing invariant. Reverting the squash commit…" >&2
+        git revert --no-edit HEAD > /dev/null 2>&1 || true
+        "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$ONLY_TASK" --status escalated
         echo "  Worktree preserved at $WORK/<slug>." >&2
         exit 2
       fi
-      echo "WARNING: plan-level test failed under --only-task on a multi-task plan." >&2
-      echo "  Peer tasks haven't all merged yet, so this may be expected." >&2
-      echo "  Worktree preserved at $WORK/<slug> for inspection." >&2
+      # Pre-canary also failed → peer-missing, expected.
+      echo "WARNING: plan-level test failed under --only-task on a multi-task plan," >&2
+      echo "  but was also failing on BASE before this canary merged." >&2
+      echo "  Peer tasks likely haven't all merged yet. Worktree preserved" >&2
+      echo "  at $WORK/<slug> for inspection." >&2
       # Preserve worktree; don't tear down; exit 0.
       exit 0
     else
