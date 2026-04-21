@@ -328,9 +328,28 @@ process_one() {
         "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status passed-gate
         return 0
       fi
-      # Gate still red → emit a fresh fallback request with a new
-      # generation. Delete any stale marker first so a delayed reply to
-      # IT can't satisfy the new request's wait loop.
+      # Gate still red. If a marker exists, a worker MAY be in flight
+      # producing a reply. Wait briefly for the existing marker's reply
+      # to appear (short budget) — if it does, consume it via the main
+      # wait-loop below. If not, assume the worker is dead and emit a
+      # fresh request with a new generation.
+      if [ -n "$fb_marker" ] && [ -r "$fb_marker" ]; then
+        local in_flight_wait=0
+        local in_flight_result
+        in_flight_result="$(echo "$fb_marker" | sed 's/needs-claude-fallback/claude-fallback-result/')"
+        while [ ! -r "$in_flight_result" ] && [ "$in_flight_wait" -lt 300 ]; do
+          sleep 5; in_flight_wait=$((in_flight_wait + 5))
+        done
+        if [ -r "$in_flight_result" ]; then
+          fb_result="$in_flight_result"
+        fi
+      fi
+    fi
+    # If the in-flight wait produced a result, skip the fresh-request branch.
+    if [ -z "$fb_result" ]; then
+      # Gate still red and no in-flight reply → emit a fresh fallback
+      # request with a new generation. Delete any stale marker first so
+      # a delayed reply to IT can't satisfy the new request's wait loop.
       [ -n "$fb_marker" ] && rm -f "$fb_marker" 2>/dev/null || true
       regate_findings="$WORK/findings.$WAVE.$num.4-resume-regate.txt"
       if [ ! -r "$regate_findings" ]; then

@@ -288,6 +288,13 @@ if [ -n "$ONLY_TASK" ]; then
     echo "       would fail or produce a bad merge." >&2
     echo "       Finish the earlier waves first (run without --only-task, or" >&2
     echo "       --only-task each of their tasks) before canarying wave $only_wave." >&2
+    # If state.json was initialized THIS invocation (fresh run), clean it up
+    # so the next non-resume run doesn't error with 'state.json exists'.
+    # We detect 'fresh run' by checking no task has status != pending.
+    any_progress="$(jq -r '[.waves[].tasks[].status] | map(select(. != "pending")) | length' "$STATE" 2>/dev/null || echo "0")"
+    if [ "$any_progress" = "0" ] && [ "$RESUME" -eq 0 ]; then
+      rm -rf "$WORK"
+    fi
     exit 2
   fi
   echo "only-task mode: running task $ONLY_TASK in wave $only_wave; all other waves skipped"
