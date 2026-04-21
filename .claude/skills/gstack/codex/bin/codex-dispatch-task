@@ -81,19 +81,35 @@ if [ -z "$final_text" ]; then
 fi
 
 case "$final_text" in
-  *DONE_WITH_CONCERNS*) echo "DONE_WITH_CONCERNS" ;;
-  *DONE*)                echo "DONE" ;;
-  *NEEDS_CONTEXT*)       echo "NEEDS_CONTEXT" ;;
-  *BLOCKED*)             echo "BLOCKED" ;;
+  *DONE_WITH_CONCERNS*) status="DONE_WITH_CONCERNS" ;;
+  *DONE*)                status="DONE" ;;
+  *NEEDS_CONTEXT*)       status="NEEDS_CONTEXT" ;;
+  *BLOCKED*)             status="BLOCKED" ;;
   *)
     if [ "$rc" -eq 124 ]; then
-      echo "BLOCKED"
+      status="BLOCKED"
     elif [ "$rc" -ne 0 ]; then
-      echo "BLOCKED"
+      status="BLOCKED"
     else
-      echo "DONE_WITH_CONCERNS"
+      status="DONE_WITH_CONCERNS"
     fi
     ;;
 esac
 
+# Auto-commit codex's changes. codex exec -s workspace-write cannot write to
+# the parent repo's .git/worktrees/<name>/ (git-worktree metadata lives
+# outside the codex sandbox), so git commits from inside the model fail
+# silently. Bash runs outside the sandbox, so we commit here on its behalf
+# whenever codex thinks it finished the work. Skip on BLOCKED/NEEDS_CONTEXT
+# (the wave will retry or escalate; half-done work should not be squashed).
+if [ "$status" = "DONE" ] || [ "$status" = "DONE_WITH_CONCERNS" ]; then
+  if (cd "$WT" && [ -n "$(git status --porcelain 2>/dev/null)" ]); then
+    (cd "$WT" \
+      && git -c user.email=codex@local -c user.name=codex add -A \
+      && git -c user.email=codex@local -c user.name=codex commit -qm \
+        "codex task: auto-commit of worktree changes") || true
+  fi
+fi
+
+echo "$status"
 exit 0

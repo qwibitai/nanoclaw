@@ -66,19 +66,38 @@ Fix and re-verify."
   fi
 
   # awk -v can't take multi-line values; ship via env + ENVIRON[] instead.
+  # awk gsub() interprets `&` in the replacement string as "the matched text",
+  # so values containing `&` (e.g. a test command with `&&`) would corrupt the
+  # output by re-inserting the placeholder. Pre-escape `\` -> `\\` and `&` -> `\&`
+  # in each ENVIRON value before gsub so those characters land literally.
   RP_GOAL="$goal" RP_ARCH="$arch" RP_HEADING="$heading" \
     RP_BODY="$body" RP_PRIOR="$prior_section" \
     RP_WT="$WORK/$slug" RP_FB="$forbidden" RP_TC="$test_cmd" \
     awk '
+      function esc(s) {
+        gsub(/\\/, "\\\\\\\\", s)
+        gsub(/&/,  "\\\\&",    s)
+        return s
+      }
+      BEGIN {
+        e_goal = esc(ENVIRON["RP_GOAL"])
+        e_arch = esc(ENVIRON["RP_ARCH"])
+        e_head = esc(ENVIRON["RP_HEADING"])
+        e_body = esc(ENVIRON["RP_BODY"])
+        e_prior= esc(ENVIRON["RP_PRIOR"])
+        e_wt   = esc(ENVIRON["RP_WT"])
+        e_fb   = esc(ENVIRON["RP_FB"])
+        e_tc   = esc(ENVIRON["RP_TC"])
+      }
       {
-        gsub(/\{\{GOAL\}\}/,                   ENVIRON["RP_GOAL"])
-        gsub(/\{\{ARCHITECTURE\}\}/,           ENVIRON["RP_ARCH"])
-        gsub(/\{\{TASK_HEADING\}\}/,           ENVIRON["RP_HEADING"])
-        gsub(/\{\{TASK_BODY\}\}/,              ENVIRON["RP_BODY"])
-        gsub(/\{\{PRIOR_ATTEMPT_FINDINGS\}\}/, ENVIRON["RP_PRIOR"])
-        gsub(/\{\{WORKTREE_PATH\}\}/,          ENVIRON["RP_WT"])
-        gsub(/\{\{FORBIDDEN_FILES\}\}/,        ENVIRON["RP_FB"])
-        gsub(/\{\{TEST_COMMAND\}\}/,           ENVIRON["RP_TC"])
+        gsub(/\{\{GOAL\}\}/,                   e_goal)
+        gsub(/\{\{ARCHITECTURE\}\}/,           e_arch)
+        gsub(/\{\{TASK_HEADING\}\}/,           e_head)
+        gsub(/\{\{TASK_BODY\}\}/,              e_body)
+        gsub(/\{\{PRIOR_ATTEMPT_FINDINGS\}\}/, e_prior)
+        gsub(/\{\{WORKTREE_PATH\}\}/,          e_wt)
+        gsub(/\{\{FORBIDDEN_FILES\}\}/,        e_fb)
+        gsub(/\{\{TEST_COMMAND\}\}/,           e_tc)
         print
       }
     ' "$PROMPT_TMPL"

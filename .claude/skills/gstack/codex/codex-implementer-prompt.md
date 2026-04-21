@@ -14,7 +14,11 @@ CONSTRAINTS:
 - Work only within the current git worktree at {{WORKTREE_PATH}}.
 - Do NOT edit these files (they belong to parallel tasks): {{FORBIDDEN_FILES}}.
 - Follow TDD: write the failing test first, then the minimal implementation.
-- Commit with descriptive messages after each logical step.
+- Do NOT run `git add`, `git commit`, `git push`, or any other git state-changing
+  command. Your sandbox cannot reliably write git worktree metadata; the
+  orchestrator will stage and commit your changes automatically once you exit.
+  You MAY run read-only git commands (`git status`, `git diff`, `git log`) to
+  inspect state.
 - On completion, run: {{TEST_COMMAND}}
 - Your final message MUST include exactly one status code on its own line:
   DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
