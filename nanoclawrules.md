@@ -486,6 +486,47 @@ Every Outlook email delivered to Nano includes a `Categories: ...` line in the m
 6. Maintain a running task list. Track open items, follow-ups, and team deadlines across the portfolio. Flag overdue items proactively.
 7. Pattern exceptions: flag a cluster as a single pattern item, not as individual events.
 
+## Standing: Daily COO Brief (5:45am PT)
+
+Every day at 5:45am PT, Nano generates a multi-property COO brief and posts to main Telegram (@GMRNanoBot).
+
+**Properties (12, in this priority order):** Santa Monica Proper, DTLA Proper, Hotel June LA, June Malibu, Austin Proper, SF Proper, Shelborne South Beach, Montauk Yacht Club, The Culver Hotel, Ingleside Estate, Avalon Beverly Hills, Avalon Palm Springs.
+
+**Per-property sections** (each 4-6 lines max, collapse to one line if nothing new):
+
+1. **ALICE** — `DUETTO_UPLOAD.RAW.GLITCH_REPORTS_RAW`. Filter by PROPERTY (use the Snowflake property names, not short codes) and last 24h via the DATE column. Count new glitches + top 3 by compensation amount or severity. Include GLITCH_ISSUE type and ROOM_NUMBER.
+2. **Revinate** — `CORE_REVINATE.PROD.FACT_REVIEWS` joined to `DIM_PROPERTIES`. New reviews last 24h. Flag any <4 stars and any unresponded.
+3. **Group/Catering Pace** — `ROSEDALE_DATABASE.TRIPLESEAT.TRIPLESEAT_BOOKINGS` and `.TRIPLESEAT_LEADS`. New definite bookings last 24h + net pace vs previous day.
+4. **Revenue** — `DUETTO_UPLOAD.RAW.*`. Next-7-day occupancy forecast + ADR delta vs forecast. (Run `SHOW TABLES IN SCHEMA DUETTO_UPLOAD.RAW` first to discover the right table.)
+
+**Per-property close:** one line labeled "⚡ FOCUS:" with the single most important action Gabe should take for that property today. If nothing actionable, omit the FOCUS line.
+
+**All sections now live except ALICE pipeline (stale Apr 8, pending Mike):**
+- ProfitSword P&L: working (Forecast/Budget/PY through EBITDA)
+- Toast F&B: working (new credentials 2026-04-17, Orders API fallback)
+- Tripleseat group/catering: working (6 hotels via Tripleseat, 5 via Delphi/Salesforce)
+- Revinate: working (switched to RAW_API.RAW_REVIEWS, current through today)
+- Lighthouse: working (rate positioning + demand + events)
+
+**Property name mapping to Snowflake PROPERTY values:**
+
+| Short | Revinate | ALICE |
+|---|---|---|
+| SMP | Santa Monica Proper | Santa Monica Proper Hotel |
+| DTLA | DTLA Proper | Proper DTLA |
+| HJL | Hotel June | Hotel June LA |
+| HJM | June Malibu | (no ALICE yet) |
+| ATX | Austin Proper | Austin Proper |
+| SFP | San Francisco Proper Hotel | San Francisco Proper Hotel |
+| SHEL | Shelborne | Shelborne South Beach |
+| MYC | Montauk Yacht Club | Montauk Yacht Club |
+| TCH | The Culver Hotel | The Culver Hotel |
+| ING | Ingleside Inn | Ingleside Estate |
+| AVBH | Avalon Hotel Beverly Hills | Avalon Beverly Hills |
+| AVPS | Avalon Hotel & Bungalows Palm Springs | Avalon Hotel and Bungalows - Palm Springs |
+
+Source schemas are referenced in `~/.claude/skills/alice-snowflake/SKILL.md` and `~/.claude/skills/revenue-audit/references/` for full detail.
+
 ## Ops Bot Routing
 
 Nano uses two Telegram bots:
@@ -512,37 +553,33 @@ Default is `'main'`. When in doubt, use `'main'` — it's better for Gabe to see
 
 Anything else gets a fallback directing Gabe to @GMRNanoBot. The ops bot does NOT use Claude, does NOT spawn containers, and does NOT hold conversations. All commands execute host-side against SQLite and the Notion API for sub-second response.
 
-## Notion "Gabe — Pending Items (Work)" Page Structure
+## Notion "Gabe — Open Items (Working)" Database
 
-Page ID: `3366d40b-27ff-81aa-bc16-dbb3a76996ce`. This page is the persistent, out-of-chat mirror of Gabe's open items. Its structure MUST match the categories Nano uses in Telegram digests so Gabe can scan either surface and see the same mental model.
+Database page ID: `93a63def-900c-4e1f-953e-97c271deb919`. Data source ID: `8ab311a2-891d-48e3-8110-66fd134b5500`. This database is the persistent, out-of-chat working surface for Gabe's open items. Each row is a page Gabe can open and work in. Nano writes rows here instead of editing a flat page.
 
-**Required structure:**
+**Schema:**
 
-The page has one top-level heading per triage category, in this exact order:
+| Property | Type | Purpose |
+|---|---|---|
+| Item | Title | Short one-line description |
+| Category | Select | 🔴 CRITICAL, 🟡 APPROVAL, 🔵 DELEGATE, ⏳ Waiting, ⚪ FYI, ✅ Done (triage bucket) |
+| Status | Select | Pending, In Progress, Done (pipeline state — "ball in their court" nuance lives in Category=⏳ Waiting, not here) |
+| Owner | Text | Person driving the item (Gabe, Shannon, Mike, etc.) |
+| Property | Select | DTLA, Hotel June WLA, SMP, Austin Proper, Shelborne, MYC, TCH, SF Proper, Portfolio, Corporate |
+| Due | Date | Deadline if applicable |
+| Source | URL | Link to originating email, doc, or thread |
+| Item ID | Auto ID | `ITM-N` identifier for chat references |
+| Created, Last Activity | Auto | System-managed timestamps |
 
-1. **🔴 CRITICAL** — time-sensitive, high-impact, or safety/legal/financial risk
-2. **🟡 APPROVAL** — needs Gabe's sign-off, signature, or explicit decision
-3. **🔵 DELEGATE** — clear owner exists; Gabe should be aware but not act
-4. **⏳ Waiting for Reply** — sent-email follow-ups where Gabe is waiting on a response
-5. **⚪ FYI** — portfolio awareness, no action needed
-6. **✅ Done** — completed items, cleared nightly by the 3am cleanup task
+**Inside each row's page body**, Nano writes the working context: thread summary, draft reply, decision notes, attachments. The row surface is for scanning; the page body is for working.
 
-**Item format inside each section:**
+**Rules for Nano:**
 
-Every item is a **numbered** to-do block (not a bullet) so Gabe can reference items by number in chat ("close #3", "what's the status on #7"). Numbering is per-section and resets at the top of each category.
-
-Example:
-```
-## 🟡 APPROVAL
-1. Sign DTLA vendor contract — waiting 3 days (Mike Thomas)
-2. Approve Tripp comp for Apr 6-7 stay (Bruno / Aaron Lee)
-3. PAG agreement redline review (Shannon)
-```
-
-**Invariants:**
-
-1. **Category names and order must exactly match what appears in Telegram digests.** If a digest uses a new category, the Notion page gets the same new category in the same order — and vice versa. Either surface drifting is a bug.
-2. **Every item is numbered within its category.** No unordered bullets for active items. The ✅ Done section can remain as unnumbered checked to-dos since they're pending deletion.
-3. **One item = one Notion to-do block.** Don't collapse multiple asks into a single item; Gabe's follow-up prompts reference individual numbers.
-4. **Nano maintains parity automatically.** When the outlook poller or a digest adds a new item to Telegram, it also writes the same item to the matching Notion section. When a Telegram message says "close #3 in APPROVAL", Nano moves that item to ✅ Done in Notion.
-5. **The categories above are the canonical set.** If Nano is unsure where an item belongs, default to FYI. Never invent new categories without asking Gabe.
+1. **Every new open item is a new row**, not a block append. Use `create-pages` against this database, set Category, Status, Owner, Property, and Source on creation.
+2. **Updates go to existing rows.** If a topic already has a row, update it (status change, new notes) rather than creating a duplicate.
+3. **Category and Status are independent.** Category is the triage bucket Gabe reads in digests. Status is pipeline state: Pending (not started), In Progress (drafted, sent, or waiting on someone), Done (closed). If something is waiting on someone else, set Category=⏳ Waiting and Status=In Progress.
+4. **Closing an item** means setting Status = Done AND Category = ✅ Done. Do not delete rows. The database is history.
+5. **Chat references use Item ID**, not per-category numbers. When Gabe says "close ITM-23", Nano finds that row. When listing in Telegram, show `ITM-23` alongside the item so Gabe can reference it.
+6. **Telegram digests are database queries rendered as text**, not hand-assembled lists. Query filters: CRITICAL = `Category = 🔴 CRITICAL AND Status != Done`. Active items = `Status IN (Pending, In Progress)`. This removes all drift between surfaces.
+7. **Source URL is mandatory when the item comes from an email** — Nano sets it to the Gmail/Outlook message URL so Gabe can one-click to the thread from Notion.
+8. **Do not use the `open_item_upsert` or `open_item_update_status` MCP tools.** The SQLite `open_items` table is retired as a tracker. The Outlook channel still calls `close_open_item_by_conversation_id` on replies — that is a dormant side-effect, not a source of truth. Notion is the only item tracker. If state differs between SQLite and Notion, Notion wins.
