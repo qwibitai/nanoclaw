@@ -1049,13 +1049,18 @@ During a run, the orchestrator creates marker files in
 `~/.gstack/codex-work/<plan-slug>/` that require Claude (the coordinating
 session) to act on:
 
-- `needs-spec-check.<wave>.<task>.json` — Claude dispatches a Task() subagent
-  using `spec-reviewer-prompt.md`, writes result to
-  `spec-check-result.<wave>.<task>.json`, removes the `needs-*` file.
-- `needs-claude-fallback.<wave>.<task>.json` — Claude dispatches a Task()
+- `needs-spec-check.<wave>.<task>.<attempt>.json` — Claude dispatches a Task()
+  subagent using `spec-reviewer-prompt.md`, writes result to
+  `spec-check-result.<wave>.<task>.<attempt>.json`, removes the `needs-*`
+  file. (The `<attempt>` suffix keeps stale replies from a prior attempt
+  from being consumed by the current one.)
+- `needs-claude-fallback.<wave>.<task>.<gen>.json` — Claude dispatches a Task()
   implementer using `codex-fallback-prompt.md` in the specified worktree,
-  writes result to `claude-fallback-result.<wave>.<task>.json`, removes the
-  `needs-*` file.
+  writes result to `claude-fallback-result.<wave>.<task>.<gen>.json`,
+  removes the `needs-*` file. (`<gen>` is a per-request generation suffix
+  of the form `<pid>-<epoch>`; use the standard substitution
+  `needs-claude-fallback` → `claude-fallback-result` to derive the reply
+  path so `<gen>` is preserved automatically.)
 
 Poll the work dir every ~5 seconds; the bash orchestrator blocks on these
 handoffs with a 15-min budget per spec check and 30-min per fallback.

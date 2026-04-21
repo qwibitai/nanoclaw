@@ -196,8 +196,12 @@ if [ "$ROLLBACK" -eq 1 ]; then
     if [ -d "$WORK/$sl" ]; then
       "$BIN/codex-worktree" teardown "$WORK" "$sl" > /dev/null 2>&1 || true
     fi
-    # codex-worktree teardown should delete the branch too; belt-and-braces
-    # in case it didn't (e.g., worktree dir was already gone).
+  done
+  # Prune stale linked-worktree metadata so branch -D can delete branches
+  # whose worktree was removed out-of-band before this rollback runs.
+  git worktree prune > /dev/null 2>&1 || true
+  for sl in $rollback_slugs; do
+    [ -z "$sl" ] && continue
     if git show-ref --verify --quiet "refs/heads/codex/$plan_slug/$sl"; then
       git branch -D "codex/$plan_slug/$sl" > /dev/null 2>&1 || true
     fi

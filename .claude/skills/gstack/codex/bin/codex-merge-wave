@@ -244,6 +244,14 @@ elif [ "$is_final_wave" -eq 1 ]; then
     if [ -d "$WORK/$sl" ]; then
       "$BIN/codex-worktree" teardown "$WORK" "$sl" > /dev/null 2>&1 || true
     fi
+  done
+  # Prune stale linked-worktree metadata so `git branch -D` can delete
+  # branches whose worktree dir was removed out-of-band. Without the
+  # prune, Git still considers those branches "checked out in a prunable
+  # worktree" and branch -D would refuse.
+  git worktree prune > /dev/null 2>&1 || true
+  for sl in $all_slugs; do
+    [ -z "$sl" ] && continue
     if git show-ref --verify --quiet "refs/heads/codex/$plan_slug/$sl"; then
       git branch -D "codex/$plan_slug/$sl" > /dev/null 2>&1 || true
     fi
