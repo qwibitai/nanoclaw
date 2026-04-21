@@ -25,8 +25,10 @@ function sshRun(
   const result = spawnSync(
     'ssh',
     [
-      '-o', 'StrictHostKeyChecking=no',
-      '-o', 'ConnectTimeout=10',
+      '-o',
+      'StrictHostKeyChecking=no',
+      '-o',
+      'ConnectTimeout=10',
       `${user}@${host}`,
       cmd,
     ],
@@ -116,7 +118,9 @@ function main(): void {
   );
   const errorCount = parseInt(logProbe.out.trim() || '0', 10);
   if (errorCount > 0) {
-    console.warn(`[smoke-send] WARN: ${errorCount} ERROR-level lines in last 50 log entries`);
+    console.warn(
+      `[smoke-send] WARN: ${errorCount} ERROR-level lines in last 50 log entries`,
+    );
   } else {
     console.log('[smoke-send] No recent ERROR log entries');
   }
