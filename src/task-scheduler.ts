@@ -286,6 +286,13 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           continue;
         }
 
+        // Advance next_run before enqueuing so subsequent polls don't re-pick this task
+        // while it's running (COO brief takes ~28 min; scheduler polls every 60s).
+        const preemptiveNextRun = computeNextRun(currentTask);
+        if (preemptiveNextRun) {
+          updateTask(currentTask.id, { next_run: preemptiveNextRun });
+        }
+
         deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
           runTask(currentTask, deps),
         );

@@ -45,6 +45,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  _closeDatabase,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -566,6 +567,7 @@ async function main(): Promise<void> {
     proxyServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    _closeDatabase();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

@@ -171,9 +171,12 @@ export function initDatabase(): void {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   db = new Database(dbPath);
+  // WAL mode survives hard kills (partial WAL discarded on reopen) and allows
+  // concurrent readers (e.g. the dashboard) without blocking writes.
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
   createSchema(db);
 
-  // Migrate from JSON files if they exist
   migrateJsonState();
 }
 
