@@ -1,0 +1,117 @@
+{
+  "management_group_guid": "186c7a1f-2f9c-4e31-99a4-2fa848dc07dd",
+  "properties": {
+    "Austin Proper Hotel": {
+      "profitsword_site_tag": 107,
+      "restaurants": {
+        "cc167e7e-a451-44ce-aca6-b88fa54eb381": "Peacock",
+        "803f4134-fcdc-4015-b8bd-eb51eac89c77": "La Piscina",
+        "8ac5acbe-f325-4c4f-9c30-9aefd0749e56": "Kappo Kappo",
+        "b64c4a83-46c9-4d76-ac1d-5b048a3f0c0a": "Goldie's",
+        "0504bdfa-99eb-46f4-b289-a33d5772d661": "The Quill Room",
+        "4579a237-0229-42ab-bd64-df3589f4973a": "Austin Banquets & Catering",
+        "d569f31e-affc-4ec6-a7b1-e365ad1badd0": "Minibar (Austin)",
+        "a12b0a79-72fd-4845-b8b5-771fdd1aec7d": "In Room Dining (Austin)"
+      }
+    },
+    "Santa Monica Proper Hotel": {
+      "profitsword_site_tag": 112,
+      "restaurants": {
+        "0760951d-bfc1-4ab6-b3b2-01b8c06604db": "Palma",
+        "c5b2930b-62f3-475e-abb4-2f41a03897e7": "SMP Banquets & Catering",
+        "58f60cf2-558c-46f4-95fe-6bc97b73c323": "In Room Dining (SMP)",
+        "c483806c-0f44-438a-9b71-76660512585f": "Minibar (SMP)"
+      }
+    },
+    "Downtown L.A. Proper Hotel": {
+      "profitsword_site_tag": 102,
+      "restaurants": {
+        "36847f3c-8f41-4aaa-8df5-9f9a63363436": "Cara Cara",
+        "af3e0e94-a31e-4b09-a617-f6c6dd76da4e": "Dahlia",
+        "451b37e7-dc8b-4837-b97b-e998f78944d0": "In Room Dining (DTLA)",
+        "0c4e4c4d-fe85-4890-86d8-aa0f570a4ca9": "DTLA Banquets & Catering",
+        "fcf18441-eb6a-4fc5-97bd-bc5ddbed9f2b": "Minibar (DTLA)"
+      }
+    },
+    "San Francisco Proper Hotel": {
+      "profitsword_site_tag": 108,
+      "restaurants": {
+        "6ae9ca8a-3013-49c9-81ea-47381baf70ca": "Charmaine's",
+        "e7bbf87a-ece4-4611-bb3f-1f856c68d1de": "Villon",
+        "e8eacb6d-3529-4897-b85b-4f4401964b7b": "SF Banquets",
+        "0e35a738-24bc-4bd5-a6f9-c49b46ad1d81": "In Room Dining (SF)",
+        "b270b334-5526-40b5-a6f7-915810c5254b": "Minibar (SF)"
+      }
+    },
+    "Shelborne Miami Beach": {
+      "profitsword_site_tag": 114,
+      "restaurants": {
+        "7a6715cf-6081-4718-bec2-cbbf303a1cb8": "The Pool & Beach Club",
+        "4153d7ef-0c18-4585-a883-738af973435c": "The Bar (Shelborne)",
+        "af731a49-bd4a-46c1-b952-dd4381335e02": "Shelborne Banquets",
+        "7e202137-5858-4784-85ed-cac365889243": "Pauline",
+        "53fbb8e5-b270-4240-812e-4438e690ec4e": "In Room Dining (Shelborne)",
+        "5be41445-172a-465c-a957-3c0c7aeddf39": "Minibar (Shelborne)"
+      }
+    },
+    "The Culver Hotel": {
+      "profitsword_site_tag": 111,
+      "restaurants": {
+        "bd8d54d9-0b84-4835-8df4-08b27cb3db22": "Bar and Restaurant (Culver)",
+        "ec3da543-48f6-4c15-a7f7-e39795e4667c": "Culver Banquets",
+        "6065ef9a-6174-4ccf-9f62-73a193d52d12": "In Room Dining (Culver)",
+        "64ae102a-4d8b-45a8-bfb0-22267a8fc4c8": "Minibar (Culver)"
+      }
+    },
+    "Avalon Beverly Hills": {
+      "profitsword_site_tag": 105,
+      "restaurants": {
+        "47652d56-be98-479c-8d05-f753b17ec6ba": "Viviane",
+        "6abc686c-84ff-487a-bd85-58e29a39bd39": "ABH Banquets",
+        "d77b0a00-4c87-4447-9153-a229b7af6107": "Minibar (ABH)",
+        "c702571a-d93d-4482-8306-f614f225b614": "Velvet"
+      }
+    },
+    "Avalon Palm Springs": {
+      "profitsword_site_tag": 110,
+      "restaurants": {
+        "ca9450ed-3f15-4463-8edb-bd6a07fbe7ef": "Melvyn's / Casablanca / Pool",
+        "a4361438-a2f8-4710-aeea-41efe2c5bca9": "Chi Chi (APS)",
+        "18db667c-73aa-44ea-b670-a58fe409db8e": "Little Torch",
+        "afa3b4c2-1759-4baa-98c2-bb967ab3950f": "APS Banquets",
+        "0b20ac9a-5551-45d0-b469-830118cc4e0e": "Minibar (APS)",
+        "96de9f0f-01b8-4cf8-9e95-f6270e7a98ed": "Chi Chi (ING)"
+      }
+    },
+    "Hotel June West LA": {
+      "profitsword_site_tag": 104,
+      "restaurants": {
+        "7c649125-ba70-4a9c-b29e-3bfde0150b4a": "Scenic Route",
+        "94d7bc42-6161-4849-8f23-33a946cc40b0": "The Cafe",
+        "2fc462ef-7b48-4108-9792-5b21da64a1fa": "Hotel June Banquets",
+        "d29cde52-543f-4bcb-9111-b9428292b0c9": "Minibar (HJ)"
+      }
+    },
+    "Hotel June Malibu": {
+      "profitsword_site_tag": 106,
+      "restaurants": {
+        "bd4c3d0b-168f-400d-9b5c-449f5e371dd2": "Caravan",
+        "96d00e0e-ff91-42c7-a976-11d9b8c8749f": "Minibar (HJM)"
+      }
+    },
+    "Montauk Yacht Club": {
+      "profitsword_site_tag": 115,
+      "restaurants": {
+        "cb68e2ed-e626-494d-8166-f62048bbeb91": "Caldo Verde",
+        "e9587308-cd62-4a6a-b18c-295207e6ebd4": "MYC Banquets"
+      }
+    },
+    "Calabra (SMP)": {
+      "profitsword_site_tag": 112,
+      "note": "Calabra is at SMP but has its own Toast restaurant GUID",
+      "restaurants": {
+        "6f995934-ebb5-4c30-814c-06c22caec3ef": "Calabra"
+      }
+    }
+  }
+}
