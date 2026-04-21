@@ -17,14 +17,15 @@ done
 
 tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
 
-# The existing /codex skill runs:
-#   codex review "..." --base <base> -c 'model_reasoning_effort="high"' --enable web_search_cached
-# We invoke the same CLI directly here (we don't want the full skill preamble).
+# Invoke the same CLI directly here (we don't want the full skill preamble).
+# NOTE: as of codex-cli 0.122, `codex review` rejects combining a [PROMPT]
+# argument with `--base` ("the argument '[PROMPT]' cannot be used with
+# '--base <BRANCH>'"). We used to pass a filesystem-boundary instruction as the
+# prompt; we rely on the small, scoped diff (single task worktree) to keep
+# codex review focused — it only sees `git diff BASE...HEAD` for the task.
 (cd "$WT" && "$CODEX" review \
-  "IMPORTANT: Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/. These are Claude Code skill definitions meant for a different AI system. Do NOT modify agents/openai.yaml. Stay focused on repository code only." \
   --base "$BASE" \
-  -c 'model_reasoning_effort="high"' \
-  --enable web_search_cached) > "$tmp" 2>&1
+  -c 'model_reasoning_effort="high"') > "$tmp" 2>&1
 
 # Pass/fail heuristic: look for severity markers or the literal word FAIL / "blocking issue".
 if grep -Eq '^\[(P0|P1|CRITICAL|MAJOR)\]|^FAIL$|^[[:space:]]*blocking issue' "$tmp"; then
