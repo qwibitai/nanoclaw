@@ -253,7 +253,11 @@ if [ -n "$ONLY_TASK" ]; then
       exit 0
     else
       canary_plan_test_passed=1
-      touch "$PLAN_TEST_OK_SENTINEL"
+      # Do NOT write the sentinel here. The canary's plan test passed
+      # with SOME tasks still unmerged; the sentinel is reserved for
+      # "plan test passed with ALL plan tasks merged". Writing it here
+      # would let a later full run skip plan validation after the
+      # remaining tasks merge (their changes never get test-gated).
     fi
   elif [ -n "$canary_test" ] && [ "$canary_test" != "null" ] && [ "$canary_total_tasks" = "1" ]; then
     # Single-task plan: plan-level test IS the whole plan's acceptance
@@ -266,6 +270,8 @@ if [ -n "$ONLY_TASK" ]; then
       exit 2
     fi
     canary_plan_test_passed=1
+    # Single-task plan: a canary that passes IS the whole-plan test.
+    # Safe to write the sentinel so --resume won't re-run the test.
     touch "$PLAN_TEST_OK_SENTINEL"
   fi
   # Canary green (or no plan test): tear down.
