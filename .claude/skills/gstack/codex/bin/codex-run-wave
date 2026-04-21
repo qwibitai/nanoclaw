@@ -158,32 +158,99 @@ process_one() {
   forbidden="$(cat "$WORK/forbidden.$num" 2>/dev/null || printf '')"
   local findings=""
 
+  # Read the prior status BEFORE we overwrite it with `dispatched`. This
+  # distinguishes three resume cases:
+  #   * claude-fallback: the previous run handed off to a Claude subagent.
+  #     Preserve the worktree + fallback markers — those contain the
+  #     subagent's in-progress work. Skip the codex retry ladder entirely
+  #     and jump straight to consuming the fallback result.
+  #   * dispatched | gate-check: genuinely mid-flight / interrupted.
+  #     Wipe partial state and restart from a clean BASE worktree.
+  #   * anything else (fresh run, or unknown): set up the worktree if it
+  #     doesn't already exist. Nothing to clean.
+  prior_status=""
+  if [ -r "$WORK/state.json" ]; then
+    prior_status="$(jq -r --argjson w "$WAVE" --argjson n "$num" \
+      '.waves[] | select(.wave == $w) | .tasks[] | select(.num == $n) | .status // ""' \
+      "$WORK/state.json" 2>/dev/null || echo "")"
+  fi
+  resume_fallback=0
+  case "$prior_status" in
+    claude-fallback)
+      resume_fallback=1
+      # Do NOT touch worktree or fallback marker files.
+      ;;
+    dispatched|gate-check)
+      if [ -d "$wt" ]; then
+        "$BIN/codex-worktree" teardown "$WORK" "$slug" > /dev/null 2>&1 || true
+      fi
+      rm -f "$sid_file" "$prompt_file" 2>/dev/null || true
+      rm -f "$WORK"/needs-spec-check.$WAVE.$num.*.json \
+            "$WORK"/spec-check-result.$WAVE.$num.*.json \
+            "$WORK"/needs-claude-fallback.$WAVE.$num.*.json \
+            "$WORK"/claude-fallback-result.$WAVE.$num.*.json \
+            "$WORK"/findings.$WAVE.$num.*.txt \
+            "$WORK"/findings.$WAVE.$num.*.txt.review \
+            "$WORK"/diff.$WAVE.$num.txt \
+            2>/dev/null || true
+      "$BIN/codex-worktree" setup "$WORK" "$slug" "$BASE" > /dev/null
+      ;;
+    *)
+      if [ ! -d "$wt" ]; then
+        "$BIN/codex-worktree" setup "$WORK" "$slug" "$BASE" > /dev/null
+      fi
+      ;;
+  esac
+
   "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status dispatched
 
-  # `--resume` semantics for an interrupted task (previous status
-  # dispatched|gate-check): wipe partial state and start clean from BASE.
-  # Without this, a crashed run leaves half-edited files, a stale codex
-  # session id, and leftover gate artifacts that would make attempt 1 of
-  # the resumed run look like attempt N (spurious passes or failures).
-  # Terminal-good statuses (passed-gate, merged) are filtered out before
-  # this point; terminal-bad (blocked) never reaches here. So any task
-  # that arrives here with a pre-existing worktree is genuinely interrupted
-  # and should be reset.
-  if [ -d "$wt" ]; then
-    "$BIN/codex-worktree" teardown "$WORK" "$slug" > /dev/null 2>&1 || true
+  # Resume from claude-fallback: skip the codex retry ladder and consume an
+  # existing (or pending) fallback result directly. The in-progress subagent
+  # edits live in $wt; the marker files may or may not already exist.
+  if [ "$resume_fallback" -eq 1 ]; then
+    "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status claude-fallback
+    # If the needs-claude-fallback marker is missing (the prior run had
+    # already consumed it and written a result), we're good. If the result
+    # is missing too, re-emit the request marker so Claude's poll loop
+    # picks it up.
+    if [ ! -r "$WORK/claude-fallback-result.$WAVE.$num.json" ] && \
+       [ ! -r "$WORK/needs-claude-fallback.$WAVE.$num.json" ]; then
+      jq -n \
+        --argjson w "$WAVE" --argjson t "$num" \
+        --arg slug "$slug" --arg wt "$wt" \
+        --arg base "$BASE" --arg findings "$WORK/findings.$WAVE.$num.3.txt" \
+        --arg plan_json "$PLAN_JSON" \
+        --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{wave:$w, task:$t, slug:$slug, worktree_path:$wt, base:$base,
+          findings_file:$findings, plan_json:$plan_json, requested_at:$now,
+          resumed:true}' \
+        > "$WORK/needs-claude-fallback.$WAVE.$num.json"
+    fi
+    local waited=0
+    while [ ! -r "$WORK/claude-fallback-result.$WAVE.$num.json" ]; do
+      sleep 5; waited=$((waited + 5))
+      if [ "$waited" -gt 1800 ]; then
+        "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status escalated
+        return 2
+      fi
+    done
+    local res
+    res="$(jq -r '.status' "$WORK/claude-fallback-result.$WAVE.$num.json")"
+    rm -f "$WORK/claude-fallback-result.$WAVE.$num.json"
+    if [ "$res" = "DONE" ] || [ "$res" = "DONE_WITH_CONCERNS" ]; then
+      GATE_ATTEMPT="4-resume" \
+      gate_status="$("$BIN/codex-gate" \
+        --worktree "$wt" --work-dir "$WORK" \
+        --wave "$WAVE" --task "$num" --task-slug "$slug" \
+        --base "$BASE" --test-cmd "$test_cmd")"
+      if [ "$gate_status" = "PASS" ]; then
+        "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status passed-gate
+        return 0
+      fi
+    fi
+    "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status escalated
+    return 2
   fi
-  # Clean any leftover per-task scratch files from the prior run.
-  rm -f "$sid_file" "$prompt_file" 2>/dev/null || true
-  rm -f "$WORK"/needs-spec-check.$WAVE.$num.*.json \
-        "$WORK"/spec-check-result.$WAVE.$num.*.json \
-        "$WORK"/needs-claude-fallback.$WAVE.$num.*.json \
-        "$WORK"/claude-fallback-result.$WAVE.$num.*.json \
-        "$WORK"/findings.$WAVE.$num.*.txt \
-        "$WORK"/findings.$WAVE.$num.*.txt.review \
-        "$WORK"/diff.$WAVE.$num.txt \
-        2>/dev/null || true
-
-  "$BIN/codex-worktree" setup "$WORK" "$slug" "$BASE" > /dev/null
 
   while :; do
     render_prompt "$num" "$findings" "$forbidden" > "$prompt_file"
