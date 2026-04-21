@@ -29,6 +29,37 @@ done
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$SKILL_DIR/bin"
 
+# Collect every slug that might have a surviving worktree/branch from this
+# plan: state.json (original run) ∪ plan.json (current parse). Using both
+# catches the case where the user edited task headings between runs.
+all_plan_slugs() {
+  {
+    jq -r '.waves[].tasks[].slug // empty' "$WORK/state.json" 2>/dev/null
+    jq -r '.tasks[].slug // empty' "$PLAN_JSON" 2>/dev/null
+  } | awk 'NF && !seen[$0]++'
+}
+
+teardown_all_plan_worktrees() {
+  local sl
+  local slugs
+  slugs="$(all_plan_slugs)"
+  for sl in $slugs; do
+    [ -z "$sl" ] && continue
+    if [ -d "$WORK/$sl" ]; then
+      "$BIN/codex-worktree" teardown "$WORK" "$sl" > /dev/null 2>&1 || true
+    fi
+  done
+  # Prune stale linked-worktree metadata so branch -D can delete branches
+  # whose worktree dir was removed out-of-band.
+  git worktree prune > /dev/null 2>&1 || true
+  for sl in $slugs; do
+    [ -z "$sl" ] && continue
+    if git show-ref --verify --quiet "refs/heads/codex/$plan_slug/$sl"; then
+      git branch -D "codex/$plan_slug/$sl" > /dev/null 2>&1 || true
+    fi
+  done
+}
+
 tasks="$(jq -r --argjson w "$WAVE" '.waves[] | select(.wave == $w) | .tasks | sort | .[]' "$PLAN_JSON")"
 # With --only-task, merge only that task; leave other branches in this wave alone.
 if [ -n "$ONLY_TASK" ]; then
@@ -253,6 +284,11 @@ if [ -n "$ONLY_TASK" ]; then
         fi
         if [ "$plan_test_ok" -eq 1 ]; then
           "$BIN/codex-state" set-wave-status "$WORK" --wave "$WAVE" --status completed
+          # Final wave + every plan task merged + plan test green: plan is
+          # fully done. Tear down every preserved worktree/branch across
+          # the plan (including slugs that may no longer appear in the
+          # current plan.json if the plan was edited between runs).
+          teardown_all_plan_worktrees
         else
           echo "ESCALATE wave=$WAVE reason=post-wave-global-test-failed (under --only-task)" >&2
           echo "  Plan-level test failed after the last --only-task merge." >&2
@@ -268,29 +304,10 @@ if [ -n "$ONLY_TASK" ]; then
     fi
   fi
 elif [ "$is_final_wave" -eq 1 ]; then
-  # Final wave green: tear down every worktree accumulated across the plan.
-  # Also delete the matching codex/<plan>/<slug> branch unconditionally —
-  # if the worktree dir was removed out-of-band (user inspection, manual
-  # cleanup), the branch would otherwise survive and block the next run
-  # with "fatal: a branch named ... already exists".
-  all_slugs="$(jq -r '.tasks[].slug' "$PLAN_JSON")"
-  for sl in $all_slugs; do
-    [ -z "$sl" ] && continue
-    if [ -d "$WORK/$sl" ]; then
-      "$BIN/codex-worktree" teardown "$WORK" "$sl" > /dev/null 2>&1 || true
-    fi
-  done
-  # Prune stale linked-worktree metadata so `git branch -D` can delete
-  # branches whose worktree dir was removed out-of-band. Without the
-  # prune, Git still considers those branches "checked out in a prunable
-  # worktree" and branch -D would refuse.
-  git worktree prune > /dev/null 2>&1 || true
-  for sl in $all_slugs; do
-    [ -z "$sl" ] && continue
-    if git show-ref --verify --quiet "refs/heads/codex/$plan_slug/$sl"; then
-      git branch -D "codex/$plan_slug/$sl" > /dev/null 2>&1 || true
-    fi
-  done
+  # Final wave green: tear down every worktree/branch accumulated across the
+  # plan, using the union of slugs from state.json and the current plan.json
+  # so edits to task headings between runs don't leak stale branches.
+  teardown_all_plan_worktrees
 fi
 # Non-final wave (full plan): do NOT tear down any worktrees; preserve
 # them so a later final-wave test failure remains recoverable.
