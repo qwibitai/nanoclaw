@@ -102,12 +102,21 @@ else
 fi
 
 PLAN_JSON="$WORK/plan.json"
-# Rollback should work even if the plan now fails to parse (e.g. a task was
-# renamed into a duplicate slug after the original run). Rollback only needs
-# state.json, which has the recorded task nums/slugs/commits. Skip re-parsing
-# in that case and reuse whatever plan.json the original run wrote.
-if [ "$ROLLBACK" -eq 1 ] && [ -r "$PLAN_JSON" ]; then
-  : # use the cached plan.json as-is
+# Rollback and resume should both work even if the plan now fails to parse
+# (e.g. the user edited the plan into a duplicate slug while trying to fix a
+# failure). Rollback uses state.json; resume uses the cached plan.json from
+# the original run. Skip re-parsing in those cases and reuse whatever
+# plan.json the original run wrote.
+if { [ "$ROLLBACK" -eq 1 ] || [ "$RESUME" -eq 1 ]; } && [ -r "$PLAN_JSON" ]; then
+  # Best-effort: try to re-parse; if it fails, keep the cached plan.json.
+  # This lets editors of the plan fix parse errors by --resume; if the
+  # new plan is valid, we pick up their edits. If it's invalid, we still
+  # proceed with the recorded state.
+  if ! "$BIN/codex-parse-plan" "$PLAN" > "$PLAN_JSON.new" 2>/dev/null; then
+    rm -f "$PLAN_JSON.new" 2>/dev/null || true
+  else
+    mv "$PLAN_JSON.new" "$PLAN_JSON"
+  fi
 else
   "$BIN/codex-parse-plan" "$PLAN" > "$PLAN_JSON"
 fi
