@@ -173,10 +173,13 @@ if [ -n "$ONLY_TASK" ]; then
         peer_status="$(jq -r --argjson n "$pn" \
           '.waves[].tasks[] | select(.num == $n) | .status' \
           "$STATE_JSON" 2>/dev/null || echo "")"
-        case "$peer_status" in
-          merged|passed-gate) : ;;
-          *) peers_all_merged=0 ;;
-        esac
+        # Only `merged` means the peer's squash commit is on BASE.
+        # `passed-gate` is a pre-merge state where the gate passed but
+        # codex-merge-wave hasn't run on that peer yet — its changes are
+        # NOT in the plan-level test target.
+        if [ "$peer_status" != "merged" ]; then
+          peers_all_merged=0
+        fi
       done
       if [ "$peers_all_merged" -eq 1 ]; then
         echo "ESCALATE --only-task canary: plan-level test failed." >&2
@@ -209,11 +212,18 @@ if [ -n "$ONLY_TASK" ]; then
     [ -z "$sl" ] && continue
     "$BIN/codex-worktree" teardown "$WORK" "$sl" > /dev/null 2>&1 || true
   done
-  # Single-task plan with --only-task that passed the canary: the whole
-  # plan is done. Mark the wave completed so state isn't permanently
-  # non-terminal. (Multi-task plans with --only-task are intentionally
-  # left in_progress — peer tasks still need to run on later invocations.)
-  if [ "$canary_total_tasks" = "1" ]; then
+  # Wave completion after a successful --only-task canary: if every task
+  # in the plan is now in state 'merged' (i.e. this invocation happened
+  # to be the last remaining peer), mark the wave completed. Otherwise
+  # stay in_progress — peers still need to run.
+  all_merged=1
+  for tn in $(jq -r '.tasks[].num' "$PLAN_JSON"); do
+    tstat="$(jq -r --argjson n "$tn" \
+      '.waves[].tasks[] | select(.num == $n) | .status' \
+      "$STATE_JSON" 2>/dev/null || echo "")"
+    [ "$tstat" = "merged" ] || { all_merged=0; break; }
+  done
+  if [ "$all_merged" -eq 1 ]; then
     "$BIN/codex-state" set-wave-status "$WORK" --wave "$WAVE" --status completed
   fi
 elif [ "$is_final_wave" -eq 1 ]; then
