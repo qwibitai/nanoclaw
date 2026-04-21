@@ -97,3 +97,4 @@ function resolveConfigTimezone(): string {
   return 'UTC';
 }
 export const TIMEZONE = resolveConfigTimezone();
+export const HEALTH_SOCKET_PATH = process.env.HEALTH_SOCKET_PATH || '';
