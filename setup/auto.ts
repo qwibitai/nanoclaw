@@ -15,7 +15,7 @@
  *                          confirm-or-override prompt fires post-ping.
  *   NANOCLAW_SKIP          comma-separated step names to skip
  *                          (environment|container|onecli|auth|
- *                           mounts|service|cli-agent|verify)
+ *                           mounts|service|cli-agent|channel|verify)
  *
  * Timezone is not configured here — it defaults to the host system's TZ.
  * Run `pnpm exec tsx setup/index.ts --step timezone -- --tz <zone>` later
@@ -23,9 +23,13 @@
  *
  * Anthropic credential registration runs via setup/register-claude-token.sh
  * (the only step that truly requires human input — browser sign-in or a
- * pasted token/key). Channel auth and `/manage-channels` remain separate
- * because they're platform-specific and typically handled via `/add-<channel>`
- * and `/manage-channels` after this driver completes.
+ * pasted token/key).
+ *
+ * After a successful end-to-end ping and the name prompts, the driver
+ * offers a messaging channel picker (see setup/channel-wire.ts). Telegram
+ * and WhatsApp-native run end-to-end here; other channels install their
+ * adapter and print a pre-filled init-first-agent command the operator
+ * finishes manually (or via `/add-<channel>` in Claude Code).
  */
 import { spawn, spawnSync } from 'child_process';
 
@@ -339,6 +343,10 @@ async function main(): Promise<void> {
         console.warn(
           '[setup:auto] rename-agent step failed — CLI agent keeps its current names.',
         );
+      }
+      if (!skip.has('channel')) {
+        const { runChannelWire } = await import('./channel-wire.js');
+        await runChannelWire({ displayName, agentName });
       }
     }
   }
