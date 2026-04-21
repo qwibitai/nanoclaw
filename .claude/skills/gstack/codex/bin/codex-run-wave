@@ -316,23 +316,12 @@ process_one() {
     # cases the worktree may already be good enough to PASS. Only emit a
     # NEW fallback request if the gate still fails.
     if [ -z "$fb_result" ]; then
-      GATE_ATTEMPT="4-resume-regate" \
-      gate_status="$("$BIN/codex-gate" \
-        --worktree "$wt" --work-dir "$WORK" \
-        --wave "$WAVE" --task "$num" --task-slug "$slug" \
-        --base "$BASE" --test-cmd "$test_cmd" 2>/dev/null || echo FAIL)"
-      if [ "$gate_status" = "PASS" ]; then
-        # Clean any leftover stale marker before returning so a later
-        # attempt doesn't see it as active.
-        [ -n "$fb_marker" ] && rm -f "$fb_marker" 2>/dev/null || true
-        "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status passed-gate
-        return 0
-      fi
-      # Gate still red. If a marker exists, a worker MAY be in flight
-      # producing a reply. Wait briefly for the existing marker's reply
-      # to appear (short budget) — if it does, consume it via the main
-      # wait-loop below. If not, assume the worker is dead and emit a
-      # fresh request with a new generation.
+      # If a live marker exists, a Claude worker may still be editing the
+      # worktree. Re-gating NOW would risk accepting a half-written branch
+      # while the worker continues to mutate it. Wait for the marker's
+      # matching reply first (bounded budget). If the reply arrives, fall
+      # through to the main wait-loop below. If not, assume the worker is
+      # dead and re-gate / emit fresh.
       if [ -n "$fb_marker" ] && [ -r "$fb_marker" ]; then
         local in_flight_wait=0
         local in_flight_result
@@ -343,6 +332,21 @@ process_one() {
         if [ -r "$in_flight_result" ]; then
           fb_result="$in_flight_result"
         fi
+      fi
+    fi
+    # Only re-gate / emit fresh if we STILL have no result (no marker
+    # existed, or the in-flight wait timed out).
+    if [ -z "$fb_result" ]; then
+      GATE_ATTEMPT="4-resume-regate" \
+      gate_status="$("$BIN/codex-gate" \
+        --worktree "$wt" --work-dir "$WORK" \
+        --wave "$WAVE" --task "$num" --task-slug "$slug" \
+        --base "$BASE" --test-cmd "$test_cmd" 2>/dev/null || echo FAIL)"
+      if [ "$gate_status" = "PASS" ]; then
+        # Clean any leftover stale marker before returning.
+        [ -n "$fb_marker" ] && rm -f "$fb_marker" 2>/dev/null || true
+        "$BIN/codex-state" set-status "$WORK" --wave "$WAVE" --task "$num" --status passed-gate
+        return 0
       fi
     fi
     # If the in-flight wait produced a result, skip the fresh-request branch.

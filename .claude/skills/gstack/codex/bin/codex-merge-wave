@@ -228,7 +228,13 @@ if [ -n "$ONLY_TASK" ]; then
   # non-idempotent concern, scaled across processes).
   PLAN_TEST_OK_SENTINEL="$WORK/plan-test-passed"
   canary_plan_test_passed=0
-  [ -r "$PLAN_TEST_OK_SENTINEL" ] && canary_plan_test_passed=1
+  if [ -r "$PLAN_TEST_OK_SENTINEL" ]; then
+    canary_plan_test_passed=1
+    # Don't re-run the canary test below — the sentinel means it already
+    # passed (possibly from a crashed prior run, and the test may be
+    # non-idempotent). Blank canary_test so both code paths short-circuit.
+    canary_test=""
+  fi
   if [ -n "$canary_test" ] && [ "$canary_test" != "null" ] && [ "$canary_total_tasks" != "1" ]; then
     # Multi-task plan: a failing plan-level test could be either
     #   (a) expected (peer tasks haven't merged yet), or
