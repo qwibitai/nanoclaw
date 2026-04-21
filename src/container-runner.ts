@@ -296,6 +296,23 @@ async function buildContainerArgs(
     }
     const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
     if (onecliApplied) {
+      // OneCLI writes certs to $TMPDIR (e.g. /var/folders/…/T/ on macOS).
+      // VMs like Colima only share /Users/ — copy the specific .pem files
+      // to a project-local dir so the volume mounts resolve inside the VM.
+      const certsDir = path.join(DATA_DIR, 'onecli-certs');
+      fs.mkdirSync(certsDir, { recursive: true });
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === '-v' && args[i + 1]?.includes('/onecli-') && args[i + 1]?.includes('.pem')) {
+          const [src, ...rest] = args[i + 1].split(':');
+          const localCert = path.join(certsDir, path.basename(src));
+          try {
+            fs.copyFileSync(src, localCert);
+            args[i + 1] = [localCert, ...rest].join(':');
+          } catch {
+            /* source missing — leave original mount, will fail visibly */
+          }
+        }
+      }
       log.info('OneCLI gateway applied', { containerName });
     } else {
       log.warn('OneCLI gateway not applied — container will have no credentials', { containerName });
