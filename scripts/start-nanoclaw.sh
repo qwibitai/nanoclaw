@@ -18,4 +18,4 @@ if [ $WAITED -gt 0 ] && [ $WAITED -lt $MAX_WAIT ]; then
     echo "$(date): Docker ready after ${WAITED}s"
 fi
 
-exec /opt/homebrew/bin/node /Users/gabrielratner/projects/nanoclaw/dist/index.js
+exec /opt/homebrew/opt/node@22/bin/node /Users/gabrielratner/projects/nanoclaw/dist/index.js
