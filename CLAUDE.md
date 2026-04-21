@@ -1,5 +1,19 @@
 # NanoClaw
 
+> ## ⚠️ ROMY OFFLINE — NE PAS LA RÉINTÉGRER À deploy.sh
+>
+> Depuis le 2026-04-21, `com.nanoclaw.romy` a été **retirée** de `SERVICES=(...)` dans `deploy.sh` (backup : `deploy.sh.bak.2026-04-21`).
+> Raison : bug OOO loop qui génère des drafts "Credit balance is too low" en boucle sur tous les mails entrants.
+>
+> **NE PAS** :
+> - Remettre `com.nanoclaw.romy` dans `SERVICES=(...)`
+> - Faire `git restore deploy.sh` / merger un PR qui la ramène
+> - `launchctl load com.nanoclaw.romy.plist`
+>
+> Conditions de relance : voir `/Users/boty/nanoclaw-romy/CLAUDE.md` section "Prérequis avant réactivation".
+
+---
+
 Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
 
 ## Quick Context

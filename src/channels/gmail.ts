@@ -332,6 +332,57 @@ export class GmailChannel implements Channel {
       }
     } else {
       // External recipient: create draft + send notification to yacine@
+
+      // Hardware-level safety: refuse drafts to system/billing/noreply
+      // recipients regardless of prompt behavior. Matches
+      // DRAFT_BLOCKLIST_PATTERNS — prevents prompt hallucinations from
+      // leaking internal data to automated endpoints.
+      const blockedPattern = this.isDraftRecipientBlocked(meta.sender);
+      if (blockedPattern) {
+        logger.error(
+          {
+            to: meta.sender,
+            threadId,
+            pattern: blockedPattern,
+            bodyPreview: text.slice(0, 300),
+          },
+          'BLOCKED: refusing agent draft to blocklisted recipient',
+        );
+        incCounter('nanoclaw_drafts_blocked_total', { pattern: blockedPattern });
+        try {
+          const alertHeaders = [
+            `To: ${allowlistCfg.notify_email}`,
+            `From: ${this.userEmail}`,
+            `Subject: [BLOCKED DRAFT] Agent attempted draft to ${meta.sender}`,
+            'Content-Type: text/plain; charset=utf-8',
+            '',
+            `The agent attempted to create a Gmail draft that was blocked by the hardware-level filter.\n\n` +
+              `Recipient: ${meta.sender}\n` +
+              `Matched blocklist pattern: ${blockedPattern}\n` +
+              `Thread ID: ${threadId}\n` +
+              `Agent: ${this.userEmail}\n\n` +
+              `Body preview:\n${text.slice(0, 500)}\n\n` +
+              `The draft was NOT created. Review the agent prompt or the blocklist if this is a false positive.`,
+          ].join('\r\n');
+          const encodedAlert = Buffer.from(alertHeaders)
+            .toString('base64')
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/, '');
+          await this.gmail.users.messages.send({
+            userId: 'me',
+            requestBody: { raw: encodedAlert },
+          });
+          logger.info(
+            { to: allowlistCfg.notify_email, blockedFor: meta.sender, pattern: blockedPattern },
+            'Block-alert notification sent',
+          );
+        } catch (notifyErr) {
+          logger.warn({ err: notifyErr }, 'Failed to send block-alert notification');
+        }
+        return;
+      }
+
       const headers = [
         `To: ${meta.sender}`,
         `From: ${this.userEmail}`,
@@ -587,7 +638,7 @@ export class GmailChannel implements Channel {
     if (senderEmail === this.userEmail) return;
 
     // Skip automated/marketing emails before spawning an agent
-    const filterReason = this.isAutomatedEmail(senderEmail, headers);
+    const filterReason = this.isAutomatedEmail(senderEmail, subject, headers);
     if (filterReason) {
       incCounter('nanoclaw_emails_filtered_total', { reason: filterReason });
       logger.debug(
@@ -665,6 +716,35 @@ export class GmailChannel implements Channel {
 
   // ---- Email filtering ----
 
+  // Leading Re:/Fwd:/Tr:/etc. prefix tokens — used to strip and count nesting.
+  private static SUBJECT_PREFIX_RE = /^(\s*(?:re|r[eé]f?|fwd?|fw|tr|aw|wg|sv|vs|antw)\s*:\s*)+/i;
+
+  // Subject phrases that reliably indicate an auto-reply / OOO, matched after
+  // the reply/forward prefix chain has been stripped. Keep anchored to the
+  // start of the core subject to avoid false positives on legit mail that
+  // merely mentions "absence" or "out of office" inside a longer subject.
+  private static AUTO_REPLY_SUBJECT_PATTERNS: RegExp[] = [
+    /^automatic\s+reply\b/i,
+    /^auto[- ]?reply\b/i,
+    /^autoresponse\b/i,
+    /^auto[- ]?response\b/i,
+    /^r[eé]ponse\s+automatique\b/i,
+    /^automatische\s+antwort\b/i,
+    /^out\s+of\s+(the\s+)?office\b/i,
+    /^absent\s+du\s+bureau\b/i,
+    /^hors\s+du?\s+bureau\b/i,
+    /^en\s+cong[eé]s?\b/i,
+    /^\[?oof\]?\b/i,
+    /^\[?ooo\]?\b/i,
+    /^\[?out\s+of\s+office\]?\b/i,
+    // Our own "[SENT] Name:" marker coming back through the inbox — if the
+    // agent replied to this, we'd loop with our own sent-prefix.
+    /^\[sent\]/i,
+    // Internal deploy / CI notifications — must never receive agent replies
+    /^\[WebDeploy\]/i,
+    /^\[Draft pending\]/i,
+  ];
+
   // Sender prefixes that indicate automated/noreply emails
   private static NOREPLY_PREFIXES = [
     'noreply@',
@@ -678,6 +758,7 @@ export class GmailChannel implements Channel {
     'notification@',
     'alert@',
     'alerts@',
+    'comments-noreply@',
   ];
 
   // Known marketing/bulk email sender domains
@@ -701,14 +782,90 @@ export class GmailChannel implements Channel {
     'drip.com',
     'getresponse.com',
     'activecampaign.com',
+    'hes.scot',
+    'e.eurostar.com',
   ];
 
   /**
-   * Check if an email is automated/marketing.
+   * Recipients for which agent-created drafts are ALWAYS refused.
+   * Hardware-level safety: regardless of what the agent's system prompt
+   * says, a draft to any of these addresses is blocked before reaching
+   * Gmail's drafts.create API — prevents accidental data leaks to
+   * billing / automated / system endpoints when an agent hallucinates
+   * a wrong recipient thread.
+   */
+  private static DRAFT_BLOCKLIST_PATTERNS: RegExp[] = [
+    // Automated / bounce / system senders
+    /^noreply@/i,
+    /^no-reply@/i,
+    /^no_reply@/i,
+    /^donotreply@/i,
+    /^do-not-reply@/i,
+    /^mailer-daemon@/i,
+    /^postmaster@/i,
+    /^automated@/i,
+    /^notifications?@/i,
+    /^alerts?@/i,
+    /^billing@/i,
+    /^invoice[+@]/i,
+    /^statements?[+@]/i,
+    /^receipt[+@]/i,
+    /^chat-noreply@/i,
+    // SaaS / infra vendors — never legitimate agent reply targets
+    /@stripe\.com$/i,
+    /@anthropic\.com$/i,
+    /@openai\.com$/i,
+    /@google\.com$/i,
+    /@googlemail\.com$/i,
+    /@googleapis\.com$/i,
+    /@accounts\.google\.com$/i,
+    /@amazon\.com$/i,
+    /@amazonaws\.com$/i,
+    /@amazonses\.com$/i,
+    /@aws\.amazon\.com$/i,
+    /@github\.com$/i,
+    /@gitlab\.com$/i,
+    /@atlassian\.com$/i,
+    /@slack\.com$/i,
+    /@notion\.so$/i,
+    /@linear\.app$/i,
+    /@vercel\.com$/i,
+    /@cloudflare\.com$/i,
+    /@firebase\.google\.com$/i,
+    // Transport / partenaires qui créent des loops OOO
+    /@e\.eurostar\.com$/i,
+    /@hes\.scot$/i,
+    // Aliases internes système (NON-humains) — agents ne doivent jamais écrire
+    // à ces destinataires. La communication avec l'équipe humaine
+    // (yacine@, ahmed@, eline@, etc.) reste autorisée.
+    /^charissa@bestoftours\.co\.uk$/i,
+  ];
+
+  /**
+   * Return the matched pattern source if the email is on the draft
+   * blocklist, null if allowed. Hardware-level safety check used before
+   * any agent-driven Gmail draft — independent of the agent's prompt.
+   */
+  private isDraftRecipientBlocked(email: string): string | null {
+    const lower = (email || '').toLowerCase();
+    for (const pat of GmailChannel.DRAFT_BLOCKLIST_PATTERNS) {
+      if (pat.test(lower)) return pat.source;
+    }
+    return null;
+  }
+
+  /**
+   * Check if an email is automated/marketing/auto-reply.
    * Returns the filter reason string if filtered, or null if not filtered.
+   *
+   * Auto-reply / OOO detection is critical: without it, an agent that
+   * creates a draft on every inbound email will trigger Exchange/Gmail
+   * OOO rules repeatedly and enter an infinite reply loop with itself
+   * (real incident — see BALISE / Romy container, 2026-04-20).
    */
   private isAutomatedEmail(
     senderEmail: string,
+    subject: string,
     headers: Array<{ name?: string | null; value?: string | null }>,
   ): string | null {
     const email = senderEmail.toLowerCase();
@@ -734,19 +891,59 @@ export class GmailChannel implements Channel {
       return 'newsletter';
     }
 
-    // 4. Precedence: bulk or list (standard header for mailing lists)
+    // 4. Precedence: bulk, list, or auto_reply
     const precedence = getHeader('Precedence').toLowerCase();
-    if (precedence === 'bulk' || precedence === 'list') {
-      return 'newsletter';
+    if (
+      precedence === 'bulk' ||
+      precedence === 'list' ||
+      precedence === 'auto_reply' ||
+      precedence === 'junk'
+    ) {
+      return precedence === 'auto_reply' ? 'auto_reply' : 'newsletter';
     }
 
-    // 5. Auto-Submitted header (bounces, auto-replies)
+    // 5. Auto-Submitted header (RFC 3834 — bounces, auto-replies, OOO)
     const autoSubmitted = getHeader('Auto-Submitted').toLowerCase();
     if (autoSubmitted && autoSubmitted !== 'no') {
-      return 'noreply';
+      return 'auto_reply';
     }
 
-    // 6. X-Mailer or X-Campaign headers (bulk mailers)
+    // 6. Outlook/Exchange-specific OOO headers. Auto-Submitted is often
+    //    missing from legacy Exchange configs, so these catch the gaps.
+    if (
+      getHeader('X-Auto-Response-Suppress') ||
+      getHeader('X-Autoreply') ||
+      getHeader('X-Autorespond') ||
+      getHeader('X-POST-MessageClass').toLowerCase().includes('autoresponse')
+    ) {
+      return 'auto_reply';
+    }
+
+    // 7. Subject phrases that reliably indicate an auto-reply.
+    //    Strip leading Re:/Fwd:/Tr:/etc. prefixes before matching so that
+    //    replies to OOO threads ("Re: Automatic reply: ...") are also caught.
+    const coreSubject = (subject || '')
+      .replace(GmailChannel.SUBJECT_PREFIX_RE, '')
+      .trim();
+    if (
+      coreSubject &&
+      GmailChannel.AUTO_REPLY_SUBJECT_PATTERNS.some((p) => p.test(coreSubject))
+    ) {
+      return 'auto_reply_subject';
+    }
+
+    // 8. Reply-chain loop detection: count leading reply/forward prefix
+    //    tokens. Legitimate human threads rarely stack more than 3 of
+    //    these; ≥4 almost always means two auto-responders ping-ponging.
+    const prefixMatch = (subject || '').match(GmailChannel.SUBJECT_PREFIX_RE);
+    if (prefixMatch) {
+      const tokenCount = (prefixMatch[0].match(/:/g) || []).length;
+      if (tokenCount >= 4) {
+        return 'reply_loop';
+      }
+    }
+
+    // 9. X-Mailer or X-Campaign headers (bulk mailers)
     if (getHeader('X-Campaign-Id') || getHeader('X-Mailchimp-Id')) {
       return 'marketing';
     }

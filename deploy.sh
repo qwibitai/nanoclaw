@@ -7,9 +7,14 @@ cd "$(dirname "$0")"
 echo "Building..."
 npm run build
 
-INSTANCES=(nanoclaw-sam nanoclaw-thais nanoclaw-alan)
+# Dirs where dist/ must be copied. Each agent plist points to one of these.
+# nanoclaw-bot is the runtime dir for Romy (its plist points to nanoclaw-bot/dist/index.js)
+CODE_DIRS=(nanoclaw-sam nanoclaw-thais nanoclaw-alan nanoclaw-alex nanoclaw-bot)
 
-for inst in "${INSTANCES[@]}"; do
+# launchd services to kickstart on --restart
+SERVICES=(com.nanoclaw com.nanoclaw.sam com.nanoclaw.thais com.nanoclaw.alan com.nanoclaw.alex)
+
+for inst in "${CODE_DIRS[@]}"; do
   dir="/Users/boty/$inst"
   if [ -d "$dir" ]; then
     # Remove old dist (symlink or directory)
@@ -19,16 +24,12 @@ for inst in "${INSTANCES[@]}"; do
   fi
 done
 
-echo "Build distributed to ${#INSTANCES[@]} instances."
+echo "Build distributed to ${#CODE_DIRS[@]} instances."
 
 if [ "$1" = "--restart" ]; then
   echo "Restarting services..."
-  launchctl kickstart -k "gui/$(id -u)/com.nanoclaw"
-  for inst in "${INSTANCES[@]}"; do
-    svc="com.${inst//-/.}"
-    # nanoclaw-sam -> com.nanoclaw.sam
-    svc="com.nanoclaw.${inst#nanoclaw-}"
-    launchctl kickstart -k "gui/$(id -u)/$svc"
+  for svc in "${SERVICES[@]}"; do
+    launchctl kickstart -k "gui/$(id -u)/$svc" || echo "  warn: $svc kickstart failed"
   done
   echo "All services restarted."
 fi
