@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import { _initTestDatabase, storeChatMetadata } from './db.js';
 import { getAvailableGroups, _setRegisteredGroups } from './index.js';
+import { routeOutboundImage } from './router.js';
 
 beforeEach(() => {
   _initTestDatabase();
@@ -166,5 +167,51 @@ describe('getAvailableGroups', () => {
   it('returns empty array when no chats exist', () => {
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(0);
+  });
+});
+
+// --- routeOutboundImage ---
+
+describe('routeOutboundImage', () => {
+  function makeChannel(
+    owns: (j: string) => boolean,
+    connected = true,
+    withSendImage = true,
+  ) {
+    return {
+      name: 'test',
+      ownsJid: owns,
+      isConnected: () => connected,
+      sendMessage: vi.fn(async () => undefined),
+      sendImage: withSendImage ? vi.fn(async () => undefined) : undefined,
+      connect: async () => undefined,
+      disconnect: async () => undefined,
+    } as unknown as import('./types.js').Channel;
+  }
+
+  it('dispatches to channel.sendImage when defined', async () => {
+    const ch = makeChannel((j) => j === 'slack:C1');
+    await routeOutboundImage([ch], 'slack:C1', ['/abs/a.png'], 'hi');
+    expect(ch.sendImage).toHaveBeenCalledWith('slack:C1', ['/abs/a.png'], 'hi');
+    expect(ch.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('falls back to sendMessage when channel lacks sendImage', async () => {
+    const ch = makeChannel((j) => j === 'wa:123', true, false);
+    await routeOutboundImage([ch], 'wa:123', ['/abs/a.png'], 'caption');
+    expect(ch.sendMessage).toHaveBeenCalledWith('wa:123', 'caption');
+  });
+
+  it('falls back with [image] placeholder when no caption and no sendImage', async () => {
+    const ch = makeChannel((j) => j === 'wa:123', true, false);
+    await routeOutboundImage([ch], 'wa:123', ['/abs/a.png']);
+    expect(ch.sendMessage).toHaveBeenCalledWith('wa:123', '[image]');
+  });
+
+  it('throws when no connected channel owns the jid', async () => {
+    const ch = makeChannel(() => false);
+    await expect(
+      routeOutboundImage([ch], 'slack:C1', ['/abs/a.png']),
+    ).rejects.toThrow(/No channel/);
   });
 });

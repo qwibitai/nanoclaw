@@ -51,6 +51,22 @@ export function routeOutbound(
   return channel.sendMessage(jid, text);
 }
 
+export async function routeOutboundImage(
+  channels: Channel[],
+  jid: string,
+  imagePaths: string[],
+  caption?: string,
+): Promise<void> {
+  const channel = channels.find((c) => c.ownsJid(jid) && c.isConnected());
+  if (!channel) throw new Error(`No channel for JID: ${jid}`);
+  if (channel.sendImage) {
+    await channel.sendImage(jid, imagePaths, caption);
+    return;
+  }
+  // Graceful fallback: surface the agent's caption (or a placeholder) as text.
+  await channel.sendMessage(jid, caption ?? '[image]');
+}
+
 export function findChannel(
   channels: Channel[],
   jid: string,
