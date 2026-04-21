@@ -5,15 +5,18 @@ import { OneCLI } from '@onecli-sh/sdk';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
+  HEALTH_SOCKET_PATH,
   IDLE_TIMEOUT,
   MAX_MESSAGES_PER_PROMPT,
   ONECLI_URL,
   POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
+import { startHealthServer, type HealthServer } from './health.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -87,6 +90,7 @@ let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
+let healthServer: HealthServer | null = null;
 const queue = new GroupQueue();
 
 const onecli = new OneCLI({ url: ONECLI_URL });
@@ -598,6 +602,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    if (healthServer) await healthServer.stop().catch(() => {});
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -614,7 +619,12 @@ async function main(): Promise<void> {
       group?.isMain ||
       (msg.canonical_id != null &&
         msg.roles != null &&
-        checkCapability(msg.canonical_id, 'system.remoteControl', msg.roles, _policyConfig));
+        checkCapability(
+          msg.canonical_id,
+          'system.remoteControl',
+          msg.roles,
+          _policyConfig,
+        ));
     if (!hasRemoteControlAccess) {
       logger.warn(
         { chatJid, sender: msg.sender, canonical_id: msg.canonical_id },
@@ -764,6 +774,19 @@ async function main(): Promise<void> {
     },
   });
   startSessionCleanup();
+  const healthSocketPath =
+    HEALTH_SOCKET_PATH ||
+    (process.env.NANOCLAW_HEALTH ? path.join(DATA_DIR, 'health.sock') : '');
+  if (healthSocketPath) {
+    healthServer = startHealthServer(healthSocketPath, () => ({
+      channelsConnected: channels
+        .filter((ch) => ch.isConnected())
+        .map((ch) => ch.name),
+      dbOk: true,
+      registeredGroupsCount: Object.keys(registeredGroups).length,
+    }));
+    logger.info({ socketPath: healthSocketPath }, 'Health server started');
+  }
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
