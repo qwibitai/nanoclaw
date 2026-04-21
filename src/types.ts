@@ -102,7 +102,11 @@ export interface Channel {
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
   // Optional: send image. Channels that support image delivery implement it.
-  sendImage?(jid: string, imagePaths: string[], caption?: string): Promise<void>;
+  sendImage?(
+    jid: string,
+    imagePaths: string[],
+    caption?: string,
+  ): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

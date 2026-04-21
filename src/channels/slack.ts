@@ -4,6 +4,7 @@ import type { GenericMessageEvent, BotMessageEvent } from '@slack/types';
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { updateChatName } from '../db.js';
 import { readEnvFile } from '../env.js';
+import { processImageBuffer, isSupportedImageMime } from '../image.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -11,6 +12,7 @@ import {
   OnInboundMessage,
   OnChatMetadata,
   RegisteredGroup,
+  ImageAttachment,
 } from '../types.js';
 
 // Slack's chat.postMessage API limits text to ~4000 characters per call.
@@ -37,6 +39,7 @@ export class SlackChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private userNameCache = new Map<string, string>();
+  private botToken: string;
 
   private opts: SlackChannelOpts;
 
@@ -54,6 +57,8 @@ export class SlackChannel implements Channel {
         'SLACK_BOT_TOKEN and SLACK_APP_TOKEN must be set in .env',
       );
     }
+
+    this.botToken = botToken;
 
     this.app = new App({
       token: botToken,
@@ -77,7 +82,7 @@ export class SlackChannel implements Channel {
       // After filtering, event is either GenericMessageEvent or BotMessageEvent
       const msg = event as HandledMessageEvent;
 
-      if (!msg.text) return;
+      if (!msg.text && !(msg as { files?: unknown[] }).files?.length) return;
 
       // Threaded replies are flattened into the channel conversation.
       // The agent sees them alongside channel-level messages; responses
@@ -110,7 +115,7 @@ export class SlackChannel implements Channel {
       // Slack encodes @mentions as <@U12345>, which won't match TRIGGER_PATTERN
       // (e.g., ^@<ASSISTANT_NAME>\b), so we prepend the trigger when the bot is @mentioned.
       let content = msg.text;
-      if (this.botUserId && !isBotMessage) {
+      if (this.botUserId && !isBotMessage && content) {
         const mentionPattern = `<@${this.botUserId}>`;
         if (
           content.includes(mentionPattern) &&
@@ -120,15 +125,67 @@ export class SlackChannel implements Channel {
         }
       }
 
+      // Process image attachments. Slack delivers files[] on the message event;
+      // we download each supported image via url_private_download (requires the
+      // bot token as bearer auth) and pass it through the shared image pipeline.
+      const files =
+        (
+          msg as {
+            files?: Array<{
+              id?: string;
+              mimetype?: string;
+              url_private_download?: string;
+              name?: string;
+            }>;
+          }
+        ).files ?? [];
+      const images: ImageAttachment[] = [];
+      for (const file of files) {
+        if (!file.mimetype || !isSupportedImageMime(file.mimetype)) {
+          if (file.mimetype) {
+            logger.debug(
+              { fileId: file.id, mime: file.mimetype },
+              'Slack non-image file skipped',
+            );
+          }
+          continue;
+        }
+        if (!file.url_private_download) continue;
+        try {
+          const res = await fetch(file.url_private_download, {
+            headers: { Authorization: `Bearer ${this.botToken}` },
+          });
+          if (!res.ok) {
+            logger.warn(
+              { fileId: file.id, status: res.status },
+              'Slack image fetch failed',
+            );
+            continue;
+          }
+          const buf = Buffer.from(await res.arrayBuffer());
+          const att = await processImageBuffer(buf, file.mimetype);
+          if (att) images.push(att);
+        } catch (err) {
+          logger.warn(
+            { fileId: file.id, err },
+            'Slack image processing error',
+          );
+        }
+      }
+
+      // If nothing survived (no text AND no images), silently drop to match pre-image behavior.
+      if (!msg.text && images.length === 0) return;
+
       this.opts.onMessage(jid, {
         id: msg.ts,
         chat_jid: jid,
         sender: msg.user || msg.bot_id || '',
         sender_name: senderName,
-        content,
+        content: content ?? '',
         timestamp,
         is_from_me: isBotMessage,
         is_bot_message: isBotMessage,
+        images: images.length ? images : undefined,
       });
     });
   }
