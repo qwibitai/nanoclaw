@@ -35,7 +35,7 @@ For write actions: describe exactly what you're about to do, then ask "Should I 
 | Company Knowledge Base | mcp__alma-library__ask, mcp__alma-library__search, mcp__alma-library__list_sources | /company-kb |
 | Linear (issues, cycles, people) | mcp__linear__* | /linear-ops |
 | GitHub (repos, PRs, issues, code) | mcp__github__* | /github-ops |
-| Slack Intel (channels, history, directory) | mcp__slack-intel__* | /slack-intel |
+| Slack (channels, history, directory, post, DM, react) | mcp__slack-intel__* | /slack-ops |
 
 For any capability listed above: if the playbook skill isn't already loaded, invoke it with the Skill tool before proceeding. Skills add the detailed tool names, approval patterns, and worked examples you need.
 

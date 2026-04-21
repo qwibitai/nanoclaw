@@ -527,7 +527,7 @@ async function runQuery(
                 args: ['-y', 'slack-mcp-server@latest'],
                 env: {
                   SLACK_MCP_XOXB_TOKEN: process.env.SLACK_BOT_TOKEN,
-                  SLACK_MCP_ADD_MESSAGE_TOOL: 'false',
+                  SLACK_MCP_ADD_MESSAGE_TOOL: 'true',
                 },
               },
             }

@@ -17,11 +17,10 @@ Read-side access to Alma Labs' Slack workspace for context, search, and people l
 | Find a person | `mcp__slack-intel__list_users` or `get_user_info` |
 | Search messages | `mcp__slack-intel__search_messages` with query |
 
-## Write actions (load /almanda-ops, ask approval first)
+## Write actions (load /slack-ops, ask approval first)
 
-Posting to Slack goes through the Slack channel integration (outbound), not this MCP.
-Use `mcp__nanoclaw__send_message` with a `target_group_jid` to post to a registered Slack group.
-Always ask approval before posting to any channel other than the current conversation.
+To post messages, DM teammates, or react, load the `/slack-ops` playbook — it lists
+the write tools and approval phrasing. Always ask approval before any write action.
 
 ## People lookup pattern
 

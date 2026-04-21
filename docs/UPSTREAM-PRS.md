@@ -50,3 +50,5 @@ Once accepted upstream, the corresponding `.nanoclaw-migrations/guide.md` entry 
 **Status:** Not yet submitted  
 **Proposal:** Add a typed `mcpEnvVars` array near the TZ forwarding block that passes named env vars to the container via `-e` when set on the host. Forks can add to the array without touching the surrounding logic.  
 **Upstream benefit:** Currently the only way to pass credentials to container-side MCP servers is OneCLI. Forks without OneCLI (dev setups, self-hosted deployments) have no clean hook to forward their own API keys. A small extension-point array keeps the change minimal and makes the pattern visible rather than scattered.
+
+**Alma fork note (add-slack-ops):** `SLACK_MCP_ADD_MESSAGE_TOOL=true` is now set on the `slack-intel` MCP block in `container/agent-runner/src/index.ts:530`. This enables `conversations_add_message`, `reactions_add`, and `reactions_remove` tools. No new env-var forwarding anchor was needed (SLACK_BOT_TOKEN was already in the allowlist).
