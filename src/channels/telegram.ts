@@ -2,7 +2,7 @@ import fs from 'fs';
 import https from 'https';
 import path from 'path';
 
-import { Api, Bot } from 'grammy';
+import { Api, Bot, InputFile } from 'grammy';
 
 import { execSync } from 'child_process';
 
@@ -263,14 +263,19 @@ export class TelegramChannel implements Channel {
 
       const jsonlFiles = fs
         .readdirSync(projectDir)
-        .filter((f) => f.endsWith('.jsonl'));
+        .filter((f) => f.endsWith('.jsonl'))
+        .map((f) => {
+          const full = path.join(projectDir, f);
+          return { full, mtime: fs.statSync(full).mtimeMs };
+        })
+        .sort((a, b) => b.mtime - a.mtime);
       if (jsonlFiles.length === 0) {
         ctx.reply('No active session.');
         return;
       }
 
       // Read last assistant entry with usage from the most recent JSONL
-      const filePath = path.join(projectDir, jsonlFiles[jsonlFiles.length - 1]);
+      const filePath = jsonlFiles[0].full;
       const lines = fs.readFileSync(filePath, 'utf-8').trim().split('\n');
 
       let model = '?';
@@ -295,7 +300,7 @@ export class TelegramChannel implements Channel {
       }
 
       const contextK = Math.round(contextTokens / 1000);
-      const maxK = 200;
+      const maxK = 1000;
       const pct = Math.round((contextTokens / (maxK * 1000)) * 100);
       const total = cacheRead + cacheCreation;
       const hitRate = total > 0 ? Math.round((cacheRead / total) * 100) : 0;
@@ -633,6 +638,28 @@ export class TelegramChannel implements Channel {
       this.bot.stop();
       this.bot = null;
       logger.info('Telegram bot stopped');
+    }
+  }
+
+  async sendVoice(
+    jid: string,
+    audio: Buffer,
+    threadId?: string,
+  ): Promise<void> {
+    if (!this.bot) return;
+    try {
+      const numericId = jid.replace(/^tg:/, '');
+      const options = threadId
+        ? { message_thread_id: parseInt(threadId, 10) }
+        : {};
+      await this.bot.api.sendVoice(
+        numericId,
+        new InputFile(audio, 'voice.ogg'),
+        options,
+      );
+      logger.info({ jid }, 'Telegram voice message sent');
+    } catch (err) {
+      logger.error({ jid, err }, 'Failed to send Telegram voice message');
     }
   }
 
