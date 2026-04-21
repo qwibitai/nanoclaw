@@ -265,7 +265,7 @@ function shouldClose(): boolean {
  * Drain all pending IPC input messages.
  * Returns messages found, or empty array.
  */
-function drainIpcInput(): string[] {
+function drainIpcInput(): Array<{ text: string; images?: ImageAttachment[] }> {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
     const files = fs
@@ -273,14 +273,17 @@ function drainIpcInput(): string[] {
       .filter((f) => f.endsWith('.json'))
       .sort();
 
-    const messages: string[] = [];
+    const messages: Array<{ text: string; images?: ImageAttachment[] }> = [];
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         fs.unlinkSync(filePath);
         if (data.type === 'message' && data.text) {
-          messages.push(data.text);
+          messages.push({
+            text: data.text,
+            images: Array.isArray(data.images) ? data.images : undefined,
+          });
         }
       } catch (err) {
         log(
@@ -302,9 +305,11 @@ function drainIpcInput(): string[] {
 
 /**
  * Wait for a new IPC message or _close sentinel.
- * Returns the messages as a single string, or null if _close.
+ * Returns the messages as an array, or null if _close.
  */
-function waitForIpcMessage(): Promise<string | null> {
+function waitForIpcMessage(): Promise<
+  Array<{ text: string; images?: ImageAttachment[] }> | null
+> {
   return new Promise((resolve) => {
     const poll = () => {
       if (shouldClose()) {
@@ -313,7 +318,7 @@ function waitForIpcMessage(): Promise<string | null> {
       }
       const messages = drainIpcInput();
       if (messages.length > 0) {
-        resolve(messages.join('\n'));
+        resolve(messages);
         return;
       }
       setTimeout(poll, IPC_POLL_MS);
@@ -356,9 +361,11 @@ async function runQuery(
       return;
     }
     const messages = drainIpcInput();
-    for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
+    for (const m of messages) {
+      log(
+        `Piping IPC message into active query (${m.text.length} chars, ${m.images?.length ?? 0} images)`,
+      );
+      stream.push(m.text, m.images);
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
@@ -604,6 +611,9 @@ async function main(): Promise<void> {
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
+  let initialImages: ImageAttachment[] | undefined;
+  let pendingFollowUps: Array<{ text: string; images?: ImageAttachment[] }> =
+    [];
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
   // Clean up stale _close sentinel from previous container runs
@@ -621,7 +631,15 @@ async function main(): Promise<void> {
   const pending = drainIpcInput();
   if (pending.length > 0) {
     log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + pending.join('\n');
+    prompt += '\n' + pending.map((p) => p.text).join('\n');
+    const pendingImages = pending.flatMap((p) => p.images ?? []);
+    if (pendingImages.length) {
+      initialImages = [...(containerInput.images ?? []), ...pendingImages];
+    } else {
+      initialImages = containerInput.images;
+    }
+  } else {
+    initialImages = containerInput.images;
   }
 
   // Script phase: run script before waking agent
@@ -683,14 +701,20 @@ async function main(): Promise<void> {
       log('Query ended, waiting for next IPC message...');
 
       // Wait for the next message or _close sentinel
-      const nextMessage = await waitForIpcMessage();
-      if (nextMessage === null) {
+      const nextMessages = await waitForIpcMessage();
+      if (nextMessages === null) {
         log('Close sentinel received, exiting');
         break;
       }
 
-      log(`Got new message (${nextMessage.length} chars), starting new query`);
-      prompt = nextMessage;
+      log(
+        `Got ${nextMessages.length} new message(s), starting new query`,
+      );
+      // First message becomes the new turn's prompt + initial images.
+      prompt = nextMessages[0].text;
+      initialImages = nextMessages[0].images;
+      // Remaining messages are queued to be pushed into the stream after runQuery starts.
+      pendingFollowUps = nextMessages.slice(1);
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
