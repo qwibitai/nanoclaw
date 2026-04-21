@@ -70,7 +70,10 @@ function createNostrDMAdapter(): ChannelAdapter | null {
   let outgoingQueue: Array<{ platformId: string; text: string }> = [];
   const MAX_OUTGOING_QUEUE = 100;
   let seenIds = new Set<string>();
-  let lastEventTimestamp = Math.floor(Date.now() / 1000) - 300;
+  // NIP-17 gift wrap timestamps are fuzzed ±48h for privacy.
+  // A DM sent right now may have created_at hours in the past.
+  // Use a 72h lookback + seenIds dedup to catch all recent DMs.
+  let lastEventTimestamp = Math.floor(Date.now() / 1000) - 72 * 3600;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempts = 0;
   let subCloser: { close: () => void } | null = null;
