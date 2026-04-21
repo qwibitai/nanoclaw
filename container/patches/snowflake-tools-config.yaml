@@ -1,0 +1,27 @@
+# Snowflake MCP tools config for Nano.
+# Exposes a read-only SQL execution tool. Connection params come from env vars.
+#
+# Read-only is deliberate: Nano should query Gabe's Snowflake, never mutate it.
+
+# Enable the SQL query manager tool (this actually registers mcp__snowflake__execute_sql)
+other_services:
+  query_manager: true
+
+# What kinds of statements the SQL tool is allowed to execute.
+# Enforced server-side, independent of role grants in Snowflake.
+sql_statement_permissions:
+  - Select: true
+  - Describe: true
+  - Show: true
+  - Use: true
+  - Insert: false
+  - Update: false
+  - Delete: false
+  - Merge: false
+  - Truncate: false
+  - Create: false
+  - Alter: false
+  - Drop: false
+  - Grant: false
+  - Revoke: false
+  - All: false
