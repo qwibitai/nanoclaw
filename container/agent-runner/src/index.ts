@@ -393,11 +393,7 @@ async function runQuery(
   }
 
   for await (const message of query({
-    // Local MessageStream yields a SDKUserMessage whose content is
-    // `string | object[]` (spec'd multimodal-aware shape); the SDK expects
-    // `string | ContentBlockParam[]`. Our blocks are valid ContentBlockParams
-    // but TS can't verify structurally through `object[]` — cast to any.
-    prompt: stream as any,
+    prompt: stream,
     options: {
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,

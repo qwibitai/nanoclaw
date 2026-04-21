@@ -3,9 +3,21 @@ export interface ImageAttachment {
   data: string;
 }
 
+type ImageMediaType =
+  | 'image/jpeg'
+  | 'image/png'
+  | 'image/gif'
+  | 'image/webp';
+type ImageContentBlock = {
+  type: 'image';
+  source: { type: 'base64'; media_type: ImageMediaType; data: string };
+};
+type TextContentBlock = { type: 'text'; text: string };
+export type UserContentBlock = ImageContentBlock | TextContentBlock;
+
 export interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string | object[] };
+  message: { role: 'user'; content: string | UserContentBlock[] };
   parent_tool_use_id: null;
   session_id: string;
 }
@@ -20,7 +32,7 @@ export class MessageStream {
   private done = false;
 
   push(text: string, images?: ImageAttachment[]): void {
-    const content: string | object[] = images?.length
+    const content: string | UserContentBlock[] = images?.length
       ? [
           ...images.map((img) => ({
             type: 'image' as const,
