@@ -524,11 +524,7 @@ export async function processImageIpcFile(
   isMain: boolean,
   registeredGroups: Record<string, RegisteredGroup>,
   groupsRoot: string,
-  sendImage: (
-    jid: string,
-    paths: string[],
-    caption?: string,
-  ) => Promise<void>,
+  sendImage: (jid: string, paths: string[], caption?: string) => Promise<void>,
 ): Promise<void> {
   if (
     data.type !== 'image' ||

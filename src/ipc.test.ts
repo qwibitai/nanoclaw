@@ -183,9 +183,7 @@ describe('processImageIpcFile', () => {
 
   it('ignores payloads with missing required fields', async () => {
     await processImageIpcFile(
-      { type: 'image' } as unknown as Parameters<
-        typeof processImageIpcFile
-      >[0],
+      { type: 'image' } as unknown as Parameters<typeof processImageIpcFile>[0],
       'slack_test',
       false,
       registered(),
