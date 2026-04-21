@@ -291,15 +291,56 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
 
   // Enable lingering so the user service survives SSH logout.
   // Without linger, systemd terminates all user processes when the last session closes.
+  let lingerEnabled = false;
   if (!runningAsRoot) {
-    try {
-      execSync('loginctl enable-linger', { stdio: 'ignore' });
-      log.info('Enabled loginctl linger for current user');
-    } catch (err) {
-      log.warn(
-        'loginctl enable-linger failed — service may stop on SSH logout',
-        { err },
-      );
+    const currentUser = execSync('whoami', { encoding: 'utf-8' }).trim();
+    const isLingerOn = (): boolean => {
+      try {
+        const out = execSync(`loginctl show-user ${currentUser}`, {
+          encoding: 'utf-8',
+        });
+        return /^Linger=yes$/m.test(out);
+      } catch {
+        return false;
+      }
+    };
+
+    // Fast path: already enabled from a previous run.
+    if (isLingerOn()) {
+      lingerEnabled = true;
+    } else {
+      // Self-target first — works on most standalone Linux systems via polkit.
+      try {
+        execSync('loginctl enable-linger', { stdio: 'ignore' });
+      } catch {
+        // On WSL (and some polkit-hardened systems) the self-call fails with
+        // "No such device or address". Fall through to sudo-targeted form.
+      }
+
+      if (!isLingerOn()) {
+        // sudo-targeted form. stdio: 'inherit' so the user can enter their
+        // password if needed (matches the setfacl escalation above). NOPASSWD
+        // configs succeed silently; no-TTY contexts fail fast rather than hang.
+        log.info(
+          `Self-target linger failed — escalating via sudo. If prompted, enter your password for: sudo loginctl enable-linger ${currentUser}`,
+        );
+        try {
+          execSync(`sudo loginctl enable-linger ${currentUser}`, {
+            stdio: 'inherit',
+          });
+        } catch {
+          // user cancelled, wrong password, or no sudo available
+        }
+      }
+
+      lingerEnabled = isLingerOn();
+      if (lingerEnabled) {
+        log.info('Enabled loginctl linger for current user');
+      } else {
+        log.warn(
+          `loginctl enable-linger failed — service will stop on logout. Fix manually: sudo loginctl enable-linger ${currentUser}`,
+        );
+      }
     }
   }
 
@@ -338,7 +379,7 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
     UNIT_PATH: unitPath,
     SERVICE_LOADED: serviceLoaded,
     ...(dockerGroupStale ? { DOCKER_GROUP_STALE: true } : {}),
-    LINGER_ENABLED: !runningAsRoot,
+    LINGER_ENABLED: runningAsRoot ? 'n/a' : lingerEnabled,
     STATUS: 'success',
     LOG: 'logs/setup.log',
   });
