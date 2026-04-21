@@ -192,6 +192,22 @@ if dup_slugs:
         f"so slugs are unique across the plan: {' '.join(sorted(dup_slugs))}"
     )
 
+# Reject plans where every Stage-1 gate would be a no-op. A multi-task
+# plan's stage-1 test falls back to `true` when a task has no Run: line
+# (the plan-level test can't hold inside an isolated task worktree). If
+# the plan ALSO has no plan-level **Test command:**, the task would be
+# squash-merged with zero runnable verification. Require every task to
+# have a Run: line OR the plan to declare a plan-level test command.
+if not test_command:
+    tasks_without_run = [t['num'] for t in tasks if not t.get('test_command')]
+    if tasks_without_run:
+        errors.append(
+            "ERROR: every task must declare a `Run:` line OR the plan must "
+            "declare a **Test command:** header (the plan-level test is the "
+            "only remaining gate for tasks without their own). Tasks missing "
+            f"Run: and no plan-level test: {' '.join(str(n) for n in tasks_without_run)}"
+        )
+
 # overlapping files within a wave
 task_map = {t['num']: t for t in tasks}
 for w in waves:
