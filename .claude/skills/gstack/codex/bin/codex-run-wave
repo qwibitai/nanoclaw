@@ -361,6 +361,11 @@ process_one() {
     local res
     res="$(jq -r '.status' "$fb_result")"
     rm -f "$fb_result"
+    # Also remove the matching request marker if it still exists — a prior
+    # Claude fallback may have written the result before deleting its
+    # marker, so we'd otherwise leave stale work visible to the poller and
+    # potentially trigger a second fallback edit on an already-gated task.
+    [ -n "$fb_marker" ] && rm -f "$fb_marker" 2>/dev/null || true
     if [ "$res" = "DONE" ] || [ "$res" = "DONE_WITH_CONCERNS" ]; then
       GATE_ATTEMPT="4-resume" \
       gate_status="$("$BIN/codex-gate" \
@@ -445,6 +450,9 @@ process_one() {
         local res
         res="$(jq -r '.status' "$fb_result4")"
         rm -f "$fb_result4"
+        # Also remove the request marker so a later resume doesn't see
+        # it as live work and trigger a redundant fallback.
+        rm -f "$fb_marker4" 2>/dev/null || true
         if [ "$res" = "DONE" ] || [ "$res" = "DONE_WITH_CONCERNS" ]; then
           GATE_ATTEMPT="$attempt" \
           gate_status="$("$BIN/codex-gate" \

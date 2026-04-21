@@ -105,13 +105,18 @@ for i, m in enumerate(task_matches):
     )
     # Body is everything AFTER the heading line up to (not including) the
     # next heading line, extracted from the ORIGINAL content so fenced
-    # blocks survive.
+    # blocks survive into the implementer prompt / Stage-3 spec check.
     body = "\n".join(original_lines[heading_line + 1:next_heading_line])
     if body and not body.endswith("\n"):
         body += "\n"
+    # Metadata extraction (file claims, Run: gate) must NOT pick up
+    # fenced examples: a task that shows `Run: rm -rf /` inside a code
+    # fence should not set that as the real gate. Use a fence-stripped
+    # view for regex scans while keeping the original for `body`.
+    body_for_meta = "\n".join(stripped_lines[heading_line + 1:next_heading_line])
 
-    files = file_re.findall(body)
-    run_matches = re.findall(r'(?m)^Run:\s+`?([^`\n]+)`?\s*$', body)
+    files = file_re.findall(body_for_meta)
+    run_matches = re.findall(r'(?m)^Run:\s+`?([^`\n]+)`?\s*$', body_for_meta)
     task_test_cmd = run_matches[-1].strip() if run_matches else None
 
     tasks.append({
