@@ -6,6 +6,8 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
 
+**Mission log:** See [`docs/superpowers/INDEX.md`](docs/superpowers/INDEX.md) for the append-only record of all `/build-it` missions.
+
 ## Key Files
 
 | File | Purpose |
@@ -18,6 +20,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
+| `src/health.ts` | Optional Unix domain socket health endpoint (opt-in via `HEALTH_SOCKET_PATH` or `NANOCLAW_HEALTH=1`) |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/` | Skills loaded inside agent containers (browser, status, formatting) |
 
@@ -52,6 +55,56 @@ Four types of skills exist in NanoClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) f
 | `/init-onecli` | Install OneCLI Agent Vault and migrate `.env` credentials to it |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+| `/add-whatsapp` | Add WhatsApp as a channel (QR or pairing code authentication) |
+| `/add-telegram` | Add Telegram as a channel (control-only, passive, or full) |
+| `/add-slack` | Add Slack as a channel via Socket Mode (no public URL needed) |
+| `/add-discord` | Add Discord bot channel integration |
+| `/add-gmail` | Add Gmail integration (tool or full channel mode) |
+| `/add-compact` | Add /compact command for manual context compaction in long sessions |
+| `/add-emacs` | Add Emacs as a channel via local HTTP bridge |
+| `/add-image-vision` | Add image vision for WhatsApp image attachments |
+| `/add-voice-transcription` | Add voice message transcription via OpenAI Whisper API |
+| `/add-pdf-reader` | Add PDF reading capability via pdftotext CLI |
+| `/add-reactions` | Add WhatsApp emoji reaction support (receive, send, store, search) |
+| `/add-karpathy-llm-wiki` | Add persistent wiki knowledge base to a group |
+| `/add-macos-statusbar` | Add macOS menu bar status indicator for NanoClaw |
+| `/add-ollama-tool` | Add Ollama MCP server for local model calls |
+| `/add-telegram-swarm` | Add agent swarm (teams) support to Telegram |
+| `/channel-formatting` | Convert Claude Markdown to each channel's native text syntax |
+| `/convert-to-apple-container` | Switch from Docker to Apple Container for macOS-native isolation |
+| `/migrate-from-openclaw` | Migrate from OpenClaw to NanoClaw |
+| `/migrate-nanoclaw` | Upgrade NanoClaw by reapplying customizations on a clean base |
+| `/update-skills` | Check for and apply updates to installed skill branches |
+| `/use-local-whisper` | Switch to whisper.cpp local transcription (Apple Silicon) |
+| `/use-native-credential-proxy` | Replace OneCLI gateway with built-in .env credential proxy |
+| `/x-integration` | X (Twitter) integration: post tweets, like, reply, retweet |
+| `/claw` | Install claw CLI tool for running NanoClaw agent containers from command line |
+| `/add-slack-ops` | Add Slack write access (post to channels + DMs, react) — writes require user approval |
+| `/build-it` | Drive a change end-to-end: intake → brainstorm → plan → implement → test → review → PR → release → deploy → verify |
+| `/build-it --resume` | Resume an interrupted `/build-it` mission from its last checkpoint |
+| `/catch-up` | Cold-start helper: given a Linear ID or slug, reconstruct current phase, last artifact, and next action |
+| `nanoclaw-docs-sync` | Audit CLAUDE.md/README/CONTRIBUTING against the tree; write ADR; update INDEX.md; commit doc fixes |
+| `nanoclaw-release` | Bump semver, append CHANGELOG entry, tag, push — phase [8] of `/build-it` |
+| `nanoclaw-deploy-droplet` | SSH-deploy a version tag to the DO droplet, rebuild container, restart, probe health |
+| `nanoclaw-postdeploy-verify` | Run smoke-send.ts probes after deploy; auto-rollback on failure |
+| `nanoclaw-channel-smoke-matrix` | Run channel unit tests and optional container smoke for each impacted channel |
+
+## Container Skills
+
+Skills automatically loaded inside every agent container at runtime from `container/skills/`:
+
+| Skill | Purpose |
+|-------|---------|
+| `agent-browser` | Playwright browser automation for the container agent |
+| `almanda-ops` | Almanda-specific operational tools |
+| `capabilities` | Agent capability index and tool listing |
+| `company-kb` | Alma Labs knowledge base access |
+| `github-ops` | GitHub read/write container tools |
+| `linear-ops` | Linear read/write container tools |
+| `slack-formatting` | Slack message formatting helpers |
+| `slack-intel` | Slack read tools (channels, search, threads) |
+| `slack-ops` | Slack write tools (post, react) |
+| `status` | Agent status and health reporting |
 
 ## Contributing
 

@@ -145,3 +145,24 @@ Keep it concise. Remove any template sections that don't apply. The description 
 - **Usage** — how the user invokes it (for skills)
 
 Don't pad the description. A few clear sentences are better than lengthy paragraphs.
+
+## How Changes Flow Through `/build-it`
+
+The NanoClaw agentic SDLC is invoked with `/build-it "<intent>"` or `/build-it <linear-url>`. Claude Code drives all phases:
+
+1. **Intake** — classify change type, ingest or create Linear ticket
+2. **Brainstorm** — `superpowers:brainstorming` → spec in `docs/superpowers/specs/`
+3. **Plan** — `superpowers:writing-plans` → plan in `docs/superpowers/plans/`
+4. **Worktree** — `superpowers:using-git-worktrees` with `ALM-<id>-<slug>` branch naming
+5. **Implement** — `superpowers:subagent-driven-development` + `superpowers:test-driven-development`
+6. **Self-verify** — `superpowers:verification-before-completion` + channel smoke matrix
+7. **Review** — `superpowers:requesting-code-review` → `code-reviewer` agent
+8. **Finish branch** — `superpowers:finishing-a-development-branch` → PR
+9. **Docs sync** — `nanoclaw-docs-sync` updates anchor docs, writes ADR, appends INDEX.md
+10. **Release** — `nanoclaw-release` bumps version, tags
+11. **Deploy** — `nanoclaw-deploy-droplet` SSHes to DO droplet
+12. **Post-deploy verify** — `nanoclaw-postdeploy-verify` runs health probes
+
+**CI gate:** `src/docs-freshness.test.ts` asserts that the skill table in CLAUDE.md, channel barrel imports, container skill references, and git tags stay in sync with the tree. A PR with doc drift fails CI.
+
+Full design: [`docs/superpowers/plans/2026-04-21-build-it-sdlc-infrastructure.md`](docs/superpowers/plans/2026-04-21-build-it-sdlc-infrastructure.md)
