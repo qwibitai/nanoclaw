@@ -203,7 +203,11 @@ if [ -n "$ONLY_TASK" ]; then
 fi
 
 total_waves="$(jq '.waves | length' "$PLAN_JSON")"
-for wave in $(seq 1 "$total_waves"); do
+# Iterate the declared wave numbers (in declaration order) instead of
+# 1..length. Plans can use non-contiguous labels like Wave 1 and Wave 3,
+# and `seq 1 total_waves` would silently skip the later one.
+wave_nums="$(jq -r '.waves[].wave' "$PLAN_JSON")"
+for wave in $wave_nums; do
   if [ -n "$only_wave" ] && [ "$wave" != "$only_wave" ]; then
     continue
   fi

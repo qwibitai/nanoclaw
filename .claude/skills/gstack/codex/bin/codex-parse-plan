@@ -32,6 +32,25 @@ plan_file = sys.argv[1]
 with open(plan_file) as f:
     content = f.read()
 
+# Strip fenced code blocks (``` ... ```) before scanning for task headings.
+# Otherwise a plan that shows an example like ``### Task 99: example`` inside
+# a code fence would be mis-parsed as a real task and either fail validation
+# ("tasks declared but not referenced in Parallelization") or materialize a
+# phantom task body. Replace each fenced block with blank lines so line
+# numbers are preserved for any subsequent error messages.
+def _strip_fences(text):
+    out = []
+    in_fence = False
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            out.append("")
+            continue
+        out.append("" if in_fence else line)
+    return "\n".join(out)
+
+content = _strip_fences(content)
+
 def extract_header(label):
     """Extract the value from a **Label:** line (case-insensitive).
     Strips surrounding backticks from inline code spans."""
@@ -139,6 +158,20 @@ if missing:
 extra = sorted(referenced - declared)
 if extra:
     errors.append(f"ERROR: Parallelization references unknown task numbers: {' '.join(str(n) for n in extra)}")
+
+# Reject duplicate task numbers before collapsing to a dict. A dict
+# comprehension would silently drop earlier definitions and run the wrong
+# body/files for the affected task number, with no error.
+seen_nums = set()
+dup_nums = []
+for t in tasks:
+    if t['num'] in seen_nums:
+        if t['num'] not in dup_nums:
+            dup_nums.append(t['num'])
+    else:
+        seen_nums.add(t['num'])
+if dup_nums:
+    errors.append(f"ERROR: duplicate task numbers: {' '.join(str(n) for n in dup_nums)}")
 
 # overlapping files within a wave
 task_map = {t['num']: t for t in tasks}
