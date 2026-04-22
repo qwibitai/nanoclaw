@@ -64,6 +64,22 @@ npm run smoke:runtime
 npm run smoke:health
 ```
 
+### Testing
+
+```bash
+npm test             # Run all tests (vitest run)
+npm run test:watch   # Watch mode for development
+npm run test:coverage # Run with coverage report
+```
+
+Test files live alongside source files (`src/**/*.test.ts`) and in `setup/**/*.test.ts`. Vitest config is in `vitest.config.ts`; skill tests use `vitest.skills.config.ts`.
+
+**When to use `--with-tests` in deploy-service:**
+
+- Use `./deploy-service <service> --with-tests` when deploying changes that touch core logic (dispatch, routing, IPC, config verification, notifications). This runs `npm test` after build and aborts the deploy if any test fails.
+- Omit `--with-tests` for config-only changes, dependency bumps with no code changes, or emergency hotfixes where speed matters more than gate coverage.
+- For multi-service deploys (`./deploy-service all --with-tests`), each service runs its own test suite independently. A failure in one service does not block the others.
+
 Service management:
 
 ```bash

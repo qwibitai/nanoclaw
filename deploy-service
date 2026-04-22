@@ -139,10 +139,13 @@ deploy_one() {
     log "No build script found — skipping build"
   fi
 
-  # Run tests if requested
+  # Run tests if requested (--with-tests flag).
+  # Use --with-tests when deploying changes to core logic (dispatch, routing,
+  # IPC, config verification, notifications) to gate the deploy on test success.
+  # Omit for config-only changes, dependency bumps, or emergency hotfixes.
   if [[ "$with_tests" == "true" ]]; then
     log "Running tests for $svc..."
-    (cd "$dir" && npm test) || die "Tests failed for $svc"
+    (cd "$dir" && npm test) || die "Tests failed for $svc — aborting deploy"
   fi
 
   # Restart service (unless --build-only)
