@@ -24,7 +24,10 @@ export const applyInstallPackages: ApprovalHandler = async ({ session, payload, 
     if (payload.npm) cfg.packages.npm.push(...(payload.npm as string[]));
   });
 
-  const pkgs = [...((payload.apt as string[] | undefined) || []), ...((payload.npm as string[] | undefined) || [])].join(', ');
+  const pkgs = [
+    ...((payload.apt as string[] | undefined) || []),
+    ...((payload.npm as string[] | undefined) || []),
+  ].join(', ');
   log.info('Package install approved', { agentGroupId: session.agent_group_id, userId });
   try {
     await buildAgentGroupImage(session.agent_group_id);

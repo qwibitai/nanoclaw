@@ -46,7 +46,11 @@ async function handleInteractiveResponse(payload: ResponsePayload): Promise<bool
   });
 
   deletePendingQuestion(payload.questionId);
-  log.info('Question response routed', { questionId: payload.questionId, selectedOption: payload.value, sessionId: session.id });
+  log.info('Question response routed', {
+    questionId: payload.questionId,
+    selectedOption: payload.value,
+    sessionId: session.id,
+  });
 
   await wakeContainer(session);
   return true;

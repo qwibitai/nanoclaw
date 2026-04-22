@@ -15,8 +15,12 @@ import { registerChannelAdapter } from './channel-registry.js';
 registerChannelAdapter('linear', {
   factory: () => {
     const env = readEnvFile([
-      'LINEAR_API_KEY', 'LINEAR_CLIENT_ID', 'LINEAR_CLIENT_SECRET',
-      'LINEAR_WEBHOOK_SECRET', 'LINEAR_BOT_USERNAME', 'LINEAR_TEAM_KEY',
+      'LINEAR_API_KEY',
+      'LINEAR_CLIENT_ID',
+      'LINEAR_CLIENT_SECRET',
+      'LINEAR_WEBHOOK_SECRET',
+      'LINEAR_BOT_USERNAME',
+      'LINEAR_TEAM_KEY',
     ]);
     if (!env.LINEAR_API_KEY && !env.LINEAR_CLIENT_ID) return null;
 

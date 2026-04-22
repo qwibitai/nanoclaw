@@ -75,7 +75,9 @@ export const migration010: Migration = {
     `);
 
     // Backfill existing rows in JS (parsing JSON per-row is painful in pure SQL).
-    const rows = db.prepare('SELECT id, trigger_rules, response_scope FROM messaging_group_agents').all() as LegacyRow[];
+    const rows = db
+      .prepare('SELECT id, trigger_rules, response_scope FROM messaging_group_agents')
+      .all() as LegacyRow[];
     const update = db.prepare(
       `UPDATE messaging_group_agents
          SET engage_mode            = ?,

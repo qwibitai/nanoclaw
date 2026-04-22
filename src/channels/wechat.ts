@@ -176,10 +176,12 @@ registerChannelAdapter('wechat', {
           connected = false;
         });
 
-        client.start({
-          loadSyncBuf,
-          saveSyncBuf,
-        }).catch((err) => log.error('WeChat: monitor loop crashed', { err }));
+        client
+          .start({
+            loadSyncBuf,
+            saveSyncBuf,
+          })
+          .catch((err) => log.error('WeChat: monitor loop crashed', { err }));
 
         connected = true;
         log.info('WeChat adapter ready', { accountId });
@@ -195,7 +197,11 @@ registerChannelAdapter('wechat', {
         return connected;
       },
 
-      async deliver(platformId: string, _threadId: string | null, message: OutboundMessage): Promise<string | undefined> {
+      async deliver(
+        platformId: string,
+        _threadId: string | null,
+        message: OutboundMessage,
+      ): Promise<string | undefined> {
         if (!client) return undefined;
         const to = platformId.replace(/^wechat:/, '');
         const text = messageText(message);

@@ -59,9 +59,7 @@ describe('handleRecurrence', () => {
     await handleRecurrence(db, fakeSession());
 
     const rows = db
-      .prepare(
-        `SELECT id, status, process_after, recurrence, series_id FROM messages_in ORDER BY seq`,
-      )
+      .prepare(`SELECT id, status, process_after, recurrence, series_id FROM messages_in ORDER BY seq`)
       .all() as Array<{
       id: string;
       status: string;
