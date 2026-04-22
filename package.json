@@ -24,7 +24,8 @@
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "smoke:runtime": "node scripts/smoke-runtime.mjs",
-    "smoke:health": "node scripts/health-check.mjs"
+    "smoke:health": "node scripts/health-check.mjs",
+    "verify": "tsx src/cli/verify.ts"
   },
   "dependencies": {
     "@jeffrey-keyser/message-contracts": "^1.5.1",
