@@ -40,12 +40,36 @@ Files you create are saved in `/workspace/group/`. Use this for notes, research,
 
 ## Memory
 
-The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
+You have two memory surfaces. Use both.
 
-When you learn something important:
-- Create files for structured data (e.g., `customers.md`, `preferences.md`)
-- Split files larger than 500 lines into folders
-- Keep an index in your memory for the files you create
+### 1. Structured memory (MCP `mcp__memory__*` tools)
+
+A per-group SQLite store. Cheap, queryable, not auto-injected into context — you look things up on demand. Good for facts you'll want to retrieve by key or by keyword later.
+
+- `memory_write({key, value, tags?, source?})` — upsert. Use dot-namespaced keys like `user.email`, `server.syd.ip`, `nanoclaw.appdata_path`, `preference.timezone`.
+- `memory_read({key})` — exact lookup by key. Use this first when you know the key.
+- `memory_search({query, limit?})` — FTS5 search across key/value/tags. Use when you don't know the exact key.
+- `memory_list({tag?, limit?})` — enumerate keys, optionally filtered by tag. Use to discover what's stored.
+- `memory_delete({key})` — remove an entry.
+
+**When to write.** Distilled facts only, not conversation dumps. Write when the user tells you something durable (a preference, a name, an address, a decision, an IP, a path) or when you've figured something out about the environment that'll be useful again. Don't log chitchat.
+
+**When to search.** Before answering any question about past events, user preferences, or environment state — if you're about to guess, search first.
+
+**Confidence conventions.** Include a confidence marker in the `source` field when it matters:
+
+- `user-stated` — user explicitly said this. Ground truth.
+- `user-confirmed` — you asked, user confirmed.
+- `agent-observed` — pattern noticed across multiple episodes.
+- `agent-inferred` — single inference from context. May be wrong.
+
+When a fact changes, update the key; optionally store the previous value under `key.previous` with a date tag so the history isn't lost. If two sources conflict and you can't tell which is right, keep both with distinct keys and flag the conflict in the value text — don't silently pick one. Higher-confidence sources override lower ones.
+
+### 2. Files in your workspace
+
+Files you create under `/workspace/group/` persist across sessions. Use these for larger structured documents (e.g., `customers.md`, long notes, research). Split files larger than 500 lines into folders.
+
+The `conversations/` folder contains archived transcripts of past conversations. Useful for recalling conversational context when the structured memory doesn't have what you need.
 
 ## Message Formatting
 

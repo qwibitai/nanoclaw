@@ -21,6 +21,7 @@ import {
   query,
   HookCallback,
   PreCompactHookInput,
+  EffortLevel,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
@@ -63,6 +64,73 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+// Per-group agent config. The `.claude` dir is mounted from
+// `data/sessions/{group}/.claude` on the host.
+const GROUP_SETTINGS_PATH = '/home/node/.claude/settings.json';
+const DEFAULT_AGENT_MODEL = 'haiku';
+const DEFAULT_AGENT_EFFORT: EffortLevel = 'medium';
+const VALID_EFFORTS: readonly EffortLevel[] = ['low', 'medium', 'high', 'max'];
+// Model IDs: alias or dated variant, optional [1m] context hint.
+// Length-bounded to prevent pathological strings; no shell/path chars.
+const MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,126}(\[1m\])?$/;
+
+function readGroupSettingsEnv(): Record<string, unknown> {
+  try {
+    if (!fs.existsSync(GROUP_SETTINGS_PATH)) return {};
+    const raw = fs.readFileSync(GROUP_SETTINGS_PATH, 'utf-8');
+    const parsed = JSON.parse(raw);
+    const env = parsed && typeof parsed === 'object' ? parsed.env : null;
+    return env && typeof env === 'object' ? (env as Record<string, unknown>) : {};
+  } catch (err) {
+    log(
+      `Failed to read ${GROUP_SETTINGS_PATH}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return {};
+  }
+}
+
+function pickString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function resolveAgentConfig(): { model: string; effort: EffortLevel } {
+  const groupEnv = readGroupSettingsEnv();
+
+  const rawModel =
+    pickString(groupEnv.NANOCLAW_AGENT_MODEL) ??
+    pickString(process.env.NANOCLAW_AGENT_MODEL);
+  let model = DEFAULT_AGENT_MODEL;
+  if (rawModel !== undefined) {
+    if (MODEL_ID_RE.test(rawModel)) {
+      model = rawModel;
+    } else {
+      log(
+        `Ignoring invalid NANOCLAW_AGENT_MODEL (regex mismatch); falling back to default '${DEFAULT_AGENT_MODEL}'`,
+      );
+    }
+  }
+
+  const rawEffort =
+    pickString(groupEnv.NANOCLAW_AGENT_EFFORT) ??
+    pickString(process.env.NANOCLAW_AGENT_EFFORT);
+  let effort: EffortLevel = DEFAULT_AGENT_EFFORT;
+  if (rawEffort !== undefined) {
+    if ((VALID_EFFORTS as readonly string[]).includes(rawEffort)) {
+      effort = rawEffort as EffortLevel;
+    } else {
+      log(
+        `Ignoring invalid NANOCLAW_AGENT_EFFORT='${rawEffort}' (expected one of ${VALID_EFFORTS.join('|')}); falling back to '${DEFAULT_AGENT_EFFORT}'`,
+      );
+    }
+  }
+
+  const config = { model, effort };
+  console.error(
+    `[nanoclaw] agent config resolved: model=${config.model} effort=${config.effort}`,
+  );
+  return config;
+}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -375,6 +443,10 @@ async function runQuery(
   prompt: string,
   sessionId: string | undefined,
   mcpServerPath: string,
+  unraidclawMcpServerPath: string,
+  tailscaleMcpServerPath: string,
+  homeassistantMcpServerPath: string,
+  ollamaMcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
@@ -435,6 +507,9 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  const agentConfig = resolveAgentConfig();
+  log(`Agent config: model=${agentConfig.model} effort=${agentConfig.effort}`);
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -449,6 +524,8 @@ async function runQuery(
             append: globalClaudeMd,
           }
         : undefined,
+      model: agentConfig.model,
+      effort: agentConfig.effort,
       allowedTools: [
         'Bash',
         'Read',
@@ -469,6 +546,10 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__unraidclaw__*',
+        'mcp__tailscale__*',
+        'mcp__homeassistant__*',
+        'mcp__ollama__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -482,6 +563,40 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+          },
+        },
+        unraidclaw: {
+          command: 'node',
+          args: [unraidclawMcpServerPath],
+          env: {
+            UNRAIDCLAW_SERVERS: sdkEnv.UNRAIDCLAW_SERVERS ?? '',
+            UNRAIDCLAW_URL: sdkEnv.UNRAIDCLAW_URL ?? '',
+            UNRAIDCLAW_API_KEY: sdkEnv.UNRAIDCLAW_API_KEY ?? '',
+          },
+        },
+        tailscale: {
+          command: 'node',
+          args: [tailscaleMcpServerPath],
+          env: {
+            TS_API_KEY: sdkEnv.TS_API_KEY ?? '',
+            TS_API_CLIENT_ID: sdkEnv.TS_API_CLIENT_ID ?? '',
+            TS_API_CLIENT_SECRET: sdkEnv.TS_API_CLIENT_SECRET ?? '',
+            TS_API_TAILNET: sdkEnv.TS_API_TAILNET ?? '-',
+          },
+        },
+        homeassistant: {
+          command: 'node',
+          args: [homeassistantMcpServerPath],
+          env: {
+            HA_URL: sdkEnv.HA_URL ?? '',
+            HA_TOKEN: sdkEnv.HA_TOKEN ?? '',
+          },
+        },
+        ollama: {
+          command: 'node',
+          args: [ollamaMcpServerPath],
+          env: {
+            OLLAMA_URL: sdkEnv.OLLAMA_URL ?? '',
           },
         },
       },
@@ -630,6 +745,10 @@ async function main(): Promise<void> {
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
+  const unraidclawMcpServerPath = path.join(__dirname, 'unraidclaw-mcp-stdio.js');
+  const tailscaleMcpServerPath = path.join(__dirname, 'tailscale-mcp-stdio.js');
+  const homeassistantMcpServerPath = path.join(__dirname, 'homeassistant-mcp-stdio.js');
+  const ollamaMcpServerPath = path.join(__dirname, 'ollama-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -686,6 +805,10 @@ async function main(): Promise<void> {
         prompt,
         sessionId,
         mcpServerPath,
+        unraidclawMcpServerPath,
+        tailscaleMcpServerPath,
+        homeassistantMcpServerPath,
+        ollamaMcpServerPath,
         containerInput,
         sdkEnv,
         resumeAt,

@@ -5,6 +5,7 @@ import { OneCLI } from '@onecli-sh/sdk';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
@@ -30,6 +31,8 @@ import {
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
 import {
+  deleteMessagesByJid,
+  deleteSessionByFolder,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -63,6 +66,7 @@ import {
 } from './sender-allowlist.js';
 import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { startPaperclipWebhookServer } from './paperclip-webhook.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -114,6 +118,66 @@ function loadState(): void {
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
   );
+
+  // Clear stale sessions and messages for groups whose session directory no longer exists
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    const sessionDir = path.join(DATA_DIR, 'sessions', group.folder);
+    if (!fs.existsSync(sessionDir)) {
+      deleteSessionByFolder(group.folder);
+      deleteMessagesByJid(jid);
+      logger.info(
+        { jid, folder: group.folder },
+        'Cleared stale session and messages (session dir missing)',
+      );
+    }
+  }
+
+  // Sync trigger and requiresTrigger from env vars if set.
+  // Allows changing trigger/requiresTrigger without re-registering groups.
+  const envTrigger = process.env.NANOCLAW_TRIGGER;
+  const envRequireTriggerRaw = process.env.NANOCLAW_REQUIRE_TRIGGER;
+  const envRequiresTrigger =
+    envRequireTriggerRaw !== undefined
+      ? envRequireTriggerRaw !== 'false'
+      : undefined;
+
+  if (envTrigger !== undefined || envRequiresTrigger !== undefined) {
+    for (const [jid, group] of Object.entries(registeredGroups)) {
+      const triggerChanged =
+        envTrigger !== undefined && group.trigger !== envTrigger;
+      const requiresChanged =
+        envRequiresTrigger !== undefined &&
+        group.requiresTrigger !== envRequiresTrigger;
+
+      if (triggerChanged || requiresChanged) {
+        const updated: RegisteredGroup = {
+          ...group,
+          ...(triggerChanged ? { trigger: envTrigger } : {}),
+          ...(requiresChanged ? { requiresTrigger: envRequiresTrigger } : {}),
+        };
+        registeredGroups[jid] = updated;
+        setRegisteredGroup(jid, updated);
+        logger.info(
+          {
+            jid,
+            name: group.name,
+            ...(triggerChanged
+              ? { trigger: { from: group.trigger, to: envTrigger } }
+              : {}),
+            ...(requiresChanged
+              ? {
+                  requiresTrigger: {
+                    from: group.requiresTrigger,
+                    to: envRequiresTrigger,
+                  },
+                }
+              : {}),
+          },
+          'Updated group trigger config from env',
+        );
+      }
+    }
+  }
 }
 
 /**
@@ -307,6 +371,25 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'error') {
       hadError = true;
+      // Surface a friendly error to the user so failures aren't silent.
+      // The agent-runner's classifyApiError() produces userMessage for
+      // Anthropic SDK errors; fall back to a generic message for anything
+      // that slipped through unclassified.
+      //
+      // Intentionally does NOT set outputSentToUser = true: that flag
+      // controls cursor-rollback for retry, and we want the existing
+      // retry logic to run unchanged. Each retry attempt will surface
+      // its own error message if it also fails.
+      const userMessage =
+        result.userMessage ?? 'Something went wrong. Please try again.';
+      try {
+        await channel.sendMessage(chatJid, `⚠️ ${userMessage}`);
+      } catch (sendErr) {
+        logger.warn(
+          { chatJid, err: sendErr },
+          'Failed to deliver user-facing error message to channel',
+        );
+      }
     }
   });
 
@@ -573,6 +656,21 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  restoreRemoteControl();
+
+  // Write initial tasks snapshot for all registered groups
+  const startupTasks = getAllTasks().map((t) => ({
+    id: t.id,
+    groupFolder: t.group_folder,
+    prompt: t.prompt,
+    schedule_type: t.schedule_type,
+    schedule_value: t.schedule_value,
+    status: t.status,
+    next_run: t.next_run,
+  }));
+  for (const [, group] of Object.entries(registeredGroups)) {
+    writeTasksSnapshot(group.folder, group.isMain === true, startupTasks);
+  }
 
   // Ensure OneCLI agents exist for all registered groups.
   // Recovers from missed creates (e.g. OneCLI was down at registration time).
@@ -581,6 +679,22 @@ async function main(): Promise<void> {
   }
 
   restoreRemoteControl();
+
+  // Start Paperclip webhook server if configured
+  if (
+    process.env.PAPERCLIP_WEBHOOK_SECRET ||
+    process.env.PAPERCLIP_GROUP_FOLDER
+  ) {
+    const paperclipPort = parseInt(
+      process.env.PAPERCLIP_WEBHOOK_PORT ?? '3102',
+      10,
+    );
+    startPaperclipWebhookServer(paperclipPort, {
+      storeMessage,
+      enqueueGroup: (jid) => queue.enqueueMessageCheck(jid),
+      registeredGroups: () => registeredGroups,
+    });
+  }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
@@ -672,11 +786,21 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+    onRegisterGroup: (jid: string, group: RegisteredGroup) =>
+      registerGroup(jid, group),
   };
 
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
   // Factories return null when credentials are missing, so unconfigured channels are skipped.
+  //
+  // Channel connect() failures must not prevent NanoClaw from starting —
+  // a transiently-unreachable homeserver (e.g. Matrix) shouldn't crash
+  // the process. Log the error and continue with the remaining channels.
+  // We do NOT retry connect() from here: retrying would re-enter the
+  // channel's connect() which may recreate WASM crypto state
+  // (e.g. the Matrix OlmMachine). Each channel is responsible for its
+  // own internal startup resilience via its own retry loop.
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
     const channel = factory(channelOpts);
@@ -687,8 +811,15 @@ async function main(): Promise<void> {
       );
       continue;
     }
-    channels.push(channel);
-    await channel.connect();
+    try {
+      await channel.connect();
+      channels.push(channel);
+    } catch (err) {
+      logger.error(
+        { channel: channelName, err },
+        'Channel failed to connect at startup — continuing without it',
+      );
+    }
   }
   if (channels.length === 0) {
     logger.fatal('No channels connected');

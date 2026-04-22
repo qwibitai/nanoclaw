@@ -4,6 +4,7 @@
  */
 import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -51,6 +52,13 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /**
+   * Friendly user-facing message for error statuses. Set by the agent-runner's
+   * classifyApiError() for Anthropic SDK errors; contains no stack trace or
+   * PII. The orchestrator forwards this verbatim to the chat channel when
+   * status === 'error'.
+   */
+  userMessage?: string;
 }
 
 interface VolumeMount {
@@ -64,7 +72,16 @@ function buildVolumeMounts(
   isMain: boolean,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
-  const projectRoot = process.cwd();
+  const containerRoot = process.cwd();
+  const hostRoot = process.env.HOST_PROJECT_ROOT ?? containerRoot;
+  // Translate internal container paths to host paths for Docker volume mounts.
+  // File system operations (mkdirSync, cpSync) use the raw path; only hostPath
+  // values passed to `docker run -v` need to reference the host filesystem.
+  const toHostPath = (p: string) =>
+    hostRoot !== containerRoot && p.startsWith(containerRoot)
+      ? hostRoot + p.slice(containerRoot.length)
+      : p;
+  const projectRoot = hostRoot;
   const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
@@ -74,7 +91,7 @@ function buildVolumeMounts(
     // (src/, dist/, package.json, etc.) which would bypass the sandbox
     // entirely on next restart.
     mounts.push({
-      hostPath: projectRoot,
+      hostPath: toHostPath(projectRoot),
       containerPath: '/workspace/project',
       readonly: true,
     });
@@ -101,7 +118,7 @@ function buildVolumeMounts(
 
     // Main also gets its group folder as the working directory
     mounts.push({
-      hostPath: groupDir,
+      hostPath: toHostPath(groupDir),
       containerPath: '/workspace/group',
       readonly: false,
     });
@@ -118,7 +135,7 @@ function buildVolumeMounts(
   } else {
     // Other groups only get their own folder
     mounts.push({
-      hostPath: groupDir,
+      hostPath: toHostPath(groupDir),
       containerPath: '/workspace/group',
       readonly: false,
     });
@@ -128,7 +145,7 @@ function buildVolumeMounts(
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
-        hostPath: globalDir,
+        hostPath: toHostPath(globalDir),
         containerPath: '/workspace/global',
         readonly: true,
       });
@@ -146,6 +163,14 @@ function buildVolumeMounts(
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
+    // Seed per-group agent knobs from the container env (if set) so Unraid / CA
+    // users can set one container-level default and have new groups inherit it.
+    // Existing groups are never overwritten — the guard above protects them.
+    // Edit these per-group after creation to override for just that group.
+    // Default is haiku for cost; append [1m] on Sonnet (only) to opt in to 1M
+    // context — the 1M beta is Sonnet-only and 400s on other models.
+    const agentModel = process.env.NANOCLAW_AGENT_MODEL || 'haiku';
+    const agentEffort = process.env.NANOCLAW_AGENT_EFFORT || 'medium';
     fs.writeFileSync(
       settingsFile,
       JSON.stringify(
@@ -160,6 +185,12 @@ function buildVolumeMounts(
             // Enable Claude's memory feature (persists user preferences between sessions)
             // https://code.claude.com/docs/en/memory#manage-auto-memory
             CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+            // Per-group agent model. Edit to override for this group only.
+            // Supports aliases (sonnet, opus, haiku) or full IDs. Append [1m]
+            // for 1M context; omit the suffix for the model's default window.
+            NANOCLAW_AGENT_MODEL: agentModel,
+            // Per-group reasoning effort: low | medium | high | max.
+            NANOCLAW_AGENT_EFFORT: agentEffort,
           },
         },
         null,
@@ -180,10 +211,83 @@ function buildVolumeMounts(
     }
   }
   mounts.push({
-    hostPath: groupSessionsDir,
+    hostPath: toHostPath(groupSessionsDir),
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+
+  // Provide a .claude.json at the container home so claude-code considers
+  // itself logged in. Copy non-sensitive account metadata from the host's
+  // ~/.claude.json (oauthAccount, onboarding flags) — no tokens or API keys.
+  const sessionDotClaudeJson = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    '.claude.json',
+  );
+  const hostDotClaudeJson = path.join(os.homedir(), '.claude.json');
+  if (!fs.existsSync(sessionDotClaudeJson)) {
+    let claudeJsonContent: Record<string, unknown> = {
+      hasCompletedOnboarding: true,
+      lastOnboardingVersion: '2.1.76',
+      oauthAccount: {
+        accountUuid: '00000000-0000-0000-0000-000000000000',
+        emailAddress: 'agent@nanoclaw.local',
+        organizationUuid: '00000000-0000-0000-0000-000000000000',
+        displayName: 'NanoClaw Agent',
+        organizationRole: 'admin',
+        organizationName: 'NanoClaw',
+      },
+    };
+    if (fs.existsSync(hostDotClaudeJson)) {
+      try {
+        const host = JSON.parse(fs.readFileSync(hostDotClaudeJson, 'utf-8'));
+        // Copy only non-sensitive identity/onboarding fields — never tokens
+        for (const key of [
+          'oauthAccount',
+          'hasCompletedOnboarding',
+          'lastOnboardingVersion',
+          'hasSeenTasksHint',
+          'userID',
+        ]) {
+          if (host[key] !== undefined) claudeJsonContent[key] = host[key];
+        }
+      } catch {
+        // ignore — use defaults
+      }
+    }
+    fs.writeFileSync(
+      sessionDotClaudeJson,
+      JSON.stringify(claudeJsonContent, null, 2) + '\n',
+    );
+    try {
+      fs.chmodSync(sessionDotClaudeJson, 0o666);
+    } catch {
+      // ignore
+    }
+  }
+  mounts.push({
+    hostPath: toHostPath(sessionDotClaudeJson),
+    containerPath: '/home/node/.claude.json',
+    readonly: false,
+  });
+
+  // Create .claude sub-directories that claude-code writes to at runtime
+  const sessionDotClaudeDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    '.claude',
+  );
+  for (const subdir of ['debug', 'backups']) {
+    const dirPath = path.join(sessionDotClaudeDir, subdir);
+    fs.mkdirSync(dirPath, { recursive: true });
+    try {
+      fs.chmodSync(dirPath, 0o777);
+    } catch {
+      // ignore
+    }
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
@@ -191,8 +295,21 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  try {
+    const chownRecursive = (p: string) => {
+      fs.chownSync(p, 1000, 1000);
+      if (fs.statSync(p).isDirectory()) {
+        for (const entry of fs.readdirSync(p)) {
+          chownRecursive(path.join(p, entry));
+        }
+      }
+    };
+    chownRecursive(groupIpcDir);
+  } catch {
+    // ignore
+  }
   mounts.push({
-    hostPath: groupIpcDir,
+    hostPath: toHostPath(groupIpcDir),
     containerPath: '/workspace/ipc',
     readonly: false,
   });
@@ -201,7 +318,7 @@ function buildVolumeMounts(
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
   const agentRunnerSrc = path.join(
-    projectRoot,
+    containerRoot,
     'container',
     'agent-runner',
     'src',
@@ -222,10 +339,23 @@ function buildVolumeMounts(
         fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
     if (needsCopy) {
       fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+      try {
+        const chownRecursive = (p: string) => {
+          fs.chownSync(p, 1000, 1000);
+          if (fs.statSync(p).isDirectory()) {
+            for (const entry of fs.readdirSync(p)) {
+              chownRecursive(path.join(p, entry));
+            }
+          }
+        };
+        chownRecursive(groupAgentRunnerDir);
+      } catch {
+        // ignore — chown may fail if not running as root (native install)
+      }
     }
   }
   mounts.push({
-    hostPath: groupAgentRunnerDir,
+    hostPath: toHostPath(groupAgentRunnerDir),
     containerPath: '/app/src',
     readonly: false,
   });
@@ -238,6 +368,23 @@ function buildVolumeMounts(
       isMain,
     );
     mounts.push(...validatedMounts);
+  }
+
+  // Extra mounts from NANOCLAW_EXTRA_MOUNTS env var
+  // Format: "hostpath:containerpath:ro,hostpath2:containerpath2:rw"
+  const extraMountsEnv = process.env.NANOCLAW_EXTRA_MOUNTS;
+  if (extraMountsEnv) {
+    for (const entry of extraMountsEnv.split(',')) {
+      const parts = entry.trim().split(':');
+      if (parts.length < 2) continue;
+      const hostPath = parts[0];
+      const containerPath = parts[1];
+      const mode = parts[2]?.toLowerCase();
+      const readonly = mode === 'ro';
+      if (hostPath && containerPath) {
+        mounts.push({ hostPath, containerPath, readonly });
+      }
+    }
   }
 
   return mounts;
@@ -266,6 +413,61 @@ async function buildContainerArgs(
       { containerName },
       'OneCLI gateway not reachable — container will have no credentials',
     );
+  }
+
+  // Pass UnraidClaw connection details if configured
+  if (process.env.UNRAIDCLAW_SERVERS) {
+    args.push('-e', `UNRAIDCLAW_SERVERS=${process.env.UNRAIDCLAW_SERVERS}`);
+  }
+  if (process.env.UNRAIDCLAW_URL) {
+    args.push('-e', `UNRAIDCLAW_URL=${process.env.UNRAIDCLAW_URL}`);
+  }
+  if (process.env.UNRAIDCLAW_API_KEY) {
+    args.push('-e', `UNRAIDCLAW_API_KEY=${process.env.UNRAIDCLAW_API_KEY}`);
+  }
+  if (process.env.TS_API_KEY) {
+    args.push('-e', `TS_API_KEY=${process.env.TS_API_KEY}`);
+  }
+  if (process.env.TS_API_CLIENT_ID) {
+    args.push('-e', `TS_API_CLIENT_ID=${process.env.TS_API_CLIENT_ID}`);
+  }
+  if (process.env.TS_API_CLIENT_SECRET) {
+    args.push('-e', `TS_API_CLIENT_SECRET=${process.env.TS_API_CLIENT_SECRET}`);
+  }
+  if (process.env.TS_API_TAILNET) {
+    args.push('-e', `TS_API_TAILNET=${process.env.TS_API_TAILNET}`);
+  }
+  if (process.env.HA_URL) {
+    args.push('-e', `HA_URL=${process.env.HA_URL}`);
+  }
+  if (process.env.HA_TOKEN) {
+    args.push('-e', `HA_TOKEN=${process.env.HA_TOKEN}`);
+  }
+  if (process.env.OLLAMA_URL) {
+    args.push('-e', `OLLAMA_URL=${process.env.OLLAMA_URL}`);
+  }
+  if (process.env.PAPERCLIP_URL) {
+    args.push('-e', `PAPERCLIP_URL=${process.env.PAPERCLIP_URL}`);
+  }
+  if (process.env.PAPERCLIP_AGENT_JWT_SECRET) {
+    args.push(
+      '-e',
+      `PAPERCLIP_AGENT_JWT_SECRET=${process.env.PAPERCLIP_AGENT_JWT_SECRET}`,
+    );
+  }
+  if (process.env.PAPERCLIP_AGENT_ID) {
+    args.push('-e', `PAPERCLIP_AGENT_ID=${process.env.PAPERCLIP_AGENT_ID}`);
+  }
+  if (process.env.PAPERCLIP_COMPANY_ID) {
+    args.push('-e', `PAPERCLIP_COMPANY_ID=${process.env.PAPERCLIP_COMPANY_ID}`);
+  }
+
+  // Attach to a custom Docker network when configured (e.g. shared
+  // network with Ollama, Home Assistant, etc.). Falls back to Docker's
+  // default bridge when unset.
+  const dockerNetwork = process.env.NANOCLAW_DOCKER_NETWORK;
+  if (dockerNetwork && dockerNetwork.trim().length > 0) {
+    args.push('--network', dockerNetwork.trim());
   }
 
   // Runtime-specific args for host gateway resolution
