@@ -141,9 +141,9 @@ Filter to these ItemTags only:
 
 Each table rows: Room Revenue | Room Expense | F&B Revenue | F&B Expense | Total Revenue | GOP | EBITDA after Reserves
 
-Each table columns: Forecast | Budget | vs Bud $ | vs Bud % | LY (Last Year) | vs LY %
+Each table columns: Primary Forecast | Budget | vs Bud $ | vs Bud % | LY (Last Year) | vs LY %
 
-For next month, Actuals column will be blank/dash (no actuals yet for a future month).
+The first column is ALWAYS Primary Forecast (dataset 1) for both current month and next month. Do NOT use Actuals (dataset -3) as a table column under any circumstances -- Actuals data is fetched for reference only and must not appear as a column in the output.
 
 Label the prior year column "LY" not "STLY" or "PY".
 
