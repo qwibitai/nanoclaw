@@ -3,8 +3,8 @@
  * Issue comment threads as conversations.
  * Self-registers on import.
  *
- * Linear OAuth apps can't be @-mentioned, so this adapter uses the
- * bridge's catchAll option to forward every comment automatically.
+ * Linear OAuth apps can't be @-mentioned, so this adapter relies on the
+ * bridge's default onNewMessage catch-all to forward every comment.
  */
 import { createLinearAdapter } from '@chat-adapter/linear';
 
@@ -40,6 +40,6 @@ registerChannelAdapter('linear', {
     const teamKey = env.LINEAR_TEAM_KEY || 'default';
     linearAdapter.channelIdFromThreadId = () => `linear:${teamKey}`;
 
-    return createChatSdkBridge({ adapter: linearAdapter, concurrency: 'queue', supportsThreads: true, catchAll: true });
+    return createChatSdkBridge({ adapter: linearAdapter, concurrency: 'queue', supportsThreads: true });
   },
 });

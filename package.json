@@ -46,7 +46,8 @@
     "cron-parser": "5.5.0",
     "kleur": "^4.1.5",
     "pino": "^9.6.0",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "wechat-ilink-client": "^0.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",

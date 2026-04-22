@@ -55,7 +55,7 @@ importers:
         version: 1.5.6
       '@whiskeysockets/baileys':
         specifier: ^6.17.16
-        version: 6.17.16(eslint@9.39.4)(typescript@5.9.3)
+        version: 6.17.16(eslint@9.39.4)(qrcode-terminal@0.12.0)(typescript@5.9.3)
       better-sqlite3:
         specifier: 11.10.0
         version: 11.10.0
@@ -77,6 +77,9 @@ importers:
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
+      wechat-ilink-client:
+        specifier: ^0.1.0
+        version: 0.1.0
     devDependencies:
       '@eslint/js':
         specifier: ^9.35.0
@@ -2792,6 +2795,10 @@ packages:
   qoa-format@1.0.1:
     resolution: {integrity: sha512-dMB0Z6XQjdpz/Cw4Rf6RiBpQvUSPCfYlQMWvmuWlWkAT7nDQD29cVZ1SwDUB6DYJSitHENwbt90lqfI+7bvMcw==}
 
+  qrcode-terminal@0.12.0:
+    resolution: {integrity: sha512-EXtzRZmC+YGmGlDFbXKxQiMZNwCLEO6BANKXG4iCtSIM0yqc/pappSx3RIKr4r0uh5JsBckOXeKrB3Iz7mdQpQ==}
+    hasBin: true
+
   qrcode@1.5.4:
     resolution: {integrity: sha512-1ca71Zgiu6ORjHqFBDpnSMTR2ReToX4l1Au1VFLyVeBTFavzQnv5JxMFr3ukHVKpSrSA2MCk0lNJSykjUfz7Zg==}
     engines: {node: '>=10.13.0'}
@@ -3288,6 +3295,10 @@ packages:
   web-streams-polyfill@3.3.3:
     resolution: {integrity: sha512-d2JWLCivmZYTSIoge9MsgFCZrt571BikcWGYkjC1khllbTeDlGqZ2D8vD8E/lJa8WGWbb7Plm8/XJYV7IJHZZw==}
     engines: {node: '>= 8'}
+
+  wechat-ilink-client@0.1.0:
+    resolution: {integrity: sha512-/gsWGEGEsWA7C5cgfKtguCL7QPdT95I1HfHHiRcHtwQppwVfgD8aDL4m4soANp1qQDl5RgiJ7q9gh9X5cXUfqA==}
+    engines: {node: '>=20'}
 
   which-module@2.0.1:
     resolution: {integrity: sha512-iBdZ57RDvnOR9AGBhML2vFZf7h8vmBjhoaZqODJBFWHVtKkDmKuHai3cx5PgVMrX5YDNp27AofYbAwctSS+vhQ==}
@@ -4545,7 +4556,7 @@ snapshots:
     dependencies:
       '@wasm-audio-decoders/common': 9.0.7
 
-  '@whiskeysockets/baileys@6.17.16(eslint@9.39.4)(typescript@5.9.3)':
+  '@whiskeysockets/baileys@6.17.16(eslint@9.39.4)(qrcode-terminal@0.12.0)(typescript@5.9.3)':
     dependencies:
       '@adiwajshing/keyed-db': 0.2.4
       '@cacheable/node-cache': 1.7.6
@@ -4563,6 +4574,8 @@ snapshots:
       protobufjs: 7.5.5
       uuid: 10.0.0
       ws: 8.20.0
+    optionalDependencies:
+      qrcode-terminal: 0.12.0
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -6271,6 +6284,9 @@ snapshots:
     dependencies:
       '@thi.ng/bitstream': 2.4.46
 
+  qrcode-terminal@0.12.0:
+    optional: true
+
   qrcode@1.5.4:
     dependencies:
       dijkstrajs: 1.0.3
@@ -6814,6 +6830,10 @@ snapshots:
       - msw
 
   web-streams-polyfill@3.3.3: {}
+
+  wechat-ilink-client@0.1.0:
+    optionalDependencies:
+      qrcode-terminal: 0.12.0
 
   which-module@2.0.1: {}
 

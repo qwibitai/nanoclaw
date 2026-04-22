@@ -17,8 +17,8 @@ vi.mock('../log.js', () => ({
 
 function makeSetup(overrides: Partial<ChannelSetup> = {}): ChannelSetup {
   return {
-    conversations: [],
     onInbound: vi.fn(),
+    onInboundEvent: vi.fn(),
     onMetadata: vi.fn(),
     onAction: vi.fn(),
     ...overrides,

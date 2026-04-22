@@ -35,7 +35,6 @@ import { normalizeOptions, type NormalizedOption } from './ask-question.js';
 import type {
   ChannelAdapter,
   ChannelSetup,
-  ConversationConfig,
   ConversationInfo,
   InboundMessage,
   OutboundMessage,
@@ -163,7 +162,6 @@ registerChannelAdapter('whatsapp', {
     let sock: WASocket;
     let connected = false;
     let setupConfig: ChannelSetup;
-    let conversations: Map<string, ConversationConfig>;
 
     // LID → phone JID mapping (WhatsApp's new ID system)
     const lidToPhoneMap: Record<string, string> = {};
@@ -201,12 +199,6 @@ registerChannelAdapter('whatsapp', {
     const pairingCodeFile = path.join(process.cwd(), 'store', 'pairing-code.txt');
 
     // --- Helpers ---
-
-    function buildConversationMap(configs: ConversationConfig[]): Map<string, ConversationConfig> {
-      const map = new Map<string, ConversationConfig>();
-      for (const conv of configs) map.set(conv.platformId, conv);
-      return map;
-    }
 
     function setLidPhoneMapping(lidUser: string, phoneJid: string): void {
       if (lidToPhoneMap[lidUser] === phoneJid) return;
@@ -519,9 +511,6 @@ registerChannelAdapter('whatsapp', {
             // Notify metadata for group discovery
             setupConfig.onMetadata(chatJid, undefined, isGroup);
 
-            // Only forward messages for registered conversations
-            if (!conversations.has(chatJid)) continue;
-
             let content =
               normalized.conversation ||
               normalized.extendedTextMessage?.text ||
@@ -606,7 +595,6 @@ registerChannelAdapter('whatsapp', {
 
       async setup(hostConfig: ChannelSetup) {
         setupConfig = hostConfig;
-        conversations = buildConversationMap(hostConfig.conversations);
 
         // Connect and wait for first open
         await new Promise<void>((resolve, reject) => {
@@ -731,9 +719,6 @@ registerChannelAdapter('whatsapp', {
         }
       },
 
-      updateConversations(configs: ConversationConfig[]) {
-        conversations = buildConversationMap(configs);
-      },
     };
 
     return adapter;
