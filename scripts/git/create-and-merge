@@ -25,6 +25,7 @@ MERGE_ARGS=()
 
 # ---------- helpers ----------
 die()  { echo "ERROR: $*" >&2; exit 1; }
+warn() { echo "WARN: $*" >&2; }
 info() { echo "INFO: $*"; }
 
 usage() {
@@ -83,12 +84,20 @@ done
 # ---------- step 1: create PR ----------
 info "=== Step 1: Creating PR for '$BRANCH' ==="
 
-PR_URL=$("$SCRIPT_DIR/create-pr" "$BRANCH" "${CREATE_ARGS[@]}" 2>&1 | tee /dev/stderr | tail -1) || {
-  die "create-pr failed. PR was not created — no merge attempted."
-}
+CREATE_EXIT=0
+PR_URL=$("$SCRIPT_DIR/create-pr" "$BRANCH" "${CREATE_ARGS[@]}" 2>&1 | tee /dev/stderr | tail -1) || CREATE_EXIT=$?
+
+if [[ $CREATE_EXIT -ne 0 ]]; then
+  echo "" >&2
+  echo "ERROR: create-pr failed (exit code $CREATE_EXIT). PR was not created — no merge attempted." >&2
+  echo "" >&2
+  echo "  To retry just the PR creation:" >&2
+  echo "    $SCRIPT_DIR/create-pr $BRANCH ${CREATE_ARGS[*]:-}" >&2
+  exit 1
+fi
 
 if [[ -z "$PR_URL" ]]; then
-  die "create-pr did not return a PR URL."
+  die "create-pr did not return a PR URL. Check the output above for details."
 fi
 
 # Extract PR number from URL (e.g., https://github.com/owner/repo/pull/123 -> 123).
@@ -113,9 +122,19 @@ if [[ ${#MERGE_ARGS[@]} -eq 0 ]]; then
   MERGE_ARGS+=(--squash)
 fi
 
-"$SCRIPT_DIR/merge-pr" "$PR_NUMBER" "${MERGE_ARGS[@]}" || {
-  die "merge-pr failed for PR #$PR_NUMBER. The PR exists at $PR_URL — merge it manually."
-}
+MERGE_EXIT=0
+"$SCRIPT_DIR/merge-pr" "$PR_NUMBER" "${MERGE_ARGS[@]}" || MERGE_EXIT=$?
+
+if [[ $MERGE_EXIT -ne 0 ]]; then
+  echo "" >&2
+  echo "ERROR: merge-pr failed for PR #$PR_NUMBER (exit code $MERGE_EXIT)." >&2
+  echo "  The PR was created successfully at: $PR_URL" >&2
+  echo "" >&2
+  echo "  Next steps:" >&2
+  echo "    - Merge manually:  $SCRIPT_DIR/merge-pr $PR_NUMBER ${MERGE_ARGS[*]:-}" >&2
+  echo "    - Or via browser:  gh pr view $PR_NUMBER --web" >&2
+  exit 1
+fi
 
 info "=== Complete: PR #$PR_NUMBER created and merged ==="
 echo "$PR_URL"

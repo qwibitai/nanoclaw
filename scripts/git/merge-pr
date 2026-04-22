@@ -17,6 +17,8 @@ STRATEGY="squash"
 DELETE_BRANCH=true
 CI_TIMEOUT=300       # 5 minutes max wait for CI
 CI_POLL_INTERVAL=10  # poll every 10 seconds
+MAX_RETRIES=3        # retry attempts for transient merge failures
+BACKOFF_BASE=2       # exponential backoff base (2^attempt seconds)
 PR_NUMBER=""
 
 # ---------- helpers ----------
@@ -76,26 +78,43 @@ PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq '.state' 2>/dev/null || tru
 
 case "$PR_STATE" in
   MERGED)
+    PR_URL_DISPLAY=$(gh pr view "$PR_NUMBER" --json url --jq '.url' 2>/dev/null || true)
     info "PR #$PR_NUMBER is already merged."
+    info "View it at: ${PR_URL_DISPLAY:-gh pr view $PR_NUMBER --web}"
     exit 0
     ;;
   CLOSED)
-    die "PR #$PR_NUMBER is closed (not merged). Re-open it first or check the PR number."
+    echo "" >&2
+    echo "ERROR: PR #$PR_NUMBER is closed (not merged)." >&2
+    echo "" >&2
+    echo "  Next steps:" >&2
+    echo "    - Re-open the PR:   gh pr reopen $PR_NUMBER" >&2
+    echo "    - View PR details:  gh pr view $PR_NUMBER" >&2
+    echo "    - Check the number: gh pr list --state all | grep $PR_NUMBER" >&2
+    exit 1
     ;;
   OPEN)
     # Good — proceed.
     ;;
   "")
-    die "PR #$PR_NUMBER not found. Check the PR number and repository."
+    echo "" >&2
+    echo "ERROR: PR #$PR_NUMBER not found or API error." >&2
+    echo "" >&2
+    echo "  Check:" >&2
+    echo "    - Is the PR number correct? gh pr list --state all" >&2
+    echo "    - Are you in the right repo? gh repo view" >&2
+    echo "    - Is GitHub auth working?   gh auth status" >&2
+    exit 1
     ;;
   *)
     die "PR #$PR_NUMBER is in unexpected state: $PR_STATE"
     ;;
 esac
 
-# Capture branch name for later cleanup.
+# Capture branch names for later cleanup and error messages.
 PR_BRANCH=$(gh pr view "$PR_NUMBER" --json headRefName --jq '.headRefName' 2>/dev/null || true)
-info "Merging PR #$PR_NUMBER (branch: ${PR_BRANCH:-unknown}, strategy: $STRATEGY)"
+BASE_BRANCH=$(gh pr view "$PR_NUMBER" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo "main")
+info "Merging PR #$PR_NUMBER (branch: ${PR_BRANCH:-unknown} -> ${BASE_BRANCH}, strategy: $STRATEGY)"
 
 # ---------- CI check wait ----------
 # Wait for required status checks to pass before merging.
@@ -137,8 +156,17 @@ while [[ $WAITED -lt $CI_TIMEOUT ]]; do
   PENDING_COUNT=$(echo "$CHECK_OUTPUT" | grep -c "pending\|queued\|in_progress" || true)
 
   if [[ "$FAIL_COUNT" -gt 0 ]]; then
-    echo "$CHECK_OUTPUT" >&2
-    die "PR #$PR_NUMBER has failing CI checks. Fix them before merging."
+    echo "" >&2
+    echo "ERROR: PR #$PR_NUMBER has failing CI checks:" >&2
+    echo "$CHECK_OUTPUT" | grep -i "fail" | while IFS= read -r line; do
+      echo "  $line" >&2
+    done
+    echo "" >&2
+    echo "  Next steps:" >&2
+    echo "    - View check details:  gh pr checks $PR_NUMBER" >&2
+    echo "    - View PR in browser:  gh pr view $PR_NUMBER --web" >&2
+    echo "    - Fix issues and push new commits to the PR branch" >&2
+    exit 1
   fi
 
   if [[ "$PENDING_COUNT" -eq 0 ]]; then
@@ -158,22 +186,63 @@ if [[ $WAITED -ge $CI_TIMEOUT ]]; then
   warn "CI checks did not complete within ${CI_TIMEOUT}s. Attempting merge anyway."
 fi
 
-# ---------- merge ----------
+# ---------- merge with retry + backoff ----------
 MERGE_FLAG="--$STRATEGY"
 DELETE_FLAG=""
 if [[ "$DELETE_BRANCH" == true ]]; then
   DELETE_FLAG="--delete-branch"
 fi
 
-MERGE_OUTPUT=$(gh pr merge "$PR_NUMBER" $MERGE_FLAG $DELETE_FLAG 2>&1) || {
+MERGE_ATTEMPT=0
+MERGE_OUTPUT=""
+
+while [[ $MERGE_ATTEMPT -lt $MAX_RETRIES ]]; do
+  MERGE_ATTEMPT=$((MERGE_ATTEMPT + 1))
+
+  MERGE_OUTPUT=$(gh pr merge "$PR_NUMBER" $MERGE_FLAG $DELETE_FLAG 2>&1) && break
+
   # Check if it was merged by someone else in the meantime.
   RECHECK_STATE=$(gh pr view "$PR_NUMBER" --json state --jq '.state' 2>/dev/null || true)
   if [[ "$RECHECK_STATE" == "MERGED" ]]; then
     info "PR #$PR_NUMBER was merged concurrently."
     exit 0
   fi
-  die "Failed to merge PR #$PR_NUMBER: $MERGE_OUTPUT"
-}
+
+  # Non-retryable errors: permission denied, merge conflicts, branch protection.
+  if echo "$MERGE_OUTPUT" | grep -qiE "merge conflict|protected branch|not authorized|permission denied|review required"; then
+    echo "" >&2
+    echo "ERROR: Cannot merge PR #$PR_NUMBER (non-retryable):" >&2
+    echo "  $MERGE_OUTPUT" >&2
+    echo "" >&2
+    echo "  Next steps:" >&2
+    if echo "$MERGE_OUTPUT" | grep -qi "merge conflict"; then
+      echo "    - Resolve conflicts: git checkout $PR_BRANCH && git merge $BASE_BRANCH" >&2
+    fi
+    if echo "$MERGE_OUTPUT" | grep -qi "review required"; then
+      echo "    - Get a review:     gh pr view $PR_NUMBER --web" >&2
+    fi
+    echo "    - View PR status:   gh pr view $PR_NUMBER" >&2
+    exit 1
+  fi
+
+  if [[ $MERGE_ATTEMPT -lt $MAX_RETRIES ]]; then
+    SLEEP=$((BACKOFF_BASE ** MERGE_ATTEMPT))
+    warn "gh pr merge failed (attempt $MERGE_ATTEMPT/$MAX_RETRIES). Retrying in ${SLEEP}s..."
+    warn "  Output: $MERGE_OUTPUT"
+    sleep "$SLEEP"
+  else
+    echo "" >&2
+    echo "ERROR: Failed to merge PR #$PR_NUMBER after $MAX_RETRIES attempts." >&2
+    echo "  Last output: $MERGE_OUTPUT" >&2
+    echo "" >&2
+    echo "  Troubleshooting:" >&2
+    echo "    - Check PR status:   gh pr view $PR_NUMBER" >&2
+    echo "    - Check CI status:   gh pr checks $PR_NUMBER" >&2
+    echo "    - Try manually:      gh pr merge $PR_NUMBER $MERGE_FLAG" >&2
+    echo "    - Check GitHub auth: gh auth status" >&2
+    exit 1
+  fi
+done
 
 info "PR #$PR_NUMBER merged successfully ($STRATEGY)."
 
@@ -190,8 +259,12 @@ if [[ "$DELETE_BRANCH" == true && -n "$PR_BRANCH" ]]; then
       git checkout main 2>/dev/null || git checkout master 2>/dev/null || warn "Could not switch away from '$PR_BRANCH'."
     fi
 
-    git branch -d "$PR_BRANCH" 2>/dev/null \
-      || warn "Could not delete local branch '$PR_BRANCH'. It may have unmerged changes — use 'git branch -D $PR_BRANCH' to force-delete."
+    git branch -d "$PR_BRANCH" 2>/dev/null || {
+      warn "Could not delete local branch '$PR_BRANCH'."
+      warn "  This usually means it has unmerged local changes."
+      warn "  To force-delete:  git branch -D $PR_BRANCH"
+      warn "  To inspect first: git log --oneline main..$PR_BRANCH"
+    }
   fi
 
   # Prune stale remote tracking refs.
