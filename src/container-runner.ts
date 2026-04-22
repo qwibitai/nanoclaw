@@ -318,8 +318,9 @@ function buildContainerArgs(
 
   // Cap memory per container so a runaway container hits a predictable limit
   // rather than triggering the kernel OOM killer against unrelated processes.
-  // 2GB is ~3x current peak usage (~600MB). OOMKilled containers exit 137.
-  args.push('--memory=2g', '--memory-swap=2g');
+  // 4GB: raised from 2GB after OOM kills during coo-prefetch (12 parallel
+  // ProfitSword Python procs + Snowflake MCP loading large YTD result sets).
+  args.push('--memory=4g', '--memory-swap=4g');
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
