@@ -4,6 +4,9 @@
   "description": "Personal Claude assistant. Lightweight, secure, customizable.",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "nanoclaw-test-notification": "dist/test-notification.js"
+  },
   "scripts": {
     "build": "npm run build:core && npm run reload-service",
     "build:core": "tsc",
