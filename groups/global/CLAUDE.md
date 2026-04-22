@@ -79,22 +79,9 @@ Rules:
 4. **Explore before assuming schema.** Use `SHOW DATABASES`, `SHOW SCHEMAS IN DATABASE X`, `DESCRIBE TABLE ...` to discover structure. Don't guess column names.
 5. **Surface findings as items.** If a query surfaces something Gabe should act on (negative review, booking anomaly, revenue gap), create a row in the Notion Open Items database with Property set and Source set to a link to the underlying context.
 
-## Open Items (Microsoft ToDo)
+## Open Items
 
-Gabe's working open-items surface is a Microsoft ToDo list, NOT Notion or SQLite:
-- List name: `Nano — COO Triage`
-- List ID: `AAMkADAyMTNhMWQ3LTg3ZTYtNDQzZi04MGFmLWM2MmVkNzZkNzQ4MgAuAAAAAACM1iz8JLvDT53LBt6p6qevAQDNA90Fe1j4RZcBrlwNuvPFAAJ_fUxSAAA=`
-- MCP tools: `mcp__outlook__create-task`, `mcp__outlook__list-tasks`, `mcp__outlook__update-task`
-
-Rules:
-1. **Create a task** for every actionable email that needs Gabe's attention. Title format: `[Name] — [topic] — [action needed]`. Set dueDateTime if there's a deadline. Put thread summary and context in the task body.
-2. **Never duplicate** — before creating, call `list-tasks` and check for an existing task on the same topic/thread.
-3. **Closing an item** = call `update-task` with `status: completed`. Never delete tasks — completed tasks stay as history.
-4. **Gabe crosses items off in ToDo** (Outlook app or mobile) and they are gone from Nano's list automatically. This is the primary completion path — no chat command needed.
-5. **Digests query ToDo live** via `list-tasks`. Filter: `status != completed`. This is the single source of truth — no SQLite, no Notion for open items.
-6. **Do NOT use `open_item_upsert`, `open_item_update_status`, or any Notion MCP tools for tracking open items.** SQLite `open_items` is retired. Notion is retired for this purpose. ToDo is authoritative.
-
-See nanoclawrules.md for full workflow and digest query details.
+Track action items in Telegram. When an actionable email or task needs Gabe's attention, surface it in the next digest or immediately if critical. Gabe manages follow-up in the chat. No external tracker — no SQLite, no Notion, no Microsoft ToDo.
 
 ## Memory
 

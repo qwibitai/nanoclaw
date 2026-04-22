@@ -533,7 +533,9 @@ export class OutlookChannel implements Channel {
         ? `\nCategories: ${existingCategories.join(', ')}`
         : '';
     const enrichedSender = enrichSenderLine(senderEmail, senderName);
-    const content = `[Outlook email from ${enrichedSender}]\nEmail ID: ${msg.id}\nSubject: ${subject}${categoryLine}\n\n${body}`;
+    const truncatedBody =
+      body.length > 1500 ? body.slice(0, 1500) + '\n[body truncated]' : body;
+    const content = `[Outlook email from ${enrichedSender}]\nEmail ID: ${msg.id}\nSubject: ${subject}${categoryLine}\n\n${truncatedBody}`;
 
     this.opts.onMessage(mainJid, {
       id: msg.id,
