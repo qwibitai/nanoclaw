@@ -401,7 +401,7 @@ describe('agency-hq-dispatcher', () => {
       expect(body.context.result.summary).toContain('Error:');
     });
 
-    it('writes status done when worker succeeds', async () => {
+    it('writes status in-review when worker succeeds', async () => {
       // Make runScheduledTask return a success result
       vi.mocked(runScheduledTask).mockResolvedValueOnce({
         result: 'Task completed successfully',
@@ -453,8 +453,8 @@ describe('agency-hq-dispatcher', () => {
       expect(resultPut).toBeDefined();
 
       const body = JSON.parse(resultPut![1]!.body as string);
-      // Should be 'done' on success
-      expect(body.status).toBe('done');
+      // Should be 'in-review' on success (PR still needs merge for 'done')
+      expect(body.status).toBe('in-review');
       expect(body.context.result.summary).toContain(
         'Task completed successfully',
       );

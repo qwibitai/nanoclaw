@@ -158,10 +158,11 @@ export async function buildPrompt(
     `Agency HQ task ID: ${task.id}`,
     '',
     'IMPORTANT: When this task is complete, you MUST:',
-    `1. PUT ${AGENCY_HQ_URL}/api/v1/tasks/${task.id} with {"status": "done", "context": {"result": {"summary": "<what you accomplished>"}}}`,
+    `1. PUT ${AGENCY_HQ_URL}/api/v1/tasks/${task.id} with {"status": "in-review", "context": {"result": {"summary": "<what you accomplished>"}}}`,
     `2. POST ${AGENCY_HQ_URL}/api/v1/notifications with a summary notification`,
     '',
-    'The result write-back in step 1 is critical — without it the task shows as done but with no result.',
+    'The result write-back in step 1 is critical — without it the task shows as in-review but with no result.',
+    'Note: Status is set to "in-review" (not "done") because the PR still needs to be merged. The final "done" transition happens after PR merge.',
   );
 
   return parts.join('\n');
@@ -598,9 +599,19 @@ async function dispatchTask(
 
       const mergedContext = { ...existingContext, result: resultPayload };
 
-      // Report correct status: 'done' for success, 'ready' for failure
+      // Report correct status: 'in-review' for success, 'ready' for failure
       // (so the task can be retried by the next dispatch tick).
-      const ahqStatus = taskSucceeded ? 'done' : 'ready';
+      //
+      // Status flow: ready → in-progress → in-review → done
+      //   - 'in-review': worker finished implementation, PR is open for review.
+      //   - 'done': PR has been merged and the task is fully shipped.
+      //
+      // The final 'done' transition should be triggered when the PR is merged.
+      // This does not yet exist — a follow-up should add it in one of:
+      //   1. A GitHub webhook handler in Agency HQ (preferred — PR merge events)
+      //   2. A polling watcher in NanoClaw's dev-inbox subsystem
+      //   3. A GitHub Actions workflow that calls the Agency HQ API
+      const ahqStatus = taskSucceeded ? 'in-review' : 'ready';
 
       try {
         const res = await agencyFetch(`/tasks/${task.id}`, {
