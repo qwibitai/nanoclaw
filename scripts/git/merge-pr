@@ -100,9 +100,37 @@ info "Merging PR #$PR_NUMBER (branch: ${PR_BRANCH:-unknown}, strategy: $STRATEGY
 # ---------- CI check wait ----------
 # Wait for required status checks to pass before merging.
 WAITED=0
+CI_API_FAILURES=0
+MAX_CI_API_FAILURES=3
+
 while [[ $WAITED -lt $CI_TIMEOUT ]]; do
   # gh pr checks returns exit code 1 if checks are failing/pending.
-  CHECK_OUTPUT=$(gh pr checks "$PR_NUMBER" 2>&1 || true)
+  # Capture exit code separately to distinguish API errors from check failures.
+  CHECK_EXIT=0
+  CHECK_OUTPUT=$(gh pr checks "$PR_NUMBER" 2>&1) || CHECK_EXIT=$?
+
+  # Detect API/auth/network errors: if gh failed AND the output doesn't contain
+  # typical check-status keywords (pass/fail/pending), it's likely an API error.
+  if [[ $CHECK_EXIT -ne 0 ]]; then
+    PASS_COUNT=$(echo "$CHECK_OUTPUT" | grep -c "pass" || true)
+    FAIL_COUNT=$(echo "$CHECK_OUTPUT" | grep -c "fail" || true)
+    PENDING_COUNT=$(echo "$CHECK_OUTPUT" | grep -c "pending\|queued\|in_progress" || true)
+
+    if [[ $((PASS_COUNT + FAIL_COUNT + PENDING_COUNT)) -eq 0 ]]; then
+      # No recognizable check statuses — this is an API/network error, not a check result.
+      CI_API_FAILURES=$((CI_API_FAILURES + 1))
+      warn "gh pr checks returned an error (attempt $CI_API_FAILURES/$MAX_CI_API_FAILURES): $CHECK_OUTPUT"
+      if [[ $CI_API_FAILURES -ge $MAX_CI_API_FAILURES ]]; then
+        die "gh pr checks failed $MAX_CI_API_FAILURES times due to API errors. Cannot verify CI status. Last output: $CHECK_OUTPUT"
+      fi
+      sleep "$CI_POLL_INTERVAL"
+      WAITED=$((WAITED + CI_POLL_INTERVAL))
+      continue
+    fi
+  fi
+
+  # Reset API failure counter on successful check retrieval.
+  CI_API_FAILURES=0
 
   # Count statuses — "pass", "fail", "pending".
   FAIL_COUNT=$(echo "$CHECK_OUTPUT" | grep -c "fail" || true)

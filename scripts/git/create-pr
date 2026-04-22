@@ -72,7 +72,9 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 # Detect and warn the user with a suggested fix.
 WORKTREE_LIST="$(git worktree list --porcelain 2>/dev/null || true)"
 if echo "$WORKTREE_LIST" | grep -q "branch refs/heads/${BRANCH}$"; then
-  WORKTREE_PATH=$(echo "$WORKTREE_LIST" | grep -B1 "branch refs/heads/${BRANCH}$" | head -1 | sed 's/^worktree //')
+  # Porcelain format emits: worktree <path>, HEAD <sha>, branch <ref> (in that order).
+  # Use -B2 to capture the worktree line (2 lines before the branch line), then filter for it.
+  WORKTREE_PATH=$(echo "$WORKTREE_LIST" | grep -B2 "branch refs/heads/${BRANCH}$" | grep '^worktree ' | sed 's/^worktree //')
   if [[ -n "$WORKTREE_PATH" ]]; then
     warn "Branch '$BRANCH' is checked out in worktree: $WORKTREE_PATH"
     warn "This may cause conflicts during PR operations."

@@ -133,7 +133,19 @@ The codebase is small enough that Claude can safely modify it.
 
 ## Operations
 
-Runtime and service checks:
+### Git PR Helpers
+
+Scripts under `scripts/git/` automate the dev-inbox PR workflow:
+
+```bash
+scripts/git/create-pr <branch> [--title <title>] [--auto-merge]
+scripts/git/merge-pr <pr-number> [--squash|--merge|--rebase]
+scripts/git/create-and-merge <branch> [options]
+```
+
+These handle worktree conflicts, missing commits, API retries, CI wait logic, and branch cleanup.
+
+### Runtime & Service Checks
 
 ```bash
 npm run smoke:runtime

@@ -40,6 +40,18 @@ Single Node.js process with a skill-based channel system.
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch     |
 | `/get-qodo-rules`   | Load org- and repo-level coding rules from Qodo before code tasks |
 
+## Git PR Helpers
+
+Bash scripts under `scripts/git/` for dev-inbox PR workflow:
+
+| Script             | Usage                                                       |
+| ------------------ | ----------------------------------------------------------- |
+| `create-pr`        | `create-pr <branch> [--title <t>] [--auto-merge] [--base <b>]` |
+| `merge-pr`         | `merge-pr <pr-number> [--squash\|--merge\|--rebase]`        |
+| `create-and-merge` | `create-and-merge <branch> [options]` — runs both in sequence |
+
+Edge cases handled: worktree lock conflicts, no commits vs base, already-merged PRs, gh CLI API failures (retry with backoff), CI check wait with timeout, branch cleanup errors, missing branches.
+
 ## Development
 
 Run commands directly—don't tell the user to run them.
