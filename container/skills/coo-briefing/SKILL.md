@@ -89,7 +89,7 @@ Current month + next month side by side (2 months only). Compare: Forecast vs Bu
 
 Run via Bash for each property. Pull BOTH MONTHS IN ONE CALL (more efficient, fewer timeouts):
 ```bash
-# Forecast (both months at once)
+# Primary Forecast (both months at once)
 python3 /workspace/project/scripts/profitsword/scripts/profitsword_api.py \
   --endpoint monthly_extended --site-tag [TAG] --dataset-id 1 \
   --year 2026 --begmonth [CURRENT_MONTH] --endmonth [CURRENT_MONTH+1] \
@@ -100,26 +100,20 @@ python3 /workspace/project/scripts/profitsword/scripts/profitsword_api.py \
   --endpoint monthly_extended --site-tag [TAG] --dataset-id 2 \
   --year 2026 --begmonth [CURRENT_MONTH] --endmonth [CURRENT_MONTH+1] \
   --include-totals Y --output /tmp/ps_bud_[TAG].csv
-
-# Actuals (current month only -- future months have no actuals)
-python3 /workspace/project/scripts/profitsword/scripts/profitsword_api.py \
-  --endpoint monthly_extended --site-tag [TAG] --dataset-id -3 \
-  --year 2026 --begmonth [CURRENT_MONTH] --endmonth [CURRENT_MONTH] \
-  --include-totals Y --output /tmp/ps_act_[TAG].csv
 ```
 
-Also pull Last Year (LY) actuals for the same months from prior year:
+Also pull Last Year (LY) for the same months from prior year:
 ```bash
-# LY Actuals (same months, year-1)
+# LY (same months, year-1)
 python3 /workspace/project/scripts/profitsword/scripts/profitsword_api.py \
   --endpoint monthly_extended --site-tag [TAG] --dataset-id -3 \
   --year 2025 --begmonth [CURRENT_MONTH] --endmonth [CURRENT_MONTH+1] \
   --include-totals Y --output /tmp/ps_ly_[TAG].csv
 ```
 
-That is 4 calls per property (48 total): Forecast + Budget + Actuals + LY.
+That is 3 calls per property (36 total): Primary Forecast + Budget + LY.
 
-DataSet IDs: -3=Actuals, 1=Forecast, 2=Budget. For LY, use -3 (Actuals) with year=2025.
+DataSet IDs: 1=Primary Forecast, 2=Budget, -3=Actuals (used only for LY with year=2025). Do NOT fetch current-year Actuals -- they are not displayed.
 
 IMPORTANT: Run ALL 12 properties. Do NOT skip any. If a call fails or returns 0 rows, note "ProfitSword: error for [property]" and continue to the next. Do NOT stop the entire report because one property fails.
 

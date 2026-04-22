@@ -37,7 +37,6 @@ run_hotel() {
   CODE=$1; TAG=$2
   python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id 1  --year $YEAR  --begmonth $CM --endmonth $NM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_fcst.csv 2>&1 | tail -1
   python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id 2  --year $YEAR  --begmonth $CM --endmonth $NM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_bud.csv  2>&1 | tail -1
-  python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id -3 --year $YEAR  --begmonth $CM --endmonth $CM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_act.csv  2>&1 | tail -1
   python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id -3 --year $PY    --begmonth $CM --endmonth $NM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_ly.csv   2>&1 | tail -1
   echo "PS done: $CODE"
 }
@@ -63,7 +62,6 @@ for CODE in SMP DTLA HJL HJM ATX SFP SHEL MYC TCH ING AVBH AVPS; do
   TAG=${TAGS[$CODE]}
   [ ! -f $PREFETCH_DIR/profitsword/${CODE}_fcst.csv ] && echo "RETRY: $CODE fcst" && python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id 1  --year $YEAR --begmonth $CM --endmonth $NM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_fcst.csv 2>&1 | tail -1
   [ ! -f $PREFETCH_DIR/profitsword/${CODE}_bud.csv  ] && echo "RETRY: $CODE bud"  && python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id 2  --year $YEAR --begmonth $CM --endmonth $NM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_bud.csv  2>&1 | tail -1
-  [ ! -f $PREFETCH_DIR/profitsword/${CODE}_act.csv  ] && echo "RETRY: $CODE act"  && python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id -3 --year $YEAR --begmonth $CM --endmonth $CM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_act.csv  2>&1 | tail -1
   [ ! -f $PREFETCH_DIR/profitsword/${CODE}_ly.csv   ] && echo "RETRY: $CODE ly"   && python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id -3 --year $PY  --begmonth $CM --endmonth $NM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_ly.csv   2>&1 | tail -1
 done
 echo "ProfitSword: all 12 hotels complete ($(ls $PREFETCH_DIR/profitsword/ | wc -l) files)"
