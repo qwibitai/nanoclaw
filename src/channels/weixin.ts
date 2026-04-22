@@ -9,15 +9,22 @@
  * so every JID is a direct chat.
  */
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
+import { GROUPS_DIR } from '../config.js';
 import { logger } from '../logger.js';
-import { Channel } from '../types.js';
+import { Channel, RegisteredGroup } from '../types.js';
 
 import {
   buildTextMessage,
+  DEFAULT_WEIXIN_CDN_BASE_URL,
   sendMessage as sendMessageApi,
 } from './weixin/api.js';
 import { runMonitorLoop } from './weixin/monitor.js';
+import { parseOutboundSegments } from './weixin/outbound-parse.js';
+import { sendWeixinMediaFile } from './weixin/send-media.js';
 import { registerChannel } from './registry.js';
 import {
   getDefaultAccount,
@@ -45,6 +52,7 @@ export class WeixinChannel implements Channel {
     message: import('../types.js').NewMessage,
   ) => void;
   private onChatMetadata: import('../types.js').OnChatMetadata;
+  private registeredGroups: () => Record<string, RegisteredGroup>;
 
   constructor(
     accountId: string,
@@ -55,6 +63,7 @@ export class WeixinChannel implements Channel {
         message: import('../types.js').NewMessage,
       ) => void;
       onChatMetadata: import('../types.js').OnChatMetadata;
+      registeredGroups: () => Record<string, RegisteredGroup>;
     },
   ) {
     this.accountId = accountId;
@@ -63,6 +72,7 @@ export class WeixinChannel implements Channel {
     this.contextTokens = loadContextTokens(accountId);
     this.onMessage = callbacks.onMessage;
     this.onChatMetadata = callbacks.onChatMetadata;
+    this.registeredGroups = callbacks.registeredGroups;
   }
 
   ownsJid(jid: string): boolean {
@@ -134,13 +144,34 @@ export class WeixinChannel implements Channel {
       );
     }
 
+    const segments = parseOutboundSegments(text);
+    if (segments.length === 0) return;
+
+    for (const segment of segments) {
+      if (segment.kind === 'text') {
+        await this.sendTextSegment(userId, segment.text, contextToken);
+      } else {
+        await this.sendAttachmentSegment(
+          jid,
+          userId,
+          segment.filePath,
+          contextToken,
+        );
+      }
+    }
+  }
+
+  private async sendTextSegment(
+    userId: string,
+    text: string,
+    contextToken: string | undefined,
+  ): Promise<void> {
     const req = buildTextMessage({
       to: userId,
       text,
       contextToken,
       clientId: crypto.randomUUID(),
     });
-
     try {
       await sendMessageApi({
         baseUrl: this.baseUrl,
@@ -164,9 +195,69 @@ export class WeixinChannel implements Channel {
       throw err;
     }
   }
+
+  private resolveContainerPath(jid: string, rawPath: string): string | null {
+    const CONTAINER_PREFIX = '/workspace/group/';
+    if (!rawPath.startsWith(CONTAINER_PREFIX)) return null;
+    const group = this.registeredGroups()[jid];
+    if (!group?.folder) return null;
+    const rest = rawPath.slice(CONTAINER_PREFIX.length);
+    return path.join(GROUPS_DIR, group.folder, rest);
+  }
+
+  private async sendAttachmentSegment(
+    jid: string,
+    userId: string,
+    rawPath: string,
+    contextToken: string | undefined,
+  ): Promise<void> {
+    const resolved =
+      this.resolveContainerPath(jid, rawPath) ?? expandTilde(rawPath);
+    if (!path.isAbsolute(resolved) || !fs.existsSync(resolved)) {
+      logger.warn(
+        { accountId: this.accountId, userId, rawPath, resolved },
+        'weixin attachment not found on host — falling back to link text',
+      );
+      await this.sendTextSegment(
+        userId,
+        `[attachment missing: ${rawPath}]`,
+        contextToken,
+      );
+      return;
+    }
+
+    try {
+      await sendWeixinMediaFile({
+        filePath: resolved,
+        to: userId,
+        opts: {
+          baseUrl: this.baseUrl,
+          token: this.token,
+          contextToken,
+        },
+        cdnBaseUrl: DEFAULT_WEIXIN_CDN_BASE_URL,
+      });
+    } catch (err) {
+      logger.error(
+        { accountId: this.accountId, userId, rawPath, err: String(err) },
+        'weixin send attachment failed',
+      );
+      await this.sendTextSegment(
+        userId,
+        `[attachment send failed: ${path.basename(resolved)}]`,
+        contextToken,
+      );
+    }
+  }
 }
 
-registerChannel('weixin', ({ onMessage, onChatMetadata }) => {
+function expandTilde(p: string): string {
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
+  return p;
+}
+
+registerChannel('weixin', ({ onMessage, onChatMetadata, registeredGroups }) => {
   const accountId = getDefaultAccount();
   if (!accountId) {
     logger.info(
@@ -179,5 +270,9 @@ registerChannel('weixin', ({ onMessage, onChatMetadata }) => {
     logger.warn({ accountId }, 'weixin account file is incomplete — skipping');
     return null;
   }
-  return new WeixinChannel(accountId, account, { onMessage, onChatMetadata });
+  return new WeixinChannel(accountId, account, {
+    onMessage,
+    onChatMetadata,
+    registeredGroups,
+  });
 });

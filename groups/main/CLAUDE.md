@@ -71,6 +71,26 @@ No `##` headings. No `[links](url)`. No `**double stars**`.
 
 Standard Markdown: `**bold**`, `*italic*`, `[links](url)`, `# headings`.
 
+### WeChat (folder starts with `weixin_` or JID starts with `wx:`)
+
+Plain text. WeChat iLink has no rich Markdown rendering — the receiver sees
+exactly what you write, so drop `**bold**`, headings, and tables.
+
+To send an image, video, or file, embed one of these markers in your reply:
+
+- `![caption](/abs/host/path.png)` — image, rendered inline
+- `<file:/abs/host/path.pdf>` — any file attachment (pdf, zip, office, …)
+
+Paths must be absolute. The container-local shortcut `/workspace/group/…` is
+auto-translated to the corresponding host path, so the simplest flow is:
+
+1. Write the file under your CWD, e.g. `./chart.png` (which is
+   `/workspace/group/chart.png` inside the container).
+2. In your reply, write `![](/workspace/group/chart.png)`.
+
+Text that surrounds an attachment marker is delivered as a separate text
+message in order — keep captions short and put them on their own line.
+
 ---
 
 ## Admin Context

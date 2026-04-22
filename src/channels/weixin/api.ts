@@ -12,6 +12,8 @@ import { logger } from '../../logger.js';
 
 import type {
   GetUpdatesResp,
+  GetUploadUrlReq,
+  GetUploadUrlResp,
   QRCodeResponse,
   QRStatusResponse,
   SendMessageReq,
@@ -23,6 +25,10 @@ const CHANNEL_VERSION = 'nanoclaw-weixin/0.1.0';
 
 /** Tencent's public iLink bot backend. No auth/approval needed to hit it. */
 export const DEFAULT_WEIXIN_BASE_URL = 'https://ilinkai.weixin.qq.com';
+
+/** Tencent's public iLink CDN for encrypted media upload/download. */
+export const DEFAULT_WEIXIN_CDN_BASE_URL =
+  'https://novac2c.cdn.weixin.qq.com/c2c';
 
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const DEFAULT_API_TIMEOUT_MS = 15_000;
@@ -142,6 +148,33 @@ export async function getUpdates(
     }
     throw err;
   }
+}
+
+export async function getUploadUrl(
+  opts: WeixinApiOptions & GetUploadUrlReq,
+): Promise<GetUploadUrlResp> {
+  const raw = await apiPost({
+    baseUrl: opts.baseUrl,
+    endpoint: 'ilink/bot/getuploadurl',
+    body: JSON.stringify({
+      filekey: opts.filekey,
+      media_type: opts.media_type,
+      to_user_id: opts.to_user_id,
+      rawsize: opts.rawsize,
+      rawfilemd5: opts.rawfilemd5,
+      filesize: opts.filesize,
+      thumb_rawsize: opts.thumb_rawsize,
+      thumb_rawfilemd5: opts.thumb_rawfilemd5,
+      thumb_filesize: opts.thumb_filesize,
+      no_need_thumb: opts.no_need_thumb,
+      aeskey: opts.aeskey,
+      base_info: { channel_version: CHANNEL_VERSION },
+    }),
+    token: opts.token,
+    timeoutMs: opts.timeoutMs ?? DEFAULT_API_TIMEOUT_MS,
+    label: 'getUploadUrl',
+  });
+  return JSON.parse(raw) as GetUploadUrlResp;
 }
 
 export async function sendMessage(

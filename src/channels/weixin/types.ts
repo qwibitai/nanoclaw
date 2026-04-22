@@ -41,6 +41,46 @@ export interface RefMessage {
   title?: string;
 }
 
+/** CDN media reference; aes_key is base64-encoded bytes. */
+export interface CDNMedia {
+  encrypt_query_param?: string;
+  aes_key?: string;
+  /** 0 = only fileid encrypted, 1 = packed thumb + mid info. */
+  encrypt_type?: number;
+  full_url?: string;
+}
+
+export interface ImageItem {
+  media?: CDNMedia;
+  thumb_media?: CDNMedia;
+  aeskey?: string;
+  url?: string;
+  mid_size?: number;
+  thumb_size?: number;
+  thumb_height?: number;
+  thumb_width?: number;
+  hd_size?: number;
+}
+
+export interface FileItem {
+  media?: CDNMedia;
+  file_name?: string;
+  md5?: string;
+  /** Plaintext byte length as a decimal string. */
+  len?: string;
+}
+
+export interface VideoItem {
+  media?: CDNMedia;
+  video_size?: number;
+  play_length?: number;
+  video_md5?: string;
+  thumb_media?: CDNMedia;
+  thumb_size?: number;
+  thumb_height?: number;
+  thumb_width?: number;
+}
+
 export interface MessageItem {
   type?: number;
   create_time_ms?: number;
@@ -49,12 +89,56 @@ export interface MessageItem {
   msg_id?: string;
   ref_msg?: RefMessage;
   text_item?: TextItem;
-  // Media items are present in the protocol but not decoded in MVP.
-  // They're kept as unknown pass-through so we don't crash on receive.
-  image_item?: unknown;
+  image_item?: ImageItem;
   voice_item?: { text?: string; [k: string]: unknown };
-  file_item?: unknown;
-  video_item?: unknown;
+  file_item?: FileItem;
+  video_item?: VideoItem;
+}
+
+/** proto: UploadMediaType */
+export const UploadMediaType = {
+  IMAGE: 1,
+  VIDEO: 2,
+  FILE: 3,
+  VOICE: 4,
+} as const;
+
+export type UploadMediaTypeValue =
+  (typeof UploadMediaType)[keyof typeof UploadMediaType];
+
+export interface GetUploadUrlReq {
+  filekey?: string;
+  media_type?: number;
+  to_user_id?: string;
+  rawsize?: number;
+  rawfilemd5?: string;
+  /** Ciphertext size (AES-128-ECB with PKCS7 padding). */
+  filesize?: number;
+  thumb_rawsize?: number;
+  thumb_rawfilemd5?: string;
+  thumb_filesize?: number;
+  no_need_thumb?: boolean;
+  /** hex-encoded AES-128 key. */
+  aeskey?: string;
+}
+
+export interface GetUploadUrlResp {
+  upload_param?: string;
+  thumb_upload_param?: string;
+  /** Full URL preferred when the server returns it. */
+  upload_full_url?: string;
+}
+
+export interface UploadedFileInfo {
+  filekey: string;
+  /** CDN-returned download encrypted_query_param. */
+  downloadEncryptedQueryParam: string;
+  /** Hex-encoded AES-128 key. */
+  aeskey: string;
+  /** Plaintext size in bytes. */
+  fileSize: number;
+  /** Ciphertext size in bytes (AES-128-ECB padded). */
+  fileSizeCiphertext: number;
 }
 
 export interface WeixinMessage {

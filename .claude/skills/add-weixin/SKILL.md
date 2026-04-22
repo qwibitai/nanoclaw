@@ -138,11 +138,21 @@ tail -f logs/nanoclaw.log | grep weixin
 - **Session expiry (errcode -14)**: After 7+ days of inactivity the server
   revokes the session. The monitor sleeps 1 hour and retries; permanent
   recovery needs a fresh QR login.
-- **Media (MVP limitation)**: Image / video / file / voice send-and-receive
-  are **not** implemented. Inbound media messages are surfaced to the agent
-  as `[图片]` / `[视频]` / `[文件]` / `[语音]` placeholders. Adding full
-  media support requires porting the CDN AES-128-ECB upload/download layer
-  and SILK voice transcoding from the Tencent plugin — track as a follow-up.
+- **Outbound media**: image / video / generic file attachments are sent via
+  the iLink CDN (AES-128-ECB upload, then a dedicated `sendmessage` with an
+  IMAGE / VIDEO / FILE item). MIME type is derived from the file extension
+  (see `media/mime.ts`). The agent triggers a media send by embedding one of
+  these markers in its reply text:
+    - `![alt](/abs/host/path.png)` — markdown image syntax
+    - `![](file:///abs/host/path.png)` — `file://` URL form
+    - `<file:/abs/host/path.pdf>` — generic attachment (any MIME)
+  Paths must be absolute on the host. The container-local shortcut
+  `/workspace/group/…` is auto-translated to the host `groups/<folder>/…`
+  path by `WeixinChannel.resolveContainerPath`, so agents writing output
+  files to their CWD can reference them with just the container path.
+- **Inbound media**: image / video / file / voice are still surfaced to the
+  agent as `[图片]` / `[视频]` / `[文件]` / `[语音]` placeholders. Decoding
+  the inbound CDN payload and SILK voice transcoding remain open tasks.
 - **Multi-account**: The storage layout supports it (`store/weixin/accounts/*`)
   but the current `WeixinChannel` registers only the default account. To run
   multiple bots, extend the factory in `src/channels/weixin.ts`.
