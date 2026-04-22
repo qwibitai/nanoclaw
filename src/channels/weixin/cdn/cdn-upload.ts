@@ -44,6 +44,15 @@ export async function uploadBufferToCdn(params: {
       `${label}: CDN upload URL missing (need upload_full_url or upload_param)`,
     );
   }
+  logger.debug(
+    {
+      label,
+      cdnUrl,
+      ciphertextLen: ciphertext.length,
+      plaintextLen: buf.length,
+    },
+    'weixin cdn upload request',
+  );
 
   let lastError: unknown;
   for (let attempt = 1; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
@@ -60,8 +69,19 @@ export async function uploadBufferToCdn(params: {
         throw new Error(`${label}: CDN client error ${res.status}: ${errMsg}`);
       }
       if (res.status !== 200) {
-        const errMsg =
-          res.headers.get('x-error-message') ?? `status ${res.status}`;
+        const xErr = res.headers.get('x-error-message');
+        const body = await res.text().catch(() => '');
+        logger.warn(
+          {
+            label,
+            status: res.status,
+            xErr,
+            bodyPreview: body.slice(0, 400),
+            allHeaders: Object.fromEntries(res.headers.entries()),
+          },
+          'weixin cdn upload server error — details',
+        );
+        const errMsg = xErr ?? (body.slice(0, 200) || `status ${res.status}`);
         throw new Error(`${label}: CDN server error: ${errMsg}`);
       }
       const downloadParam = res.headers.get('x-encrypted-param') ?? undefined;

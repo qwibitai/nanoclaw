@@ -23,6 +23,16 @@ import { MessageItemType, MessageState, MessageType } from './types.js';
 
 const CHANNEL_VERSION = 'nanoclaw-weixin/0.1.0';
 
+/**
+ * Values copied from the Tencent `@tencent-weixin/openclaw-weixin` v2.1.9
+ * package.json — the iLink backend (and the CDN it redirects you to) checks
+ * both of these headers. Mismatched / missing values surface as opaque
+ * 500 / -5102031 CDN errors, so keep them in sync with the upstream plugin.
+ */
+const ILINK_APP_ID = 'bot';
+/** 2.1.9 -> (2<<16) | (1<<8) | 9 = 131593. */
+const ILINK_APP_CLIENT_VERSION = (2 << 16) | (1 << 8) | 9;
+
 /** Tencent's public iLink bot backend. No auth/approval needed to hit it. */
 export const DEFAULT_WEIXIN_BASE_URL = 'https://ilinkai.weixin.qq.com';
 
@@ -56,6 +66,8 @@ function buildHeaders(token?: string, body?: string): Record<string, string> {
     'Content-Type': 'application/json',
     AuthorizationType: 'ilink_bot_token',
     'X-WECHAT-UIN': randomWechatUin(),
+    'iLink-App-Id': ILINK_APP_ID,
+    'iLink-App-ClientVersion': String(ILINK_APP_CLIENT_VERSION),
   };
   if (body) {
     headers['Content-Length'] = String(Buffer.byteLength(body, 'utf-8'));
@@ -107,7 +119,10 @@ async function apiGet(params: {
   const timer = setTimeout(() => controller.abort(), params.timeoutMs);
   try {
     const res = await fetch(url.toString(), {
-      headers: { 'iLink-App-ClientVersion': '1' },
+      headers: {
+        'iLink-App-Id': ILINK_APP_ID,
+        'iLink-App-ClientVersion': String(ILINK_APP_CLIENT_VERSION),
+      },
       signal: controller.signal,
     });
     const rawText = await res.text();
