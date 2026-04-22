@@ -435,6 +435,27 @@ Plans opting into `/codex implement` include a `## Parallelization` section
 (see design spec). Plans without this section fall back to fully-serial execution
 with a warning.
 
+### Test commands — repo-root invariant
+
+Per-task `Run:` commands and the plan-level `Test command:` both execute inside
+a disposable worktree whose cwd is the repo root. Authors do NOT need to `cd`
+anywhere — relative paths work from the repo root.
+
+If you need the repo root explicitly (e.g. for tools that hate relative paths),
+the orchestrator exports `REPO_ROOT` to the bash subshell. Use it like:
+
+```
+Test command: DODAMI_TEST_SKIP_LOAD=1 python3 -m pytest "$REPO_ROOT/tests/" -v
+```
+
+Do NOT hardcode `~/` or absolute paths to your working checkout — those point
+to your dev machine, not the disposable worktree the orchestrator runs the
+test in. The most common failure mode is `cd ~/myrepo/$UNSUBSTITUTED && ...` —
+the unexpanded shell var silently drops `cd` into the wrong directory, and
+your test fails with "file not found" while appearing to execute. If you see
+that failure pattern, check your plan's Test command for unexpanded `$VARS`
+or hardcoded paths, not the underlying code.
+
 ---
 
 ## Model & Reasoning

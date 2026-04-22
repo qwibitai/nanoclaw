@@ -165,7 +165,14 @@ if [ -z "$ONLY_TASK" ]; then
       rm -rf "$fin_wt" 2>/dev/null || true
       fin_passes=0
       if git worktree add -q --detach "$fin_wt" "$final_commit_sha" 2>/dev/null; then
-        if (cd "$fin_wt" && bash -c "$global_test"); then
+        # Export REPO_ROOT so plan Test commands can reference the repo root
+        # explicitly without hardcoding paths. The subshell's cwd is already
+        # $fin_wt, so relative paths work too — REPO_ROOT just lets authors
+        # write `cd "$REPO_ROOT" && ...` or `pytest "$REPO_ROOT/tests/..."`
+        # without relying on implicit cwd. Prior to this, it was too easy to
+        # write `cd ~/repo/$UNSUBSTITUTED && ...` and silently land in the
+        # wrong directory when the shell var wasn't expanded.
+        if (cd "$fin_wt" && REPO_ROOT="$fin_wt" bash -c "$global_test"); then
           fin_passes=1
         fi
         git worktree remove -f "$fin_wt" 2>/dev/null || rm -rf "$fin_wt" 2>/dev/null || true
@@ -179,13 +186,20 @@ if [ -z "$ONLY_TASK" ]; then
         echo "  (every wave in the plan — the plan test could fail on a bug" >&2
         echo "  from any earlier wave)." >&2
         echo "" >&2
-        echo "  TO REPAIR: run 'codex-implement --rollback <plan>' to revert" >&2
-        echo "  every squash commit from this plan, then fix the plan itself" >&2
-        echo "  (per-task Run: lines, plan-level Test command:, task specs)" >&2
-        echo "  and re-run from scratch. Direct ad-hoc commits on $BASE are" >&2
-        echo "  NOT tracked by --rollback and can leave orphan changes or" >&2
-        echo "  cause revert conflicts on a later rollback; fix the plan so" >&2
-        echo "  its own tasks produce the correct acceptance state." >&2
+        echo "  Two things could have gone wrong here — check WHICH before repairing:" >&2
+        echo "  1. Plan-level Test command is malformed (typo, undefined shell var," >&2
+        echo "     bad cd path, missing binary). The per-task gates all passed; the" >&2
+        echo "     merged commits on $BASE are correct. Fix: re-run the Test command" >&2
+        echo "     manually — if it passes standalone, the plan-level command in your" >&2
+        echo "     plan needs a typo fix. No rollback needed; commit a plan edit and" >&2
+        echo "     keep moving." >&2
+        echo "  2. An individual task's code actually broke the plan-level test." >&2
+        echo "     Fix: run 'codex-implement --rollback <plan>' to revert every squash" >&2
+        echo "     commit from this plan, fix the offending task spec, re-run from" >&2
+        echo "     scratch. Direct ad-hoc commits on $BASE are NOT tracked by --rollback" >&2
+        echo "     and can leave orphan changes or cause revert conflicts on a later" >&2
+        echo "     rollback; fix the plan so its own tasks produce the correct" >&2
+        echo "     acceptance state." >&2
         exit 2
       fi
       # Plan test just passed — persist the flag so later --resume runs
@@ -255,7 +269,7 @@ if [ -n "$ONLY_TASK" ]; then
     post_passes=0
     post_output_file="$WORK/.canary-post-output.$$"
     if git worktree add -q --detach "$post_wt" "$canary_commit_sha" 2>/dev/null; then
-      if (cd "$post_wt" && bash -c "$canary_test") > "$post_output_file" 2>&1; then
+      if (cd "$post_wt" && REPO_ROOT="$post_wt" bash -c "$canary_test") > "$post_output_file" 2>&1; then
         post_passes=1
       fi
       git worktree remove -f "$post_wt" 2>/dev/null || rm -rf "$post_wt" 2>/dev/null || true
@@ -269,7 +283,7 @@ if [ -n "$ONLY_TASK" ]; then
         pre_wt="$WORK/.canary-pre.$$"
         rm -rf "$pre_wt" 2>/dev/null || true
         if git worktree add -q --detach "$pre_wt" "$pre_canary_sha" 2>/dev/null; then
-          if (cd "$pre_wt" && bash -c "$canary_test") > "$pre_output_file" 2>&1; then
+          if (cd "$pre_wt" && REPO_ROOT="$pre_wt" bash -c "$canary_test") > "$pre_output_file" 2>&1; then
             pre_canary_passes=1
           fi
           git worktree remove -f "$pre_wt" 2>/dev/null || rm -rf "$pre_wt" 2>/dev/null || true
@@ -385,7 +399,7 @@ if [ -n "$ONLY_TASK" ]; then
     rm -rf "$st_wt" 2>/dev/null || true
     st_passes=0
     if git worktree add -q --detach "$st_wt" "$st_canary_sha" 2>/dev/null; then
-      if (cd "$st_wt" && bash -c "$canary_test"); then
+      if (cd "$st_wt" && REPO_ROOT="$st_wt" bash -c "$canary_test"); then
         st_passes=1
       fi
       git worktree remove -f "$st_wt" 2>/dev/null || rm -rf "$st_wt" 2>/dev/null || true
@@ -444,7 +458,12 @@ if [ -n "$ONLY_TASK" ]; then
         # a sentinel file on first run) would pass once then fail here.
         if [ -n "$plan_test" ] && [ "$plan_test" != "null" ] && \
            [ "$canary_plan_test_passed" -ne 1 ]; then
-          if ! bash -c "$plan_test" >/dev/null 2>&1; then
+          # REPO_ROOT="$PWD" matches the documented invariant in SKILL.md
+          # so plan-level Test commands can reference $REPO_ROOT here too.
+          # Without this, an --only-task completion-path plan_test that
+          # uses $REPO_ROOT would fail with an unset variable while the
+          # same command would pass under the main full-wave path.
+          if ! REPO_ROOT="$PWD" bash -c "$plan_test" >/dev/null 2>&1; then
             plan_test_ok=0
           else
             touch "$PLAN_TEST_OK_SENTINEL"
@@ -494,7 +513,9 @@ if [ -n "$ONLY_TASK" ]; then
           plan_test_ok=1
           if [ -n "$plan_test" ] && [ "$plan_test" != "null" ] && \
              [ "$canary_plan_test_passed" -ne 1 ]; then
-            if ! bash -c "$plan_test" >/dev/null 2>&1; then
+            # REPO_ROOT="$PWD" matches the documented invariant — see
+            # the matching call site ~50 lines above for the rationale.
+            if ! REPO_ROOT="$PWD" bash -c "$plan_test" >/dev/null 2>&1; then
               plan_test_ok=0
             else
               touch "$PLAN_TEST_OK_SENTINEL"

@@ -56,7 +56,12 @@ findings_file() {
 stage_tests() {
   local attempt="$1" ff; ff="$(findings_file "$attempt")"
   local tmp; tmp="$(mktemp)"
-  if (cd "$WT" && bash -c "$TEST_CMD") > "$tmp" 2>&1; then
+  # REPO_ROOT="$WT" matches the codex-merge-wave invariant: tests can
+  # reference $REPO_ROOT for absolute paths regardless of which gate
+  # they're running under. Without this, a per-task `Run:` that uses
+  # $REPO_ROOT (per the documented invariant in SKILL.md) would fail
+  # stage 1 with an unset variable while passing the plan-level gate.
+  if (cd "$WT" && REPO_ROOT="$WT" bash -c "$TEST_CMD") > "$tmp" 2>&1; then
     rm -f "$tmp"; return 0
   fi
   {
@@ -104,12 +109,29 @@ stage_spec() {
     task_body="$(jq -r --argjson n "$TASK" '.tasks[] | select(.num == $n) | .body // ""' "$plan_json" 2>/dev/null)"
   fi
 
+  # Include prior-attempt findings so the spec-reviewer can understand WHY
+  # the current diff looks the way it does. Without this context, changes
+  # that codex made specifically to recover from an earlier stage-1 test
+  # failure (e.g. "runtime import needs a lazy wrapper because torch
+  # isn't installed locally") can look like gratuitously out-of-scope
+  # additions to a reviewer who only sees the final diff. Trial run
+  # 2026-04-22 had the reviewer FAIL a required change for exactly this
+  # reason; see FOLLOWUPS.md §"spec-reviewer context gap".
+  local prior_findings=""
+  if [ "$attempt" -gt 1 ]; then
+    local prior_ff; prior_ff="$(findings_file "$((attempt - 1))")"
+    if [ -r "$prior_ff" ]; then
+      prior_findings="$(cat "$prior_ff")"
+    fi
+  fi
+
   jq -n \
     --argjson w "$WAVE" --argjson t "$TASK" \
     --arg base "$BASE" --arg wt "$WT" \
     --arg diff "$diff_file" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg goal "$goal" --arg arch "$arch" --arg body "$task_body" \
-    '{wave:$w, task:$t, task_body:$body, plan_goal:$goal, plan_architecture:$arch, base:$base, worktree_path:$wt, diff_file:$diff, requested_at:$now}' \
+    --arg prior "$prior_findings" \
+    '{wave:$w, task:$t, task_body:$body, plan_goal:$goal, plan_architecture:$arch, base:$base, worktree_path:$wt, diff_file:$diff, prior_attempt_findings:$prior, requested_at:$now}' \
     > "$MARKER_IN.tmp"
   mv "$MARKER_IN.tmp" "$MARKER_IN"
 
