@@ -18,6 +18,7 @@ import {
   deleteSession,
 } from '../progress-server.js';
 import { Channel, NewMessage, SendMessageOptions } from '../types.js';
+import { notifyVoice } from '../voice-notify.js';
 
 import { registerChannel, ChannelOpts } from './registry.js';
 
@@ -606,6 +607,16 @@ export class FeishuChannel implements Channel {
 
     // 统一媒体提取与发送（图片/文件标记提取、文本发送、媒体上传，互不阻塞）
     const groupFolder = this.getGroupFolder(jid);
+
+    // 语音通知（只对主会话）：剥离媒体标记后送 LLM 摘要 → Pushover → iOS 朗读
+    // fire-and-forget，不 await，不影响飞书主流程
+    const textForSpeech = text
+      .replace(new RegExp(IMAGE_SEND_PATTERN.source, 'gi'), '')
+      .replace(new RegExp(FILE_SEND_PATTERN.source, 'gi'), '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    notifyVoice(groupFolder, textForSpeech);
+
     await this.extractAndSendMedia(chatId, text, groupFolder, usage, thinking);
   }
 
