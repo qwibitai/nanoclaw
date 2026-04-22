@@ -443,8 +443,27 @@ export class TelegramChannel implements Channel {
         'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
 
+      let needsTriggerPrefix = false;
+      const botUsername = ctx.me?.username?.toLowerCase();
+      if (botUsername && caption) {
+        const entities = ctx.message.caption_entities || [];
+        needsTriggerPrefix = entities.some(
+          (e: any) =>
+            e.type === 'mention' &&
+            ctx.message
+              .caption!.substring(e.offset, e.offset + e.length)
+              .toLowerCase() === `@${botUsername}`,
+        );
+      }
+
       const isGroup =
         ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+
+      // Reply to bot's message in group = trigger
+      const replyTo = ctx.message.reply_to_message;
+      if (!needsTriggerPrefix && replyTo?.from?.id === ctx.me.id && isGroup) {
+        needsTriggerPrefix = true;
+      }
       this.opts.onChatMetadata(
         chatJid,
         timestamp,
@@ -454,12 +473,15 @@ export class TelegramChannel implements Channel {
       );
 
       const deliver = (content: string) => {
+        const final = needsTriggerPrefix
+          ? `@${ASSISTANT_NAME} ${content}`
+          : content;
         this.opts.onMessage(chatJid, {
           id: ctx.message.message_id.toString(),
           chat_jid: chatJid,
           sender: ctx.from?.id?.toString() || '',
           sender_name: senderName,
-          content,
+          content: final,
           timestamp,
           is_from_me: false,
         });
