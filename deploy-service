@@ -1,0 +1,236 @@
+#!/bin/bash
+# deploy-service — Deploy one or all supported services
+# Usage: ./deploy-service <service|all> [--branch <name>] [--build-only] [--with-tests]
+set -euo pipefail
+
+# --- Configuration ---
+
+SUPPORTED_SERVICES=(nanoclaw agency-hq dev-inbox ops-agent)
+
+# Map service name → repo directory
+declare -A SERVICE_DIRS=(
+  [nanoclaw]="/home/jkeyser/nanoclaw"
+  [agency-hq]="/home/jkeyser/agency-hq"
+  [dev-inbox]="/home/jkeyser/dev-inbox"
+  [ops-agent]="/home/jkeyser/ops-agent"
+)
+
+# Map service name → systemd unit
+declare -A SERVICE_UNITS=(
+  [nanoclaw]="nanoclaw.service"
+  [agency-hq]="agency-hq.service"
+  [dev-inbox]="dev-inbox.service"
+  [ops-agent]="ops-agent.service"
+)
+
+LOG_TAIL_SECONDS=5
+
+# --- Helpers ---
+
+log()   { echo "[deploy] $*"; }
+err()   { echo "[deploy] ERROR: $*" >&2; }
+die()   { err "$*"; exit 1; }
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") <service|all> [options]
+
+Services: ${SUPPORTED_SERVICES[*]}
+
+Options:
+  --branch <name>   Check out branch before deploying (default: pull current branch)
+  --build-only      Build without restarting the service
+  --with-tests      Run npm test after build
+
+Examples:
+  $(basename "$0") nanoclaw
+  $(basename "$0") agency-hq --branch dev
+  $(basename "$0") all
+  $(basename "$0") nanoclaw --build-only
+  $(basename "$0") nanoclaw --with-tests
+EOF
+  exit 1
+}
+
+is_supported() {
+  local svc="$1"
+  for s in "${SUPPORTED_SERVICES[@]}"; do
+    [[ "$s" == "$svc" ]] && return 0
+  done
+  return 1
+}
+
+package_json_changed() {
+  # Returns 0 (true) if package.json changed between HEAD~1 and HEAD
+  local dir="$1"
+  git -C "$dir" diff HEAD~1 HEAD --name-only 2>/dev/null | grep -q '^package\.json$'
+}
+
+has_build_script() {
+  local dir="$1"
+  node -e "
+    const pkg = JSON.parse(require('fs').readFileSync('$dir/package.json', 'utf8'));
+    process.exit(pkg.scripts && pkg.scripts.build ? 0 : 1);
+  " 2>/dev/null
+}
+
+# --- Deploy a single service ---
+
+deploy_one() {
+  local svc="$1"
+  local branch="$2"
+  local build_only="$3"
+  local with_tests="$4"
+
+  local dir="${SERVICE_DIRS[$svc]}"
+  local unit="${SERVICE_UNITS[$svc]}"
+
+  log "=== Deploying $svc ==="
+
+  # Validate directory exists
+  if [[ ! -d "$dir" ]]; then
+    die "Service directory not found: $dir"
+  fi
+
+  # Validate it's a git repo
+  if [[ ! -d "$dir/.git" ]]; then
+    die "$dir is not a git repository"
+  fi
+
+  # Check for uncommitted changes
+  if [[ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ]]; then
+    die "$svc has uncommitted changes in $dir — commit or stash first"
+  fi
+
+  # Switch branch if requested
+  if [[ -n "$branch" ]]; then
+    log "Fetching and checking out branch: $branch"
+    git -C "$dir" fetch origin || die "git fetch failed for $svc"
+    git -C "$dir" checkout "$branch" || die "Failed to checkout branch '$branch' for $svc"
+  fi
+
+  # Pull latest
+  log "Pulling latest changes..."
+  if ! git -C "$dir" pull --ff-only; then
+    die "git pull failed for $svc — resolve conflicts manually in $dir"
+  fi
+
+  # Install dependencies if package.json changed
+  if [[ -f "$dir/package.json" ]]; then
+    if package_json_changed "$dir"; then
+      log "package.json changed — installing dependencies..."
+      (cd "$dir" && npm install) || die "npm install failed for $svc"
+    else
+      log "package.json unchanged — skipping npm install"
+    fi
+  fi
+
+  # Build if package.json has a build script
+  if [[ -f "$dir/package.json" ]] && has_build_script "$dir"; then
+    log "Building $svc..."
+    # For nanoclaw, use build:core to avoid the reload-service step bundled
+    # in the default "build" script — this script handles restart separately.
+    if [[ "$svc" == "nanoclaw" ]]; then
+      (cd "$dir" && npm run build:core) || die "Build failed for $svc"
+    else
+      (cd "$dir" && npm run build) || die "Build failed for $svc"
+    fi
+  else
+    log "No build script found — skipping build"
+  fi
+
+  # Run tests if requested
+  if [[ "$with_tests" == "true" ]]; then
+    log "Running tests for $svc..."
+    (cd "$dir" && npm test) || die "Tests failed for $svc"
+  fi
+
+  # Restart service (unless --build-only)
+  if [[ "$build_only" == "true" ]]; then
+    log "Build-only mode — skipping service restart"
+  else
+    log "Restarting $unit..."
+    if ! systemctl --user is-enabled "$unit" &>/dev/null; then
+      err "Service $unit is not enabled or does not exist — skipping restart"
+      err "You may need to install the service unit first"
+    else
+      systemctl --user restart "$unit" || die "Failed to restart $unit"
+
+      log "Tailing logs for ${LOG_TAIL_SECONDS}s to verify startup..."
+      journalctl --user -u "$unit" -f --no-pager -n 0 &
+      local tail_pid=$!
+      sleep "$LOG_TAIL_SECONDS"
+      kill "$tail_pid" 2>/dev/null || true
+      wait "$tail_pid" 2>/dev/null || true
+
+      # Check service is running
+      if systemctl --user is-active "$unit" &>/dev/null; then
+        log "$svc is running"
+      else
+        die "$unit failed to start — check logs: journalctl --user -u $unit"
+      fi
+    fi
+  fi
+
+  log "=== $svc deployed successfully ==="
+}
+
+# --- Parse arguments ---
+
+[[ $# -lt 1 ]] && usage
+[[ "$1" == "-h" || "$1" == "--help" ]] && usage
+
+TARGET="$1"
+shift
+
+BRANCH=""
+BUILD_ONLY="false"
+WITH_TESTS="false"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --branch)
+      [[ $# -lt 2 ]] && die "--branch requires a value"
+      BRANCH="$2"
+      shift 2
+      ;;
+    --build-only)
+      BUILD_ONLY="true"
+      shift
+      ;;
+    --with-tests)
+      WITH_TESTS="true"
+      shift
+      ;;
+    -h|--help)
+      usage
+      ;;
+    *)
+      die "Unknown option: $1"
+      ;;
+  esac
+done
+
+# --- Execute ---
+
+if [[ "$TARGET" == "all" ]]; then
+  log "Deploying all services: ${SUPPORTED_SERVICES[*]}"
+  FAILED=()
+  for svc in "${SUPPORTED_SERVICES[@]}"; do
+    # Run in subshell so die() doesn't exit the parent loop
+    if (deploy_one "$svc" "$BRANCH" "$BUILD_ONLY" "$WITH_TESTS"); then
+      :
+    else
+      err "$svc deployment failed — continuing with remaining services"
+      FAILED+=("$svc")
+    fi
+  done
+  if [[ ${#FAILED[@]} -gt 0 ]]; then
+    die "Failed services: ${FAILED[*]}"
+  fi
+  log "All services deployed successfully."
+elif is_supported "$TARGET"; then
+  deploy_one "$TARGET" "$BRANCH" "$BUILD_ONLY" "$WITH_TESTS"
+else
+  die "Unknown service: $TARGET (supported: ${SUPPORTED_SERVICES[*]})"
+fi
