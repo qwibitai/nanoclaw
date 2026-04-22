@@ -25,6 +25,10 @@ import {
 import { agencyFetch, type AgencyHqTask } from './agency-hq-client.js';
 import { detectStalledTasks, dispatchTime } from './stall-detector.js';
 import {
+  startOpsAgentWatchdog,
+  stopOpsAgentWatchdog,
+} from './ops-agent-watchdog.js';
+import {
   startSprintRetroWatcher,
   stopSprintRetroWatcher,
 } from './sprint-retro-watcher.js';
@@ -320,6 +324,13 @@ export async function startStallDetector(
   }, STALL_DETECTOR_INTERVAL);
 }
 
+export function startOpsWatchdog(
+  deps: SchedulerDependencies,
+  notificationBatcher?: NotificationBatcher,
+): void {
+  startOpsAgentWatchdog(deps, isStopping, notificationBatcher);
+}
+
 export async function startSprintRetroWatcherSubsystem(
   deps: SchedulerDependencies,
 ): Promise<void> {
@@ -338,6 +349,7 @@ export async function stopAgencyHqSubsystems(): Promise<void> {
     stallIntervalHandle = null;
   }
   stopSprintRetroWatcher();
+  stopOpsAgentWatchdog();
   stallNotificationBatcher = undefined;
   dispatchRetryCount.clear();
   dispatchSkipTicks.clear();

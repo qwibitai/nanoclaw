@@ -47,6 +47,7 @@ import { startMessageApi, stopMessageApi } from './message-api.js';
 import { initSkillRegistry, shutdownSkillRegistry } from './skill-registry.js';
 import {
   startDispatchLoop,
+  startOpsWatchdog,
   startSprintRetroWatcherSubsystem,
   startStallDetector,
   stopAgencyHqSubsystems,
@@ -223,6 +224,10 @@ export async function initApp(): Promise<void> {
         details: 'Shutdown requested.',
       });
       setSubsystemState('stall-detector', {
+        state: 'disabled',
+        details: 'Shutdown requested.',
+      });
+      setSubsystemState('ops-watchdog', {
         state: 'disabled',
         details: 'Shutdown requested.',
       });
@@ -431,6 +436,11 @@ export async function initApp(): Promise<void> {
     });
     logger.error({ err }, 'Failed to start stall detector');
   }
+  startOpsWatchdog(schedulerDeps, notificationBatcher);
+  setSubsystemState('ops-watchdog', {
+    state: 'running',
+    details: 'Dispatch slot watchdog active (every 15 min).',
+  });
   startSprintRetroWatcherSubsystem(schedulerDeps).catch((err) =>
     logger.error({ err }, 'Failed to start sprint retro watcher'),
   );
