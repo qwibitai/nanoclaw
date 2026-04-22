@@ -32,6 +32,13 @@ const AHQ_RETRY_BASE_MS = 1_000;
 /** Cooldown after a restart to avoid restart loops. */
 const RESTART_COOLDOWN_MS = 20 * 60_000; // 20 minutes
 
+/**
+ * Grace period before a slot can be considered stuck.
+ * Slots that entered 'executing' less than this duration ago are assumed to be
+ * legitimately working — their worker process may still be starting up.
+ */
+export const SLOT_GRACE_PERIOD_MS = 5 * 60_000; // 5 minutes
+
 /** Well-known task ID for the watchdog scheduled task row. */
 export const WATCHDOG_TASK_ID = 'ops-dispatch-watchdog';
 
@@ -110,20 +117,26 @@ export interface StuckSlotInfo {
   slotIndex: number;
   ahqTaskId: string;
   state: string;
+  /** How long the slot has been in 'executing' state (ms), or null if unknown. */
+  slotAgeMs: number | null;
+  /** Whether a tmux session matching the slot prefix was found. */
+  hasSession: boolean;
 }
 
 /**
  * Detect stuck dispatch slots: slots in 'executing' state with no
- * corresponding tmux session running.
+ * corresponding tmux session running AND past the grace period.
  *
- * Each executing slot is checked individually against the list of active
- * tmux sessions. A slot is stuck when its worker session prefix
- * (`nanoclaw-devworker{slotIndex}-`) has no matching tmux session.
+ * A slot is considered stuck only when ALL of these conditions are met:
+ * 1. It has been in 'executing' state for longer than SLOT_GRACE_PERIOD_MS
+ * 2. No tmux session matching its worker prefix exists
+ * 3. The runtime confirms the session does not exist (double-check via hasSession)
  *
  * Returns the list of stuck slots, or empty if everything is healthy.
  */
 export async function detectStuckSlots(): Promise<StuckSlotInfo[]> {
   const log = createCorrelationLogger(undefined, { op: 'ops-watchdog' });
+  const now = Date.now();
 
   let activeSlots;
   try {
@@ -149,10 +162,31 @@ export async function detectStuckSlots(): Promise<StuckSlotInfo[]> {
     return [];
   }
 
+  const runtime = getAgentRuntime();
+
   // Check each executing slot against its expected session prefix
   const stuckSlots: StuckSlotInfo[] = [];
   for (const slot of activeSlots) {
     if (slot.state !== 'executing') continue;
+
+    // Calculate slot age from executing_at timestamp
+    const slotAgeMs = slot.executingAt
+      ? now - new Date(slot.executingAt).getTime()
+      : null;
+
+    // Grace period: skip slots that entered executing recently
+    if (slotAgeMs !== null && slotAgeMs < SLOT_GRACE_PERIOD_MS) {
+      log.debug(
+        {
+          slotIndex: slot.slotIndex,
+          ahqTaskId: slot.ahqTaskId,
+          slotAgeMs,
+          gracePeriodMs: SLOT_GRACE_PERIOD_MS,
+        },
+        'Slot within grace period, skipping stuck check',
+      );
+      continue;
+    }
 
     // Worker slot sessions are named nanoclaw-devworker{slotIndex}-{timestamp}
     const sessionPrefix = `nanoclaw-devworker${slot.slotIndex}-`;
@@ -160,14 +194,38 @@ export async function detectStuckSlots(): Promise<StuckSlotInfo[]> {
       name.startsWith(sessionPrefix),
     );
 
-    if (!hasMatchingSession) {
-      stuckSlots.push({
-        slotId: slot.slotId,
-        slotIndex: slot.slotIndex,
-        ahqTaskId: slot.ahqTaskId,
-        state: slot.state,
-      });
+    if (hasMatchingSession) continue;
+
+    // Double-check: use hasSession for a direct tmux has-session query
+    // in case the list was stale or incomplete.
+    let hasSessionConfirmed = false;
+    try {
+      hasSessionConfirmed = runtime.hasSession(
+        `nanoclaw-devworker${slot.slotIndex}`,
+      );
+    } catch {
+      // hasSession failure — treat as no session found
     }
+
+    if (hasSessionConfirmed) {
+      log.debug(
+        {
+          slotIndex: slot.slotIndex,
+          ahqTaskId: slot.ahqTaskId,
+        },
+        'Slot has active process confirmed via hasSession, not stuck',
+      );
+      continue;
+    }
+
+    stuckSlots.push({
+      slotId: slot.slotId,
+      slotIndex: slot.slotIndex,
+      ahqTaskId: slot.ahqTaskId,
+      state: slot.state,
+      slotAgeMs,
+      hasSession: false,
+    });
   }
 
   if (stuckSlots.length > 0) {
@@ -180,9 +238,11 @@ export async function detectStuckSlots(): Promise<StuckSlotInfo[]> {
         slots: stuckSlots.map((s) => ({
           slotIndex: s.slotIndex,
           ahqTaskId: s.ahqTaskId,
+          slotAgeMs: s.slotAgeMs,
+          hasSession: s.hasSession,
         })),
       },
-      'Detected stuck dispatch slots (executing with no matching tmux session)',
+      'Detected stuck dispatch slots (executing past grace period with no worker process)',
     );
   }
 
@@ -253,6 +313,8 @@ async function logRecoveryToAgencyHq(
               stuck_slots: stuckSlots.map((s) => ({
                 slot_index: s.slotIndex,
                 ahq_task_id: s.ahqTaskId,
+                slot_age_ms: s.slotAgeMs,
+                has_session: s.hasSession,
               })),
               timestamp: new Date().toISOString(),
             },
@@ -308,9 +370,12 @@ export async function runWatchdogTick(
   const ceo = findCeoJid(deps);
   if (ceo) {
     const slotDetails = stuckSlots
-      .map((s) => `slot ${s.slotIndex} (task: ${s.ahqTaskId})`)
-      .join(', ');
-    const msg = `🔧 *Ops Watchdog Recovery*\nDetected ${stuckSlots.length} stuck dispatch slot(s): ${slotDetails}\nRestarting NanoClaw to trigger slot recovery.`;
+      .map((s) => {
+        const ageMin = s.slotAgeMs !== null ? Math.round(s.slotAgeMs / 60_000) : '?';
+        return `slot ${s.slotIndex} (task: ${s.ahqTaskId}, age: ${ageMin}min, process: none)`;
+      })
+      .join('\n');
+    const msg = `🔧 *Ops Watchdog Recovery*\nDetected ${stuckSlots.length} stuck dispatch slot(s):\n${slotDetails}\nRestarting NanoClaw to trigger slot recovery.`;
     try {
       if (notificationBatcher) {
         await notificationBatcher.send(ceo.jid, msg, 'critical');

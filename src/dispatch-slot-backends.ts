@@ -35,6 +35,8 @@ export interface ActiveSlotInfo {
   ahqTaskId: string;
   state: string;
   worktreePath: string | null;
+  /** ISO timestamp when the slot entered 'executing' state (null if not yet executing). */
+  executingAt: string | null;
 }
 
 export interface RecoveredSlotInfo extends ActiveSlotInfo {
@@ -106,6 +108,7 @@ class SqliteDispatchSlotBackend implements DispatchSlotBackend {
       ahqTaskId: slot.ahq_task_id,
       state: slot.state,
       worktreePath: slot.worktree_path,
+      executingAt: slot.executing_at,
     }));
   }
 
@@ -116,6 +119,7 @@ class SqliteDispatchSlotBackend implements DispatchSlotBackend {
       ahqTaskId: slot.ahqTaskId,
       state: slot.state,
       worktreePath: slot.worktreePath,
+      executingAt: null,
       reason: slot.reason,
     }));
   }
@@ -220,6 +224,7 @@ class PgDispatchSlotBackend implements DispatchSlotBackend {
       ahqTaskId: slot.ahq_task_id,
       state: slot.status,
       worktreePath: null,
+      executingAt: (slot as Record<string, unknown>).executing_at as string | null ?? null,
     }));
   }
 
@@ -244,6 +249,7 @@ class PgDispatchSlotBackend implements DispatchSlotBackend {
       ahqTaskId: taskId,
       state: 'reconciled',
       worktreePath: null,
+      executingAt: null,
       reason: 'Reconciled in Agency HQ PostgreSQL backend.',
     }));
   }

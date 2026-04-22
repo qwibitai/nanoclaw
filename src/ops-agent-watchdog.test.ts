@@ -38,6 +38,7 @@ import {
   runWatchdogTick,
   startOpsAgentWatchdog,
   stopOpsAgentWatchdog,
+  SLOT_GRACE_PERIOD_MS,
   WATCHDOG_TASK_ID,
   _resetWatchdogState,
 } from './ops-agent-watchdog.js';
@@ -69,6 +70,11 @@ function makeMockDeps(
     sendMessage: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
+}
+
+/** Return an ISO timestamp that is `ms` milliseconds in the past. */
+function pastTimestamp(ms: number): string {
+  return new Date(Date.now() - ms).toISOString();
 }
 
 function mockFetchResponse(body: unknown, ok = true, status = 200) {
@@ -174,6 +180,7 @@ describe('ops-agent-watchdog', () => {
             ahqTaskId: 'task-1',
             state: 'executing',
             worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
           },
         ]),
         claimSlot: vi.fn(async () => null),
@@ -204,6 +211,7 @@ describe('ops-agent-watchdog', () => {
             ahqTaskId: 'task-healthy',
             state: 'executing',
             worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
           },
           {
             slotId: 2,
@@ -211,6 +219,7 @@ describe('ops-agent-watchdog', () => {
             ahqTaskId: 'task-stuck',
             state: 'executing',
             worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
           },
         ]),
         claimSlot: vi.fn(async () => null),
@@ -229,12 +238,16 @@ describe('ops-agent-watchdog', () => {
 
       const result = await detectStuckSlots();
       expect(result).toHaveLength(1);
-      expect(result[0]).toEqual({
-        slotId: 2,
-        slotIndex: 1,
-        ahqTaskId: 'task-stuck',
-        state: 'executing',
-      });
+      expect(result[0]).toEqual(
+        expect.objectContaining({
+          slotId: 2,
+          slotIndex: 1,
+          ahqTaskId: 'task-stuck',
+          state: 'executing',
+          hasSession: false,
+        }),
+      );
+      expect(result[0].slotAgeMs).toBeGreaterThan(SLOT_GRACE_PERIOD_MS);
     });
 
     it('detects all stuck slots when no tmux sessions exist', async () => {
@@ -247,6 +260,7 @@ describe('ops-agent-watchdog', () => {
             ahqTaskId: 'task-1',
             state: 'executing',
             worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
           },
           {
             slotId: 2,
@@ -254,6 +268,7 @@ describe('ops-agent-watchdog', () => {
             ahqTaskId: 'task-2',
             state: 'executing',
             worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
           },
         ]),
         claimSlot: vi.fn(async () => null),
@@ -272,18 +287,24 @@ describe('ops-agent-watchdog', () => {
 
       const result = await detectStuckSlots();
       expect(result).toHaveLength(2);
-      expect(result[0]).toEqual({
-        slotId: 1,
-        slotIndex: 0,
-        ahqTaskId: 'task-1',
-        state: 'executing',
-      });
-      expect(result[1]).toEqual({
-        slotId: 2,
-        slotIndex: 1,
-        ahqTaskId: 'task-2',
-        state: 'executing',
-      });
+      expect(result[0]).toEqual(
+        expect.objectContaining({
+          slotId: 1,
+          slotIndex: 0,
+          ahqTaskId: 'task-1',
+          state: 'executing',
+          hasSession: false,
+        }),
+      );
+      expect(result[1]).toEqual(
+        expect.objectContaining({
+          slotId: 2,
+          slotIndex: 1,
+          ahqTaskId: 'task-2',
+          state: 'executing',
+          hasSession: false,
+        }),
+      );
     });
 
     it('ignores non-executing slots (acquiring/releasing)', async () => {
@@ -296,6 +317,7 @@ describe('ops-agent-watchdog', () => {
             ahqTaskId: 'task-1',
             state: 'acquiring',
             worktreePath: null,
+            executingAt: null,
           },
           {
             slotId: 2,
@@ -303,6 +325,7 @@ describe('ops-agent-watchdog', () => {
             ahqTaskId: 'task-2',
             state: 'releasing',
             worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
           },
         ]),
         claimSlot: vi.fn(async () => null),
@@ -348,6 +371,7 @@ describe('ops-agent-watchdog', () => {
             ahqTaskId: 'task-1',
             state: 'executing',
             worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
           },
         ]),
         claimSlot: vi.fn(async () => null),
@@ -367,6 +391,178 @@ describe('ops-agent-watchdog', () => {
 
       const result = await detectStuckSlots();
       expect(result).toEqual([]);
+    });
+
+    it('skips slots within grace period even if no tmux session exists', async () => {
+      // Slot entered executing only 2 minutes ago (within 5-min grace period)
+      vi.mocked(getDispatchSlotBackend).mockReturnValue({
+        name: 'sqlite',
+        listActiveSlots: vi.fn(async () => [
+          {
+            slotId: 1,
+            slotIndex: 0,
+            ahqTaskId: 'task-new',
+            state: 'executing',
+            worktreePath: null,
+            executingAt: pastTimestamp(2 * 60_000), // 2 min ago
+          },
+        ]),
+        claimSlot: vi.fn(async () => null),
+        markExecuting: vi.fn(async () => {}),
+        markReleasing: vi.fn(async () => {}),
+        freeSlot: vi.fn(async () => {}),
+        recoverStaleSlots: vi.fn(async () => []),
+        pruneHistory: vi.fn(() => 0),
+      });
+
+      // No tmux sessions at all
+      vi.mocked(getAgentRuntime).mockReturnValue({
+        ...getAgentRuntime(),
+        listSessionNames: vi.fn(() => []),
+      });
+
+      const result = await detectStuckSlots();
+      expect(result).toEqual([]); // Should NOT be flagged as stuck
+    });
+
+    it('detects stuck slot after grace period expires', async () => {
+      // Slot entered executing 6 minutes ago (past 5-min grace period)
+      vi.mocked(getDispatchSlotBackend).mockReturnValue({
+        name: 'sqlite',
+        listActiveSlots: vi.fn(async () => [
+          {
+            slotId: 1,
+            slotIndex: 0,
+            ahqTaskId: 'task-old',
+            state: 'executing',
+            worktreePath: null,
+            executingAt: pastTimestamp(6 * 60_000), // 6 min ago
+          },
+        ]),
+        claimSlot: vi.fn(async () => null),
+        markExecuting: vi.fn(async () => {}),
+        markReleasing: vi.fn(async () => {}),
+        freeSlot: vi.fn(async () => {}),
+        recoverStaleSlots: vi.fn(async () => []),
+        pruneHistory: vi.fn(() => 0),
+      });
+
+      // No tmux sessions
+      vi.mocked(getAgentRuntime).mockReturnValue({
+        ...getAgentRuntime(),
+        listSessionNames: vi.fn(() => []),
+        hasSession: vi.fn(() => false),
+      });
+
+      const result = await detectStuckSlots();
+      expect(result).toHaveLength(1);
+      expect(result[0].ahqTaskId).toBe('task-old');
+      expect(result[0].slotAgeMs).toBeGreaterThanOrEqual(6 * 60_000);
+      expect(result[0].hasSession).toBe(false);
+    });
+
+    it('does not flag slot as stuck when hasSession confirms active process', async () => {
+      // Slot past grace period but hasSession returns true
+      vi.mocked(getDispatchSlotBackend).mockReturnValue({
+        name: 'sqlite',
+        listActiveSlots: vi.fn(async () => [
+          {
+            slotId: 1,
+            slotIndex: 0,
+            ahqTaskId: 'task-active',
+            state: 'executing',
+            worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
+          },
+        ]),
+        claimSlot: vi.fn(async () => null),
+        markExecuting: vi.fn(async () => {}),
+        markReleasing: vi.fn(async () => {}),
+        freeSlot: vi.fn(async () => {}),
+        recoverStaleSlots: vi.fn(async () => []),
+        pruneHistory: vi.fn(() => 0),
+      });
+
+      // listSessionNames returns nothing, but hasSession returns true
+      vi.mocked(getAgentRuntime).mockReturnValue({
+        ...getAgentRuntime(),
+        listSessionNames: vi.fn(() => []),
+        hasSession: vi.fn(() => true),
+      });
+
+      const result = await detectStuckSlots();
+      expect(result).toEqual([]); // hasSession saved it from false positive
+    });
+
+    it('handles null executingAt gracefully (treats as past grace period)', async () => {
+      // executingAt is null (e.g., PG backend may not return it)
+      vi.mocked(getDispatchSlotBackend).mockReturnValue({
+        name: 'sqlite',
+        listActiveSlots: vi.fn(async () => [
+          {
+            slotId: 1,
+            slotIndex: 0,
+            ahqTaskId: 'task-unknown-age',
+            state: 'executing',
+            worktreePath: null,
+            executingAt: null,
+          },
+        ]),
+        claimSlot: vi.fn(async () => null),
+        markExecuting: vi.fn(async () => {}),
+        markReleasing: vi.fn(async () => {}),
+        freeSlot: vi.fn(async () => {}),
+        recoverStaleSlots: vi.fn(async () => []),
+        pruneHistory: vi.fn(() => 0),
+      });
+
+      // No tmux sessions
+      vi.mocked(getAgentRuntime).mockReturnValue({
+        ...getAgentRuntime(),
+        listSessionNames: vi.fn(() => []),
+        hasSession: vi.fn(() => false),
+      });
+
+      const result = await detectStuckSlots();
+      expect(result).toHaveLength(1);
+      expect(result[0].slotAgeMs).toBeNull();
+    });
+
+    it('includes slot age and process info in stuck slot details', async () => {
+      const ageMs = SLOT_GRACE_PERIOD_MS + 120_000; // 7 minutes
+      vi.mocked(getDispatchSlotBackend).mockReturnValue({
+        name: 'sqlite',
+        listActiveSlots: vi.fn(async () => [
+          {
+            slotId: 1,
+            slotIndex: 2,
+            ahqTaskId: 'task-diagnostics',
+            state: 'executing',
+            worktreePath: null,
+            executingAt: pastTimestamp(ageMs),
+          },
+        ]),
+        claimSlot: vi.fn(async () => null),
+        markExecuting: vi.fn(async () => {}),
+        markReleasing: vi.fn(async () => {}),
+        freeSlot: vi.fn(async () => {}),
+        recoverStaleSlots: vi.fn(async () => []),
+        pruneHistory: vi.fn(() => 0),
+      });
+
+      vi.mocked(getAgentRuntime).mockReturnValue({
+        ...getAgentRuntime(),
+        listSessionNames: vi.fn(() => []),
+        hasSession: vi.fn(() => false),
+      });
+
+      const result = await detectStuckSlots();
+      expect(result).toHaveLength(1);
+      // slotAgeMs should be roughly ageMs (allow 1s tolerance for test execution)
+      expect(result[0].slotAgeMs).toBeGreaterThanOrEqual(ageMs - 1000);
+      expect(result[0].slotAgeMs).toBeLessThanOrEqual(ageMs + 1000);
+      expect(result[0].hasSession).toBe(false);
+      expect(result[0].slotIndex).toBe(2);
     });
   });
 
@@ -422,7 +618,7 @@ describe('ops-agent-watchdog', () => {
     });
 
     it('sends notification, logs to AHQ, and restarts when stuck slots found', async () => {
-      // Set up stuck slot scenario
+      // Set up stuck slot scenario (past grace period)
       vi.mocked(getDispatchSlotBackend).mockReturnValue({
         name: 'sqlite',
         listActiveSlots: vi.fn(async () => [
@@ -432,6 +628,7 @@ describe('ops-agent-watchdog', () => {
             ahqTaskId: 'stuck-task-1',
             state: 'executing',
             worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
           },
         ]),
         claimSlot: vi.fn(async () => null),
@@ -457,19 +654,24 @@ describe('ops-agent-watchdog', () => {
       const deps = makeMockDeps();
       await runWatchdogTick(deps, () => false);
 
-      // Should have sent Telegram notification to CEO
+      // Should have sent Telegram notification to CEO with diagnostic info
       expect(deps.sendMessage).toHaveBeenCalledTimes(1);
       const sentMsg = (deps.sendMessage as ReturnType<typeof vi.fn>).mock
         .calls[0][1] as string;
       expect(sentMsg).toContain('Ops Watchdog Recovery');
       expect(sentMsg).toContain('stuck-task-1');
+      expect(sentMsg).toContain('age:');
+      expect(sentMsg).toContain('min');
+      expect(sentMsg).toContain('process: none');
 
-      // Should have logged to Agency HQ
+      // Should have logged to Agency HQ with slot diagnostics
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const postCall = fetchMock.mock.calls[0];
       expect(postCall[0]).toContain('/notifications');
       const body = JSON.parse(postCall[1].body);
       expect(body.type).toBe('dispatch-watchdog-recovery');
+      expect(body.metadata.stuck_slots[0]).toHaveProperty('slot_age_ms');
+      expect(body.metadata.stuck_slots[0]).toHaveProperty('has_session', false);
 
       // Should have called systemctl restart
       expect(execSync).toHaveBeenCalledWith(
@@ -479,7 +681,7 @@ describe('ops-agent-watchdog', () => {
     });
 
     it('sends notification even when CEO group is not registered', async () => {
-      // Set up stuck slot scenario
+      // Set up stuck slot scenario (past grace period)
       vi.mocked(getDispatchSlotBackend).mockReturnValue({
         name: 'sqlite',
         listActiveSlots: vi.fn(async () => [
@@ -489,6 +691,7 @@ describe('ops-agent-watchdog', () => {
             ahqTaskId: 'stuck-task-1',
             state: 'executing',
             worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
           },
         ]),
         claimSlot: vi.fn(async () => null),
@@ -532,6 +735,7 @@ describe('ops-agent-watchdog', () => {
             ahqTaskId: 'stuck-task-1',
             state: 'executing',
             worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
           },
         ]),
         claimSlot: vi.fn(async () => null),
@@ -582,6 +786,7 @@ describe('ops-agent-watchdog', () => {
             ahqTaskId: 'stuck-task-1',
             state: 'executing',
             worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
           },
         ]),
         claimSlot: vi.fn(async () => null),
@@ -613,6 +818,85 @@ describe('ops-agent-watchdog', () => {
 
       // Should have been called twice (initial + 1 retry)
       expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not restart when all executing slots are within grace period', async () => {
+      // Simulate a normal task that just started (1 min ago)
+      vi.mocked(getDispatchSlotBackend).mockReturnValue({
+        name: 'sqlite',
+        listActiveSlots: vi.fn(async () => [
+          {
+            slotId: 1,
+            slotIndex: 0,
+            ahqTaskId: 'normal-task',
+            state: 'executing',
+            worktreePath: null,
+            executingAt: pastTimestamp(1 * 60_000), // 1 min ago
+          },
+        ]),
+        claimSlot: vi.fn(async () => null),
+        markExecuting: vi.fn(async () => {}),
+        markReleasing: vi.fn(async () => {}),
+        freeSlot: vi.fn(async () => {}),
+        recoverStaleSlots: vi.fn(async () => []),
+        pruneHistory: vi.fn(() => 0),
+      });
+
+      // No tmux sessions (e.g., session hasn't started yet)
+      vi.mocked(getAgentRuntime).mockReturnValue({
+        ...getAgentRuntime(),
+        listSessionNames: vi.fn(() => []),
+      });
+
+      const deps = makeMockDeps();
+      await runWatchdogTick(deps, () => false);
+
+      // Should NOT send notification, log to AHQ, or restart
+      expect(deps.sendMessage).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(execSync).not.toHaveBeenCalled();
+    });
+
+    it('catches truly stuck slot (past grace period, no process)', async () => {
+      // Simulate a truly stuck slot: 10 min old, no tmux session, hasSession=false
+      vi.mocked(getDispatchSlotBackend).mockReturnValue({
+        name: 'sqlite',
+        listActiveSlots: vi.fn(async () => [
+          {
+            slotId: 1,
+            slotIndex: 0,
+            ahqTaskId: 'stuck-task',
+            state: 'executing',
+            worktreePath: null,
+            executingAt: pastTimestamp(10 * 60_000), // 10 min ago
+          },
+        ]),
+        claimSlot: vi.fn(async () => null),
+        markExecuting: vi.fn(async () => {}),
+        markReleasing: vi.fn(async () => {}),
+        freeSlot: vi.fn(async () => {}),
+        recoverStaleSlots: vi.fn(async () => []),
+        pruneHistory: vi.fn(() => 0),
+      });
+
+      vi.mocked(getAgentRuntime).mockReturnValue({
+        ...getAgentRuntime(),
+        listSessionNames: vi.fn(() => []),
+        hasSession: vi.fn(() => false),
+      });
+
+      vi.mocked(execSync).mockReturnValue(Buffer.from(''));
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+
+      const deps = makeMockDeps();
+      await runWatchdogTick(deps, () => false);
+
+      // Should have sent notification and restarted
+      expect(deps.sendMessage).toHaveBeenCalledTimes(1);
+      expect(execSync).toHaveBeenCalledWith(
+        'systemctl --user restart nanoclaw',
+        expect.anything(),
+      );
     });
   });
 
