@@ -46,6 +46,12 @@ import { getActiveSlots, type SlotRecord } from './db/dispatch-slots.js';
 import { createCorrelationLogger, logger } from './logger.js';
 import { cleanupOrphanedWorktrees } from './worktree-manager.js';
 
+/**
+ * Task statuses that indicate the work is finished — the slot should be freed
+ * without requeuing the task back to 'ready'.
+ */
+const TERMINAL_TASK_STATUSES = new Set(['in-review', 'done', 'cancelled']);
+
 export { isDispatchSlotsPgEnabled, PARALLEL_DISPATCH_WORKERS, workerSlotJid };
 export type { SlotClaim };
 
@@ -75,6 +81,34 @@ async function requeueAgencyTask(
     log.info({ ahqTaskId, reason }, 'AHQ task re-queued');
   } catch (err) {
     log.error({ err, ahqTaskId, reason }, 'Error re-queuing AHQ task');
+  }
+}
+
+/**
+ * Query Agency HQ for the current status of a task.
+ * Returns the status string on success, or null on any failure.
+ */
+async function queryTaskStatus(
+  ahqTaskId: string,
+  log: ReturnType<typeof createCorrelationLogger>,
+): Promise<string | null> {
+  try {
+    const res = await agencyFetch(`/tasks/${ahqTaskId}`);
+    if (!res.ok) {
+      log.warn(
+        { ahqTaskId, status: res.status },
+        'Failed to query Agency HQ task status',
+      );
+      return null;
+    }
+    const json = (await res.json()) as { data?: { status?: string } };
+    return json.data?.status ?? null;
+  } catch (err) {
+    log.warn(
+      { err, ahqTaskId },
+      'Error querying Agency HQ task status',
+    );
+    return null;
   }
 }
 
@@ -252,6 +286,24 @@ export async function recoverStaleSlots(): Promise<void> {
   }
 
   for (const record of staleRecords) {
+    // Check Agency HQ task status before requeuing — if the task has already
+    // reached a terminal state (done, in-review, cancelled), the worker
+    // finished normally and we should just free the slot without resetting
+    // the task back to 'ready'.
+    const taskStatus = await queryTaskStatus(record.ahqTaskId, log);
+    if (taskStatus && TERMINAL_TASK_STATUSES.has(taskStatus)) {
+      log.info(
+        {
+          slotId: record.slotId,
+          ahqTaskId: record.ahqTaskId,
+          taskStatus,
+          prevState: record.state,
+        },
+        'Stale slot task is in terminal state, freeing slot without requeue',
+      );
+      continue;
+    }
+
     log.warn(
       {
         slotId: record.slotId,

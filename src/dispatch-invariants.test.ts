@@ -522,4 +522,115 @@ describe('Invariant 5: startup reconciliation frees orphaned acquiring rows', ()
       vi.useRealTimers();
     }
   });
+
+  it('skips requeuing when Agency HQ task is in a terminal state (done)', async () => {
+    const mockFetch = vi.mocked(agencyFetch);
+    mockFetch.mockImplementation(async (path: string, opts?: RequestInit) => {
+      // GET /tasks/:id — return terminal status 'done'
+      if (!opts?.method || opts.method === 'GET') {
+        return mockResponse({ data: { status: 'done' } });
+      }
+      return mockResponse({ success: true });
+    });
+
+    vi.useFakeTimers();
+
+    try {
+      insertAcquiringSlot(0, 'ahq-done-task', null, 'local-done', null);
+      vi.advanceTimersByTime(ACQUIRING_STALE_MS + 5_000);
+
+      await recoverStaleSlots();
+
+      // Slot must be freed in SQLite
+      expect(getActiveSlots()).toHaveLength(0);
+
+      // Must NOT have issued a PUT to requeue the task
+      const reQueueCall = mockFetch.mock.calls.find(
+        ([url, opts]: [string, RequestInit]) =>
+          typeof url === 'string' &&
+          url.includes('ahq-done-task') &&
+          opts?.method === 'PUT',
+      );
+      expect(
+        reQueueCall,
+        'should not PUT requeue a terminal-state task',
+      ).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('skips requeuing when Agency HQ task is in-review', async () => {
+    const mockFetch = vi.mocked(agencyFetch);
+    mockFetch.mockImplementation(async (path: string, opts?: RequestInit) => {
+      if (!opts?.method || opts.method === 'GET') {
+        return mockResponse({ data: { status: 'in-review' } });
+      }
+      return mockResponse({ success: true });
+    });
+
+    vi.useFakeTimers();
+
+    try {
+      insertAcquiringSlot(0, 'ahq-review-task', null, 'local-review', null);
+      vi.advanceTimersByTime(ACQUIRING_STALE_MS + 5_000);
+
+      await recoverStaleSlots();
+
+      expect(getActiveSlots()).toHaveLength(0);
+
+      const reQueueCall = mockFetch.mock.calls.find(
+        ([url, opts]: [string, RequestInit]) =>
+          typeof url === 'string' &&
+          url.includes('ahq-review-task') &&
+          opts?.method === 'PUT',
+      );
+      expect(
+        reQueueCall,
+        'should not PUT requeue an in-review task',
+      ).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still requeues when Agency HQ task is in an active state (in-progress)', async () => {
+    const mockFetch = vi.mocked(agencyFetch);
+    mockFetch.mockImplementation(async (path: string, opts?: RequestInit) => {
+      if (!opts?.method || opts.method === 'GET') {
+        return mockResponse({ data: { status: 'in-progress' } });
+      }
+      return mockResponse({ success: true });
+    });
+
+    vi.useFakeTimers();
+
+    try {
+      insertAcquiringSlot(0, 'ahq-active-task', null, 'local-active', null);
+      vi.advanceTimersByTime(ACQUIRING_STALE_MS + 5_000);
+
+      await recoverStaleSlots();
+
+      expect(getActiveSlots()).toHaveLength(0);
+
+      // Must have issued a PUT to requeue the active task
+      const reQueueCall = mockFetch.mock.calls.find(
+        ([url, opts]: [string, RequestInit]) =>
+          typeof url === 'string' &&
+          url.includes('ahq-active-task') &&
+          opts?.method === 'PUT',
+      ) as [string, RequestInit] | undefined;
+      expect(
+        reQueueCall,
+        'should PUT requeue an active-state task',
+      ).toBeDefined();
+
+      const body = JSON.parse(reQueueCall![1].body as string) as {
+        status: string;
+      };
+      expect(body.status).toBe('ready');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
