@@ -46,7 +46,7 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
  */
 export async function fetchDispatchConfig(): Promise<DispatchConfig | null> {
   try {
-    const res = await agencyFetch('/dispatch-config');
+    const res = await agencyFetch('/dispatch-config/ops-agent');
     if (!res.ok) {
       logger.warn(
         { status: res.status },
