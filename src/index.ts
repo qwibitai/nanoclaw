@@ -86,15 +86,16 @@ async function sendWithTts(
   channel: Channel,
   jid: string,
   text: string,
+  threadId?: string,
 ): Promise<void> {
   const directive = extractTtsDirective(text);
   if (directive && channel.sendVoice) {
     const audio = await synthesize(directive.ttsText);
-    if (audio) await channel.sendVoice(jid, audio);
+    if (audio) await channel.sendVoice(jid, audio, threadId);
     if (directive.cleanText)
-      await channel.sendMessage(jid, directive.cleanText);
+      await channel.sendMessage(jid, directive.cleanText, threadId);
   } else {
-    await channel.sendMessage(jid, text);
+    await channel.sendMessage(jid, text, threadId);
   }
 }
 
@@ -259,6 +260,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
+  const replyThreadId = missedMessages[missedMessages.length - 1].thread_id;
+
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
     const triggerPattern = getTriggerPattern(group.trigger);
@@ -314,7 +317,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
-        await sendWithTts(channel, chatJid, text);
+        await sendWithTts(channel, chatJid, text, replyThreadId);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)

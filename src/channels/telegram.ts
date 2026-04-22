@@ -372,6 +372,15 @@ export class TelegramChannel implements Channel {
         if (isBotMentioned && !TRIGGER_PATTERN.test(content)) {
           content = `@${ASSISTANT_NAME} ${content}`;
         }
+
+        // Treat replies to the bot's own messages as trigger in groups
+        if (
+          replyTo?.from?.id === ctx.me.id &&
+          ctx.chat.type !== 'private' &&
+          !TRIGGER_PATTERN.test(content)
+        ) {
+          content = `@${ASSISTANT_NAME} ${content}`;
+        }
       }
 
       // Store chat metadata for discovery
