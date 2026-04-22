@@ -1,0 +1,204 @@
+#!/bin/bash
+# create-pr — Create a GitHub PR from a dev-inbox branch with edge-case handling.
+#
+# Usage: create-pr <branch-name> [--title <title>] [--auto-merge]
+#
+# Edge cases handled:
+#   - Worktree lock conflicts (suggests cleanup)
+#   - No commits on branch vs base (clear error)
+#   - Branch already has an open PR (returns existing URL)
+#   - gh CLI API failures (retry with exponential backoff)
+#   - Missing/invalid branch name (clear error)
+set -euo pipefail
+
+# ---------- defaults ----------
+MAX_RETRIES=3
+BACKOFF_BASE=2
+TITLE=""
+AUTO_MERGE=false
+BASE_BRANCH="main"
+BRANCH=""
+
+# ---------- helpers ----------
+die()  { echo "ERROR: $*" >&2; exit 1; }
+warn() { echo "WARN: $*" >&2; }
+info() { echo "INFO: $*"; }
+
+usage() {
+  cat <<EOF
+Usage: create-pr <branch-name> [--title <title>] [--auto-merge] [--base <base>]
+
+Arguments:
+  branch-name       The branch to create a PR from (required).
+
+Options:
+  --title <title>   PR title. Defaults to the branch name, cleaned up.
+  --auto-merge      Enable auto-merge on the PR after creation.
+  --base <base>     Base branch to merge into (default: main).
+  -h, --help        Show this help message.
+EOF
+  exit 0
+}
+
+# ---------- arg parsing ----------
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --title)   shift; TITLE="${1:-}"; [[ -z "$TITLE" ]] && die "--title requires a value" ;;
+    --auto-merge) AUTO_MERGE=true ;;
+    --base)    shift; BASE_BRANCH="${1:-}"; [[ -z "$BASE_BRANCH" ]] && die "--base requires a value" ;;
+    -h|--help) usage ;;
+    -*)        die "Unknown option: $1" ;;
+    *)
+      [[ -z "$BRANCH" ]] && BRANCH="$1" || die "Unexpected argument: $1"
+      ;;
+  esac
+  shift
+done
+
+[[ -z "$BRANCH" ]] && die "Branch name is required. Run 'create-pr --help' for usage."
+
+# ---------- prerequisite checks ----------
+
+# Ensure gh CLI is available.
+command -v gh >/dev/null 2>&1 || die "gh CLI is not installed. Install it: https://cli.github.com"
+
+# Ensure we're inside a git repository.
+git rev-parse --git-dir >/dev/null 2>&1 || die "Not inside a git repository."
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# ---------- worktree lock detection ----------
+# If a worktree is checked out on this branch, git operations may conflict.
+# Detect and warn the user with a suggested fix.
+WORKTREE_LIST="$(git worktree list --porcelain 2>/dev/null || true)"
+if echo "$WORKTREE_LIST" | grep -q "branch refs/heads/${BRANCH}$"; then
+  # Porcelain format emits: worktree <path>, HEAD <sha>, branch <ref> (in that order).
+  # Use -B2 to capture the worktree line (2 lines before the branch line), then filter for it.
+  WORKTREE_PATH=$(echo "$WORKTREE_LIST" | grep -B2 "branch refs/heads/${BRANCH}$" | grep '^worktree ' | sed 's/^worktree //')
+  if [[ -n "$WORKTREE_PATH" ]]; then
+    warn "Branch '$BRANCH' is checked out in worktree: $WORKTREE_PATH"
+    warn "This may cause conflicts during PR operations."
+    warn "To clean up: git worktree remove '$WORKTREE_PATH'"
+    # Non-fatal — the PR can still be created from the remote branch.
+  fi
+fi
+
+# ---------- branch existence check ----------
+# Verify the branch exists locally or on the remote.
+BRANCH_EXISTS_LOCAL=false
+BRANCH_EXISTS_REMOTE=false
+
+if git show-ref --verify --quiet "refs/heads/$BRANCH" 2>/dev/null; then
+  BRANCH_EXISTS_LOCAL=true
+fi
+
+if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+  BRANCH_EXISTS_REMOTE=true
+fi
+
+if [[ "$BRANCH_EXISTS_LOCAL" == false && "$BRANCH_EXISTS_REMOTE" == false ]]; then
+  die "Branch '$BRANCH' does not exist locally or on remote 'origin'."
+fi
+
+# ---------- commit verification ----------
+# Ensure the branch has commits that differ from the base branch.
+# Use the remote base if available, otherwise local.
+if git show-ref --verify --quiet "refs/remotes/origin/$BASE_BRANCH" 2>/dev/null; then
+  BASE_REF="origin/$BASE_BRANCH"
+else
+  BASE_REF="$BASE_BRANCH"
+fi
+
+# Determine branch ref to compare.
+if [[ "$BRANCH_EXISTS_LOCAL" == true ]]; then
+  BRANCH_REF="$BRANCH"
+else
+  BRANCH_REF="origin/$BRANCH"
+fi
+
+COMMIT_COUNT=$(git rev-list --count "$BASE_REF".."$BRANCH_REF" 2>/dev/null || echo "0")
+if [[ "$COMMIT_COUNT" -eq 0 ]]; then
+  die "Branch '$BRANCH' has no commits ahead of '$BASE_BRANCH'. Nothing to create a PR for."
+fi
+
+info "Branch '$BRANCH' has $COMMIT_COUNT commit(s) ahead of '$BASE_BRANCH'."
+
+# ---------- check for existing PR ----------
+EXISTING_PR=$(gh pr list --head "$BRANCH" --base "$BASE_BRANCH" --state open --json number,url --jq '.[0].url' 2>/dev/null || true)
+if [[ -n "$EXISTING_PR" ]]; then
+  info "PR already exists: $EXISTING_PR"
+  echo "$EXISTING_PR"
+  exit 0
+fi
+
+# Also check if already merged.
+MERGED_PR=$(gh pr list --head "$BRANCH" --base "$BASE_BRANCH" --state merged --json number,url --jq '.[0].url' 2>/dev/null || true)
+if [[ -n "$MERGED_PR" ]]; then
+  info "Branch '$BRANCH' was already merged: $MERGED_PR"
+  echo "$MERGED_PR"
+  exit 0
+fi
+
+# ---------- push branch to remote if needed ----------
+if [[ "$BRANCH_EXISTS_REMOTE" == false ]]; then
+  info "Pushing '$BRANCH' to origin..."
+  git push -u origin "$BRANCH" || die "Failed to push '$BRANCH' to origin."
+fi
+
+# ---------- derive PR title ----------
+if [[ -z "$TITLE" ]]; then
+  # Clean branch name into a human-readable title.
+  # e.g. "dev-inbox/abc12345-feat/git-pr-helpers" -> "feat: git pr helpers"
+  TITLE=$(echo "$BRANCH" \
+    | sed 's|^dev-inbox/[a-f0-9]*-||' \
+    | sed 's|^dispatch/[a-f0-9]*-||' \
+    | sed 's|/|: |' \
+    | sed 's/-/ /g')
+fi
+
+# ---------- create PR with retry + backoff ----------
+ATTEMPT=0
+PR_URL=""
+
+while [[ $ATTEMPT -lt $MAX_RETRIES ]]; do
+  ATTEMPT=$((ATTEMPT + 1))
+
+  PR_URL=$(gh pr create \
+    --head "$BRANCH" \
+    --base "$BASE_BRANCH" \
+    --title "$TITLE" \
+    --body "Automated PR from dev-inbox branch \`$BRANCH\`." \
+    2>&1) && break
+
+  # Check if the error indicates the PR already exists (race condition).
+  if echo "$PR_URL" | grep -qi "already exists"; then
+    EXISTING=$(gh pr list --head "$BRANCH" --base "$BASE_BRANCH" --state open --json url --jq '.[0].url' 2>/dev/null || true)
+    if [[ -n "$EXISTING" ]]; then
+      info "PR was created concurrently: $EXISTING"
+      echo "$EXISTING"
+      exit 0
+    fi
+  fi
+
+  if [[ $ATTEMPT -lt $MAX_RETRIES ]]; then
+    SLEEP=$((BACKOFF_BASE ** ATTEMPT))
+    warn "gh pr create failed (attempt $ATTEMPT/$MAX_RETRIES). Retrying in ${SLEEP}s..."
+    sleep "$SLEEP"
+  else
+    die "Failed to create PR after $MAX_RETRIES attempts. Last output: $PR_URL"
+  fi
+done
+
+info "PR created: $PR_URL"
+
+# ---------- auto-merge ----------
+if [[ "$AUTO_MERGE" == true ]]; then
+  PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$' || true)
+  if [[ -n "$PR_NUMBER" ]]; then
+    info "Enabling auto-merge on PR #$PR_NUMBER..."
+    gh pr merge "$PR_NUMBER" --auto --squash 2>/dev/null \
+      || warn "Could not enable auto-merge (may require branch protection rules)."
+  fi
+fi
+
+echo "$PR_URL"
