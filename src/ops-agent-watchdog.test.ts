@@ -564,6 +564,225 @@ describe('ops-agent-watchdog', () => {
       expect(result[0].hasSession).toBe(false);
       expect(result[0].slotIndex).toBe(2);
     });
+
+    it('skips slot when Agency HQ task status is terminal (done)', async () => {
+      vi.mocked(getDispatchSlotBackend).mockReturnValue({
+        name: 'sqlite',
+        listActiveSlots: vi.fn(async () => [
+          {
+            slotId: 1,
+            slotIndex: 0,
+            ahqTaskId: 'task-done',
+            state: 'executing',
+            worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
+          },
+        ]),
+        claimSlot: vi.fn(async () => null),
+        markExecuting: vi.fn(async () => {}),
+        markReleasing: vi.fn(async () => {}),
+        freeSlot: vi.fn(async () => {}),
+        recoverStaleSlots: vi.fn(async () => []),
+        pruneHistory: vi.fn(() => 0),
+      });
+
+      vi.mocked(getAgentRuntime).mockReturnValue({
+        ...getAgentRuntime(),
+        listSessionNames: vi.fn(() => []),
+        hasSession: vi.fn(() => false),
+      });
+
+      // Agency HQ returns terminal status 'done'
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({ data: { status: 'done' } }),
+      );
+
+      const result = await detectStuckSlots();
+      expect(result).toEqual([]); // Not flagged because task is done
+      // Should have queried Agency HQ for task status
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toContain('/tasks/task-done');
+    });
+
+    it('skips slot when Agency HQ task status is in-review', async () => {
+      vi.mocked(getDispatchSlotBackend).mockReturnValue({
+        name: 'sqlite',
+        listActiveSlots: vi.fn(async () => [
+          {
+            slotId: 1,
+            slotIndex: 0,
+            ahqTaskId: 'task-reviewed',
+            state: 'executing',
+            worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
+          },
+        ]),
+        claimSlot: vi.fn(async () => null),
+        markExecuting: vi.fn(async () => {}),
+        markReleasing: vi.fn(async () => {}),
+        freeSlot: vi.fn(async () => {}),
+        recoverStaleSlots: vi.fn(async () => []),
+        pruneHistory: vi.fn(() => 0),
+      });
+
+      vi.mocked(getAgentRuntime).mockReturnValue({
+        ...getAgentRuntime(),
+        listSessionNames: vi.fn(() => []),
+        hasSession: vi.fn(() => false),
+      });
+
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({ data: { status: 'in-review' } }),
+      );
+
+      const result = await detectStuckSlots();
+      expect(result).toEqual([]);
+    });
+
+    it('skips slot when Agency HQ task status is cancelled', async () => {
+      vi.mocked(getDispatchSlotBackend).mockReturnValue({
+        name: 'sqlite',
+        listActiveSlots: vi.fn(async () => [
+          {
+            slotId: 1,
+            slotIndex: 0,
+            ahqTaskId: 'task-cancelled',
+            state: 'executing',
+            worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
+          },
+        ]),
+        claimSlot: vi.fn(async () => null),
+        markExecuting: vi.fn(async () => {}),
+        markReleasing: vi.fn(async () => {}),
+        freeSlot: vi.fn(async () => {}),
+        recoverStaleSlots: vi.fn(async () => []),
+        pruneHistory: vi.fn(() => 0),
+      });
+
+      vi.mocked(getAgentRuntime).mockReturnValue({
+        ...getAgentRuntime(),
+        listSessionNames: vi.fn(() => []),
+        hasSession: vi.fn(() => false),
+      });
+
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({ data: { status: 'cancelled' } }),
+      );
+
+      const result = await detectStuckSlots();
+      expect(result).toEqual([]);
+    });
+
+    it('flags slot when Agency HQ task status is active (in-progress)', async () => {
+      vi.mocked(getDispatchSlotBackend).mockReturnValue({
+        name: 'sqlite',
+        listActiveSlots: vi.fn(async () => [
+          {
+            slotId: 1,
+            slotIndex: 0,
+            ahqTaskId: 'task-active',
+            state: 'executing',
+            worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
+          },
+        ]),
+        claimSlot: vi.fn(async () => null),
+        markExecuting: vi.fn(async () => {}),
+        markReleasing: vi.fn(async () => {}),
+        freeSlot: vi.fn(async () => {}),
+        recoverStaleSlots: vi.fn(async () => []),
+        pruneHistory: vi.fn(() => 0),
+      });
+
+      vi.mocked(getAgentRuntime).mockReturnValue({
+        ...getAgentRuntime(),
+        listSessionNames: vi.fn(() => []),
+        hasSession: vi.fn(() => false),
+      });
+
+      // Agency HQ returns active status 'in-progress'
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({ data: { status: 'in-progress' } }),
+      );
+
+      const result = await detectStuckSlots();
+      expect(result).toHaveLength(1);
+      expect(result[0].ahqTaskId).toBe('task-active');
+    });
+
+    it('flags slot when Agency HQ task status query fails (conservative)', async () => {
+      vi.mocked(getDispatchSlotBackend).mockReturnValue({
+        name: 'sqlite',
+        listActiveSlots: vi.fn(async () => [
+          {
+            slotId: 1,
+            slotIndex: 0,
+            ahqTaskId: 'task-unknown',
+            state: 'executing',
+            worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
+          },
+        ]),
+        claimSlot: vi.fn(async () => null),
+        markExecuting: vi.fn(async () => {}),
+        markReleasing: vi.fn(async () => {}),
+        freeSlot: vi.fn(async () => {}),
+        recoverStaleSlots: vi.fn(async () => []),
+        pruneHistory: vi.fn(() => 0),
+      });
+
+      vi.mocked(getAgentRuntime).mockReturnValue({
+        ...getAgentRuntime(),
+        listSessionNames: vi.fn(() => []),
+        hasSession: vi.fn(() => false),
+      });
+
+      // Agency HQ task query fails
+      fetchMock.mockRejectedValueOnce(new Error('network error'));
+
+      const result = await detectStuckSlots();
+      // Should still flag the slot when API fails
+      expect(result).toHaveLength(1);
+      expect(result[0].ahqTaskId).toBe('task-unknown');
+    });
+
+    it('flags slot when Agency HQ returns non-OK response', async () => {
+      vi.mocked(getDispatchSlotBackend).mockReturnValue({
+        name: 'sqlite',
+        listActiveSlots: vi.fn(async () => [
+          {
+            slotId: 1,
+            slotIndex: 0,
+            ahqTaskId: 'task-404',
+            state: 'executing',
+            worktreePath: null,
+            executingAt: pastTimestamp(SLOT_GRACE_PERIOD_MS + 60_000),
+          },
+        ]),
+        claimSlot: vi.fn(async () => null),
+        markExecuting: vi.fn(async () => {}),
+        markReleasing: vi.fn(async () => {}),
+        freeSlot: vi.fn(async () => {}),
+        recoverStaleSlots: vi.fn(async () => []),
+        pruneHistory: vi.fn(() => 0),
+      });
+
+      vi.mocked(getAgentRuntime).mockReturnValue({
+        ...getAgentRuntime(),
+        listSessionNames: vi.fn(() => []),
+        hasSession: vi.fn(() => false),
+      });
+
+      // Agency HQ returns 404
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({ error: 'not found' }, false, 404),
+      );
+
+      const result = await detectStuckSlots();
+      expect(result).toHaveLength(1);
+      expect(result[0].ahqTaskId).toBe('task-404');
+    });
   });
 
   describe('restartNanoClaw', () => {
@@ -665,8 +884,10 @@ describe('ops-agent-watchdog', () => {
       expect(sentMsg).toContain('process: none');
 
       // Should have logged to Agency HQ with slot diagnostics
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      const postCall = fetchMock.mock.calls[0];
+      // fetchMock calls: 1 task status query + 1 notification POST
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[0][0]).toContain('/tasks/stuck-task-1');
+      const postCall = fetchMock.mock.calls[1];
       expect(postCall[0]).toContain('/notifications');
       const body = JSON.parse(postCall[1].body);
       expect(body.type).toBe('dispatch-watchdog-recovery');
@@ -721,7 +942,8 @@ describe('ops-agent-watchdog', () => {
       expect(deps.sendMessage).not.toHaveBeenCalled();
 
       // Should still log to AHQ and restart
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      // fetchMock calls: 1 task status query + 1 notification POST
+      expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(execSync).toHaveBeenCalled();
     });
 
@@ -804,8 +1026,13 @@ describe('ops-agent-watchdog', () => {
 
       vi.mocked(execSync).mockReturnValue(Buffer.from(''));
 
-      // First call fails, second succeeds
+      // First call: task status query (succeeds with active status)
+      // Second call: notification POST (fails)
+      // Third call: notification POST retry (succeeds)
       fetchMock
+        .mockResolvedValueOnce(
+          mockFetchResponse({ data: { status: 'in-progress' } }),
+        )
         .mockRejectedValueOnce(new Error('network error'))
         .mockResolvedValueOnce(mockFetchResponse({}));
 
@@ -816,8 +1043,8 @@ describe('ops-agent-watchdog', () => {
       await vi.advanceTimersByTimeAsync(2_000);
       await tickPromise;
 
-      // Should have been called twice (initial + 1 retry)
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      // Should have been called 3 times: 1 task status + 1 failed notification + 1 retry
+      expect(fetchMock).toHaveBeenCalledTimes(3);
     });
 
     it('does not restart when all executing slots are within grace period', async () => {

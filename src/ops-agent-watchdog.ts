@@ -124,6 +124,40 @@ export interface StuckSlotInfo {
 }
 
 /**
+ * Task statuses that indicate the work is finished — the slot is not stuck,
+ * the worker completed normally and the slot just hasn't been freed yet.
+ */
+const TERMINAL_TASK_STATUSES = new Set(['in-review', 'done', 'cancelled']);
+
+/**
+ * Query Agency HQ for the current status of a task.
+ * Returns the status string on success, or null on any failure.
+ */
+async function queryTaskStatus(
+  ahqTaskId: string,
+  log: ReturnType<typeof createCorrelationLogger>,
+): Promise<string | null> {
+  try {
+    const res = await agencyFetch(`/tasks/${ahqTaskId}`);
+    if (!res.ok) {
+      log.warn(
+        { ahqTaskId, status: res.status },
+        'Failed to query Agency HQ task status',
+      );
+      return null;
+    }
+    const json = (await res.json()) as { data?: { status?: string } };
+    return json.data?.status ?? null;
+  } catch (err) {
+    log.warn(
+      { err, ahqTaskId },
+      'Error querying Agency HQ task status',
+    );
+    return null;
+  }
+}
+
+/**
  * Detect stuck dispatch slots: slots in 'executing' state with no
  * corresponding tmux session running AND past the grace period.
  *
@@ -131,6 +165,7 @@ export interface StuckSlotInfo {
  * 1. It has been in 'executing' state for longer than SLOT_GRACE_PERIOD_MS
  * 2. No tmux session matching its worker prefix exists
  * 3. The runtime confirms the session does not exist (double-check via hasSession)
+ * 4. The Agency HQ task is NOT in a terminal state (done, in-review, cancelled)
  *
  * Returns the list of stuck slots, or empty if everything is healthy.
  */
@@ -214,6 +249,22 @@ export async function detectStuckSlots(): Promise<StuckSlotInfo[]> {
           ahqTaskId: slot.ahqTaskId,
         },
         'Slot has active process confirmed via hasSession, not stuck',
+      );
+      continue;
+    }
+
+    // Check Agency HQ task status — if the task has reached a terminal state
+    // (done, in-review, cancelled) then the worker finished normally and the
+    // slot simply hasn't been freed yet. Skip to avoid false positives.
+    const taskStatus = await queryTaskStatus(slot.ahqTaskId, log);
+    if (taskStatus && TERMINAL_TASK_STATUSES.has(taskStatus)) {
+      log.debug(
+        {
+          slotIndex: slot.slotIndex,
+          ahqTaskId: slot.ahqTaskId,
+          taskStatus,
+        },
+        'Slot task is in terminal state on Agency HQ, not stuck',
       );
       continue;
     }
