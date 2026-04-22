@@ -174,6 +174,8 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
       if (ASSISTANT_NAME !== 'Andy') {
         content = content.replace(/^# Andy$/m, `# ${ASSISTANT_NAME}`);
         content = content.replace(/You are Andy/g, `You are ${ASSISTANT_NAME}`);
+        // Also rename trigger references (e.g. scheduled-task "trigger": "@Andy" entries)
+        content = content.replace(/@Andy\b/g, `@${ASSISTANT_NAME}`);
       }
       fs.writeFileSync(groupMdFile, content);
       logger.info({ folder: group.folder }, 'Created CLAUDE.md from template');
