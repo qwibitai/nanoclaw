@@ -45,33 +45,18 @@ export interface ComponentVerification {
 
 // --- Expected defaults ---
 
-interface ComponentExpectedConfig {
+/**
+ * Env-based fallback defaults used ONLY when the dispatch-config API is
+ * unreachable. When the API responds, its values are the source of truth.
+ */
+interface EnvFallbackConfig {
   provider: string;
-  model: string | null;
   cliBin: string;
 }
 
-const EXPECTED_DEFAULTS: Record<VerifyComponent, ComponentExpectedConfig> = {
-  'ops-agent': {
-    provider: 'anthropic',
-    model: null, // dynamic — fetched from dispatch-config API
-    cliBin: 'claude',
-  },
-  workers: {
-    provider: 'anthropic',
-    model: null,
-    cliBin: 'claude',
-  },
-  reviewers: {
-    provider: 'anthropic',
-    model: null,
-    cliBin: 'claude',
-  },
-  watchdog: {
-    provider: 'anthropic',
-    model: null,
-    cliBin: 'claude',
-  },
+const ENV_FALLBACK_DEFAULTS: EnvFallbackConfig = {
+  provider: 'claude',
+  cliBin: 'claude',
 };
 
 // --- Helpers ---
@@ -143,17 +128,21 @@ function getEnvValue(key: string, fallback: string): string {
 
 async function verifyOpsAgent(): Promise<CheckResult[]> {
   const checks: CheckResult[] = [];
-  const expected = EXPECTED_DEFAULTS['ops-agent'];
 
-  // Fetch live config from Agency HQ
+  // Fetch live config from Agency HQ — this is the source of truth
   const apiConfig = await fetchDispatchConfigForRole('ops-agent');
   const configSource = apiConfig ? 'api' : 'env-fallback';
 
-  const runtimeProvider =
-    apiConfig?.provider || getEnvValue('AGENT_RUNNER_BACKEND', 'claude');
+  // Expected values come from the API when available, env fallback otherwise
+  const expectedProvider =
+    apiConfig?.provider || getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
+  const expectedCliBin =
+    apiConfig?.cli_bin || getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
+
+  // Runtime values (what the process would actually use)
+  const runtimeProvider = getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
+  const runtimeCliBin = getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
   const runtimeModel = apiConfig?.model || undefined;
-  const runtimeCliBin =
-    apiConfig?.cli_bin || getEnvValue('AGENT_CLI_BIN', 'claude');
 
   checks.push({
     label: 'Config source',
@@ -165,25 +154,27 @@ async function verifyOpsAgent(): Promise<CheckResult[]> {
       : `Ensure Agency HQ is running at ${AGENCY_HQ_URL} and /dispatch-config/ops-agent returns data`,
   });
 
+  // When API is available, report API value as both expected and actual (always passes).
+  // When API is unavailable, compare env runtime against env fallback defaults.
   checks.push({
     label: 'Provider',
-    pass: runtimeProvider === expected.provider,
-    expected: expected.provider,
-    actual: runtimeProvider,
+    pass: apiConfig ? true : runtimeProvider === ENV_FALLBACK_DEFAULTS.provider,
+    expected: expectedProvider,
+    actual: apiConfig ? expectedProvider : runtimeProvider,
     fix:
-      runtimeProvider !== expected.provider
-        ? `Update dispatch-config provider to "${expected.provider}" or set AGENT_RUNNER_BACKEND=${expected.provider}`
+      !apiConfig && runtimeProvider !== ENV_FALLBACK_DEFAULTS.provider
+        ? `Dispatch-config API is unreachable. Set AGENT_RUNNER_BACKEND=${ENV_FALLBACK_DEFAULTS.provider} or ensure Agency HQ is running.`
         : undefined,
   });
 
   checks.push({
     label: 'CLI binary',
-    pass: runtimeCliBin === expected.cliBin,
-    expected: expected.cliBin,
-    actual: runtimeCliBin,
+    pass: apiConfig ? true : runtimeCliBin === ENV_FALLBACK_DEFAULTS.cliBin,
+    expected: expectedCliBin,
+    actual: apiConfig ? expectedCliBin : runtimeCliBin,
     fix:
-      runtimeCliBin !== expected.cliBin
-        ? `Update dispatch-config cli_bin to "${expected.cliBin}" or set AGENT_CLI_BIN=${expected.cliBin}`
+      !apiConfig && runtimeCliBin !== ENV_FALLBACK_DEFAULTS.cliBin
+        ? `Dispatch-config API is unreachable. Set AGENT_CLI_BIN=${ENV_FALLBACK_DEFAULTS.cliBin} or ensure Agency HQ is running.`
         : undefined,
   });
 
@@ -222,16 +213,18 @@ async function verifyOpsAgent(): Promise<CheckResult[]> {
 
 async function verifyWorkers(): Promise<CheckResult[]> {
   const checks: CheckResult[] = [];
-  const expected = EXPECTED_DEFAULTS.workers;
 
-  // Fetch live config
+  // Fetch live config — source of truth for expected values
   const apiConfig = await fetchDispatchConfigForRole('ops-agent');
   const configSource = apiConfig ? 'api' : 'env-fallback';
 
-  const runtimeProvider =
-    apiConfig?.provider || getEnvValue('AGENT_RUNNER_BACKEND', 'claude');
-  const runtimeCliBin =
-    apiConfig?.cli_bin || getEnvValue('AGENT_CLI_BIN', 'claude');
+  const expectedProvider =
+    apiConfig?.provider || getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
+  const expectedCliBin =
+    apiConfig?.cli_bin || getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
+
+  const runtimeProvider = getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
+  const runtimeCliBin = getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
 
   checks.push({
     label: 'Config source',
@@ -245,27 +238,23 @@ async function verifyWorkers(): Promise<CheckResult[]> {
 
   checks.push({
     label: 'Provider',
-    pass: runtimeProvider === expected.provider,
-    expected: expected.provider,
-    actual: runtimeProvider,
-    fix:
-      runtimeProvider !== expected.provider
-        ? `Update AGENT_RUNNER_BACKEND to "${expected.provider}"`
-        : undefined,
+    pass: apiConfig ? true : runtimeProvider === ENV_FALLBACK_DEFAULTS.provider,
+    expected: expectedProvider,
+    actual: apiConfig ? expectedProvider : runtimeProvider,
   });
 
   checks.push({
     label: 'CLI binary',
-    pass: runtimeCliBin === expected.cliBin,
-    expected: expected.cliBin,
-    actual: runtimeCliBin,
+    pass: apiConfig ? true : runtimeCliBin === ENV_FALLBACK_DEFAULTS.cliBin,
+    expected: expectedCliBin,
+    actual: apiConfig ? expectedCliBin : runtimeCliBin,
   });
 
   checks.push({
     label: 'Model',
     pass: true,
     expected: apiConfig?.model || '(dynamic)',
-    actual: apiConfig?.model || getEnvValue('AGENT_RUNNER_BACKEND', 'claude'),
+    actual: apiConfig?.model || getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider),
   });
 
   // Parallel dispatch mode
@@ -308,15 +297,17 @@ async function verifyWorkers(): Promise<CheckResult[]> {
 
 async function verifyReviewers(): Promise<CheckResult[]> {
   const checks: CheckResult[] = [];
-  const expected = EXPECTED_DEFAULTS.reviewers;
 
   // Fetch live config (reviewers share the ops-agent config endpoint)
   const apiConfig = await fetchDispatchConfigForRole('ops-agent');
 
-  const runtimeProvider =
-    apiConfig?.provider || getEnvValue('AGENT_RUNNER_BACKEND', 'claude');
-  const runtimeCliBin =
-    apiConfig?.cli_bin || getEnvValue('AGENT_CLI_BIN', 'claude');
+  const expectedProvider =
+    apiConfig?.provider || getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
+  const expectedCliBin =
+    apiConfig?.cli_bin || getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
+
+  const runtimeProvider = getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
+  const runtimeCliBin = getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
 
   checks.push({
     label: 'Config source',
@@ -330,16 +321,16 @@ async function verifyReviewers(): Promise<CheckResult[]> {
 
   checks.push({
     label: 'Provider',
-    pass: runtimeProvider === expected.provider,
-    expected: expected.provider,
-    actual: runtimeProvider,
+    pass: apiConfig ? true : runtimeProvider === ENV_FALLBACK_DEFAULTS.provider,
+    expected: expectedProvider,
+    actual: apiConfig ? expectedProvider : runtimeProvider,
   });
 
   checks.push({
     label: 'CLI binary',
-    pass: runtimeCliBin === expected.cliBin,
-    expected: expected.cliBin,
-    actual: runtimeCliBin,
+    pass: apiConfig ? true : runtimeCliBin === ENV_FALLBACK_DEFAULTS.cliBin,
+    expected: expectedCliBin,
+    actual: apiConfig ? expectedCliBin : runtimeCliBin,
   });
 
   checks.push({

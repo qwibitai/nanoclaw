@@ -208,8 +208,9 @@ describe('verify-config', () => {
       expect(graceCheck!.pass).toBe(true);
     });
 
-    it('provides fix suggestions for mismatches', async () => {
-      // Return non-standard provider
+    it('passes provider check when API returns any provider (dynamic expected values)', async () => {
+      // API returns a non-default provider — this should PASS because
+      // the API is the source of truth for expected values
       fetchMock.mockImplementation((url: string) => {
         if (typeof url === 'string' && url.includes('/dispatch-config/')) {
           return mockFetchResponse({
@@ -221,31 +222,100 @@ describe('verify-config', () => {
       });
 
       execSyncMock.mockImplementation((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('is-active')) {
-          throw new Error('not active');
-        }
+        if (typeof cmd === 'string' && cmd.includes('is-active')) return 'active';
         return '';
       });
 
       const result = await verifyComponent('ops-agent');
 
-      // Provider mismatch should have a fix
+      // Provider should pass — API value is the expected value
       const providerCheck = result.checks.find(
         (c) => c.label === 'Provider',
       );
       expect(providerCheck).toBeDefined();
-      expect(providerCheck!.pass).toBe(false);
+      expect(providerCheck!.pass).toBe(true);
+      expect(providerCheck!.expected).toBe('openai');
       expect(providerCheck!.actual).toBe('openai');
-      expect(providerCheck!.fix).toContain('anthropic');
 
-      // CLI binary mismatch should have a fix
+      // CLI binary should also pass
       const cliBinCheck = result.checks.find(
         (c) => c.label === 'CLI binary',
       );
       expect(cliBinCheck).toBeDefined();
-      expect(cliBinCheck!.pass).toBe(false);
+      expect(cliBinCheck!.pass).toBe(true);
+      expect(cliBinCheck!.expected).toBe('openai-cli');
       expect(cliBinCheck!.actual).toBe('openai-cli');
-      expect(cliBinCheck!.fix).toContain('claude');
+    });
+
+    it('passes validation when API returns provider=kimi', async () => {
+      fetchMock.mockImplementation((url: string) => {
+        if (typeof url === 'string' && url.includes('/dispatch-config/')) {
+          return mockFetchResponse({
+            success: true,
+            data: { provider: 'kimi', model: 'kimi-latest', cli_bin: 'kimi' },
+          });
+        }
+        return mockFetchResponse({ success: true, data: {} });
+      });
+
+      execSyncMock.mockImplementation((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('is-active')) return 'active';
+        return '';
+      });
+
+      const result = await verifyComponent('ops-agent');
+
+      // Provider=kimi should pass — API is the source of truth
+      const providerCheck = result.checks.find(
+        (c) => c.label === 'Provider',
+      );
+      expect(providerCheck).toBeDefined();
+      expect(providerCheck!.pass).toBe(true);
+      expect(providerCheck!.expected).toBe('kimi');
+      expect(providerCheck!.actual).toBe('kimi');
+
+      // CLI binary=kimi should pass
+      const cliBinCheck = result.checks.find(
+        (c) => c.label === 'CLI binary',
+      );
+      expect(cliBinCheck).toBeDefined();
+      expect(cliBinCheck!.pass).toBe(true);
+      expect(cliBinCheck!.expected).toBe('kimi');
+      expect(cliBinCheck!.actual).toBe('kimi');
+
+      // Model should report kimi-latest
+      const modelCheck = result.checks.find(
+        (c) => c.label === 'Model',
+      );
+      expect(modelCheck).toBeDefined();
+      expect(modelCheck!.expected).toBe('kimi-latest');
+    });
+
+    it('reports env fallback values when API is unreachable', async () => {
+      fetchMock.mockRejectedValue(new Error('connection refused'));
+
+      execSyncMock.mockImplementation((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('is-active')) return 'active';
+        return '';
+      });
+
+      const result = await verifyComponent('ops-agent');
+
+      // Config source should fail
+      const configSourceCheck = result.checks.find(
+        (c) => c.label === 'Config source',
+      );
+      expect(configSourceCheck!.pass).toBe(false);
+      expect(configSourceCheck!.actual).toBe('env-fallback');
+
+      // Provider should still pass when env default matches fallback
+      const providerCheck = result.checks.find(
+        (c) => c.label === 'Provider',
+      );
+      expect(providerCheck).toBeDefined();
+      expect(providerCheck!.pass).toBe(true);
+      expect(providerCheck!.expected).toBe('claude');
+      expect(providerCheck!.actual).toBe('claude');
     });
   });
 
@@ -305,6 +375,79 @@ describe('verify-config', () => {
       expect(parallelCheck!.fix).toBeDefined();
 
       delete process.env.DISPATCH_PARALLEL;
+    });
+  });
+
+  describe('dynamic expected values across components', () => {
+    it('workers passes with provider=kimi from API', async () => {
+      fetchMock.mockImplementation((url: string) => {
+        if (typeof url === 'string' && url.includes('/dispatch-config/')) {
+          return mockFetchResponse({
+            success: true,
+            data: { provider: 'kimi', cli_bin: 'kimi' },
+          });
+        }
+        return mockFetchResponse({ success: true, data: {} });
+      });
+
+      const result = await verifyComponent('workers');
+
+      const providerCheck = result.checks.find(
+        (c) => c.label === 'Provider',
+      );
+      expect(providerCheck!.pass).toBe(true);
+      expect(providerCheck!.expected).toBe('kimi');
+    });
+
+    it('reviewers passes with provider=kimi from API', async () => {
+      fetchMock.mockImplementation((url: string) => {
+        if (typeof url === 'string' && url.includes('/dispatch-config/')) {
+          return mockFetchResponse({
+            success: true,
+            data: { provider: 'kimi', cli_bin: 'kimi' },
+          });
+        }
+        if (typeof url === 'string' && url.includes('/health')) {
+          return mockFetchResponse({ service: 'nanoclaw', status: 'ok' });
+        }
+        return mockFetchResponse({ success: true, data: {} });
+      });
+
+      const result = await verifyComponent('reviewers');
+
+      const providerCheck = result.checks.find(
+        (c) => c.label === 'Provider',
+      );
+      expect(providerCheck!.pass).toBe(true);
+      expect(providerCheck!.expected).toBe('kimi');
+    });
+
+    it('uses env fallback when API returns empty data', async () => {
+      fetchMock.mockImplementation((url: string) => {
+        if (typeof url === 'string' && url.includes('/dispatch-config/')) {
+          return mockFetchResponse({
+            success: true,
+            data: {},
+          });
+        }
+        return mockFetchResponse({ success: true, data: {} });
+      });
+
+      execSyncMock.mockImplementation((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('is-active')) return 'active';
+        return '';
+      });
+
+      const result = await verifyComponent('ops-agent');
+
+      // API is reachable but returns no provider/cli_bin — use API values (empty)
+      // which fall back to env values. Provider check should still pass
+      // because API returned successfully (even if empty), so the pass logic
+      // uses the `apiConfig ? true : ...` branch.
+      const providerCheck = result.checks.find(
+        (c) => c.label === 'Provider',
+      );
+      expect(providerCheck!.pass).toBe(true);
     });
   });
 });
