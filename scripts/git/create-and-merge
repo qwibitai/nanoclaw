@@ -1,0 +1,121 @@
+#!/bin/bash
+# create-and-merge — Create a PR and merge it in one step.
+#
+# Composite wrapper that calls create-pr then merge-pr in sequence.
+# Useful for dev-inbox branches that are ready to land immediately.
+#
+# Usage: create-and-merge <branch-name> [--title <title>] [--squash|--merge|--rebase]
+#
+# Edge cases handled:
+#   - create-pr failure (exits early with clear message)
+#   - PR already merged (detected by create-pr, skips merge)
+#   - merge-pr failure (reports error but create-pr work is preserved)
+set -euo pipefail
+
+# ---------- resolve script directory ----------
+# Find sibling scripts regardless of how this script was invoked.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ---------- defaults ----------
+BRANCH=""
+TITLE=""
+STRATEGY="squash"
+CREATE_ARGS=()
+MERGE_ARGS=()
+
+# ---------- helpers ----------
+die()  { echo "ERROR: $*" >&2; exit 1; }
+info() { echo "INFO: $*"; }
+
+usage() {
+  cat <<EOF
+Usage: create-and-merge <branch-name> [options]
+
+Arguments:
+  branch-name           The branch to create a PR from and merge (required).
+
+Options:
+  --title <title>       PR title (passed to create-pr).
+  --base <base>         Base branch (default: main, passed to create-pr).
+  --squash              Squash and merge (default).
+  --merge               Create a merge commit.
+  --rebase              Rebase and merge.
+  --no-delete-branch    Keep the remote branch after merging.
+  --ci-timeout <sec>    Max seconds to wait for CI (default: 300).
+  -h, --help            Show this help message.
+EOF
+  exit 0
+}
+
+# ---------- arg parsing ----------
+# Separate args into those for create-pr vs merge-pr.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --title)
+      shift; TITLE="${1:-}"; [[ -z "$TITLE" ]] && die "--title requires a value"
+      CREATE_ARGS+=(--title "$TITLE")
+      ;;
+    --base)
+      shift; CREATE_ARGS+=(--base "${1:-}")
+      ;;
+    --squash)  STRATEGY="squash"; MERGE_ARGS+=(--squash) ;;
+    --merge)   STRATEGY="merge";  MERGE_ARGS+=(--merge) ;;
+    --rebase)  STRATEGY="rebase"; MERGE_ARGS+=(--rebase) ;;
+    --no-delete-branch) MERGE_ARGS+=(--no-delete-branch) ;;
+    --ci-timeout)
+      shift; MERGE_ARGS+=(--ci-timeout "${1:-}")
+      ;;
+    -h|--help) usage ;;
+    -*)        die "Unknown option: $1" ;;
+    *)
+      [[ -z "$BRANCH" ]] && BRANCH="$1" || die "Unexpected argument: $1"
+      ;;
+  esac
+  shift
+done
+
+[[ -z "$BRANCH" ]] && die "Branch name is required. Run 'create-and-merge --help' for usage."
+
+# ---------- verify sibling scripts exist ----------
+[[ -x "$SCRIPT_DIR/create-pr" ]] || die "create-pr not found at $SCRIPT_DIR/create-pr"
+[[ -x "$SCRIPT_DIR/merge-pr" ]] || die "merge-pr not found at $SCRIPT_DIR/merge-pr"
+
+# ---------- step 1: create PR ----------
+info "=== Step 1: Creating PR for '$BRANCH' ==="
+
+PR_URL=$("$SCRIPT_DIR/create-pr" "$BRANCH" "${CREATE_ARGS[@]}" 2>&1 | tee /dev/stderr | tail -1) || {
+  die "create-pr failed. PR was not created — no merge attempted."
+}
+
+if [[ -z "$PR_URL" ]]; then
+  die "create-pr did not return a PR URL."
+fi
+
+# Extract PR number from URL (e.g., https://github.com/owner/repo/pull/123 -> 123).
+PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$' || true)
+if [[ -z "$PR_NUMBER" ]]; then
+  die "Could not extract PR number from URL: $PR_URL"
+fi
+
+# Check if the PR was already merged (create-pr returns merged PR URLs too).
+PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq '.state' 2>/dev/null || true)
+if [[ "$PR_STATE" == "MERGED" ]]; then
+  info "PR #$PR_NUMBER is already merged. Nothing to do."
+  echo "$PR_URL"
+  exit 0
+fi
+
+# ---------- step 2: merge PR ----------
+info "=== Step 2: Merging PR #$PR_NUMBER ($STRATEGY) ==="
+
+# Default to squash if no strategy args were provided.
+if [[ ${#MERGE_ARGS[@]} -eq 0 ]]; then
+  MERGE_ARGS+=(--squash)
+fi
+
+"$SCRIPT_DIR/merge-pr" "$PR_NUMBER" "${MERGE_ARGS[@]}" || {
+  die "merge-pr failed for PR #$PR_NUMBER. The PR exists at $PR_URL — merge it manually."
+}
+
+info "=== Complete: PR #$PR_NUMBER created and merged ==="
+echo "$PR_URL"

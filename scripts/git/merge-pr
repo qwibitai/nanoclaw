@@ -1,0 +1,180 @@
+#!/bin/bash
+# merge-pr — Merge a GitHub PR with CI wait logic and branch cleanup.
+#
+# Usage: merge-pr <pr-number> [--squash|--merge|--rebase] [--no-delete-branch]
+#
+# Edge cases handled:
+#   - CI checks pending (waits with timeout)
+#   - CI checks failing (clear error, does not merge)
+#   - Branch deletion errors after merge (non-fatal warning)
+#   - PR already merged (skip, report success)
+#   - PR not found / closed (clear error)
+#   - Merge strategy selection (squash default, merge, rebase)
+set -euo pipefail
+
+# ---------- defaults ----------
+STRATEGY="squash"
+DELETE_BRANCH=true
+CI_TIMEOUT=300       # 5 minutes max wait for CI
+CI_POLL_INTERVAL=10  # poll every 10 seconds
+PR_NUMBER=""
+
+# ---------- helpers ----------
+die()  { echo "ERROR: $*" >&2; exit 1; }
+warn() { echo "WARN: $*" >&2; }
+info() { echo "INFO: $*"; }
+
+usage() {
+  cat <<EOF
+Usage: merge-pr <pr-number> [--squash|--merge|--rebase] [--no-delete-branch]
+
+Arguments:
+  pr-number           The PR number to merge (required).
+
+Options:
+  --squash            Squash and merge (default).
+  --merge             Create a merge commit.
+  --rebase            Rebase and merge.
+  --no-delete-branch  Keep the remote branch after merging.
+  --ci-timeout <sec>  Max seconds to wait for CI (default: 300).
+  -h, --help          Show this help message.
+EOF
+  exit 0
+}
+
+# ---------- arg parsing ----------
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --squash)  STRATEGY="squash" ;;
+    --merge)   STRATEGY="merge" ;;
+    --rebase)  STRATEGY="rebase" ;;
+    --no-delete-branch) DELETE_BRANCH=false ;;
+    --ci-timeout) shift; CI_TIMEOUT="${1:-300}" ;;
+    -h|--help) usage ;;
+    -*)        die "Unknown option: $1" ;;
+    *)
+      if [[ -z "$PR_NUMBER" ]]; then
+        # Validate that it looks like a number.
+        [[ "$1" =~ ^[0-9]+$ ]] || die "PR number must be numeric, got: $1"
+        PR_NUMBER="$1"
+      else
+        die "Unexpected argument: $1"
+      fi
+      ;;
+  esac
+  shift
+done
+
+[[ -z "$PR_NUMBER" ]] && die "PR number is required. Run 'merge-pr --help' for usage."
+
+# ---------- prerequisite checks ----------
+command -v gh >/dev/null 2>&1 || die "gh CLI is not installed. Install it: https://cli.github.com"
+git rev-parse --git-dir >/dev/null 2>&1 || die "Not inside a git repository."
+
+# ---------- PR state check ----------
+PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq '.state' 2>/dev/null || true)
+
+case "$PR_STATE" in
+  MERGED)
+    info "PR #$PR_NUMBER is already merged."
+    exit 0
+    ;;
+  CLOSED)
+    die "PR #$PR_NUMBER is closed (not merged). Re-open it first or check the PR number."
+    ;;
+  OPEN)
+    # Good — proceed.
+    ;;
+  "")
+    die "PR #$PR_NUMBER not found. Check the PR number and repository."
+    ;;
+  *)
+    die "PR #$PR_NUMBER is in unexpected state: $PR_STATE"
+    ;;
+esac
+
+# Capture branch name for later cleanup.
+PR_BRANCH=$(gh pr view "$PR_NUMBER" --json headRefName --jq '.headRefName' 2>/dev/null || true)
+info "Merging PR #$PR_NUMBER (branch: ${PR_BRANCH:-unknown}, strategy: $STRATEGY)"
+
+# ---------- CI check wait ----------
+# Wait for required status checks to pass before merging.
+WAITED=0
+while [[ $WAITED -lt $CI_TIMEOUT ]]; do
+  # gh pr checks returns exit code 1 if checks are failing/pending.
+  CHECK_OUTPUT=$(gh pr checks "$PR_NUMBER" 2>&1 || true)
+
+  # Count statuses — "pass", "fail", "pending".
+  FAIL_COUNT=$(echo "$CHECK_OUTPUT" | grep -c "fail" || true)
+  PENDING_COUNT=$(echo "$CHECK_OUTPUT" | grep -c "pending\|queued\|in_progress" || true)
+
+  if [[ "$FAIL_COUNT" -gt 0 ]]; then
+    echo "$CHECK_OUTPUT" >&2
+    die "PR #$PR_NUMBER has failing CI checks. Fix them before merging."
+  fi
+
+  if [[ "$PENDING_COUNT" -eq 0 ]]; then
+    # No pending, no failing — checks either passed or there are none.
+    break
+  fi
+
+  if [[ $WAITED -eq 0 ]]; then
+    info "Waiting for CI checks to complete (timeout: ${CI_TIMEOUT}s)..."
+  fi
+
+  sleep "$CI_POLL_INTERVAL"
+  WAITED=$((WAITED + CI_POLL_INTERVAL))
+done
+
+if [[ $WAITED -ge $CI_TIMEOUT ]]; then
+  warn "CI checks did not complete within ${CI_TIMEOUT}s. Attempting merge anyway."
+fi
+
+# ---------- merge ----------
+MERGE_FLAG="--$STRATEGY"
+DELETE_FLAG=""
+if [[ "$DELETE_BRANCH" == true ]]; then
+  DELETE_FLAG="--delete-branch"
+fi
+
+MERGE_OUTPUT=$(gh pr merge "$PR_NUMBER" $MERGE_FLAG $DELETE_FLAG 2>&1) || {
+  # Check if it was merged by someone else in the meantime.
+  RECHECK_STATE=$(gh pr view "$PR_NUMBER" --json state --jq '.state' 2>/dev/null || true)
+  if [[ "$RECHECK_STATE" == "MERGED" ]]; then
+    info "PR #$PR_NUMBER was merged concurrently."
+    exit 0
+  fi
+  die "Failed to merge PR #$PR_NUMBER: $MERGE_OUTPUT"
+}
+
+info "PR #$PR_NUMBER merged successfully ($STRATEGY)."
+
+# ---------- branch cleanup ----------
+# Handle branch deletion errors gracefully. The merge may have already
+# deleted the remote branch, or deletion may fail due to branch protection.
+if [[ "$DELETE_BRANCH" == true && -n "$PR_BRANCH" ]]; then
+  # Clean up local branch reference if it exists.
+  if git show-ref --verify --quiet "refs/heads/$PR_BRANCH" 2>/dev/null; then
+    # Don't delete if we're currently on this branch.
+    CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || true)
+    if [[ "$CURRENT_BRANCH" == "$PR_BRANCH" ]]; then
+      warn "Currently on branch '$PR_BRANCH'. Switching to main before cleanup."
+      git checkout main 2>/dev/null || git checkout master 2>/dev/null || warn "Could not switch away from '$PR_BRANCH'."
+    fi
+
+    git branch -d "$PR_BRANCH" 2>/dev/null \
+      || warn "Could not delete local branch '$PR_BRANCH'. It may have unmerged changes — use 'git branch -D $PR_BRANCH' to force-delete."
+  fi
+
+  # Prune stale remote tracking refs.
+  git remote prune origin 2>/dev/null || true
+fi
+
+# ---------- update local main ----------
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || true)
+if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
+  info "Pulling latest changes on $CURRENT_BRANCH..."
+  git pull --ff-only 2>/dev/null || warn "Could not fast-forward $CURRENT_BRANCH."
+fi
+
+info "Done. PR #$PR_NUMBER merged via $STRATEGY."
