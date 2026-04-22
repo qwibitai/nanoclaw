@@ -12,6 +12,7 @@ vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
+  DATA_DIR: '/tmp/test-data',
 }));
 
 // Mock logger
@@ -47,7 +48,11 @@ vi.mock('grammy', () => ({
     api = {
       sendMessage: vi.fn().mockResolvedValue(undefined),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      sendVoice: vi.fn().mockResolvedValue(undefined),
+      sendPhoto: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: 'photos/file_0.jpg' }),
+      setMessageReaction: vi.fn().mockResolvedValue(true),
+      setMyCommands: vi.fn().mockResolvedValue(true),
     };
 
     constructor(token: string) {
@@ -1154,6 +1159,134 @@ describe('TelegramChannel', () => {
     it('has name "telegram"', () => {
       const channel = new TelegramChannel('test-token', createTestOpts());
       expect(channel.name).toBe('telegram');
+    });
+  });
+
+  // --- setReaction ---
+
+  describe('setReaction', () => {
+    it('calls setMessageReaction with emoji reaction array', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      await channel.setReaction('tg:100200300', '42', '👀');
+
+      expect(currentBot().api.setMessageReaction).toHaveBeenCalledWith(
+        '100200300',
+        42,
+        [{ type: 'emoji', emoji: '👀' }],
+      );
+    });
+
+    it('calls setMessageReaction with empty array when emoji is null', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      await channel.setReaction('tg:100200300', '42', null);
+
+      expect(currentBot().api.setMessageReaction).toHaveBeenCalledWith(
+        '100200300',
+        42,
+        [],
+      );
+    });
+
+    it('treats empty-string emoji as null (removal)', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      await channel.setReaction('tg:100200300', '42', '');
+
+      expect(currentBot().api.setMessageReaction).toHaveBeenCalledWith(
+        '100200300',
+        42,
+        [],
+      );
+    });
+
+    it('is idempotent: repeat call with same emoji skips API', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      await channel.setReaction('tg:100200300', '42', '👀');
+      await channel.setReaction('tg:100200300', '42', '👀');
+
+      expect(currentBot().api.setMessageReaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('replaces reaction in a single API call (no remove+add)', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      await channel.setReaction('tg:100200300', '42', '👀');
+      await channel.setReaction('tg:100200300', '42', '✍');
+
+      expect(currentBot().api.setMessageReaction).toHaveBeenCalledTimes(2);
+      expect(currentBot().api.setMessageReaction).toHaveBeenLastCalledWith(
+        '100200300',
+        42,
+        [{ type: 'emoji', emoji: '✍' }],
+      );
+    });
+
+    it('strips tg: prefix from jid (supergroup negative ID)', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      await channel.setReaction('tg:-1001751566922', '42', '👀');
+
+      expect(currentBot().api.setMessageReaction).toHaveBeenCalledWith(
+        '-1001751566922',
+        42,
+        [{ type: 'emoji', emoji: '👀' }],
+      );
+    });
+
+    it('throws on invalid (non-numeric) message_id', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      await expect(
+        channel.setReaction('tg:100200300', 'not-a-number', '👀'),
+      ).rejects.toThrow(/Invalid message_id/);
+      expect(currentBot().api.setMessageReaction).not.toHaveBeenCalled();
+    });
+
+    it('throws on disallowed emoji (defensive second-pass guard)', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      await expect(
+        channel.setReaction('tg:100200300', '42', '🦆'),
+      ).rejects.toThrow(/not allowed/);
+      expect(currentBot().api.setMessageReaction).not.toHaveBeenCalled();
+    });
+
+    it('throws when bot is not connected', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+
+      await expect(
+        channel.setReaction('tg:100200300', '42', '👀'),
+      ).rejects.toThrow(/not initialized/);
+    });
+
+    it('LRU cache evicts oldest entries when over cap', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      for (let i = 0; i < 1005; i++) {
+        await channel.setReaction('tg:100200300', String(i), '👀');
+      }
+
+      // First 5 should have been evicted; re-calling them triggers fresh API call
+      currentBot().api.setMessageReaction.mockClear();
+      await channel.setReaction('tg:100200300', '0', '👀');
+      expect(currentBot().api.setMessageReaction).toHaveBeenCalledTimes(1);
+
+      // Last insert still cached — idempotent no-op
+      currentBot().api.setMessageReaction.mockClear();
+      await channel.setReaction('tg:100200300', '1004', '👀');
+      expect(currentBot().api.setMessageReaction).not.toHaveBeenCalled();
     });
   });
 });

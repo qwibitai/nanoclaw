@@ -39,6 +39,7 @@ import {
   deleteSession,
   getAllTasks,
   getLastBotMessageTimestamp,
+  getLastUserMessageId,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -779,6 +780,22 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return sendWithTts(channel, jid, text);
+    },
+    setReaction: async (jid, messageId, emoji) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (!channel.setReaction) {
+        throw new Error('reactions not supported in this channel');
+      }
+      let resolvedId = messageId;
+      if (!resolvedId) {
+        resolvedId = getLastUserMessageId(jid);
+        if (!resolvedId) {
+          throw new Error('no recent user message to react to');
+        }
+      }
+      await channel.setReaction(jid, resolvedId, emoji);
+      return resolvedId;
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

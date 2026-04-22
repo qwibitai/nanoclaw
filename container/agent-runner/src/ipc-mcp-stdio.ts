@@ -7,13 +7,20 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
+import allowedReactions from './telegram-allowed-reactions.json' with { type: 'json' };
 
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
+const RESPONSES_DIR = path.join(IPC_DIR, 'responses');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+
+const ALLOWED_REACTIONS: ReadonlySet<string> = new Set(allowedReactions);
+const REACTION_RESPONSE_TIMEOUT_MS = 5_000;
+const REACTION_POLL_INTERVAL_MS = 100;
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -64,6 +71,124 @@ server.tool(
     writeIpcFile(MESSAGES_DIR, data);
 
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+  },
+);
+
+function toolError(text: string): {
+  content: Array<{ type: 'text'; text: string }>;
+  isError: true;
+} {
+  return { content: [{ type: 'text' as const, text }], isError: true };
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+server.tool(
+  'react',
+  `Set or clear an emoji reaction on a Telegram message. Useful as a lightweight signal that you've received a request and it's being processed (e.g. 👀 while working, 👌 when done), instead of sending a noisy chat message.
+
+WHEN TO USE:
+• Task will take more than a couple of seconds — react with 👀 so the user sees you've picked it up.
+• Replace with a different emoji to signal state changes (👀 → 👌 for done, 👀 → 💔 for failure, 👀 → 🤔 to ask for clarification).
+• Pass \`emoji: null\` (JSON null, or empty string "") to remove the reaction entirely when no follow-up signal is needed. Any other value is validated against the allowlist.
+
+DONE-EMOJI HINT: ✅ is NOT in the Telegram-bot-allowed list. For "done" use one of: 👌 (got it) / 🫡 (on it) / 💯 (solid) / ❤ (warm ack) / 🔥 (great).
+
+LIFECYCLE (important):
+• Use react within a single turn: \`react(👀)\` at the start, replace or \`react(null)\` before finishing the same response.
+• The \`message_id\` fallback resolves to the most recent incoming user message on the host side. If the user sent another message between your 👀 and your clear/replace, a cross-turn call without explicit \`message_id\` will hit the NEW message, leaving the old 👀 orphaned. For any cross-turn use, pass \`message_id\` explicitly (the tool returns it in the success response so you can persist it).
+
+GROUP CHATS: you MUST pass \`message_id\` explicitly in group chats. Without it the fallback picks the most recent non-bot message, which may be from someone else while you were working. In 1-on-1 DMs the fallback is safe.
+
+LIMITATIONS:
+• Telegram only. Other channels will return an error.
+• Only emoji from the Telegram-bot-allowed list (👍 ❤ 🔥 👀 🎉 🤔 👌 🫡 💯 …). Unknown emoji returns an error.
+• This tool is for your (the agent's) own use. Do not call it from hooks or automation.
+• Replacing 👀 with 👌 is one call — do not remove then add separately.`,
+  {
+    emoji: z
+      .string()
+      .nullable()
+      .describe(
+        'Emoji to set, or null to remove any existing reaction. Must be in the Telegram-bot-allowed list.',
+      ),
+    message_id: z
+      .string()
+      .optional()
+      .describe(
+        'Telegram message_id to react to. Required in group chats. In DMs, defaults to the last incoming user message.',
+      ),
+  },
+  async (args) => {
+    if (!chatJid.startsWith('tg:')) {
+      return toolError('Reactions are only supported in Telegram channels.');
+    }
+
+    const emoji = args.emoji === '' ? null : args.emoji;
+    if (emoji !== null && !ALLOWED_REACTIONS.has(emoji)) {
+      return toolError(
+        `Emoji "${emoji}" not allowed for Telegram bot reactions. Examples: 👍 ❤ 🔥 👀 🎉 🤔. See Telegram Bot API docs for the full list.`,
+      );
+    }
+
+    const numericChat = chatJid.slice(3);
+    const isGroupChat = numericChat.startsWith('-');
+    if (isGroupChat && !args.message_id) {
+      return toolError(
+        'In group chats you must pass message_id explicitly — the last-message fallback is unreliable because other participants may have written while you were working.',
+      );
+    }
+
+    const requestId = crypto.randomUUID();
+    const data: Record<string, string | null | undefined> = {
+      type: 'reaction',
+      chatJid,
+      emoji,
+      message_id: args.message_id ?? null,
+      requestId,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    const responsePath = path.join(RESPONSES_DIR, `${requestId}.json`);
+    const deadline = Date.now() + REACTION_RESPONSE_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (fs.existsSync(responsePath)) {
+        try {
+          const resp = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
+          fs.unlinkSync(responsePath);
+          if (resp.success) {
+            const idSuffix =
+              typeof resp.message_id === 'string'
+                ? ` on message ${resp.message_id}`
+                : '';
+            const summary =
+              emoji === null
+                ? `Reaction cleared${idSuffix}.`
+                : `Reaction ${emoji} set${idSuffix}.`;
+            return {
+              content: [{ type: 'text' as const, text: summary }],
+            };
+          }
+          return toolError(
+            `Failed to set reaction: ${resp.error ?? 'unknown error'}`,
+          );
+        } catch (err) {
+          return toolError(
+            `Failed to read reaction response: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      await sleep(REACTION_POLL_INTERVAL_MS);
+    }
+
+    return toolError(
+      'Reaction request timed out after 5s — it may still have been applied on the host.',
+    );
   },
 );
 

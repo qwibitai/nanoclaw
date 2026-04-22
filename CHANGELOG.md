@@ -4,6 +4,10 @@ All notable changes to NanoClaw will be documented in this file.
 
 For detailed release notes, see the [full changelog on the documentation site](https://docs.nanoclaw.dev/changelog).
 
+## [Unreleased]
+
+- Added `react` MCP tool for Telegram message reactions. Agents can set 👀 when picking up a long task and replace/clear it when done. Introduces a request/response IPC pattern (new — existing fire-and-forget tools are unchanged) so the agent gets explicit success/failure feedback.
+
 ## [1.2.36] - 2026-03-26
 
 - [BREAKING] Replaced pino logger with built-in logger. WhatsApp users must re-merge the WhatsApp fork to pick up the Baileys logger compatibility fix: `git fetch whatsapp main && git merge whatsapp/main`. If the `whatsapp` remote is not configured: `git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git`.

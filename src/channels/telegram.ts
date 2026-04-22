@@ -3,6 +3,7 @@ import https from 'https';
 import path from 'path';
 
 import { Api, Bot, InputFile } from 'grammy';
+import type { ReactionType } from 'grammy/types';
 
 import { execSync } from 'child_process';
 
@@ -12,12 +13,16 @@ import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+import allowedReactions from './telegram-allowed-reactions.json' with { type: 'json' };
 import {
   Channel,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+
+const ALLOWED_REACTIONS: ReadonlySet<string> = new Set(allowedReactions);
+const REACTION_CACHE_CAP = 1000;
 
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
@@ -57,6 +62,7 @@ export class TelegramChannel implements Channel {
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
+  private lastReactions = new Map<string, string | null>();
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
@@ -653,6 +659,60 @@ export class TelegramChannel implements Channel {
       );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
+    }
+  }
+
+  async setReaction(
+    jid: string,
+    messageId: string,
+    emoji: string | null,
+  ): Promise<void> {
+    if (!this.bot) {
+      throw new Error('Telegram bot not initialized');
+    }
+
+    const normalizedEmoji = emoji === '' ? null : emoji;
+    const cacheKey = `${jid}:${messageId}`;
+    if (this.lastReactions.get(cacheKey) === normalizedEmoji) {
+      logger.debug(
+        { jid, messageId, emoji: normalizedEmoji },
+        'Telegram reaction idempotent cache hit, skipping API',
+      );
+      return;
+    }
+
+    if (normalizedEmoji !== null && !ALLOWED_REACTIONS.has(normalizedEmoji)) {
+      throw new Error(
+        `Emoji "${normalizedEmoji}" not allowed for Telegram bot reactions`,
+      );
+    }
+
+    const numericId = jid.replace(/^tg:/, '');
+    const numMsgId = parseInt(messageId, 10);
+    if (Number.isNaN(numMsgId)) {
+      throw new Error(`Invalid message_id: "${messageId}"`);
+    }
+
+    const reaction: ReactionType[] = normalizedEmoji
+      ? ([
+          { type: 'emoji', emoji: normalizedEmoji },
+        ] as unknown as ReactionType[])
+      : [];
+
+    await this.bot.api.setMessageReaction(numericId, numMsgId, reaction);
+    logger.info(
+      { jid, messageId, emoji: normalizedEmoji },
+      'Telegram reaction API called',
+    );
+
+    if (this.lastReactions.has(cacheKey)) {
+      this.lastReactions.delete(cacheKey);
+    }
+    this.lastReactions.set(cacheKey, normalizedEmoji);
+    while (this.lastReactions.size > REACTION_CACHE_CAP) {
+      const oldestKey = this.lastReactions.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.lastReactions.delete(oldestKey);
     }
   }
 

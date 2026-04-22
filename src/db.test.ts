@@ -7,6 +7,7 @@ import {
   getAllChats,
   getAllRegisteredGroups,
   getLastBotMessageTimestamp,
+  getLastUserMessageId,
   getMessagesSince,
   getNewMessages,
   getTaskById,
@@ -648,5 +649,106 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+describe('getLastUserMessageId', () => {
+  it('returns id of the most recent user (non-bot, non-self) message', () => {
+    storeChatMetadata('chat@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'msg-1',
+      chat_jid: 'chat@g.us',
+      sender: '123@s.whatsapp.net',
+      sender_name: 'Alice',
+      content: 'hi',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+    });
+    storeMessage({
+      id: 'msg-2',
+      chat_jid: 'chat@g.us',
+      sender: '123@s.whatsapp.net',
+      sender_name: 'Alice',
+      content: 'later msg',
+      timestamp: '2024-01-01T00:00:05.000Z',
+      is_from_me: false,
+    });
+
+    expect(getLastUserMessageId('chat@g.us')).toBe('msg-2');
+  });
+
+  it('excludes is_from_me=1 messages', () => {
+    storeChatMetadata('chat@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'user-msg',
+      chat_jid: 'chat@g.us',
+      sender: '123@s.whatsapp.net',
+      sender_name: 'Alice',
+      content: 'hi',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+    });
+    storeMessage({
+      id: 'self-msg',
+      chat_jid: 'chat@g.us',
+      sender: 'bot@s.whatsapp.net',
+      sender_name: 'Bot',
+      content: 'reply',
+      timestamp: '2024-01-01T00:00:05.000Z',
+      is_from_me: true,
+    });
+
+    expect(getLastUserMessageId('chat@g.us')).toBe('user-msg');
+  });
+
+  it('excludes is_bot_message=1 messages', () => {
+    storeChatMetadata('chat@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'user-msg',
+      chat_jid: 'chat@g.us',
+      sender: '123@s.whatsapp.net',
+      sender_name: 'Alice',
+      content: 'hi',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+    });
+    storeMessage({
+      id: 'bot-msg',
+      chat_jid: 'chat@g.us',
+      sender: 'bot@s.whatsapp.net',
+      sender_name: 'Bot',
+      content: 'reply',
+      timestamp: '2024-01-01T00:00:05.000Z',
+      is_from_me: false,
+      is_bot_message: true,
+    });
+
+    expect(getLastUserMessageId('chat@g.us')).toBe('user-msg');
+  });
+
+  it('returns null when the chat has no user messages', () => {
+    storeChatMetadata('empty@g.us', '2024-01-01T00:00:00.000Z');
+    expect(getLastUserMessageId('empty@g.us')).toBeNull();
+  });
+
+  it('scoped per chat_jid — does not cross chats', () => {
+    storeChatMetadata('a@g.us', '2024-01-01T00:00:00.000Z');
+    storeChatMetadata('b@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'a-msg',
+      chat_jid: 'a@g.us',
+      sender: '123@s.whatsapp.net',
+      sender_name: 'Alice',
+      content: 'hi',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+    });
+
+    expect(getLastUserMessageId('a@g.us')).toBe('a-msg');
+    expect(getLastUserMessageId('b@g.us')).toBeNull();
   });
 });

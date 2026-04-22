@@ -631,6 +631,7 @@ The `nanoclaw` MCP server is created dynamically per agent call with the current
 | `resume_task` | Resume a paused task |
 | `cancel_task` | Delete a task |
 | `send_message` | Send a message to the group via its channel |
+| `react` | Set or clear an emoji reaction on a Telegram message (signal "received, working") |
 
 ---
 

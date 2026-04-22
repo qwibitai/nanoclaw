@@ -12,6 +12,11 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  setReaction?: (
+    jid: string,
+    messageId: string | null,
+    emoji: string | null,
+  ) => Promise<string>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -23,6 +28,54 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+}
+
+const RESPONSE_TTL_MS = 60_000;
+
+function writeIpcResponse(
+  responsesDir: string,
+  requestId: string,
+  payload: { success: boolean; error?: string; message_id?: string },
+): void {
+  fs.mkdirSync(responsesDir, { recursive: true });
+  const responsePath = path.join(responsesDir, `${requestId}.json`);
+  const tmpPath = `${responsePath}.tmp`;
+  fs.writeFileSync(tmpPath, JSON.stringify({ requestId, ...payload }));
+  fs.renameSync(tmpPath, responsePath);
+}
+
+function sweepOrphanResponses(ipcBaseDir: string): void {
+  let groupFolders: string[];
+  try {
+    groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
+      const stat = fs.statSync(path.join(ipcBaseDir, f));
+      return stat.isDirectory() && f !== 'errors';
+    });
+  } catch {
+    return;
+  }
+
+  const cutoff = Date.now() - RESPONSE_TTL_MS;
+  for (const folder of groupFolders) {
+    const responsesDir = path.join(ipcBaseDir, folder, 'responses');
+    if (!fs.existsSync(responsesDir)) continue;
+    try {
+      for (const file of fs.readdirSync(responsesDir)) {
+        if (!file.endsWith('.json')) continue;
+        const filePath = path.join(responsesDir, file);
+        try {
+          const stat = fs.statSync(filePath);
+          if (stat.mtimeMs < cutoff) {
+            fs.unlinkSync(filePath);
+          }
+        } catch {
+          // File already removed by container, ignore
+        }
+      }
+    } catch (err) {
+      logger.debug({ folder, err }, 'Error sweeping orphan IPC responses');
+    }
+  }
 }
 
 let ipcWatcherRunning = false;
@@ -92,6 +145,68 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
+              } else if (
+                data.type === 'reaction' &&
+                data.chatJid &&
+                typeof data.requestId === 'string'
+              ) {
+                const targetGroup = registeredGroups[data.chatJid];
+                const authorized =
+                  isMain || (targetGroup && targetGroup.folder === sourceGroup);
+                const responsesDir = path.join(
+                  ipcBaseDir,
+                  sourceGroup,
+                  'responses',
+                );
+                if (!authorized) {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC reaction attempt blocked',
+                  );
+                  writeIpcResponse(responsesDir, data.requestId, {
+                    success: false,
+                    error: 'unauthorized',
+                  });
+                } else if (!deps.setReaction) {
+                  writeIpcResponse(responsesDir, data.requestId, {
+                    success: false,
+                    error: 'reactions not supported in this channel',
+                  });
+                } else {
+                  try {
+                    const resolvedMessageId = await deps.setReaction(
+                      data.chatJid,
+                      typeof data.message_id === 'string'
+                        ? data.message_id
+                        : null,
+                      typeof data.emoji === 'string' ? data.emoji : null,
+                    );
+                    logger.info(
+                      {
+                        chatJid: data.chatJid,
+                        sourceGroup,
+                        emoji: data.emoji,
+                        messageId: resolvedMessageId,
+                      },
+                      'IPC reaction applied',
+                    );
+                    writeIpcResponse(responsesDir, data.requestId, {
+                      success: true,
+                      message_id: resolvedMessageId,
+                    });
+                  } catch (err) {
+                    const errMsg =
+                      err instanceof Error ? err.message : String(err);
+                    logger.warn(
+                      { chatJid: data.chatJid, sourceGroup, err: errMsg },
+                      'IPC reaction failed',
+                    );
+                    writeIpcResponse(responsesDir, data.requestId, {
+                      success: false,
+                      error: errMsg,
+                    });
+                  }
+                }
               }
               fs.unlinkSync(filePath);
             } catch (err) {
@@ -147,6 +262,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
       }
     }
 
+    sweepOrphanResponses(ipcBaseDir);
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
   };
 

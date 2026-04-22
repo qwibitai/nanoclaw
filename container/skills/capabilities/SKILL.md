@@ -45,6 +45,7 @@ Read the allowed tools from your SDK configuration. You always have access to:
 
 The NanoClaw MCP server exposes these tools (via `mcp__nanoclaw__*` prefix):
 - `send_message` — send a message to the user/group
+- `react` — set/clear an emoji reaction on a Telegram message (👀 while working, ✅ when done)
 - `schedule_task` — schedule a recurring or one-time task
 - `list_tasks` — list scheduled tasks
 - `pause_task` — pause a scheduled task
