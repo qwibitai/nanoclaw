@@ -18,6 +18,12 @@ import {
   type AgencyHqTask,
 } from '../agency-hq-client.js';
 import { AGENCY_HQ_URL, AGENT_CLI_BIN } from '../config.js';
+import {
+  getEffectiveConfig,
+  startConfigPolling,
+  stopConfigPolling,
+  _resetForTest as _resetConfigForTest,
+} from './dispatch-config.js';
 import { createCorrelationLogger, logger } from '../logger.js';
 
 // --- Configuration ---
@@ -98,6 +104,7 @@ export async function buildOpsPrompt(task: AgencyHqTask): Promise<string> {
 
 /**
  * Execute an ops task via the Claude Code CLI.
+ * Uses dispatch-config for provider/model when available, falls back to env vars.
  * Returns { result, error } where result is stdout and error is set on failure.
  */
 export async function executeTask(
@@ -107,9 +114,15 @@ export async function executeTask(
   const abort = new AbortController();
   activeAbort = abort;
 
+  const config = getEffectiveConfig();
+
   return new Promise((resolve) => {
-    const args = ['--print', '--dangerously-skip-permissions', prompt];
-    const proc = spawn(AGENT_CLI_BIN, args, {
+    const args = ['--print', '--dangerously-skip-permissions'];
+    if (config.model) {
+      args.push('--model', config.model);
+    }
+    args.push(prompt);
+    const proc = spawn(config.cliBin, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       signal: abort.signal,
       env: { ...process.env },
@@ -317,13 +330,19 @@ export async function pollTick(): Promise<void> {
 }
 
 /** Start the polling loop. Returns a cleanup function. */
-export function startPolling(): () => void {
+export async function startPolling(): Promise<() => void> {
+  // Fetch dispatch-config before starting task polling
+  await startConfigPolling();
+
+  const effective = getEffectiveConfig();
   logger.info(
     {
       pollIntervalMs: OPS_POLL_INTERVAL_MS,
       taskTimeoutMs: OPS_TASK_TIMEOUT_MS,
       agencyHqUrl: AGENCY_HQ_URL,
-      cliBin: AGENT_CLI_BIN,
+      cliBin: effective.cliBin,
+      model: effective.model,
+      provider: effective.provider,
     },
     'Ops-agent worker starting',
   );
@@ -348,6 +367,8 @@ export function shutdown(): void {
   stopping = true;
   logger.info('Ops-agent worker shutting down');
 
+  stopConfigPolling();
+
   if (pollTimer) {
     clearTimeout(pollTimer);
     pollTimer = null;
@@ -365,12 +386,14 @@ export function _resetForTest(): void {
   stopping = false;
   pollTimer = null;
   activeAbort = null;
+  _resetConfigForTest();
 }
 
 // --- Entrypoint ---
 
 if (process.argv[1] && process.argv[1].includes('ops-agent/worker')) {
-  // Verify CLI binary is available
+  // Verify CLI binary is available (check env default; dispatch-config
+  // may override at runtime, but the default must exist on disk)
   try {
     execSync(`which ${AGENT_CLI_BIN}`, { stdio: 'pipe' });
   } catch {
@@ -381,15 +404,15 @@ if (process.argv[1] && process.argv[1].includes('ops-agent/worker')) {
     process.exit(1);
   }
 
-  const cleanup = startPolling();
+  startPolling().then((cleanup) => {
+    process.on('SIGTERM', () => {
+      logger.info('Received SIGTERM');
+      cleanup();
+    });
 
-  process.on('SIGTERM', () => {
-    logger.info('Received SIGTERM');
-    cleanup();
-  });
-
-  process.on('SIGINT', () => {
-    logger.info('Received SIGINT');
-    cleanup();
+    process.on('SIGINT', () => {
+      logger.info('Received SIGINT');
+      cleanup();
+    });
   });
 }

@@ -143,7 +143,7 @@ describe('ops-agent/worker', () => {
   });
 
   describe('executeTask', () => {
-    it('spawns claude CLI with --print flag', async () => {
+    it('spawns CLI using dispatch-config defaults (env fallback)', async () => {
       const mockProc = {
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
@@ -155,7 +155,7 @@ describe('ops-agent/worker', () => {
 
       const promise = executeTask('test prompt', 5000);
 
-      // Verify spawn was called correctly
+      // Without dispatch-config, should use env default 'claude' and no --model flag
       expect(spawn).toHaveBeenCalledWith(
         'claude',
         ['--print', '--dangerously-skip-permissions', 'test prompt'],
@@ -179,6 +179,49 @@ describe('ops-agent/worker', () => {
       const result = await promise;
       expect(result.result).toBe('Task output');
       expect(result.error).toBeNull();
+    });
+
+    it('passes --model flag when dispatch-config provides a model', async () => {
+      // Seed dispatch-config with a model
+      const { refreshConfig } = await import('./dispatch-config.js');
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          success: true,
+          data: { model: 'claude-sonnet-4-5-20250929', cli_bin: 'claude' },
+        }),
+      );
+      await refreshConfig();
+
+      const mockProc = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        stdin: { end: vi.fn() },
+        on: vi.fn(),
+      };
+      vi.mocked(spawn).mockReturnValue(mockProc as never);
+
+      const promise = executeTask('test prompt', 5000);
+
+      expect(spawn).toHaveBeenCalledWith(
+        'claude',
+        [
+          '--print',
+          '--dangerously-skip-permissions',
+          '--model',
+          'claude-sonnet-4-5-20250929',
+          'test prompt',
+        ],
+        expect.objectContaining({
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }),
+      );
+
+      // Simulate close
+      const closeHandler = mockProc.on.mock.calls.find(
+        (c: unknown[]) => c[0] === 'close',
+      )![1];
+      closeHandler(0);
+      await promise;
     });
 
     it('reports error on non-zero exit code', async () => {
@@ -397,14 +440,24 @@ describe('ops-agent/worker', () => {
   });
 
   describe('startPolling / shutdown', () => {
-    it('starts polling and can be shut down', () => {
-      const cleanup = startPolling();
+    it('starts polling and can be shut down', async () => {
+      // startPolling fetches dispatch-config first
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({ success: true, data: {} }),
+      );
+
+      const cleanup = await startPolling();
       expect(typeof cleanup).toBe('function');
       cleanup();
     });
 
     it('stops processing on shutdown', async () => {
-      startPolling();
+      // startPolling fetches dispatch-config first
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({ success: true, data: {} }),
+      );
+
+      await startPolling();
       shutdown();
 
       // Advance timers — pollTick should not run after shutdown
