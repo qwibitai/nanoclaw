@@ -25,7 +25,8 @@
     "test:watch": "vitest",
     "smoke:runtime": "node scripts/smoke-runtime.mjs",
     "smoke:health": "node scripts/health-check.mjs",
-    "status": "tsx scripts/nanoclaw-status.ts"
+    "status": "tsx scripts/nanoclaw-status.ts",
+    "verify": "tsx src/cli/verify.ts"
   },
   "dependencies": {
     "@jeffrey-keyser/message-contracts": "^1.5.1",
