@@ -390,7 +390,9 @@ Color: green if current year revenue > STLY, red if < STLY by more than 10%.
 
 ## Output
 
-**HTML email** to Gabriel.Ratner@properhotel.com ONLY via `mcp__outlook__send-email`. Subject: "COO Briefing -- [Month Day, Year]". Self-addressed operational report, send directly. NO CC, NO BCC -- Gabe is the only recipient.
+**HTML email** to Gabriel.Ratner@properhotel.com ONLY via `mcp__outlook__send-email`. Subject: "COO Briefing -- [Month Day, Year]". Self-addressed operational report, send directly.
+
+**ABSOLUTE RULE: NO CC, NO BCC, ever, under any circumstances.** Do not pass `cc` or `bcc` parameters to `send-email`. Do not add any address from contacts, org chart, or anywhere else. The only recipient is Gabriel.Ratner@properhotel.com. This applies even if a contact looks like a relevant stakeholder (e.g. revman@properhotel.com). One recipient. No exceptions.
 
 **Telegram** via `send_message`. Per hotel 3-4 lines (P&L variance, ALICE count, Revinate score, STR RGI if Wednesday). FOCUS line if actionable. Under 4000 chars.
 
