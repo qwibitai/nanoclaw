@@ -40,6 +40,18 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  progress?: AgentProgress;
+}
+
+/**
+ * Intermediate step notification streamed to the host so users can see what
+ * the agent is currently doing (tool calls, thinking). Never carries the
+ * final answer — that stays in `result`.
+ */
+interface AgentProgress {
+  kind: 'tool_use' | 'tool_result' | 'thinking';
+  tool?: string;
+  summary: string;
 }
 
 interface SessionEntry {
@@ -125,6 +137,83 @@ function writeOutput(output: ContainerOutput): void {
 
 function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
+}
+
+const TOOL_USE_PREVIEW_KEYS = [
+  'command',
+  'path',
+  'file_path',
+  'pattern',
+  'url',
+  'query',
+  'description',
+  'prompt',
+  'old_string',
+  'new_string',
+];
+
+function truncate(text: string, max: number): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+}
+
+function summariseToolUseInput(input: unknown): string {
+  if (!input || typeof input !== 'object') return '';
+  const obj = input as Record<string, unknown>;
+  for (const key of TOOL_USE_PREVIEW_KEYS) {
+    const v = obj[key];
+    if (typeof v === 'string' && v.trim()) {
+      return truncate(v, 160);
+    }
+  }
+  const firstString = Object.values(obj).find(
+    (v) => typeof v === 'string' && v.trim(),
+  );
+  if (typeof firstString === 'string') return truncate(firstString, 160);
+  try {
+    return truncate(JSON.stringify(obj), 160);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Emit `tool_use` items and non-final `text` blocks inside an assistant
+ * message as progress markers. The final result text is delivered via the
+ * dedicated `type === 'result'` branch, so we never forward text blocks that
+ * are identical to the final answer — but short intermediate reasoning blobs
+ * still show up as `thinking` progress.
+ */
+function emitAssistantProgress(message: unknown, newSessionId?: string): void {
+  const content = (
+    message as {
+      message?: {
+        content?: Array<{
+          type?: string;
+          text?: string;
+          name?: string;
+          input?: unknown;
+        }>;
+      };
+    }
+  ).message?.content;
+  if (!Array.isArray(content)) return;
+
+  for (const block of content) {
+    if (block.type === 'tool_use' && typeof block.name === 'string') {
+      const preview = summariseToolUseInput(block.input);
+      writeOutput({
+        status: 'success',
+        result: null,
+        newSessionId,
+        progress: {
+          kind: 'tool_use',
+          tool: block.name,
+          summary: preview,
+        },
+      });
+    }
+  }
 }
 
 function getSessionSummary(
@@ -501,6 +590,7 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+      emitAssistantProgress(message, newSessionId);
     }
 
     if (message.type === 'system' && message.subtype === 'init') {

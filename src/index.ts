@@ -20,6 +20,7 @@ import {
   getRegisteredChannelNames,
 } from './channels/registry.js';
 import {
+  AgentProgress,
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
@@ -283,32 +284,52 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+  const output = await runAgent(
+    group,
+    prompt,
+    chatJid,
+    channel.name,
+    async (result) => {
+      // Streaming output callback — called for each agent result
+      if (result.progress) {
+        const line = formatProgressLine(result.progress);
+        if (line) {
+          try {
+            await channel.sendMessage(chatJid, line);
+          } catch (err) {
+            logger.warn(
+              { group: group.name, err: String(err) },
+              'failed to stream progress to channel',
+            );
+          }
+        }
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+        if (text) {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid);
+      }
+
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+  );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
@@ -336,10 +357,38 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+const TOOL_ICON: Record<string, string> = {
+  Bash: '🖥',
+  Read: '📄',
+  Write: '✏️',
+  Edit: '✏️',
+  StrReplace: '✏️',
+  Glob: '🔎',
+  Grep: '🔎',
+  WebSearch: '🌐',
+  WebFetch: '🌐',
+  Task: '🤖',
+};
+
+function formatProgressLine(progress: AgentProgress): string {
+  if (progress.kind === 'tool_use') {
+    const icon = progress.tool ? (TOOL_ICON[progress.tool] ?? '🔧') : '🔧';
+    const name = progress.tool ?? 'tool';
+    return progress.summary
+      ? `> ${icon} **${name}** — ${progress.summary}`
+      : `> ${icon} **${name}**`;
+  }
+  if (progress.kind === 'tool_result') {
+    return progress.summary ? `> ↳ ${progress.summary}` : '';
+  }
+  return progress.summary ? `> 💭 ${progress.summary}` : '';
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  channelName: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
@@ -392,6 +441,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        channelName,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),

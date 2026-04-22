@@ -45,9 +45,12 @@ When you learn something important:
 
 ## Message Formatting
 
-Format messages based on the channel. Check the group folder name prefix:
+Format messages based on the channel. The channel name is available as the
+`$NANOCLAW_CHANNEL` environment variable (`weixin`, `telegram`, `whatsapp`,
+`slack`, `discord`, …). Fall back to the group folder name prefix (e.g.
+`slack_`, `telegram_`, `weixin_`) if the variable is unset.
 
-### Slack channels (folder starts with `slack_`)
+### Slack channels (`$NANOCLAW_CHANNEL=slack`, or folder starts with `slack_`)
 
 Use Slack mrkdwn syntax. Run `/slack-formatting` for the full reference. Key rules:
 - `*bold*` (single asterisks)
@@ -58,7 +61,7 @@ Use Slack mrkdwn syntax. Run `/slack-formatting` for the full reference. Key rul
 - `>` for block quotes
 - No `##` headings — use `*Bold text*` instead
 
-### WhatsApp/Telegram (folder starts with `whatsapp_` or `telegram_`)
+### WhatsApp / Telegram (`$NANOCLAW_CHANNEL` is `whatsapp` or `telegram`, or folder starts with `whatsapp_` / `telegram_`)
 
 - `*bold*` (single asterisks, NEVER **double**)
 - `_italic_` (underscores)
@@ -67,29 +70,33 @@ Use Slack mrkdwn syntax. Run `/slack-formatting` for the full reference. Key rul
 
 No `##` headings. No `[links](url)`. No `**double stars**`.
 
-### Discord (folder starts with `discord_`)
+### Discord (`$NANOCLAW_CHANNEL=discord`, or folder starts with `discord_`)
 
 Standard Markdown: `**bold**`, `*italic*`, `[links](url)`, `# headings`.
 
-### WeChat (folder starts with `weixin_` or JID starts with `wx:`)
+### WeChat (`$NANOCLAW_CHANNEL=weixin`, or folder starts with `weixin_`, or JID starts with `wx:`)
 
 Plain text. WeChat iLink has no rich Markdown rendering — the receiver sees
 exactly what you write, so drop `**bold**`, headings, and tables.
 
-To send an image, video, or file, embed one of these markers in your reply:
+To send an image, video, or file, embed one of these markers directly in
+your reply text:
 
-- `![caption](/abs/host/path.png)` — image, rendered inline
-- `<file:/abs/host/path.pdf>` — any file attachment (pdf, zip, office, …)
+- `![caption](/workspace/group/chart.png)` — image, rendered inline
+- `<file:/workspace/group/report.pdf>` — any file attachment (pdf, zip, office, …)
 
-Paths must be absolute. The container-local shortcut `/workspace/group/…` is
-auto-translated to the corresponding host path, so the simplest flow is:
+The easiest flow: save the file under your CWD (which is
+`/workspace/group/` inside the container) and reference it with that
+path — NanoClaw auto-translates it back to the host's
+`groups/<folder>/…` before uploading to the WeChat CDN. Absolute host
+paths (e.g. `~/Workspace/foo.png`) also work if the file lives outside
+the group directory.
 
-1. Write the file under your CWD, e.g. `./chart.png` (which is
-   `/workspace/group/chart.png` inside the container).
-2. In your reply, write `![](/workspace/group/chart.png)`.
-
-Text that surrounds an attachment marker is delivered as a separate text
-message in order — keep captions short and put them on their own line.
+Each marker becomes one media message. Any text that surrounds it is
+delivered as a separate text message in order, so keep captions short
+and put them on their own line. Do NOT describe the attachment with
+phrases like "图片如下" / "here is the file" — just emit the marker
+and the channel will display the media inline.
 
 ---
 
