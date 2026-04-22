@@ -55,20 +55,27 @@ export async function generateImage(
     return null;
   }
 
-  const resp = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'gpt-image-2',
-      prompt,
-      n: 1,
-      size: '1024x1024',
-      quality: 'low',
-    }),
-  });
+  let resp: Response;
+  try {
+    resp = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-image-2',
+        prompt,
+        n: 1,
+        size: '1024x1024',
+        quality: 'low',
+      }),
+      signal: AbortSignal.timeout(180_000),
+    });
+  } catch (err) {
+    logger.error({ err, promptLen: prompt.length }, 'Image gen: fetch failed');
+    return null;
+  }
 
   if (!resp.ok) {
     const body = await resp.text();
@@ -90,8 +97,12 @@ export async function generateImage(
   fs.mkdirSync(attachmentsDir, { recursive: true });
   const filename = `image_${Date.now()}.png`;
   const filePath = path.join(attachmentsDir, filename);
-  fs.writeFileSync(filePath, Buffer.from(b64, 'base64'));
-  logger.info({ filePath, promptLen: prompt.length }, 'Image generated');
+  const buf = Buffer.from(b64, 'base64');
+  fs.writeFileSync(filePath, buf);
+  logger.info(
+    { filePath, bytes: buf.length, promptLen: prompt.length },
+    'Image generated',
+  );
   return filePath;
 }
 
@@ -129,6 +140,7 @@ export async function editImage(
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },
       body: form,
+      signal: AbortSignal.timeout(180_000),
     });
   } catch (err) {
     logger.error({ err, sourcePath }, 'Image edit: fetch failed');
@@ -155,9 +167,10 @@ export async function editImage(
   fs.mkdirSync(attachmentsDir, { recursive: true });
   const filename = `image_${Date.now()}.png`;
   const filePath = path.join(attachmentsDir, filename);
-  fs.writeFileSync(filePath, Buffer.from(b64, 'base64'));
+  const buf = Buffer.from(b64, 'base64');
+  fs.writeFileSync(filePath, buf);
   logger.info(
-    { filePath, sourcePath, promptLen: prompt.length },
+    { filePath, bytes: buf.length, sourcePath, promptLen: prompt.length },
     'Image edited',
   );
   return filePath;

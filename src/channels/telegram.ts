@@ -777,7 +777,7 @@ export class TelegramChannel implements Channel {
           new InputFile(fs.readFileSync(filePath), path.basename(filePath)),
           options,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          AbortSignal.timeout(60_000) as any,
+          AbortSignal.timeout(120_000) as any,
         );
         logger.info({ jid }, 'Telegram photo sent');
         return;
