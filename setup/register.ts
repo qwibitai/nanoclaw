@@ -162,6 +162,8 @@ export async function run(args: string[]): Promise<void> {
           /You are Andy/g,
           `You are ${parsed.assistantName}`,
         );
+        // Also rename trigger references (e.g. scheduled-task "trigger": "@Andy" entries)
+        content = content.replace(/@Andy\b/g, `@${parsed.assistantName}`);
         fs.writeFileSync(mdFile, content);
         logger.info({ file: mdFile }, 'Updated CLAUDE.md');
       }

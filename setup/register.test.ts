@@ -236,6 +236,33 @@ describe('file templating', () => {
     expect(content).toContain('You are C.L.A.U.D.E.');
   });
 
+  it('replaces @Andy trigger references in CLAUDE.md content', () => {
+    let content = [
+      '# Andy',
+      '',
+      'You are Andy.',
+      '',
+      'Scheduled tasks:',
+      '```json',
+      '[',
+      '  { "trigger": "@Andy", "prompt": "daily digest" },',
+      '  { "trigger": "@Andy", "prompt": "weekly review" }',
+      ']',
+      '```',
+    ].join('\n');
+
+    content = content.replace(/^# Andy$/m, '# Ruby');
+    content = content.replace(/You are Andy/g, 'You are Ruby');
+    content = content.replace(/@Andy\b/g, '@Ruby');
+
+    expect(content).not.toContain('@Andy');
+    expect(content).toContain('@Ruby');
+    // Sanity: word boundary prevents accidentally matching longer names
+    // that happen to start with "Andy"
+    const overlap = '@Andyville'.replace(/@Andy\b/g, '@Ruby');
+    expect(overlap).toBe('@Andyville');
+  });
+
   it('updates .env ASSISTANT_NAME line', () => {
     let envContent = 'SOME_KEY=value\nASSISTANT_NAME="Andy"\nOTHER=test';
 
