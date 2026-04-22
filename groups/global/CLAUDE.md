@@ -22,6 +22,8 @@ When in doubt, ask Gabe before acting. A 10-second confirmation is cheaper than 
 
 These three rules override everything else. If any other instruction conflicts, these win.
 
+4. **Never use em dashes (—) or dashes as separators in any output.** This applies to all written communication: emails, drafts, Telegram messages, summaries, briefings, everything. Use commas or periods instead. No exceptions.
+
 ## What You Can Do
 
 - Answer questions and have conversations
@@ -77,23 +79,22 @@ Rules:
 4. **Explore before assuming schema.** Use `SHOW DATABASES`, `SHOW SCHEMAS IN DATABASE X`, `DESCRIBE TABLE ...` to discover structure. Don't guess column names.
 5. **Surface findings as items.** If a query surfaces something Gabe should act on (negative review, booking anomaly, revenue gap), create a row in the Notion Open Items database with Property set and Source set to a link to the underlying context.
 
-## Open Items (Notion database)
+## Open Items (Microsoft ToDo)
 
-Gabe's working open-items surface is a Notion database, NOT a flat page:
-- Database page: `93a63def-900c-4e1f-953e-97c271deb919`
-- Data source: `8ab311a2-891d-48e3-8110-66fd134b5500`
-
-Each open item is a row with properties (Category, Status, Owner, Property, Due, Source, Item ID). The row's page body holds working context: thread summary, draft replies, decision notes.
+Gabe's working open-items surface is a Microsoft ToDo list, NOT Notion or SQLite:
+- List name: `Nano — COO Triage`
+- List ID: `AAMkADAyMTNhMWQ3LTg3ZTYtNDQzZi04MGFmLWM2MmVkNzZkNzQ4MgAuAAAAAACM1iz8JLvDT53LBt6p6qevAQDNA90Fe1j4RZcBrlwNuvPFAAJ_fUxSAAA=`
+- MCP tools: `mcp__outlook__create-task`, `mcp__outlook__list-tasks`, `mcp__outlook__update-task`
 
 Rules:
-1. Create a new row for every new open item. Do not write to the old flat page `3366d40b-27ff-81aa-bc16-dbb3a76996ce` (archived).
-2. Update existing rows instead of duplicating — query by Owner + Property + a keyword before creating.
-3. Closing an item = set Status=Done AND Category=✅ Done. Never delete.
-4. Telegram digests are queries over this database, not independently assembled lists. Single source of truth prevents Notion/Telegram drift.
-5. Gabe references items by Item ID (e.g. `ITM-23`), not per-category numbers.
-6. **Do NOT use the `open_item_upsert` or `open_item_update_status` MCP tools.** The SQLite `open_items` table is retired. All item state lives in Notion. If Gabe marks something Done in Notion, that is authoritative — do not query or update SQLite to override it.
+1. **Create a task** for every actionable email that needs Gabe's attention. Title format: `[Name] — [topic] — [action needed]`. Set dueDateTime if there's a deadline. Put thread summary and context in the task body.
+2. **Never duplicate** — before creating, call `list-tasks` and check for an existing task on the same topic/thread.
+3. **Closing an item** = call `update-task` with `status: completed`. Never delete tasks — completed tasks stay as history.
+4. **Gabe crosses items off in ToDo** (Outlook app or mobile) and they are gone from Nano's list automatically. This is the primary completion path — no chat command needed.
+5. **Digests query ToDo live** via `list-tasks`. Filter: `status != completed`. This is the single source of truth — no SQLite, no Notion for open items.
+6. **Do NOT use `open_item_upsert`, `open_item_update_status`, or any Notion MCP tools for tracking open items.** SQLite `open_items` is retired. Notion is retired for this purpose. ToDo is authoritative.
 
-See nanoclawrules.md for full schema and field semantics.
+See nanoclawrules.md for full workflow and digest query details.
 
 ## Memory
 
