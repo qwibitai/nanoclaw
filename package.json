@@ -32,12 +32,12 @@
     "verify": "tsx src/cli/verify.ts"
   },
   "dependencies": {
-    "@jeffrey-keyser/message-contracts": "^1.5.1",
+    "@jeffrey-keyser/message-contracts": "^1.11.2",
     "@types/amqplib": "^0.10.8",
     "amqplib": "^0.10.9",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
-    "grammy": "^1.41.1",
+    "grammy": "^1.42.0",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "yaml": "^2.8.2",
@@ -46,18 +46,18 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^7.6.12",
-    "@types/node": "^22.10.0",
+    "@types/node": "^22.19.17",
     "@typescript-eslint/eslint-plugin": "^8.57.0",
     "@typescript-eslint/parser": "^8.57.0",
-    "@vitest/coverage-v8": "^4.0.18",
-    "eslint": "^10.0.3",
+    "@vitest/coverage-v8": "^4.1.5",
+    "eslint": "^10.2.1",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
     "prettier": "^3.8.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.57.0",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.5"
   },
   "engines": {
     "node": ">=20"
