@@ -34,7 +34,6 @@ export class WeixinChannel implements Channel {
   private accountId: string;
   private baseUrl: string;
   private token: string;
-  private botUserId: string | undefined;
 
   private contextTokens: Record<string, string>;
   private abortController: AbortController | null = null;
@@ -61,7 +60,6 @@ export class WeixinChannel implements Channel {
     this.accountId = accountId;
     this.baseUrl = account.baseUrl;
     this.token = account.token;
-    this.botUserId = account.userId;
     this.contextTokens = loadContextTokens(accountId);
     this.onMessage = callbacks.onMessage;
     this.onChatMetadata = callbacks.onChatMetadata;
@@ -84,7 +82,6 @@ export class WeixinChannel implements Channel {
       accountId: this.accountId,
       baseUrl: this.baseUrl,
       token: this.token,
-      ownBotUserId: this.botUserId,
       abortSignal: this.abortController.signal,
       onInbound: (parsed) => {
         if (parsed.contextToken) {
@@ -144,11 +141,28 @@ export class WeixinChannel implements Channel {
       clientId: crypto.randomUUID(),
     });
 
-    await sendMessageApi({
-      baseUrl: this.baseUrl,
-      token: this.token,
-      body: req,
-    });
+    try {
+      await sendMessageApi({
+        baseUrl: this.baseUrl,
+        token: this.token,
+        body: req,
+      });
+      logger.info(
+        {
+          accountId: this.accountId,
+          userId,
+          len: text.length,
+          hasContextToken: Boolean(contextToken),
+        },
+        'weixin sendMessage ok',
+      );
+    } catch (err) {
+      logger.error(
+        { accountId: this.accountId, userId, err: String(err) },
+        'weixin sendMessage failed',
+      );
+      throw err;
+    }
   }
 }
 

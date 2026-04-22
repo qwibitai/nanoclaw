@@ -122,6 +122,17 @@ export async function run(_args: string[]): Promise<void> {
     channelAuth.whatsapp = 'authenticated';
   }
 
+  // WeChat: check for a logged-in default account under store/weixin/
+  const weixinDefaultAccount = path.join(
+    projectRoot,
+    'store',
+    'weixin',
+    'default-account',
+  );
+  if (fs.existsSync(weixinDefaultAccount)) {
+    channelAuth.weixin = 'authenticated';
+  }
+
   // Token-based channels: check .env
   if (process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN) {
     channelAuth.telegram = 'configured';

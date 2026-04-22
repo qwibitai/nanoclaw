@@ -20,7 +20,6 @@ export interface MonitorOptions {
   accountId: string;
   baseUrl: string;
   token: string;
-  ownBotUserId?: string;
   onInbound: (parsed: ParsedInbound) => void;
   abortSignal: AbortSignal;
 }
@@ -119,7 +118,16 @@ export async function runMonitorLoop(opts: MonitorOptions): Promise<void> {
       }
 
       for (const msg of resp.msgs ?? []) {
-        const parsed = parseWeixinMessage(msg, opts.ownBotUserId);
+        logger.info(
+          {
+            accountId,
+            fromUserId: msg.from_user_id,
+            messageType: msg.message_type,
+            itemTypes: msg.item_list?.map((i) => i.type).join(',') ?? 'none',
+          },
+          'weixin inbound message',
+        );
+        const parsed = parseWeixinMessage(msg);
         if (!parsed) continue;
         try {
           onInbound(parsed);

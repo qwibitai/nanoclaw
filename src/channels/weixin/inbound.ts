@@ -11,7 +11,7 @@ import crypto from 'node:crypto';
 import { NewMessage } from '../../types.js';
 
 import type { MessageItem, WeixinMessage } from './types.js';
-import { MessageItemType } from './types.js';
+import { MessageItemType, MessageType } from './types.js';
 
 function isMediaItem(item: MessageItem): boolean {
   return (
@@ -72,13 +72,12 @@ export interface ParsedInbound {
   contextToken?: string;
 }
 
-export function parseWeixinMessage(
-  msg: WeixinMessage,
-  ownBotUserId: string | undefined,
-): ParsedInbound | null {
+export function parseWeixinMessage(msg: WeixinMessage): ParsedInbound | null {
   const fromUserId = msg.from_user_id ?? '';
   if (!fromUserId) return null;
-  if (ownBotUserId && fromUserId === ownBotUserId) return null;
+  // Drop messages authored by the bot itself. The inbound userId of the person
+  // who scanned the QR is the normal counterpart, not us.
+  if (msg.message_type === MessageType.BOT) return null;
 
   const content = bodyFromItemList(msg.item_list);
   if (!content) return null;

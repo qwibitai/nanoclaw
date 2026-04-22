@@ -19,26 +19,28 @@ describe('weixin normalizeAccountId', () => {
 
 describe('weixin parseWeixinMessage', () => {
   it('returns null when from_user_id is empty', () => {
-    expect(parseWeixinMessage({ from_user_id: '' }, undefined)).toBeNull();
+    expect(parseWeixinMessage({ from_user_id: '' })).toBeNull();
   });
 
-  it('filters messages sent by ourselves', () => {
+  it('filters messages whose message_type is BOT (authored by ourselves)', () => {
     const msg: WeixinMessage = {
-      from_user_id: 'bot',
+      from_user_id: 'u-1',
+      message_type: MessageType.BOT,
       item_list: [{ type: MessageItemType.TEXT, text_item: { text: 'hi' } }],
     };
-    expect(parseWeixinMessage(msg, 'bot')).toBeNull();
+    expect(parseWeixinMessage(msg)).toBeNull();
   });
 
   it('decodes plain text messages', () => {
     const msg: WeixinMessage = {
       from_user_id: 'u-1',
+      message_type: MessageType.USER,
       create_time_ms: 1_700_000_000_000,
       context_token: 'ctx-1',
       client_id: 'cid-1',
       item_list: [{ type: MessageItemType.TEXT, text_item: { text: 'hello' } }],
     };
-    const parsed = parseWeixinMessage(msg, 'other-bot');
+    const parsed = parseWeixinMessage(msg);
     expect(parsed).not.toBeNull();
     expect(parsed!.jid).toBe('wx:u-1');
     expect(parsed!.contextToken).toBe('ctx-1');
@@ -65,7 +67,7 @@ describe('weixin parseWeixinMessage', () => {
         },
       ],
     };
-    const parsed = parseWeixinMessage(msg, undefined);
+    const parsed = parseWeixinMessage(msg);
     expect(parsed!.message.content).toBe('[引用: orig | body]\nreply');
   });
 
@@ -80,7 +82,7 @@ describe('weixin parseWeixinMessage', () => {
         },
       ],
     };
-    const parsed = parseWeixinMessage(msg, undefined);
+    const parsed = parseWeixinMessage(msg);
     expect(parsed!.message.content).toBe('look');
   });
 
@@ -89,7 +91,7 @@ describe('weixin parseWeixinMessage', () => {
       from_user_id: 'u-4',
       item_list: [{ type: MessageItemType.IMAGE }],
     };
-    const parsed = parseWeixinMessage(msg, undefined);
+    const parsed = parseWeixinMessage(msg);
     expect(parsed!.message.content).toBe('[图片]');
   });
 
@@ -100,7 +102,7 @@ describe('weixin parseWeixinMessage', () => {
         { type: MessageItemType.VOICE, voice_item: { text: 'hi from voice' } },
       ],
     };
-    const parsed = parseWeixinMessage(msg, undefined);
+    const parsed = parseWeixinMessage(msg);
     expect(parsed!.message.content).toBe('hi from voice');
   });
 });
