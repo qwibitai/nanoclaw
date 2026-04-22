@@ -11,7 +11,39 @@ previously-addressed issues for reference.
 
 ## Open items
 
-(none known)
+(none known — items below were addressed in commits on top of the
+2026-04-22 trial run; see "First real-world trial" section)
+
+## First real-world trial: 2026-04-22 (Dodami Tier-2 shadow plan)
+
+First production use after the 39-round hardening pass. Plan completed
+end-to-end (3 tasks, 2 waves, all merged + deployed). Four UX/protocol
+issues surfaced and were fixed in follow-up commits same-day:
+
+- [FIXED] **Plan-level Test command needs an explicit repo-root
+  reference.** Author wrote `cd ~/repo/$UNSUBSTITUTED && pytest ...`
+  with `$UNSUBSTITUTED` an unset shell var; `cd` silently landed in
+  the parent dir, pytest failed on missing tests/. Orchestrator now
+  exports `REPO_ROOT` to the bash subshell + SKILL.md documents the
+  invariant. (codex-merge-wave + SKILL.md)
+- [FIXED] **Post-wave-test-failed message wrongly implied rollback
+  was the only fix.** When the plan-level Test command itself is
+  malformed (vs a real code regression), rolling back discards
+  correctly-merged work. Message now distinguishes the two cases.
+  (codex-merge-wave)
+- [FIXED] **Spec-reviewer subagent had no context on prior-attempt
+  failures.** When codex made a recovery change to fix a stage-1 test
+  failure (e.g. lazy-import wrapper for an unavailable module), the
+  reviewer flagged it as out-of-scope because the literal task spec
+  didn't mention it. Cost: 3 wasted codex attempts, 1 escalation
+  cycle. Marker payload now includes `prior_attempt_findings`;
+  reviewer prompt explicitly handles recovery-change scope.
+  (codex-gate + spec-reviewer-prompt.md + PROTOCOL.md)
+- [FIXED] **Claude-side marker polling pattern was undocumented.**
+  Coordinating session went through three broken Monitor variants
+  (zsh nomatch, name-only dedup across --resume, tail+grep against
+  atomic writes) before landing on a working pattern. Reference
+  pattern + footgun list now in PROTOCOL.md. (PROTOCOL.md)
 
 ## Historical: items addressed during 45-round hardening pass
 
