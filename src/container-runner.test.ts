@@ -227,4 +227,26 @@ describe('container-runner timeout behavior', () => {
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
   });
+
+  it('empty stdout in fallback mode resolves as error with clear message', async () => {
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    // Emit only whitespace/blank lines on stdout — no sentinel markers, no JSON
+    fakeProc.stdout.push('\n   \n\n');
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('error');
+    // The error should be the clear "no parseable output" message,
+    // not the cryptic "Unexpected end of JSON input" from JSON.parse('')
+    expect(result.error).toContain('no parseable output');
+  });
 });

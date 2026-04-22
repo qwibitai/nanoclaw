@@ -639,7 +639,13 @@ export async function runContainerAgent(
             .trim();
         } else {
           // Fallback: last non-empty line (backwards compatibility)
-          const lines = stdout.trim().split('\n');
+          const lines = stdout
+            .split('\n')
+            .map((l) => l.trim())
+            .filter((l) => l.length > 0);
+          if (lines.length === 0) {
+            throw new Error('Container produced no parseable output');
+          }
           jsonLine = lines[lines.length - 1];
         }
 
