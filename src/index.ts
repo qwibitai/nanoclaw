@@ -53,6 +53,11 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import {
+  editImage,
+  extractImageDirective,
+  generateImage,
+} from './image-gen.js';
 import { extractTtsDirective, synthesize } from './tts.js';
 import {
   restoreRemoteControl,
@@ -87,7 +92,38 @@ async function sendWithTts(
   jid: string,
   text: string,
   threadId?: string,
+  groupFolder?: string,
 ): Promise<void> {
+  if (groupFolder) {
+    const imgDirective = extractImageDirective(text);
+    if (imgDirective) {
+      const attachmentsDir = path.join(GROUPS_DIR, groupFolder, 'attachments');
+      let imagePath: string | null = null;
+
+      if (imgDirective.type === 'generate') {
+        imagePath = await generateImage(imgDirective.prompt, attachmentsDir);
+      } else if (imgDirective.sourcePath) {
+        const sourceFull = path.join(
+          GROUPS_DIR,
+          groupFolder,
+          imgDirective.sourcePath,
+        );
+        imagePath = await editImage(
+          sourceFull,
+          imgDirective.prompt,
+          attachmentsDir,
+        );
+      }
+
+      if (imagePath && channel.sendPhoto) {
+        await channel.sendPhoto(jid, imagePath, undefined, threadId);
+      }
+
+      text = imgDirective.cleanText;
+      if (!text) return;
+    }
+  }
+
   const directive = extractTtsDirective(text);
   if (directive && channel.sendVoice) {
     const audio = await synthesize(directive.ttsText);
@@ -317,7 +353,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
-        await sendWithTts(channel, chatJid, text, replyThreadId);
+        await sendWithTts(channel, chatJid, text, replyThreadId, group.folder);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
