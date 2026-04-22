@@ -318,7 +318,7 @@ export function parseModelPrefix(
   }
   if (/^\+\s/.test(trimmed)) {
     return {
-      override: { model: 'claude-opus-4-6', thinking: 'adaptive' },
+      override: { model: 'claude-opus-4-7', thinking: 'adaptive' },
       cleanedText: trimmed.replace(/^\+\s*/, ''),
     };
   }
@@ -1136,7 +1136,7 @@ async function startMessageLoop(): Promise<void> {
             } else if (/^\+\s/.test(t)) {
               pipeLastMsg.content = t.replace(/^\+\s*/, '');
               pipeModelOverride = {
-                model: 'claude-opus-4-6',
+                model: 'claude-opus-4-7',
                 thinking: 'adaptive',
               };
             } else if (/^~\s/.test(t)) {
