@@ -18,6 +18,7 @@ import path from 'path';
 import { createServer, Server } from 'http';
 
 import { logger } from './logger.js';
+import { buildStatusSnapshot, formatStatusPlain } from './status-dashboard.js';
 
 export interface SkillEntry {
   name: string;
@@ -217,6 +218,20 @@ export function startSkillServer(
           } as const);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(payload));
+        return;
+      }
+
+      if (req.method === 'GET' && req.url === '/status') {
+        buildStatusSnapshot()
+          .then((snapshot) => {
+            res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end(formatStatusPlain(snapshot));
+          })
+          .catch((err) => {
+            logger.error({ err }, 'Failed to build status snapshot');
+            res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('Error: Failed to build status snapshot\n');
+          });
         return;
       }
 
