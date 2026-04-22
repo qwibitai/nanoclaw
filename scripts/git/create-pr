@@ -67,6 +67,15 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "Not inside a git repository."
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
+# ---------- branch name validation ----------
+# Reject branch names that would cause git or shell problems.
+if [[ "$BRANCH" =~ [[:space:]] ]]; then
+  die "Branch name '$BRANCH' contains whitespace. Use hyphens or slashes instead."
+fi
+if [[ "$BRANCH" == *.lock || "$BRANCH" == *.. || "$BRANCH" =~ [\~\^:?*\[] ]]; then
+  die "Branch name '$BRANCH' contains invalid git ref characters. See 'git check-ref-format --help'."
+fi
+
 # ---------- worktree lock detection ----------
 # If a worktree is checked out on this branch, git operations may conflict.
 # Detect and warn the user with a suggested fix.
@@ -77,9 +86,13 @@ if echo "$WORKTREE_LIST" | grep -q "branch refs/heads/${BRANCH}$"; then
   WORKTREE_PATH=$(echo "$WORKTREE_LIST" | grep -B2 "branch refs/heads/${BRANCH}$" | grep '^worktree ' | sed 's/^worktree //')
   if [[ -n "$WORKTREE_PATH" ]]; then
     warn "Branch '$BRANCH' is checked out in worktree: $WORKTREE_PATH"
-    warn "This may cause conflicts during PR operations."
-    warn "To clean up: git worktree remove '$WORKTREE_PATH'"
-    # Non-fatal — the PR can still be created from the remote branch.
+    warn "This may cause push/checkout conflicts during PR operations."
+    warn ""
+    warn "To resolve, either:"
+    warn "  1. Remove the worktree:  git worktree remove '$WORKTREE_PATH'"
+    warn "  2. Or unlock and prune:  git worktree unlock '$WORKTREE_PATH' && git worktree prune"
+    warn ""
+    warn "Continuing anyway — the PR can still be created from the remote branch."
   fi
 fi
 
@@ -118,15 +131,31 @@ fi
 
 COMMIT_COUNT=$(git rev-list --count "$BASE_REF".."$BRANCH_REF" 2>/dev/null || echo "0")
 if [[ "$COMMIT_COUNT" -eq 0 ]]; then
-  die "Branch '$BRANCH' has no commits ahead of '$BASE_BRANCH'. Nothing to create a PR for."
+  echo "" >&2
+  echo "ERROR: Branch '$BRANCH' has no commits ahead of '$BASE_BRANCH'. Nothing to create a PR for." >&2
+  echo "" >&2
+  echo "  To inspect the branch:" >&2
+  echo "    git log --oneline $BASE_REF..$BRANCH_REF" >&2
+  echo "" >&2
+  echo "  If you expected commits, check:" >&2
+  echo "    - Are commits on a different base? Try: git log --oneline --all --graph | head -20" >&2
+  echo "    - Was the branch rebased or force-pushed? Try: git reflog show $BRANCH_REF | head -5" >&2
+  exit 1
 fi
 
 info "Branch '$BRANCH' has $COMMIT_COUNT commit(s) ahead of '$BASE_BRANCH'."
+
+# Show commit summary for verification.
+info "Commits to be included in PR:"
+git log --oneline "$BASE_REF".."$BRANCH_REF" 2>/dev/null | while IFS= read -r line; do
+  echo "  $line"
+done
 
 # ---------- check for existing PR ----------
 EXISTING_PR=$(gh pr list --head "$BRANCH" --base "$BASE_BRANCH" --state open --json number,url --jq '.[0].url' 2>/dev/null || true)
 if [[ -n "$EXISTING_PR" ]]; then
   info "PR already exists: $EXISTING_PR"
+  info "To update it, push new commits to '$BRANCH'."
   echo "$EXISTING_PR"
   exit 0
 fi
@@ -135,6 +164,11 @@ fi
 MERGED_PR=$(gh pr list --head "$BRANCH" --base "$BASE_BRANCH" --state merged --json number,url --jq '.[0].url' 2>/dev/null || true)
 if [[ -n "$MERGED_PR" ]]; then
   info "Branch '$BRANCH' was already merged: $MERGED_PR"
+  info ""
+  info "Next steps:"
+  info "  - Delete the branch locally:   git branch -d $BRANCH"
+  info "  - Delete the remote branch:    git push origin --delete $BRANCH"
+  info "  - Or start fresh from main:    git checkout main && git pull"
   echo "$MERGED_PR"
   exit 0
 fi
@@ -142,7 +176,28 @@ fi
 # ---------- push branch to remote if needed ----------
 if [[ "$BRANCH_EXISTS_REMOTE" == false ]]; then
   info "Pushing '$BRANCH' to origin..."
-  git push -u origin "$BRANCH" || die "Failed to push '$BRANCH' to origin."
+  PUSH_OUTPUT=""
+  PUSH_ATTEMPT=0
+  while [[ $PUSH_ATTEMPT -lt $MAX_RETRIES ]]; do
+    PUSH_ATTEMPT=$((PUSH_ATTEMPT + 1))
+    PUSH_OUTPUT=$(git push -u origin "$BRANCH" 2>&1) && break
+
+    if [[ $PUSH_ATTEMPT -lt $MAX_RETRIES ]]; then
+      SLEEP=$((BACKOFF_BASE ** PUSH_ATTEMPT))
+      warn "git push failed (attempt $PUSH_ATTEMPT/$MAX_RETRIES). Retrying in ${SLEEP}s..."
+      sleep "$SLEEP"
+    else
+      echo "" >&2
+      echo "ERROR: Failed to push '$BRANCH' to origin after $MAX_RETRIES attempts." >&2
+      echo "  Last output: $PUSH_OUTPUT" >&2
+      echo "" >&2
+      echo "  Common fixes:" >&2
+      echo "    - Check network connectivity" >&2
+      echo "    - Verify remote access: git remote -v" >&2
+      echo "    - Check auth: gh auth status" >&2
+      exit 1
+    fi
+  done
 fi
 
 # ---------- derive PR title ----------
@@ -185,7 +240,15 @@ while [[ $ATTEMPT -lt $MAX_RETRIES ]]; do
     warn "gh pr create failed (attempt $ATTEMPT/$MAX_RETRIES). Retrying in ${SLEEP}s..."
     sleep "$SLEEP"
   else
-    die "Failed to create PR after $MAX_RETRIES attempts. Last output: $PR_URL"
+    echo "" >&2
+    echo "ERROR: Failed to create PR after $MAX_RETRIES attempts." >&2
+    echo "  Last output: $PR_URL" >&2
+    echo "" >&2
+    echo "  Troubleshooting:" >&2
+    echo "    - Check GitHub auth:  gh auth status" >&2
+    echo "    - Verify remote:      git remote -v" >&2
+    echo "    - Try manually:       gh pr create --head '$BRANCH' --base '$BASE_BRANCH'" >&2
+    exit 1
   fi
 done
 
