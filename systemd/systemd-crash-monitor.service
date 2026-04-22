@@ -1,0 +1,30 @@
+# NanoClaw Systemd Crash Monitor
+# Lightweight service that detects systemd unit failures and triggers ops-agent.
+#
+# The crash monitor runs as part of the main NanoClaw process (src/lifecycle.ts)
+# by default. This standalone unit file is provided for installations that want
+# to run the monitor independently, e.g. when NanoClaw itself may crash.
+#
+# Install (user-level):
+#   cp systemd/systemd-crash-monitor.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now systemd-crash-monitor
+#
+# Configuration:
+#   ~/.config/nanoclaw/crash-monitor.json
+#   See config-examples/crash-monitor.json for format.
+
+[Unit]
+Description=NanoClaw Systemd Crash Monitor
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env node %h/nanoclaw/dist/systemd-crash-monitor-standalone.js
+WorkingDirectory=%h/nanoclaw
+Restart=always
+RestartSec=10
+Environment=HOME=%h
+
+[Install]
+WantedBy=default.target

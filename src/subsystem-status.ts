@@ -73,6 +73,13 @@ const subsystemDefaults: Array<Omit<SubsystemStatus, 'updatedAt'>> = [
     details: 'Not started yet.',
   },
   {
+    id: 'crash-monitor',
+    label: 'Systemd crash monitor',
+    classification: 'internal',
+    state: 'disabled',
+    details: 'Not started yet.',
+  },
+  {
     id: 'remote-control',
     label: 'Remote control',
     classification: 'experimental',

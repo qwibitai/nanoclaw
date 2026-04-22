@@ -1,0 +1,6 @@
+{
+  "services": ["nanoclaw", "agency-hq"],
+  "intervalMs": 30000,
+  "opsFolder": "ops",
+  "userMode": true
+}
