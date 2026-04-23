@@ -157,6 +157,10 @@ Four types of skills. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full taxono
 
 Before creating a PR, adding a skill, or preparing any contribution, you MUST read [CONTRIBUTING.md](CONTRIBUTING.md). It covers accepted change types, the four skill types and their guidelines, `SKILL.md` format rules, and the pre-submission checklist.
 
+## Git Workflow
+
+**IMPORTANT:** Never commit code automatically. Always ask the user explicitly if the feature is completed and ready to commit before creating any git commit. Wait for explicit confirmation before proceeding with the commit.
+
 ## Development
 
 Run commands directly — don't tell the user to run them.
