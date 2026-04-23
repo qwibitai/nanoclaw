@@ -75,6 +75,7 @@ import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { withLogContext } from './log-context.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -318,7 +319,7 @@ export function parseModelPrefix(
   }
   if (/^\+\s/.test(trimmed)) {
     return {
-      override: { model: 'claude-opus-4-7', thinking: 'adaptive' },
+      override: { model: 'claude-opus-4-6', thinking: 'adaptive' },
       cleanedText: trimmed.replace(/^\+\s*/, ''),
     };
   }
@@ -344,6 +345,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
     return true;
   }
+
 
   const isMainGroup = group.isMain === true;
 
@@ -1136,7 +1138,7 @@ async function startMessageLoop(): Promise<void> {
             } else if (/^\+\s/.test(t)) {
               pipeLastMsg.content = t.replace(/^\+\s*/, '');
               pipeModelOverride = {
-                model: 'claude-opus-4-7',
+                model: 'claude-opus-4-6',
                 thinking: 'adaptive',
               };
             } else if (/^~\s/.test(t)) {
@@ -1488,7 +1490,13 @@ async function main(): Promise<void> {
     },
   });
   startSessionCleanup();
-  queue.setProcessMessagesFn(processGroupMessages);
+  queue.setProcessMessagesFn((chatJid) => {
+    const group = registeredGroups[chatJid];
+    return withLogContext(
+      { chatJid, groupFolder: group?.folder },
+      () => processGroupMessages(chatJid),
+    );
+  });
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');

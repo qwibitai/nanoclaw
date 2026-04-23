@@ -17,6 +17,7 @@ import { AvailableGroup, getFeishuToken } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, storeMessageDirect, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { withLogContext } from './log-context.js';
 import { MemoryStore } from './memory/memory-store.js';
 import { extractAndRefine } from './memory/extract-fact.js';
 import { loadFacts, storeFactRaw } from './memory/storage.js';
