@@ -92,13 +92,22 @@ function resolveProxyTarget(
 
   const rest = requestUrl.slice(PROVIDER_ROUTE_PREFIX.length);
   const slashIndex = rest.indexOf('/');
-  const namePart = slashIndex === -1 ? rest : rest.slice(0, slashIndex);
+  const queryIndex = rest.indexOf('?');
+  const endIndex =
+    slashIndex === -1 && queryIndex === -1
+      ? rest.length
+      : slashIndex === -1
+        ? queryIndex
+        : queryIndex === -1
+          ? slashIndex
+          : Math.min(slashIndex, queryIndex);
+  const namePart = rest.slice(0, endIndex);
   const providerName = decodeURIComponent(namePart);
   const target = targets[providerName];
   if (!target) return undefined;
 
-  const suffix = slashIndex === -1 ? '/' : rest.slice(slashIndex);
-  return { target, upstreamPath: suffix || '/' };
+  const suffix = rest.slice(endIndex) || '/';
+  return { target, upstreamPath: suffix };
 }
 
 export function startCredentialProxy(

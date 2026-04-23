@@ -702,7 +702,9 @@ async function createOrResumeSession(
   const privileged = isPrivilegedGroup(groupType);
   const hooks = createHooks(containerInput.assistantName);
 
-  if (requestedSessionId && requestedSessionProviderName === providerConfig.name) {
+  if (requestedSessionId &&
+      (requestedSessionProviderName === providerConfig.name ||
+       requestedSessionProviderName === undefined)) {
     if (!isUuid(requestedSessionId)) {
       log(
         `非 UUID の sessionId (${requestedSessionId}) を受信しました。セッション復帰を試みます。`,
@@ -825,6 +827,7 @@ async function runQuery(
     let ipcPollingActive = false;
     let ipcPollTimer: NodeJS.Timeout | undefined;
     let followupSendChain = Promise.resolve();
+    let sessionClosed = false;
 
     try {
       session = await createOrResumeSession(
@@ -852,6 +855,7 @@ async function runQuery(
         shouldExit = true;
         log(reason);
         stopIpcPolling();
+        sessionClosed = true;
         void session
           ?.close()
           .catch((err) =>
@@ -1001,7 +1005,7 @@ async function runQuery(
         ipcPollTimer = undefined;
       }
       await followupSendChain;
-      if (session) {
+      if (session && !sessionClosed) {
         try {
           await session.close();
         } catch (err) {

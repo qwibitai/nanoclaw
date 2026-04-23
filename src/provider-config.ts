@@ -198,6 +198,8 @@ function resolveProviderFromEnv(
 }
 
 let cachedNanoclawYaml: ReturnType<typeof readNanoclawYaml> | null = null;
+let cachedNanoclawYamlMtime: number | null = null;
+let cachedNanoclawYamlPath: string | null = null;
 
 function readNanoclawYaml():
   | {
@@ -212,14 +214,25 @@ function readNanoclawYaml():
       fallbacks?: string[];
     }
   | undefined {
-  if (cachedNanoclawYaml !== null) {
-    return cachedNanoclawYaml;
+  const configPath = path.join(process.cwd(), 'nanoclaw.yaml');
+
+  let mtime: number | undefined;
+  try {
+    mtime = fs.statSync(configPath).mtimeMs;
+  } catch {
+    // ファイルが存在しない場合はキャッシュをクリアして undefined を返す
+    cachedNanoclawYaml = undefined;
+    cachedNanoclawYamlMtime = null;
+    cachedNanoclawYamlPath = configPath;
+    return undefined;
   }
 
-  const configPath = path.join(process.cwd(), 'nanoclaw.yaml');
-  if (!fs.existsSync(configPath)) {
-    cachedNanoclawYaml = undefined;
-    return undefined;
+  if (
+    cachedNanoclawYaml !== null &&
+    cachedNanoclawYamlPath === configPath &&
+    cachedNanoclawYamlMtime === mtime
+  ) {
+    return cachedNanoclawYaml;
   }
 
   const parsed = YAML.parse(fs.readFileSync(configPath, 'utf-8')) as
@@ -267,11 +280,15 @@ function readNanoclawYaml():
     : undefined;
 
   cachedNanoclawYaml = { providers, defaultProvider, fallbacks };
+  cachedNanoclawYamlMtime = mtime;
+  cachedNanoclawYamlPath = configPath;
   return cachedNanoclawYaml;
 }
 
 export function invalidateNanoclawYamlCache(): void {
   cachedNanoclawYaml = null;
+  cachedNanoclawYamlMtime = null;
+  cachedNanoclawYamlPath = null;
 }
 
 function normalizeYamlProvider(provider: string): LlmProvider {

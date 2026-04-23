@@ -21,6 +21,12 @@ vi.mock('fs', async () => {
         }
         return value;
       }),
+      statSync: vi.fn((filePath: string) => {
+        if (!mockFiles.has(filePath)) {
+          throw new Error(`ENOENT: ${filePath}`);
+        }
+        return { mtimeMs: Date.now() } as ReturnType<typeof actual.statSync>;
+      }),
     },
     existsSync: vi.fn((filePath: string) => mockFiles.has(filePath)),
     readFileSync: vi.fn((filePath: string) => {
@@ -29,6 +35,12 @@ vi.mock('fs', async () => {
         throw new Error(`ENOENT: ${filePath}`);
       }
       return value;
+    }),
+    statSync: vi.fn((filePath: string) => {
+      if (!mockFiles.has(filePath)) {
+        throw new Error(`ENOENT: ${filePath}`);
+      }
+      return { mtimeMs: Date.now() } as ReturnType<typeof actual.statSync>;
     }),
   };
 });
