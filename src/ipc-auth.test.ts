@@ -15,7 +15,7 @@ import { RegisteredGroup } from './types.js';
 // Set up registered groups used across tests
 const MAIN_GROUP: RegisteredGroup = {
   name: 'Main',
-  folder: 'whatsapp_main',
+  folder: 'discord_main',
   trigger: 'always',
   added_at: '2024-01-01T00:00:00.000Z',
   type: 'main',
@@ -151,7 +151,7 @@ describe('pause_task authorization', () => {
   beforeEach(() => {
     createTask({
       id: 'task-main',
-      group_folder: 'whatsapp_main',
+      group_folder: 'discord_main',
       chat_jid: 'main@g.us',
       prompt: 'main task',
       schedule_type: 'once',
@@ -307,7 +307,7 @@ describe('cancel_task authorization', () => {
   it('non-main group cannot cancel another groups task', async () => {
     createTask({
       id: 'task-foreign',
-      group_folder: 'whatsapp_main',
+      group_folder: 'discord_main',
       chat_jid: 'main@g.us',
       prompt: 'not yours',
       schedule_type: 'once',

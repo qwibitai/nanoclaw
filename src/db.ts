@@ -38,14 +38,11 @@ function parseGroupType(
 }
 
 const JID_PREFIX_RE = /^[a-z]{2,}:/;
-const WHATSAPP_JID_RE = /^[^@\s]+@(g\.us|s\.whatsapp\.net)$/;
 const SPAWNED_THREAD_RETENTION_DAYS = 30;
 const PENDING_SPAWN_THREAD_JID = '__pending__';
 
 export function _shouldMigrateSessionKey(key: string): boolean {
-  if (JID_PREFIX_RE.test(key)) return true;
-  if (WHATSAPP_JID_RE.test(key)) return true;
-  return false;
+  return JID_PREFIX_RE.test(key);
 }
 
 export function _sanitizeContainerConfig(
@@ -428,18 +425,8 @@ function createSchema(database: Database.Database): void {
   try {
     database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
     database.exec(`ALTER TABLE chats ADD COLUMN is_group INTEGER DEFAULT 0`);
-    // JID パターンから過去分への適用
-    database.exec(
-      `UPDATE chats SET channel = 'whatsapp', is_group = 1 WHERE jid LIKE '%@g.us'`,
-    );
-    database.exec(
-      `UPDATE chats SET channel = 'whatsapp', is_group = 0 WHERE jid LIKE '%@s.whatsapp.net'`,
-    );
     database.exec(
       `UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`,
-    );
-    database.exec(
-      `UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`,
     );
   } catch {
     /* カラムはすでに存在します */
@@ -1199,7 +1186,7 @@ function migrateJsonState(): void {
   }
 
   // sessions.json のマイグレーション
-  // sessions テーブルのキーは group_jid（例: dc:123、tg:456、xxx@g.us）。
+  // sessions テーブルのキーは group_jid（例: dc:123）。
   // 旧形式の folder キーは移行対象から除外する。
   const sessions = migrateFile('sessions.json') as Record<
     string,
