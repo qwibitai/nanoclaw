@@ -29,6 +29,8 @@ export interface AgentEvents extends Record<string, any[]> {
   'task.run.succeeded': [payload: TaskRunSucceededEvent];
   'task.run.failed': [payload: TaskRunFailedEvent];
   'task.run.skipped': [payload: TaskRunSkippedEvent];
+  'budget.exceeded': [payload: BudgetExceededEvent];
+  'budget.warning': [payload: BudgetWarningEvent];
   started: [];
   stopped: [];
 }
@@ -300,5 +302,37 @@ export interface TaskRunSkippedEvent {
   reason: 'not_active' | 'group_not_found' | 'invalid_group_folder';
   /** Optional detail string for the skip reason. */
   detail?: string;
+  timestamp: string;
+}
+
+// ── Budget events ─────────────────────────────────────────────────
+
+/** Agent was paused because it exceeded its token budget. */
+export interface BudgetExceededEvent {
+  agentId: string;
+  /** Group/chat JID that exceeded its budget. */
+  jid: string;
+  /** Which limit was hit. */
+  limitType: 'daily' | 'total';
+  /** The configured limit in USD. */
+  limitUsd: number;
+  /** Amount spent at time of enforcement. */
+  usedUsd: number;
+  timestamp: string;
+}
+
+/** Agent is approaching its token budget (≥80% used). */
+export interface BudgetWarningEvent {
+  agentId: string;
+  /** Group/chat JID. */
+  jid: string;
+  /** Fraction of the limit used (e.g. 0.83 = 83%). */
+  pctUsed: number;
+  /** Which limit triggered the warning. */
+  limitType: 'daily' | 'total';
+  /** The configured limit in USD. */
+  limitUsd: number;
+  /** Amount spent so far. */
+  usedUsd: number;
   timestamp: string;
 }

@@ -82,6 +82,32 @@ export function createSchema(
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS token_usage (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_jid          TEXT    NOT NULL,
+      session_id         TEXT,
+      model              TEXT    NOT NULL,
+      prompt_tokens      INTEGER NOT NULL DEFAULT 0,
+      completion_tokens  INTEGER NOT NULL DEFAULT 0,
+      total_tokens       INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd           REAL,
+      latency_ms         INTEGER,
+      ts                 INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS token_budget_configs (
+      group_jid       TEXT PRIMARY KEY,
+      daily_limit_usd REAL,
+      total_limit_usd REAL,
+      reset_hour      INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS token_budget_state (
+      group_jid     TEXT PRIMARY KEY,
+      paused        INTEGER NOT NULL DEFAULT 0,
+      paused_at     INTEGER,
+      paused_reason TEXT
+    );
 
   `);
 
@@ -142,6 +168,11 @@ export function createSchema(
   } catch {
     /* columns already exist */
   }
+
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_token_usage_group_jid ON token_usage(group_jid);
+    CREATE INDEX IF NOT EXISTS idx_token_usage_ts ON token_usage(ts);
+  `);
 }
 
 export function initDatabase(opts: {
@@ -729,5 +760,124 @@ export class AgentDb {
         }
       }
     }
+  }
+
+  // ─── Token budget helpers ─────────────────────────────────────────
+
+  getBudgetConfig(groupJid: string): {
+    daily_limit_usd: number | null;
+    total_limit_usd: number | null;
+    reset_hour: number;
+  } | null {
+    const row = this.db
+      .prepare(
+        `SELECT daily_limit_usd, total_limit_usd, reset_hour FROM token_budget_configs WHERE group_jid = ?`,
+      )
+      .get(groupJid) as {
+      daily_limit_usd: number | null;
+      total_limit_usd: number | null;
+      reset_hour: number;
+    } | undefined;
+    return row ?? null;
+  }
+
+  setBudgetConfig(
+    groupJid: string,
+    opts: {
+      daily_limit_usd?: number | null;
+      total_limit_usd?: number | null;
+      reset_hour?: number;
+    },
+  ): void {
+    const existing = this.getBudgetConfig(groupJid);
+    const daily =
+      opts.daily_limit_usd !== undefined
+        ? opts.daily_limit_usd
+        : (existing?.daily_limit_usd ?? null);
+    const total =
+      opts.total_limit_usd !== undefined
+        ? opts.total_limit_usd
+        : (existing?.total_limit_usd ?? null);
+    const hour =
+      opts.reset_hour !== undefined ? opts.reset_hour : (existing?.reset_hour ?? 0);
+
+    this.db
+      .prepare(
+        `INSERT INTO token_budget_configs (group_jid, daily_limit_usd, total_limit_usd, reset_hour)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(group_jid) DO UPDATE SET
+           daily_limit_usd = excluded.daily_limit_usd,
+           total_limit_usd = excluded.total_limit_usd,
+           reset_hour = excluded.reset_hour`,
+      )
+      .run(groupJid, daily, total, hour);
+  }
+
+  getBudgetState(groupJid: string): {
+    paused: boolean;
+    paused_at: number | null;
+    paused_reason: string | null;
+  } {
+    const row = this.db
+      .prepare(
+        `SELECT paused, paused_at, paused_reason FROM token_budget_state WHERE group_jid = ?`,
+      )
+      .get(groupJid) as {
+      paused: number;
+      paused_at: number | null;
+      paused_reason: string | null;
+    } | undefined;
+    if (!row) return { paused: false, paused_at: null, paused_reason: null };
+    return {
+      paused: row.paused === 1,
+      paused_at: row.paused_at,
+      paused_reason: row.paused_reason,
+    };
+  }
+
+  setBudgetPaused(groupJid: string, reason: 'daily_limit' | 'total_limit'): void {
+    this.db
+      .prepare(
+        `INSERT INTO token_budget_state (group_jid, paused, paused_at, paused_reason)
+         VALUES (?, 1, ?, ?)
+         ON CONFLICT(group_jid) DO UPDATE SET
+           paused = 1,
+           paused_at = excluded.paused_at,
+           paused_reason = excluded.paused_reason`,
+      )
+      .run(groupJid, Date.now(), reason);
+  }
+
+  clearBudgetPaused(groupJid: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO token_budget_state (group_jid, paused, paused_at, paused_reason)
+         VALUES (?, 0, NULL, NULL)
+         ON CONFLICT(group_jid) DO UPDATE SET
+           paused = 0,
+           paused_at = NULL,
+           paused_reason = NULL`,
+      )
+      .run(groupJid);
+  }
+
+  /** Sum cost_usd for a group since the given epoch-ms timestamp. */
+  getDailyUsageUsd(groupJid: string, periodStartMs: number): number {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(cost_usd), 0) AS total FROM token_usage WHERE group_jid = ? AND ts >= ?`,
+      )
+      .get(groupJid, periodStartMs) as { total: number };
+    return row.total;
+  }
+
+  /** Sum cost_usd for a group across all time. */
+  getTotalUsageUsd(groupJid: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(cost_usd), 0) AS total FROM token_usage WHERE group_jid = ?`,
+      )
+      .get(groupJid) as { total: number };
+    return row.total;
   }
 }
