@@ -14,8 +14,10 @@
  *                          "Terminal Agent".
  *   NANOCLAW_SKIP          comma-separated step names to skip
  *                          (environment|container|onecli|auth|mounts|
- *                           service|cli-agent|timezone|channel|verify|
- *                           first-chat)
+ *                           service|cli-agent|timezone|migration|channel|
+ *                           verify|first-chat)
+ *   NANOCLAW_V1_PATH       explicit path to a v1 install to migrate
+ *                          from (default: scan common locations)
  *
  * Timezone is auto-detected after the CLI agent step. UTC resolves are
  * confirmed with the user, and free-text replies fall through to a
@@ -36,6 +38,7 @@ import { pingCliAgent, type PingResult } from './lib/agent-ping.js';
 import { brightSelect } from './lib/bright-select.js';
 import { offerClaudeAssist } from './lib/claude-assist.js';
 import { runWindowedStep } from './lib/windowed-runner.js';
+import { runMigrateV1 } from './migrate-v1.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
 import {
   claudeCliAvailable,
@@ -306,7 +309,16 @@ async function main(): Promise<void> {
     await runTimezoneStep();
   }
 
+  if (!skip.has('migration')) {
+    // Runs silently when there's no v1 install; otherwise orchestrates the
+    // detect → validate → db → groups → env → channel-auth → channels →
+    // tasks sub-steps and writes logs/setup-migration/handoff.json for the
+    // /migrate-from-v1 skill to pick up.
+    await runMigrateV1();
+  }
+
   let channelChoice: ChannelChoice = 'skip';
+
   if (!skip.has('channel')) {
     channelChoice = await askChannelChoice();
     if (channelChoice === 'telegram') {
