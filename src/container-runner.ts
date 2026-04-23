@@ -189,9 +189,14 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Copy agent-runner source into a per-group writable location so agents
-  // can customize it (add tools, change behavior) without affecting other
+  // Copy agent-runner source into a per-group location so the host can
+  // customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
+  //
+  // Mounted READONLY into the container: per-group customization is a
+  // host-side mechanism, not an agent capability. Writable mount would
+  // let a prompt-injected agent overwrite its own runner and persist a
+  // backdoor across container restarts.
   const agentRunnerSrc = path.join(
     projectRoot,
     'container',
@@ -219,7 +224,7 @@ function buildVolumeMounts(
   mounts.push({
     hostPath: groupAgentRunnerDir,
     containerPath: '/app/src',
-    readonly: false,
+    readonly: true,
   });
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)

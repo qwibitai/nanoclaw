@@ -35,4 +35,14 @@ groups/global/*
 # Skills system (local per-installation state)
 .nanoclaw/
 
+# gstack local state (security reports, review logs)
+.gstack/
+
+# Claude Code runtime state
+.claude/scheduled_tasks.lock
+
+# Local-only infrastructure composes (may contain secrets)
+tailscale-sidecar.yml
+onecli-ca.pem
+
 agents-sdk-docs

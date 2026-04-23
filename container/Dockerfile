@@ -45,7 +45,9 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# claude-code pinned to 2.1.91 (2026-04-02 release) — 2.1.118 introduced a
+# ~33s container SIGKILL regression. Revisit when upstream fixes it.
+RUN npm install -g agent-browser @anthropic-ai/claude-code@2.1.91
 
 # Create app directory
 WORKDIR /app
