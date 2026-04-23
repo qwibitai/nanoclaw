@@ -168,7 +168,11 @@ export async function executeGoogleWorkspaceCommand(
       }
 
       // 4b. drive files create: require parents in --json and validate them
-      if (service === 'drive' && hasMethod('create') && commandArgs.includes('files')) {
+      if (
+        service === 'drive' &&
+        hasMethod('create') &&
+        commandArgs.includes('files')
+      ) {
         if (
           !jsonBody ||
           !jsonBody.parents ||
@@ -217,7 +221,10 @@ export async function executeGoogleWorkspaceCommand(
             );
           }
         }
-        if (gwConfig.allowedFolders?.length && (!jsonBody?.parents || !Array.isArray(jsonBody.parents))) {
+        if (
+          gwConfig.allowedFolders?.length &&
+          (!jsonBody?.parents || !Array.isArray(jsonBody.parents))
+        ) {
           return deny(
             `Copy operations require "parents" in --json body to control destination. ` +
               `Allowed folders: [${gwConfig.allowedFolders.join(', ')}]`,
@@ -264,7 +271,10 @@ export async function executeGoogleWorkspaceCommand(
       commandArgs.includes('files');
 
     if (!isDriveCreate) {
-      const locationError = await validateResourceLocation(resourceId!, gwConfig);
+      const locationError = await validateResourceLocation(
+        resourceId!,
+        gwConfig,
+      );
       if (locationError) {
         return deny(locationError);
       }
