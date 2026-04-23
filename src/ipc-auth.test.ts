@@ -406,9 +406,7 @@ describe('IPC message authorization', () => {
   });
 
   it('non-main group cannot send to unregistered JID', () => {
-    expect(isMessageAuthorized('dc:other', false, 'dc:unknown')).toBe(
-      false,
-    );
+    expect(isMessageAuthorized('dc:other', false, 'dc:unknown')).toBe(false);
   });
 
   it('main group can send to unregistered JID', () => {

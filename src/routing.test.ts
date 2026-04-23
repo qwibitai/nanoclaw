@@ -129,11 +129,7 @@ describe('getAvailableGroups', () => {
 
   it('excludes non-group chats regardless of JID format', () => {
     // Unknown JID format stored without is_group should not appear
-    storeChatMetadata(
-      'unknown-format',
-      '2024-01-01T00:00:01.000Z',
-      'Unknown',
-    );
+    storeChatMetadata('unknown-format', '2024-01-01T00:00:01.000Z', 'Unknown');
     // Explicitly non-group with unusual JID
     storeChatMetadata(
       'other:abc',
