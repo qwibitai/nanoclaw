@@ -1,0 +1,25 @@
+[Unit]
+Description=NanoClaw Personal AI Assistant
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jkeyser/nanoclaw
+ExecStart=/home/jkeyser/nanoclaw/start-nanoclaw.sh
+Restart=always
+RestartSec=5
+EnvironmentFile=/home/jkeyser/nanoclaw/.env
+Environment=HOME=/home/jkeyser
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/home/jkeyser/.local/bin
+Environment=CREDENTIAL_PROXY_PORT=3100
+Environment=SKILL_SERVER_PORT=3101
+Environment=MESSAGE_API_PORT=3102
+Environment=DISPATCH_SLOTS_PG=true
+Environment=OPS_WATCHDOG_ENABLED=true
+StandardOutput=append:/home/jkeyser/nanoclaw/logs/nanoclaw.log
+StandardError=append:/home/jkeyser/nanoclaw/logs/nanoclaw.error.log
+OOMScoreAdjust=-500
+MemoryMax=3G
+
+[Install]
+WantedBy=default.target
