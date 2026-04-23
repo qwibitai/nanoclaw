@@ -1,0 +1,14 @@
+skill: claude-mem
+version: 1.0.0
+description: "Cross-session memory for NanoClaw agents via claude-mem MCP server"
+core_version: 0.1.0
+adds: []
+modifies:
+  - src/config.ts
+  - src/container-runner.ts
+  - src/container-runner.test.ts
+  - container/agent-runner/src/index.ts
+structured: {}
+conflicts: []
+depends: []
+test: "npx vitest run src/container-runner.test.ts"
