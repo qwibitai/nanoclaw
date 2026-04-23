@@ -705,32 +705,31 @@ async function createOrResumeSession(
   if (requestedSessionId && requestedSessionProviderName === providerConfig.name) {
     if (!isUuid(requestedSessionId)) {
       log(
-        `非 UUID の sessionId (${requestedSessionId}) を受信したため、新規セッションを開始します`,
+        `非 UUID の sessionId (${requestedSessionId}) を受信しました。セッション復帰を試みます。`,
       );
-    } else {
-      try {
-        const resumeOptions = {
-          storage,
-          ...(providerConfig.apiKey ? { apiKey: providerConfig.apiKey } : {}),
-          ...(providerConfig.codexOAuth
-            ? { codexOAuth: providerConfig.codexOAuth }
-            : {}),
-          permissionMode: 'bypassPermissions' as const,
-          allowDangerouslySkipPermissions: true,
-          hooks,
-        };
-        const resumed = await resumeSession(requestedSessionId, {
-          ...resumeOptions,
-        });
-        log(
-          `セッションを再開しました: ${resumed.id} (provider: ${providerConfig.name})`,
-        );
-        return resumed;
-      } catch (err) {
-        log(
-          `セッション再開に失敗したため、新規作成へフォールバックします: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
+    }
+    try {
+      const resumeOptions = {
+        storage,
+        ...(providerConfig.apiKey ? { apiKey: providerConfig.apiKey } : {}),
+        ...(providerConfig.codexOAuth
+          ? { codexOAuth: providerConfig.codexOAuth }
+          : {}),
+        permissionMode: 'bypassPermissions' as const,
+        allowDangerouslySkipPermissions: true,
+        hooks,
+      };
+      const resumed = await resumeSession(requestedSessionId, {
+        ...resumeOptions,
+      });
+      log(
+        `セッションを再開しました: ${resumed.id} (provider: ${providerConfig.name})`,
+      );
+      return resumed;
+    } catch (err) {
+      log(
+        `セッション再開に失敗したため、新規作成へフォールバックします: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 

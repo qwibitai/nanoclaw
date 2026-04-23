@@ -855,10 +855,10 @@ async function main(): Promise<void> {
     if (!channel) return;
 
     const group = registeredGroups[chatJid];
-    if (!group) {
+    if (!group || !hasPrivilege(group)) {
       await channel.sendMessage(
         chatJid,
-        'This channel is not a registered group, so provider switching is unavailable.',
+        'Provider switching is only available in privileged groups (main/override).',
       );
       return;
     }

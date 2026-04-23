@@ -35,6 +35,7 @@ vi.mock('fs', async () => {
 
 import {
   buildContainerProviderEnv,
+  invalidateNanoclawYamlCache,
   resolveProviderConfig,
   resolveProviderExecutionConfig,
 } from './provider-config.js';
@@ -49,6 +50,7 @@ describe('provider-config', () => {
   beforeEach(() => {
     resetMockEnv();
     mockFiles.clear();
+    invalidateNanoclawYamlCache();
   });
 
   it('falls back to legacy env detection when nanoclaw.yaml is absent', () => {

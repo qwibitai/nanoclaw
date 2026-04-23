@@ -197,6 +197,8 @@ function resolveProviderFromEnv(
   };
 }
 
+let cachedNanoclawYaml: ReturnType<typeof readNanoclawYaml> | null = null;
+
 function readNanoclawYaml():
   | {
       providers: Record<
@@ -210,8 +212,15 @@ function readNanoclawYaml():
       fallbacks?: string[];
     }
   | undefined {
+  if (cachedNanoclawYaml !== null) {
+    return cachedNanoclawYaml;
+  }
+
   const configPath = path.join(process.cwd(), 'nanoclaw.yaml');
-  if (!fs.existsSync(configPath)) return undefined;
+  if (!fs.existsSync(configPath)) {
+    cachedNanoclawYaml = undefined;
+    return undefined;
+  }
 
   const parsed = YAML.parse(fs.readFileSync(configPath, 'utf-8')) as
     | Record<string, unknown>
@@ -257,7 +266,12 @@ function readNanoclawYaml():
       })
     : undefined;
 
-  return { providers, defaultProvider, fallbacks };
+  cachedNanoclawYaml = { providers, defaultProvider, fallbacks };
+  return cachedNanoclawYaml;
+}
+
+export function invalidateNanoclawYamlCache(): void {
+  cachedNanoclawYaml = null;
 }
 
 function normalizeYamlProvider(provider: string): LlmProvider {
@@ -305,7 +319,11 @@ function resolveYamlProviderConfig(
     throw new Error('[provider-config] nanoclaw.yaml must define at least one provider.');
   }
 
-  const defaultProvider = yamlConfig.defaultProvider || configuredNames[0];
+  const firstConfiguredName = Object.entries(yamlConfig.providers)
+    .filter(([name]) => providers[name] !== undefined)
+    .map(([name]) => name)[0];
+
+  const defaultProvider = yamlConfig.defaultProvider || firstConfiguredName;
   if (!providers[defaultProvider]) {
     throw new Error(
       `[provider-config] defaultProvider "${defaultProvider}" does not exist in providers.`,

@@ -264,8 +264,7 @@ function createSchema(database: Database.Database): void {
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
-      requires_trigger INTEGER DEFAULT 1
-      ,
+      requires_trigger INTEGER DEFAULT 1,
       provider TEXT
     );
 
