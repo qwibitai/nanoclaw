@@ -34,21 +34,51 @@ export function bootstrapSessionSettings(groupFolder: string): string {
   fs.mkdirSync(groupSessionsDir, { recursive: true });
 
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
+  const serviceGuardHook = path.join(
+    process.cwd(),
+    'container',
+    'hooks',
+    'service-guard.sh',
+  );
+  const defaultSettings: Record<string, unknown> = {
+    env: {
+      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+      CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+    },
+  };
+
+  // Add service-guard hook if the script exists
+  if (fs.existsSync(serviceGuardHook)) {
+    defaultSettings.hooks = {
+      PreToolUse: [
+        {
+          matcher: 'Bash',
+          hooks: [{ type: 'command', command: serviceGuardHook }],
+        },
+      ],
+    };
+  }
+
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
       settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
+      JSON.stringify(defaultSettings, null, 2) + '\n',
     );
+  } else {
+    // Ensure existing settings have the service-guard hook
+    try {
+      const existing = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+      if (fs.existsSync(serviceGuardHook) && !existing.hooks) {
+        existing.hooks = defaultSettings.hooks;
+        fs.writeFileSync(
+          settingsFile,
+          JSON.stringify(existing, null, 2) + '\n',
+        );
+      }
+    } catch {
+      // Corrupted settings — leave as-is
+    }
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
