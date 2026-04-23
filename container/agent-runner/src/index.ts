@@ -714,6 +714,7 @@ async function createOrResumeSession(
       const resumeOptions = {
         storage,
         ...(providerConfig.apiKey ? { apiKey: providerConfig.apiKey } : {}),
+        ...(providerConfig.baseURL ? { baseURL: providerConfig.baseURL } : {}),
         ...(providerConfig.codexOAuth
           ? { codexOAuth: providerConfig.codexOAuth }
           : {}),

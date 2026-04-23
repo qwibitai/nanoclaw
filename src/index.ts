@@ -867,7 +867,10 @@ async function main(): Promise<void> {
     const parts = msg.content.trim().split(/\s+/);
 
     if (parts.length === 1) {
-      const execution = resolveProviderExecutionConfig(resolved, group.provider);
+      const execution = resolveProviderExecutionConfig(
+        resolved,
+        group.provider,
+      );
       const currentName = execution.defaultProvider;
       const current = execution.providers[currentName];
       await channel.sendMessage(
@@ -888,8 +891,7 @@ async function main(): Promise<void> {
 
     const updatedGroup: RegisteredGroup = {
       ...group,
-      provider:
-        requested === resolved.defaultProvider ? undefined : requested,
+      provider: requested === resolved.defaultProvider ? undefined : requested,
     };
     registeredGroups[chatJid] = updatedGroup;
     setRegisteredGroup(chatJid, updatedGroup);

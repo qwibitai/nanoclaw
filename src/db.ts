@@ -871,7 +871,9 @@ export interface StoredSession {
 
 export function getSession(groupJid: string): StoredSession | undefined {
   const row = db
-    .prepare('SELECT session_id, provider_name FROM sessions WHERE group_jid = ?')
+    .prepare(
+      'SELECT session_id, provider_name FROM sessions WHERE group_jid = ?',
+    )
     .get(groupJid) as
     | { session_id: string; provider_name: string | null }
     | undefined;

@@ -2,17 +2,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'http';
 import type { AddressInfo } from 'net';
 
-const mockResolvedProviderConfig = vi.hoisted(
-  (): { value: any } => ({
-    value: {
+const mockResolvedProviderConfig = vi.hoisted((): { value: any } => ({
+  value: {
     providers: {},
     defaultProvider: 'default',
     fallbackProviders: [],
     allowDirectSecretInjection: false,
     source: 'env' as const,
-    },
-  }),
-);
+  },
+}));
 
 vi.mock('./provider-config.js', () => ({
   resolveProviderConfig: vi.fn(() => mockResolvedProviderConfig.value),
@@ -84,7 +82,9 @@ describe('credential-proxy', () => {
     }
   });
 
-  async function startProxy(providers: Record<string, unknown>): Promise<number> {
+  async function startProxy(
+    providers: Record<string, unknown>,
+  ): Promise<number> {
     mockResolvedProviderConfig.value = {
       providers,
       defaultProvider: Object.keys(providers)[0] || 'default',

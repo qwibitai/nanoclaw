@@ -147,10 +147,17 @@ function resolveProviderFromEnv(
     return {
       name,
       provider,
-      model: modelOverride || env.ANTHROPIC_MODEL || DEFAULT_MODEL_BY_PROVIDER.anthropic,
+      model:
+        modelOverride ||
+        env.ANTHROPIC_MODEL ||
+        DEFAULT_MODEL_BY_PROVIDER.anthropic,
       usesCredentialProxy: true,
       allowDirectSecretInjection: false,
-      apiKey: requiredValue(env.ANTHROPIC_API_KEY, 'ANTHROPIC_API_KEY', provider),
+      apiKey: requiredValue(
+        env.ANTHROPIC_API_KEY,
+        'ANTHROPIC_API_KEY',
+        provider,
+      ),
       upstreamBaseURL:
         env.ANTHROPIC_BASE_URL || DEFAULT_UPSTREAM_BASE_URL.anthropic,
     };
@@ -161,7 +168,8 @@ function resolveProviderFromEnv(
     return {
       name,
       provider,
-      model: modelOverride || env.OPENAI_MODEL || DEFAULT_MODEL_BY_PROVIDER.openai,
+      model:
+        modelOverride || env.OPENAI_MODEL || DEFAULT_MODEL_BY_PROVIDER.openai,
       usesCredentialProxy: true,
       allowDirectSecretInjection: false,
       apiKey: requiredValue(env.OPENAI_API_KEY, 'OPENAI_API_KEY', provider),
@@ -175,7 +183,8 @@ function resolveProviderFromEnv(
     return {
       name,
       provider,
-      model: modelOverride || env.GEMINI_MODEL || DEFAULT_MODEL_BY_PROVIDER.google,
+      model:
+        modelOverride || env.GEMINI_MODEL || DEFAULT_MODEL_BY_PROVIDER.google,
       usesCredentialProxy: false,
       allowDirectSecretInjection,
       apiKey: requiredValue(env.GEMINI_API_KEY, 'GEMINI_API_KEY', provider),
@@ -244,8 +253,14 @@ function readNanoclawYaml():
   }
 
   const providersRaw = parsed.providers;
-  if (!providersRaw || typeof providersRaw !== 'object' || Array.isArray(providersRaw)) {
-    throw new Error('[provider-config] nanoclaw.yaml requires a providers mapping.');
+  if (
+    !providersRaw ||
+    typeof providersRaw !== 'object' ||
+    Array.isArray(providersRaw)
+  ) {
+    throw new Error(
+      '[provider-config] nanoclaw.yaml requires a providers mapping.',
+    );
   }
 
   const providers: Record<
@@ -269,11 +284,15 @@ function readNanoclawYaml():
   }
 
   const defaultProvider =
-    typeof parsed.defaultProvider === 'string' ? parsed.defaultProvider : undefined;
+    typeof parsed.defaultProvider === 'string'
+      ? parsed.defaultProvider
+      : undefined;
   const fallbacks = Array.isArray(parsed.fallbacks)
     ? parsed.fallbacks.map((value) => {
         if (typeof value !== 'string') {
-          throw new Error('[provider-config] fallbacks must be a string array.');
+          throw new Error(
+            '[provider-config] fallbacks must be a string array.',
+          );
         }
         return value;
       })
@@ -292,7 +311,11 @@ export function invalidateNanoclawYamlCache(): void {
 }
 
 function normalizeYamlProvider(provider: string): LlmProvider {
-  if (provider === 'anthropic' || provider === 'openai' || provider === 'codex') {
+  if (
+    provider === 'anthropic' ||
+    provider === 'openai' ||
+    provider === 'codex'
+  ) {
     return provider;
   }
   if (provider === 'google' || provider === 'gemini') {
@@ -333,7 +356,9 @@ function resolveYamlProviderConfig(
 
   const configuredNames = Object.keys(providers);
   if (configuredNames.length === 0) {
-    throw new Error('[provider-config] nanoclaw.yaml must define at least one provider.');
+    throw new Error(
+      '[provider-config] nanoclaw.yaml must define at least one provider.',
+    );
   }
 
   const firstConfiguredName = Object.entries(yamlConfig.providers)

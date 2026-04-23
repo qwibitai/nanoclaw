@@ -388,9 +388,7 @@ describe('container-runner timeout behavior', () => {
     const spawnCalls = vi.mocked(spawn).mock.calls;
     const args = spawnCalls[spawnCalls.length - 1][1] as string[];
     const joined = args.join(' ');
-    expect(joined).toContain(
-      '-e NANOCLAW_PROVIDER_CONFIG_JSON=',
-    );
+    expect(joined).toContain('-e NANOCLAW_PROVIDER_CONFIG_JSON=');
     expect(joined).toContain('__provider/fast');
     expect(joined).toContain('placeholder-fast');
   });

@@ -123,7 +123,7 @@ export function startCredentialProxy(
     const server = createServer((req, res) => {
       const targets = buildProxyTargets();
       const routed = resolveProxyTarget(req.url, targets);
-      
+
       if (!routed) {
         if (Object.keys(targets).length === 0) {
           res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
@@ -144,17 +144,22 @@ export function startCredentialProxy(
       req.on('end', () => {
         const body = Buffer.concat(chunks);
 
-        const headers: Record<string, string | number | string[] | undefined> = {
-          ...(req.headers as Record<string, string>),
-          host: upstreamUrl.host,
-          'content-length': body.length,
-        };
+        const headers: Record<string, string | number | string[] | undefined> =
+          {
+            ...(req.headers as Record<string, string>),
+            host: upstreamUrl.host,
+            'content-length': body.length,
+          };
 
         delete headers['connection'];
         delete headers['keep-alive'];
         delete headers['transfer-encoding'];
 
-        injectAuthHeaders(headers, routed.target.provider, routed.target.apiKey);
+        injectAuthHeaders(
+          headers,
+          routed.target.provider,
+          routed.target.apiKey,
+        );
 
         const upstream = makeRequest(
           {
