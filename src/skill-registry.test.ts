@@ -185,6 +185,30 @@ describe('skill-registry', () => {
       });
     });
 
+    it('GET /health returns default payload with skill_count when no provider', async () => {
+      writeSkill('health-a', 'name: health-a\ndescription: Health A');
+      writeSkill('health-b', 'name: health-b\ndescription: Health B');
+      scanSkills(TEST_DIR);
+
+      server = await startSkillServer(0, '127.0.0.1');
+      const port = (server.address() as { port: number }).port;
+
+      const body = await new Promise<string>((resolve, reject) => {
+        http.get(`http://127.0.0.1:${port}/health`, (res) => {
+          expect(res.statusCode).toBe(200);
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => resolve(data));
+          res.on('error', reject);
+        });
+      });
+
+      const payload = JSON.parse(body);
+      expect(payload.status).toBe('ok');
+      expect(payload.service).toBe('nanoclaw-skills');
+      expect(payload.skill_count).toBe(2);
+    });
+
     it('returns 404 for other paths', async () => {
       server = await startSkillServer(0, '127.0.0.1');
       const port = (server.address() as { port: number }).port;
