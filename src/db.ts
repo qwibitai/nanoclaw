@@ -773,11 +773,13 @@ export class AgentDb {
       .prepare(
         `SELECT daily_limit_usd, total_limit_usd, reset_hour FROM token_budget_configs WHERE group_jid = ?`,
       )
-      .get(groupJid) as {
-      daily_limit_usd: number | null;
-      total_limit_usd: number | null;
-      reset_hour: number;
-    } | undefined;
+      .get(groupJid) as
+      | {
+          daily_limit_usd: number | null;
+          total_limit_usd: number | null;
+          reset_hour: number;
+        }
+      | undefined;
     return row ?? null;
   }
 
@@ -799,7 +801,9 @@ export class AgentDb {
         ? opts.total_limit_usd
         : (existing?.total_limit_usd ?? null);
     const hour =
-      opts.reset_hour !== undefined ? opts.reset_hour : (existing?.reset_hour ?? 0);
+      opts.reset_hour !== undefined
+        ? opts.reset_hour
+        : (existing?.reset_hour ?? 0);
 
     this.db
       .prepare(
@@ -822,11 +826,13 @@ export class AgentDb {
       .prepare(
         `SELECT paused, paused_at, paused_reason FROM token_budget_state WHERE group_jid = ?`,
       )
-      .get(groupJid) as {
-      paused: number;
-      paused_at: number | null;
-      paused_reason: string | null;
-    } | undefined;
+      .get(groupJid) as
+      | {
+          paused: number;
+          paused_at: number | null;
+          paused_reason: string | null;
+        }
+      | undefined;
     if (!row) return { paused: false, paused_at: null, paused_reason: null };
     return {
       paused: row.paused === 1,
@@ -835,7 +841,10 @@ export class AgentDb {
     };
   }
 
-  setBudgetPaused(groupJid: string, reason: 'daily_limit' | 'total_limit'): void {
+  setBudgetPaused(
+    groupJid: string,
+    reason: 'daily_limit' | 'total_limit',
+  ): void {
     this.db
       .prepare(
         `INSERT INTO token_budget_state (group_jid, paused, paused_at, paused_reason)

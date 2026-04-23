@@ -360,7 +360,10 @@ export class MessageProcessor {
    */
   private async checkAndEnforceBudget(chatJid: string): Promise<boolean> {
     const config = this.ctx.db.getBudgetConfig(chatJid);
-    if (!config || (config.daily_limit_usd == null && config.total_limit_usd == null)) {
+    if (
+      !config ||
+      (config.daily_limit_usd == null && config.total_limit_usd == null)
+    ) {
       return false; // no budget configured
     }
 
@@ -400,10 +403,15 @@ export class MessageProcessor {
       const isDaily =
         config.daily_limit_usd != null && dailyCost >= config.daily_limit_usd;
       const limitType: 'daily' | 'total' = isDaily ? 'daily' : 'total';
-      const limitUsd = isDaily ? config.daily_limit_usd! : config.total_limit_usd!;
+      const limitUsd = isDaily
+        ? config.daily_limit_usd!
+        : config.total_limit_usd!;
       const usedUsd = isDaily ? dailyCost : totalCost;
 
-      this.ctx.db.setBudgetPaused(chatJid, `${limitType}_limit` as 'daily_limit' | 'total_limit');
+      this.ctx.db.setBudgetPaused(
+        chatJid,
+        `${limitType}_limit` as 'daily_limit' | 'total_limit',
+      );
       this.ctx.emit('budget.exceeded', {
         agentId: this.ctx.id,
         jid: chatJid,
@@ -437,7 +445,9 @@ export class MessageProcessor {
     if (warnDaily || warnTotal) {
       const isDaily = warnDaily;
       const limitType: 'daily' | 'total' = isDaily ? 'daily' : 'total';
-      const limitUsd = isDaily ? config.daily_limit_usd! : config.total_limit_usd!;
+      const limitUsd = isDaily
+        ? config.daily_limit_usd!
+        : config.total_limit_usd!;
       const usedUsd = isDaily ? dailyCost : totalCost;
       const pctUsed = usedUsd / limitUsd;
 
@@ -452,7 +462,12 @@ export class MessageProcessor {
       });
 
       logger.info(
-        { chatJid, limitType, pctUsed: Math.round(pctUsed * 100), agent: this.ctx.name },
+        {
+          chatJid,
+          limitType,
+          pctUsed: Math.round(pctUsed * 100),
+          agent: this.ctx.name,
+        },
         'Budget warning — approaching limit',
       );
     }

@@ -49,7 +49,9 @@ export function registerBudgetActions(agent: Agent, db: AgentDb): void {
         .min(0)
         .max(23)
         .optional()
-        .describe('UTC hour at which the daily counter resets (0–23, default 0).'),
+        .describe(
+          'UTC hour at which the daily counter resets (0–23, default 0).',
+        ),
     },
     async (args) => {
       db.setBudgetConfig(args.group_jid, {
