@@ -12,6 +12,16 @@ import { agencyFetch } from '../agency-hq-client.js';
 import { AGENT_CLI_BIN, AGENT_RUNNER_BACKEND } from '../config.js';
 import { logger } from '../logger.js';
 
+// --- Provider → CLI binary mapping ---
+
+const PROVIDER_CLI_MAP: Record<string, string> = {
+  claude: 'claude',
+  kimi: 'kimi',
+  copilot: 'copilot',
+  gemini: 'gemini',
+  codex: 'codex',
+};
+
 // --- Types ---
 
 export interface DispatchConfig {
@@ -59,9 +69,7 @@ export async function fetchDispatchConfig(): Promise<DispatchConfig | null> {
       data?: DispatchConfig;
     };
     if (!json.success || !json.data) {
-      logger.warn(
-        'dispatch-config: API returned no data, using fallback',
-      );
+      logger.warn('dispatch-config: API returned no data, using fallback');
       return null;
     }
     return json.data;
@@ -78,10 +86,13 @@ export async function fetchDispatchConfig(): Promise<DispatchConfig | null> {
  * Resolve the effective config by merging API config over env var defaults.
  * API values take precedence when present; env vars are the fallback.
  */
-export function resolveConfig(apiConfig: DispatchConfig | null): ResolvedConfig {
+export function resolveConfig(
+  apiConfig: DispatchConfig | null,
+): ResolvedConfig {
+  const provider = apiConfig?.provider || AGENT_RUNNER_BACKEND;
   return {
-    provider: apiConfig?.provider || AGENT_RUNNER_BACKEND,
-    cliBin: apiConfig?.cli_bin || AGENT_CLI_BIN,
+    provider,
+    cliBin: apiConfig?.cli_bin || PROVIDER_CLI_MAP[provider] || AGENT_CLI_BIN,
     model: apiConfig?.model || undefined,
   };
 }

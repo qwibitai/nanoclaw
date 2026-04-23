@@ -22,6 +22,7 @@ import {
   getEffectiveConfig,
   startConfigPolling,
   stopConfigPolling,
+  type ResolvedConfig,
   _resetForTest as _resetConfigForTest,
 } from './dispatch-config.js';
 import { createCorrelationLogger, logger } from '../logger.js';
@@ -103,7 +104,55 @@ export async function buildOpsPrompt(task: AgencyHqTask): Promise<string> {
 }
 
 /**
- * Execute an ops task via the Claude Code CLI.
+ * Build CLI arguments for a given provider.
+ * Each provider has different flags for permission bypass, model selection, and prompt delivery.
+ */
+export function buildCliArgs(config: ResolvedConfig, prompt: string): string[] {
+  switch (config.provider) {
+    case 'kimi':
+      return [
+        '--print',
+        ...(config.model ? ['-m', config.model] : []),
+        prompt,
+      ];
+    case 'copilot':
+      return [
+        '--allow-all-tools',
+        '--allow-all-paths',
+        '--allow-all-urls',
+        '--no-ask-user',
+        ...(config.model ? ['--model', config.model] : []),
+        '-p',
+        prompt,
+      ];
+    case 'gemini':
+      return [
+        '--approval-mode',
+        'yolo',
+        ...(config.model ? ['-m', config.model] : []),
+        prompt,
+      ];
+    case 'codex':
+      return [
+        'exec',
+        '--full-auto',
+        '--skip-git-repo-check',
+        ...(config.model ? ['-m', config.model] : []),
+        prompt,
+      ];
+    case 'claude':
+    default:
+      return [
+        '--print',
+        '--dangerously-skip-permissions',
+        ...(config.model ? ['--model', config.model] : []),
+        prompt,
+      ];
+  }
+}
+
+/**
+ * Execute an ops task via the configured CLI.
  * Uses dispatch-config for provider/model when available, falls back to env vars.
  * Returns { result, error } where result is stdout and error is set on failure.
  */
@@ -117,15 +166,18 @@ export async function executeTask(
   const config = getEffectiveConfig();
 
   return new Promise((resolve) => {
-    const args = ['--print', '--dangerously-skip-permissions'];
-    if (config.model) {
-      args.push('--model', config.model);
+    const args = buildCliArgs(config, prompt);
+
+    // Copilot rejects classic GitHub PATs — unset GITHUB_TOKEN
+    const spawnEnv = { ...process.env };
+    if (config.provider === 'copilot') {
+      delete spawnEnv.GITHUB_TOKEN;
     }
-    args.push(prompt);
+
     const proc = spawn(config.cliBin, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       signal: abort.signal,
-      env: { ...process.env },
+      env: spawnEnv,
     });
 
     const stdoutChunks: Buffer[] = [];

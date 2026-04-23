@@ -12,6 +12,7 @@ import {
   fetchOpsTasks,
   claimTask,
   buildOpsPrompt,
+  buildCliArgs,
   executeTask,
   reportResult,
   pollTick,
@@ -19,6 +20,7 @@ import {
   shutdown,
   _resetForTest,
 } from './worker.js';
+import { resolveConfig } from './dispatch-config.js';
 import { createCorrelationLogger } from '../logger.js';
 import { spawn } from 'child_process';
 
@@ -270,6 +272,156 @@ describe('ops-agent/worker', () => {
       const result = await promise;
       expect(result.error).toBe('ENOENT');
       expect(result.result).toBeNull();
+    });
+  });
+
+  describe('resolveConfig', () => {
+    it('maps provider to cliBin when cli_bin is absent', () => {
+      const config = resolveConfig({ provider: 'kimi' });
+      expect(config.provider).toBe('kimi');
+      expect(config.cliBin).toBe('kimi');
+    });
+
+    it('prefers explicit cli_bin over provider mapping', () => {
+      const config = resolveConfig({ provider: 'kimi', cli_bin: '/usr/local/bin/kimi-custom' });
+      expect(config.cliBin).toBe('/usr/local/bin/kimi-custom');
+    });
+
+    it('falls back to AGENT_CLI_BIN for unknown provider', () => {
+      const config = resolveConfig({ provider: 'unknown-provider' });
+      expect(config.provider).toBe('unknown-provider');
+      // Falls back to AGENT_CLI_BIN (default: 'claude')
+      expect(config.cliBin).toBe('claude');
+    });
+  });
+
+  describe('buildCliArgs', () => {
+    it('claude: uses --print --dangerously-skip-permissions', () => {
+      const args = buildCliArgs({ provider: 'claude', cliBin: 'claude', model: undefined }, 'do stuff');
+      expect(args).toEqual(['--print', '--dangerously-skip-permissions', 'do stuff']);
+    });
+
+    it('claude: includes --model when set', () => {
+      const args = buildCliArgs({ provider: 'claude', cliBin: 'claude', model: 'claude-sonnet-4-5-20250929' }, 'do stuff');
+      expect(args).toContain('--model');
+      expect(args).toContain('claude-sonnet-4-5-20250929');
+    });
+
+    it('kimi: uses --print, -m, no --dangerously-skip-permissions', () => {
+      const args = buildCliArgs({ provider: 'kimi', cliBin: 'kimi', model: 'k2-0520' }, 'do stuff');
+      expect(args).toEqual(['--print', '-m', 'k2-0520', 'do stuff']);
+      expect(args).not.toContain('--dangerously-skip-permissions');
+    });
+
+    it('kimi: omits -m when no model', () => {
+      const args = buildCliArgs({ provider: 'kimi', cliBin: 'kimi', model: undefined }, 'do stuff');
+      expect(args).toEqual(['--print', 'do stuff']);
+    });
+
+    it('copilot: uses allow flags and -p for prompt', () => {
+      const args = buildCliArgs({ provider: 'copilot', cliBin: 'copilot', model: undefined }, 'do stuff');
+      expect(args).toContain('--allow-all-tools');
+      expect(args).toContain('--no-ask-user');
+      expect(args).toContain('-p');
+      expect(args[args.length - 1]).toBe('do stuff');
+    });
+
+    it('gemini: uses --approval-mode yolo', () => {
+      const args = buildCliArgs({ provider: 'gemini', cliBin: 'gemini', model: 'gemini-2.5-pro' }, 'do stuff');
+      expect(args).toContain('--approval-mode');
+      expect(args).toContain('yolo');
+      expect(args).toContain('-m');
+      expect(args).toContain('gemini-2.5-pro');
+    });
+
+    it('codex: uses exec --full-auto --skip-git-repo-check', () => {
+      const args = buildCliArgs({ provider: 'codex', cliBin: 'codex', model: undefined }, 'do stuff');
+      expect(args).toEqual(['exec', '--full-auto', '--skip-git-repo-check', 'do stuff']);
+    });
+
+    it('unknown provider falls through to claude defaults', () => {
+      const args = buildCliArgs({ provider: 'future-ai', cliBin: 'future-ai', model: undefined }, 'do stuff');
+      expect(args).toContain('--print');
+      expect(args).toContain('--dangerously-skip-permissions');
+    });
+  });
+
+  describe('executeTask with kimi provider', () => {
+    it('spawns kimi binary with correct args', async () => {
+      // Seed dispatch-config with kimi provider
+      const { refreshConfig } = await import('./dispatch-config.js');
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          success: true,
+          data: { provider: 'kimi', model: 'k2-0520' },
+        }),
+      );
+      await refreshConfig();
+
+      const mockProc = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        stdin: { end: vi.fn() },
+        on: vi.fn(),
+      };
+      vi.mocked(spawn).mockReturnValue(mockProc as never);
+
+      const promise = executeTask('test prompt', 5000);
+
+      expect(spawn).toHaveBeenCalledWith(
+        'kimi',
+        ['--print', '-m', 'k2-0520', 'test prompt'],
+        expect.objectContaining({
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }),
+      );
+
+      const closeHandler = mockProc.on.mock.calls.find(
+        (c: unknown[]) => c[0] === 'close',
+      )![1];
+      closeHandler(0);
+      await promise;
+    });
+  });
+
+  describe('executeTask with copilot provider', () => {
+    it('spawns copilot without GITHUB_TOKEN in env', async () => {
+      const { refreshConfig } = await import('./dispatch-config.js');
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          success: true,
+          data: { provider: 'copilot' },
+        }),
+      );
+      await refreshConfig();
+
+      const mockProc = {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        stdin: { end: vi.fn() },
+        on: vi.fn(),
+      };
+      vi.mocked(spawn).mockReturnValue(mockProc as never);
+
+      // Set GITHUB_TOKEN to verify it gets stripped
+      process.env.GITHUB_TOKEN = 'ghp_test123';
+      const promise = executeTask('test prompt', 5000);
+
+      expect(spawn).toHaveBeenCalledWith(
+        'copilot',
+        expect.arrayContaining(['--allow-all-tools', '-p', 'test prompt']),
+        expect.objectContaining({
+          env: expect.not.objectContaining({ GITHUB_TOKEN: expect.anything() }),
+        }),
+      );
+
+      delete process.env.GITHUB_TOKEN;
+
+      const closeHandler = mockProc.on.mock.calls.find(
+        (c: unknown[]) => c[0] === 'close',
+      )![1];
+      closeHandler(0);
+      await promise;
     });
   });
 
