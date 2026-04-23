@@ -102,7 +102,12 @@ function resolveProxyTarget(
           ? slashIndex
           : Math.min(slashIndex, queryIndex);
   const namePart = rest.slice(0, endIndex);
-  const providerName = decodeURIComponent(namePart);
+  let providerName: string;
+  try {
+    providerName = decodeURIComponent(namePart);
+  } catch {
+    return undefined;
+  }
   const target = targets[providerName];
   if (!target) return undefined;
 
@@ -114,31 +119,17 @@ export function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
 ): Promise<Server> {
-  const targets = buildProxyTargets();
-
-  if (Object.keys(targets).length === 0) {
-    return new Promise((resolve, reject) => {
-      const server = createServer((_req, res) => {
-        res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
-        res.end('Credential proxy is disabled for the configured providers.');
-      });
-
-      server.listen(port, host, () => {
-        logger.info(
-          { port, host, providers: [] },
-          'Credential proxy started in disabled mode',
-        );
-        resolve(server);
-      });
-
-      server.on('error', reject);
-    });
-  }
-
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
+      const targets = buildProxyTargets();
       const routed = resolveProxyTarget(req.url, targets);
+      
       if (!routed) {
+        if (Object.keys(targets).length === 0) {
+          res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
+          res.end('Credential proxy is disabled for the configured providers.');
+          return;
+        }
         res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
         res.end('Unknown provider route');
         return;
@@ -222,8 +213,9 @@ export function startCredentialProxy(
     });
 
     server.listen(port, host, () => {
+      const initialTargets = buildProxyTargets();
       logger.info(
-        { port, host, providers: Object.keys(targets) },
+        { port, host, providers: Object.keys(initialTargets) },
         'Credential proxy started',
       );
       resolve(server);
