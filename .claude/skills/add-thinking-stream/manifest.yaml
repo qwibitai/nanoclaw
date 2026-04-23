@@ -1,0 +1,20 @@
+skill: add-thinking-stream
+version: 1.0.0
+description: "Live thinking stream — tool calls and thinking blocks shown as edit-in-place messages in chat"
+core_version: 0.1.0
+adds: []
+modifies:
+  - src/types.ts
+  - src/container-runner.ts
+  - src/ipc.ts
+  - src/index.ts
+  - src/router.ts
+  - src/channels/telegram.ts
+  - container/agent-runner/src/index.ts
+structured:
+  npm_dependencies: {}
+  env_additions: []
+conflicts: []
+depends:
+  - add-telegram
+test: "npm run build"
