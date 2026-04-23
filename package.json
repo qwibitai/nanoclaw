@@ -15,6 +15,7 @@
     "prepare": "husky",
     "setup": "tsx setup/index.ts",
     "restart": "tsx setup/index.ts --step restart",
+    "reset-session": "tsx scripts/reset-session.ts",
     "auth": "tsx src/whatsapp-auth.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",

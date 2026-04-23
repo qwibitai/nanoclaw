@@ -206,7 +206,7 @@ server.tool(
       const formatted = tasks
         .map(
           (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
-            `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
+            `- [${t.id}] ${[...t.prompt].slice(0, 50).join('')}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
         )
         .join('\n');
 

@@ -285,7 +285,7 @@ function formatTranscriptMarkdown(
     const sender = msg.role === 'user' ? 'User' : assistantName || 'Assistant';
     const content =
       msg.content.length > 2000
-        ? msg.content.slice(0, 2000) + '...'
+        ? [...msg.content].slice(0, 2000).join('') + '...'
         : msg.content;
     lines.push(`**${sender}**: ${content}`);
     lines.push('');
