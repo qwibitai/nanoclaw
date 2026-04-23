@@ -1,0 +1,30 @@
+repos:
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier
+        language: system
+        entry: npx prettier --write
+        types: [ts]
+        files: ^src/
+
+      - id: eslint
+        name: eslint
+        language: system
+        entry: npx eslint --fix
+        types: [ts]
+        files: ^src/
+
+      - id: typecheck
+        name: typecheck
+        language: system
+        entry: npx tsc --noEmit
+        pass_filenames: false
+        always_run: true
+
+      - id: vitest
+        name: vitest
+        language: system
+        entry: npx vitest run
+        pass_filenames: false
+        always_run: true
