@@ -13,17 +13,24 @@ export const CONTAINER_RUNTIME_BIN = 'container';
 
 /**
  * IP address containers use to reach the host machine.
- * Apple Container VMs use a bridge network (192.168.64.x); the host is at the gateway.
- * Detected from the bridge0 interface, falling back to 192.168.64.1.
+ * Apple Container VMs use a bridge network on the 192.168.64.0/24 subnet;
+ * the host sits at the gateway on that subnet.
  */
 export const CONTAINER_HOST_GATEWAY = detectHostGateway();
 
 function detectHostGateway(): string {
-  // Apple Container on macOS: containers reach the host via the bridge network gateway
+  // Apple Container always uses 192.168.64.0/24, but the bridge number
+  // that hosts that subnet is not stable — bridge100 is often already
+  // claimed by Parallels/VMware, pushing Apple Container onto bridge101
+  // or bridge102. Scan every bridge* interface for one on the expected
+  // subnet rather than hard-coding the bridge number.
   const ifaces = os.networkInterfaces();
-  const bridge = ifaces['bridge100'] || ifaces['bridge0'];
-  if (bridge) {
-    const ipv4 = bridge.find((a) => a.family === 'IPv4');
+  for (const name of Object.keys(ifaces)) {
+    if (!name.startsWith('bridge')) continue;
+    const addrs = ifaces[name] || [];
+    const ipv4 = addrs.find(
+      (a) => a.family === 'IPv4' && a.address.startsWith('192.168.64.'),
+    );
     if (ipv4) return ipv4.address;
   }
   // Fallback: Apple Container's default gateway
