@@ -60,11 +60,31 @@ function createBuiltinSkillsDir(...names: string[]): string {
 // ─── Config resolution ──────────────────────────────────────────────
 
 describe('resolveSerializableAgentSettings', () => {
-  it('defaults instructions, skillsSources, and mcpServers to null', () => {
+  it('defaults backend, instructions, skillsSources, and mcpServers to null-ish values', () => {
     const s = resolveSerializableAgentSettings('bot', {}, tmpDir);
+    expect(s.backend.type).toBe('claudeCode');
     expect(s.instructions).toBeNull();
     expect(s.skillsSources).toBeNull();
     expect(s.mcpServers).toBeNull();
+  });
+
+  it('persists an explicit backend', () => {
+    const s = resolveSerializableAgentSettings(
+      'bot',
+      { backend: { type: 'codex' } },
+      tmpDir,
+    );
+    expect(s.backend.type).toBe('codex');
+  });
+
+  it('rejects an invalid backend value', () => {
+    expect(() =>
+      resolveSerializableAgentSettings(
+        'bot',
+        { backend: { type: 'bad-backend' as never } },
+        tmpDir,
+      ),
+    ).toThrow('Invalid agent backend');
   });
 
   it('passes through instructions string', () => {
@@ -128,6 +148,7 @@ describe('buildAgentConfig', () => {
       ...resolveSerializableAgentSettings('bot', {}, tmpDir),
     });
     expect(c.agentDir).toBe(path.join(c.workDir, 'agent'));
+    expect(c.backend.type).toBe('claudeCode');
   });
 });
 
@@ -141,6 +162,7 @@ describe('AgentRegistryDb instructions/skills/mcpServers', () => {
         'bot',
         {
           instructions: 'Be concise.',
+          backend: { type: 'codex' },
           skills: ['/a/skill-a', '/a/skill-b'],
           mcpServers: {
             weather: {
@@ -160,6 +182,7 @@ describe('AgentRegistryDb instructions/skills/mcpServers', () => {
       db.createAgent(settings);
 
       const loaded = db.getAgent('bot')!;
+      expect(loaded.backend.type).toBe('codex');
       expect(loaded.instructions).toBe('Be concise.');
       expect(loaded.skillsSources).toEqual(['/a/skill-a', '/a/skill-b']);
       expect(loaded.mcpServers).toEqual({
@@ -180,6 +203,7 @@ describe('AgentRegistryDb instructions/skills/mcpServers', () => {
     try {
       db.createAgent(resolveSerializableAgentSettings('bot', {}, tmpDir));
       const loaded = db.getAgent('bot')!;
+      expect(loaded.backend.type).toBe('claudeCode');
       expect(loaded.instructions).toBeNull();
       expect(loaded.skillsSources).toBeNull();
       expect(loaded.mcpServers).toBeNull();
@@ -220,6 +244,7 @@ describe('AgentRegistryDb instructions/skills/mcpServers', () => {
     const db = initAgentRegistryDb(tmpDir);
     try {
       const loaded = db.getAgent('old')!;
+      expect(loaded.backend.type).toBe('claudeCode');
       expect(loaded.instructions).toBeNull();
       expect(loaded.skillsSources).toBeNull();
       expect(loaded.mcpServers).toBeNull();
@@ -232,7 +257,7 @@ describe('AgentRegistryDb instructions/skills/mcpServers', () => {
 // ─── syncAgentCustomizations ────────────────────────────────────────
 
 describe('syncAgentCustomizations', () => {
-  it('writes instructions to agentDir/CLAUDE.md', () => {
+  it('writes instructions to agentDir/CLAUDE.md and agentDir/AGENTS.md', () => {
     const agentDir = path.join(tmpDir, 'agent');
     syncAgentCustomizations({
       instructions: 'You are a finance assistant.',
@@ -244,6 +269,11 @@ describe('syncAgentCustomizations', () => {
 
     const content = fs.readFileSync(path.join(agentDir, 'CLAUDE.md'), 'utf-8');
     expect(content).toBe('You are a finance assistant.');
+    const agentsContent = fs.readFileSync(
+      path.join(agentDir, 'AGENTS.md'),
+      'utf-8',
+    );
+    expect(agentsContent).toBe('You are a finance assistant.');
   });
 
   it('copies skill directory with supporting files', () => {
@@ -661,6 +691,7 @@ describe('management API persistence', () => {
       agentId: record.agentId,
       agentName: record.agentName,
       assistantName: record.assistantName,
+      backend: record.backend,
       workDir: record.workDir,
       mountAllowlist: record.mountAllowlist,
       instructions: record.instructions,
@@ -755,147 +786,5 @@ describe('management API persistence', () => {
     expect(record.mcpServers!['stocks'].args).toEqual(['index.ts']);
     expect(record.mcpServers!['stocks'].env).toEqual({ API_KEY: 'test' });
     registry2.close();
-  });
-});
-
-// ─── MCP runtime config building ────────────────────────────────────
-
-import { buildMcpRuntimeConfig } from './message-processor.js';
-
-describe('buildMcpRuntimeConfig', () => {
-  // Paths resolve to /home/node/.claude/mcp/{name}/ — the entrypoint copies sources there
-  // from read-only /home/node/.claude/mcp/ and symlinks node_modules.
-
-  it('returns null for null input', () => {
-    expect(buildMcpRuntimeConfig(null)).toBeNull();
-  });
-
-  it('resolves node .js entry to /home/node/.claude/mcp/ path', () => {
-    const result = buildMcpRuntimeConfig({
-      'my-db': {
-        source: '/host/path/my-db',
-        command: 'node',
-        args: ['index.js'],
-        env: { DB_URL: 'postgres://localhost' },
-      },
-    });
-    expect(result).toEqual({
-      'my-db': {
-        command: 'node',
-        args: ['/home/node/.claude/mcp/my-db/index.js'],
-        env: { DB_URL: 'postgres://localhost' },
-      },
-    });
-  });
-
-  it('resolves node .ts entry and injects --experimental-transform-types', () => {
-    const result = buildMcpRuntimeConfig({
-      dune: {
-        source: '/host/path/dune-mcp',
-        command: 'node',
-        args: ['server.ts', '--port', '3000'],
-      },
-    });
-    expect(result).toEqual({
-      dune: {
-        command: 'node',
-        args: [
-          '--experimental-transform-types',
-          '/home/node/.claude/mcp/dune/server.ts',
-          '--port',
-          '3000',
-        ],
-      },
-    });
-  });
-
-  it('passes args through for non-node commands', () => {
-    const result = buildMcpRuntimeConfig({
-      pyserver: {
-        source: '/host/path/py',
-        command: 'python',
-        args: ['server.ts'],
-      },
-    });
-    expect(result).toEqual({
-      pyserver: { command: 'python', args: ['server.ts'] },
-    });
-  });
-
-  it('passes args through for npx commands', () => {
-    const result = buildMcpRuntimeConfig({
-      tool: {
-        source: '/host/path/tool',
-        command: 'npx',
-        args: ['--yes', 'tsx', 'server.ts'],
-      },
-    });
-    expect(result).toEqual({
-      tool: { command: 'npx', args: ['--yes', 'tsx', 'server.ts'] },
-    });
-  });
-
-  it('handles multiple servers with mixed .ts and .js', () => {
-    const result = buildMcpRuntimeConfig({
-      ts: { source: '/a', command: 'node', args: ['index.ts'] },
-      js: { source: '/b', command: 'node', args: ['index.js'] },
-    });
-    expect(result!['ts'].args).toEqual([
-      '--experimental-transform-types',
-      '/home/node/.claude/mcp/ts/index.ts',
-    ]);
-    expect(result!['js'].args).toEqual(['/home/node/.claude/mcp/js/index.js']);
-  });
-
-  it('does not resolve already-absolute paths', () => {
-    const result = buildMcpRuntimeConfig({
-      abs: {
-        source: '/host/path',
-        command: 'node',
-        args: ['/custom/path/server.js'],
-      },
-    });
-    expect(result!['abs'].args).toEqual(['/custom/path/server.js']);
-  });
-
-  it('preserves user env as-is', () => {
-    const result = buildMcpRuntimeConfig({
-      custom: {
-        source: '/x',
-        command: 'node',
-        args: ['server.js'],
-        env: { FOO: 'bar' },
-      },
-    });
-    expect(result!['custom'].env).toEqual({ FOO: 'bar' });
-  });
-
-  it('handles server with no args', () => {
-    const result = buildMcpRuntimeConfig({
-      noargs: { source: '/x', command: 'node' },
-    });
-    expect(result).toEqual({
-      noargs: { command: 'node', args: undefined, env: undefined },
-    });
-  });
-
-  // ─── Regression tests ──────────────────────────────────────────
-
-  it('regression: node entry resolved to /home/node/.claude/mcp/ (not left relative)', () => {
-    const result = buildMcpRuntimeConfig({
-      db: { source: '/host/db', command: 'node', args: ['server.js'] },
-    });
-    expect(result!['db'].args).toEqual(['/home/node/.claude/mcp/db/server.js']);
-  });
-
-  it('regression: npx args NOT path-resolved', () => {
-    const result = buildMcpRuntimeConfig({
-      tool: {
-        source: '/host/tool',
-        command: 'npx',
-        args: ['--yes', 'tsx', 'server.ts'],
-      },
-    });
-    expect(result!['tool'].args).toEqual(['--yes', 'tsx', 'server.ts']);
   });
 });

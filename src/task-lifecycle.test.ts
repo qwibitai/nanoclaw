@@ -50,12 +50,15 @@ const TEAM_GROUP: RegisteredGroup = {
 let tmpDir: string;
 let db: AgentDb;
 
-function createAgent(name: string): AgentImpl {
+function createAgent(
+  name: string,
+  opts: Parameters<typeof resolveSerializableAgentSettings>[1] = {},
+): AgentImpl {
   const config = buildAgentConfig({
     agentId: `${name}00000000`.slice(0, 8),
     ...resolveSerializableAgentSettings(
       name,
-      { workdir: path.join(tmpDir, 'agents', name) },
+      { ...opts, workdir: opts?.workdir ?? path.join(tmpDir, 'agents', name) },
       tmpDir,
     ),
   });
@@ -101,6 +104,7 @@ function startScheduler(
     db,
     agentId: agent.id,
     assistantName: 'Andy',
+    agentBackend: agent.config.backend,
     schedulerPollInterval: 60000,
     timezone: 'UTC',
     workDir: agent.config.workDir,
@@ -230,6 +234,7 @@ describe('task lifecycle integration', () => {
       db,
       agentId: agent.id,
       assistantName: 'Andy',
+      agentBackend: agent.config.backend,
       schedulerPollInterval: 60000,
       timezone: 'UTC',
       workDir: agent.config.workDir,
@@ -302,6 +307,44 @@ describe('task lifecycle integration', () => {
     }
   });
 
+  it('passes the configured backend through scheduled task execution', async () => {
+    const agent = createAgent('codex-task', { backend: { type: 'codex' } });
+    agent._setDbForTests(db);
+    agent._setRegisteredGroups({
+      'main@g.us': MAIN_GROUP,
+      'team@g.us': TEAM_GROUP,
+    });
+    (agent as unknown as { _started: boolean })._started = true;
+
+    vi.mocked(runContainerAgent).mockResolvedValue({
+      status: 'success',
+      result: 'done',
+    });
+
+    const task = await agent.scheduleTask({
+      jid: 'team@g.us',
+      prompt: 'use configured backend',
+      scheduleType: 'once',
+      scheduleValue: '2024-01-01T00:00:00Z',
+      contextMode: 'isolated',
+    });
+
+    const queue = immediateQueue();
+    const handle = startScheduler(agent, queue);
+
+    try {
+      await vi.waitFor(() => {
+        expect(runContainerAgent).toHaveBeenCalledTimes(1);
+      });
+
+      const input = vi.mocked(runContainerAgent).mock.calls[0][1];
+      expect(input.agentBackend).toEqual({ type: 'codex' });
+      expect(agent.getTask(task.id)?.status).toBe('completed');
+    } finally {
+      handle.stop();
+    }
+  });
+
   it('emits CRUD and run lifecycle events in the expected order', async () => {
     const agent = createAgent('events');
     agent._setDbForTests(db);
@@ -363,6 +406,7 @@ describe('task lifecycle integration', () => {
       db,
       agentId: agent.id,
       assistantName: 'Andy',
+      agentBackend: agent.config.backend,
       schedulerPollInterval: 60000,
       timezone: 'UTC',
       workDir: agent.config.workDir,
@@ -445,6 +489,7 @@ describe('task lifecycle integration', () => {
       db,
       agentId: agent.id,
       assistantName: 'Andy',
+      agentBackend: agent.config.backend,
       schedulerPollInterval: 60000,
       timezone: 'UTC',
       workDir: agent.config.workDir,

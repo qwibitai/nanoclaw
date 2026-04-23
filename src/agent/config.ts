@@ -6,7 +6,12 @@
 import path from 'path';
 
 import type { MountAllowlist } from '../types.js';
-import type { AgentOptions, McpServerConfig } from '../api/options.js';
+import type {
+  AgentBackendOptions,
+  AgentOptions,
+  McpServerConfig,
+} from '../api/options.js';
+import { normalizeAgentBackendOptions } from './backend.js';
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -37,6 +42,7 @@ export function serializeMountAllowlist(
 export interface SerializableAgentSettings {
   readonly agentName: string;
   readonly assistantName: string;
+  readonly backend: AgentBackendOptions;
   readonly workDir: string;
   readonly mountAllowlist: MountAllowlist | null;
   /** Agent-level instructions appended to the system prompt. */
@@ -50,6 +56,10 @@ export interface SerializableAgentSettings {
 export interface PersistedAgentSettings extends SerializableAgentSettings {
   readonly agentId: string;
 }
+
+type BuildAgentConfigInput = Omit<PersistedAgentSettings, 'backend'> & {
+  readonly backend?: AgentBackendOptions;
+};
 
 /** Immutable config for one Agent — identity, paths, and security. */
 export interface AgentConfig extends PersistedAgentSettings {
@@ -70,6 +80,7 @@ export function resolveSerializableAgentSettings(
   return {
     agentName,
     assistantName: opts?.name ?? 'Andy',
+    backend: normalizeAgentBackendOptions(opts?.backend),
     workDir: path.resolve(
       opts?.workdir ?? path.join(baseWorkdir, 'agents', agentName),
     ),
@@ -91,13 +102,14 @@ export function resolveSerializableAgentSettings(
 }
 
 /** Build an immutable AgentConfig from persisted registry metadata. */
-export function buildAgentConfig(input: PersistedAgentSettings): AgentConfig {
+export function buildAgentConfig(input: BuildAgentConfigInput): AgentConfig {
   const workDir = path.resolve(input.workDir);
 
   return {
     agentId: input.agentId,
     agentName: input.agentName,
     assistantName: input.assistantName,
+    backend: normalizeAgentBackendOptions(input.backend),
     triggerPattern: new RegExp(`^@${escapeRegex(input.assistantName)}\\b`, 'i'),
     workDir,
     storeDir: path.join(workDir, 'store'),

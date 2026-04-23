@@ -50,6 +50,7 @@ describe('AgentLite platform registry', () => {
 
     const agent = platform.createAgent('alice', {
       name: 'Alice',
+      backend: { type: 'codex' },
       mountAllowlist: allowlist,
     });
 
@@ -59,6 +60,7 @@ describe('AgentLite platform registry', () => {
       expect(row).toBeDefined();
       expect(row!.agentId).toBe(agent.id);
       expect(row!.assistantName).toBe('Alice');
+      expect(row!.backend.type).toBe('codex');
       expect(row!.workDir).toBe(path.join(tmpDir, 'agents', 'alice'));
       expect(row!.mountAllowlist).toEqual(allowlist);
     } finally {
@@ -79,6 +81,7 @@ describe('AgentLite platform registry', () => {
 
     const created = firstPlatform.createAgent('alice', {
       name: 'Alice',
+      backend: { type: 'codex' },
       workdir: path.join(tmpDir, 'custom-agents', 'alice'),
       mountAllowlist: allowlist,
     });
@@ -93,6 +96,7 @@ describe('AgentLite platform registry', () => {
     const restored = secondPlatform.agents.get('alice') as AgentImpl;
     expect(restored.id).toBe(created.id);
     expect(restored.config.assistantName).toBe('Alice');
+    expect(restored.config.backend.type).toBe('codex');
     expect(restored.config.workDir).toBe(
       path.join(tmpDir, 'custom-agents', 'alice'),
     );
@@ -139,6 +143,9 @@ describe('AgentLite platform registry', () => {
         workdir: path.join(tmpDir, 'other'),
       }),
     ).toThrow('workdir');
+    expect(() =>
+      secondPlatform.getOrCreateAgent('alice', { backend: { type: 'codex' } }),
+    ).toThrow('backend');
   });
 
   it('keeps createAgent strict for restored names, deletes the workdir, and removes registry rows on delete', async () => {

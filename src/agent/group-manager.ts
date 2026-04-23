@@ -10,6 +10,10 @@ import type {
   RegisterGroupOptions,
   RegisteredGroup as PublicRegisteredGroup,
 } from '../api/group.js';
+import {
+  ensureInstructionAliases,
+  PRIMARY_INSTRUCTION_FILE,
+} from './instruction-files.js';
 import type { RegisteredGroup as InternalRegisteredGroup } from '../types.js';
 import { logger } from '../logger.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
@@ -166,14 +170,15 @@ export class GroupManager {
     );
   }
 
-  /** Copy CLAUDE.md templates for new groups. */
+  /** Copy instruction templates for new groups. */
   copyGroupTemplates(): void {
     const templateDir = path.join(this.ctx.runtimeConfig.packageRoot, 'groups');
     if (!fs.existsSync(templateDir)) return;
 
     for (const name of ['global', 'main']) {
-      const src = path.join(templateDir, name, 'CLAUDE.md');
-      const dst = path.join(this.ctx.config.groupsDir, name, 'CLAUDE.md');
+      const groupDir = path.join(this.ctx.config.groupsDir, name);
+      const src = path.join(templateDir, name, PRIMARY_INSTRUCTION_FILE);
+      const dst = path.join(groupDir, PRIMARY_INSTRUCTION_FILE);
       if (fs.existsSync(src) && !fs.existsSync(dst)) {
         fs.mkdirSync(path.dirname(dst), { recursive: true });
         const content = fs.readFileSync(src, 'utf-8');
@@ -184,6 +189,9 @@ export class GroupManager {
             this.ctx.config.assistantName,
           ),
         );
+      }
+      if (fs.existsSync(dst)) {
+        ensureInstructionAliases(groupDir);
       }
     }
   }

@@ -5,6 +5,12 @@
 import fs from 'fs';
 import path from 'path';
 
+import {
+  AGENT_BACKEND_HOME_LIST,
+  resolveAgentBackendHomeDir,
+} from './agent/backend-home.js';
+import { ensureInstructionAliases } from './agent/instruction-files.js';
+import type { AgentBackendOptions, AgentBackendType } from './api/options.js';
 import type { RuntimeConfig } from './runtime-config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -35,7 +41,15 @@ const OUTPUT_END_MARKER = '---AGENTLITE_OUTPUT_END---';
 
 export type CredentialResolver = () => Promise<Record<string, string>>;
 
-export interface ContainerInput {
+export type ContainerAgentBackendOptions = AgentBackendOptions;
+
+export interface ContainerMcpServerRuntimeConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+export interface ContainerAgentInput {
   prompt: string;
   sessionId?: string;
   groupFolder: string;
@@ -43,7 +57,8 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
-  /** Agent id used to scope runtime box names. */
+  agentBackend?: ContainerAgentBackendOptions;
+  /** Agent id used to scope box names. */
   agentId?: string;
   workDir?: string;
   /** Override config.GROUPS_DIR for per-instance group paths. */
@@ -55,10 +70,7 @@ export interface ContainerInput {
   /** Per-agent mount allowlist (resolved). */
   mountAllowlist?: import('./types.js').MountAllowlist | null;
   /** Custom MCP server runtime configs (source dirs already copied into agentDir/mcp/). */
-  mcpServers?: Record<
-    string,
-    { command: string; args?: string[]; env?: Record<string, string> }
-  > | null;
+  mcpServers?: Record<string, ContainerMcpServerRuntimeConfig> | null;
   /**
    * Host-side actions HTTP server coordinates — URL and per-spawn bearer
    * token the in-container MCP shim uses to reach /search and /call.
@@ -67,6 +79,8 @@ export interface ContainerInput {
    */
   actionsAuth?: { url: string; token: string };
 }
+
+export type ContainerInput = ContainerAgentInput;
 
 export type ContainerState = 'active' | 'idle' | 'stopped';
 
@@ -131,6 +145,35 @@ export interface VolumeMount {
   readonly: boolean;
 }
 
+function syncSkillsDir(
+  skillsSrc: string,
+  agentSkillsSrc: string,
+  dstRoot: string,
+): void {
+  fs.mkdirSync(dstRoot, { recursive: true });
+
+  const builtinNames = new Set<string>();
+  if (fs.existsSync(skillsSrc)) {
+    for (const skillDir of fs.readdirSync(skillsSrc)) {
+      const srcDir = path.join(skillsSrc, skillDir);
+      if (!fs.statSync(srcDir).isDirectory()) continue;
+      builtinNames.add(skillDir);
+      copyDirRecursive(srcDir, path.join(dstRoot, skillDir));
+    }
+  }
+
+  if (!fs.existsSync(agentSkillsSrc)) return;
+
+  for (const skillDir of fs.readdirSync(agentSkillsSrc)) {
+    const srcDir = path.join(agentSkillsSrc, skillDir);
+    if (!fs.statSync(srcDir).isDirectory()) continue;
+    if (builtinNames.has(skillDir)) {
+      throw new Error(`Skill "${skillDir}" collides with built-in skill`);
+    }
+    copyDirRecursive(srcDir, path.join(dstRoot, skillDir));
+  }
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -142,10 +185,11 @@ function buildVolumeMounts(
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const groupDir = resolveGroupFolderPath(group.folder, groupsDir);
+  ensureInstructionAliases(groupDir);
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
-    // (group folder, IPC, .claude/) are mounted separately below.
+    // (group folder, IPC, per-backend homes) are mounted separately below.
     // Read-only prevents the agent from modifying host application code
     // (src/, dist/, package.json, etc.) which would bypass the sandbox
     // entirely on next restart.
@@ -189,6 +233,7 @@ function buildVolumeMounts(
     // Only directory mounts are supported, not file mounts
     const globalDir = path.join(groupsDir, 'global');
     if (fs.existsSync(globalDir)) {
+      ensureInstructionAliases(globalDir);
       mounts.push({
         hostPath: globalDir,
         containerPath: '/workspace/global',
@@ -197,81 +242,34 @@ function buildVolumeMounts(
     }
   }
 
-  // Per-group Claude sessions directory (isolated from other groups)
-  // Each group gets their own .claude/ to prevent cross-group session access
-  const groupSessionsDir = path.join(
-    dataDir,
-    'sessions',
-    group.folder,
-    '.claude',
-  );
-  fs.mkdirSync(groupSessionsDir, { recursive: true });
-  const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            // Enable agent swarms (subagent orchestration)
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
+  // Per-group agent backend homes (isolated from other groups)
+  // Each group gets their own .claude/ and .codex/ to prevent cross-group
+  // session access when switching backends.
+  const backendRootDir = path.join(dataDir, 'sessions', group.folder);
+  const backendHomeDirs = {} as Record<AgentBackendType, string>;
+  for (const spec of AGENT_BACKEND_HOME_LIST) {
+    const homeDir = resolveAgentBackendHomeDir(backendRootDir, spec.type);
+    spec.initialize(homeDir);
+    backendHomeDirs[spec.type] = homeDir;
   }
 
-  // Sync skills from container/skills/ into each group's .claude/skills/
+  // Sync skills from container/skills/ into each group's backend home.
   const skillsSrc = path.join(packageRoot, 'container', 'skills');
-  const skillsDst = path.join(groupSessionsDir, 'skills');
-  if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
-      const srcDir = path.join(skillsSrc, skillDir);
-      if (!fs.statSync(srcDir).isDirectory()) continue;
-      const dstDir = path.join(skillsDst, skillDir);
-      copyDirRecursive(srcDir, dstDir);
-    }
-  }
-
-  // Sync agent-level skills (copied by syncAgentCustomizations in agent-impl)
   const agentDir = path.join(workDir, 'agent');
   const agentSkillsSrc = path.join(agentDir, 'skills');
-  if (fs.existsSync(agentSkillsSrc)) {
-    // Collect built-in skill names to check collisions against the source
-    // of truth — not against whatever exists in the persistent .claude/skills/
-    // directory (which may contain stale agent skills from previous runs).
-    const builtinNames = new Set(
-      fs.existsSync(skillsSrc)
-        ? fs
-            .readdirSync(skillsSrc)
-            .filter((e) => fs.statSync(path.join(skillsSrc, e)).isDirectory())
-        : [],
+  for (const spec of AGENT_BACKEND_HOME_LIST) {
+    syncSkillsDir(
+      skillsSrc,
+      agentSkillsSrc,
+      path.join(backendHomeDirs[spec.type], 'skills'),
     );
-    for (const skillDir of fs.readdirSync(agentSkillsSrc)) {
-      const srcDir = path.join(agentSkillsSrc, skillDir);
-      if (!fs.statSync(srcDir).isDirectory()) continue;
-      if (builtinNames.has(skillDir)) {
-        throw new Error(`Skill "${skillDir}" collides with built-in skill`);
-      }
-      copyDirRecursive(srcDir, path.join(skillsDst, skillDir));
-    }
   }
 
-  // Sync custom MCP server sources into each group's .claude/mcp/{name}/.
-  // Per-group copy so each container is isolated. A dangling symlink to
-  // /app/node_modules is created — it resolves inside the container for
-  // ESM import resolution without needing agent-runner changes.
+  // Sync custom MCP server sources into the shared MCP backend home.
+  // Both backends reference this staging directory today, so the host-side
+  // copy stays centralized instead of branching per backend.
   const agentMcpSrc = path.join(agentDir, 'mcp');
-  const mcpDst = path.join(groupSessionsDir, 'mcp');
+  const mcpDst = path.join(backendHomeDirs.claudeCode, 'mcp');
   if (fs.existsSync(agentMcpSrc)) {
     if (fs.existsSync(mcpDst)) {
       fs.rmSync(mcpDst, { recursive: true });
@@ -291,13 +289,15 @@ function buildVolumeMounts(
     fs.rmSync(mcpDst, { recursive: true });
   }
 
-  mounts.push({
-    hostPath: groupSessionsDir,
-    containerPath: '/home/node/.claude',
-    readonly: false,
-  });
+  for (const spec of AGENT_BACKEND_HOME_LIST) {
+    mounts.push({
+      hostPath: backendHomeDirs[spec.type],
+      containerPath: spec.containerHomePath,
+      readonly: false,
+    });
+  }
 
-  // Mount agent-level customization dir (read-only) for CLAUDE.md
+  // Mount agent-level customization dir (read-only) for instructions/skills/MCP.
   if (fs.existsSync(agentDir)) {
     mounts.push({
       hostPath: agentDir,
@@ -453,7 +453,7 @@ async function buildBoxConfig(
 
 export async function runContainerAgent(
   group: RegisteredGroup,
-  input: ContainerInput,
+  input: ContainerAgentInput,
   rc: RuntimeConfig,
   onProcess: (boxName: string, containerName: string) => void,
   onOutput?: (event: ContainerEvent) => Promise<void>,

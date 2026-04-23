@@ -2,8 +2,12 @@ import { describe, expectTypeOf, it } from 'vitest';
 
 import type {
   Agent,
+  AgentBackendOptions,
+  AgentBackendType,
   AgentLite,
   AvailableGroup,
+  ClaudeCodeBackendOptions,
+  CodexBackendOptions,
   RegisteredGroup,
   Task,
   TaskDetails,
@@ -22,6 +26,17 @@ describe('public SDK type exports', () => {
     type GetOrCreateAgent = ReturnType<AgentLite['getOrCreateAgent']>;
 
     expectTypeOf<GetOrCreateAgent>().toEqualTypeOf<Agent>();
+  });
+
+  it('exposes agent backend option types', () => {
+    expectTypeOf<AgentBackendType>().toEqualTypeOf<'claudeCode' | 'codex'>();
+    expectTypeOf<ClaudeCodeBackendOptions>().toEqualTypeOf<{
+      type: 'claudeCode';
+    }>();
+    expectTypeOf<CodexBackendOptions>().toEqualTypeOf<{ type: 'codex' }>();
+    expectTypeOf<AgentBackendOptions>().toEqualTypeOf<
+      ClaudeCodeBackendOptions | CodexBackendOptions
+    >();
   });
 
   it('exposes task APIs with public task types', () => {

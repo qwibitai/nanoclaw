@@ -1,6 +1,5 @@
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
-import path from 'path';
 
 import {
   ContainerEvent,
@@ -15,7 +14,7 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 import type { ActionsHttp } from './agent/actions-http.js';
-import type { McpServerConfig } from './api/options.js';
+import type { AgentBackendOptions, McpServerConfig } from './api/options.js';
 import { buildMcpRuntimeConfig } from './agent/mcp-runtime.js';
 
 /** Minimal emit signature matching agent.emit for task events. */
@@ -71,6 +70,7 @@ export function computeNextRun(
 export interface SchedulerDependencies {
   agentId: string;
   assistantName: string;
+  agentBackend: AgentBackendOptions;
   schedulerPollInterval: number;
   timezone: string;
   runtimeConfig: RuntimeConfig;
@@ -246,6 +246,7 @@ async function runTask(
         isMain,
         isScheduledTask: true,
         assistantName: deps.assistantName,
+        agentBackend: deps.agentBackend,
         agentId: deps.agentId,
         workDir: deps.workDir,
         groupsDir: deps.groupsDir,

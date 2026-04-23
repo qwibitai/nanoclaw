@@ -5,15 +5,16 @@
  *
  * Transforms user-facing McpServerConfig into container-ready runtime configs:
  * - Strips `source` (host path) — not needed at runtime
- * - For `node` commands: resolves entry file to /tmp/mcp/{name}/ (prepared by entrypoint),
- *   injects --experimental-transform-types for .ts files (Node 22+)
+ * - For `node` commands: resolves entry file to the shared container MCP directory,
+ *   injecting --experimental-transform-types for .ts files (Node 22+)
  * - For other commands (npx, python): passes args through unchanged
  */
 
-// MCP sources are copied per-group into /home/node/.claude/mcp/{name}/.
+import { CONTAINER_CUSTOM_MCP_DIR } from './backend-home.js';
+
+// MCP sources are copied per-group into the shared container MCP directory.
 // A host-created symlink node_modules → /app/node_modules resolves inside
 // the container for ESM import resolution. Verified by e2e test.
-const CONTAINER_MCP_DIR = '/home/node/.claude/mcp';
 
 export function buildMcpRuntimeConfig(
   mcpServers: Record<
@@ -32,7 +33,7 @@ export function buildMcpRuntimeConfig(
   if (!mcpServers) return null;
   return Object.fromEntries(
     Object.entries(mcpServers).map(([name, cfg]) => {
-      const mcpDir = `${CONTAINER_MCP_DIR}/${name}`;
+      const mcpDir = `${CONTAINER_CUSTOM_MCP_DIR}/${name}`;
       const isNode = cfg.command === 'node';
       const entry = cfg.args?.[0];
 

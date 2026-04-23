@@ -24,7 +24,11 @@ import {
 } from './registry-db.js';
 import { cleanupOrphans } from '../box-runtime.js';
 import { buildRuntimeConfig } from '../runtime-config.js';
-import type { AgentLiteOptions, AgentOptions } from '../api/options.js';
+import type {
+  AgentBackendOptions,
+  AgentLiteOptions,
+  AgentOptions,
+} from '../api/options.js';
 import type { Agent } from '../api/agent.js';
 import type { AgentLite } from '../api/sdk.js';
 
@@ -32,6 +36,7 @@ interface RuntimeOptionsAwareAgent extends Agent {
   mergeRuntimeOptions(options?: AgentOptions): void;
   readonly config: {
     assistantName: string;
+    backend: AgentBackendOptions;
     workDir: string;
     mountAllowlist: import('../types.js').MountAllowlist | null;
   };
@@ -45,6 +50,7 @@ function toRuntimeOptions(
     acp: options?.acp,
     workdir: record.workDir,
     name: record.assistantName,
+    backend: record.backend,
     mountAllowlist: record.mountAllowlist ?? undefined,
     channels: options?.channels,
     credentials: options?.credentials,
@@ -203,6 +209,7 @@ class AgentLiteImpl implements AgentLite {
       agentId: record.agentId,
       agentName: record.agentName,
       assistantName: record.assistantName,
+      backend: record.backend,
       workDir: record.workDir,
       mountAllowlist: record.mountAllowlist,
       instructions: record.instructions,
@@ -222,7 +229,7 @@ class AgentLiteImpl implements AgentLite {
     name: string,
     existing: Pick<
       SerializableAgentSettings,
-      'assistantName' | 'workDir' | 'mountAllowlist'
+      'assistantName' | 'backend' | 'workDir' | 'mountAllowlist'
     >,
     options?: AgentOptions,
   ): void {
@@ -231,6 +238,15 @@ class AgentLiteImpl implements AgentLite {
     if (options.name !== undefined && options.name !== existing.assistantName) {
       throw new Error(
         `Agent "${name}" already exists with assistant name "${existing.assistantName}"`,
+      );
+    }
+
+    if (
+      options.backend !== undefined &&
+      options.backend.type !== existing.backend.type
+    ) {
+      throw new Error(
+        `Agent "${name}" already exists with backend "${existing.backend.type}"`,
       );
     }
 
