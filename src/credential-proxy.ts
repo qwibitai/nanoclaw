@@ -115,13 +115,31 @@ function resolveProxyTarget(
   return { target, upstreamPath: suffix };
 }
 
+const CONFIG_REFRESH_INTERVAL_MS = 30_000;
+
 export function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
 ): Promise<Server> {
   return new Promise((resolve, reject) => {
+    let cachedTargets: Record<string, ProxyTarget>;
+    try {
+      cachedTargets = buildProxyTargets();
+    } catch (err) {
+      return reject(err);
+    }
+
+    const refreshTimer = setInterval(() => {
+      try {
+        cachedTargets = buildProxyTargets();
+      } catch (err) {
+        logger.error({ err }, 'Credential proxy: failed to refresh targets');
+      }
+    }, CONFIG_REFRESH_INTERVAL_MS);
+    refreshTimer.unref();
+
     const server = createServer((req, res) => {
-      const targets = buildProxyTargets();
+      const targets = cachedTargets;
       const routed = resolveProxyTarget(req.url, targets);
 
       if (!routed) {
@@ -218,14 +236,20 @@ export function startCredentialProxy(
     });
 
     server.listen(port, host, () => {
-      const initialTargets = buildProxyTargets();
       logger.info(
-        { port, host, providers: Object.keys(initialTargets) },
+        { port, host, providers: Object.keys(cachedTargets) },
         'Credential proxy started',
       );
       resolve(server);
     });
 
-    server.on('error', reject);
+    server.on('error', (err) => {
+      clearInterval(refreshTimer);
+      reject(err);
+    });
+
+    server.on('close', () => {
+      clearInterval(refreshTimer);
+    });
   });
 }
