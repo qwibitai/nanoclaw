@@ -10,12 +10,7 @@ import {
   writeGroupsSnapshot,
 } from '../container-runner.js';
 import { findChannel, formatMessages } from '../router.js';
-import {
-  isSenderAllowed,
-  isTriggerAllowed,
-  loadSenderAllowlist,
-  shouldDropMessage,
-} from '../sender-allowlist.js';
+import { isTriggerAllowed, loadSenderAllowlist } from '../sender-allowlist.js';
 import { isAcpNoticeMessage } from '../acp/notice.js';
 import type { AgentContext } from './agent-context.js';
 import type { ChannelManager } from './channel-manager.js';
@@ -378,6 +373,7 @@ export class MessageProcessor {
           chatJid,
           isMain,
           assistantName: this.ctx.config.assistantName,
+          agentBackend: this.ctx.config.backend,
           agentId: this.ctx.id,
           groupsDir: this.ctx.config.groupsDir,
           dataDir: this.ctx.config.dataDir,

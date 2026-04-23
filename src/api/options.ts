@@ -8,6 +8,22 @@ import type { MountAllowlist } from './mount.js';
 /** Resolves credentials to env vars injected into agent containers. */
 export type CredentialResolver = () => Promise<Record<string, string>>;
 
+/** In-container coding agent backend. */
+export const AGENT_BACKEND_TYPES = ['claudeCode', 'codex'] as const;
+export type AgentBackendType = (typeof AGENT_BACKEND_TYPES)[number];
+
+export interface ClaudeCodeBackendOptions {
+  type: 'claudeCode';
+}
+
+export interface CodexBackendOptions {
+  type: 'codex';
+}
+
+export type AgentBackendOptions =
+  | ClaudeCodeBackendOptions
+  | CodexBackendOptions;
+
 /**
  * MCP server configuration (stdio transport).
  * The source directory is copied into the container, similar to skills.
@@ -65,6 +81,8 @@ export interface AgentOptions {
   workdir?: string;
   /** Assistant trigger name (used in @Name patterns). Persisted in the platform registry. Default: 'Andy' */
   name?: string;
+  /** In-container coding agent backend. Persisted in the platform registry. Default: { type: 'claudeCode' } */
+  backend?: AgentBackendOptions;
   /** Resolve credentials injected into agent containers. Runtime-only, never persisted. */
   credentials?: CredentialResolver;
   /** Mount allowlist for container security. Persisted in the platform registry. */

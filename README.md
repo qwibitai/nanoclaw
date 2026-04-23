@@ -1,6 +1,6 @@
 # AgentLite
 
-An SDK for running Claude agents in isolated BoxLite VMs with messaging channel integration.
+An SDK for running AI agents in isolated BoxLite VMs with messaging channel integration.
 
 ## SDK Usage
 
@@ -9,7 +9,10 @@ import { createAgentLite } from '@boxlite-ai/agentlite';
 import { telegram } from '@boxlite-ai/agentlite/channels/telegram';
 
 const agentlite = await createAgentLite({ workdir: './data' });
-const agent = agentlite.getOrCreateAgent('main', { name: 'Andy' });
+const agent = agentlite.getOrCreateAgent('main', {
+  name: 'Andy',
+  backend: { type: 'claudeCode' }, // default; use { type: 'codex' } for OpenAI Codex CLI
+});
 agent.addChannel(
   'telegram',
   telegram({ token: process.env.TELEGRAM_BOT_TOKEN! }),
@@ -47,7 +50,7 @@ npm run dev
 - **Multi-channel messaging** - Talk to your assistant from WhatsApp, Telegram, Discord, Slack, or Gmail
 - **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own BoxLite VM
 - **Main channel** - Your private channel for admin control; every group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
+- **Scheduled tasks** - Recurring jobs that run your configured in-container agent and can message you back
 - **Web access** - Search and fetch content from the Web
 - **BoxLite VM isolation** - Agents are sandboxed in hardware-isolated VMs (KVM on Linux, Hypervisor.framework on macOS)
 - **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks
@@ -106,6 +109,27 @@ Key files:
 **Is this secure?**
 
 Agents run in hardware-isolated BoxLite VMs, not behind application-level permission checks. They can only access explicitly mounted directories. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
+
+**Can I switch the in-container coding agent backend?**
+
+Yes. Each agent can persist either the Claude Code backend or the Codex backend:
+
+```typescript
+const claudeAgent = agentlite.getOrCreateAgent('claude-main', {
+  name: 'Andy',
+  backend: { type: 'claudeCode' },
+});
+
+const codexAgent = agentlite.getOrCreateAgent('codex-main', {
+  name: 'Casey',
+  backend: { type: 'codex' },
+  credentials: async () => ({
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY!,
+  }),
+});
+```
+
+Claude remains the default when `runtime` is omitted.
 
 **Can I use third-party or open-source models?**
 

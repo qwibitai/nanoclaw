@@ -1,5 +1,5 @@
 # AgentLite Agent Container
-# Runs Claude Agent SDK in isolated BoxLite VM with browser automation
+# Runs the configured in-container coding agent in an isolated BoxLite VM
 
 FROM node:22-slim
 
@@ -33,8 +33,8 @@ RUN apt-get update && apt-get install -y \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install agent CLIs globally
+RUN npm install -g agent-browser @anthropic-ai/claude-code @openai/codex
 
 # Create app directory
 WORKDIR /app

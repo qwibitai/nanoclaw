@@ -77,4 +77,39 @@ describe('buildMcpRuntimeConfig', () => {
     });
     expect(out!.e.env).toEqual({ FOO: 'bar' });
   });
+
+  it('handles multiple servers with mixed .ts and .js node entries', () => {
+    const out = buildMcpRuntimeConfig({
+      ts: { source: '/host/ts', command: 'node', args: ['index.ts'] },
+      js: { source: '/host/js', command: 'node', args: ['index.js'] },
+    });
+
+    expect(out!.ts.args).toEqual([
+      '--experimental-transform-types',
+      '/home/node/.claude/mcp/ts/index.ts',
+    ]);
+    expect(out!.js.args).toEqual(['/home/node/.claude/mcp/js/index.js']);
+  });
+
+  it('keeps node commands with no args unchanged', () => {
+    const out = buildMcpRuntimeConfig({
+      noargs: { source: '/host/noargs', command: 'node' },
+    });
+
+    expect(out).toEqual({
+      noargs: { command: 'node', args: undefined, env: undefined },
+    });
+  });
+
+  it('keeps npx ts runner args relative to the package command', () => {
+    const out = buildMcpRuntimeConfig({
+      tool: {
+        source: '/host/tool',
+        command: 'npx',
+        args: ['--yes', 'tsx', 'server.ts'],
+      },
+    });
+
+    expect(out!.tool.args).toEqual(['--yes', 'tsx', 'server.ts']);
+  });
 });

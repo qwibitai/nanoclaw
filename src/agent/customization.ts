@@ -1,15 +1,16 @@
 /**
  * Agent-level customization sync: instructions, skills, and MCP servers.
  *
- * Writes instructions to {agentDir}/CLAUDE.md, copies skill
- * directories to {agentDir}/skills/, and copies MCP server sources
- * to {agentDir}/mcp/. Validates structure and detects collisions.
+ * Writes instruction files to {agentDir}/, copies skill directories to
+ * {agentDir}/skills/, and copies MCP server sources to {agentDir}/mcp/.
+ * Validates structure and detects collisions.
  */
 import fs from 'fs';
 import path from 'path';
 
 import type { McpServerConfig } from '../api/options.js';
 import { copyDirRecursive } from '../utils.js';
+import { writeInstructionFiles } from './instruction-files.js';
 
 export interface SyncAgentCustomizationsInput {
   /** Agent-level instructions string. */
@@ -40,8 +41,7 @@ export function syncAgentCustomizations(
   } = input;
 
   if (instructions) {
-    fs.mkdirSync(agentDir, { recursive: true });
-    fs.writeFileSync(path.join(agentDir, 'CLAUDE.md'), instructions);
+    writeInstructionFiles(agentDir, instructions);
   }
 
   if (skillsSources) {

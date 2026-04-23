@@ -16,8 +16,12 @@
  */
 
 export type {
+  AgentBackendOptions,
+  AgentBackendType,
   AgentLiteOptions,
   AgentOptions,
+  ClaudeCodeBackendOptions,
+  CodexBackendOptions,
   CredentialResolver,
   McpServerConfig,
 } from './options.js';

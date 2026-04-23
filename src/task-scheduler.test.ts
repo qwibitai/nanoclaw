@@ -42,6 +42,7 @@ describe('task scheduler', () => {
       db,
       agentId: 'test0001',
       assistantName: 'Andy',
+      agentBackend: { type: 'claudeCode' },
       schedulerPollInterval: 60000,
       timezone: 'UTC',
       workDir: '/tmp/agentlite-test',

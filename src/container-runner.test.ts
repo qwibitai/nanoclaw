@@ -48,6 +48,8 @@ vi.mock('@onecli-sh/sdk', () => ({
   },
 }));
 
+import fs from 'fs';
+
 // Mock BoxLite runtime
 interface MockStdoutLine {
   resolve: (line: string | null) => void;
@@ -147,7 +149,7 @@ vi.mock('./box-runtime.js', () => ({
 import {
   runContainerAgent,
   type ContainerEvent,
-  type ContainerOutput,
+  type VolumeMount,
 } from './container-runner.js';
 import type { RuntimeConfig } from './runtime-config.js';
 import type { RegisteredGroup } from './types.js';
@@ -192,9 +194,44 @@ function emitOutputToExec(
   exec.pushStdout(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
 }
 
+async function startContainerRun(
+  input: Parameters<typeof runContainerAgent>[1] = testInput,
+) {
+  const onOutput = vi.fn(async () => {});
+  const resultPromise = runContainerAgent(
+    testGroup,
+    input,
+    testRuntimeConfig,
+    () => {},
+    onOutput,
+  );
+
+  for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
+
+  expect(mockSpawnBox).toHaveBeenCalled();
+  const spawnCall = mockSpawnBox.mock.calls.at(-1)!;
+  const stdinJson = spawnCall[5] as string;
+
+  return {
+    onOutput,
+    resultPromise,
+    mounts: spawnCall[2] as VolumeMount[],
+    boxEnv: spawnCall[3] as Record<string, string>,
+    parsedInput: JSON.parse(stdinJson) as Record<string, unknown>,
+    async finish(exitCode = 0) {
+      mockExec.closeStdout();
+      mockExec.closeStderr();
+      mockExec.resolveWait(exitCode);
+      await vi.advanceTimersByTimeAsync(10);
+      return resultPromise;
+    },
+  };
+}
+
 describe('container-runner with BoxLite', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.clearAllMocks();
     mockExec = createMockExecution();
     mockSpawnBox.mockResolvedValue({
       box: mockBox,
@@ -587,81 +624,95 @@ describe('container-runner with BoxLite', () => {
   // the box. See docs: "Unify actions-auth transport" plan.
 
   it('serializes actionsAuth into the stdin JSON payload', async () => {
-    const resultPromise = runContainerAgent(
-      testGroup,
-      {
-        ...testInput,
-        actionsAuth: { url: 'http://10.0.0.1:7777', token: 'tok-abc' },
-      },
-      testRuntimeConfig,
-      () => {},
-      vi.fn(async () => {}),
-    );
+    const run = await startContainerRun({
+      ...testInput,
+      actionsAuth: { url: 'http://10.0.0.1:7777', token: 'tok-abc' },
+    });
 
-    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
-
-    // spawnBox(groupName, containerName, mounts, boxEnv, userStr, stdinJson, rc)
-    expect(mockSpawnBox).toHaveBeenCalled();
-    const stdinJson = mockSpawnBox.mock.calls.at(-1)![5] as string;
-    const parsed = JSON.parse(stdinJson);
-    expect(parsed.actionsAuth).toEqual({
+    expect(run.parsedInput.actionsAuth).toEqual({
       url: 'http://10.0.0.1:7777',
       token: 'tok-abc',
     });
 
-    // Cleanup
-    mockExec.closeStdout();
-    mockExec.closeStderr();
-    mockExec.resolveWait(0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
+    await run.finish();
+  });
+
+  it('serializes agentBackend into the stdin JSON payload', async () => {
+    const run = await startContainerRun({
+      ...testInput,
+      agentBackend: { type: 'codex' },
+    });
+
+    expect(run.parsedInput.agentBackend).toEqual({ type: 'codex' });
+
+    await run.finish();
+  });
+
+  it('mounts every agent backend home into the container', async () => {
+    const run = await startContainerRun();
+
+    expect(run.mounts).toEqual(
+      expect.arrayContaining([
+        {
+          hostPath: '/tmp/agentlite-test/data/sessions/test-group/.claude',
+          containerPath: '/home/node/.claude',
+          readonly: false,
+        },
+        {
+          hostPath: '/tmp/agentlite-test/data/sessions/test-group/.codex',
+          containerPath: '/home/node/.codex',
+          readonly: false,
+        },
+      ]),
+    );
+
+    await run.finish();
+  });
+
+  it('initializes Claude Code settings without Codex-specific settings', async () => {
+    const run = await startContainerRun();
+    const writeFileSyncCalls = (
+      fs.writeFileSync as unknown as { mock: { calls: unknown[][] } }
+    ).mock.calls;
+
+    const claudeSettingsCall = writeFileSyncCalls.find(([file]) =>
+      String(file).endsWith('/.claude/settings.json'),
+    );
+    expect(claudeSettingsCall).toBeDefined();
+    expect(
+      writeFileSyncCalls.some(([file]) =>
+        String(file).endsWith('/.codex/settings.json'),
+      ),
+    ).toBe(false);
+
+    const settings = JSON.parse(String(claudeSettingsCall![1]));
+    expect(settings.env).toMatchObject({
+      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+      CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+    });
+
+    await run.finish();
   });
 
   it('does not set AGENTLITE_ACTIONS_URL/TOKEN env vars on the box', async () => {
-    const resultPromise = runContainerAgent(
-      testGroup,
-      {
-        ...testInput,
-        actionsAuth: { url: 'http://10.0.0.1:7777', token: 'tok-xyz' },
-      },
-      testRuntimeConfig,
-      () => {},
-      vi.fn(async () => {}),
-    );
+    const run = await startContainerRun({
+      ...testInput,
+      actionsAuth: { url: 'http://10.0.0.1:7777', token: 'tok-xyz' },
+    });
 
-    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
+    expect(run.boxEnv).not.toHaveProperty('AGENTLITE_ACTIONS_URL');
+    expect(run.boxEnv).not.toHaveProperty('AGENTLITE_ACTIONS_TOKEN');
 
-    const boxEnv = mockSpawnBox.mock.calls.at(-1)![3] as Record<string, string>;
-    expect(boxEnv).not.toHaveProperty('AGENTLITE_ACTIONS_URL');
-    expect(boxEnv).not.toHaveProperty('AGENTLITE_ACTIONS_TOKEN');
-
-    mockExec.closeStdout();
-    mockExec.closeStderr();
-    mockExec.resolveWait(0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
+    await run.finish();
   });
 
   it('omits actionsAuth from stdin JSON when the caller passes none', async () => {
-    const resultPromise = runContainerAgent(
-      testGroup,
-      testInput,
-      testRuntimeConfig,
-      () => {},
-      vi.fn(async () => {}),
-    );
+    const run = await startContainerRun();
 
-    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
+    expect(run.parsedInput.actionsAuth).toBeUndefined();
 
-    const stdinJson = mockSpawnBox.mock.calls.at(-1)![5] as string;
-    const parsed = JSON.parse(stdinJson);
-    expect(parsed.actionsAuth).toBeUndefined();
-
-    mockExec.closeStdout();
-    mockExec.closeStderr();
-    mockExec.resolveWait(0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
+    await run.finish();
   });
 
   it('does not extract newSessionId from sdk_message events', async () => {

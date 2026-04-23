@@ -8,6 +8,7 @@ import {
   serializeMountAllowlist,
   type SerializableAgentSettings,
 } from './config.js';
+import { normalizeAgentBackendOptions } from './backend.js';
 import type { MountAllowlist } from '../types.js';
 import type { McpServerConfig } from '../api/options.js';
 
@@ -30,6 +31,7 @@ interface AgentRegistryRow {
   agent_id: string;
   workdir: string;
   assistant_name: string;
+  backend_type: string | null;
   mount_allowlist_json: string | null;
   instructions: string | null;
   skills_sources_json: string | null;
@@ -59,6 +61,7 @@ function createSchema(database: Database.Database): void {
       agent_id TEXT NOT NULL UNIQUE,
       workdir TEXT NOT NULL,
       assistant_name TEXT NOT NULL,
+      backend_type TEXT NOT NULL DEFAULT 'claudeCode',
       mount_allowlist_json TEXT,
       instructions TEXT,
       skills_sources_json TEXT,
@@ -68,6 +71,12 @@ function createSchema(database: Database.Database): void {
     );
   `);
   // Migrate existing databases that lack the new columns
+  addColumnIfMissing(
+    database,
+    'agents',
+    'backend_type',
+    `TEXT NOT NULL DEFAULT 'claudeCode'`,
+  );
   addColumnIfMissing(database, 'agents', 'instructions', 'TEXT');
   addColumnIfMissing(database, 'agents', 'skills_sources_json', 'TEXT');
   addColumnIfMissing(database, 'agents', 'mcp_servers_json', 'TEXT');
@@ -86,6 +95,9 @@ function mapRow(
     agentName: row.name,
     workDir: row.workdir,
     assistantName: row.assistant_name,
+    backend: normalizeAgentBackendOptions(
+      row.backend_type ? { type: row.backend_type } : undefined,
+    ),
     mountAllowlist: parseMountAllowlist(row.mount_allowlist_json),
     instructions: row.instructions ?? null,
     skillsSources: row.skills_sources_json
@@ -154,13 +166,14 @@ export class AgentRegistryDb {
                 agent_id,
                 workdir,
                 assistant_name,
+                backend_type,
                 mount_allowlist_json,
                 instructions,
                 skills_sources_json,
                 mcp_servers_json,
                 created_at,
                 updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
           )
           .run(
@@ -168,6 +181,7 @@ export class AgentRegistryDb {
             agentId,
             settings.workDir,
             settings.assistantName,
+            settings.backend.type,
             mountAllowlistJson,
             settings.instructions,
             skillsSourcesJson,
