@@ -60,6 +60,51 @@ const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 
+// Narration constants
+const MESSAGES_IPC_DIR = '/workspace/ipc/messages';
+const NARRATION_THINKING_DELAY_MS = 2000;   // send "Thinking..." if no tool fires within 2s
+const NARRATION_MIN_INTERVAL_MS = 4000;     // minimum ms between consecutive narration messages
+
+/**
+ * Write a narration message directly to the IPC messages dir.
+ * Same format as ipc-mcp-stdio send_message — host picks it up and sends to Telegram.
+ */
+function sendNarration(chatJid: string, groupFolder: string, text: string): void {
+  try {
+    fs.mkdirSync(MESSAGES_IPC_DIR, { recursive: true });
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+    const filepath = path.join(MESSAGES_IPC_DIR, filename);
+    const tempPath = `${filepath}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify({
+      type: 'message',
+      chatJid,
+      text,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    }, null, 2));
+    fs.renameSync(tempPath, filepath);
+  } catch (err) {
+    log(`Narration send failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Map a tool name to a short narration string for the user.
+ * Returns null for tools that are fast/silent (file reads, MCP tools, etc.).
+ */
+function getToolNarration(toolName: string): string | null {
+  const n = toolName.toLowerCase();
+  if (n === 'bash') return '🔧 Running a command...';
+  if (n === 'websearch' || n === 'webfetch') return '🔍 Looking that up...';
+  if (n === 'write' || n === 'edit') return '✏️ Making changes...';
+  if (n === 'agent' || n === 'task') return '🤔 Working on it...';
+  // read/glob/grep/todowrite: fast ops, skip narration
+  // mcp__nanoclaw__send_message: agent is messaging directly, don't double-narrate
+  // mcp__nanoclaw__schedule_task etc: silent background ops
+  // mcp__gmail__*: could narrate but usually fast
+  return null;
+}
+
 /**
  * Push-based async iterable for streaming user messages to the SDK.
  * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
@@ -330,6 +375,7 @@ function waitForIpcMessage(): Promise<string | null> {
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
  * allowing agent teams subagents to run to completion.
  * Also pipes IPC messages into the stream during the query.
+ * Emits narration messages to Telegram as tools fire (unless scheduled task).
  */
 async function runQuery(
   prompt: string,
@@ -391,82 +437,133 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
-  for await (const message of query({
-    prompt: stream,
-    options: {
-      cwd: '/workspace/group',
-      additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
-      resume: sessionId,
-      resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
-      allowedTools: [
-        'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*',
-        'mcp__gmail__*',
-      ],
-      env: sdkEnv,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+  // Narration state — null for scheduled tasks (they run silently)
+  // Sends a "Thinking..." fallback after NARRATION_THINKING_DELAY_MS if no tool fires first,
+  // then sends specific tool narrations with at least NARRATION_MIN_INTERVAL_MS between them.
+  const narrationState = containerInput.isScheduledTask ? null : (() => {
+    const state = { timer: null as ReturnType<typeof setTimeout> | null, lastSentAt: 0 };
+    state.timer = setTimeout(() => {
+      sendNarration(containerInput.chatJid, containerInput.groupFolder, '💭 Thinking...');
+      state.lastSentAt = Date.now();
+      state.timer = null;
+    }, NARRATION_THINKING_DELAY_MS);
+    return state;
+  })();
+
+  try {
+    for await (const message of query({
+      prompt: stream,
+      options: {
+        cwd: '/workspace/group',
+        additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+        resume: sessionId,
+        resumeSessionAt: resumeAt,
+        systemPrompt: globalClaudeMd
+          ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+          : undefined,
+        allowedTools: [
+          'Bash',
+          'Read', 'Write', 'Edit', 'Glob', 'Grep',
+          'WebSearch', 'WebFetch',
+          'Task', 'TaskOutput', 'TaskStop',
+          'TeamCreate', 'TeamDelete', 'SendMessage',
+          'TodoWrite', 'ToolSearch', 'Skill',
+          'NotebookEdit',
+          'mcp__nanoclaw__*',
+          'mcp__gmail__*',
+        ],
+        env: sdkEnv,
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        settingSources: ['project', 'user'],
+        mcpServers: {
+          nanoclaw: {
+            command: 'node',
+            args: [mcpServerPath],
+            env: {
+              NANOCLAW_CHAT_JID: containerInput.chatJid,
+              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+              NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            },
+          },
+          gmail: {
+            command: 'npx',
+            args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
           },
         },
-        gmail: {
-          command: 'npx',
-          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+        hooks: {
+          PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
         },
-      },
-      hooks: {
-        PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
-      },
-    }
-  })) {
-    messageCount++;
-    const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
-    log(`[msg #${messageCount}] type=${msgType}`);
+      }
+    })) {
+      messageCount++;
+      const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
+      log(`[msg #${messageCount}] type=${msgType}`);
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
-    }
+      if (message.type === 'assistant' && 'uuid' in message) {
+        lastAssistantUuid = (message as { uuid: string }).uuid;
+      }
 
-    if (message.type === 'system' && message.subtype === 'init') {
-      newSessionId = message.session_id;
-      log(`Session initialized: ${newSessionId}`);
-    }
+      // Narration: intercept tool_use blocks in assistant messages
+      if (narrationState && message.type === 'assistant') {
+        const content = (message as { message?: { content?: Array<{ type: string; name?: string }> } }).message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === 'tool_use' && block.name) {
+              const narText = getToolNarration(block.name);
+              if (narText) {
+                const now = Date.now();
+                if (now - narrationState.lastSentAt >= NARRATION_MIN_INTERVAL_MS) {
+                  // Cancel "Thinking..." timer — we have something more specific
+                  if (narrationState.timer) {
+                    clearTimeout(narrationState.timer);
+                    narrationState.timer = null;
+                  }
+                  narrationState.lastSentAt = now;
+                  sendNarration(containerInput.chatJid, containerInput.groupFolder, narText);
+                  log(`Narration sent: ${narText}`);
+                }
+              }
+            }
+          }
+        }
+      }
 
-    if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
-      const tn = message as { task_id: string; status: string; summary: string };
-      log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
-    }
+      if (message.type === 'system' && message.subtype === 'init') {
+        newSessionId = message.session_id;
+        log(`Session initialized: ${newSessionId}`);
+      }
 
-    if (message.type === 'result') {
-      resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId
-      });
+      if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
+        const tn = message as { task_id: string; status: string; summary: string };
+        log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
+      }
+
+      if (message.type === 'result') {
+        // Clear narration timer — result is in, no need for "Thinking..."
+        if (narrationState?.timer) {
+          clearTimeout(narrationState.timer);
+          narrationState.timer = null;
+        }
+        resultCount++;
+        const textResult = 'result' in message ? (message as { result?: string }).result : null;
+        log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+        writeOutput({
+          status: 'success',
+          result: textResult || null,
+          newSessionId
+        });
+      }
+    }
+  } finally {
+    // Always clean up, even if an error propagates
+    ipcPolling = false;
+    if (narrationState?.timer) {
+      clearTimeout(narrationState.timer);
+      narrationState.timer = null;
     }
   }
 
-  ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
@@ -582,6 +679,9 @@ async function main(): Promise<void> {
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
+  // Session resume cap disabled: resumeSessionAt rejects anchors once the
+  // session's end_turn anchors skew toward the start of a tool-heavy
+  // transcript, producing deterministic "No message found" failures.
   let resumeAt: string | undefined;
   try {
     while (true) {

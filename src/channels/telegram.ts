@@ -19,7 +19,7 @@ import {
 async function transcribeVoice(
   botToken: string,
   fileId: string,
-  openaiKey: string,
+  _openaiKey?: string,
 ): Promise<string | null> {
   try {
     // 1. Get file path from Telegram
@@ -38,7 +38,10 @@ async function transcribeVoice(
       `https://api.telegram.org/file/bot${botToken}/${filePath}`,
     );
     if (!audioRes.ok) {
-      logger.error({ status: audioRes.status }, 'Failed to download voice file');
+      logger.error(
+        { status: audioRes.status },
+        'Failed to download voice file',
+      );
       return null;
     }
     const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
@@ -51,14 +54,18 @@ async function transcribeVoice(
     const parts: Buffer[] = [];
 
     // model field
-    parts.push(Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n`,
-    ));
+    parts.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n`,
+      ),
+    );
 
     // file field
-    parts.push(Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: audio/ogg\r\n\r\n`,
-    ));
+    parts.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: audio/ogg\r\n\r\n`,
+      ),
+    );
     parts.push(audioBuffer);
     parts.push(Buffer.from('\r\n'));
 
@@ -72,7 +79,6 @@ async function transcribeVoice(
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${openaiKey}`,
           'Content-Type': `multipart/form-data; boundary=${boundary}`,
         },
         body,
@@ -99,6 +105,109 @@ async function transcribeVoice(
     return text;
   } catch (err) {
     logger.error({ err }, 'Voice transcription failed');
+    return null;
+  }
+}
+
+/**
+ * Download a Telegram photo and describe it using Claude vision API via OneCLI proxy.
+ * Returns the description, or null on failure.
+ */
+async function analyzeImage(
+  botToken: string,
+  fileId: string,
+): Promise<string | null> {
+  try {
+    // 1. Get file path from Telegram
+    const fileRes = await fetch(
+      `https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`,
+    );
+    const fileData = (await fileRes.json()) as any;
+    if (!fileData.ok || !fileData.result?.file_path) {
+      logger.error({ fileData }, 'Failed to get Telegram photo file path');
+      return null;
+    }
+    const filePath = fileData.result.file_path;
+
+    // 2. Download the image
+    const imgRes = await fetch(
+      `https://api.telegram.org/file/bot${botToken}/${filePath}`,
+    );
+    if (!imgRes.ok) {
+      logger.error({ status: imgRes.status }, 'Failed to download photo');
+      return null;
+    }
+    const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+    const base64 = imgBuffer.toString('base64');
+
+    // Detect media type from file extension
+    const ext = filePath.split('.').pop()?.toLowerCase() || 'jpeg';
+    const mediaType =
+      ext === 'png'
+        ? 'image/png'
+        : ext === 'gif'
+          ? 'image/gif'
+          : ext === 'webp'
+            ? 'image/webp'
+            : 'image/jpeg';
+
+    // 3. Send to Anthropic Claude vision API
+    const envVars2 = readEnvFile(['ANTHROPIC_API_KEY']);
+    const anthropicKey =
+      process.env.ANTHROPIC_API_KEY || envVars2.ANTHROPIC_API_KEY;
+    if (!anthropicKey) {
+      logger.warn('ANTHROPIC_API_KEY not set, cannot analyse photo');
+      return null;
+    }
+
+    const visionRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5',
+        max_tokens: 1024,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: { type: 'base64', media_type: mediaType, data: base64 },
+              },
+              {
+                type: 'text',
+                text: 'Describe this image concisely. If it contains text, transcribe it. If it shows a product, book, or identifiable item, name it.',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!visionRes.ok) {
+      const errText = await visionRes.text();
+      logger.error(
+        { status: visionRes.status, body: errText },
+        'Claude vision API error',
+      );
+      return null;
+    }
+
+    const result = (await visionRes.json()) as any;
+    const text = result.content?.[0]?.text?.trim();
+    if (!text) {
+      logger.warn('Claude vision returned empty response');
+      return null;
+    }
+
+    logger.info({ length: text.length }, 'Photo analysed by Claude');
+    return text;
+  } catch (err) {
+    logger.error({ err }, 'Photo analysis failed');
     return null;
   }
 }
@@ -383,7 +492,54 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
+    this.bot.on('message:photo', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      // Use highest-resolution photo
+      const photos = ctx.message.photo;
+      const bestPhoto = photos[photos.length - 1];
+      const fileId = bestPhoto.file_id;
+      const caption = ctx.message.caption
+        ? ` Caption: "${ctx.message.caption}"`
+        : '';
+
+      const description = await analyzeImage(this.botToken, fileId);
+      if (description) {
+        const timestamp = new Date(ctx.message.date * 1000).toISOString();
+        const senderName =
+          ctx.from?.first_name ||
+          ctx.from?.username ||
+          ctx.from?.id.toString() ||
+          'Unknown';
+        const isGroup =
+          ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+        this.opts.onChatMetadata(
+          chatJid,
+          timestamp,
+          undefined,
+          'telegram',
+          isGroup,
+        );
+        this.opts.onMessage(chatJid, {
+          id: ctx.message.message_id.toString(),
+          chat_jid: chatJid,
+          sender: ctx.from?.id?.toString() || '',
+          sender_name: senderName,
+          content: `[Photo description]: ${description}${caption}`,
+          timestamp,
+          is_from_me: false,
+        });
+        logger.info(
+          { chatJid, sender: senderName },
+          'Photo analysed and stored',
+        );
+        return;
+      }
+
+      storeNonText(ctx, '[Photo]');
+    });
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     // Voice messages: transcribe via Whisper, fall back to placeholder
     this.bot.on('message:voice', async (ctx) => {
@@ -396,7 +552,11 @@ export class TelegramChannel implements Channel {
       const fileId = ctx.message.voice.file_id;
 
       if (openaiKey) {
-        const transcription = await transcribeVoice(this.botToken, fileId, openaiKey);
+        const transcription = await transcribeVoice(
+          this.botToken,
+          fileId,
+          openaiKey,
+        );
         if (transcription) {
           // Deliver transcribed text as a normal message
           const timestamp = new Date(ctx.message.date * 1000).toISOString();
@@ -408,7 +568,13 @@ export class TelegramChannel implements Channel {
 
           const isGroup =
             ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-          this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+          this.opts.onChatMetadata(
+            chatJid,
+            timestamp,
+            undefined,
+            'telegram',
+            isGroup,
+          );
           this.opts.onMessage(chatJid, {
             id: ctx.message.message_id.toString(),
             chat_jid: chatJid,
@@ -419,7 +585,10 @@ export class TelegramChannel implements Channel {
             is_from_me: false,
           });
 
-          logger.info({ chatJid, sender: senderName }, 'Voice message transcribed and stored');
+          logger.info(
+            { chatJid, sender: senderName },
+            'Voice message transcribed and stored',
+          );
           return;
         }
       }
@@ -439,7 +608,11 @@ export class TelegramChannel implements Channel {
       const fileId = ctx.message.audio.file_id;
 
       if (openaiKey) {
-        const transcription = await transcribeVoice(this.botToken, fileId, openaiKey);
+        const transcription = await transcribeVoice(
+          this.botToken,
+          fileId,
+          openaiKey,
+        );
         if (transcription) {
           const timestamp = new Date(ctx.message.date * 1000).toISOString();
           const senderName =
@@ -450,7 +623,13 @@ export class TelegramChannel implements Channel {
 
           const isGroup =
             ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-          this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+          this.opts.onChatMetadata(
+            chatJid,
+            timestamp,
+            undefined,
+            'telegram',
+            isGroup,
+          );
           this.opts.onMessage(chatJid, {
             id: ctx.message.message_id.toString(),
             chat_jid: chatJid,
@@ -461,7 +640,10 @@ export class TelegramChannel implements Channel {
             is_from_me: false,
           });
 
-          logger.info({ chatJid, sender: senderName }, 'Audio message transcribed and stored');
+          logger.info(
+            { chatJid, sender: senderName },
+            'Audio message transcribed and stored',
+          );
           return;
         }
       }
