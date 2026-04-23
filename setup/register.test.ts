@@ -116,7 +116,7 @@ describe('parameterized SQL registration', () => {
        (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
        VALUES (?, ?, ?, ?, ?, NULL, ?)`,
     ).run(
-      '789@s.whatsapp.net',
+      'dc:789123456',
       'Personal',
       'main',
       '@Andy',
@@ -126,7 +126,7 @@ describe('parameterized SQL registration', () => {
 
     const row = db
       .prepare('SELECT requires_trigger FROM registered_groups WHERE jid = ?')
-      .get('789@s.whatsapp.net') as { requires_trigger: number };
+      .get('dc:789123456') as { requires_trigger: number };
 
     expect(row.requires_trigger).toBe(0);
   });
@@ -137,9 +137,9 @@ describe('parameterized SQL registration', () => {
        (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
        VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
     ).run(
-      '789@s.whatsapp.net',
+      'dc:789123456',
       'Personal',
-      'whatsapp_main',
+      'discord_main',
       '@Andy',
       '2024-01-01T00:00:00.000Z',
       0,
@@ -148,7 +148,7 @@ describe('parameterized SQL registration', () => {
 
     const row = db
       .prepare('SELECT is_main FROM registered_groups WHERE jid = ?')
-      .get('789@s.whatsapp.net') as { is_main: number };
+      .get('dc:789123456') as { is_main: number };
 
     expect(row.is_main).toBe(1);
   });
@@ -161,7 +161,7 @@ describe('parameterized SQL registration', () => {
     ).run(
       '123@g.us',
       'Some Group',
-      'whatsapp_some-group',
+      'discord_some-group',
       '@Andy',
       '2024-01-01T00:00:00.000Z',
       1,

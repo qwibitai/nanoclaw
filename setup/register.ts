@@ -1,7 +1,7 @@
 /**
  * ステップ: register — チャネル登録設定を書き込み、グループフォルダを作成します。
  *
- * --channel を受け取り、メッセージングプラットフォーム (whatsapp, telegram, slack, discord) を指定します。
+ * --channel を受け取り、メッセージングプラットフォームを指定します。
  * インジェクションを防ぐため、パラメータ化された SQL クエリを使用します。
  */
 import fs from 'fs';
@@ -30,7 +30,7 @@ function parseArgs(args: string[]): RegisterArgs {
     name: '',
     trigger: '',
     folder: '',
-    channel: 'whatsapp', // 後方互換性: リファクタリング前のインストールでは --channel が省略されます
+    channel: 'discord',
     requiresTrigger: true,
     type: 'chat',
     assistantName: 'Andy',
@@ -92,8 +92,6 @@ export async function run(args: string[]): Promise<void> {
 
   logger.info(parsed, 'チャネルを登録中');
 
-  // data および store ディレクトリが存在することを確認（store/ は WhatsApp 認証をスキップした
-  // 新規インストール時には存在しない可能性があります。通常は認証時に作成されます）
   fs.mkdirSync(path.join(projectRoot, 'data'), { recursive: true });
   fs.mkdirSync(STORE_DIR, { recursive: true });
 

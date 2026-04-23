@@ -660,11 +660,6 @@ describe('_shouldMigrateSessionKey', () => {
     expect(_shouldMigrateSessionKey('dc:123456')).toBe(true);
   });
 
-  it('accepts WhatsApp JID-style keys', () => {
-    expect(_shouldMigrateSessionKey('123456@g.us')).toBe(true);
-    expect(_shouldMigrateSessionKey('123456@s.whatsapp.net')).toBe(true);
-  });
-
   it('rejects legacy folder keys', () => {
     expect(_shouldMigrateSessionKey('discord_main')).toBe(false);
     expect(_shouldMigrateSessionKey('my-group_folder')).toBe(false);

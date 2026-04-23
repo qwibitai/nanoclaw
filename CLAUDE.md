@@ -4,7 +4,7 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process. Discord channel self-registers at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
 
 ## Key Files
 
@@ -26,8 +26,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | Skill | When to Use |
 |-------|-------------|
 | `/setup` | First-time installation, authentication, service configuration |
-| `/customize` | Adding channels, integrations, changing behavior |
-| `/add-<channel>` | Install multi-channel support (e.g., `/add-discord`, `/add-slack`, `/add-telegram`, `/add-whatsapp`, `/add-gmail`) |
+| `/customize` | Adding integrations, changing behavior |
 | `/debug` | Container issues, logs, troubleshooting |
 | `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
@@ -58,7 +57,7 @@ systemctl --user restart nanoclaw
 
 ## Troubleshooting
 
-**Channel not connecting after upgrade:** Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are now separate channel forks/skills, not bundled in core. Run `/add-<channel>` (e.g., `/add-whatsapp`, `/add-discord`) to install multi-channel support. Existing auth credentials and groups are preserved.
+**Discord not connecting:** Ensure `DISCORD_BOT_TOKEN` is set in `.env`. Re-run `/setup` to reconfigure.
 
 ## Container Build Cache
 
