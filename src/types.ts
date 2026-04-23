@@ -72,6 +72,7 @@ export interface RegisteredGroup {
   thread_defaults?: ThreadDefaults; // 設定時、thread message を受信した際に子 group を自動登録する
   channel_mode?: 'chat' | 'thread_per_message' | 'admin_control';
   chat_behavior?: 'ambient_room_chat' | 'directed_help_chat';
+  provider?: string; // nanoclaw.yaml の providers キー。未設定時はグローバル defaultProvider
 }
 
 export interface NewMessage {

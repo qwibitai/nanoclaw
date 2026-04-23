@@ -32,7 +32,7 @@ import {
 } from './container-runtime.js';
 import {
   buildContainerProviderEnv,
-  detectActiveProviderConfig,
+  resolveProviderConfig,
 } from './provider-config.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { getDefaultAllowedTools } from './group-type.js';
@@ -45,18 +45,21 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
+  sessionProviderName?: string;
   groupFolder: string;
   chatJid: string;
   // NOTE: isMain (boolean) は意図的に削除。後方互換性は不要（個人プロジェクトのため、ホスト・コンテナは常にセットで更新する運用）。
   groupType: GroupType;
   isScheduledTask?: boolean;
   assistantName?: string;
+  selectedProvider?: string;
 }
 
 export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
+  providerName?: string;
   error?: string;
 }
 
@@ -286,15 +289,17 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  group: RegisteredGroup,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // コンテナのローカル時間がユーザーと一致するようにホストのタイムゾーンを渡す
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  const activeProviderConfig = detectActiveProviderConfig();
+  const activeProviderConfig = resolveProviderConfig();
   const providerEnv = buildContainerProviderEnv(
     activeProviderConfig,
+    group.provider,
     CONTAINER_HOST_GATEWAY,
     CREDENTIAL_PROXY_PORT,
   );
@@ -344,7 +349,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.groupType, input.chatJid);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, group);
 
   logger.debug(
     {

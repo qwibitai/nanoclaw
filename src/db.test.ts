@@ -513,6 +513,19 @@ describe('registered group type', () => {
     }
   });
 
+  it('persists provider override through set/get round-trip', () => {
+    setRegisteredGroup('dc:provider-test', {
+      name: 'Provider Test',
+      folder: 'discord_provider-test',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      provider: 'fast',
+    });
+
+    const groups = getAllRegisteredGroups();
+    expect(groups['dc:provider-test'].provider).toBe('fast');
+  });
+
   it('persists thread_defaults through set/get round-trip', () => {
     setRegisteredGroup('dc:parent123', {
       name: 'Parent Channel',
@@ -625,8 +638,11 @@ describe('registered group type', () => {
 
 describe('session accessors', () => {
   it('sets and retrieves session by jid', () => {
-    setSession('dc:123456789', 'sess-abc');
-    expect(getSession('dc:123456789')).toBe('sess-abc');
+    setSession('dc:123456789', 'sess-abc', 'claude');
+    expect(getSession('dc:123456789')).toEqual({
+      sessionId: 'sess-abc',
+      providerName: 'claude',
+    });
   });
 
   it('returns undefined for unknown jid', () => {
@@ -635,23 +651,35 @@ describe('session accessors', () => {
 
   it('overwrites existing session', () => {
     setSession('dc:111', 'sess-old');
-    setSession('dc:111', 'sess-new');
-    expect(getSession('dc:111')).toBe('sess-new');
+    setSession('dc:111', 'sess-new', 'fast');
+    expect(getSession('dc:111')).toEqual({
+      sessionId: 'sess-new',
+      providerName: 'fast',
+    });
   });
 
   it('getAllSessions returns all sessions keyed by jid', () => {
-    setSession('dc:aaa', 'sess-1');
-    setSession('dc:bbb', 'sess-2');
+    setSession('dc:aaa', 'sess-1', 'claude');
+    setSession('dc:bbb', 'sess-2', 'fast');
     const sessions = getAllSessions();
-    expect(sessions['dc:aaa']).toBe('sess-1');
-    expect(sessions['dc:bbb']).toBe('sess-2');
+    expect(sessions['dc:aaa']).toEqual({
+      sessionId: 'sess-1',
+      providerName: 'claude',
+    });
+    expect(sessions['dc:bbb']).toEqual({
+      sessionId: 'sess-2',
+      providerName: 'fast',
+    });
   });
 
   it('parent and thread groups have independent sessions', () => {
     setSession('dc:parent', 'parent-sess');
-    setSession('dc:thread', 'thread-sess');
-    expect(getSession('dc:parent')).toBe('parent-sess');
-    expect(getSession('dc:thread')).toBe('thread-sess');
+    setSession('dc:thread', 'thread-sess', 'gemini');
+    expect(getSession('dc:parent')).toEqual({ sessionId: 'parent-sess' });
+    expect(getSession('dc:thread')).toEqual({
+      sessionId: 'thread-sess',
+      providerName: 'gemini',
+    });
   });
 });
 

@@ -53,17 +53,37 @@ vi.mock('./mount-security.js', () => ({
 
 // Mock provider selection
 const mockContainerProviderEnv: Record<string, string> = {
-  ANTHROPIC_BASE_URL: 'http://host.docker.internal:3001',
-  ANTHROPIC_API_KEY: 'placeholder',
+  NANOCLAW_PROVIDER_CONFIG_JSON: JSON.stringify({
+    providers: {
+      claude: {
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
+        apiKey: 'placeholder-claude',
+        baseURL: 'http://host.docker.internal:3001/__provider/claude',
+      },
+    },
+    defaultProvider: 'claude',
+    fallbackProviders: [],
+  }),
 };
 
 vi.mock('./provider-config.js', () => ({
-  detectActiveProviderConfig: vi.fn(() => ({
-    provider: 'anthropic',
-    usesCredentialProxy: true,
+  resolveProviderConfig: vi.fn(() => ({
+    providers: {
+      claude: {
+        name: 'claude',
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
+        usesCredentialProxy: true,
+        allowDirectSecretInjection: false,
+        apiKey: 'sk-ant-real-key',
+        upstreamBaseURL: 'https://api.anthropic.com',
+      },
+    },
+    defaultProvider: 'claude',
+    fallbackProviders: [],
     allowDirectSecretInjection: false,
-    apiKey: 'sk-ant-real-key',
-    upstreamBaseURL: 'https://api.anthropic.com',
+    source: 'yaml',
   })),
   buildContainerProviderEnv: vi.fn(() => ({ ...mockContainerProviderEnv })),
 }));
@@ -138,8 +158,18 @@ describe('container-runner timeout behavior', () => {
       delete mockContainerProviderEnv[key];
     }
     Object.assign(mockContainerProviderEnv, {
-      ANTHROPIC_BASE_URL: 'http://host.docker.internal:3001',
-      ANTHROPIC_API_KEY: 'placeholder',
+      NANOCLAW_PROVIDER_CONFIG_JSON: JSON.stringify({
+        providers: {
+          claude: {
+            provider: 'anthropic',
+            model: 'claude-sonnet-4-6',
+            apiKey: 'placeholder-claude',
+            baseURL: 'http://host.docker.internal:3001/__provider/claude',
+          },
+        },
+        defaultProvider: 'claude',
+        fallbackProviders: [],
+      }),
     });
   });
 
@@ -330,8 +360,18 @@ describe('container-runner timeout behavior', () => {
       delete mockContainerProviderEnv[key];
     }
     Object.assign(mockContainerProviderEnv, {
-      OPENAI_BASE_URL: 'http://host.docker.internal:3001',
-      OPENAI_API_KEY: 'placeholder',
+      NANOCLAW_PROVIDER_CONFIG_JSON: JSON.stringify({
+        providers: {
+          fast: {
+            provider: 'openai',
+            model: 'gpt-4.1-mini',
+            apiKey: 'placeholder-fast',
+            baseURL: 'http://host.docker.internal:3001/__provider/fast',
+          },
+        },
+        defaultProvider: 'fast',
+        fallbackProviders: [],
+      }),
     });
 
     const resultPromise = runContainerAgent(testGroup, testInput, () => {});
@@ -349,10 +389,10 @@ describe('container-runner timeout behavior', () => {
     const args = spawnCalls[spawnCalls.length - 1][1] as string[];
     const joined = args.join(' ');
     expect(joined).toContain(
-      '-e OPENAI_BASE_URL=http://host.docker.internal:3001',
+      '-e NANOCLAW_PROVIDER_CONFIG_JSON=',
     );
-    expect(joined).toContain('-e OPENAI_API_KEY=placeholder');
-    expect(joined).not.toContain('ANTHROPIC_API_KEY=placeholder');
+    expect(joined).toContain('__provider/fast');
+    expect(joined).toContain('placeholder-fast');
   });
 
   it('injects direct Gemini key when provider env mapping switches', async () => {
@@ -360,7 +400,17 @@ describe('container-runner timeout behavior', () => {
       delete mockContainerProviderEnv[key];
     }
     Object.assign(mockContainerProviderEnv, {
-      GEMINI_API_KEY: 'gemini-real-key',
+      NANOCLAW_PROVIDER_CONFIG_JSON: JSON.stringify({
+        providers: {
+          gemini: {
+            provider: 'google',
+            model: 'gemini-2.5-flash',
+            apiKey: 'gemini-real-key',
+          },
+        },
+        defaultProvider: 'gemini',
+        fallbackProviders: [],
+      }),
     });
 
     const resultPromise = runContainerAgent(testGroup, testInput, () => {});
@@ -377,9 +427,9 @@ describe('container-runner timeout behavior', () => {
     const spawnCalls = vi.mocked(spawn).mock.calls;
     const args = spawnCalls[spawnCalls.length - 1][1] as string[];
     const joined = args.join(' ');
-    expect(joined).toContain('-e GEMINI_API_KEY=gemini-real-key');
-    expect(joined).not.toContain('OPENAI_BASE_URL=');
-    expect(joined).not.toContain('ANTHROPIC_BASE_URL=');
+    expect(joined).toContain('-e NANOCLAW_PROVIDER_CONFIG_JSON=');
+    expect(joined).toContain('gemini-real-key');
+    expect(joined).not.toContain('__provider/claude');
   });
 
   it('injects Codex oauth json when provider env mapping switches', async () => {
@@ -387,7 +437,17 @@ describe('container-runner timeout behavior', () => {
       delete mockContainerProviderEnv[key];
     }
     Object.assign(mockContainerProviderEnv, {
-      OAS_CODEX_OAUTH_JSON: '{"access":"a","refresh":"r","expires":1}',
+      NANOCLAW_PROVIDER_CONFIG_JSON: JSON.stringify({
+        providers: {
+          codex: {
+            provider: 'codex',
+            model: 'gpt-5.4',
+            codexOAuthJson: '{"access":"a","refresh":"r","expires":1}',
+          },
+        },
+        defaultProvider: 'codex',
+        fallbackProviders: [],
+      }),
     });
 
     const resultPromise = runContainerAgent(testGroup, testInput, () => {});
@@ -404,10 +464,8 @@ describe('container-runner timeout behavior', () => {
     const spawnCalls = vi.mocked(spawn).mock.calls;
     const args = spawnCalls[spawnCalls.length - 1][1] as string[];
     const joined = args.join(' ');
-    expect(joined).toContain(
-      '-e OAS_CODEX_OAUTH_JSON={"access":"a","refresh":"r","expires":1}',
-    );
-    expect(joined).not.toContain('OPENAI_BASE_URL=');
-    expect(joined).not.toContain('ANTHROPIC_BASE_URL=');
+    expect(joined).toContain('-e NANOCLAW_PROVIDER_CONFIG_JSON=');
+    expect(joined).toContain('gpt-5.4');
+    expect(joined).toContain('codexOAuthJson');
   });
 });

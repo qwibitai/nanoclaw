@@ -254,7 +254,8 @@ function createSchema(database: Database.Database): void {
     );
     CREATE TABLE IF NOT EXISTS sessions (
       group_jid TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL
+      session_id TEXT NOT NULL,
+      provider_name TEXT
     );
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
@@ -264,6 +265,8 @@ function createSchema(database: Database.Database): void {
       added_at TEXT NOT NULL,
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
+      ,
+      provider TEXT
     );
 
     CREATE TABLE IF NOT EXISTS spawned_threads (
@@ -287,12 +290,22 @@ function createSchema(database: Database.Database): void {
     ).some((col) => col.name === 'group_folder');
     if (hasOldColumn) {
       database.exec(`DROP TABLE sessions`);
-      database.exec(
-        `CREATE TABLE IF NOT EXISTS sessions (group_jid TEXT PRIMARY KEY, session_id TEXT NOT NULL)`,
-      );
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS sessions (
+          group_jid TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          provider_name TEXT
+        )
+      `);
     }
   } catch {
     /* テーブルが存在しないか、すでに移行済み */
+  }
+
+  try {
+    database.exec(`ALTER TABLE sessions ADD COLUMN provider_name TEXT`);
+  } catch {
+    /* カラムはすでに存在します */
   }
 
   // context_mode カラムが存在しない場合は追加（既存 DB のマイグレーション）
@@ -367,6 +380,12 @@ function createSchema(database: Database.Database): void {
     /* カラムはすでに存在します */
   }
 
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN provider TEXT`);
+  } catch {
+    /* カラムはすでに存在します */
+  }
+
   // 旧スキーマ: registered_groups.folder UNIQUE を解除する
   // thread は parent と同じ folder を共有するため、folder の一意制約は不適切。
   try {
@@ -400,17 +419,18 @@ function createSchema(database: Database.Database): void {
             group_type TEXT DEFAULT 'chat',
             thread_defaults TEXT,
             parent_folder TEXT,
-            channel_mode TEXT
+            channel_mode TEXT,
+            provider TEXT
           );
           INSERT INTO registered_groups (
             jid, name, folder, trigger_pattern, added_at, container_config,
             requires_trigger, is_main, group_type, thread_defaults,
-            parent_folder, channel_mode
+            parent_folder, channel_mode, provider
           )
           SELECT
             jid, name, folder, trigger_pattern, added_at, container_config,
             requires_trigger, is_main, group_type, thread_defaults,
-            parent_folder, channel_mode
+            parent_folder, channel_mode, provider
           FROM registered_groups_old;
           DROP TABLE registered_groups_old;
         `);
@@ -845,26 +865,52 @@ export function setRouterState(key: string, value: string): void {
 // sessions テーブルのキーは group_jid（例: dc:123456789）。
 // Phase 3 でセッション分離を group 単位に変更した。
 
-export function getSession(groupJid: string): string | undefined {
+export interface StoredSession {
+  sessionId: string;
+  providerName?: string;
+}
+
+export function getSession(groupJid: string): StoredSession | undefined {
   const row = db
-    .prepare('SELECT session_id FROM sessions WHERE group_jid = ?')
-    .get(groupJid) as { session_id: string } | undefined;
-  return row?.session_id;
+    .prepare('SELECT session_id, provider_name FROM sessions WHERE group_jid = ?')
+    .get(groupJid) as
+    | { session_id: string; provider_name: string | null }
+    | undefined;
+  if (!row) return undefined;
+  return {
+    sessionId: row.session_id,
+    providerName: row.provider_name || undefined,
+  };
 }
 
-export function setSession(groupJid: string, sessionId: string): void {
+export function setSession(
+  groupJid: string,
+  sessionId: string,
+  providerName?: string,
+): void {
   db.prepare(
-    'INSERT OR REPLACE INTO sessions (group_jid, session_id) VALUES (?, ?)',
-  ).run(groupJid, sessionId);
+    'INSERT OR REPLACE INTO sessions (group_jid, session_id, provider_name) VALUES (?, ?, ?)',
+  ).run(groupJid, sessionId, providerName ?? null);
 }
 
-export function getAllSessions(): Record<string, string> {
+export function deleteSession(groupJid: string): void {
+  db.prepare('DELETE FROM sessions WHERE group_jid = ?').run(groupJid);
+}
+
+export function getAllSessions(): Record<string, StoredSession> {
   const rows = db
-    .prepare('SELECT group_jid, session_id FROM sessions')
-    .all() as Array<{ group_jid: string; session_id: string }>;
-  const result: Record<string, string> = {};
+    .prepare('SELECT group_jid, session_id, provider_name FROM sessions')
+    .all() as Array<{
+    group_jid: string;
+    session_id: string;
+    provider_name: string | null;
+  }>;
+  const result: Record<string, StoredSession> = {};
   for (const row of rows) {
-    result[row.group_jid] = row.session_id;
+    result[row.group_jid] = {
+      sessionId: row.session_id,
+      providerName: row.provider_name || undefined,
+    };
   }
   return result;
 }
@@ -918,6 +964,7 @@ export function getRegisteredGroup(
         thread_defaults: string | null;
         parent_folder: string | null;
         channel_mode: string | null;
+        provider: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -942,6 +989,7 @@ export function getRegisteredGroup(
     type: groupType,
     thread_defaults: _parseThreadDefaultsJson(row.thread_defaults, row.jid),
     channel_mode: parseChannelMode(row.channel_mode),
+    provider: row.provider || undefined,
   };
 }
 
@@ -965,8 +1013,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
       : null;
   const channelMode = parseChannelMode(group.channel_mode ?? null);
   db.prepare(
-    `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, group_type, thread_defaults, parent_folder, channel_mode)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, group_type, thread_defaults, parent_folder, channel_mode, provider)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(jid) DO UPDATE SET
        name = excluded.name,
        folder = excluded.folder,
@@ -978,7 +1026,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
        group_type = excluded.group_type,
        thread_defaults = excluded.thread_defaults,
        parent_folder = excluded.parent_folder,
-       channel_mode = excluded.channel_mode`,
+       channel_mode = excluded.channel_mode,
+       provider = excluded.provider`,
   ).run(
     jid,
     group.name,
@@ -992,6 +1041,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.thread_defaults ? JSON.stringify(group.thread_defaults) : null,
     parentFolder,
     channelMode ?? null,
+    group.provider ?? null,
   );
 }
 
@@ -1009,6 +1059,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     thread_defaults: string | null;
     parent_folder: string | null;
     channel_mode: string | null;
+    provider: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -1032,6 +1083,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       type: groupType,
       thread_defaults: _parseThreadDefaultsJson(row.thread_defaults, row.jid),
       channel_mode: parseChannelMode(row.channel_mode),
+      provider: row.provider || undefined,
     };
   }
   return result;
