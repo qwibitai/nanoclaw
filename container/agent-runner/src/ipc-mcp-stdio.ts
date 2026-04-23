@@ -61,7 +61,10 @@ server.tool(
   },
   async (args) => {
     // 跨群发消息仅 main group 可用
-    const targetJid = isMain && args.target_chat_jid ? args.target_chat_jid : chatJid;
+    // 自动补全 JID 前缀：agent 传 oc_xxx 时自动加 fs: 前缀
+    const rawTarget = args.target_chat_jid;
+    const normalizedTarget = rawTarget && rawTarget.startsWith('oc_') ? `fs:${rawTarget}` : rawTarget;
+    const targetJid = isMain && normalizedTarget ? normalizedTarget : chatJid;
 
     const data: Record<string, string | undefined> = {
       type: 'message',
