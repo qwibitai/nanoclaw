@@ -2,6 +2,7 @@
  * ステップ: groups — グループ情報の確認。
  * Discord はチャンネル名を実行時に解決するため、事前同期は不要です。
  */
+import fs from 'fs';
 import path from 'path';
 
 import Database from 'better-sqlite3';
@@ -43,6 +44,10 @@ export async function run(args: string[]): Promise<void> {
 
 async function listGroups(limit: number): Promise<void> {
   const dbPath = path.join(STORE_DIR, 'messages.db');
+  if (!fs.existsSync(dbPath)) {
+    console.error('エラー: データベースが見つかりません');
+    process.exit(1);
+  }
   const db = new Database(dbPath, { readonly: true });
   try {
     const rows = db

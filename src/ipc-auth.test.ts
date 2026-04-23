@@ -42,15 +42,15 @@ beforeEach(() => {
   _initTestDatabase();
 
   groups = {
-    'main@g.us': MAIN_GROUP,
-    'other@g.us': OTHER_GROUP,
-    'third@g.us': THIRD_GROUP,
+    'dc:main': MAIN_GROUP,
+    'dc:other': OTHER_GROUP,
+    'dc:third': THIRD_GROUP,
   };
 
   // Populate DB as well
-  setRegisteredGroup('main@g.us', MAIN_GROUP);
-  setRegisteredGroup('other@g.us', OTHER_GROUP);
-  setRegisteredGroup('third@g.us', THIRD_GROUP);
+  setRegisteredGroup('dc:main', MAIN_GROUP);
+  setRegisteredGroup('dc:other', OTHER_GROUP);
+  setRegisteredGroup('dc:third', THIRD_GROUP);
 
   deps = {
     sendMessage: async () => {},
@@ -76,9 +76,9 @@ describe('schedule_task authorization', () => {
         prompt: 'do something',
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00',
-        targetJid: 'other@g.us',
+        targetJid: 'dc:other',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -96,9 +96,9 @@ describe('schedule_task authorization', () => {
         prompt: 'self task',
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00',
-        targetJid: 'other@g.us',
+        targetJid: 'dc:other',
       },
-      'other@g.us',
+      'dc:other',
       false,
       deps,
     );
@@ -115,9 +115,9 @@ describe('schedule_task authorization', () => {
         prompt: 'unauthorized',
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00',
-        targetJid: 'main@g.us',
+        targetJid: 'dc:main',
       },
-      'other@g.us',
+      'dc:other',
       false,
       deps,
     );
@@ -133,9 +133,9 @@ describe('schedule_task authorization', () => {
         prompt: 'no target',
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00',
-        targetJid: 'unknown@g.us',
+        targetJid: 'dc:unknown',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -152,7 +152,7 @@ describe('pause_task authorization', () => {
     createTask({
       id: 'task-main',
       group_folder: 'discord_main',
-      chat_jid: 'main@g.us',
+      chat_jid: 'dc:main',
       prompt: 'main task',
       schedule_type: 'once',
       schedule_value: '2025-06-01T00:00:00',
@@ -164,7 +164,7 @@ describe('pause_task authorization', () => {
     createTask({
       id: 'task-other',
       group_folder: 'other-group',
-      chat_jid: 'other@g.us',
+      chat_jid: 'dc:other',
       prompt: 'other task',
       schedule_type: 'once',
       schedule_value: '2025-06-01T00:00:00',
@@ -178,7 +178,7 @@ describe('pause_task authorization', () => {
   it('main group can pause any task', async () => {
     await processTaskIpc(
       { type: 'pause_task', taskId: 'task-other' },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -188,7 +188,7 @@ describe('pause_task authorization', () => {
   it('non-main group can pause its own task', async () => {
     await processTaskIpc(
       { type: 'pause_task', taskId: 'task-other' },
-      'other@g.us',
+      'dc:other',
       false,
       deps,
     );
@@ -198,7 +198,7 @@ describe('pause_task authorization', () => {
   it('non-main group cannot pause another groups task', async () => {
     await processTaskIpc(
       { type: 'pause_task', taskId: 'task-main' },
-      'other@g.us',
+      'dc:other',
       false,
       deps,
     );
@@ -213,7 +213,7 @@ describe('resume_task authorization', () => {
     createTask({
       id: 'task-paused',
       group_folder: 'other-group',
-      chat_jid: 'other@g.us',
+      chat_jid: 'dc:other',
       prompt: 'paused task',
       schedule_type: 'once',
       schedule_value: '2025-06-01T00:00:00',
@@ -227,7 +227,7 @@ describe('resume_task authorization', () => {
   it('main group can resume any task', async () => {
     await processTaskIpc(
       { type: 'resume_task', taskId: 'task-paused' },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -237,7 +237,7 @@ describe('resume_task authorization', () => {
   it('non-main group can resume its own task', async () => {
     await processTaskIpc(
       { type: 'resume_task', taskId: 'task-paused' },
-      'other@g.us',
+      'dc:other',
       false,
       deps,
     );
@@ -247,7 +247,7 @@ describe('resume_task authorization', () => {
   it('non-main group cannot resume another groups task', async () => {
     await processTaskIpc(
       { type: 'resume_task', taskId: 'task-paused' },
-      'third@g.us',
+      'dc:third',
       false,
       deps,
     );
@@ -262,7 +262,7 @@ describe('cancel_task authorization', () => {
     createTask({
       id: 'task-to-cancel',
       group_folder: 'other-group',
-      chat_jid: 'other@g.us',
+      chat_jid: 'dc:other',
       prompt: 'cancel me',
       schedule_type: 'once',
       schedule_value: '2025-06-01T00:00:00',
@@ -274,7 +274,7 @@ describe('cancel_task authorization', () => {
 
     await processTaskIpc(
       { type: 'cancel_task', taskId: 'task-to-cancel' },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -285,7 +285,7 @@ describe('cancel_task authorization', () => {
     createTask({
       id: 'task-own',
       group_folder: 'other-group',
-      chat_jid: 'other@g.us',
+      chat_jid: 'dc:other',
       prompt: 'my task',
       schedule_type: 'once',
       schedule_value: '2025-06-01T00:00:00',
@@ -297,7 +297,7 @@ describe('cancel_task authorization', () => {
 
     await processTaskIpc(
       { type: 'cancel_task', taskId: 'task-own' },
-      'other@g.us',
+      'dc:other',
       false,
       deps,
     );
@@ -308,7 +308,7 @@ describe('cancel_task authorization', () => {
     createTask({
       id: 'task-foreign',
       group_folder: 'discord_main',
-      chat_jid: 'main@g.us',
+      chat_jid: 'dc:main',
       prompt: 'not yours',
       schedule_type: 'once',
       schedule_value: '2025-06-01T00:00:00',
@@ -320,7 +320,7 @@ describe('cancel_task authorization', () => {
 
     await processTaskIpc(
       { type: 'cancel_task', taskId: 'task-foreign' },
-      'other@g.us',
+      'dc:other',
       false,
       deps,
     );
@@ -335,35 +335,35 @@ describe('register_group authorization', () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'new@g.us',
+        jid: 'dc:new',
         name: 'New Group',
         folder: 'new-group',
         trigger: '@Andy',
       },
-      'other@g.us',
+      'dc:other',
       false,
       deps,
     );
 
     // registeredGroups should not have changed
-    expect(groups['new@g.us']).toBeUndefined();
+    expect(groups['dc:new']).toBeUndefined();
   });
 
   it('main group cannot register with unsafe folder path', async () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'new@g.us',
+        jid: 'dc:new',
         name: 'New Group',
         folder: '../../outside',
         trigger: '@Andy',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
-    expect(groups['new@g.us']).toBeUndefined();
+    expect(groups['dc:new']).toBeUndefined();
   });
 });
 
@@ -372,7 +372,7 @@ describe('register_group authorization', () => {
 describe('refresh_groups authorization', () => {
   it('non-main group cannot trigger refresh', async () => {
     // This should be silently blocked (no crash, no effect)
-    await processTaskIpc({ type: 'refresh_groups' }, 'other@g.us', false, deps);
+    await processTaskIpc({ type: 'refresh_groups' }, 'dc:other', false, deps);
     // If we got here without error, the auth gate worked
   });
 });
@@ -392,28 +392,28 @@ describe('IPC message authorization', () => {
   }
 
   it('main group can send to any group', () => {
-    expect(isMessageAuthorized('main@g.us', true, 'other@g.us')).toBe(true);
-    expect(isMessageAuthorized('main@g.us', true, 'third@g.us')).toBe(true);
+    expect(isMessageAuthorized('dc:main', true, 'dc:other')).toBe(true);
+    expect(isMessageAuthorized('dc:main', true, 'dc:third')).toBe(true);
   });
 
   it('non-main group can send to its own chat', () => {
-    expect(isMessageAuthorized('other@g.us', false, 'other@g.us')).toBe(true);
+    expect(isMessageAuthorized('dc:other', false, 'dc:other')).toBe(true);
   });
 
   it('non-main group cannot send to another groups chat', () => {
-    expect(isMessageAuthorized('other@g.us', false, 'main@g.us')).toBe(false);
-    expect(isMessageAuthorized('other@g.us', false, 'third@g.us')).toBe(false);
+    expect(isMessageAuthorized('dc:other', false, 'dc:main')).toBe(false);
+    expect(isMessageAuthorized('dc:other', false, 'dc:third')).toBe(false);
   });
 
   it('non-main group cannot send to unregistered JID', () => {
-    expect(isMessageAuthorized('other@g.us', false, 'unknown@g.us')).toBe(
+    expect(isMessageAuthorized('dc:other', false, 'dc:unknown')).toBe(
       false,
     );
   });
 
   it('main group can send to unregistered JID', () => {
     // Main is always authorized regardless of target
-    expect(isMessageAuthorized('main@g.us', true, 'unknown@g.us')).toBe(true);
+    expect(isMessageAuthorized('dc:main', true, 'dc:unknown')).toBe(true);
   });
 });
 
@@ -427,9 +427,9 @@ describe('schedule_task schedule types', () => {
         prompt: 'cron task',
         schedule_type: 'cron',
         schedule_value: '0 9 * * *', // every day at 9am
-        targetJid: 'other@g.us',
+        targetJid: 'dc:other',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -451,9 +451,9 @@ describe('schedule_task schedule types', () => {
         prompt: 'bad cron',
         schedule_type: 'cron',
         schedule_value: 'not a cron',
-        targetJid: 'other@g.us',
+        targetJid: 'dc:other',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -470,9 +470,9 @@ describe('schedule_task schedule types', () => {
         prompt: 'interval task',
         schedule_type: 'interval',
         schedule_value: '3600000', // 1 hour
-        targetJid: 'other@g.us',
+        targetJid: 'dc:other',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -493,9 +493,9 @@ describe('schedule_task schedule types', () => {
         prompt: 'bad interval',
         schedule_type: 'interval',
         schedule_value: 'abc',
-        targetJid: 'other@g.us',
+        targetJid: 'dc:other',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -510,9 +510,9 @@ describe('schedule_task schedule types', () => {
         prompt: 'zero interval',
         schedule_type: 'interval',
         schedule_value: '0',
-        targetJid: 'other@g.us',
+        targetJid: 'dc:other',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -527,9 +527,9 @@ describe('schedule_task schedule types', () => {
         prompt: 'bad once',
         schedule_type: 'once',
         schedule_value: 'not-a-date',
-        targetJid: 'other@g.us',
+        targetJid: 'dc:other',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -549,9 +549,9 @@ describe('schedule_task context_mode', () => {
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00',
         context_mode: 'group',
-        targetJid: 'other@g.us',
+        targetJid: 'dc:other',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -568,9 +568,9 @@ describe('schedule_task context_mode', () => {
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00',
         context_mode: 'isolated',
-        targetJid: 'other@g.us',
+        targetJid: 'dc:other',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -587,9 +587,9 @@ describe('schedule_task context_mode', () => {
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00',
         context_mode: 'bogus' as any,
-        targetJid: 'other@g.us',
+        targetJid: 'dc:other',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -605,9 +605,9 @@ describe('schedule_task context_mode', () => {
         prompt: 'no context mode',
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00',
-        targetJid: 'other@g.us',
+        targetJid: 'dc:other',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -624,18 +624,18 @@ describe('register_group success', () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'new@g.us',
+        jid: 'dc:new',
         name: 'New Group',
         folder: 'new-group',
         trigger: '@Andy',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
     // Verify group was registered in DB
-    const group = getRegisteredGroup('new@g.us');
+    const group = getRegisteredGroup('dc:new');
     expect(group).toBeDefined();
     expect(group!.name).toBe('New Group');
     expect(group!.folder).toBe('new-group');
@@ -646,16 +646,16 @@ describe('register_group success', () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'partial@g.us',
+        jid: 'dc:partial',
         name: 'Partial',
         // missing folder and trigger
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
-    expect(getRegisteredGroup('partial@g.us')).toBeUndefined();
+    expect(getRegisteredGroup('dc:partial')).toBeUndefined();
   });
 });
 
@@ -667,21 +667,21 @@ describe('register_group group_type', () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'typed@g.us',
+        jid: 'dc:typed',
         name: 'Typed Group',
         folder: 'typed-group',
         trigger: '@Andy',
         group_type: 'chat',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
     // DB から取得して group_type が正しいか確認
     const allGroups = getAllRegisteredGroups();
-    expect(allGroups['typed@g.us']).toBeDefined();
-    expect(allGroups['typed@g.us'].type).toBe('chat');
+    expect(allGroups['dc:typed']).toBeDefined();
+    expect(allGroups['dc:typed'].type).toBe('chat');
   });
 
   it('group_type: override を指定すると拒否される', async () => {
@@ -689,27 +689,27 @@ describe('register_group group_type', () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'override@g.us',
+        jid: 'dc:override',
         name: 'Override Group',
         folder: 'override-group',
         trigger: '@Andy',
         group_type: 'override',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
     // override は IPC 経由で設定できないため登録されていないことを確認
     const allGroups = getAllRegisteredGroups();
-    expect(allGroups['override@g.us']).toBeUndefined();
+    expect(allGroups['dc:override']).toBeUndefined();
   });
 
   it('thread_defaults.requiresTrigger が boolean でない場合は拒否される', async () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'bad-thread-defaults@g.us',
+        jid: 'dc:bad-thread-defaults',
         name: 'Bad Thread Defaults',
         folder: 'bad-thread-defaults',
         trigger: '@Andy',
@@ -718,20 +718,20 @@ describe('register_group group_type', () => {
           requiresTrigger: 'nope' as unknown as boolean,
         },
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
     const allGroups = getAllRegisteredGroups();
-    expect(allGroups['bad-thread-defaults@g.us']).toBeUndefined();
+    expect(allGroups['dc:bad-thread-defaults']).toBeUndefined();
   });
 
   it('thread_defaults.containerConfig.timeout が不正な場合は拒否される', async () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'bad-thread-cc@g.us',
+        jid: 'dc:bad-thread-cc',
         name: 'Bad Thread CC',
         folder: 'bad-thread-cc',
         trigger: '@Andy',
@@ -742,20 +742,20 @@ describe('register_group group_type', () => {
           },
         },
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
     const allGroups = getAllRegisteredGroups();
-    expect(allGroups['bad-thread-cc@g.us']).toBeUndefined();
+    expect(allGroups['dc:bad-thread-cc']).toBeUndefined();
   });
 
   it('register_group の containerConfig はサニタイズされる', async () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'sanitize-cc@g.us',
+        jid: 'dc:sanitize-cc',
         name: 'Sanitized CC',
         folder: 'sanitized-cc',
         trigger: '@Andy',
@@ -764,34 +764,34 @@ describe('register_group group_type', () => {
           additionalMounts: 'oops' as unknown as [],
         },
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
     const allGroups = getAllRegisteredGroups();
-    expect(allGroups['sanitize-cc@g.us']).toBeDefined();
-    expect(allGroups['sanitize-cc@g.us'].containerConfig).toEqual({});
+    expect(allGroups['dc:sanitize-cc']).toBeDefined();
+    expect(allGroups['dc:sanitize-cc'].containerConfig).toEqual({});
   });
 
   it('register_group で channel_mode: thread_per_message を設定できる', async () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'thread-per-message@g.us',
+        jid: 'dc:thread-per-message',
         name: 'Thread Per Message',
         folder: 'thread-per-message',
         trigger: '@Andy',
         channel_mode: 'thread_per_message',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
     const allGroups = getAllRegisteredGroups();
-    expect(allGroups['thread-per-message@g.us']).toBeDefined();
-    expect(allGroups['thread-per-message@g.us'].channel_mode).toBe(
+    expect(allGroups['dc:thread-per-message']).toBeDefined();
+    expect(allGroups['dc:thread-per-message'].channel_mode).toBe(
       'thread_per_message',
     );
   });
@@ -800,20 +800,20 @@ describe('register_group group_type', () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'legacy-urlwatch@g.us',
+        jid: 'dc:legacy-urlwatch',
         name: 'Legacy Url Watch',
         folder: 'legacy-urlwatch',
         trigger: '@Andy',
         channel_mode: 'url_watch',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
     const allGroups = getAllRegisteredGroups();
-    expect(allGroups['legacy-urlwatch@g.us']).toBeDefined();
-    expect(allGroups['legacy-urlwatch@g.us'].channel_mode).toBe(
+    expect(allGroups['dc:legacy-urlwatch']).toBeDefined();
+    expect(allGroups['dc:legacy-urlwatch'].channel_mode).toBe(
       'thread_per_message',
     );
   });
@@ -825,37 +825,37 @@ describe('update_group group_type', () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'target@g.us',
+        jid: 'dc:target',
         name: 'Target Group',
         folder: 'target-group',
         trigger: '@Andy',
         group_type: 'chat',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
     {
       const allGroups = getAllRegisteredGroups();
-      expect(allGroups['target@g.us']?.type).toBe('chat');
+      expect(allGroups['dc:target']?.type).toBe('chat');
     }
 
     // メイングループから update_group で type を 'main' に変更
     await processTaskIpc(
       {
         type: 'update_group',
-        jid: 'target@g.us',
+        jid: 'dc:target',
         group_type: 'main',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
     // type が 'main' に変更されていることを確認
     const allGroups = getAllRegisteredGroups();
-    expect(allGroups['target@g.us']).toBeDefined();
-    expect(allGroups['target@g.us'].type).toBe('main');
+    expect(allGroups['dc:target']).toBeDefined();
+    expect(allGroups['dc:target'].type).toBe('main');
   });
 
   it('update_group で override への変更が拒否される', async () => {
@@ -863,13 +863,13 @@ describe('update_group group_type', () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'noraise@g.us',
+        jid: 'dc:noraise',
         name: 'No Raise Group',
         folder: 'noraise-group',
         trigger: '@Andy',
         group_type: 'chat',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -878,18 +878,18 @@ describe('update_group group_type', () => {
     await processTaskIpc(
       {
         type: 'update_group',
-        jid: 'noraise@g.us',
+        jid: 'dc:noraise',
         group_type: 'override',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
     // type が 'override' に変わっていないことを確認
     const allGroups = getAllRegisteredGroups();
-    expect(allGroups['noraise@g.us']).toBeDefined();
-    expect(allGroups['noraise@g.us'].type).not.toBe('override');
+    expect(allGroups['dc:noraise']).toBeDefined();
+    expect(allGroups['dc:noraise'].type).not.toBe('override');
   });
 
   it('メイン以外のグループから update_group は拒否される', async () => {
@@ -897,13 +897,13 @@ describe('update_group group_type', () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'protected@g.us',
+        jid: 'dc:protected',
         name: 'Protected Group',
         folder: 'protected-group',
         trigger: '@Andy',
         group_type: 'chat',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -912,31 +912,31 @@ describe('update_group group_type', () => {
     await processTaskIpc(
       {
         type: 'update_group',
-        jid: 'protected@g.us',
+        jid: 'dc:protected',
         group_type: 'main',
       },
-      'other@g.us',
+      'dc:other',
       false,
       deps,
     );
 
     // type が変わっていないことを確認
     const allGroups = getAllRegisteredGroups();
-    expect(allGroups['protected@g.us']).toBeDefined();
-    expect(allGroups['protected@g.us'].type).toBe('chat');
+    expect(allGroups['dc:protected']).toBeDefined();
+    expect(allGroups['dc:protected'].type).toBe('chat');
   });
 
   it('update_group で thread_defaults を更新・クリアできる', async () => {
     await processTaskIpc(
       {
         type: 'register_group',
-        jid: 'threadcfg@g.us',
+        jid: 'dc:threadcfg',
         name: 'Thread Cfg Group',
         folder: 'threadcfg-group',
         trigger: '@Andy',
         group_type: 'chat',
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
@@ -944,17 +944,17 @@ describe('update_group group_type', () => {
     await processTaskIpc(
       {
         type: 'update_group',
-        jid: 'threadcfg@g.us',
+        jid: 'dc:threadcfg',
         thread_defaults: { type: 'chat', requiresTrigger: false },
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
     {
       const allGroups = getAllRegisteredGroups();
-      expect(allGroups['threadcfg@g.us'].thread_defaults).toEqual({
+      expect(allGroups['dc:threadcfg'].thread_defaults).toEqual({
         type: 'chat',
         requiresTrigger: false,
       });
@@ -963,15 +963,15 @@ describe('update_group group_type', () => {
     await processTaskIpc(
       {
         type: 'update_group',
-        jid: 'threadcfg@g.us',
+        jid: 'dc:threadcfg',
         thread_defaults: null as unknown as object,
       },
-      'main@g.us',
+      'dc:main',
       true,
       deps,
     );
 
     const allGroups = getAllRegisteredGroups();
-    expect(allGroups['threadcfg@g.us'].thread_defaults).toBeUndefined();
+    expect(allGroups['dc:threadcfg'].thread_defaults).toBeUndefined();
   });
 });
