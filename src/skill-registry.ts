@@ -211,10 +211,9 @@ export function startSkillServer(
         const payload =
           healthProvider?.() ??
           ({
-            service: 'nanoclaw',
             status: 'ok',
-            timestamp: new Date().toISOString(),
-            skills: getRegisteredSkills().length,
+            service: 'nanoclaw-skills',
+            skill_count: getRegisteredSkills().length,
           } as const);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(payload));
