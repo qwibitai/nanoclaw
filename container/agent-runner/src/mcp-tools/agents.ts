@@ -43,6 +43,11 @@ export const createAgent: McpToolDefinition = {
           description:
             'Optional agent provider for the new sub-agent (e.g. "claude", "codex", "opencode", "mock"). Omit to inherit the default (claude). Case-insensitive.',
         },
+        model: {
+          type: 'string',
+          description:
+            'Optional model override for the new sub-agent (opaque string, SDK-specific — e.g. "sonnet[1m]", "opus[1m]", "haiku" for Claude, "gpt-5.4-mini" for Codex). Omit to let the provider pick its default. Case preserved.',
+        },
       },
       required: ['name'],
     },
@@ -54,6 +59,9 @@ export const createAgent: McpToolDefinition = {
     const rawProvider = args.agent_provider as string | undefined;
     const agentProvider = typeof rawProvider === 'string' && rawProvider.trim() ? rawProvider.trim().toLowerCase() : null;
 
+    const rawModel = args.model as string | undefined;
+    const model = typeof rawModel === 'string' && rawModel.trim() ? rawModel.trim() : null;
+
     const requestId = generateId();
     writeMessageOut({
       id: requestId,
@@ -64,12 +72,16 @@ export const createAgent: McpToolDefinition = {
         name,
         instructions: (args.instructions as string) || null,
         agent_provider: agentProvider,
+        model,
       }),
     });
 
-    const providerSuffix = agentProvider ? ` on ${agentProvider}` : '';
-    log(`create_agent: ${requestId} → "${name}"${providerSuffix}`);
-    return ok(`Creating agent "${name}"${providerSuffix}. You will be notified when it is ready.`);
+    const parts: string[] = [];
+    if (agentProvider) parts.push(`provider=${agentProvider}`);
+    if (model) parts.push(`model=${model}`);
+    const suffix = parts.length ? ` (${parts.join(', ')})` : '';
+    log(`create_agent: ${requestId} → "${name}"${suffix}`);
+    return ok(`Creating agent "${name}"${suffix}. You will be notified when it is ready.`);
   },
 };
 
