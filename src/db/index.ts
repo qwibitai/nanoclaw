@@ -11,6 +11,7 @@ import { migrateJsonState, runMigrations } from './migrations.js';
 import { _setOutboundMessagesDb } from './outbound-messages.js';
 import { _setSessionsDb } from './sessions.js';
 import { _setTasksDb } from './tasks.js';
+import { _setToolEventsDb } from './tool-events.js';
 
 function setAllDbs(database: Database.Database): void {
   _setMessagesDb(database);
@@ -19,6 +20,7 @@ function setAllDbs(database: Database.Database): void {
   _setTasksDb(database);
   _setDispatchSlotsDb(database);
   _setOutboundMessagesDb(database);
+  _setToolEventsDb(database);
 }
 
 export function initDatabase(): void {
@@ -26,6 +28,10 @@ export function initDatabase(): void {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   const database = new Database(dbPath);
+
+  // Enable WAL mode for better concurrency with tool event writes
+  database.pragma('journal_mode = WAL');
+
   setAllDbs(database);
   runMigrations(database);
 
@@ -112,3 +118,10 @@ export {
   insertOutboundMessage,
   updateMessageStatus,
 } from './outbound-messages.js';
+
+export {
+  ToolEvent,
+  getRecentToolEvents,
+  insertToolEvent,
+  pruneToolEvents,
+} from './tool-events.js';

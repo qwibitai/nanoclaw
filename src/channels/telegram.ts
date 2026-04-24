@@ -4,6 +4,7 @@ import { createServer, Server } from 'http';
 import { Api, Bot, webhookCallback } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { getRecentToolEvents } from '../db/index.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -141,6 +142,67 @@ export class TelegramChannel implements Channel {
     // Command to check bot status
     this.bot!.command('ping', (ctx) => {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
+    });
+
+    // Command to show recent tool activity
+    this.bot!.command('activity', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+
+      if (!group) {
+        await ctx.reply('This chat is not registered.');
+        return;
+      }
+
+      try {
+        // Get events from last 5 minutes
+        const events = getRecentToolEvents(group.folder, 5 * 60 * 1000);
+
+        if (events.length === 0) {
+          await ctx.reply('No tool activity in the last 5 minutes.');
+          return;
+        }
+
+        // Build emoji-prefixed format
+        const lines: string[] = ['*Recent Tool Activity (last 5 min):*\n'];
+
+        for (const event of events) {
+          const emoji = event.hook_event === 'PostToolUseFailure' ? '❌' : '✅';
+          const timestamp = new Date(event.timestamp).toLocaleTimeString(
+            'en-US',
+            { hour: '2-digit', minute: '2-digit', second: '2-digit' },
+          );
+
+          lines.push(
+            `${emoji} \`${timestamp}\` *${event.tool_name}* (session: ${event.session_id.slice(0, 8)})`,
+          );
+
+          // Include truncated input/response if available
+          if (event.tool_input) {
+            const input = event.tool_input.slice(0, 100);
+            lines.push(`  Input: ${input}${event.tool_input.length > 100 ? '...' : ''}`);
+          }
+          if (event.tool_response) {
+            const response = event.tool_response.slice(0, 100);
+            lines.push(
+              `  Response: ${response}${event.tool_response.length > 100 ? '...' : ''}`,
+            );
+          }
+        }
+
+        // Join and cap at 3500 chars (Telegram limit is 4096)
+        let message = lines.join('\n');
+        if (message.length > 3500) {
+          message = message.slice(0, 3500) + '\n\n_[Output truncated]_';
+        }
+
+        await sendTelegramMessage(this.bot!.api, ctx.chat.id, message, {
+          message_thread_id: ctx.message?.message_thread_id,
+        });
+      } catch (err) {
+        logger.error({ err }, 'Failed to fetch tool activity');
+        await ctx.reply('Failed to fetch tool activity. Check logs.');
+      }
     });
 
     // Command to manage pantry items — CEO chat only

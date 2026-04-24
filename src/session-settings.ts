@@ -40,6 +40,12 @@ export function bootstrapSessionSettings(groupFolder: string): string {
     'hooks',
     'service-guard.sh',
   );
+  const toolObserverHook = path.join(
+    process.cwd(),
+    'container',
+    'hooks',
+    'tool-observer.sh',
+  );
   const defaultSettings: Record<string, unknown> = {
     env: {
       CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
@@ -60,17 +66,56 @@ export function bootstrapSessionSettings(groupFolder: string): string {
     };
   }
 
+  // Add tool observer hooks for all tools (observability)
+  if (fs.existsSync(toolObserverHook)) {
+    if (!defaultSettings.hooks) {
+      defaultSettings.hooks = {};
+    }
+    const toolObserverEntry = {
+      matcher: '',
+      hooks: [{ type: 'command', command: toolObserverHook }],
+    };
+    (defaultSettings.hooks as Record<string, unknown>).PostToolUse = [
+      toolObserverEntry,
+    ];
+    (defaultSettings.hooks as Record<string, unknown>).PostToolUseFailure = [
+      toolObserverEntry,
+    ];
+  }
+
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
       settingsFile,
       JSON.stringify(defaultSettings, null, 2) + '\n',
     );
   } else {
-    // Ensure existing settings have the service-guard hook
+    // Ensure existing settings have the required hooks
     try {
       const existing = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+      let updated = false;
+
       if (fs.existsSync(serviceGuardHook) && !existing.hooks) {
         existing.hooks = defaultSettings.hooks;
+        updated = true;
+      }
+
+      // Add tool observer hooks if missing
+      if (fs.existsSync(toolObserverHook) && existing.hooks) {
+        const toolObserverEntry = {
+          matcher: '',
+          hooks: [{ type: 'command', command: toolObserverHook }],
+        };
+        if (!existing.hooks.PostToolUse) {
+          existing.hooks.PostToolUse = [toolObserverEntry];
+          updated = true;
+        }
+        if (!existing.hooks.PostToolUseFailure) {
+          existing.hooks.PostToolUseFailure = [toolObserverEntry];
+          updated = true;
+        }
+      }
+
+      if (updated) {
         fs.writeFileSync(
           settingsFile,
           JSON.stringify(existing, null, 2) + '\n',
