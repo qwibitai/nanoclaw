@@ -6,7 +6,7 @@
  *  - agent_group: folder=telegram_main, name=ClusterManager
  *  - user: telegram:6541428999 "Emerjesse" (jsboige)
  *  - owner role (global scope)
- *  - wiring: engage_mode='pattern' engage_pattern='@(ClusterManager|NanoClawClusterBot)'
+ *  - wiring: engage_mode='pattern' engage_pattern='.' (match all — 2-person group)
  *
  * Safe to run while service is running (WAL mode). Doesn't touch cli.sock.
  *
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
       messaging_group_id: mg.id,
       agent_group_id: ag.id,
       engage_mode: 'pattern',
-      engage_pattern: '@(ClusterManager|NanoClawClusterBot)',
+      engage_pattern: '.',
       sender_scope: 'all',
       ignored_message_policy: 'drop',
       session_mode: 'shared',
