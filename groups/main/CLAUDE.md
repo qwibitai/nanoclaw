@@ -150,7 +150,7 @@ Groups are registered in the SQLite `registered_groups` table:
   "1234567890-1234567890@g.us": {
     "name": "Family Chat",
     "folder": "whatsapp_family-chat",
-    "trigger": "@Andy",
+    "trigger": "@Dobby",
     "added_at": "2024-01-31T12:00:00.000Z"
   }
 }
@@ -196,7 +196,7 @@ Groups can have extra directories mounted. Add `containerConfig` to their entry:
   "1234567890@g.us": {
     "name": "Dev Team",
     "folder": "dev-team",
-    "trigger": "@Andy",
+    "trigger": "@Dobby",
     "added_at": "2026-01-31T12:00:00Z",
     "containerConfig": {
       "additionalMounts": [

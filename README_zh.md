@@ -61,19 +61,19 @@ bash nanoclaw.sh
 
 ## 使用方法
 
-用触发词（默认为 `@Andy`）与您的助手对话：
+用触发词（默认为 `@Dobby`）与您的助手对话：
 
 ```
-@Andy 每个工作日早上 9 点给我发一份销售渠道概览（可以访问我的 Obsidian vault 文件夹）
-@Andy 每周五回顾过去一周的 git 历史，如果与 README 有出入就更新它
-@Andy 每周一早上 8 点，从 Hacker News 和 TechCrunch 收集 AI 相关资讯，给我发一份简报
+@Dobby 每个工作日早上 9 点给我发一份销售渠道概览（可以访问我的 Obsidian vault 文件夹）
+@Dobby 每周五回顾过去一周的 git 历史，如果与 README 有出入就更新它
+@Dobby 每周一早上 8 点，从 Hacker News 和 TechCrunch 收集 AI 相关资讯，给我发一份简报
 ```
 
 在您拥有或管理的渠道里，还可以管理群组和任务：
 ```
-@Andy 列出所有群组里的计划任务
-@Andy 暂停周一简报任务
-@Andy 加入"家庭聊天"群组
+@Dobby 列出所有群组里的计划任务
+@Dobby 暂停周一简报任务
+@Dobby 加入"家庭聊天"群组
 ```
 
 ## 定制

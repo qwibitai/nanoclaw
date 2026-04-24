@@ -72,7 +72,7 @@ beforeEach(async () => {
   await import('./index.js'); // register hooks
 
   // Base fixtures: one agent group + owner with a DM on 'telegram'.
-  createAgentGroup({ id: 'ag-1', name: 'Andy', folder: 'andy', agent_provider: null, created_at: now() });
+  createAgentGroup({ id: 'ag-1', name: 'Dobby', folder: 'dobby', agent_provider: null, created_at: now() });
 
   upsertUser({ id: 'telegram:owner', kind: 'telegram', display_name: 'Owner', created_at: now() });
   grantRole({
@@ -154,7 +154,7 @@ describe('unknown-channel registration flow', () => {
     const payload = JSON.parse(content as string);
     expect(payload.type).toBe('ask_question');
     // Card names the target agent so the owner knows what they're wiring to.
-    expect(payload.question).toContain('Andy');
+    expect(payload.question).toContain('Dobby');
 
     const { getDb } = await import('../../db/connection.js');
     const rows = getDb().prepare('SELECT * FROM pending_channel_approvals').all() as Array<{

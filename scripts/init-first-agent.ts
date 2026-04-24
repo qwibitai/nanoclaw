@@ -23,7 +23,7 @@
  *     --user-id discord:1470183333427675709 \
  *     --platform-id discord:@me:1491573333382523708 \
  *     --display-name "Gavriel" \
- *     [--agent-name "Andy"] \
+ *     [--agent-name "Dobby"] \
  *     [--welcome "System instruction: ..."] \
  *     [--role owner|admin|member]    # default: owner
  *

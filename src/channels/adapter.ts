@@ -77,7 +77,7 @@ export interface InboundMessage {
    * in the router instead of agent-name regex matching, which breaks on
    * platforms where the mention text is the bot's platform username (e.g.
    * Telegram's `@nanoclaw_v2_refactr_1_bot`) rather than the agent_group
-   * display name (e.g. `@Andy`).
+   * display name (e.g. `@Dobby`).
    *
    * Adapters that don't set it (native / legacy) leave it undefined — the
    * router falls back to text-match against agent_group_name.

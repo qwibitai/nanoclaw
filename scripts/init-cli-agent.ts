@@ -15,7 +15,7 @@
  * Usage:
  *   pnpm exec tsx scripts/init-cli-agent.ts \
  *     --display-name "Gavriel" \
- *     [--agent-name "Andy"]
+ *     [--agent-name "Dobby"]
  */
 import path from 'path';
 

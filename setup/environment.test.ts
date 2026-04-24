@@ -96,7 +96,7 @@ describe('credentials detection', () => {
   });
 
   it('returns false when no credentials', () => {
-    const content = 'ASSISTANT_NAME="Andy"\nOTHER=foo';
+    const content = 'ASSISTANT_NAME="Dobby"\nOTHER=foo';
     const hasCredentials =
       /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(content);
     expect(hasCredentials).toBe(false);
@@ -125,4 +125,3 @@ describe('channel auth detection', () => {
     expect(hasAuth('/tmp/nonexistent_auth_dir_xyz')).toBe(false);
   });
 });
-
