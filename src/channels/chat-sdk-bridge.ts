@@ -125,7 +125,11 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
   let setupConfig: ChannelSetup;
   let gatewayAbort: AbortController | null = null;
 
-  async function messageToInbound(message: ChatMessage, isMention: boolean, isGroup?: boolean): Promise<InboundMessage> {
+  async function messageToInbound(
+    message: ChatMessage,
+    isMention: boolean,
+    isGroup?: boolean,
+  ): Promise<InboundMessage> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const serialized = message.toJSON() as Record<string, any>;
 
@@ -216,7 +220,11 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // wirings still fire on in-thread mentions.
       chat.onSubscribedMessage(async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
-        await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, message.isMention === true, true));
+        await setupConfig.onInbound(
+          channelId,
+          thread.id,
+          await messageToInbound(message, message.isMention === true, true),
+        );
       });
 
       // @mention in an unsubscribed thread — SDK-confirmed bot mention.
