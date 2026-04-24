@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query as sdkQuery, type HookCallback, type PreCompactHookInput, type SdkBeta } from '@anthropic-ai/claude-agent-sdk';
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import { registerProvider } from './provider-registry.js';
@@ -9,6 +9,22 @@ import type { AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, Provide
 
 function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
+}
+
+/**
+ * The Claude Code CLI accepts `sonnet[1m]` / `opus[1m]` as a model alias
+ * *only* when the `context-1m-2025-08-07` beta header is also enabled —
+ * without both, the CLI silently strips the suffix and falls back to the
+ * provider default (currently sonnet-4-6). Enforce the pair here so
+ * callers can set `model: 'opus[1m]'` once and get the 1M-context Opus
+ * they asked for.
+ *
+ * Pure / side-effect-free so the inference can be unit-tested.
+ */
+export function betasForModel(model: string | undefined): SdkBeta[] | undefined {
+  if (typeof model !== 'string') return undefined;
+  if (/\[1m\]$/i.test(model.trim())) return ['context-1m-2025-08-07'];
+  return undefined;
 }
 
 // Deferred SDK builtins that either sidestep nanoclaw's own scheduling or
@@ -276,6 +292,9 @@ export class ClaudeProvider implements AgentProvider {
         // Opaque string. SDK conventions like `sonnet[1m]` / `opus[1m]`
         // auto-switch on the 1M-context beta; omit for the SDK's default.
         model: this.model,
+        // `[1m]` suffix requires the context-1m beta — CLI silently falls
+        // back to the default model without it. See betasForModel().
+        betas: betasForModel(this.model),
         pathToClaudeCodeExecutable: '/pnpm/claude',
         systemPrompt: instructions ? { type: 'preset' as const, preset: 'claude_code' as const, append: instructions } : undefined,
         allowedTools: TOOL_ALLOWLIST,
