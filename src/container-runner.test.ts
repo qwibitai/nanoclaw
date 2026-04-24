@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveProviderName } from './container-runner.js';
+import { clearContainerImageCache, containerImageExists, resolveProviderName } from './container-runner.js';
 
 describe('resolveProviderName', () => {
   it('prefers session over group and container.json', () => {
@@ -28,5 +28,47 @@ describe('resolveProviderName', () => {
   it('treats empty string as unset (falls through)', () => {
     expect(resolveProviderName('', 'codex', null)).toBe('codex');
     expect(resolveProviderName(null, '', 'opencode')).toBe('opencode');
+  });
+});
+
+describe('containerImageExists', () => {
+  it('caches positive inspections per image tag', () => {
+    clearContainerImageCache();
+    let calls = 0;
+    const inspect = () => {
+      calls++;
+      return true;
+    };
+
+    expect(containerImageExists('nanoclaw:test', inspect)).toBe(true);
+    expect(containerImageExists('nanoclaw:test', inspect)).toBe(true);
+    expect(calls).toBe(1);
+  });
+
+  it('does not cache negative inspections', () => {
+    clearContainerImageCache();
+    let calls = 0;
+    const inspect = () => {
+      calls++;
+      return false;
+    };
+
+    expect(containerImageExists('nanoclaw:missing', inspect)).toBe(false);
+    expect(containerImageExists('nanoclaw:missing', inspect)).toBe(false);
+    expect(calls).toBe(2);
+  });
+
+  it('clears cached entries when requested', () => {
+    clearContainerImageCache();
+    let calls = 0;
+    const inspect = () => {
+      calls++;
+      return true;
+    };
+
+    expect(containerImageExists('nanoclaw:test', inspect)).toBe(true);
+    clearContainerImageCache('nanoclaw:test');
+    expect(containerImageExists('nanoclaw:test', inspect)).toBe(true);
+    expect(calls).toBe(2);
   });
 });

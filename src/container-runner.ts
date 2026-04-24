@@ -50,6 +50,7 @@ const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 /** Active containers tracked by session ID. */
 const activeContainers = new Map<string, { process: ChildProcess; containerName: string }>();
 const missingImageWarnings = new Set<string>();
+const existingImageCache = new Set<string>();
 
 /**
  * In-flight wake promises, keyed by session id. Deduplicates concurrent
@@ -111,18 +112,6 @@ async function spawnContainer(session: Session): Promise<void> {
   // Read container config once — threaded through provider resolution,
   // buildMounts, and buildContainerArgs so we don't re-read the file.
   const containerConfig = readContainerConfig(agentGroup.folder);
-
-  // Ensure container.json has the agent group identity fields the runner needs.
-  // Written at spawn time so the runner can read them from the RO mount.
-  ensureRuntimeFields(containerConfig, agentGroup);
-
-  // Resolve the effective provider + any host-side contribution it declares
-  // (extra mounts, env passthrough). Computed once and threaded through both
-  // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
-  const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
-
-  const mounts = buildMounts(agentGroup, session, containerConfig, contribution);
-  const containerName = `nanoclaw-v2-${agentGroup.folder}-${Date.now()}`;
   const imageTag = containerConfig.imageTag || CONTAINER_IMAGE;
 
   if (!containerImageExists(imageTag)) {
@@ -142,6 +131,18 @@ async function spawnContainer(session: Session): Promise<void> {
     return;
   }
   missingImageWarnings.delete(imageTag);
+
+  // Ensure container.json has the agent group identity fields the runner needs.
+  // Written at spawn time so the runner can read them from the RO mount.
+  ensureRuntimeFields(containerConfig, agentGroup);
+
+  // Resolve the effective provider + any host-side contribution it declares
+  // (extra mounts, env passthrough). Computed once and threaded through both
+  // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
+  const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
+
+  const mounts = buildMounts(agentGroup, session, containerConfig, contribution);
+  const containerName = `nanoclaw-v2-${agentGroup.folder}-${Date.now()}`;
 
   // OneCLI agent identifier is always the agent group id — stable across
   // sessions and reversible via getAgentGroup() for approval routing.
@@ -185,6 +186,11 @@ async function spawnContainer(session: Session): Promise<void> {
   // on a wall-clock timer.
 
   container.on('close', (code) => {
+    // docker exits with 125 when it can't start the container. If the
+    // image was removed after we cached it, force a re-check on next wake.
+    if (code === 125) {
+      clearContainerImageCache(imageTag);
+    }
     activeContainers.delete(session.id);
     markContainerStopped(session.id);
     stopTypingRefresh(session.id);
@@ -199,12 +205,30 @@ async function spawnContainer(session: Session): Promise<void> {
   });
 }
 
-function containerImageExists(imageTag: string): boolean {
+function inspectContainerImage(imageTag: string): boolean {
   const res = spawnSync(CONTAINER_RUNTIME_BIN, ['image', 'inspect', imageTag], {
     stdio: 'pipe',
     encoding: 'utf-8',
   });
   return res.status === 0;
+}
+
+export function containerImageExists(
+  imageTag: string,
+  inspect: (imageTag: string) => boolean = inspectContainerImage,
+): boolean {
+  if (existingImageCache.has(imageTag)) return true;
+  const exists = inspect(imageTag);
+  if (exists) existingImageCache.add(imageTag);
+  return exists;
+}
+
+export function clearContainerImageCache(imageTag?: string): void {
+  if (imageTag) {
+    existingImageCache.delete(imageTag);
+    return;
+  }
+  existingImageCache.clear();
 }
 
 /** Kill a container for a session. */
