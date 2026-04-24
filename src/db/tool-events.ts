@@ -52,32 +52,31 @@ export function insertToolCallEvent(event: InsertToolCallEvent): void {
 
 /**
  * Get recent tool call events, defaulting to last 5 minutes.
+ * Uses SQLite's datetime() for comparison since created_at uses SQLite format.
  */
 export function getRecentToolEvents(
   minutesAgo: number = 5,
   limit: number = 100,
 ): ToolCallEvent[] {
-  const cutoff = new Date(Date.now() - minutesAgo * 60_000).toISOString();
   return db
     .prepare(
       `SELECT id, session_id, group_folder, tool_name, tool_use_id, hook_event, tool_input, tool_response, created_at
        FROM tool_call_events
-       WHERE created_at >= ?
-       ORDER BY created_at DESC
+       WHERE created_at >= datetime('now', ?)
+       ORDER BY created_at DESC, id DESC
        LIMIT ?`,
     )
-    .all(cutoff, limit) as ToolCallEvent[];
+    .all(`-${minutesAgo} minutes`, limit) as ToolCallEvent[];
 }
 
 /**
  * Delete tool call events older than the given retention period.
  */
 export function pruneToolEvents(retentionDays: number = 7): number {
-  const cutoff = new Date(
-    Date.now() - retentionDays * 24 * 60 * 60_000,
-  ).toISOString();
   const result = db
-    .prepare('DELETE FROM tool_call_events WHERE created_at < ?')
-    .run(cutoff);
+    .prepare(
+      `DELETE FROM tool_call_events WHERE created_at < datetime('now', ?)`,
+    )
+    .run(`-${retentionDays} days`);
   return result.changes;
 }
