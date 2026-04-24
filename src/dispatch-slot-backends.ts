@@ -224,7 +224,9 @@ class PgDispatchSlotBackend implements DispatchSlotBackend {
       ahqTaskId: slot.ahq_task_id,
       state: slot.status,
       worktreePath: null,
-      executingAt: (slot as Record<string, unknown>).executing_at as string | null ?? null,
+      executingAt:
+        ((slot as Record<string, unknown>).executing_at as string | null) ??
+        null,
     }));
   }
 

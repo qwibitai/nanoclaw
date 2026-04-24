@@ -89,6 +89,14 @@ export function bootstrapSessionSettings(groupFolder: string): string {
           if (!existing.hooks[hookType]) {
             existing.hooks[hookType] = entries;
             needsWrite = true;
+          } else {
+            // Update existing hooks if they differ (compare JSON strings)
+            const existingJson = JSON.stringify(existing.hooks[hookType]);
+            const desiredJson = JSON.stringify(entries);
+            if (existingJson !== desiredJson) {
+              existing.hooks[hookType] = entries;
+              needsWrite = true;
+            }
           }
         }
       }

@@ -224,8 +224,14 @@ describe('skill-registry', () => {
     });
 
     it('GET /api/v1/skills returns skill manifest with required fields', async () => {
-      writeSkill('api-skill-a', 'name: api-skill-a\ndescription: First API skill');
-      writeSkill('api-skill-b', 'name: api-skill-b\ndescription: Second API skill');
+      writeSkill(
+        'api-skill-a',
+        'name: api-skill-a\ndescription: First API skill',
+      );
+      writeSkill(
+        'api-skill-b',
+        'name: api-skill-b\ndescription: Second API skill',
+      );
       scanSkills(TEST_DIR);
 
       server = await startSkillServer(0, '127.0.0.1');

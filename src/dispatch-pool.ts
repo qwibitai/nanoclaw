@@ -104,10 +104,7 @@ async function queryTaskStatus(
     const json = (await res.json()) as { data?: { status?: string } };
     return json.data?.status ?? null;
   } catch (err) {
-    log.warn(
-      { err, ahqTaskId },
-      'Error querying Agency HQ task status',
-    );
+    log.warn({ err, ahqTaskId }, 'Error querying Agency HQ task status');
     return null;
   }
 }

@@ -26,9 +26,9 @@ describe('verify-config', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    fetchMock = vi.fn().mockResolvedValue(
-      mockFetchResponse({ success: true, data: {} }),
-    );
+    fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockFetchResponse({ success: true, data: {} }));
     vi.stubGlobal('fetch', fetchMock);
     execSyncMock.mockReturnValue('');
   });
@@ -74,7 +74,8 @@ describe('verify-config', () => {
 
       // Mock systemctl active
       execSyncMock.mockImplementation((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('is-active')) return 'active';
+        if (typeof cmd === 'string' && cmd.includes('is-active'))
+          return 'active';
         if (typeof cmd === 'string' && cmd.includes('pgrep')) return '';
         if (typeof cmd === 'string' && cmd.includes('tmux')) return '';
         return '';
@@ -184,7 +185,8 @@ describe('verify-config', () => {
       });
 
       execSyncMock.mockImplementation((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('is-active')) return 'active';
+        if (typeof cmd === 'string' && cmd.includes('is-active'))
+          return 'active';
         if (typeof cmd === 'string' && cmd.includes('tmux')) return '';
         return '';
       });
@@ -222,25 +224,22 @@ describe('verify-config', () => {
       });
 
       execSyncMock.mockImplementation((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('is-active')) return 'active';
+        if (typeof cmd === 'string' && cmd.includes('is-active'))
+          return 'active';
         return '';
       });
 
       const result = await verifyComponent('ops-agent');
 
       // Provider should pass — API value is the expected value
-      const providerCheck = result.checks.find(
-        (c) => c.label === 'Provider',
-      );
+      const providerCheck = result.checks.find((c) => c.label === 'Provider');
       expect(providerCheck).toBeDefined();
       expect(providerCheck!.pass).toBe(true);
       expect(providerCheck!.expected).toBe('openai');
       expect(providerCheck!.actual).toBe('openai');
 
       // CLI binary should also pass
-      const cliBinCheck = result.checks.find(
-        (c) => c.label === 'CLI binary',
-      );
+      const cliBinCheck = result.checks.find((c) => c.label === 'CLI binary');
       expect(cliBinCheck).toBeDefined();
       expect(cliBinCheck!.pass).toBe(true);
       expect(cliBinCheck!.expected).toBe('openai-cli');
@@ -259,34 +258,29 @@ describe('verify-config', () => {
       });
 
       execSyncMock.mockImplementation((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('is-active')) return 'active';
+        if (typeof cmd === 'string' && cmd.includes('is-active'))
+          return 'active';
         return '';
       });
 
       const result = await verifyComponent('ops-agent');
 
       // Provider=kimi should pass — API is the source of truth
-      const providerCheck = result.checks.find(
-        (c) => c.label === 'Provider',
-      );
+      const providerCheck = result.checks.find((c) => c.label === 'Provider');
       expect(providerCheck).toBeDefined();
       expect(providerCheck!.pass).toBe(true);
       expect(providerCheck!.expected).toBe('kimi');
       expect(providerCheck!.actual).toBe('kimi');
 
       // CLI binary=kimi should pass
-      const cliBinCheck = result.checks.find(
-        (c) => c.label === 'CLI binary',
-      );
+      const cliBinCheck = result.checks.find((c) => c.label === 'CLI binary');
       expect(cliBinCheck).toBeDefined();
       expect(cliBinCheck!.pass).toBe(true);
       expect(cliBinCheck!.expected).toBe('kimi');
       expect(cliBinCheck!.actual).toBe('kimi');
 
       // Model should report kimi-latest
-      const modelCheck = result.checks.find(
-        (c) => c.label === 'Model',
-      );
+      const modelCheck = result.checks.find((c) => c.label === 'Model');
       expect(modelCheck).toBeDefined();
       expect(modelCheck!.expected).toBe('kimi-latest');
     });
@@ -295,7 +289,8 @@ describe('verify-config', () => {
       fetchMock.mockRejectedValue(new Error('connection refused'));
 
       execSyncMock.mockImplementation((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('is-active')) return 'active';
+        if (typeof cmd === 'string' && cmd.includes('is-active'))
+          return 'active';
         return '';
       });
 
@@ -309,9 +304,7 @@ describe('verify-config', () => {
       expect(configSourceCheck!.actual).toBe('env-fallback');
 
       // Provider should still pass when env default matches fallback
-      const providerCheck = result.checks.find(
-        (c) => c.label === 'Provider',
-      );
+      const providerCheck = result.checks.find((c) => c.label === 'Provider');
       expect(providerCheck).toBeDefined();
       expect(providerCheck!.pass).toBe(true);
       expect(providerCheck!.expected).toBe('claude');
@@ -392,9 +385,7 @@ describe('verify-config', () => {
 
       const result = await verifyComponent('workers');
 
-      const providerCheck = result.checks.find(
-        (c) => c.label === 'Provider',
-      );
+      const providerCheck = result.checks.find((c) => c.label === 'Provider');
       expect(providerCheck!.pass).toBe(true);
       expect(providerCheck!.expected).toBe('kimi');
     });
@@ -415,9 +406,7 @@ describe('verify-config', () => {
 
       const result = await verifyComponent('reviewers');
 
-      const providerCheck = result.checks.find(
-        (c) => c.label === 'Provider',
-      );
+      const providerCheck = result.checks.find((c) => c.label === 'Provider');
       expect(providerCheck!.pass).toBe(true);
       expect(providerCheck!.expected).toBe('kimi');
     });
@@ -434,7 +423,8 @@ describe('verify-config', () => {
       });
 
       execSyncMock.mockImplementation((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('is-active')) return 'active';
+        if (typeof cmd === 'string' && cmd.includes('is-active'))
+          return 'active';
         return '';
       });
 
@@ -444,9 +434,7 @@ describe('verify-config', () => {
       // which fall back to env values. Provider check should still pass
       // because API returned successfully (even if empty), so the pass logic
       // uses the `apiConfig ? true : ...` branch.
-      const providerCheck = result.checks.find(
-        (c) => c.label === 'Provider',
-      );
+      const providerCheck = result.checks.find((c) => c.label === 'Provider');
       expect(providerCheck!.pass).toBe(true);
     });
   });

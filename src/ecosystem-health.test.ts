@@ -19,9 +19,7 @@ describe('ecosystem-health', () => {
     });
 
     it('marks ping-mobile as skipped', () => {
-      const pingMobile = SERVICE_REGISTRY.find(
-        (s) => s.name === 'ping-mobile',
-      );
+      const pingMobile = SERVICE_REGISTRY.find((s) => s.name === 'ping-mobile');
       expect(pingMobile).toBeDefined();
       expect(pingMobile!.skip).toBe(true);
     });
@@ -80,9 +78,7 @@ describe('ecosystem-health', () => {
     });
 
     it('returns down for a connection error', async () => {
-      globalThis.fetch = vi
-        .fn()
-        .mockRejectedValue(new Error('ECONNREFUSED'));
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
 
       const result = await checkService({
         name: 'test-svc',
@@ -165,7 +161,8 @@ describe('ecosystem-health', () => {
       const timeoutErr = new DOMException('signal timed out', 'TimeoutError');
 
       globalThis.fetch = vi.fn().mockImplementation((url: string) => {
-        if (url.includes(':1')) return Promise.resolve({ ok: true, status: 200 });
+        if (url.includes(':1'))
+          return Promise.resolve({ ok: true, status: 200 });
         if (url.includes(':2'))
           return Promise.reject(new Error('ECONNREFUSED'));
         return Promise.reject(timeoutErr);

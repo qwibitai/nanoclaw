@@ -149,10 +149,7 @@ async function queryTaskStatus(
     const json = (await res.json()) as { data?: { status?: string } };
     return json.data?.status ?? null;
   } catch (err) {
-    log.warn(
-      { err, ahqTaskId },
-      'Error querying Agency HQ task status',
-    );
+    log.warn({ err, ahqTaskId }, 'Error querying Agency HQ task status');
     return null;
   }
 }
@@ -422,7 +419,8 @@ export async function runWatchdogTick(
   if (ceo) {
     const slotDetails = stuckSlots
       .map((s) => {
-        const ageMin = s.slotAgeMs !== null ? Math.round(s.slotAgeMs / 60_000) : '?';
+        const ageMin =
+          s.slotAgeMs !== null ? Math.round(s.slotAgeMs / 60_000) : '?';
         return `slot ${s.slotIndex} (task: ${s.ahqTaskId}, age: ${ageMin}min, process: none)`;
       })
       .join('\n');
@@ -489,9 +487,7 @@ export function startOpsAgentWatchdog(
   watchdogIntervalHandle = setInterval(() => {
     runWatchdogTick(deps, isStopping, notificationBatcher)
       .then(() => updateWatchdogTaskRow())
-      .catch((err) =>
-        logger.error({ err }, 'Ops watchdog tick failed'),
-      );
+      .catch((err) => logger.error({ err }, 'Ops watchdog tick failed'));
   }, OPS_AGENT_WATCHDOG_INTERVAL);
 }
 
