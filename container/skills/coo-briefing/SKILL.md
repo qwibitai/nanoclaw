@@ -17,7 +17,6 @@ Generate the daily COO Briefing for all 12 Proper Hospitality properties. Output
 | Snowflake ALICE | `DUETTO_UPLOAD.RAW.GLITCH_REPORTS_RAW` | Guest glitches, compensation |
 | Snowflake Revinate | `CORE_REVINATE.RAW_API.RAW_REVIEWS` (NOT PROD -- RAW is 6x more data + current) | Guest review scores, sub-ratings from RAW_JSON |
 | Snowflake Duetto Pace | `DUETTO_UPLOAD.RAW.DUETTO_BUDGET_VS_PY` | OTB pace vs STLY/Forecast/Budget |
-| Snowflake Tripleseat | `ROSEDALE_DATABASE.TRIPLESEAT.*` | Group/catering |
 | Toast POS API | `/workspace/project/scripts/toast/scripts/toast_api.py` | F&B revenue by outlet |
 
 ## Property Reference
@@ -59,8 +58,6 @@ ls $CACHE_DIR/manifest.json 2>/dev/null && echo "CACHE HIT" || echo "CACHE MISS"
 | ALICE Glitches | `$CACHE_DIR/snowflake/alice.json` |
 | Revinate Reviews | `$CACHE_DIR/snowflake/revinate.json` |
 | Duetto Pace | `$CACHE_DIR/snowflake/duetto_pace.json` |
-| Tripleseat | `$CACHE_DIR/snowflake/tripleseat.json` |
-| Delphi/Salesforce | `$CACHE_DIR/snowflake/delphi.json` |
 | Toast F&B | `$CACHE_DIR/toast/sales_summary.csv` |
 
 Read cached files with:
@@ -72,14 +69,34 @@ Snowflake JSON files contain arrays of row objects -- filter by hotel name/code 
 
 **If CACHE MISS (manual/daytime run):** Proceed with live API calls as documented in each section below. Add note "Running without cache -- live data fetch" in the Telegram summary.
 
+## Report Mode
+
+Check the day of week before building the report:
+
+```bash
+DOW=$(date +%u)  # 1=Monday ... 7=Sunday
+[ "$DOW" = "1" ] && REPORT_MODE="full" || REPORT_MODE="delta"
+echo "Report mode: $REPORT_MODE (DOW=$DOW)"
+```
+
+- **Monday (REPORT_MODE=full):** All 6 sections per hotel at full depth, same as the spec below.
+- **Tuesday-Sunday (REPORT_MODE=delta):** Only show what moved since yesterday. Each section has a "Daily mode" note. Yesterday's prefetch cache:
+
+```bash
+YESTERDAY_CACHE=/workspace/project/data/coo-prefetch/$(date -d "yesterday" +%Y-%m-%d)
+```
+
+If yesterday's cache does not exist for a section, fall back to full mode for that section and note "First run -- no prior cache."
+
 ## HTML Styling
 
 - Title: "COO Briefing" in large DARK font (#1a1a1a, font-weight 700, 28px)
 - All section headers: dark font, bold, clearly readable (never light gray)
 - Each hotel: FULL NAME as header (e.g., "Santa Monica Proper Hotel" not "SMP")
 - Every data section: full-width card, NO two-column layout
-- Layout order per hotel: P&L > STR > Duetto Pace > ALICE > Revinate > Tripleseat > Toast F&B > COO Actions
+- Layout order per hotel: P&L > STR > Duetto Pace > ALICE > Revinate > Toast F&B > COO Actions
 - CSS classes: ALICE = `section-card alice-card` (amber), Revinate = `section-card revinate-card` (green)
+- **Color rule: use black as the default text color for all numbers.** Use red ONLY for negative variances or negative trends. Use green ONLY for positive variances or positive trends. Never color a number red or green just because it is large or small -- only based on direction of variance.
 
 ## Sections (per hotel)
 
@@ -123,6 +140,9 @@ Filter to these ItemTags only:
 
 | P&L Line | ItemTag |
 |---|---|
+| Rooms Sold (room nights) | RF0001 |
+| Available Rooms | RMAVL |
+| ADR | RF0003 |
 | Room Revenue | TOTRMRV |
 | Room Expense | TOTRMEX |
 | F&B Revenue | RF0007 |
@@ -133,7 +153,18 @@ Filter to these ItemTags only:
 
 **ALWAYS show TWO tables per hotel -- current month AND next month.** Label each table clearly with the month name (e.g., "April 2026" and "May 2026"). Never collapse to one month or omit next month.
 
-Each table rows: Room Revenue | Room Expense | F&B Revenue | F&B Expense | Total Revenue | GOP | EBITDA after Reserves
+Each table has TWO parts:
+
+**Part 1 -- KPI Summary (above the P&L rows):** Show these four KPIs computed from the fetched data:
+- Room Nights = RF0001 Stat
+- Occupancy % = RF0001 Stat / RMAVL Stat (express as %, e.g. "79.5%")
+- ADR = RF0003 Amt / RF0003 Stat (dollar value, e.g. "$556")
+- RevPAR = RF0003 Amt / RMAVL Stat (dollar value, e.g. "$442")
+
+Show these four KPIs as a header row above the P&L table, with the same column structure: Primary Forecast | Budget | vs Bud $ | vs Bud % | LY | vs LY %
+
+**Part 2 -- P&L rows:**
+Room Revenue | Room Expense | F&B Revenue | F&B Expense | Total Revenue | GOP | EBITDA after Reserves
 
 Each table columns: Primary Forecast | Budget | vs Bud $ | vs Bud % | LY (Last Year) | vs LY %
 
@@ -141,9 +172,11 @@ The first column is ALWAYS Primary Forecast (dataset 1) for both current month a
 
 Label the prior year column "LY" not "STLY" or "PY".
 
-Color: green = favorable variance, red = adverse > 5%.
+Color: black by default. Red for negative variance. Green for positive variance.
 
 If 0 rows returned for a month, show "ProfitSword: no data for [month]" -- but still show the other month's table.
+
+**Daily mode:** Show one summary line per hotel only: "[Hotel] -- [Month] Total Rev: $X.XM ([+/-X%] vs Bud) | GOP: $X.XM ([+/-X%] vs Bud)." Skip next month table. If Forecast vs Budget variance is > 5% adverse, show the full table instead and flag it.
 
 ### 2. STR Competitive Index (Snowflake) -- EVERY DAY
 
@@ -155,33 +188,51 @@ SELECT MAX(DATE) FROM DUETTO_UPLOAD.RAW.STR_DAILY
 ```
 Label the section header: "STR Competitive Index (as of [max date])". If data is more than 7 days old, add "(refresh pending)" to the header.
 
-**Show INDEX values only -- NOT actual Occ/ADR/RevPAR:**
-- MPI = OCC_INDEX
-- ARI = ADR_INDEX
-- RGI = REVPAR_INDEX
+Show competitive index values for OCC, ADR, and RevPAR (these are indices vs the comp set, not the hotel's actual Occ/ADR/RevPAR):
+- OCC Index (column: OCC_INDEX)
+- ADR Index (column: ADR_INDEX)
+- RevPAR Index (column: REVPAR_INDEX)
 
 Three segments: Total, Transient, Group (show ALL three).
 
-Three time windows:
+Three time windows -- always show all three:
 - Current Week: AVG last 7 days from `STR_DAILY`
 - Running 28: AVG last 28 days from `STR_DAILY`
 - YTD: from `STR_MONTHLY` where `PERIOD_TYPE = '2026 YTD'`
 
-Table: rows = Total / Transient / Group. Columns = CurrWk MPI|ARI|RGI|Rank | R28 MPI|ARI|RGI|Rank | YTD MPI|ARI|RGI|Rank.
+Table: rows = Total / Transient / Group. Columns = CurrWk OCC Idx|ADR Idx|RevPAR Idx|Rank | R28 OCC Idx|ADR Idx|RevPAR Idx|Rank | YTD OCC Idx|ADR Idx|RevPAR Idx|Rank.
 
 Column is `HOTEL` in both tables. Run `SELECT DISTINCT HOTEL FROM STR_DAILY` first to get exact names.
+
+**STR refresh callout (applies in both full and delta mode):** Check whether today's STR data is newer than yesterday's:
+```bash
+python3 -c "
+import json, os
+f = os.environ.get('YESTERDAY_CACHE', '') + '/snowflake/str_daily.json'
+if os.path.exists(f):
+    d = json.load(open(f))
+    print(max(r['DATE'] for r in d))
+else:
+    print('no-cache')
+" 2>/dev/null
+```
+If today's MAX(DATE) from STR_DAILY is newer than yesterday's max date, add a "What Changed -- STR Refresh" callout block below each hotel's STR table. Show Total segment Current Week OCC Index, ADR Index, RevPAR Index: this week's value, prior week's value (from yesterday's cache), and delta. Example: "OCC Index: 102 (+4 vs prior week) | ADR Index: 98 (-1) | RevPAR Index: 101 (+3)". Label the block with the new data date.
+
+**Daily mode:** Show the full STR table every day (no change from full mode). STR is always included.
 
 ### 3. Duetto Pace (Snowflake)
 
 Table: `DUETTO_BUDGET_VS_PY`. EACH HOTEL SEPARATE. Current month + next month shown as TWO SEPARATE tables (2 months only).
 
-Three segments: Total, Transient, Group.
+Three segments: Total, Transient, Group. All three are REQUIRED -- never omit a segment.
 
 Per segment per month: OTB Rooms | OTB ADR | OTB Revenue | STLY Revenue | vs STLY % | Forecast Revenue | Budget Revenue | Fcst vs Bud %
 
 Aggregate daily rows: SUM rooms/revenue, ADR = SUM(rev) / SUM(rooms).
 
 HOTEL_CODE mapping in `references/property_mapping.json`.
+
+**Daily mode:** Total segment only, current month only. Show OTB rooms and OTB revenue. Load yesterday's cached duetto_pace.json and compute delta vs today: "+X rooms / +$XK OTB vs yesterday." Flag if OTB revenue delta > 5% in either direction.
 
 ### 4. ALICE Glitches (Snowflake)
 
@@ -199,6 +250,8 @@ Show top issues SIDE BY SIDE in two columns:
 - Left column: "Top Issues MTD" -- top 3-5 by frequency for current month, with count + $ comp
 - Right column: "Top Issues YTD" -- top 3-5 by frequency for year to date, with count + $ comp
 Display NEXT TO each other (two-column layout for the issues only, not the summary numbers above).
+
+**Daily mode:** Filter to glitches where parsed_date >= yesterday's date. Show count and total comps for the day. If zero new glitches, show "ALICE: 0 new glitches today." Show MTD total in parentheses for context. Still flag any individual comp > $500.
 
 Comp formula: `TRY_TO_NUMBER(REPLACE(REPLACE(COMPENSATION,'$',''),',',''))`
 
@@ -247,13 +300,49 @@ SELECT DISTINCT f.key FROM CORE_REVINATE.RAW_API.RAW_REVIEWS, LATERAL FLATTEN(in
 
 THREE COLUMNS: MTD | 90-Day | YTD. Each: review count + avg rating (from RAW_JSON:rating).
 
+**Platform Ratings Table (below the summary columns):**
+
+Show a per-platform breakdown for MTD and YTD. All ratings are out of 5.0. The following platforms are available in Snowflake via `REVIEW_SOURCE`:
+
+| Platform | REVIEW_SOURCE value |
+|---|---|
+| Google | Google |
+| Booking.com | Booking.com |
+| Expedia | Expedia |
+| TripAdvisor | TripAdvisor |
+
+Query per hotel:
+```sql
+SELECT REVIEW_SOURCE,
+  COUNT(*) AS review_count,
+  AVG(PARSE_JSON(RAW_JSON):rating::FLOAT) AS avg_rating
+FROM CORE_REVINATE.RAW_API.RAW_REVIEWS
+WHERE HOTEL_NAME = '[hotel]'
+  AND REVIEW_SOURCE IN ('Google','Booking.com','Expedia','TripAdvisor')
+  AND DATE_REVIEW >= '[mtd_start]'
+GROUP BY REVIEW_SOURCE
+```
+
+Run once for MTD (1st of current month) and once for YTD (Jan 1). Show as a table:
+
+| Platform | MTD Avg | MTD # | YTD Avg | YTD # | TripAdvisor Rank |
+|---|---|---|---|---|---|
+| Google | 4.6 | 32 | 4.5 | 187 | -- |
+| Booking.com | 4.3 | 18 | 4.2 | 110 | -- |
+| Expedia | 4.4 | 11 | 4.3 | 67 | -- |
+| TripAdvisor | 4.5 | 9 | 4.4 | 52 | #14 of 312 |
+
+**TripAdvisor Property Rank:** For each hotel, use `WebSearch` to look up the current TripAdvisor ranking in their city. Search query: `site:tripadvisor.com "[Full Hotel Name]" hotels [city] ranking`. Pull the "#X of Y hotels in [City]" rank from the result and display in the TripAdvisor row. If not found via search, show "N/A".
+
 Show top issues SIDE BY SIDE in two columns:
 - Left column: "Top Issues MTD" -- 3 lowest sub-rating categories from MTD reviews with avg score
 - Right column: "Top Issues YTD" -- 3 lowest sub-rating categories from YTD reviews with avg score
 Display NEXT TO each other (two-column layout for the issues only, not the summary numbers above).
-Show BELOW the summary numbers.
+Show BELOW the platform ratings table.
 
-Flag avg rating < 4.0 red. This data is CURRENT -- no staleness disclaimer needed.
+Flag avg rating < 4.0 in red. This data is CURRENT -- no staleness disclaimer needed.
+
+**Daily mode:** Filter to reviews where DATE_REVIEW >= yesterday. Show count and average rating for those reviews. If zero new reviews, show "Revinate: 0 new reviews today." Show MTD count in parentheses for context.
 
 ### 6. Toast F&B Revenue (Toast POS API)
 
@@ -294,78 +383,15 @@ Property total at bottom of each hotel's outlet table.
 
 This gives Gabe full F&B visibility by outlet. Do NOT truncate to top 3 -- show every outlet that has revenue.
 
-### 7. Group/Catering Pace -- Tripleseat + Delphi (Snowflake)
+**Daily mode:** Same as full mode -- Toast data is inherently date-scoped (MTD 1st through yesterday). No change needed.
 
-TWO sources cover different hotels. Use the PRIMARY source for each hotel:
 
-**Delphi/Salesforce** (PRIMARY for these 5): ATX, SMP, SFP, DTLA, SHEL
-Table: `ROSEDALE_DATABASE.SALESFORCE.SF_BOOKINGS`
-Hotel column: `NIHRM__LOCATION__R_NAME`
-Status column: `NIHRM__BOOKINGSTATUS__C` (values: Definite, Tentative, Prospect)
-Date column: `NIHRM__ARRIVALDATE__C` (text "YYYY-MM-DD")
-Revenue: `NIHRM__CURRENTBLENDEDREVENUETOTAL__C`
-Room nights: `NIHRM__BLOCKEDROOMNIGHTSTOTAL__C`
-
-**Tripleseat** (PRIMARY for these 6): HJL, TCH, MYC, AVPS, AVBH, ING
-Table: `ROSEDALE_DATABASE.TRIPLESEAT.TRIPLESEAT_BOOKINGS`
-Hotel column: `LOCATION_NAME`
-Status column: `STATUS` (values: DEFINITE, TENTATIVE, PROSPECT -- uppercase)
-Date column: `START_DATE` (timestamp)
-Revenue: `TOTAL_GRAND_TOTAL`
-Room nights: `BLOCKED_ROOM_NIGHTS`
-
-**HJM (Hotel June Malibu):** not in either system. Show "No group/catering data."
-
-**Per hotel, show Pace vs STLY for next 3 months, broken out by status:**
-
-For CURRENT YEAR: query where arrival/start date is in each of the next 3 calendar months.
-For STLY: query same months but year-1 (2025).
-
-Table per hotel (3 months side by side):
-| Status | [Month 1] Bkgs | Rev | RN | STLY Rev | vs LY % | [Month 2] same | [Month 3] same |
-
-Three rows per month: Definite, Tentative, Prospect.
-
-Delphi query pattern:
-```sql
-SELECT NIHRM__LOCATION__R_NAME, NIHRM__BOOKINGSTATUS__C,
-  LEFT(NIHRM__ARRIVALDATE__C, 7) AS month,
-  COUNT(*) AS bookings,
-  SUM(NIHRM__CURRENTBLENDEDREVENUETOTAL__C) AS revenue,
-  SUM(NIHRM__BLOCKEDROOMNIGHTSTOTAL__C) AS room_nights
-FROM ROSEDALE_DATABASE.SALESFORCE.SF_BOOKINGS
-WHERE NIHRM__ARRIVALDATE__C >= '[MONTH_START]'
-  AND NIHRM__ARRIVALDATE__C < '[MONTH_END]'
-  AND NIHRM__BOOKINGSTATUS__C IN ('Definite','Tentative','Prospect')
-GROUP BY 1,2,3
-```
-Run twice: once for 2026, once for 2025 (STLY).
-
-Tripleseat query pattern:
-```sql
-SELECT LOCATION_NAME, STATUS,
-  LEFT(START_DATE::VARCHAR, 7) AS month,
-  COUNT(*) AS bookings,
-  SUM(TOTAL_GRAND_TOTAL) AS revenue,
-  SUM(BLOCKED_ROOM_NIGHTS) AS room_nights
-FROM ROSEDALE_DATABASE.TRIPLESEAT.TRIPLESEAT_BOOKINGS
-WHERE START_DATE >= '[MONTH_START]'
-  AND START_DATE < '[MONTH_END]'
-  AND STATUS IN ('DEFINITE','TENTATIVE','PROSPECT')
-GROUP BY 1,2,3
-```
-Run twice: once for 2026, once for 2025 (STLY).
-
-Color: green if current year revenue > STLY, red if < STLY by more than 10%.
-
-## Report Format
-
-**CRITICAL -- ORGANIZATION RULE: The report is organized HOTEL BY HOTEL, not section by section. Complete all 8 data sections for Hotel 1, then move to Hotel 2 and complete all 8 sections, then Hotel 3, etc. NEVER group all P&L sections together, then all STR sections, etc. Each hotel block must be contiguous -- all its data in one place before the next hotel begins.**
+**CRITICAL -- ORGANIZATION RULE: The report is organized HOTEL BY HOTEL, not section by section. Complete all 6 sections for Hotel 1, then move to Hotel 2 and complete all 6 sections, then Hotel 3, etc. NEVER group all P&L sections together, then all STR sections, etc. Each hotel block must be contiguous -- all its data in one place before the next hotel begins.**
 
 1. **Top 5 Portfolio Flags** -- FIRST, before any hotel detail. Most urgent cross-portfolio items.
-2. **Per hotel** -- all 8 sections in order above, COMPLETE for that hotel before moving to the next hotel.
+2. **Per hotel** -- all 6 sections in order above, COMPLETE for that hotel before moving to the next hotel.
 3. **3-5 COO Action Items** at bottom of each hotel section. Data-driven, priority-sorted. Thresholds:
-   - STR: Total RGI28 < 65 = critical, < 85 = alert, < 95 = watch
+   - STR: Total RevPAR Index R28 < 65 = critical, < 85 = alert, < 95 = watch
    - Duetto: Fcst vs Budget < -7% = alert, < -5% = watch
    - Lighthouse: vs comp < -20% = alert, OTB < 30% with high comp OTB = alert
    - ALICE: comp > $30/glitch = alert, volume > 600 MTD = alert
@@ -394,7 +420,7 @@ Color: green if current year revenue > STLY, red if < STLY by more than 10%.
 
 **ABSOLUTE RULE: NO CC, NO BCC, ever, under any circumstances.** Do not pass `cc` or `bcc` parameters to `send-email`. Do not add any address from contacts, org chart, or anywhere else. The only recipient is Gabriel.Ratner@properhotel.com. This applies even if a contact looks like a relevant stakeholder (e.g. revman@properhotel.com). One recipient. No exceptions.
 
-**Telegram** via `send_message`. Per hotel 3-4 lines (P&L variance, ALICE count, Revinate score, STR RGI if Wednesday). FOCUS line if actionable. Under 4000 chars.
+**Telegram** via `send_message`. Full mode: per hotel 3-4 lines (P&L variance, ALICE count, Revinate score, STR RGI). Delta mode: only hotels with notable changes (new ALICE glitches, new reviews < 4.0, OTB shift > 5%, STR refresh with meaningful delta); skip hotels with nothing to flag. Under 4000 chars.
 
 **After both email and Telegram are sent**, write the completion flag so duplicate runs are no-ops:
 ```bash
@@ -411,7 +437,7 @@ echo "Brief flag written"
 - If a data source returns no data, show "Data pending -- [source] not available" with last known date. Never skip a section silently.
 - **STR rule:** Always include STR every day. Show "(as of [max date])" in the section header. Add "(refresh pending)" if data is more than 7 days old. Never omit this section.
 - **ALICE exception:** ALICE pipeline refreshes weekly and may lag up to 14 days. If no ALICE data within 7 days, re-query up to 14 days back and display with "(as of [date])" in the section header. If pipeline is older than 14 days, show the most recent available data with a "(pipeline stale -- as of [date])" warning in amber. Never show a blank ALICE section -- always show the most recent data available regardless of age.
-- Flag: RGI < 85, comps > $20K, reviews < 4.0, EBITDA adverse > 10%.
+- Flag: RevPAR Index < 85, comps > $20K, reviews < 4.0, EBITDA adverse > 10%.
 
 ## SPELLING AND NAMING -- CRITICAL
 
