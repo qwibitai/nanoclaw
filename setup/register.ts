@@ -42,6 +42,22 @@ interface RegisterArgs {
   sessionMode: string;
 }
 
+const DEFAULT_ASSISTANT_NAMES = ['Dobby', 'Andy'];
+
+function escapeForRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function rewriteAssistantNameInClaudeMd(content: string, assistantName: string): string {
+  let updated = content;
+  for (const defaultName of DEFAULT_ASSISTANT_NAMES) {
+    const escaped = escapeForRegex(defaultName);
+    updated = updated.replace(new RegExp(`^# ${escaped}$`, 'm'), `# ${assistantName}`);
+    updated = updated.replace(new RegExp(`You are ${escaped}`, 'g'), `You are ${assistantName}`);
+  }
+  return updated;
+}
+
 function parseArgs(args: string[]): RegisterArgs {
   const result: RegisterArgs = {
     platformId: '',
@@ -219,8 +235,7 @@ export async function run(args: string[]): Promise<void> {
 
     for (const mdFile of mdFiles) {
       let content = fs.readFileSync(mdFile, 'utf-8');
-      content = content.replace(/^# Dobby$/m, `# ${parsed.assistantName}`);
-      content = content.replace(/You are Dobby/g, `You are ${parsed.assistantName}`);
+      content = rewriteAssistantNameInClaudeMd(content, parsed.assistantName);
       fs.writeFileSync(mdFile, content);
       log.info('Updated CLAUDE.md', { file: mdFile });
     }
