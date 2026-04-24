@@ -176,7 +176,7 @@ Color: black by default. Red for negative variance. Green for positive variance.
 
 If 0 rows returned for a month, show "ProfitSword: no data for [month]" -- but still show the other month's table.
 
-**Daily mode:** Show one summary line per hotel only: "[Hotel] -- [Month] Total Rev: $X.XM ([+/-X%] vs Bud) | GOP: $X.XM ([+/-X%] vs Bud)." Skip next month table. If Forecast vs Budget variance is > 5% adverse, show the full table instead and flag it.
+**Daily mode:** Show current month only (skip next month table). Always show the KPI summary row (Room Nights, Occupancy %, ADR, RevPAR) and the full P&L table with all rows. If Forecast vs Budget variance is > 5% adverse, flag it. The KPI header and P&L table appear every day, not just Mondays.
 
 ### 2. STR Competitive Index (Snowflake) -- EVERY DAY
 
@@ -232,7 +232,7 @@ Aggregate daily rows: SUM rooms/revenue, ADR = SUM(rev) / SUM(rooms).
 
 HOTEL_CODE mapping in `references/property_mapping.json`.
 
-**Daily mode:** Total segment only, current month only. Show OTB rooms and OTB revenue. Load yesterday's cached duetto_pace.json and compute delta vs today: "+X rooms / +$XK OTB vs yesterday." Flag if OTB revenue delta > 5% in either direction.
+**Daily mode:** All three segments (Total, Transient, Group), current month only. Show OTB rooms and OTB revenue per segment. Load yesterday's cached duetto_pace.json and compute delta vs today: "+X rooms / +$XK OTB vs yesterday" per segment. Flag if OTB revenue delta > 5% in either direction. All three segments appear every day, not just Mondays.
 
 ### 4. ALICE Glitches (Snowflake)
 
@@ -342,7 +342,7 @@ Show BELOW the platform ratings table.
 
 Flag avg rating < 4.0 in red. This data is CURRENT -- no staleness disclaimer needed.
 
-**Daily mode:** Filter to reviews where DATE_REVIEW >= yesterday. Show count and average rating for those reviews. If zero new reviews, show "Revinate: 0 new reviews today." Show MTD count in parentheses for context.
+**Daily mode:** Always show the full platform ratings table (Google, Booking.com, Expedia, TripAdvisor with MTD/YTD avg and TripAdvisor rank) -- same as full mode. Additionally show new reviews since yesterday: count and avg rating for reviews where DATE_REVIEW >= yesterday. If zero new reviews, show "0 new reviews today" below the platform table. The platform ratings table appears every day, not just Mondays.
 
 ### 6. Toast F&B Revenue (Toast POS API)
 
