@@ -38,6 +38,11 @@ export const createAgent: McpToolDefinition = {
       properties: {
         name: { type: 'string', description: 'Human-readable name (also becomes your destination name for this agent)' },
         instructions: { type: 'string', description: 'CLAUDE.md content for the new agent (personality, role, instructions)' },
+        agent_provider: {
+          type: 'string',
+          description:
+            'Optional agent provider for the new sub-agent (e.g. "claude", "codex", "opencode", "mock"). Omit to inherit the default (claude). Case-insensitive.',
+        },
       },
       required: ['name'],
     },
@@ -45,6 +50,9 @@ export const createAgent: McpToolDefinition = {
   async handler(args) {
     const name = args.name as string;
     if (!name) return err('name is required');
+
+    const rawProvider = args.agent_provider as string | undefined;
+    const agentProvider = typeof rawProvider === 'string' && rawProvider.trim() ? rawProvider.trim().toLowerCase() : null;
 
     const requestId = generateId();
     writeMessageOut({
@@ -55,11 +63,13 @@ export const createAgent: McpToolDefinition = {
         requestId,
         name,
         instructions: (args.instructions as string) || null,
+        agent_provider: agentProvider,
       }),
     });
 
-    log(`create_agent: ${requestId} → "${name}"`);
-    return ok(`Creating agent "${name}". You will be notified when it is ready.`);
+    const providerSuffix = agentProvider ? ` on ${agentProvider}` : '';
+    log(`create_agent: ${requestId} → "${name}"${providerSuffix}`);
+    return ok(`Creating agent "${name}"${providerSuffix}. You will be notified when it is ready.`);
   },
 };
 

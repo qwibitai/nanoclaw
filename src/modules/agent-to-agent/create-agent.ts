@@ -38,6 +38,8 @@ export async function handleCreateAgent(content: Record<string, unknown>, sessio
   const requestId = content.requestId as string;
   const name = content.name as string;
   const instructions = content.instructions as string | null;
+  const rawProvider = content.agent_provider as string | null | undefined;
+  const agentProvider = typeof rawProvider === 'string' && rawProvider.trim() ? rawProvider.trim().toLowerCase() : null;
 
   const sourceGroup = getAgentGroup(session.agent_group_id);
   if (!sourceGroup) {
@@ -78,7 +80,7 @@ export async function handleCreateAgent(content: Record<string, unknown>, sessio
     id: agentGroupId,
     name,
     folder,
-    agent_provider: null,
+    agent_provider: agentProvider,
     model: null,
     created_at: now,
   };
@@ -117,11 +119,19 @@ export async function handleCreateAgent(content: Record<string, unknown>, sessio
   writeDestinations(session.agent_group_id, session.id);
 
   // Fire-and-forget notification back to the creator
+  const providerSuffix = agentProvider ? ` on ${agentProvider}` : '';
   notifyAgent(
     session,
-    `Agent "${localName}" created. You can now message it with <message to="${localName}">...</message>.`,
+    `Agent "${localName}" created${providerSuffix}. You can now message it with <message to="${localName}">...</message>.`,
   );
-  log.info('Agent group created', { agentGroupId, name, localName, folder, parent: sourceGroup.id });
+  log.info('Agent group created', {
+    agentGroupId,
+    name,
+    localName,
+    folder,
+    parent: sourceGroup.id,
+    agent_provider: agentProvider,
+  });
   // Note: requestId is unused — this is fire-and-forget, not request/response.
   void requestId;
 }
