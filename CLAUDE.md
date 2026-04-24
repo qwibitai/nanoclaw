@@ -32,7 +32,8 @@ agent_group_members (user_id, agent_group_id)    — unprivileged access gate
 user_dms (user_id, channel_type, messaging_group_id) — cold-DM cache
 
 agent_groups (workspace, memory, CLAUDE.md, personality, container config)
-    ↕ many-to-many via messaging_group_agents (session_mode, trigger_rules, priority)
+    ↕ many-to-many via messaging_group_agents
+      (engage_mode, engage_pattern, sender_scope, ignored_message_policy, session_mode, priority)
 messaging_groups (one chat/channel on one platform; unknown_sender_policy)
 
 sessions (agent_group_id + messaging_group_id + thread_id → per-session container)
@@ -177,13 +178,14 @@ Container typecheck is a separate tsconfig — if you edit `container/agent-runn
 
 Service management:
 ```bash
+# Service names are slug-scoped per checkout. Setup prints the exact values.
+pnpm exec tsx -e "import { getLaunchdLabel, getSystemdUnit } from './src/install-slug.js'; console.log(getLaunchdLabel()); console.log(getSystemdUnit());"
+
 # macOS (launchd)
-launchctl load   ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # restart
+launchctl kickstart -k gui/$(id -u)/<launchd-label>
 
 # Linux (systemd)
-systemctl --user start|stop|restart nanoclaw
+systemctl --user restart <systemd-unit>
 ```
 
 Host logs: `logs/nanoclaw.log` (normal) and `logs/nanoclaw.error.log` (errors only — some delivery/approval failures only show up here).
@@ -201,16 +203,16 @@ This project uses pnpm with `minimumReleaseAge: 4320` (3 days) in `pnpm-workspac
 
 | Doc | Purpose |
 |-----|---------|
-| [docs/architecture.md](docs/architecture.md) | Full architecture writeup |
-| [docs/api-details.md](docs/api-details.md) | Host API + DB schema details |
+| [docs/build-and-runtime.md](docs/build-and-runtime.md) | Runtime split (Node host + Bun container), lockfiles, image build surface, CI, key invariants |
 | [docs/db.md](docs/db.md) | DB architecture overview: three-DB model, cross-mount rules, readers/writers map |
 | [docs/db-central.md](docs/db-central.md) | Central DB (`data/v2.db`) — every table + migration system |
 | [docs/db-session.md](docs/db-session.md) | Per-session `inbound.db` + `outbound.db` schemas + seq parity |
-| [docs/agent-runner-details.md](docs/agent-runner-details.md) | Agent-runner internals + MCP tool interface |
 | [docs/isolation-model.md](docs/isolation-model.md) | Three-level channel isolation model |
 | [docs/setup-wiring.md](docs/setup-wiring.md) | What's wired, what's open in the setup flow |
 | [docs/architecture-diagram.md](docs/architecture-diagram.md) | Diagram version of the architecture |
-| [docs/build-and-runtime.md](docs/build-and-runtime.md) | Runtime split (Node host + Bun container), lockfiles, image build surface, CI, key invariants |
+| [docs/architecture.md](docs/architecture.md) | Historical architecture writeup; do not use as current source of truth without code cross-check |
+| [docs/api-details.md](docs/api-details.md) | Historical host API + DB notes; current schema lives in `src/db/schema.ts` and `docs/db-central.md` |
+| [docs/agent-runner-details.md](docs/agent-runner-details.md) | Historical agent-runner internals; verify current behavior against `container/agent-runner/src/` |
 
 ## Container Build Cache
 
@@ -240,8 +242,8 @@ grep -q '^INSTALL_CJK_FONTS=' .env && sed -i.bak 's/^INSTALL_CJK_FONTS=.*/INSTAL
 
 # Rebuild and restart so new sessions pick up the new image
 ./container/build.sh
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw   # macOS
-# systemctl --user restart nanoclaw                # Linux
+launchctl kickstart -k gui/$(id -u)/<launchd-label>   # macOS
+# systemctl --user restart <systemd-unit>             # Linux
 ```
 
 `container/build.sh` reads `INSTALL_CJK_FONTS` from `.env` and passes it through as a Docker build-arg. Without CJK fonts, Chromium-rendered screenshots and PDFs containing CJK text show tofu (empty rectangles) instead of characters.
