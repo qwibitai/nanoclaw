@@ -85,4 +85,68 @@ export const createAgent: McpToolDefinition = {
   },
 };
 
-registerTools([createAgent]);
+export const updateAgent: McpToolDefinition = {
+  tool: {
+    name: 'update_agent',
+    description:
+      'Update the configuration of a previously-created sub-agent by destination name. Currently supports changing `agent_provider` and/or `model`. At least one of the two must be provided. Takes effect on the sub-agent\'s next spawn — any running container for the target is stopped so the next message to it picks up the new config. Admin-only; fire-and-forget.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        target: {
+          type: 'string',
+          description: 'Destination name of the sub-agent to update (the name you message it as via <message to="…">).',
+        },
+        agent_provider: {
+          type: 'string',
+          description: 'New agent provider (e.g. "claude", "codex"). Omit to leave unchanged. Case-insensitive.',
+        },
+        model: {
+          type: 'string',
+          description: 'New model override (e.g. "sonnet[1m]", "opus[1m]", "haiku", "gpt-5.4-mini"). Omit to leave unchanged. Case preserved. Pass an empty string to clear the override (fall through to provider default).',
+        },
+      },
+      required: ['target'],
+    },
+  },
+  async handler(args) {
+    const target = args.target as string;
+    if (!target) return err('target is required');
+
+    const hasProvider = args.agent_provider !== undefined;
+    const hasModel = args.model !== undefined;
+    if (!hasProvider && !hasModel) {
+      return err('at least one of agent_provider or model must be provided');
+    }
+
+    const rawProvider = args.agent_provider as string | undefined;
+    const agentProvider = hasProvider
+      ? (typeof rawProvider === 'string' && rawProvider.trim() ? rawProvider.trim().toLowerCase() : null)
+      : undefined;
+
+    const rawModel = args.model as string | undefined;
+    // Empty string = intentional clear. Undefined = don't touch.
+    const model = hasModel ? (typeof rawModel === 'string' && rawModel.trim() ? rawModel.trim() : null) : undefined;
+
+    const requestId = generateId();
+    writeMessageOut({
+      id: requestId,
+      kind: 'system',
+      content: JSON.stringify({
+        action: 'update_agent',
+        requestId,
+        target,
+        ...(agentProvider !== undefined ? { agent_provider: agentProvider } : {}),
+        ...(model !== undefined ? { model } : {}),
+      }),
+    });
+
+    const parts: string[] = [];
+    if (agentProvider !== undefined) parts.push(`provider=${agentProvider ?? '<cleared>'}`);
+    if (model !== undefined) parts.push(`model=${model ?? '<cleared>'}`);
+    log(`update_agent: ${requestId} → "${target}" (${parts.join(', ')})`);
+    return ok(`Updating agent "${target}" (${parts.join(', ')}). You will be notified when it takes effect.`);
+  },
+};
+
+registerTools([createAgent, updateAgent]);
