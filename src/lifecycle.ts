@@ -178,6 +178,11 @@ export async function initApp(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
 
+  // Update all existing group settings to ensure tool-observer hooks are present
+  // (migration for groups that existed before tool-observer was added)
+  const { updateAllGroupSettings } = await import('./session-settings.js');
+  updateAllGroupSettings();
+
   // Prune stale tool call events on startup and every 6 hours
   const pruned = pruneToolEvents(7);
   if (pruned > 0) {

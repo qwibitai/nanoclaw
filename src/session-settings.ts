@@ -80,10 +80,13 @@ export function bootstrapSessionSettings(groupFolder: string): string {
     try {
       const existing = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
       let needsWrite = false;
+
+      // Case 1: No hooks at all — copy the entire hooks object
       if (!existing.hooks && defaultSettings.hooks) {
         existing.hooks = defaultSettings.hooks;
         needsWrite = true;
       } else if (existing.hooks && defaultSettings.hooks) {
+        // Case 2: Has hooks, but may be missing some hook types
         const desired = defaultSettings.hooks as Record<string, unknown[]>;
         for (const [hookType, entries] of Object.entries(desired)) {
           if (!existing.hooks[hookType]) {
@@ -91,15 +94,28 @@ export function bootstrapSessionSettings(groupFolder: string): string {
             needsWrite = true;
           }
         }
+      } else if (!existing.hooks && !defaultSettings.hooks) {
+        // Case 3: Neither has hooks — no action needed
+      } else if (existing.hooks && !defaultSettings.hooks) {
+        // Case 4: Existing has hooks but default doesn't — preserve existing
       }
+
       if (needsWrite) {
         fs.writeFileSync(
           settingsFile,
           JSON.stringify(existing, null, 2) + '\n',
         );
+        logger.debug(
+          { groupFolder: path.basename(path.dirname(path.dirname(settingsFile))) },
+          'Updated settings.json with missing hooks',
+        );
       }
-    } catch {
-      // Corrupted settings — leave as-is
+    } catch (err) {
+      // Corrupted settings — log and leave as-is
+      logger.warn(
+        { err, settingsFile },
+        'Failed to parse or update existing settings.json',
+      );
     }
   }
 
@@ -186,4 +202,68 @@ export function ensureAgentRunnerCompiled(): string {
   }
 
   return distIndex;
+}
+
+/**
+ * Update all existing group settings files to ensure they have the latest hooks.
+ * Called once at startup to ensure tool-observer hooks are added to pre-existing sessions.
+ */
+export function updateAllGroupSettings(): void {
+  const sessionsDir = path.join(DATA_DIR, 'sessions');
+  if (!fs.existsSync(sessionsDir)) return;
+
+  const hooksDir = path.join(process.cwd(), 'container', 'hooks');
+  const toolObserverHook = path.join(hooksDir, 'tool-observer.sh');
+
+  // Only proceed if tool-observer hook exists
+  if (!fs.existsSync(toolObserverHook)) return;
+
+  let updatedCount = 0;
+  for (const groupFolder of fs.readdirSync(sessionsDir)) {
+    const settingsFile = path.join(
+      sessionsDir,
+      groupFolder,
+      '.claude',
+      'settings.json',
+    );
+    if (!fs.existsSync(settingsFile)) continue;
+
+    try {
+      const existing = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+
+      // Check if PostToolUse or PostToolUseFailure hooks are missing
+      const needsPostToolUse =
+        !existing.hooks?.PostToolUse || !existing.hooks?.PostToolUseFailure;
+
+      if (needsPostToolUse) {
+        if (!existing.hooks) existing.hooks = {};
+
+        const toolObserverEntry = {
+          matcher: '',
+          hooks: [{ type: 'command', command: toolObserverHook }],
+        };
+
+        existing.hooks.PostToolUse = [toolObserverEntry];
+        existing.hooks.PostToolUseFailure = [toolObserverEntry];
+
+        fs.writeFileSync(
+          settingsFile,
+          JSON.stringify(existing, null, 2) + '\n',
+        );
+        updatedCount++;
+      }
+    } catch (err) {
+      logger.warn(
+        { err, settingsFile },
+        'Failed to update group settings.json',
+      );
+    }
+  }
+
+  if (updatedCount > 0) {
+    logger.info(
+      { updatedCount },
+      'Updated existing group settings with tool-observer hooks',
+    );
+  }
 }
