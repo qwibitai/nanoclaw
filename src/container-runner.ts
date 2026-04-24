@@ -427,6 +427,11 @@ async function buildContainerArgs(
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Resolved provider from sessions/agent_groups/container.json precedence —
+  // runner prefers this env over container.json so per-session overrides work
+  // without mutating the shared per-agent-group container.json.
+  args.push('-e', `AGENT_PROVIDER=${provider}`);
+
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {
     for (const [key, value] of Object.entries(providerContribution.env)) {

@@ -23,6 +23,24 @@ const DEFAULT_MAX_MESSAGES = 10;
 let _config: RunnerConfig | null = null;
 
 /**
+ * Pick the provider name with env-over-config precedence.
+ *
+ * The host resolves `sessions.agent_provider → agent_groups.agent_provider →
+ * container.json.provider → 'claude'` and passes the result as AGENT_PROVIDER.
+ * Env wins because container.json is shared across all sessions of an agent
+ * group — per-session overrides can't round-trip through that file.
+ *
+ * Empty / whitespace-only values fall through to the next source.
+ */
+export function resolveProvider(envValue: string | undefined, configValue: unknown): string {
+  const env = typeof envValue === 'string' ? envValue.trim() : '';
+  if (env) return env;
+  const cfg = typeof configValue === 'string' ? configValue.trim() : '';
+  if (cfg) return cfg;
+  return 'claude';
+}
+
+/**
  * Load config from container.json. Called once at startup.
  * Falls back to sensible defaults for any missing field.
  */
@@ -37,7 +55,7 @@ export function loadConfig(): RunnerConfig {
   }
 
   _config = {
-    provider: (raw.provider as string) || 'claude',
+    provider: resolveProvider(process.env.AGENT_PROVIDER, raw.provider),
     assistantName: (raw.assistantName as string) || '',
     groupName: (raw.groupName as string) || '',
     agentGroupId: (raw.agentGroupId as string) || '',
