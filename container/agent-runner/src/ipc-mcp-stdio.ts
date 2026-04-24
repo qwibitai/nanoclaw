@@ -10,6 +10,7 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
+import { appendSendMessageActivity } from './delivery-activity.js';
 
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -62,6 +63,10 @@ server.tool(
     };
 
     writeIpcFile(MESSAGES_DIR, data);
+    appendSendMessageActivity(
+      process.env.NANOCLAW_OUTPUT_ACTIVITY_FILE,
+      args.text,
+    );
 
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
   },

@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('./container-runner.js', () => ({
+  runContainerAgent: vi.fn(),
+  writeTasksSnapshot: vi.fn(),
+}));
+
+import { runContainerAgent } from './container-runner.js';
 import { _initTestDatabase, createTask, getTaskById } from './db.js';
 import {
   _resetSchedulerLoopForTests,
@@ -12,6 +18,7 @@ describe('task scheduler', () => {
     _initTestDatabase();
     _resetSchedulerLoopForTests();
     vi.useFakeTimers();
+    vi.mocked(runContainerAgent).mockReset();
   });
 
   afterEach(() => {
@@ -125,5 +132,72 @@ describe('task scheduler', () => {
     const offset =
       (new Date(nextRun!).getTime() - new Date(scheduledTime).getTime()) % ms;
     expect(offset).toBe(0);
+  });
+
+  it('allows scheduled tasks to finish silently without sending a message', async () => {
+    createTask({
+      id: 'task-silent-success',
+      group_folder: 'test-group',
+      chat_jid: 'test@g.us',
+      prompt: 'run silently',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    });
+
+    const notifyIdle = vi.fn();
+    const closeStdin = vi.fn();
+    const sendMessage = vi.fn(async () => {});
+
+    vi.mocked(runContainerAgent).mockImplementation(
+      async (_group, _input, _onProcess, onOutput) => {
+        await onOutput?.({ status: 'success', result: null });
+        return { status: 'success', result: null };
+      },
+    );
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'test@g.us': {
+          name: 'Test Group',
+          folder: 'test-group',
+          trigger: '@Andy',
+          added_at: new Date().toISOString(),
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: (
+          _groupJid: string,
+          _taskId: string,
+          fn: () => Promise<void>,
+        ) => {
+          void fn();
+        },
+        notifyIdle,
+        closeStdin,
+      } as any,
+      onProcess: () => {},
+      sendMessage,
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(notifyIdle).toHaveBeenCalledWith('test@g.us');
+    expect(closeStdin).not.toHaveBeenCalled();
+    expect(vi.mocked(runContainerAgent)).toHaveBeenCalledWith(
+      expect.objectContaining({ folder: 'test-group' }),
+      expect.objectContaining({ isScheduledTask: true }),
+      expect.any(Function),
+      expect.any(Function),
+    );
+
+    const task = getTaskById('task-silent-success');
+    expect(task?.status).toBe('completed');
+    expect(task?.last_result).toBe('Completed');
   });
 });

@@ -362,6 +362,7 @@ export async function runContainerAgent(
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
     let newSessionId: string | undefined;
+    let lastStreamedOutput: ContainerOutput | undefined;
     let outputChain = Promise.resolve();
 
     container.stdout.on('data', (data) => {
@@ -397,6 +398,7 @@ export async function runContainerAgent(
 
           try {
             const parsed: ContainerOutput = JSON.parse(jsonStr);
+            lastStreamedOutput = parsed;
             if (parsed.newSessionId) {
               newSessionId = parsed.newSessionId;
             }
@@ -588,6 +590,19 @@ export async function runContainerAgent(
 
       fs.writeFileSync(logFile, logLines.join('\n'));
       logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
+
+      const streamedErrorOutput =
+        lastStreamedOutput?.status === 'error' ? lastStreamedOutput : null;
+      if (streamedErrorOutput) {
+        outputChain.then(() => {
+          resolve({
+            ...streamedErrorOutput,
+            newSessionId:
+              streamedErrorOutput.newSessionId || newSessionId || undefined,
+          });
+        });
+        return;
+      }
 
       if (code !== 0) {
         logger.error(

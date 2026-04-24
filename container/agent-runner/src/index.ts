@@ -23,6 +23,15 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import {
+  consumeSendMessageCount,
+  resetSendMessageActivity,
+} from './delivery-activity.js';
+import {
+  PromptQueue,
+  QueryRunnerMessage,
+  runQueryRunner,
+} from './query-runner.js';
 
 interface ContainerInput {
   prompt: string;
@@ -53,54 +62,9 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
-interface SDKUserMessage {
-  type: 'user';
-  message: { role: 'user'; content: string };
-  parent_tool_use_id: null;
-  session_id: string;
-}
-
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
-
-/**
- * Push-based async iterable for streaming user messages to the SDK.
- * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
- */
-class MessageStream {
-  private queue: SDKUserMessage[] = [];
-  private waiting: (() => void) | null = null;
-  private done = false;
-
-  push(text: string): void {
-    this.queue.push({
-      type: 'user',
-      message: { role: 'user', content: text },
-      parent_tool_use_id: null,
-      session_id: '',
-    });
-    this.waiting?.();
-  }
-
-  end(): void {
-    this.done = true;
-    this.waiting?.();
-  }
-
-  async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
-    while (true) {
-      while (this.queue.length > 0) {
-        yield this.queue.shift()!;
-      }
-      if (this.done) return;
-      await new Promise<void>((r) => {
-        this.waiting = r;
-      });
-      this.waiting = null;
-    }
-  }
-}
 
 async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -125,6 +89,13 @@ function writeOutput(output: ContainerOutput): void {
 
 function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
+}
+
+function createSendMessageActivityFilePath(): string {
+  return path.join(
+    '/tmp',
+    `nanoclaw-send-message-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.log`,
+  );
 }
 
 function getSessionSummary(
@@ -383,8 +354,9 @@ async function runQuery(
   lastAssistantUuid?: string;
   closedDuringQuery: boolean;
 }> {
-  const stream = new MessageStream();
-  stream.push(prompt);
+  const promptQueue = new PromptQueue(prompt);
+  const activityFile = createSendMessageActivityFilePath();
+  resetSendMessageActivity(activityFile);
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -394,23 +366,18 @@ async function runQuery(
     if (shouldClose()) {
       log('Close sentinel detected during query, ending stream');
       closedDuringQuery = true;
-      stream.end();
+      promptQueue.end();
       ipcPolling = false;
       return;
     }
     const messages = drainIpcInput();
     for (const text of messages) {
       log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
+      promptQueue.enqueuePrompt(text);
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
   setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
-
-  let newSessionId: string | undefined;
-  let lastAssistantUuid: string | undefined;
-  let messageCount = 0;
-  let resultCount = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -435,113 +402,83 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
-  for await (const message of query({
-    prompt: stream,
-    options: {
-      cwd: '/workspace/group',
-      additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
-      resume: sessionId,
-      resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? {
-            type: 'preset' as const,
-            preset: 'claude_code' as const,
-            append: globalClaudeMd,
-          }
-        : undefined,
-      allowedTools: [
-        'Bash',
-        'Read',
-        'Write',
-        'Edit',
-        'Glob',
-        'Grep',
-        'WebSearch',
-        'WebFetch',
-        'Task',
-        'TaskOutput',
-        'TaskStop',
-        'TeamCreate',
-        'TeamDelete',
-        'SendMessage',
-        'TodoWrite',
-        'ToolSearch',
-        'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*',
-      ],
-      env: sdkEnv,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+  try {
+    const sdkMessages = query({
+      prompt: promptQueue,
+      options: {
+        cwd: '/workspace/group',
+        additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+        resume: sessionId,
+        resumeSessionAt: resumeAt,
+        systemPrompt: globalClaudeMd
+          ? {
+              type: 'preset' as const,
+              preset: 'claude_code' as const,
+              append: globalClaudeMd,
+            }
+          : undefined,
+        allowedTools: [
+          'Bash',
+          'Read',
+          'Write',
+          'Edit',
+          'Glob',
+          'Grep',
+          'WebSearch',
+          'WebFetch',
+          'Task',
+          'TaskOutput',
+          'TaskStop',
+          'TeamCreate',
+          'TeamDelete',
+          'SendMessage',
+          'TodoWrite',
+          'ToolSearch',
+          'Skill',
+          'NotebookEdit',
+          'mcp__nanoclaw__*',
+        ],
+        env: sdkEnv,
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        settingSources: ['project', 'user'],
+        mcpServers: {
+          nanoclaw: {
+            command: 'node',
+            args: [mcpServerPath],
+            env: {
+              NANOCLAW_CHAT_JID: containerInput.chatJid,
+              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+              NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+              NANOCLAW_OUTPUT_ACTIVITY_FILE: activityFile,
+            },
           },
         },
+        hooks: {
+          PreCompact: [
+            { hooks: [createPreCompactHook(containerInput.assistantName)] },
+          ],
+        },
       },
-      hooks: {
-        PreCompact: [
-          { hooks: [createPreCompactHook(containerInput.assistantName)] },
-        ],
-      },
-    },
-  })) {
-    messageCount++;
-    const msgType =
-      message.type === 'system'
-        ? `system/${(message as { subtype?: string }).subtype}`
-        : message.type;
-    log(`[msg #${messageCount}] type=${msgType}`);
+    }) as AsyncIterable<QueryRunnerMessage>;
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
-    }
-
-    if (message.type === 'system' && message.subtype === 'init') {
-      newSessionId = message.session_id;
-      log(`Session initialized: ${newSessionId}`);
-    }
-
-    if (
-      message.type === 'system' &&
-      (message as { subtype?: string }).subtype === 'task_notification'
-    ) {
-      const tn = message as {
-        task_id: string;
-        status: string;
-        summary: string;
-      };
-      log(
-        `Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`,
-      );
-    }
-
-    if (message.type === 'result') {
-      resultCount++;
-      const textResult =
-        'result' in message ? (message as { result?: string }).result : null;
-      log(
-        `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
-      );
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId,
-      });
+    return await runQueryRunner({
+      promptQueue,
+      messages: sdkMessages,
+      isScheduledTask: containerInput.isScheduledTask === true,
+      getClosedDuringQuery: () => closedDuringQuery,
+      consumeSendMessageCount: () => consumeSendMessageCount(activityFile),
+      writeOutput,
+    });
+  } finally {
+    ipcPolling = false;
+    promptQueue.end();
+    try {
+      fs.unlinkSync(activityFile);
+    } catch {
+      /* ignore */
     }
   }
-
-  ipcPolling = false;
-  log(
-    `Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`,
-  );
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 
 interface ScriptResult {
