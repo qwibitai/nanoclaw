@@ -257,6 +257,14 @@ async function buildContainerArgs(
     }
   }
 
+  // Per-group env from container.json — overrides provider defaults.
+  const containerConfig = readContainerConfig(agentGroup.folder);
+  if (containerConfig.env) {
+    for (const [key, value] of Object.entries(containerConfig.env)) {
+      args.push('-e', `${key}=${value}`);
+    }
+  }
+
   // Users allowed to run admin commands (e.g. /clear) inside this container.
   // Computed at wake time: owners + global admins + admins scoped to this
   // agent group. Role changes take effect on next container spawn.
@@ -325,7 +333,6 @@ async function buildContainerArgs(
   }
 
   // Pass additional MCP servers from container config (groups/<folder>/container.json)
-  const containerConfig = readContainerConfig(agentGroup.folder);
   if (containerConfig.mcpServers && Object.keys(containerConfig.mcpServers).length > 0) {
     args.push('-e', `NANOCLAW_MCP_SERVERS=${JSON.stringify(containerConfig.mcpServers)}`);
   }

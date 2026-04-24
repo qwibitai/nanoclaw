@@ -38,6 +38,8 @@ export interface ContainerConfig {
   packages: { apt: string[]; npm: string[] };
   imageTag?: string;
   additionalMounts: AdditionalMountConfig[];
+  /** Per-group env vars passed to the container as `-e KEY=VALUE` at spawn. */
+  env?: Record<string, string>;
 }
 
 function emptyConfig(): ContainerConfig {
@@ -71,6 +73,7 @@ export function readContainerConfig(folder: string): ContainerConfig {
       },
       imageTag: raw.imageTag,
       additionalMounts: raw.additionalMounts ?? [],
+      env: raw.env,
     };
   } catch (err) {
     console.error(`[container-config] failed to parse ${p}: ${String(err)}`);
