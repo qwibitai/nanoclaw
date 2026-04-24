@@ -8,15 +8,15 @@
 
 ## 1. Tool Interception Approach
 
-### Decision: PostToolUse hook (settings.json)
+### Decision: PostToolUse + PostToolUseFailure hooks (settings.json)
 
-**Use Claude Code's native `PostToolUse` hook** to capture every tool call after execution, writing a JSON event file to a new IPC subdirectory for host-side collection.
+**Use Claude Code's native `PostToolUse` and `PostToolUseFailure` hooks** to capture every tool call after execution (both successful and failed), writing a JSON event file to a new IPC subdirectory for host-side collection. `PostToolUse` fires after successful tool calls; `PostToolUseFailure` fires after failed invocations. Both hooks are required for complete observability coverage.
 
-### Why PostToolUse over alternatives
+### Why PostToolUse + PostToolUseFailure over alternatives
 
 | Approach | Pros | Cons | Verdict |
 |----------|------|------|---------|
-| **PostToolUse hook** (settings.json) | Native, zero Claude CLI patches. Receives `tool_name`, `tool_input`, `tool_response`, `tool_use_id`, `session_id`. Runs after execution so captures outcome. Already proven pattern (service-guard.sh uses PreToolUse). | Adds ~5-15ms per tool call for hook process spawn. No duration timing (would need PreToolUse+PostToolUse pairing). | **Recommended** |
+| **PostToolUse + PostToolUseFailure hooks** (settings.json) | Native, zero Claude CLI patches. Receives `tool_name`, `tool_input`, `tool_response`, `tool_use_id`, `session_id`. Runs after execution so captures outcome for both successes and failures. Already proven pattern (service-guard.sh uses PreToolUse). | Adds ~5-15ms per tool call for hook process spawn. No duration timing (would need PreToolUse pairing). | **Recommended** |
 | PreToolUse + PostToolUse pair | Gets both input and duration timing | Requires correlating two events by `tool_use_id`; doubles hook overhead | Good follow-up if duration matters |
 | Monkey-patch RunnerBackend.invoke() | Single interception point at `container/agent-runner/src/claude-cli-backend.ts:42` | Only sees session-level invoke, not individual tool calls within a session. Claude CLI is a black box from this layer. | Not viable for per-tool granularity |
 | Parse stream-json output | Could extract `content_block_start` events with `type: "tool_use"` from stdout in `parseStreamOutput()` at `claude-cli-backend.ts:131` | Only sees tool invocations, not results. Would need to correlate with result blocks. Fragile coupling to stream format. | Backup option |
@@ -26,28 +26,30 @@
 
 **Code locations to modify:**
 
-1. **`src/session-settings.ts:52-60`** — Add PostToolUse hook alongside existing PreToolUse:
+1. **`src/session-settings.ts:52-60`** — Add PostToolUse and PostToolUseFailure hooks alongside existing PreToolUse:
    ```typescript
+   const toolObserverEntry = {
+     matcher: '',  // match all tools
+     hooks: [{ type: 'command', command: toolObserverHook }],
+   };
    defaultSettings.hooks = {
      PreToolUse: [/* existing service-guard */],
-     PostToolUse: [
-       {
-         matcher: '',  // match all tools
-         hooks: [{ type: 'command', command: toolObserverHook }],
-       },
-     ],
+     PostToolUse: [toolObserverEntry],
+     PostToolUseFailure: [toolObserverEntry],
    };
    ```
 
-2. **New file: `container/hooks/tool-observer.sh`** — Hook script that receives PostToolUse JSON on stdin and writes an event file:
+2. **New file: `container/hooks/tool-observer.sh`** — Hook script that receives PostToolUse or PostToolUseFailure JSON on stdin and writes an event file:
    ```bash
    INPUT=$(cat)
    TOOL=$(echo "$INPUT" | jq -r '.tool_name')
+   EVENT=$(echo "$INPUT" | jq -r '.hook_event_name')
    TS=$(date +%s%N)
-   echo "$INPUT" | jq -c '{
+   echo "$INPUT" | jq -c --arg event "$EVENT" '{
      tool_name: .tool_name,
      tool_use_id: .tool_use_id,
      session_id: .session_id,
+     hook_event: $event,
      tool_input: .tool_input,
      tool_response: (.tool_response | tostring | .[0:2000]),
      timestamp: now
@@ -64,8 +66,9 @@
 
 5. **New migration** — Schema for tool_call_events table (see Storage section).
 
-### What PostToolUse gives us (per hook invocation)
+### What the hooks give us (per hook invocation)
 
+**PostToolUse** (successful tool calls):
 ```json
 {
   "session_id": "abc123",
@@ -77,7 +80,19 @@
 }
 ```
 
-This is sufficient for observability: we know what tool was called, with what input, what the result was, and which session it belongs to.
+**PostToolUseFailure** (failed tool calls):
+```json
+{
+  "session_id": "abc123",
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": { "command": "rm -rf /protected", "timeout": 120000 },
+  "tool_response": { "error": "Permission denied" },
+  "tool_use_id": "toolu_01DEF456"
+}
+```
+
+Both hooks use the same schema. The `hook_event_name` field distinguishes success from failure, which the observer script records as `hook_event` in the stored event. This is sufficient for observability: we know what tool was called, with what input, whether it succeeded or failed, what the result was, and which session it belongs to.
 
 ---
 
@@ -119,7 +134,7 @@ These volumes are trivial for any storage backend. Even at peak with worst-case 
 
 ## 3. Storage Choice
 
-### Decision: SQLite (existing, WAL mode)
+### Decision: SQLite (existing)
 
 **Use the existing SQLite database** (`store/messages.db`) with a new `tool_call_events` table. Do not introduce PostgreSQL for this feature.
 
@@ -128,8 +143,8 @@ These volumes are trivial for any storage backend. Even at peak with worst-case 
 | Factor | SQLite (existing) | PostgreSQL (new) |
 |--------|-------------------|-----------------|
 | **Volume fit** | 17.5K rows/week peak is nothing for SQLite | Massively over-provisioned |
-| **Ops burden** | Zero — already running, WAL already enabled (`src/db/index.ts:28`) | Requires new service, connection management, credentials |
-| **Write throughput** | WAL mode handles hundreds of writes/sec; our peak is ~0.2 writes/sec | Unnecessary for this volume |
+| **Ops burden** | Zero — already running. WAL mode not currently enabled but trivial to add (`PRAGMA journal_mode=WAL` in `src/db/index.ts` after database open). | Requires new service, connection management, credentials |
+| **Write throughput** | Default journal mode handles our peak of ~0.2 writes/sec easily. WAL mode (if enabled) would handle hundreds of writes/sec. | Unnecessary for this volume |
 | **Query patterns** | Simple time-range scans, group by tool_name — perfect for SQLite | No need for concurrent readers or complex joins |
 | **Existing pattern** | `task_run_logs` table already stores per-execution telemetry in the same DB | Would split observability data across two stores |
 | **Backup** | Single file copy | Requires pg_dump or streaming replication |
@@ -149,6 +164,7 @@ CREATE TABLE IF NOT EXISTS tool_call_events (
   group_folder TEXT NOT NULL,
   tool_name TEXT NOT NULL,
   tool_use_id TEXT,
+  hook_event TEXT NOT NULL DEFAULT 'PostToolUse',  -- 'PostToolUse' or 'PostToolUseFailure'
   tool_input TEXT,           -- JSON, may be truncated
   tool_response TEXT,        -- JSON, truncated to 2KB
   timestamp TEXT NOT NULL,
@@ -184,17 +200,19 @@ The approach uses only existing, proven patterns (hooks, IPC file-based communic
 
 ### Concerns to address during implementation
 
-1. **Hook process spawn overhead:** Each PostToolUse hook spawns a shell process. At ~30 tool calls/session this adds ~0.5-1.5s total latency per session. Acceptable, but monitor. If it becomes a problem, the hook could batch-write to a single JSONL file instead of per-event files.
+1. **Hook process spawn overhead:** Each PostToolUse/PostToolUseFailure hook spawns a shell process. At ~30 tool calls/session this adds ~0.5-1.5s total latency per session. Acceptable, but monitor. If it becomes a problem, the hook could batch-write to a single JSONL file instead of per-event files.
 
 2. **tool_response truncation:** Some tool responses (e.g., file reads, large Bash output) can be very large. The hook script must truncate `tool_response` to a reasonable size (2KB recommended) before writing the event file. Otherwise IPC directory could accumulate large files.
 
 3. **Group folder correlation:** The PostToolUse hook receives `session_id` but not `group_folder`. The host IPC processor knows the group folder from the directory path (`/data/ipc/{groupFolder}/tool-events/`), so this is resolved by the existing IPC namespace design.
 
-4. **Duration timing:** PostToolUse alone doesn't provide tool execution duration. If duration is needed, pair with a PreToolUse hook that writes a start-time file, and correlate by `tool_use_id` in the PostToolUse hook. This is a v2 enhancement, not a blocker.
+4. **Duration timing:** PostToolUse/PostToolUseFailure alone don't provide tool execution duration. If duration is needed, pair with a PreToolUse hook that writes a start-time file, and correlate by `tool_use_id`. This is a v2 enhancement, not a blocker.
 
-5. **IPC directory cleanup:** Tool event files are consumed by the host IPC watcher and deleted after insertion into SQLite. If the host is down, files accumulate. The existing IPC error-file cleanup pattern (`src/ipc.ts:32-58`) should be extended to tool-events.
+5. **WAL mode prerequisite:** The existing SQLite database does not currently enable WAL mode. While default journal mode is sufficient for our projected write volume (~0.2 writes/sec peak), enabling WAL (`PRAGMA journal_mode=WAL` after database open in `src/db/index.ts`) is recommended during implementation to avoid write contention if IPC processing overlaps with other DB operations.
 
-6. **No existing `src/agent/tool-executor.ts`:** The task description references this path, but it does not exist. Tool execution is handled entirely within Claude CLI (opaque to NanoClaw). The hook system is the correct interception point, not a custom executor layer.
+6. **IPC directory cleanup:** Tool event files are consumed by the host IPC watcher and deleted after insertion into SQLite. If the host is down, files accumulate. The existing IPC error-file cleanup pattern (`src/ipc.ts:32-58`) should be extended to tool-events.
+
+7. **No existing `src/agent/tool-executor.ts`:** The task description references this path, but it does not exist. Tool execution is handled entirely within Claude CLI (opaque to NanoClaw). The hook system is the correct interception point, not a custom executor layer.
 
 ---
 
@@ -202,9 +220,21 @@ The approach uses only existing, proven patterns (hooks, IPC file-based communic
 
 | Question | Answer |
 |----------|--------|
-| **Interception approach** | PostToolUse hook in `settings.json`, configured at `src/session-settings.ts:52-60`, writing event files via new `container/hooks/tool-observer.sh` to `/workspace/ipc/tool-events/` |
-| **Storage** | SQLite (existing `store/messages.db`, WAL mode), new `tool_call_events` table via migration |
+| **Interception approach** | PostToolUse + PostToolUseFailure hooks in `settings.json`, configured at `src/session-settings.ts:52-60`, writing event files via new `container/hooks/tool-observer.sh` to `/workspace/ipc/tool-events/` |
+| **Storage** | SQLite (existing `store/messages.db`), new `tool_call_events` table via migration. WAL mode recommended but not yet enabled. |
 | **Average volume** | ~450 tool calls/day, ~3,150/week |
 | **Peak volume** | ~2,500 tool calls/day, ~17,500/week |
 | **7-day retention** | 1.5-44 MB depending on event size |
 | **Blockers** | None. `src/agent/tool-executor.ts` does not exist; hooks are the correct interception layer. |
+
+---
+
+## Cited Context
+
+| Source | Usage |
+|--------|-------|
+| `docs/SDK_DEEP_DIVE.md:464-477` | Hook event type reference — confirmed `PostToolUseFailure` as the hook for failed tool invocations |
+| `src/db/index.ts` | Verified WAL mode is **not** currently enabled (no `PRAGMA journal_mode=WAL` present) |
+| `src/ipc.ts` | Referenced existing IPC error-file cleanup pattern for tool-events extension |
+| `src/session-settings.ts` | Hook configuration location for PreToolUse/PostToolUse/PostToolUseFailure |
+| `src/config.ts` | MAX_CONCURRENT_CONTAINERS and dispatch concurrency limits for volume estimates |
