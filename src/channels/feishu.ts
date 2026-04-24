@@ -738,41 +738,19 @@ export class FeishuChannel implements Channel {
   /** 修改飞书群名称，同时生成缩略字头像（仅群聊生效） */
   async renameChat(jid: string, name: string): Promise<void> {
     const chatId = jid.replace(JID_PREFIX, '');
-    logger.info({ jid, chatId, name }, '[rename] 开始修改群名+头像');
-
-    // 生成头像（头像失败不影响群名更新）
-    const avatarKey = await this.generateAndUploadAvatar(name);
+    logger.info({ jid, chatId, name }, '[rename] 开始修改群名');
 
     try {
-      // 先尝试带头像更新（仅群聊支持 avatar）
-      const data: { name: string; avatar?: string } = { name };
-      if (avatarKey) data.avatar = avatarKey;
-
       const resp = await this.client.im.chat.update({
         path: { chat_id: chatId },
-        data,
+        data: { name },
       });
       logger.info(
-        { jid, name, avatar: !!avatarKey, code: resp?.code },
-        '[rename] 群名+头像已更新',
+        { jid, name, code: resp?.code },
+        '[rename] 群名已更新',
       );
     } catch (err: any) {
-      // 232008 = 非群聊类型，不支持 avatar，退化为仅改群名
-      const code = err?.response?.data?.code ?? err?.code;
-      if (avatarKey && code === 232008) {
-        logger.info({ jid }, '[rename] 非群聊，退化为仅改群名');
-        try {
-          await this.client.im.chat.update({
-            path: { chat_id: chatId },
-            data: { name },
-          });
-          logger.info({ jid, name }, '[rename] 群名已更新（无头像）');
-        } catch (retryErr) {
-          logger.warn({ err: retryErr, jid, name }, '[rename] 修改群名失败');
-        }
-      } else {
-        logger.warn({ err, jid, name }, '[rename] 修改群名失败');
-      }
+      logger.warn({ err, jid, name }, '[rename] 修改群名失败');
     }
   }
 
