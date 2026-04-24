@@ -130,7 +130,10 @@ export function bootstrapSessionSettings(groupFolder: string): string {
  * Build environment variables for the tmux session.
  * These replace the Docker -e flags and path-mapping volume mounts.
  */
-export function buildSessionEnv(mounts: VolumeMount[]): Record<string, string> {
+export function buildSessionEnv(
+  mounts: VolumeMount[],
+  groupFolder?: string,
+): Record<string, string> {
   const env: Record<string, string> = {};
 
   env.TZ = TIMEZONE;
@@ -152,6 +155,11 @@ export function buildSessionEnv(mounts: VolumeMount[]): Record<string, string> {
     } else if (mount.containerPath === '/workspace/extra') {
       env.NANOCLAW_EXTRA_DIR = mount.hostPath;
     }
+  }
+
+  // Set group folder for tool event logging
+  if (groupFolder) {
+    env.NANOCLAW_GROUP_FOLDER = groupFolder;
   }
 
   // Auto-compact configuration

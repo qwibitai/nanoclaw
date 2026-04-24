@@ -244,7 +244,7 @@ export async function runContainerAgent(
   fs.writeFileSync(stderrFile, ''); // Create empty stderr file
 
   // Build environment for the session
-  const sessionEnv = buildSessionEnv(mounts);
+  const sessionEnv = buildSessionEnv(mounts, group.folder);
 
   // Build the tmux command
   const envString = Object.entries(sessionEnv)
