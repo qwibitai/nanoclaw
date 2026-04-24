@@ -1,6 +1,6 @@
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
-import { writeMessageOut } from './db/messages-out.js';
+import { writeMessageOut, countOutboundChatSince, getMaxOutboundSeq } from './db/messages-out.js';
 import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import { getStoredSessionId, setStoredSessionId, clearStoredSessionId } from './db/session-state.js';
 import { formatMessages, extractRouting, categorizeMessage, isClearCommand, stripInternalTags, type RoutingContext } from './formatter.js';
@@ -241,6 +241,9 @@ async function processQuery(
 ): Promise<QueryResult> {
   let queryContinuation: string | undefined;
   let done = false;
+  // Snapshot outbound seq before the query — any send_message MCP calls
+  // during the query will produce seq values above this baseline.
+  const outboundSeqBaseline = getMaxOutboundSeq();
 
   // Concurrent polling: push follow-ups into the active query as they arrive.
   // We do NOT force-end the stream on silence — keeping the query open is
@@ -298,7 +301,16 @@ async function processQuery(
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
         if (event.text) {
-          dispatchResultText(event.text, routing);
+          // Suppress result dispatch if the agent already sent output via
+          // send_message MCP tool during this turn. Without this check,
+          // both paths (MCP + SDK result) independently send to the user,
+          // causing duplicate/triple messages.
+          const mcpMessagesSent = countOutboundChatSince(outboundSeqBaseline);
+          if (mcpMessagesSent > 0) {
+            log(`Result text suppressed (${mcpMessagesSent} send_message(s) already sent during this turn)`);
+          } else {
+            dispatchResultText(event.text, routing);
+          }
         }
       }
     }

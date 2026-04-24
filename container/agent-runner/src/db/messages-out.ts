@@ -141,3 +141,29 @@ export function getUndeliveredMessages(): MessageOutRow[] {
     )
     .all() as MessageOutRow[];
 }
+
+/**
+ * Count chat messages written to outbound since a given seq number.
+ * Used to detect whether the agent already sent output via send_message
+ * during the current turn, so the poll loop can suppress duplicate
+ * result text dispatch.
+ */
+export function countOutboundChatSince(sinceSeq: number): number {
+  const row = getOutboundDb()
+    .prepare(
+      `SELECT COUNT(*) AS cnt FROM messages_out
+       WHERE kind = 'chat' AND seq > $sinceSeq`,
+    )
+    .get({ $sinceSeq: sinceSeq }) as { cnt: number };
+  return row.cnt;
+}
+
+/**
+ * Get the current max seq in outbound DB (0 if empty).
+ */
+export function getMaxOutboundSeq(): number {
+  const row = getOutboundDb()
+    .prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out')
+    .get() as { m: number };
+  return row.m;
+}
