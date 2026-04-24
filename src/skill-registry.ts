@@ -207,6 +207,21 @@ export function startSkillServer(
         return;
       }
 
+      if (req.method === 'GET' && req.url === '/api/v1/skills') {
+        const skills = getRegisteredSkills().map(
+          ({ name, description }) => ({
+            name,
+            description,
+            last_invoked_at: null as string | null,
+            invocation_count: 0,
+            error_rate: 0,
+          }),
+        );
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(skills));
+        return;
+      }
+
       if (req.method === 'GET' && req.url === '/health') {
         const payload =
           healthProvider?.() ??

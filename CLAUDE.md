@@ -10,7 +10,7 @@ Single Node.js process with a skill-based channel system.
 - The runtime abstraction lives in `src/runtime-adapter.ts`.
 - Channel support is installation-specific; the repo currently includes Telegram core code and expects other channels to arrive via skills or downstream forks.
 - Session lifecycle commands `/compact` and `/clear` are already in core.
-- The process now exposes `GET /skills` and `GET /health` from the skill server.
+- The process now exposes `GET /skills`, `GET /health`, and `GET /api/v1/skills` from the skill server.
 
 ## Key Files
 

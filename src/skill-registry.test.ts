@@ -222,5 +222,89 @@ describe('skill-registry', () => {
 
       expect(statusCode).toBe(404);
     });
+
+    it('GET /api/v1/skills returns skill manifest with required fields', async () => {
+      writeSkill('api-skill-a', 'name: api-skill-a\ndescription: First API skill');
+      writeSkill('api-skill-b', 'name: api-skill-b\ndescription: Second API skill');
+      scanSkills(TEST_DIR);
+
+      server = await startSkillServer(0, '127.0.0.1');
+      const port = (server.address() as { port: number }).port;
+
+      const body = await new Promise<string>((resolve, reject) => {
+        http.get(`http://127.0.0.1:${port}/api/v1/skills`, (res) => {
+          expect(res.statusCode).toBe(200);
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => resolve(data));
+          res.on('error', reject);
+        });
+      });
+
+      const skills = JSON.parse(body);
+      expect(Array.isArray(skills)).toBe(true);
+      expect(skills).toHaveLength(2);
+
+      for (const skill of skills) {
+        expect(skill).toHaveProperty('name');
+        expect(skill).toHaveProperty('description');
+        expect(skill).toHaveProperty('last_invoked_at');
+        expect(skill).toHaveProperty('invocation_count');
+        expect(skill).toHaveProperty('error_rate');
+        expect(typeof skill.name).toBe('string');
+        expect(typeof skill.description).toBe('string');
+        expect(skill.last_invoked_at).toBeNull();
+        expect(skill.invocation_count).toBe(0);
+        expect(skill.error_rate).toBe(0);
+      }
+
+      const names = skills.map((s: { name: string }) => s.name);
+      expect(names).toContain('api-skill-a');
+      expect(names).toContain('api-skill-b');
+    });
+
+    it('GET /api/v1/skills returns empty array when no skills registered', async () => {
+      server = await startSkillServer(0, '127.0.0.1');
+      const port = (server.address() as { port: number }).port;
+
+      const body = await new Promise<string>((resolve, reject) => {
+        http.get(`http://127.0.0.1:${port}/api/v1/skills`, (res) => {
+          expect(res.statusCode).toBe(200);
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => resolve(data));
+          res.on('error', reject);
+        });
+      });
+
+      const skills = JSON.parse(body);
+      expect(Array.isArray(skills)).toBe(true);
+      expect(skills).toHaveLength(0);
+    });
+
+    it('GET /api/v1/skills does not expose internal fields', async () => {
+      writeSkill(
+        'api-private',
+        'name: api-private\ndescription: Private test\nallowed-tools: Bash(priv:*)',
+      );
+      scanSkills(TEST_DIR);
+
+      server = await startSkillServer(0, '127.0.0.1');
+      const port = (server.address() as { port: number }).port;
+
+      const body = await new Promise<string>((resolve, reject) => {
+        http.get(`http://127.0.0.1:${port}/api/v1/skills`, (res) => {
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => resolve(data));
+          res.on('error', reject);
+        });
+      });
+
+      const skills = JSON.parse(body);
+      expect(skills[0]).not.toHaveProperty('allowedTools');
+      expect(skills[0]).not.toHaveProperty('file');
+      expect(skills[0]).not.toHaveProperty('registeredAt');
+    });
   });
 });
