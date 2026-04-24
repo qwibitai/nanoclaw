@@ -10,44 +10,34 @@ export function _setToolEventsDb(database: Database.Database): void {
 export interface ToolCallEvent {
   id: number;
   session_id: string;
-  group_folder: string;
+  event_type: string;
   tool_name: string;
-  tool_use_id: string | null;
-  hook_event: string;
-  tool_input: string | null;
-  tool_response: string | null;
+  payload: string | null;
   created_at: string;
 }
 
 export interface InsertToolCallEvent {
   session_id: string;
-  group_folder: string;
+  event_type: string;
   tool_name: string;
-  tool_use_id?: string;
-  hook_event: string;
-  tool_input?: string;
-  tool_response?: string;
+  payload?: Record<string, unknown>;
 }
 
-const MAX_TOOL_RESPONSE_LENGTH = 2048;
+const MAX_PAYLOAD_LENGTH = 4096;
 
 export function insertToolCallEvent(event: InsertToolCallEvent): void {
-  const toolResponse = event.tool_response
-    ? event.tool_response.slice(0, MAX_TOOL_RESPONSE_LENGTH)
-    : null;
+  let payloadStr: string | null = null;
+  if (event.payload) {
+    payloadStr = JSON.stringify(event.payload);
+    if (payloadStr.length > MAX_PAYLOAD_LENGTH) {
+      payloadStr = payloadStr.slice(0, MAX_PAYLOAD_LENGTH);
+    }
+  }
 
   db.prepare(
-    `INSERT INTO tool_call_events (session_id, group_folder, tool_name, tool_use_id, hook_event, tool_input, tool_response)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    event.session_id,
-    event.group_folder,
-    event.tool_name,
-    event.tool_use_id ?? null,
-    event.hook_event,
-    event.tool_input ?? null,
-    toolResponse,
-  );
+    `INSERT INTO tool_call_events (session_id, event_type, tool_name, payload)
+     VALUES (?, ?, ?, ?)`,
+  ).run(event.session_id, event.event_type, event.tool_name, payloadStr);
 }
 
 /**
@@ -60,7 +50,7 @@ export function getRecentToolEvents(
 ): ToolCallEvent[] {
   return db
     .prepare(
-      `SELECT id, session_id, group_folder, tool_name, tool_use_id, hook_event, tool_input, tool_response, created_at
+      `SELECT id, session_id, event_type, tool_name, payload, created_at
        FROM tool_call_events
        WHERE created_at >= datetime('now', ?)
        ORDER BY created_at DESC, id DESC

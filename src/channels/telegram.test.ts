@@ -614,23 +614,17 @@ describe('TelegramChannel', () => {
         {
           id: 1,
           session_id: 'sess-1',
-          group_folder: 'ceo',
+          event_type: 'PostToolUse',
           tool_name: 'Bash',
-          tool_use_id: 'toolu_01',
-          hook_event: 'PostToolUse',
-          tool_input: null,
-          tool_response: null,
+          payload: JSON.stringify({ group_folder: 'ceo', tool_use_id: 'toolu_01' }),
           created_at: '2026-04-24 12:30:45',
         },
         {
           id: 2,
           session_id: 'sess-1',
-          group_folder: 'ceo',
+          event_type: 'PostToolUse',
           tool_name: 'Read',
-          tool_use_id: 'toolu_02',
-          hook_event: 'PostToolUse',
-          tool_input: null,
-          tool_response: null,
+          payload: JSON.stringify({ group_folder: 'ceo', tool_use_id: 'toolu_02' }),
           created_at: '2026-04-24 12:30:50',
         },
       ];
@@ -660,12 +654,9 @@ describe('TelegramChannel', () => {
         {
           id: 1,
           session_id: 'sess-1',
-          group_folder: 'ceo',
+          event_type: 'PostToolUseFailure',
           tool_name: 'Bash',
-          tool_use_id: 'toolu_01',
-          hook_event: 'PostToolUseFailure',
-          tool_input: null,
-          tool_response: null,
+          payload: JSON.stringify({ group_folder: 'ceo', tool_use_id: 'toolu_01' }),
           created_at: '2026-04-24 12:30:45',
         },
       ];
@@ -688,12 +679,9 @@ describe('TelegramChannel', () => {
       const events: ToolCallEvent[] = Array.from({ length: 100 }, (_, i) => ({
         id: i + 1,
         session_id: 'sess-1',
-        group_folder: 'long-group-name-for-testing',
+        event_type: 'PostToolUse',
         tool_name: 'LongToolNameForTesting',
-        tool_use_id: `toolu_${i}`,
-        hook_event: 'PostToolUse',
-        tool_input: null,
-        tool_response: null,
+        payload: JSON.stringify({ group_folder: 'long-group-name-for-testing', tool_use_id: `toolu_${i}` }),
         created_at: `2026-04-24 12:${String(i).padStart(2, '0')}:00`,
       }));
       (getRecentToolEvents as ReturnType<typeof vi.fn>).mockReturnValue(events);

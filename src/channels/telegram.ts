@@ -177,8 +177,12 @@ export class TelegramChannel implements Channel {
           const emoji = toolEmojis[event.tool_name] || defaultEmoji;
           const time = event.created_at.slice(11, 19);
           const status =
-            event.hook_event === 'PostToolUseFailure' ? ' FAIL' : '';
-          const line = `${emoji} \`${time}\` *${event.tool_name}*${status} — ${event.group_folder}`;
+            event.event_type === 'PostToolUseFailure' ? ' FAIL' : '';
+          const parsed: Record<string, unknown> = event.payload
+            ? JSON.parse(event.payload)
+            : {};
+          const groupFolder = (parsed.group_folder as string) || '';
+          const line = `${emoji} \`${time}\` *${event.tool_name}*${status} — ${groupFolder}`;
 
           if (totalLen + line.length + 1 > MAX_LEN) {
             lines.push(`\n_(${events.length - lines.length + 1} more events truncated)_`);

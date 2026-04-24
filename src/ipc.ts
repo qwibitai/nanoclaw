@@ -192,18 +192,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
             }
             insertToolCallEvent({
               session_id: event.session_id,
-              group_folder: sourceGroup,
+              event_type: event.hook_event || 'PostToolUse',
               tool_name: event.tool_name,
-              tool_use_id: event.tool_use_id,
-              hook_event: event.hook_event || 'PostToolUse',
-              tool_input:
-                typeof event.tool_input === 'string'
-                  ? event.tool_input
-                  : JSON.stringify(event.tool_input),
-              tool_response:
-                typeof event.tool_response === 'string'
-                  ? event.tool_response
-                  : JSON.stringify(event.tool_response),
+              payload: {
+                group_folder: sourceGroup,
+                tool_use_id: event.tool_use_id ?? null,
+                tool_input:
+                  typeof event.tool_input === 'string'
+                    ? event.tool_input
+                    : JSON.stringify(event.tool_input),
+                tool_response:
+                  typeof event.tool_response === 'string'
+                    ? event.tool_response
+                    : JSON.stringify(event.tool_response),
+              },
             });
             log.debug(
               { tool: event.tool_name, session: event.session_id },
