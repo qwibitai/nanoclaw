@@ -15,7 +15,9 @@ describe('StreamToolLogger', () => {
   it('extracts session_id from system/init message', () => {
     const logger = new StreamToolLogger('test-group');
 
-    logger.processLine('{"type":"system","subtype":"init","session_id":"sess-123"}');
+    logger.processLine(
+      '{"type":"system","subtype":"init","session_id":"sess-123"}',
+    );
 
     expect(logger.getSessionId()).toBe('sess-123');
   });
@@ -25,13 +27,19 @@ describe('StreamToolLogger', () => {
     const insertMock = vi.mocked(toolEvents.insertToolCallEvent);
 
     // Set session ID
-    logger.processLine('{"type":"system","subtype":"init","session_id":"sess-123"}');
+    logger.processLine(
+      '{"type":"system","subtype":"init","session_id":"sess-123"}',
+    );
 
     // Tool use
-    logger.processLine('{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"ls"}}');
+    logger.processLine(
+      '{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"ls"}}',
+    );
 
     // Tool result
-    logger.processLine('{"type":"tool_result","tool_use_id":"tool-1","content":"file1.txt\\nfile2.txt"}');
+    logger.processLine(
+      '{"type":"tool_result","tool_use_id":"tool-1","content":"file1.txt\\nfile2.txt"}',
+    );
 
     expect(insertMock).toHaveBeenCalledWith({
       session_id: 'sess-123',
@@ -50,9 +58,15 @@ describe('StreamToolLogger', () => {
     const logger = new StreamToolLogger('test-group');
     const insertMock = vi.mocked(toolEvents.insertToolCallEvent);
 
-    logger.processLine('{"type":"system","subtype":"init","session_id":"sess-123"}');
-    logger.processLine('{"type":"tool_use","id":"tool-2","name":"Read","input":{"file_path":"/foo/bar.txt"}}');
-    logger.processLine('{"type":"tool_result","tool_use_id":"tool-2","content":[{"type":"text","text":"Hello World"}]}');
+    logger.processLine(
+      '{"type":"system","subtype":"init","session_id":"sess-123"}',
+    );
+    logger.processLine(
+      '{"type":"tool_use","id":"tool-2","name":"Read","input":{"file_path":"/foo/bar.txt"}}',
+    );
+    logger.processLine(
+      '{"type":"tool_result","tool_use_id":"tool-2","content":[{"type":"text","text":"Hello World"}]}',
+    );
 
     expect(insertMock).toHaveBeenCalledWith({
       session_id: 'sess-123',
@@ -73,9 +87,15 @@ describe('StreamToolLogger', () => {
 
     const longContent = 'x'.repeat(3000);
 
-    logger.processLine('{"type":"system","subtype":"init","session_id":"sess-123"}');
-    logger.processLine('{"type":"tool_use","id":"tool-3","name":"WebFetch","input":{}}');
-    logger.processLine(`{"type":"tool_result","tool_use_id":"tool-3","content":"${longContent}"}`);
+    logger.processLine(
+      '{"type":"system","subtype":"init","session_id":"sess-123"}',
+    );
+    logger.processLine(
+      '{"type":"tool_use","id":"tool-3","name":"WebFetch","input":{}}',
+    );
+    logger.processLine(
+      `{"type":"tool_result","tool_use_id":"tool-3","content":"${longContent}"}`,
+    );
 
     expect(insertMock).toHaveBeenCalledWith({
       session_id: 'sess-123',
@@ -91,8 +111,12 @@ describe('StreamToolLogger', () => {
     const logger = new StreamToolLogger('test-group');
     const insertMock = vi.mocked(toolEvents.insertToolCallEvent);
 
-    logger.processLine('{"type":"system","subtype":"init","session_id":"sess-123"}');
-    logger.processLine('{"type":"tool_result","tool_use_id":"nonexistent","content":"foo"}');
+    logger.processLine(
+      '{"type":"system","subtype":"init","session_id":"sess-123"}',
+    );
+    logger.processLine(
+      '{"type":"tool_result","tool_use_id":"nonexistent","content":"foo"}',
+    );
 
     expect(insertMock).not.toHaveBeenCalled();
   });
@@ -101,8 +125,12 @@ describe('StreamToolLogger', () => {
     const logger = new StreamToolLogger('test-group');
     const insertMock = vi.mocked(toolEvents.insertToolCallEvent);
 
-    logger.processLine('{"type":"tool_use","id":"tool-4","name":"Bash","input":{}}');
-    logger.processLine('{"type":"tool_result","tool_use_id":"tool-4","content":"output"}');
+    logger.processLine(
+      '{"type":"tool_use","id":"tool-4","name":"Bash","input":{}}',
+    );
+    logger.processLine(
+      '{"type":"tool_result","tool_use_id":"tool-4","content":"output"}',
+    );
 
     expect(insertMock).not.toHaveBeenCalled();
   });
@@ -130,18 +158,34 @@ describe('StreamToolLogger', () => {
     const logger = new StreamToolLogger('test-group');
     const insertMock = vi.mocked(toolEvents.insertToolCallEvent);
 
-    logger.processLine('{"type":"system","subtype":"init","session_id":"sess-123"}');
+    logger.processLine(
+      '{"type":"system","subtype":"init","session_id":"sess-123"}',
+    );
 
     // First tool
-    logger.processLine('{"type":"tool_use","id":"tool-1","name":"Read","input":{}}');
-    logger.processLine('{"type":"tool_result","tool_use_id":"tool-1","content":"data1"}');
+    logger.processLine(
+      '{"type":"tool_use","id":"tool-1","name":"Read","input":{}}',
+    );
+    logger.processLine(
+      '{"type":"tool_result","tool_use_id":"tool-1","content":"data1"}',
+    );
 
     // Second tool
-    logger.processLine('{"type":"tool_use","id":"tool-2","name":"Write","input":{}}');
-    logger.processLine('{"type":"tool_result","tool_use_id":"tool-2","content":"data2"}');
+    logger.processLine(
+      '{"type":"tool_use","id":"tool-2","name":"Write","input":{}}',
+    );
+    logger.processLine(
+      '{"type":"tool_result","tool_use_id":"tool-2","content":"data2"}',
+    );
 
     expect(insertMock).toHaveBeenCalledTimes(2);
-    expect(insertMock).toHaveBeenNthCalledWith(1, expect.objectContaining({ tool_name: 'Read' }));
-    expect(insertMock).toHaveBeenNthCalledWith(2, expect.objectContaining({ tool_name: 'Write' }));
+    expect(insertMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ tool_name: 'Read' }),
+    );
+    expect(insertMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ tool_name: 'Write' }),
+    );
   });
 });

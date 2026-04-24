@@ -105,9 +105,7 @@ export class StreamToolLogger {
       if (typeof toolResult.content === 'string') {
         responseText = toolResult.content;
       } else if (Array.isArray(toolResult.content)) {
-        responseText = toolResult.content
-          .map((c) => c.text || '')
-          .join('\n');
+        responseText = toolResult.content.map((c) => c.text || '').join('\n');
       }
 
       insertToolCallEvent({

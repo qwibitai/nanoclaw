@@ -183,16 +183,19 @@ export async function initApp(): Promise<void> {
   if (pruned > 0) {
     logger.info({ pruned }, 'Pruned stale tool call events (>7 days)');
   }
-  setInterval(() => {
-    try {
-      const count = pruneToolEvents(7);
-      if (count > 0) {
-        logger.info({ pruned: count }, 'Periodic tool event cleanup');
+  setInterval(
+    () => {
+      try {
+        const count = pruneToolEvents(7);
+        if (count > 0) {
+          logger.info({ pruned: count }, 'Periodic tool event cleanup');
+        }
+      } catch (err) {
+        logger.warn({ err }, 'Tool event cleanup failed');
       }
-    } catch (err) {
-      logger.warn({ err }, 'Tool event cleanup failed');
-    }
-  }, 6 * 60 * 60_000);
+    },
+    6 * 60 * 60_000,
+  );
 
   loadState();
   restoreRemoteControl();

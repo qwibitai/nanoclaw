@@ -135,13 +135,21 @@ async function verifyOpsAgent(): Promise<CheckResult[]> {
 
   // Expected values come from the API when available, env fallback otherwise
   const expectedProvider =
-    apiConfig?.provider || getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
+    apiConfig?.provider ||
+    getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
   const expectedCliBin =
-    apiConfig?.cli_bin || getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
+    apiConfig?.cli_bin ||
+    getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
 
   // Runtime values (what the process would actually use)
-  const runtimeProvider = getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
-  const runtimeCliBin = getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
+  const runtimeProvider = getEnvValue(
+    'AGENT_RUNNER_BACKEND',
+    ENV_FALLBACK_DEFAULTS.provider,
+  );
+  const runtimeCliBin = getEnvValue(
+    'AGENT_CLI_BIN',
+    ENV_FALLBACK_DEFAULTS.cliBin,
+  );
   const runtimeModel = apiConfig?.model || undefined;
 
   checks.push({
@@ -192,9 +200,7 @@ async function verifyOpsAgent(): Promise<CheckResult[]> {
     pass: serviceActive,
     expected: 'active',
     actual: serviceActive ? 'active' : 'inactive',
-    fix: serviceActive
-      ? undefined
-      : 'Run: systemctl --user start nanoclaw',
+    fix: serviceActive ? undefined : 'Run: systemctl --user start nanoclaw',
   });
 
   // Agency HQ reachability
@@ -219,12 +225,20 @@ async function verifyWorkers(): Promise<CheckResult[]> {
   const configSource = apiConfig ? 'api' : 'env-fallback';
 
   const expectedProvider =
-    apiConfig?.provider || getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
+    apiConfig?.provider ||
+    getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
   const expectedCliBin =
-    apiConfig?.cli_bin || getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
+    apiConfig?.cli_bin ||
+    getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
 
-  const runtimeProvider = getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
-  const runtimeCliBin = getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
+  const runtimeProvider = getEnvValue(
+    'AGENT_RUNNER_BACKEND',
+    ENV_FALLBACK_DEFAULTS.provider,
+  );
+  const runtimeCliBin = getEnvValue(
+    'AGENT_CLI_BIN',
+    ENV_FALLBACK_DEFAULTS.cliBin,
+  );
 
   checks.push({
     label: 'Config source',
@@ -254,7 +268,9 @@ async function verifyWorkers(): Promise<CheckResult[]> {
     label: 'Model',
     pass: true,
     expected: apiConfig?.model || '(dynamic)',
-    actual: apiConfig?.model || getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider),
+    actual:
+      apiConfig?.model ||
+      getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider),
   });
 
   // Parallel dispatch mode
@@ -302,12 +318,20 @@ async function verifyReviewers(): Promise<CheckResult[]> {
   const apiConfig = await fetchDispatchConfigForRole('ops-agent');
 
   const expectedProvider =
-    apiConfig?.provider || getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
+    apiConfig?.provider ||
+    getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
   const expectedCliBin =
-    apiConfig?.cli_bin || getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
+    apiConfig?.cli_bin ||
+    getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
 
-  const runtimeProvider = getEnvValue('AGENT_RUNNER_BACKEND', ENV_FALLBACK_DEFAULTS.provider);
-  const runtimeCliBin = getEnvValue('AGENT_CLI_BIN', ENV_FALLBACK_DEFAULTS.cliBin);
+  const runtimeProvider = getEnvValue(
+    'AGENT_RUNNER_BACKEND',
+    ENV_FALLBACK_DEFAULTS.provider,
+  );
+  const runtimeCliBin = getEnvValue(
+    'AGENT_CLI_BIN',
+    ENV_FALLBACK_DEFAULTS.cliBin,
+  );
 
   checks.push({
     label: 'Config source',
@@ -365,9 +389,7 @@ async function verifyWatchdog(): Promise<CheckResult[]> {
     pass: serviceActive,
     expected: 'active',
     actual: serviceActive ? 'active' : 'inactive',
-    fix: serviceActive
-      ? undefined
-      : 'Run: systemctl --user start nanoclaw',
+    fix: serviceActive ? undefined : 'Run: systemctl --user start nanoclaw',
   });
 
   // Watchdog interval

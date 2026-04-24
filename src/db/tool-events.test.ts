@@ -179,7 +179,12 @@ describe('end-to-end: IPC file -> SQLite -> getRecentToolEvents', () => {
       errorDirectory: errorDir,
       sourceGroup,
       createLogger: () =>
-        ({ warn: () => {}, debug: () => {}, error: () => {}, info: () => {} }) as any,
+        ({
+          warn: () => {},
+          debug: () => {},
+          error: () => {},
+          info: () => {},
+        }) as any,
       handle: async (data) => {
         const event = data as typeof hookOutput;
         insertToolCallEvent({
@@ -235,9 +240,21 @@ describe('end-to-end: IPC file -> SQLite -> getRecentToolEvents', () => {
       errorDirectory: errorDir,
       sourceGroup: 'e2e-group',
       createLogger: () =>
-        ({ warn: () => {}, debug: () => {}, error: () => {}, info: () => {} }) as any,
+        ({
+          warn: () => {},
+          debug: () => {},
+          error: () => {},
+          info: () => {},
+        }) as any,
       handle: async (data) => {
-        const event = data as { tool_name: string; tool_use_id: string; session_id: string; hook_event: string; tool_input: string; tool_response: string };
+        const event = data as {
+          tool_name: string;
+          tool_use_id: string;
+          session_id: string;
+          hook_event: string;
+          tool_input: string;
+          tool_response: string;
+        };
         insertToolCallEvent({
           session_id: event.session_id,
           event_type: event.hook_event,

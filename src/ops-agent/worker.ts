@@ -111,11 +111,7 @@ export async function buildOpsPrompt(task: AgencyHqTask): Promise<string> {
 export function buildCliArgs(config: ResolvedConfig, prompt: string): string[] {
   switch (config.provider) {
     case 'kimi':
-      return [
-        '--print',
-        ...(config.model ? ['-m', config.model] : []),
-        prompt,
-      ];
+      return ['--print', ...(config.model ? ['-m', config.model] : []), prompt];
     case 'copilot':
       return [
         '--allow-all-tools',

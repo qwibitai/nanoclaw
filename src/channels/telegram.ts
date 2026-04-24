@@ -185,7 +185,9 @@ export class TelegramChannel implements Channel {
           const line = `${emoji} \`${time}\` *${event.tool_name}*${status} — ${groupFolder}`;
 
           if (totalLen + line.length + 1 > MAX_LEN) {
-            lines.push(`\n_(${events.length - lines.length + 1} more events truncated)_`);
+            lines.push(
+              `\n_(${events.length - lines.length + 1} more events truncated)_`,
+            );
             break;
           }
           lines.push(line);

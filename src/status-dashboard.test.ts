@@ -442,9 +442,7 @@ describe('status-dashboard', () => {
       const now = new Date();
       const oneHourAgo = new Date(now.getTime() - 3_600_000).toISOString();
       const twoHoursAgo = new Date(now.getTime() - 7_200_000).toISOString();
-      const threeHoursAgo = new Date(
-        now.getTime() - 10_800_000,
-      ).toISOString();
+      const threeHoursAgo = new Date(now.getTime() - 10_800_000).toISOString();
 
       mockAgencyFetch.mockImplementation(async (path: string) => {
         if (path === '/tasks?status=done') {
@@ -590,9 +588,15 @@ describe('status-dashboard', () => {
         id: `task-${String(i).padStart(3, '0')}`,
         title: `Task ${i}`,
         status: 'done',
-        created_at: new Date(now.getTime() - (20 - i) * 3_600_000).toISOString(),
-        dispatched_at: new Date(now.getTime() - (19 - i) * 3_600_000).toISOString(),
-        updated_at: new Date(now.getTime() - (18 - i) * 3_600_000).toISOString(),
+        created_at: new Date(
+          now.getTime() - (20 - i) * 3_600_000,
+        ).toISOString(),
+        dispatched_at: new Date(
+          now.getTime() - (19 - i) * 3_600_000,
+        ).toISOString(),
+        updated_at: new Date(
+          now.getTime() - (18 - i) * 3_600_000,
+        ).toISOString(),
       }));
 
       mockAgencyFetch.mockImplementation(async (path: string) => {
@@ -673,7 +677,11 @@ describe('status-dashboard', () => {
       performance: {
         avgCompletionMs: 1_200_000,
         slowestTasks: [
-          { id: 'task-001-abcd', title: 'Add login page', durationMs: 1_800_000 },
+          {
+            id: 'task-001-abcd',
+            title: 'Add login page',
+            durationMs: 1_800_000,
+          },
         ],
         errorRate: 50,
         totalCompleted: 1,
