@@ -389,5 +389,21 @@ export function writeCodexMcpConfigToml(servers: Record<string, CodexMcpServer>)
 }
 
 export function createCodexConfigOverrides(): string[] {
-  return ['features.use_linux_sandbox_bwrap=false'];
+  const overrides = ['features.use_linux_sandbox_bwrap=false'];
+
+  // If OPENAI_BASE_URL is set, route through the plain `openai` provider
+  // (Chat Completions REST). Without this override Codex defaults to the
+  // `openai-codex` provider which targets the ChatGPT subscription
+  // WebSocket endpoint at api.openai.com and ignores OPENAI_BASE_URL.
+  const baseUrl = process.env.OPENAI_BASE_URL;
+  if (baseUrl) {
+    overrides.push(
+      'model_provider="openai-custom"',
+      'model_providers.openai-custom.name="Custom OpenAI-compatible"',
+      `model_providers.openai-custom.base_url=${tomlBasicString(baseUrl)}`,
+      'model_providers.openai-custom.wire_api="responses"',
+      'model_providers.openai-custom.env_key="OPENAI_API_KEY"',
+    );
+  }
+  return overrides;
 }
