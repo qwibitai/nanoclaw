@@ -46,7 +46,8 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
   }
 
   const sharedLink = path.join(groupDir, '.claude-shared.md');
-  syncSymlink(sharedLink, SHARED_CLAUDE_MD_CONTAINER_PATH);
+  const sharedHostSource = path.join(process.cwd(), 'container', 'CLAUDE.md');
+  syncFragment(sharedLink, SHARED_CLAUDE_MD_CONTAINER_PATH, sharedHostSource);
 
   const fragmentsDir = path.join(groupDir, '.claude-fragments');
   if (!fs.existsSync(fragmentsDir)) {
@@ -55,7 +56,7 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
 
   // Desired fragment set.
   const config = readContainerConfig(group.folder);
-  const desired = new Map<string, { type: 'symlink' | 'inline'; content: string }>();
+  const desired = new Map<string, { type: 'symlink' | 'inline'; content: string; hostSource?: string }>();
 
   // Skill fragments — every skill that ships an `instructions.md`.
   // TODO (shared-source refactor): respect `container.json` skill selection.
@@ -67,6 +68,7 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
         desired.set(`skill-${skillName}.md`, {
           type: 'symlink',
           content: `${SHARED_SKILLS_CONTAINER_BASE}/${skillName}/instructions.md`,
+          hostSource: hostFragment,
         });
       }
     }
@@ -85,6 +87,7 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
       desired.set(`module-${moduleName}.md`, {
         type: 'symlink',
         content: `${SHARED_MCP_TOOLS_CONTAINER_BASE}/${entry}`,
+        hostSource: path.join(mcpToolsHostDir, entry),
       });
     }
   }
@@ -109,7 +112,7 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
   for (const [name, frag] of desired) {
     const fragPath = path.join(fragmentsDir, name);
     if (frag.type === 'symlink') {
-      syncSymlink(fragPath, frag.content);
+      syncFragment(fragPath, frag.content, frag.hostSource);
     } else {
       writeAtomic(fragPath, frag.content);
     }
@@ -182,20 +185,35 @@ export function migrateGroupsToClaudeLocal(): void {
   }
 }
 
-function syncSymlink(linkPath: string, target: string): void {
+function syncFragment(linkPath: string, containerTarget: string, hostSource: string | undefined): void {
+  // Windows host: MSYS2/Git-Bash rewrites POSIX-absolute symlink targets
+  // (`/app/...` → `/d/app/...`) when the filesystem stores them, so inside
+  // the container the symlinks resolve to `/mnt/host/d/app/...` (broken).
+  // Copy the host file content on every spawn instead. Composition runs per
+  // spawn so the copy is never stale. PATCHES.md#5. Exit: Node/Windows
+  // stops translating, or upstream ships a non-symlink composition path.
+  if (process.platform === 'win32' && hostSource && fs.existsSync(hostSource)) {
+    try {
+      fs.unlinkSync(linkPath);
+    } catch {
+      /* missing */
+    }
+    writeAtomic(linkPath, fs.readFileSync(hostSource, 'utf8'));
+    return;
+  }
   let currentTarget: string | null = null;
   try {
     currentTarget = fs.readlinkSync(linkPath);
   } catch {
     /* missing */
   }
-  if (currentTarget === target) return;
+  if (currentTarget === containerTarget) return;
   try {
     fs.unlinkSync(linkPath);
   } catch {
     /* missing */
   }
-  fs.symlinkSync(target, linkPath);
+  fs.symlinkSync(containerTarget, linkPath);
 }
 
 function writeAtomic(filePath: string, content: string): void {

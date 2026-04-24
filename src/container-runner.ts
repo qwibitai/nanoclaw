@@ -438,18 +438,22 @@ async function buildContainerArgs(
   // `LOCAL_MEDIUM_*`, `LOCAL_MINI_*` — internal vLLM endpoints the cluster-
   //   manager skill curls directly for lightweight local inference.
   // Exit condition: v2 grows a container.json:env passthrough field.
-  const ENV_PASSTHROUGH_PREFIXES = [
-    'ANTHROPIC_',
-    'GH_TOKEN_',
-    'MCP_',
-    'ASR_',
-    'LOCAL_MEDIUM_',
-    'LOCAL_MINI_',
-  ];
+  const ENV_PASSTHROUGH_PREFIXES = ['ANTHROPIC_', 'GH_TOKEN_', 'MCP_', 'ASR_', 'LOCAL_MEDIUM_', 'LOCAL_MINI_'];
   for (const key of Object.keys(process.env)) {
     if (ENV_PASSTHROUGH_PREFIXES.some((p) => key.startsWith(p))) {
       args.push('-e', `${key}=${process.env[key]}`);
     }
+  }
+
+  // Pass host GH_TOKEN through (not covered by the GH_TOKEN_ prefix above,
+  // which only matches identity-suffixed tokens). Fall back to
+  // GH_TOKEN_JSBOIGE so bare `gh` works without the multi-identity-github
+  // skill switching identity — the skill still overrides per repo owner.
+  // PATCHES.md#6. Host override of Dockerfile ENTRYPOINT at line 492 below
+  // bypasses entrypoint.sh, so this has to happen here.
+  const ghTokenDefault = process.env.GH_TOKEN ?? process.env.GH_TOKEN_JSBOIGE;
+  if (ghTokenDefault) {
+    args.push('-e', `GH_TOKEN=${ghTokenDefault}`);
   }
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).

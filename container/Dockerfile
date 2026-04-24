@@ -54,6 +54,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && if [ "$INSTALL_CJK_FONTS" = "true" ]; then \
         apt-get install -y --no-install-recommends fonts-noto-cjk; \
        fi \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
 # Chromium path for agent-browser / Playwright consumers
@@ -112,6 +118,20 @@ RUN chmod +x /app/entrypoint.sh
 RUN mkdir -p /workspace/group /workspace/extra && \
     chown -R node:node /workspace && \
     chmod 777 /home/node
+
+# ---- Multi-identity GitHub help file -----------------------------------------
+# jsboige/nanoclaw fork — referenced by the `multi-identity-github` skill so
+# the agent can discover which GH_TOKEN_* env vars are available at runtime.
+# PATCHES.md#7. Exit condition: skill embeds the mapping directly.
+RUN printf '%s\n' \
+        '# GitHub identity tokens available via env vars:' \
+        '# GH_TOKEN_JSBOIGE       — jsboige/* (default)' \
+        '# GH_TOKEN_JSBOIGEECE    — jsboige-ece/*' \
+        '# GH_TOKEN_JSBOIGEEPF    — jsboige-epf/*' \
+        '# GH_TOKEN_JSBOIGEEPITA  — jsboige-epita/*' \
+        '# Use the `multi-identity-github` skill to switch `gh auth` by repo owner.' \
+        > /home/node/.gh-identities \
+    && chown node:node /home/node/.gh-identities
 
 USER node
 WORKDIR /workspace/group

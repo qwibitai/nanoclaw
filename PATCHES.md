@@ -52,18 +52,42 @@ If none works, document the patch here with justification.
 - **Exit condition:** Upstream adds a `container/CLAUDE.local.md` (per-install, not tracked) or similar mechanism for install-global rules.
 - **Lines:** ~30 (content, not code)
 
+### 4. gh CLI + multi-identity help file in Dockerfile
+
+- **File:** `container/Dockerfile`
+- **Summary:** (a) Install `gh` (GitHub CLI) from the official Debian repo during the apt install step, after the Playwright/Chromium deps. (b) Create `/home/node/.gh-identities` with a header listing the 4 `GH_TOKEN_*` env vars the `multi-identity-github` skill expects.
+- **Why:** Upstream's `container/Dockerfile` doesn't ship `gh` — the container is for agent-SDK work, not GitHub ops. Our cluster-manager role is GitHub-heavy (PR reviews, issue triage, multi-repo monitoring across 4 identities). The `multi-identity-github` skill references `/home/node/.gh-identities` as a discovery file for available tokens; baking it in the image avoids needing an entrypoint side-effect.
+- **Exit condition:** Either (a) upstream adds a `container.json:packages.apt` honored at image-build time (not runtime), or (b) we split the cluster-manager role into a sibling image via docker-compose (Exp 2 plan) — then gh goes on that image only.
+- **Lines:** ~12 (apt install block + gh-identities heredoc).
+
+### 5. Copy CLAUDE.md fragments instead of symlinking on Windows
+
+- **File:** `src/claude-md-compose.ts` (`syncSymlink` → `syncFragment`, plus `hostSource` on the desired-fragment map)
+- **Summary:** On `win32` hosts, inline the host file content (`fs.readFileSync` + `writeAtomic`) instead of `fs.symlinkSync`. Composition runs per-spawn so the inlined copy is never stale.
+- **Why:** The upstream design uses symlinks whose targets are container-side absolute paths (`/app/CLAUDE.md`, `/app/src/mcp-tools/<x>.instructions.md`), valid inside the container via RO mounts, dangling on the POSIX host. On Windows, MSYS2/Git-Bash (NSSM service env, or any Node-via-Bash spawn) rewrites these POSIX-absolute targets at symlink-creation time to `/d/app/...`, which Docker then exposes as `/mnt/host/d/app/...` inside the container — permanently broken. Impact: without this patch the composed `groups/<folder>/CLAUDE.md` imports 1 broken `.claude-shared.md` + 5 broken `.claude-fragments/module-*.md` links, meaning the agent never sees the shared `container/CLAUDE.md` (non-negotiable rules, skills overview) nor the MCP tool instructions (agents, core, interactive, scheduling, self-mod).
+- **Exit condition:** Upstream changes the composition to write content directly (not symlinks), or Node/Windows stops translating POSIX-absolute symlink targets.
+- **Lines:** ~18 (platform branch in `syncFragment` + `hostSource` plumbing on 3 call sites).
+
+### 6. Default GH_TOKEN from GH_TOKEN_JSBOIGE in host spawn
+
+- **File:** `src/container-runner.ts` (extension of the patch #1 env-passthrough block in `buildContainerArgs`)
+- **Summary:** After the prefix-based env passthrough, if `GH_TOKEN` is unset on the host and `GH_TOKEN_JSBOIGE` is set, append `-e GH_TOKEN=<value>` to the spawn args. The `multi-identity-github` skill still overrides per repo owner at runtime — this only provides the default.
+- **Why:** `gh` CLI consults `GH_TOKEN` as its primary env credential. Without a default, bare `gh` fails out-of-the-box even though 4 identity tokens are passed through. Had to be host-side (not `entrypoint.sh`) because `container-runner.ts:492` overrides the Dockerfile `ENTRYPOINT ["/usr/bin/tini", "--", "/app/entrypoint.sh"]` with `--entrypoint bash -c "exec bun run /app/src/index.ts"` — so anything in `entrypoint.sh` is dead code at spawn time.
+- **Exit condition:** `multi-identity-github` skill is redesigned to set `GH_TOKEN` directly on startup, or upstream adds a generic env-defaulting hook in `buildContainerArgs`.
+- **Lines:** ~5.
+
 ---
 
 ## Deferred / not yet applied
 
-### 4. Per-MCP tool timeout
+### 7. Per-MCP tool timeout
 
 - **Status:** DEFERRED.
 - **Context:** `@anthropic-ai/claude-agent-sdk@0.2.116` has no per-MCP `timeout` field on `McpServerConfig`. Production need: 1800000 ms (30 min) for roo-state-manager dashboard condense (local LLM calls).
 - **Plan:** Open upstream PR on `claude-agent-sdk` adding `McpServerConfig.timeout?: number`. Until merged, long-running MCP tools may hit default 60s timeout.
 - **Workaround:** `MCP_TOOL_TIMEOUT_MS` env var is already passed through to the container via patch #1 for when the SDK surface gains support.
 
-### 5. Docker network per agent_group
+### 8. Docker network per agent_group
 
 - **Status:** Not applied. Apply only when starting Experience 2 (web-explorer).
 - **File (when applied):** `src/container-runner.ts`
@@ -71,7 +95,7 @@ If none works, document the patch here with justification.
 - **Why later:** cluster-manager runs on `internal: true` network (no internet); web-explorer needs standard bridge. Issue #5 on this repo.
 - **Exit condition:** Upstream adds `container.json:dockerNetwork` natively.
 
-### 6. Telegram voice transcription (ASR)
+### 9. Telegram voice transcription (ASR)
 
 - **Status:** Post-migration follow-up.
 - **Plan:** Implement as container skill `container/skills/voice-transcription/` that the agent invokes on audio content. Agent script fetches the voice file via Telegram Bot API, POSTs to `ASR_BASE_URL` (Whisper), receives text. No patch to the Telegram adapter.
