@@ -428,12 +428,24 @@ async function buildContainerArgs(
   args.push('-e', `TZ=${TIMEZONE}`);
 
   // jsboige/nanoclaw fork patch — host env passthrough (PATCHES.md#1).
+  // `ANTHROPIC_*` — z.ai credentials + base URL so the Claude SDK inside the
+  //   container reaches z.ai directly (OneCLI gateway is optional on this fork,
+  //   see PATCHES.md#2 for the OneCLI-bypass rationale).
   // `GH_TOKEN_*` — multi-identity-github skill switches `gh auth` per repo owner.
   // `MCP_PROXY_BEARER`, `MCP_TOOL_TIMEOUT_MS` — roo-state-manager HTTP MCP via
   //   mcp-remote (stdio wrapper) + timeout override for long-running tools.
   // `ASR_*` — Telegram voice-transcription skill (host-side ASR endpoint).
+  // `LOCAL_MEDIUM_*`, `LOCAL_MINI_*` — internal vLLM endpoints the cluster-
+  //   manager skill curls directly for lightweight local inference.
   // Exit condition: v2 grows a container.json:env passthrough field.
-  const ENV_PASSTHROUGH_PREFIXES = ['GH_TOKEN_', 'MCP_', 'ASR_'];
+  const ENV_PASSTHROUGH_PREFIXES = [
+    'ANTHROPIC_',
+    'GH_TOKEN_',
+    'MCP_',
+    'ASR_',
+    'LOCAL_MEDIUM_',
+    'LOCAL_MINI_',
+  ];
   for (const key of Object.keys(process.env)) {
     if (ENV_PASSTHROUGH_PREFIXES.some((p) => key.startsWith(p))) {
       args.push('-e', `${key}=${process.env[key]}`);
