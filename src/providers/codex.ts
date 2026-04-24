@@ -19,17 +19,28 @@
 import fs from 'fs';
 import path from 'path';
 
+import { getAgentGroup } from '../db/agent-groups.js';
+import { readContainerConfig } from '../container-config.js';
 import { registerProviderContainerConfig } from './provider-container-registry.js';
 
 registerProviderContainerConfig('codex', (ctx) => {
   const codexDir = path.join(ctx.sessionDir, 'codex');
   fs.mkdirSync(codexDir, { recursive: true });
 
+  // If the per-group container.json env sets OPENAI_BASE_URL, this group is
+  // routed to a custom OpenAI-compat endpoint (LiteLLM, llama.cpp, etc.)
+  // rather than the ChatGPT subscription. Codex prefers auth.json over an
+  // API key when both are present, so we skip the auth.json copy in that
+  // case to force the OPENAI_API_KEY path against the custom endpoint.
+  const group = getAgentGroup(ctx.agentGroupId);
+  const groupEnv = group ? (readContainerConfig(group.folder).env ?? {}) : {};
+  const usesCustomEndpoint = !!groupEnv.OPENAI_BASE_URL;
+
   // Copy the host's auth.json into the per-session dir if it exists.
   // We only copy auth.json, not the full ~/.codex — config.toml would
   // get clobbered by the container on every wake anyway.
   const hostHome = ctx.hostEnv.HOME;
-  if (hostHome) {
+  if (hostHome && !usesCustomEndpoint) {
     const hostAuth = path.join(hostHome, '.codex', 'auth.json');
     if (fs.existsSync(hostAuth)) {
       fs.copyFileSync(hostAuth, path.join(codexDir, 'auth.json'));
