@@ -3,7 +3,7 @@
  * Spawns agent containers with session folder + agent group folder mounts.
  * The container runs the v2 agent-runner which polls the session DB.
  */
-import { ChildProcess, execSync, spawn } from 'child_process';
+import { ChildProcess, execSync, spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -49,6 +49,7 @@ const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 
 /** Active containers tracked by session ID. */
 const activeContainers = new Map<string, { process: ChildProcess; containerName: string }>();
+const missingImageWarnings = new Set<string>();
 
 /**
  * In-flight wake promises, keyed by session id. Deduplicates concurrent
@@ -122,6 +123,26 @@ async function spawnContainer(session: Session): Promise<void> {
 
   const mounts = buildMounts(agentGroup, session, containerConfig, contribution);
   const containerName = `nanoclaw-v2-${agentGroup.folder}-${Date.now()}`;
+  const imageTag = containerConfig.imageTag || CONTAINER_IMAGE;
+
+  if (!containerImageExists(imageTag)) {
+    // Avoid a hot loop of opaque docker exit 125 errors when setup/container
+    // was skipped or the image was pruned.
+    if (!missingImageWarnings.has(imageTag)) {
+      missingImageWarnings.add(imageTag);
+      log.error('Container image not found; skipping wake', {
+        sessionId: session.id,
+        agentGroup: agentGroup.name,
+        imageTag,
+      });
+      log.error('Build the runtime image and retry', {
+        command: 'pnpm exec tsx setup/index.ts --step container',
+      });
+    }
+    return;
+  }
+  missingImageWarnings.delete(imageTag);
+
   // OneCLI agent identifier is always the agent group id — stable across
   // sessions and reversible via getAgentGroup() for approval routing.
   const agentIdentifier = agentGroup.id;
@@ -176,6 +197,14 @@ async function spawnContainer(session: Session): Promise<void> {
     stopTypingRefresh(session.id);
     log.error('Container spawn error', { sessionId: session.id, err });
   });
+}
+
+function containerImageExists(imageTag: string): boolean {
+  const res = spawnSync(CONTAINER_RUNTIME_BIN, ['image', 'inspect', imageTag], {
+    stdio: 'pipe',
+    encoding: 'utf-8',
+  });
+  return res.status === 0;
 }
 
 /** Kill a container for a session. */
