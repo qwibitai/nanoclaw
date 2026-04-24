@@ -5,6 +5,7 @@ import type pino from 'pino';
 
 import { DATA_DIR, IPC_FALLBACK_POLL_INTERVAL } from './config.js';
 import { AvailableGroup } from './container-runner.js';
+import { insertToolCallEvent } from './db/tool-events.js';
 import { handleFeedbackIpc } from './ipc/feedback-handler.js';
 import { processJsonIpcDirectory } from './ipc/file-processor.js';
 import { handleMessageIpc } from './ipc/message-handler.js';
@@ -161,6 +162,62 @@ export function startIpcWatcher(deps: IpcDeps): void {
         });
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+      }
+
+      // Process tool-events from this group's IPC directory
+      const toolEventsDir = path.join(ipcBaseDir, sourceGroup, 'tool-events');
+      try {
+        await processJsonIpcDirectory({
+          directory: toolEventsDir,
+          errorDirectory: errorDir,
+          sourceGroup,
+          createLogger: (file) =>
+            createCorrelationLogger(undefined, {
+              op: 'ipc-tool-event',
+              sourceGroup,
+              file,
+            }),
+          handle: async (data, log) => {
+            const event = data as {
+              tool_name?: string;
+              tool_use_id?: string;
+              session_id?: string;
+              hook_event?: string;
+              tool_input?: string;
+              tool_response?: string;
+            };
+            if (!event.tool_name || !event.session_id) {
+              log.warn({ event }, 'Skipping tool event with missing fields');
+              return;
+            }
+            insertToolCallEvent({
+              session_id: event.session_id,
+              event_type: event.hook_event || 'PostToolUse',
+              tool_name: event.tool_name,
+              payload: {
+                group_folder: sourceGroup,
+                tool_use_id: event.tool_use_id ?? null,
+                tool_input:
+                  typeof event.tool_input === 'string'
+                    ? event.tool_input
+                    : JSON.stringify(event.tool_input),
+                tool_response:
+                  typeof event.tool_response === 'string'
+                    ? event.tool_response
+                    : JSON.stringify(event.tool_response),
+              },
+            });
+            log.debug(
+              { tool: event.tool_name, session: event.session_id },
+              'Tool event stored',
+            );
+          },
+        });
+      } catch (err) {
+        logger.error(
+          { err, sourceGroup },
+          'Error reading IPC tool-events directory',
+        );
       }
     } finally {
       processingGroups.delete(sourceGroup);

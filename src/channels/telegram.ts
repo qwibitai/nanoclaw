@@ -4,6 +4,7 @@ import { createServer, Server } from 'http';
 import { Api, Bot, webhookCallback } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { getRecentToolEvents } from '../db/tool-events.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -141,6 +142,61 @@ export class TelegramChannel implements Channel {
     // Command to check bot status
     this.bot!.command('ping', (ctx) => {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
+    });
+
+    // Command to show recent agent tool activity
+    this.bot!.command('activity', (ctx) => {
+      try {
+        const events = getRecentToolEvents(5, 100);
+        if (events.length === 0) {
+          ctx.reply('No agent tool activity in the last 5 minutes.');
+          return;
+        }
+
+        const toolEmojis: Record<string, string> = {
+          Bash: '\u{1F4BB}',
+          Read: '\u{1F4D6}',
+          Write: '\u{1F4DD}',
+          Edit: '\u{270F}\u{FE0F}',
+          Glob: '\u{1F50D}',
+          Grep: '\u{1F50E}',
+          WebFetch: '\u{1F310}',
+          WebSearch: '\u{1F310}',
+          Task: '\u{1F4CB}',
+          TodoWrite: '\u{2705}',
+          NotebookEdit: '\u{1F4D3}',
+        };
+        const defaultEmoji = '\u{1F527}';
+
+        const lines: string[] = [`*Agent Activity* (last 5 min)\n`];
+        let totalLen = lines[0].length;
+        const MAX_LEN = 3500;
+
+        // Events are DESC from query — reverse for chronological display
+        for (const event of events.slice().reverse()) {
+          const emoji = toolEmojis[event.tool_name] || defaultEmoji;
+          const time = event.created_at.slice(11, 19);
+          const status =
+            event.event_type === 'PostToolUseFailure' ? ' FAIL' : '';
+          const parsed: Record<string, unknown> = event.payload
+            ? JSON.parse(event.payload)
+            : {};
+          const groupFolder = (parsed.group_folder as string) || '';
+          const line = `${emoji} \`${time}\` *${event.tool_name}*${status} — ${groupFolder}`;
+
+          if (totalLen + line.length + 1 > MAX_LEN) {
+            lines.push(`\n_(${events.length - lines.length + 1} more events truncated)_`);
+            break;
+          }
+          lines.push(line);
+          totalLen += line.length + 1;
+        }
+
+        ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
+      } catch (err) {
+        logger.error({ err }, 'Activity command error');
+        ctx.reply('Failed to retrieve activity data.');
+      }
     });
 
     // Command to manage pantry items — CEO chat only

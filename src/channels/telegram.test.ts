@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+import type { ToolCallEvent } from '../db/tool-events.js';
 import { TelegramChannel } from './telegram.js';
 import type { TelegramChannelOpts } from './telegram.js';
+
+vi.mock('../db/tool-events.js', () => ({
+  getRecentToolEvents: vi.fn(() => []),
+}));
 
 // Track all created bot instances for assertions
 let lastBotInstance: any = null;
@@ -576,6 +581,121 @@ describe('TelegramChannel', () => {
 
       // Should be called twice: 4096 + 904
       expect(lastBotInstance.api.sendMessage).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('/activity command', () => {
+    function getActivityHandler(bot: any) {
+      const call = bot.command.mock.calls.find(
+        (c: any) => c[0] === 'activity',
+      );
+      return call?.[1];
+    }
+
+    it('shows no activity message when no events exist', async () => {
+      const { getRecentToolEvents } = await import('../db/tool-events.js');
+      (getRecentToolEvents as ReturnType<typeof vi.fn>).mockReturnValue([]);
+
+      const ch = new TelegramChannel('token123', makeOpts());
+      await ch.connect();
+
+      const handler = getActivityHandler(lastBotInstance);
+      const ctx = { reply: vi.fn().mockResolvedValue(undefined) };
+
+      handler(ctx);
+      expect(ctx.reply).toHaveBeenCalledWith(
+        'No agent tool activity in the last 5 minutes.',
+      );
+    });
+
+    it('formats events with emoji prefixes', async () => {
+      const { getRecentToolEvents } = await import('../db/tool-events.js');
+      const events: ToolCallEvent[] = [
+        {
+          id: 1,
+          session_id: 'sess-1',
+          event_type: 'PostToolUse',
+          tool_name: 'Bash',
+          payload: JSON.stringify({ group_folder: 'ceo', tool_use_id: 'toolu_01' }),
+          created_at: '2026-04-24 12:30:45',
+        },
+        {
+          id: 2,
+          session_id: 'sess-1',
+          event_type: 'PostToolUse',
+          tool_name: 'Read',
+          payload: JSON.stringify({ group_folder: 'ceo', tool_use_id: 'toolu_02' }),
+          created_at: '2026-04-24 12:30:50',
+        },
+      ];
+      (getRecentToolEvents as ReturnType<typeof vi.fn>).mockReturnValue(events);
+
+      const ch = new TelegramChannel('token123', makeOpts());
+      await ch.connect();
+
+      const handler = getActivityHandler(lastBotInstance);
+      const ctx = { reply: vi.fn().mockResolvedValue(undefined) };
+
+      handler(ctx);
+      const replyText = ctx.reply.mock.calls[0][0] as string;
+      expect(replyText).toContain('Agent Activity');
+      expect(replyText).toContain('Bash');
+      expect(replyText).toContain('Read');
+      // Uses Markdown
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ parse_mode: 'Markdown' }),
+      );
+    });
+
+    it('marks failed events with FAIL suffix', async () => {
+      const { getRecentToolEvents } = await import('../db/tool-events.js');
+      const events: ToolCallEvent[] = [
+        {
+          id: 1,
+          session_id: 'sess-1',
+          event_type: 'PostToolUseFailure',
+          tool_name: 'Bash',
+          payload: JSON.stringify({ group_folder: 'ceo', tool_use_id: 'toolu_01' }),
+          created_at: '2026-04-24 12:30:45',
+        },
+      ];
+      (getRecentToolEvents as ReturnType<typeof vi.fn>).mockReturnValue(events);
+
+      const ch = new TelegramChannel('token123', makeOpts());
+      await ch.connect();
+
+      const handler = getActivityHandler(lastBotInstance);
+      const ctx = { reply: vi.fn().mockResolvedValue(undefined) };
+
+      handler(ctx);
+      const replyText = ctx.reply.mock.calls[0][0] as string;
+      expect(replyText).toContain('FAIL');
+    });
+
+    it('respects 3500-char cap and shows truncation notice', async () => {
+      const { getRecentToolEvents } = await import('../db/tool-events.js');
+      // Create enough events to exceed 3500 chars
+      const events: ToolCallEvent[] = Array.from({ length: 100 }, (_, i) => ({
+        id: i + 1,
+        session_id: 'sess-1',
+        event_type: 'PostToolUse',
+        tool_name: 'LongToolNameForTesting',
+        payload: JSON.stringify({ group_folder: 'long-group-name-for-testing', tool_use_id: `toolu_${i}` }),
+        created_at: `2026-04-24 12:${String(i).padStart(2, '0')}:00`,
+      }));
+      (getRecentToolEvents as ReturnType<typeof vi.fn>).mockReturnValue(events);
+
+      const ch = new TelegramChannel('token123', makeOpts());
+      await ch.connect();
+
+      const handler = getActivityHandler(lastBotInstance);
+      const ctx = { reply: vi.fn().mockResolvedValue(undefined) };
+
+      handler(ctx);
+      const replyText = ctx.reply.mock.calls[0][0] as string;
+      expect(replyText.length).toBeLessThanOrEqual(3600); // Allow some padding
+      expect(replyText).toContain('truncated');
     });
   });
 });

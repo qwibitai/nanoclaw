@@ -34,12 +34,9 @@ export function bootstrapSessionSettings(groupFolder: string): string {
   fs.mkdirSync(groupSessionsDir, { recursive: true });
 
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  const serviceGuardHook = path.join(
-    process.cwd(),
-    'container',
-    'hooks',
-    'service-guard.sh',
-  );
+  const hooksDir = path.join(process.cwd(), 'container', 'hooks');
+  const serviceGuardHook = path.join(hooksDir, 'service-guard.sh');
+  const toolObserverHook = path.join(hooksDir, 'tool-observer.sh');
   const defaultSettings: Record<string, unknown> = {
     env: {
       CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
@@ -48,16 +45,29 @@ export function bootstrapSessionSettings(groupFolder: string): string {
     },
   };
 
-  // Add service-guard hook if the script exists
+  // Build hooks configuration
+  const hooks: Record<string, unknown[]> = {};
+
   if (fs.existsSync(serviceGuardHook)) {
-    defaultSettings.hooks = {
-      PreToolUse: [
-        {
-          matcher: 'Bash',
-          hooks: [{ type: 'command', command: serviceGuardHook }],
-        },
-      ],
+    hooks.PreToolUse = [
+      {
+        matcher: 'Bash',
+        hooks: [{ type: 'command', command: serviceGuardHook }],
+      },
+    ];
+  }
+
+  if (fs.existsSync(toolObserverHook)) {
+    const toolObserverEntry = {
+      matcher: '',
+      hooks: [{ type: 'command', command: toolObserverHook }],
     };
+    hooks.PostToolUse = [toolObserverEntry];
+    hooks.PostToolUseFailure = [toolObserverEntry];
+  }
+
+  if (Object.keys(hooks).length > 0) {
+    defaultSettings.hooks = hooks;
   }
 
   if (!fs.existsSync(settingsFile)) {
@@ -66,11 +76,23 @@ export function bootstrapSessionSettings(groupFolder: string): string {
       JSON.stringify(defaultSettings, null, 2) + '\n',
     );
   } else {
-    // Ensure existing settings have the service-guard hook
+    // Ensure existing settings have hooks up to date
     try {
       const existing = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
-      if (fs.existsSync(serviceGuardHook) && !existing.hooks) {
+      let needsWrite = false;
+      if (!existing.hooks && defaultSettings.hooks) {
         existing.hooks = defaultSettings.hooks;
+        needsWrite = true;
+      } else if (existing.hooks && defaultSettings.hooks) {
+        const desired = defaultSettings.hooks as Record<string, unknown[]>;
+        for (const [hookType, entries] of Object.entries(desired)) {
+          if (!existing.hooks[hookType]) {
+            existing.hooks[hookType] = entries;
+            needsWrite = true;
+          }
+        }
+      }
+      if (needsWrite) {
         fs.writeFileSync(
           settingsFile,
           JSON.stringify(existing, null, 2) + '\n',
