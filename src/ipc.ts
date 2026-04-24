@@ -9,8 +9,10 @@ import { handleFeedbackIpc } from './ipc/feedback-handler.js';
 import { processJsonIpcDirectory } from './ipc/file-processor.js';
 import { handleMessageIpc } from './ipc/message-handler.js';
 import { handleTaskIpc } from './ipc/task-handler.js';
+import { handleToolEventIpc } from './ipc/tool-event-handler.js';
 import { createCorrelationLogger, logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
+import { pruneToolEvents } from './db/index.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -71,6 +73,26 @@ export function startIpcWatcher(deps: IpcDeps): void {
   // Clean up stale error files on startup
   cleanupStaleErrorFiles(ipcBaseDir);
 
+  // Clean up old tool events on startup
+  try {
+    pruneToolEvents(7);
+    logger.info('Pruned tool events older than 7 days');
+  } catch (err) {
+    logger.warn({ err }, 'Failed to prune tool events');
+  }
+
+  // Schedule periodic cleanup every 6 hours
+  setInterval(
+    () => {
+      try {
+        pruneToolEvents(7);
+      } catch (err) {
+        logger.warn({ err }, 'Failed to prune tool events during periodic cleanup');
+      }
+    },
+    6 * 60 * 60_000,
+  );
+
   // Per-group processing lock: allows different groups to process concurrently
   // while preventing the same group from being processed twice simultaneously.
   const processingGroups = new Set<string>();
@@ -86,6 +108,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
     try {
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
+      const toolEventsDir = path.join(ipcBaseDir, sourceGroup, 'input', 'tool-events');
       const errorDir = path.join(ipcBaseDir, 'errors');
 
       // Process messages from this group's IPC directory
@@ -161,6 +184,37 @@ export function startIpcWatcher(deps: IpcDeps): void {
         });
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+      }
+
+      // Process tool events from this group's IPC directory
+      try {
+        await processJsonIpcDirectory({
+          directory: toolEventsDir,
+          errorDirectory: errorDir,
+          sourceGroup,
+          createLogger: (file) =>
+            createCorrelationLogger(undefined, {
+              op: 'ipc-tool-event',
+              sourceGroup,
+              file,
+            }),
+          handle: async (data, log) =>
+            handleToolEventIpc(
+              data as {
+                tool_name?: string;
+                tool_use_id?: string;
+                session_id?: string;
+                hook_event?: string;
+                tool_input?: string;
+                tool_response?: string;
+                timestamp?: string;
+              },
+              sourceGroup,
+              log,
+            ),
+        });
+      } catch (err) {
+        logger.error({ err, sourceGroup }, 'Error reading IPC tool-events directory');
       }
     } finally {
       processingGroups.delete(sourceGroup);

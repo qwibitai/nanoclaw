@@ -40,6 +40,12 @@ export function bootstrapSessionSettings(groupFolder: string): string {
     'hooks',
     'service-guard.sh',
   );
+  const toolObserverHook = path.join(
+    process.cwd(),
+    'container',
+    'hooks',
+    'tool-observer.sh',
+  );
   const defaultSettings: Record<string, unknown> = {
     env: {
       CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
@@ -48,16 +54,31 @@ export function bootstrapSessionSettings(groupFolder: string): string {
     },
   };
 
+  // Build hooks configuration
+  const hooks: Record<string, unknown[]> = {};
+
   // Add service-guard hook if the script exists
   if (fs.existsSync(serviceGuardHook)) {
-    defaultSettings.hooks = {
-      PreToolUse: [
-        {
-          matcher: 'Bash',
-          hooks: [{ type: 'command', command: serviceGuardHook }],
-        },
-      ],
+    hooks.PreToolUse = [
+      {
+        matcher: 'Bash',
+        hooks: [{ type: 'command', command: serviceGuardHook }],
+      },
+    ];
+  }
+
+  // Add tool-observer hook for all tool calls if the script exists
+  if (fs.existsSync(toolObserverHook)) {
+    const toolObserverEntry = {
+      matcher: '',
+      hooks: [{ type: 'command', command: toolObserverHook }],
     };
+    hooks.PostToolUse = [toolObserverEntry];
+    hooks.PostToolUseFailure = [toolObserverEntry];
+  }
+
+  if (Object.keys(hooks).length > 0) {
+    defaultSettings.hooks = hooks;
   }
 
   if (!fs.existsSync(settingsFile)) {
@@ -66,11 +87,18 @@ export function bootstrapSessionSettings(groupFolder: string): string {
       JSON.stringify(defaultSettings, null, 2) + '\n',
     );
   } else {
-    // Ensure existing settings have the service-guard hook
+    // Ensure existing settings have the hooks
     try {
       const existing = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
-      if (fs.existsSync(serviceGuardHook) && !existing.hooks) {
+      let modified = false;
+
+      // Merge hooks if they don't exist
+      if (Object.keys(hooks).length > 0 && !existing.hooks) {
         existing.hooks = defaultSettings.hooks;
+        modified = true;
+      }
+
+      if (modified) {
         fs.writeFileSync(
           settingsFile,
           JSON.stringify(existing, null, 2) + '\n',

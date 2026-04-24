@@ -65,18 +65,14 @@ describe('dispatch-config', () => {
     });
 
     it('returns null when API returns success: false', async () => {
-      fetchMock.mockResolvedValueOnce(
-        mockFetchResponse({ success: false }),
-      );
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({ success: false }));
 
       const config = await fetchDispatchConfig();
       expect(config).toBeNull();
     });
 
     it('returns null when API returns no data', async () => {
-      fetchMock.mockResolvedValueOnce(
-        mockFetchResponse({ success: true }),
-      );
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({ success: true }));
 
       const config = await fetchDispatchConfig();
       expect(config).toBeNull();

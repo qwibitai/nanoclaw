@@ -5,6 +5,11 @@ vi.mock('./transcript-archiver.js', () => ({
   archiveTranscript: vi.fn().mockReturnValue(true),
 }));
 
+// Mock db before importing session-commands
+vi.mock('./db/index.js', () => ({
+  getRecentToolEvents: vi.fn().mockReturnValue([]),
+}));
+
 import {
   extractSessionCommand,
   handleSessionCommand,
@@ -22,6 +27,14 @@ describe('extractSessionCommand', () => {
 
   it('detects bare /clear', () => {
     expect(extractSessionCommand('/clear', trigger)).toBe('/clear');
+  });
+
+  it('detects bare /activity', () => {
+    expect(extractSessionCommand('/activity', trigger)).toBe('/activity');
+  });
+
+  it('detects /activity with trigger prefix', () => {
+    expect(extractSessionCommand('@Andy /activity', trigger)).toBe('/activity');
   });
 
   it('detects /clear with trigger prefix', () => {

@@ -209,9 +209,7 @@ interface TaskHistoryRecord {
 /**
  * Fetch recently completed/failed tasks from Agency HQ.
  */
-async function fetchTaskHistory(
-  limit: number,
-): Promise<TaskHistoryRecord[]> {
+async function fetchTaskHistory(limit: number): Promise<TaskHistoryRecord[]> {
   const results: TaskHistoryRecord[] = [];
 
   for (const status of ['done', 'failed', 'cancelled']) {
@@ -290,15 +288,23 @@ export async function buildHistoricalSnapshot(): Promise<HistoricalSnapshot> {
 
     // Utilization: compute from current active slots + in-progress tasks
     const currentInProgress = inProgressTasks.length;
-    const avgSlotsInUse = Math.min(currentInProgress, PARALLEL_DISPATCH_WORKERS);
-    const peakSlotsInUse = Math.min(currentInProgress, PARALLEL_DISPATCH_WORKERS);
+    const avgSlotsInUse = Math.min(
+      currentInProgress,
+      PARALLEL_DISPATCH_WORKERS,
+    );
+    const peakSlotsInUse = Math.min(
+      currentInProgress,
+      PARALLEL_DISPATCH_WORKERS,
+    );
 
     // Find peak time from dispatched_at of in-progress tasks
     let peakTime: string | null = null;
     if (inProgressTasks.length > 0) {
       const earliest = inProgressTasks
         .filter((t) => t.dispatched_at)
-        .sort((a, b) => (a.dispatched_at ?? '').localeCompare(b.dispatched_at ?? ''));
+        .sort((a, b) =>
+          (a.dispatched_at ?? '').localeCompare(b.dispatched_at ?? ''),
+        );
       if (earliest.length > 0) {
         peakTime = earliest[0].dispatched_at ?? null;
       }
@@ -307,7 +313,9 @@ export async function buildHistoricalSnapshot(): Promise<HistoricalSnapshot> {
     // Idle percentage: slots not in use out of total
     const idlePercent =
       PARALLEL_DISPATCH_WORKERS > 0
-        ? ((PARALLEL_DISPATCH_WORKERS - avgSlotsInUse) / PARALLEL_DISPATCH_WORKERS) * 100
+        ? ((PARALLEL_DISPATCH_WORKERS - avgSlotsInUse) /
+            PARALLEL_DISPATCH_WORKERS) *
+          100
         : 100;
 
     const utilization: UtilizationMetrics = {
@@ -323,7 +331,8 @@ export async function buildHistoricalSnapshot(): Promise<HistoricalSnapshot> {
         if (!t.created_at || !t.dispatched_at) return null;
         const created = new Date(t.created_at).getTime();
         const dispatched = new Date(t.dispatched_at).getTime();
-        if (isNaN(created) || isNaN(dispatched) || dispatched < created) return null;
+        if (isNaN(created) || isNaN(dispatched) || dispatched < created)
+          return null;
         return { waitMs: dispatched - created, taskId: t.id };
       })
       .filter((w): w is { waitMs: number; taskId: string } => w !== null);
@@ -333,10 +342,10 @@ export async function buildHistoricalSnapshot(): Promise<HistoricalSnapshot> {
         ? waitTimes.reduce((sum, w) => sum + w.waitMs, 0) / waitTimes.length
         : 0;
 
-    const longestWait = waitTimes.reduce<{ waitMs: number; taskId: string } | null>(
-      (max, w) => (!max || w.waitMs > max.waitMs ? w : max),
-      null,
-    );
+    const longestWait = waitTimes.reduce<{
+      waitMs: number;
+      taskId: string;
+    } | null>((max, w) => (!max || w.waitMs > max.waitMs ? w : max), null);
 
     const queue: QueueMetrics = {
       avgDepth: readyTasks,
@@ -358,7 +367,8 @@ export async function buildHistoricalSnapshot(): Promise<HistoricalSnapshot> {
 
     const avgCompletionMs =
       completionTimes.length > 0
-        ? completionTimes.reduce((sum, d) => sum + d, 0) / completionTimes.length
+        ? completionTimes.reduce((sum, d) => sum + d, 0) /
+          completionTimes.length
         : 0;
 
     // Top 3 slowest tasks
@@ -368,7 +378,10 @@ export async function buildHistoricalSnapshot(): Promise<HistoricalSnapshot> {
         title: t.title,
         durationMs: computeDuration(t),
       }))
-      .filter((t): t is { id: string; title: string; durationMs: number } => t.durationMs !== null)
+      .filter(
+        (t): t is { id: string; title: string; durationMs: number } =>
+          t.durationMs !== null,
+      )
       .sort((a, b) => b.durationMs - a.durationMs)
       .slice(0, 3);
 
@@ -563,7 +576,8 @@ function formatDuration(ms: number): string {
   if (totalSeconds < 60) return `${totalSeconds}s`;
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  if (minutes < 60) return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
+  if (minutes < 60)
+    return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
   const hours = Math.floor(minutes / 60);
   const remainMinutes = minutes % 60;
   return `${hours}h ${remainMinutes.toString().padStart(2, '0')}m`;
@@ -594,9 +608,7 @@ export function formatHistoricalPlain(
   lines.push('\u251c' + '\u2500'.repeat(W - 2) + '\u2524');
 
   // --- Current slots ---
-  lines.push(
-    '\u2502' + '  Worker Slots'.padEnd(W - 2) + '\u2502',
-  );
+  lines.push('\u2502' + '  Worker Slots'.padEnd(W - 2) + '\u2502');
   lines.push('\u2502' + '\u2500'.repeat(W - 2) + '\u2502');
 
   for (const slot of snapshot.slots) {
@@ -621,7 +633,9 @@ export function formatHistoricalPlain(
 
   lines.push(
     '\u2502' +
-      `  Queue: ${snapshot.queueDepth} task${snapshot.queueDepth === 1 ? '' : 's'} ready`.padEnd(W - 2) +
+      `  Queue: ${snapshot.queueDepth} task${snapshot.queueDepth === 1 ? '' : 's'} ready`.padEnd(
+        W - 2,
+      ) +
       '\u2502',
   );
 
@@ -639,40 +653,37 @@ export function formatHistoricalPlain(
   lines.push('\u2502' + '\u2500'.repeat(W - 2) + '\u2502');
 
   if (historical.recentTasks.length === 0) {
-    lines.push(
-      '\u2502' + '  No recent tasks'.padEnd(W - 2) + '\u2502',
-    );
+    lines.push('\u2502' + '  No recent tasks'.padEnd(W - 2) + '\u2502');
   } else {
     for (const task of historical.recentTasks) {
       const icon = statusIcon(task.status);
-      const dur = task.durationMs !== null ? formatDuration(task.durationMs) : '--';
+      const dur =
+        task.durationMs !== null ? formatDuration(task.durationMs) : '--';
       const title =
-        task.title.length > 28
-          ? task.title.slice(0, 25) + '...'
-          : task.title;
+        task.title.length > 28 ? task.title.slice(0, 25) + '...' : task.title;
       const line = `  ${icon} ${task.id.slice(0, 8)}  ${title.padEnd(28)}  ${dur.padStart(8)}`;
-      lines.push(
-        '\u2502' + line.padEnd(W - 2) + '\u2502',
-      );
+      lines.push('\u2502' + line.padEnd(W - 2) + '\u2502');
     }
   }
 
   // --- Utilization ---
   lines.push('\u251c' + '\u2500'.repeat(W - 2) + '\u2524');
-  lines.push(
-    '\u2502' + '  Worker Utilization'.padEnd(W - 2) + '\u2502',
-  );
+  lines.push('\u2502' + '  Worker Utilization'.padEnd(W - 2) + '\u2502');
   lines.push('\u2502' + '\u2500'.repeat(W - 2) + '\u2502');
 
   const { utilization } = historical;
   lines.push(
     '\u2502' +
-      `  Avg slots in use:  ${utilization.avgSlotsInUse}/${PARALLEL_DISPATCH_WORKERS}`.padEnd(W - 2) +
+      `  Avg slots in use:  ${utilization.avgSlotsInUse}/${PARALLEL_DISPATCH_WORKERS}`.padEnd(
+        W - 2,
+      ) +
       '\u2502',
   );
   lines.push(
     '\u2502' +
-      `  Peak slots:        ${utilization.peakSlotsInUse}/${PARALLEL_DISPATCH_WORKERS}`.padEnd(W - 2) +
+      `  Peak slots:        ${utilization.peakSlotsInUse}/${PARALLEL_DISPATCH_WORKERS}`.padEnd(
+        W - 2,
+      ) +
       '\u2502',
   );
   if (utilization.peakTime) {
@@ -684,15 +695,15 @@ export function formatHistoricalPlain(
   }
   lines.push(
     '\u2502' +
-      `  Idle:              ${utilization.idlePercent.toFixed(1)}%`.padEnd(W - 2) +
+      `  Idle:              ${utilization.idlePercent.toFixed(1)}%`.padEnd(
+        W - 2,
+      ) +
       '\u2502',
   );
 
   // --- Queue Metrics ---
   lines.push('\u251c' + '\u2500'.repeat(W - 2) + '\u2524');
-  lines.push(
-    '\u2502' + '  Queue Metrics'.padEnd(W - 2) + '\u2502',
-  );
+  lines.push('\u2502' + '  Queue Metrics'.padEnd(W - 2) + '\u2502');
   lines.push('\u2502' + '\u2500'.repeat(W - 2) + '\u2502');
 
   const { queue } = historical;
@@ -710,42 +721,40 @@ export function formatHistoricalPlain(
     ? `${formatDuration(queue.longestWaitMs)} (${queue.longestWaitTaskId.slice(0, 8)})`
     : formatDuration(queue.longestWaitMs);
   lines.push(
-    '\u2502' +
-      `  Longest queued:    ${longestLabel}`.padEnd(W - 2) +
-      '\u2502',
+    '\u2502' + `  Longest queued:    ${longestLabel}`.padEnd(W - 2) + '\u2502',
   );
 
   // --- Performance Trends ---
   lines.push('\u251c' + '\u2500'.repeat(W - 2) + '\u2524');
-  lines.push(
-    '\u2502' + '  Performance Trends'.padEnd(W - 2) + '\u2502',
-  );
+  lines.push('\u2502' + '  Performance Trends'.padEnd(W - 2) + '\u2502');
   lines.push('\u2502' + '\u2500'.repeat(W - 2) + '\u2502');
 
   const { performance } = historical;
   lines.push(
     '\u2502' +
-      `  Avg completion:    ${formatDuration(performance.avgCompletionMs)}`.padEnd(W - 2) +
+      `  Avg completion:    ${formatDuration(performance.avgCompletionMs)}`.padEnd(
+        W - 2,
+      ) +
       '\u2502',
   );
   lines.push(
     '\u2502' +
-      `  Error rate:        ${performance.errorRate.toFixed(1)}% (${performance.totalFailed}/${performance.totalCompleted + performance.totalFailed})`.padEnd(W - 2) +
+      `  Error rate:        ${performance.errorRate.toFixed(1)}% (${performance.totalFailed}/${performance.totalCompleted + performance.totalFailed})`.padEnd(
+        W - 2,
+      ) +
       '\u2502',
   );
 
   if (performance.slowestTasks.length > 0) {
-    lines.push(
-      '\u2502' + '  Slowest tasks:'.padEnd(W - 2) + '\u2502',
-    );
+    lines.push('\u2502' + '  Slowest tasks:'.padEnd(W - 2) + '\u2502');
     for (const task of performance.slowestTasks) {
       const title =
-        task.title.length > 30
-          ? task.title.slice(0, 27) + '...'
-          : task.title;
+        task.title.length > 30 ? task.title.slice(0, 27) + '...' : task.title;
       lines.push(
         '\u2502' +
-          `    ${task.id.slice(0, 8)}  ${title.padEnd(30)}  ${formatDuration(task.durationMs).padStart(8)}`.padEnd(W - 2) +
+          `    ${task.id.slice(0, 8)}  ${title.padEnd(30)}  ${formatDuration(task.durationMs).padStart(8)}`.padEnd(
+            W - 2,
+          ) +
           '\u2502',
       );
     }
@@ -785,10 +794,12 @@ export function formatHistoricalColor(
 
   const lines: string[] = [];
 
-  lines.push(`${DIM}\u250c${ '\u2500'.repeat(W - 2)}\u2510${RESET}`);
+  lines.push(`${DIM}\u250c${'\u2500'.repeat(W - 2)}\u2510${RESET}`);
   lines.push(
     `${DIM}\u2502${RESET}` +
-      ` ${BOLD}NanoClaw Status Dashboard${RESET}  ${DIM}${snapshot.timestamp}${RESET}`.padEnd(W - 2 + (BOLD.length + RESET.length + DIM.length + RESET.length)) +
+      ` ${BOLD}NanoClaw Status Dashboard${RESET}  ${DIM}${snapshot.timestamp}${RESET}`.padEnd(
+        W - 2 + (BOLD.length + RESET.length + DIM.length + RESET.length),
+      ) +
       `${DIM}\u2502${RESET}`,
   );
   // Use raw approach for colored sections to avoid padEnd counting ANSI codes
@@ -824,7 +835,9 @@ export function formatHistoricalColor(
   );
 
   if (snapshot.error) {
-    rawLines.push(`${DIM}\u2502${RESET}  ${RED}Error: ${snapshot.error}${RESET}`);
+    rawLines.push(
+      `${DIM}\u2502${RESET}  ${RED}Error: ${snapshot.error}${RESET}`,
+    );
   }
 
   // --- Recent Activity ---
@@ -849,9 +862,7 @@ export function formatHistoricalColor(
           ? `${CYAN}${formatDuration(task.durationMs)}${RESET}`
           : `${DIM}--${RESET}`;
       const title =
-        task.title.length > 28
-          ? task.title.slice(0, 25) + '...'
-          : task.title;
+        task.title.length > 28 ? task.title.slice(0, 25) + '...' : task.title;
       rawLines.push(
         `${DIM}\u2502${RESET}  ${icon} ${DIM}${task.id.slice(0, 8)}${RESET}  ${title}  ${dur}`,
       );
@@ -875,7 +886,12 @@ export function formatHistoricalColor(
       `${DIM}\u2502${RESET}  Peak time:         ${DIM}${utilization.peakTime}${RESET}`,
     );
   }
-  const idleColor = utilization.idlePercent > 75 ? GREEN : utilization.idlePercent > 25 ? YELLOW : RED;
+  const idleColor =
+    utilization.idlePercent > 75
+      ? GREEN
+      : utilization.idlePercent > 25
+        ? YELLOW
+        : RED;
   rawLines.push(
     `${DIM}\u2502${RESET}  Idle:              ${idleColor}${utilization.idlePercent.toFixed(1)}%${RESET}`,
   );
@@ -908,7 +924,12 @@ export function formatHistoricalColor(
   rawLines.push(
     `${DIM}\u2502${RESET}  Avg completion:    ${CYAN}${formatDuration(performance.avgCompletionMs)}${RESET}`,
   );
-  const errColor = performance.errorRate > 10 ? RED : performance.errorRate > 0 ? YELLOW : GREEN;
+  const errColor =
+    performance.errorRate > 10
+      ? RED
+      : performance.errorRate > 0
+        ? YELLOW
+        : GREEN;
   rawLines.push(
     `${DIM}\u2502${RESET}  Error rate:        ${errColor}${performance.errorRate.toFixed(1)}%${RESET} ${DIM}(${performance.totalFailed}/${performance.totalCompleted + performance.totalFailed})${RESET}`,
   );
@@ -917,9 +938,7 @@ export function formatHistoricalColor(
     rawLines.push(`${DIM}\u2502${RESET}  Slowest tasks:`);
     for (const task of performance.slowestTasks) {
       const title =
-        task.title.length > 30
-          ? task.title.slice(0, 27) + '...'
-          : task.title;
+        task.title.length > 30 ? task.title.slice(0, 27) + '...' : task.title;
       rawLines.push(
         `${DIM}\u2502${RESET}    ${DIM}${task.id.slice(0, 8)}${RESET}  ${title}  ${CYAN}${formatDuration(task.durationMs)}${RESET}`,
       );

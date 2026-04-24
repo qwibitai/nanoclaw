@@ -283,7 +283,10 @@ describe('ops-agent/worker', () => {
     });
 
     it('prefers explicit cli_bin over provider mapping', () => {
-      const config = resolveConfig({ provider: 'kimi', cli_bin: '/usr/local/bin/kimi-custom' });
+      const config = resolveConfig({
+        provider: 'kimi',
+        cli_bin: '/usr/local/bin/kimi-custom',
+      });
       expect(config.cliBin).toBe('/usr/local/bin/kimi-custom');
     });
 
@@ -297,29 +300,52 @@ describe('ops-agent/worker', () => {
 
   describe('buildCliArgs', () => {
     it('claude: uses --print --dangerously-skip-permissions', () => {
-      const args = buildCliArgs({ provider: 'claude', cliBin: 'claude', model: undefined }, 'do stuff');
-      expect(args).toEqual(['--print', '--dangerously-skip-permissions', 'do stuff']);
+      const args = buildCliArgs(
+        { provider: 'claude', cliBin: 'claude', model: undefined },
+        'do stuff',
+      );
+      expect(args).toEqual([
+        '--print',
+        '--dangerously-skip-permissions',
+        'do stuff',
+      ]);
     });
 
     it('claude: includes --model when set', () => {
-      const args = buildCliArgs({ provider: 'claude', cliBin: 'claude', model: 'claude-sonnet-4-5-20250929' }, 'do stuff');
+      const args = buildCliArgs(
+        {
+          provider: 'claude',
+          cliBin: 'claude',
+          model: 'claude-sonnet-4-5-20250929',
+        },
+        'do stuff',
+      );
       expect(args).toContain('--model');
       expect(args).toContain('claude-sonnet-4-5-20250929');
     });
 
     it('kimi: uses --print, -m, no --dangerously-skip-permissions', () => {
-      const args = buildCliArgs({ provider: 'kimi', cliBin: 'kimi', model: 'k2-0520' }, 'do stuff');
+      const args = buildCliArgs(
+        { provider: 'kimi', cliBin: 'kimi', model: 'k2-0520' },
+        'do stuff',
+      );
       expect(args).toEqual(['--print', '-m', 'k2-0520', 'do stuff']);
       expect(args).not.toContain('--dangerously-skip-permissions');
     });
 
     it('kimi: omits -m when no model', () => {
-      const args = buildCliArgs({ provider: 'kimi', cliBin: 'kimi', model: undefined }, 'do stuff');
+      const args = buildCliArgs(
+        { provider: 'kimi', cliBin: 'kimi', model: undefined },
+        'do stuff',
+      );
       expect(args).toEqual(['--print', 'do stuff']);
     });
 
     it('copilot: uses allow flags and -p for prompt', () => {
-      const args = buildCliArgs({ provider: 'copilot', cliBin: 'copilot', model: undefined }, 'do stuff');
+      const args = buildCliArgs(
+        { provider: 'copilot', cliBin: 'copilot', model: undefined },
+        'do stuff',
+      );
       expect(args).toContain('--allow-all-tools');
       expect(args).toContain('--no-ask-user');
       expect(args).toContain('-p');
@@ -327,7 +353,10 @@ describe('ops-agent/worker', () => {
     });
 
     it('gemini: uses --approval-mode yolo', () => {
-      const args = buildCliArgs({ provider: 'gemini', cliBin: 'gemini', model: 'gemini-2.5-pro' }, 'do stuff');
+      const args = buildCliArgs(
+        { provider: 'gemini', cliBin: 'gemini', model: 'gemini-2.5-pro' },
+        'do stuff',
+      );
       expect(args).toContain('--approval-mode');
       expect(args).toContain('yolo');
       expect(args).toContain('-m');
@@ -335,12 +364,23 @@ describe('ops-agent/worker', () => {
     });
 
     it('codex: uses exec --full-auto --skip-git-repo-check', () => {
-      const args = buildCliArgs({ provider: 'codex', cliBin: 'codex', model: undefined }, 'do stuff');
-      expect(args).toEqual(['exec', '--full-auto', '--skip-git-repo-check', 'do stuff']);
+      const args = buildCliArgs(
+        { provider: 'codex', cliBin: 'codex', model: undefined },
+        'do stuff',
+      );
+      expect(args).toEqual([
+        'exec',
+        '--full-auto',
+        '--skip-git-repo-check',
+        'do stuff',
+      ]);
     });
 
     it('unknown provider falls through to claude defaults', () => {
-      const args = buildCliArgs({ provider: 'future-ai', cliBin: 'future-ai', model: undefined }, 'do stuff');
+      const args = buildCliArgs(
+        { provider: 'future-ai', cliBin: 'future-ai', model: undefined },
+        'do stuff',
+      );
       expect(args).toContain('--print');
       expect(args).toContain('--dangerously-skip-permissions');
     });

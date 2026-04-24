@@ -31,7 +31,9 @@ function formatCheck(check: {
   fix?: string;
 }): string {
   const icon = check.pass ? '\u2705' : '\u274C';
-  const lines = [`  ${icon} ${check.label}: ${check.actual} (expected: ${check.expected})`];
+  const lines = [
+    `  ${icon} ${check.label}: ${check.actual} (expected: ${check.expected})`,
+  ];
   if (!check.pass && check.fix) {
     lines.push(`     \u2192 Fix: ${check.fix}`);
   }
@@ -40,8 +42,7 @@ function formatCheck(check: {
 
 function formatComponentResult(result: ComponentVerification): string {
   const lines: string[] = [];
-  const statusIcon =
-    result.summary.failed === 0 ? '\u2705' : '\u274C';
+  const statusIcon = result.summary.failed === 0 ? '\u2705' : '\u274C';
 
   lines.push(
     `\n${statusIcon} ${result.component} (${result.summary.passed} passed, ${result.summary.failed} failed)`,
@@ -56,7 +57,8 @@ function formatComponentResult(result: ComponentVerification): string {
 }
 
 function printUsage(): void {
-  console.log(`
+  console.log(
+    `
 Usage: nanoclaw-verify config [component]
 
 Components:
@@ -71,7 +73,8 @@ Examples:
   npx tsx src/cli/verify.ts config
   npx tsx src/cli/verify.ts config ops-agent
   npx tsx src/cli/verify.ts config workers
-`.trim());
+`.trim(),
+  );
 }
 
 // --- Main ---
@@ -96,9 +99,7 @@ async function main(): Promise<void> {
   const component = args[1] as VerifyComponent | undefined;
 
   if (component && !VALID_COMPONENTS.includes(component)) {
-    console.error(
-      `Unknown component: ${component}`,
-    );
+    console.error(`Unknown component: ${component}`);
     console.error(`Valid components: ${VALID_COMPONENTS.join(', ')}`);
     process.exit(1);
   }
@@ -127,9 +128,7 @@ async function main(): Promise<void> {
       `\u2705 All checks passed (${totalPassed}/${totalPassed + totalFailed})`,
     );
   } else {
-    console.log(
-      `\u274C ${totalFailed} check(s) failed, ${totalPassed} passed`,
-    );
+    console.log(`\u274C ${totalFailed} check(s) failed, ${totalPassed} passed`);
   }
   console.log('');
 

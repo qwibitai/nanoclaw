@@ -1,6 +1,7 @@
 import type { NewMessage } from './types.js';
 import { logger } from './logger.js';
 import { archiveTranscript } from './transcript-archiver.js';
+import { getRecentToolEvents } from './db/index.js';
 
 /**
  * Extract a session slash command from a message, stripping the trigger prefix if present.
@@ -14,6 +15,7 @@ export function extractSessionCommand(
   text = text.replace(triggerPattern, '').trim();
   if (text === '/compact') return '/compact';
   if (text === '/clear') return '/clear';
+  if (text === '/activity') return '/activity';
   return null;
 }
 
@@ -161,6 +163,10 @@ export async function handleSessionCommand(opts: {
     return handleClear(cmdMsg, groupName, deps);
   }
 
+  if (command === '/activity') {
+    return handleActivity(cmdMsg, deps);
+  }
+
   // /compact: forward the literal slash command as the prompt
   return handleCompact(command, cmdMsg, deps);
 }
@@ -187,6 +193,71 @@ async function handleCompact(
   }
 
   return { handled: true, success: true };
+}
+
+async function handleActivity(
+  cmdMsg: NewMessage,
+  deps: SessionCommandDeps,
+): Promise<{ handled: true; success: boolean }> {
+  await deps.setTyping(true);
+
+  try {
+    const events = getRecentToolEvents(5);
+
+    if (events.length === 0) {
+      deps.advanceCursor(cmdMsg.timestamp);
+      await deps.setTyping(false);
+      await deps.sendMessage('No recent tool activity in the last 5 minutes.');
+      return { handled: true, success: true };
+    }
+
+    // Format events with emoji prefix and truncate to 3500 chars
+    const lines: string[] = ['*Recent Tool Activity (last 5 minutes):*\n'];
+
+    for (const event of events) {
+      const emoji = getToolEmoji(event.tool_name);
+      const status = event.hook_event === 'PostToolUse' ? '✓' : '✗';
+      const timestamp = new Date(event.timestamp).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+
+      lines.push(
+        `${emoji} ${status} *${event.tool_name}* (${timestamp}) - ${event.group_folder}`,
+      );
+    }
+
+    const message = lines.join('\n').slice(0, 3500);
+
+    deps.advanceCursor(cmdMsg.timestamp);
+    await deps.setTyping(false);
+    await deps.sendMessage(message);
+
+    return { handled: true, success: true };
+  } catch (err) {
+    logger.error({ err }, 'Failed to fetch tool activity');
+    await deps.setTyping(false);
+    await deps.sendMessage('/activity failed. Could not retrieve tool events.');
+    return { handled: true, success: false };
+  }
+}
+
+function getToolEmoji(toolName: string): string {
+  const emojiMap: Record<string, string> = {
+    Bash: '🔧',
+    Read: '📖',
+    Write: '✍️',
+    Edit: '✏️',
+    Grep: '🔍',
+    Glob: '📁',
+    Task: '🤖',
+    WebFetch: '🌐',
+    WebSearch: '🔎',
+    Skill: '⚡',
+    AskUserQuestion: '❓',
+  };
+  return emojiMap[toolName] ?? '🔨';
 }
 
 async function handleClear(
