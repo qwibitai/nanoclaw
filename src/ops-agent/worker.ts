@@ -26,6 +26,7 @@ import {
   _resetForTest as _resetConfigForTest,
 } from './dispatch-config.js';
 import { createCorrelationLogger, logger } from '../logger.js';
+import { StreamToolLogger } from '../stream-tool-logger.js';
 
 // --- Configuration ---
 
@@ -144,6 +145,8 @@ export function buildCliArgs(config: ResolvedConfig, prompt: string): string[] {
     default:
       return [
         '--print',
+        '--output-format',
+        'stream-json',
         '--dangerously-skip-permissions',
         ...(config.model ? ['--model', config.model] : []),
         prompt,
@@ -155,6 +158,7 @@ export function buildCliArgs(config: ResolvedConfig, prompt: string): string[] {
  * Execute an ops task via the configured CLI.
  * Uses dispatch-config for provider/model when available, falls back to env vars.
  * Returns { result, error } where result is stdout and error is set on failure.
+ * Logs tool call events to the database when using stream-json output.
  */
 export async function executeTask(
   prompt: string,
@@ -164,6 +168,7 @@ export async function executeTask(
   activeAbort = abort;
 
   const config = getEffectiveConfig();
+  const toolLogger = new StreamToolLogger('ops-agent');
 
   return new Promise((resolve) => {
     const args = buildCliArgs(config, prompt);
@@ -182,8 +187,23 @@ export async function executeTask(
 
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
+    let stdoutBuffer = '';
 
-    proc.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdoutChunks.push(chunk);
+
+      // Parse stream-json lines for tool events (Claude provider only)
+      if (config.provider === 'claude') {
+        stdoutBuffer += chunk.toString('utf-8');
+        const lines = stdoutBuffer.split('\n');
+        stdoutBuffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          toolLogger.processLine(line);
+        }
+      }
+    });
+
     proc.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
 
     const timer = setTimeout(() => {
@@ -193,6 +213,11 @@ export async function executeTask(
     proc.on('close', (code) => {
       clearTimeout(timer);
       activeAbort = null;
+
+      // Process any remaining buffered line
+      if (stdoutBuffer && config.provider === 'claude') {
+        toolLogger.processLine(stdoutBuffer);
+      }
 
       const stdout = Buffer.concat(stdoutChunks).toString('utf-8').trim();
       const stderr = Buffer.concat(stderrChunks).toString('utf-8').trim();
