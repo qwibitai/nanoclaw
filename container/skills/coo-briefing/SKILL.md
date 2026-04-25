@@ -17,6 +17,7 @@ Generate the daily COO Briefing for all 12 Proper Hospitality properties. Output
 | Snowflake ALICE | `DUETTO_UPLOAD.RAW.GLITCH_REPORTS_RAW` | Guest glitches, compensation |
 | Snowflake Revinate | `CORE_REVINATE.RAW_API.RAW_REVIEWS` (NOT PROD -- RAW is 6x more data + current) | Guest review scores, sub-ratings from RAW_JSON |
 | Snowflake Duetto Pace | `DUETTO_UPLOAD.RAW.DUETTO_BUDGET_VS_PY` | OTB pace vs STLY/Forecast/Budget |
+| Snowflake Lighthouse | `DUETTO_UPLOAD.RAW.LIGHTHOUSE_RATES` | Rate positioning vs comp set, OTB%, market demand, events (next 30 days) |
 | Toast POS API | `/workspace/project/scripts/toast/scripts/toast_api.py` | F&B revenue by outlet |
 
 ## Property Reference
@@ -58,6 +59,7 @@ ls $CACHE_DIR/manifest.json 2>/dev/null && echo "CACHE HIT" || echo "CACHE MISS"
 | ALICE Glitches | `$CACHE_DIR/snowflake/alice.json` |
 | Revinate Reviews | `$CACHE_DIR/snowflake/revinate.json` |
 | Duetto Pace | `$CACHE_DIR/snowflake/duetto_pace.json` |
+| Lighthouse Rates | `$CACHE_DIR/snowflake/lighthouse.json` |
 | Toast F&B | `$CACHE_DIR/toast/sales_summary.csv` |
 
 Read cached files with:
@@ -94,7 +96,7 @@ If yesterday's cache does not exist for a section, fall back to full mode for th
 - All section headers: dark font, bold, clearly readable (never light gray)
 - Each hotel: FULL NAME as header (e.g., "Santa Monica Proper Hotel" not "SMP")
 - Every data section: full-width card, NO two-column layout
-- Layout order per hotel: P&L > STR > Duetto Pace > ALICE > Revinate > Toast F&B > COO Actions
+- Layout order per hotel: P&L > STR > Duetto Pace > Lighthouse > ALICE > Revinate > Toast F&B > COO Actions
 - CSS classes: ALICE = `section-card alice-card` (amber), Revinate = `section-card revinate-card` (green)
 - **Color rule: use black as the default text color for all numbers.** Use red ONLY for negative variances or negative trends. Use green ONLY for positive variances or positive trends. Never color a number red or green just because it is large or small -- only based on direction of variance.
 
@@ -234,7 +236,34 @@ HOTEL_CODE mapping in `references/property_mapping.json`.
 
 **Daily mode:** All three segments (Total, Transient, Group), current month only. Show OTB rooms and OTB revenue per segment. Load yesterday's cached duetto_pace.json and compute delta vs today: "+X rooms / +$XK OTB vs yesterday" per segment. Flag if OTB revenue delta > 5% in either direction. All three segments appear every day, not just Mondays.
 
-### 4. ALICE Glitches (Snowflake)
+### 4. Lighthouse Rate Shopper (Snowflake)
+
+Table: `DUETTO_UPLOAD.RAW.LIGHTHOUSE_RATES`. Refreshes daily at ~5:20am. Use cached file `$CACHE_DIR/snowflake/lighthouse.json` (contains LOS=1, IS_OWN_HOTEL=TRUE rows only, next 30 days).
+
+Show a rate positioning table for the next 14 days (rows = each date):
+
+| Date | Day | Own Rate | Median Comp | Rank | My OTB% | Mkt OTB% | Demand% | Events |
+|---|---|---|---|---|---|---|---|---|
+
+Column notes:
+- **Own Rate:** `OWN_RATE` -- if null, show "Min Stay" (means LOS2 restriction in effect)
+- **Median Comp:** `MEDIAN_COMPSET_RATE`
+- **Rank:** `COMPSET_PRICE_RANK` e.g. "3 of 9" (1=cheapest in comp set). "LOS2" = min stay, "Sold out" = own hotel sold out
+- **My OTB%:** `MY_OTB_PCT` -- own hotel occupancy on the books
+- **Mkt OTB%:** `MARKET_OTB_PCT` -- comp set average OTB
+- **Demand%:** `MARKET_DEMAND_PCT` -- Lighthouse market demand score
+- **Events:** `EVENTS` (truncate to 40 chars if long); show `HOLIDAYS` if set
+
+**Flag these situations in the COO Action Items:**
+- Ranked last or near-last (e.g., "8 of 9", "9 of 9") on a date where Demand% > 50 -- priced too high vs comp
+- My OTB% significantly below Mkt OTB% (> 15 pts gap) on a high-demand date -- losing occupancy to comp set
+- Any date in next 7 days where OWN_SOLD_OUT = true -- sold out, check for walkability
+- Events with high demand (Demand% > 70) where rank is poor -- missed opportunity
+
+**Daily mode:** Same table, next 7 days only instead of 14. Events column always shown.
+
+### 5. ALICE Glitches (Snowflake)
+
 
 Table: `GLITCH_REPORTS_RAW`. Dates are text "MMMM DD, YYYY", parse with `TRY_TO_DATE(DATE, 'MMMM DD, YYYY')`.
 
@@ -261,7 +290,7 @@ Comp formula: `TRY_TO_NUMBER(REPLACE(REPLACE(COMPENSATION,'$',''),',',''))`
 
 Always show data regardless of staleness. If max date is more than 7 days ago, note "(pipeline stale -- as of [date])" in the section header in amber text.
 
-### 5. Revinate (Snowflake)
+### 6. Revinate (Snowflake)
 
 USE THIS TABLE: `CORE_REVINATE.RAW_API.RAW_REVIEWS` (13K+ rows, current through today).
 DO NOT use PROD.FACT_REVIEWS (only 2K rows, stale at Feb 10).
@@ -348,7 +377,7 @@ Flag avg rating < 4.0 in red. This data is CURRENT -- no staleness disclaimer ne
 
 **Daily mode:** Always show the full platform ratings table (Google, Booking.com, Expedia, TripAdvisor with MTD/YTD avg and TripAdvisor rank) -- same as full mode. Additionally show new reviews since yesterday: count and avg rating for reviews where DATE_REVIEW >= yesterday. If zero new reviews, show "0 new reviews today" below the platform table. The platform ratings table appears every day, not just Mondays.
 
-### 6. Toast F&B Revenue (Toast POS API)
+### 7. Toast F&B Revenue (Toast POS API)
 
 IMPORTANT: You MUST run this section. Do NOT skip it.
 
@@ -397,7 +426,7 @@ This gives Gabe full F&B visibility by outlet. Do NOT truncate to top 3 -- show 
 3. **3-5 COO Action Items** at bottom of each hotel section. Data-driven, priority-sorted. Thresholds:
    - STR: Total RevPAR Index R28 < 65 = critical, < 85 = alert, < 95 = watch
    - Duetto: Fcst vs Budget < -7% = alert, < -5% = watch
-   - Lighthouse: vs comp < -20% = alert, OTB < 30% with high comp OTB = alert
+   - Lighthouse: ranked last/near-last on Demand% > 50 date = alert. My OTB% > 15pts below Mkt OTB% on high-demand date = alert. Sold out in next 7 days = flag.
    - ALICE: flag trend spikes only (a glitch TYPE spiking 2x vs prior month baseline). Do NOT flag high total volume -- volume is encouraged. Individual comp > $500 = flag.
    - Revinate: avg < 3.8 = critical, < 4.1 = alert, < 4.3 = watch
    If fewer than 3 anomalies, pad with positive observations.

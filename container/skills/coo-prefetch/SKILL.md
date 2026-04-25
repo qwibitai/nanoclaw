@@ -198,6 +198,31 @@ GROUP BY 1,2,3,4
 ORDER BY location, year, month, status
 ```
 
+### 3h. Lighthouse Rate Shopper -- next 30 days, all hotels
+Output: `$PREFETCH_DIR/snowflake/lighthouse.json`
+```sql
+SELECT
+  HOTEL_NAME,
+  STAY_DATE,
+  DAY_OF_WEEK,
+  OWN_RATE,
+  OWN_SOLD_OUT,
+  MEDIAN_COMPSET_RATE,
+  COMPSET_PRICE_RANK,
+  ROUND(MY_OTB * 100, 1) AS MY_OTB_PCT,
+  ROUND(MARKET_OTB * 100, 1) AS MARKET_OTB_PCT,
+  ROUND(MARKET_DEMAND * 100, 1) AS MARKET_DEMAND_PCT,
+  EVENTS,
+  HOLIDAYS
+FROM DUETTO_UPLOAD.RAW.LIGHTHOUSE_RATES
+WHERE SNAPSHOT_DATE = CURRENT_DATE
+  AND LOS = 1
+  AND IS_OWN_HOTEL = TRUE
+  AND STAY_DATE >= CURRENT_DATE
+  AND STAY_DATE < DATEADD(day, 30, CURRENT_DATE)
+ORDER BY HOTEL_NAME, STAY_DATE
+```
+
 ## Step 4: Write Manifest
 
 Write this LAST, only after all steps complete. Its presence is the signal that tells the COO briefing the cache is valid.
