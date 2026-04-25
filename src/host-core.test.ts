@@ -23,6 +23,8 @@ import {
   sessionDir,
   inboundDbPath,
   outboundDbPath,
+  readOutboxFiles,
+  clearOutbox,
 } from './session-manager.js';
 import { getSession, findSession } from './db/sessions.js';
 import type { InboundEvent } from './channels/adapter.js';
@@ -106,6 +108,58 @@ describe('session manager', () => {
     expect(outTables.map((t) => t.name)).toContain('messages_out');
     expect(outTables.map((t) => t.name)).toContain('processing_ack');
     outDb.close();
+  });
+
+  it('should reject outbound attachment filenames that escape the message outbox', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const dir = sessionDir('ag-1', 'sess-test');
+    const msgOutbox = path.join(dir, 'outbox', 'msg-1');
+    fs.mkdirSync(msgOutbox, { recursive: true });
+
+    const outside = path.join(TEST_DIR, 'outside.txt');
+    fs.writeFileSync(outside, 'outside secret');
+
+    expect(readOutboxFiles('ag-1', 'sess-test', 'msg-1', ['../../../../../outside.txt'])).toBeUndefined();
+  });
+
+  it('should reject outbound attachment symlinks that escape the message outbox', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const dir = sessionDir('ag-1', 'sess-test');
+    const msgOutbox = path.join(dir, 'outbox', 'msg-1');
+    fs.mkdirSync(msgOutbox, { recursive: true });
+
+    const outside = path.join(TEST_DIR, 'outside.txt');
+    fs.writeFileSync(outside, 'outside secret');
+    fs.symlinkSync('../../../../../outside.txt', path.join(msgOutbox, 'safe-name.txt'));
+
+    expect(readOutboxFiles('ag-1', 'sess-test', 'msg-1', ['safe-name.txt'])).toBeUndefined();
+  });
+
+  it('should not recursively delete outside the outbox for unsafe message ids', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const victimDir = path.join(TEST_DIR, 'victim-dir');
+    fs.mkdirSync(victimDir, { recursive: true });
+    fs.writeFileSync(path.join(victimDir, 'keep.txt'), 'do not delete');
+
+    clearOutbox('ag-1', 'sess-test', '../../../../victim-dir');
+
+    expect(fs.existsSync(path.join(victimDir, 'keep.txt'))).toBe(true);
+  });
+
+  it('should still read and clear normal basename outbox files', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const dir = sessionDir('ag-1', 'sess-test');
+    const msgOutbox = path.join(dir, 'outbox', 'msg-1');
+    fs.mkdirSync(msgOutbox, { recursive: true });
+    fs.writeFileSync(path.join(msgOutbox, 'result.txt'), 'ok');
+
+    const files = readOutboxFiles('ag-1', 'sess-test', 'msg-1', ['result.txt']);
+    expect(files).toHaveLength(1);
+    expect(files?.[0]?.filename).toBe('result.txt');
+    expect(files?.[0]?.data.toString()).toBe('ok');
+
+    clearOutbox('ag-1', 'sess-test', 'msg-1');
+    expect(fs.existsSync(msgOutbox)).toBe(false);
   });
 
   it('should resolve to existing session (shared mode)', () => {
