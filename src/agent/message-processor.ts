@@ -20,6 +20,26 @@ import { buildMcpRuntimeConfig } from './mcp-runtime.js';
 
 export { buildMcpRuntimeConfig };
 
+/** Compute the start of the current daily budget period (epoch ms). */
+function getDailyPeriodStart(resetHour: number): number {
+  const now = new Date();
+  const start = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      resetHour,
+      0,
+      0,
+      0,
+    ),
+  );
+  if (start.getTime() > now.getTime()) {
+    start.setUTCDate(start.getUTCDate() - 1);
+  }
+  return start.getTime();
+}
+
 function hasWakeTrigger(
   messages: Array<{ content: string; sender: string; is_from_me?: boolean }>,
   chatJid: string,
@@ -136,6 +156,11 @@ export class MessageProcessor {
       },
       'Processing messages',
     );
+
+    // ── Budget enforcement ───────────────────────���────────────────
+    const budgetBlocked = await this.checkAndEnforceBudget(chatJid);
+    if (budgetBlocked) return false;
+    // ─────────────────────────────────────────────────────────────
 
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     const resetIdleTimer = () => {
@@ -320,6 +345,129 @@ export class MessageProcessor {
     }
 
     return true;
+  }
+
+  /**
+   * Check whether this group's token budget is exceeded or warning-level.
+   * Returns true if the agent should be blocked (budget exceeded), false otherwise.
+   * Emits 'budget.exceeded' or 'budget.warning' events as appropriate.
+   * Sends a user-facing message when pausing.
+   */
+  private async checkAndEnforceBudget(chatJid: string): Promise<boolean> {
+    const config = this.ctx.db.getBudgetConfig(chatJid);
+    if (
+      !config ||
+      (config.daily_limit_usd == null && config.total_limit_usd == null)
+    ) {
+      return false; // no budget configured
+    }
+
+    const state = this.ctx.db.getBudgetState(chatJid);
+    const now = new Date().toISOString();
+
+    // If already paused, block immediately.
+    if (state.paused) {
+      this.ctx.emit('budget.exceeded', {
+        agentId: this.ctx.id,
+        jid: chatJid,
+        limitType: state.paused_reason === 'total_limit' ? 'total' : 'daily',
+        limitUsd:
+          state.paused_reason === 'total_limit'
+            ? (config.total_limit_usd ?? 0)
+            : (config.daily_limit_usd ?? 0),
+        usedUsd: 0,
+        timestamp: now,
+      });
+      const channel = findChannel(this.channelMgr.channelArray, chatJid);
+      await channel?.sendMessage?.(
+        chatJid,
+        'Agent paused: token budget exceeded. Resume from Dune settings.',
+      );
+      return true;
+    }
+
+    const periodStart = getDailyPeriodStart(config.reset_hour);
+    const dailyCost = this.ctx.db.getDailyUsageUsd(chatJid, periodStart);
+    const totalCost = this.ctx.db.getTotalUsageUsd(chatJid);
+
+    // Check hard limits.
+    if (
+      (config.daily_limit_usd != null && dailyCost >= config.daily_limit_usd) ||
+      (config.total_limit_usd != null && totalCost >= config.total_limit_usd)
+    ) {
+      const isDaily =
+        config.daily_limit_usd != null && dailyCost >= config.daily_limit_usd;
+      const limitType: 'daily' | 'total' = isDaily ? 'daily' : 'total';
+      const limitUsd = isDaily
+        ? config.daily_limit_usd!
+        : config.total_limit_usd!;
+      const usedUsd = isDaily ? dailyCost : totalCost;
+
+      this.ctx.db.setBudgetPaused(
+        chatJid,
+        `${limitType}_limit` as 'daily_limit' | 'total_limit',
+      );
+      this.ctx.emit('budget.exceeded', {
+        agentId: this.ctx.id,
+        jid: chatJid,
+        limitType,
+        limitUsd,
+        usedUsd,
+        timestamp: now,
+      });
+
+      const channel = findChannel(this.channelMgr.channelArray, chatJid);
+      await channel?.sendMessage?.(
+        chatJid,
+        `Agent paused: ${limitType} token budget exceeded ($${usedUsd.toFixed(4)} of $${limitUsd.toFixed(2)} used). Resume from Dune settings.`,
+      );
+
+      logger.warn(
+        { chatJid, limitType, limitUsd, usedUsd, agent: this.ctx.name },
+        'Budget exceeded — agent paused',
+      );
+      return true;
+    }
+
+    // Check warning threshold (80%).
+    const warnDaily =
+      config.daily_limit_usd != null &&
+      dailyCost >= 0.8 * config.daily_limit_usd;
+    const warnTotal =
+      config.total_limit_usd != null &&
+      totalCost >= 0.8 * config.total_limit_usd;
+
+    if (warnDaily || warnTotal) {
+      const isDaily = warnDaily;
+      const limitType: 'daily' | 'total' = isDaily ? 'daily' : 'total';
+      const limitUsd = isDaily
+        ? config.daily_limit_usd!
+        : config.total_limit_usd!;
+      const usedUsd = isDaily ? dailyCost : totalCost;
+      const pctUsed = usedUsd / limitUsd;
+
+      this.ctx.emit('budget.warning', {
+        agentId: this.ctx.id,
+        jid: chatJid,
+        pctUsed,
+        limitType,
+        limitUsd,
+        usedUsd,
+        timestamp: now,
+      });
+
+      logger.info(
+        {
+          chatJid,
+          limitType,
+          pctUsed: Math.round(pctUsed * 100),
+          agent: this.ctx.name,
+        },
+        'Budget warning — approaching limit',
+      );
+    }
+
+    return false; // proceed normally
   }
 
   /** Execute agent in a container for the given group. */
