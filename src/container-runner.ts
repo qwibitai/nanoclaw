@@ -434,6 +434,13 @@ async function buildContainerArgs(
     }
   }
 
+  // Per-group env from container.json — overrides provider defaults.
+  if (containerConfig.env) {
+    for (const [key, value] of Object.entries(containerConfig.env)) {
+      args.push('-e', `${key}=${value}`);
+    }
+  }
+
   // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls
   // are routed through the agent vault for credential injection.
   try {
