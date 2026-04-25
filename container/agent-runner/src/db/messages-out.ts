@@ -80,8 +80,11 @@ export function writeMessageOut(msg: WriteMessageOut): number {
  * Look up a message's platform ID by seq number.
  * Searches both inbound and outbound DBs since seq spans both.
  *
- * For inbound messages, the Chat SDK message ID is already the platform message ID
- * (e.g., "6037840640:42" for Telegram).
+ * For inbound chat-sdk messages, the column `id` is suffixed with the agent
+ * group id to keep rows unique across agent groups (e.g.
+ * "8236653927:118:ag-XXXX"). The chat-sdk adapter expects the original 2-part
+ * composite ("8236653927:118") for edit / addReaction / etc., which is preserved
+ * verbatim in the content JSON's `id` field — read from there.
  *
  * For outbound messages, the internal ID (msg-xxx) won't work for edits/reactions.
  * Instead, look up the platform_message_id from the delivered table (host writes this
@@ -90,11 +93,20 @@ export function writeMessageOut(msg: WriteMessageOut): number {
 export function getMessageIdBySeq(seq: number): string | null {
   const inbound = getInboundDb();
 
-  // Inbound messages: ID is already the platform message ID
-  const inRow = inbound.prepare('SELECT id FROM messages_in WHERE seq = ?').get(seq) as
-    | { id: string }
-    | undefined;
-  if (inRow) return inRow.id;
+  const inRow = inbound
+    .prepare('SELECT id, kind, content FROM messages_in WHERE seq = ?')
+    .get(seq) as { id: string; kind: string; content: string } | undefined;
+  if (inRow) {
+    if (inRow.kind === 'chat-sdk') {
+      try {
+        const parsed = JSON.parse(inRow.content) as { id?: string };
+        if (typeof parsed.id === 'string' && parsed.id.length > 0) return parsed.id;
+      } catch {
+        /* fall through to column id */
+      }
+    }
+    return inRow.id;
+  }
 
   // Outbound messages: look up platform message ID from delivered table
   const outRow = getOutboundDb().prepare('SELECT id FROM messages_out WHERE seq = ?').get(seq) as
