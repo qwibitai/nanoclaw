@@ -53,8 +53,10 @@ createMessagingGroupAgent({
   id: 'mga-chan',
   messaging_group_id: 'mg-chan',
   agent_group_id: 'ag-chan',
-  trigger_rules: null,
-  response_scope: 'all',
+  engage_mode: 'pattern',
+  engage_pattern: '.',
+  sender_scope: 'all',
+  ignored_message_policy: 'drop',
   session_mode: 'shared',
   priority: 0,
   created_at: new Date().toISOString(),
@@ -105,7 +107,15 @@ registerChannelAdapter('mock', { factory: () => mockAdapter });
 
 // Init channel adapters — this calls setup() with conversation configs from central DB
 await initChannelAdapters((adapter) => ({
-  conversations: [{ platformId: 'mock-channel-1', agentGroupId: 'ag-chan', requiresTrigger: false, sessionMode: 'shared' }],
+  conversations: [
+    {
+      platformId: 'mock-channel-1',
+      agentGroupId: 'ag-chan',
+      engageMode: 'pattern',
+      engagePattern: '.',
+      sessionMode: 'shared',
+    },
+  ],
   onInbound(platformId, threadId, message) {
     routeInbound({
       channelType: adapter.channelType,

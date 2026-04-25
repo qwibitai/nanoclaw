@@ -1,12 +1,11 @@
 ---
 name: add-emacs
-description: Add Emacs as a channel. Opens an interactive chat buffer and org-mode integration so you can talk to NanoClaw from within Emacs (Doom, Spacemacs, or vanilla). Uses a local HTTP bridge — no bot token or external service needed.
+description: Add Emacs as a channel. Opens an interactive chat buffer and org-mode integration so you can talk to NanoClaw from within Emacs (Doom, Spacemacs, or vanilla). Local HTTP bridge — no bot token or external service needed.
 ---
 
 # Add Emacs Channel
 
-This skill adds Emacs support to NanoClaw, then walks through interactive setup.
-Works with Doom Emacs, Spacemacs, and vanilla Emacs 27.1+.
+Adds Emacs support via a local HTTP bridge. Works with Doom Emacs, Spacemacs, and vanilla Emacs 27.1+.
 
 ## What you can do with this
 
@@ -15,95 +14,99 @@ Works with Doom Emacs, Spacemacs, and vanilla Emacs 27.1+.
 - **Meeting notes** — send an org agenda entry; get a summary or action item list back as a child node
 - **Draft writing** — send org prose; receive revisions or continuations in place
 - **Research capture** — ask a question directly in your org notes; the answer lands exactly where you need it
-- **Schedule tasks** — ask Andy to set a reminder or create a scheduled NanoClaw task (e.g. "remind me tomorrow to review the PR")
 
-## Phase 1: Pre-flight
+## Install
 
-### Check if already applied
+NanoClaw doesn't ship channels in trunk. This skill copies the Emacs adapter and the Lisp client in from the `channels` branch. Native HTTP bridge — no Chat SDK, no adapter package.
 
-Check if `src/channels/emacs.ts` exists:
+### Pre-flight (idempotent)
 
-```bash
-test -f src/channels/emacs.ts && echo "already applied" || echo "not applied"
-```
+Skip to **Enable** if all of these are already in place:
 
-If it exists, skip to Phase 3 (Setup). The code changes are already in place.
+- `src/channels/emacs.ts` exists
+- `emacs/nanoclaw.el` exists
+- `src/channels/index.ts` contains `import './emacs.js';`
 
-## Phase 2: Apply Code Changes
+Otherwise continue. Every step below is safe to re-run.
 
-### Ensure the upstream remote
-
-```bash
-git remote -v
-```
-
-If an `upstream` remote pointing to `https://github.com/qwibitai/nanoclaw.git` is missing,
-add it:
+### 1. Fetch the channels branch
 
 ```bash
-git remote add upstream https://github.com/qwibitai/nanoclaw.git
+git fetch origin channels
 ```
 
-### Merge the skill branch
+### 2. Copy the adapter and Lisp client
 
 ```bash
-git fetch upstream skill/emacs
-git merge upstream/skill/emacs
+mkdir -p emacs
+git show origin/channels:src/channels/emacs.ts      > src/channels/emacs.ts
+git show origin/channels:src/channels/emacs.test.ts > src/channels/emacs.test.ts
+git show origin/channels:emacs/nanoclaw.el          > emacs/nanoclaw.el
 ```
 
-If there are merge conflicts on `pnpm-lock.yaml`, resolve them by accepting the incoming
-version and continuing:
+### 3. Append the self-registration import
 
-```bash
-git checkout --theirs pnpm-lock.yaml
-git add pnpm-lock.yaml
-git merge --continue
+Append to `src/channels/index.ts` (skip if the line is already present):
+
+```typescript
+import './emacs.js';
 ```
 
-For any other conflict, read the conflicted file and reconcile both sides manually.
-
-This adds:
-- `src/channels/emacs.ts` — `EmacsBridgeChannel` HTTP server (port 8766)
-- `src/channels/emacs.test.ts` — unit tests
-- `emacs/nanoclaw.el` — Emacs Lisp package (`nanoclaw-chat`, `nanoclaw-org-send`)
-- `import './emacs.js'` appended to `src/channels/index.ts`
-
-If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
-
-### Validate code changes
+### 4. Build
 
 ```bash
 pnpm run build
-pnpm exec vitest run src/channels/emacs.test.ts
 ```
 
-Build must be clean and tests must pass before proceeding.
+No npm package to install — the adapter uses only Node builtins (`http`).
 
-## Phase 3: Setup
+## Enable
 
-### Configure environment (optional)
-
-The channel works out of the box with defaults. Add to `.env` only if you need non-defaults:
+The adapter is gated by `EMACS_ENABLED` so the HTTP port isn't opened on hosts that aren't running Emacs. Add to `.env`:
 
 ```bash
-EMACS_CHANNEL_PORT=8766     # default — change if 8766 is already in use
-EMACS_AUTH_TOKEN=<random>   # optional — locks the endpoint to Emacs only
+EMACS_ENABLED=true
+EMACS_CHANNEL_PORT=8766       # optional — change only if 8766 is taken
+EMACS_AUTH_TOKEN=             # optional — set to a random string to lock the endpoint
+EMACS_PLATFORM_ID=default     # optional — only change if you want a non-default chat id
 ```
 
-If you change or add values, sync to the container environment:
+Generate an auth token (recommended even on single-user machines — prevents other local processes from poking the endpoint):
 
 ```bash
-mkdir -p data/env && cp .env data/env/env
+node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
 ```
 
-### Configure Emacs
+## Wire the channel
 
-The `nanoclaw.el` package requires only Emacs 27.1+ built-in libraries (`url`, `json`, `org`) — no package manager setup needed.
+Emacs is a single-user, single-chat channel. One host = one messaging group with `platform_id = "default"`.
+
+### If this is your first agent group
+
+Run `/init-first-agent` — pick **Emacs** as the channel, use any short handle as the "user id" (e.g. your OS username), and the skill will create the agent group, wire the channel, and write a welcome message that the agent delivers back to your Emacs buffer.
+
+### Otherwise — wire to an existing agent group
+
+Run the `register` step directly. The `EMACS_PLATFORM_ID` (default `default`) becomes the messaging group's platform id:
+
+```bash
+pnpm exec tsx setup/index.ts --step register -- \
+  --platform-id "default" --name "Emacs" \
+  --folder "<existing-folder>" --channel "emacs" \
+  --session-mode "agent-shared" \
+  --assistant-name "<existing-assistant-name>"
+```
+
+`agent-shared` puts Emacs messages in the same session as any other channel wired to the same agent group — so a conversation you started in Telegram continues in Emacs. Use `shared` to keep an independent Emacs thread with the same workspace, or a new `--folder` for a dedicated Emacs-only agent.
+
+## Configure Emacs
+
+`nanoclaw.el` needs only Emacs 27.1+ builtins (`url`, `json`, `org`) — no package manager.
 
 AskUserQuestion: Which Emacs distribution are you using?
-- **Doom Emacs** - config.el with map! keybindings
-- **Spacemacs** - dotspacemacs/user-config in ~/.spacemacs
-- **Vanilla Emacs / other** - init.el with global-set-key
+- **Doom Emacs** — `config.el` with `map!` keybindings
+- **Spacemacs** — `dotspacemacs/user-config` in `~/.spacemacs`
+- **Vanilla Emacs / other** — `init.el` with `global-set-key`
 
 **Doom Emacs** — add to `~/.config/doom/config.el` (or `~/.doom.d/config.el`):
 
@@ -117,7 +120,7 @@ AskUserQuestion: Which Emacs distribution are you using?
       :desc "Send org"     "o" #'nanoclaw-org-send)
 ```
 
-Then reload: `M-x doom/reload`
+Reload: `M-x doom/reload`
 
 **Spacemacs** — add to `dotspacemacs/user-config` in `~/.spacemacs`:
 
@@ -129,9 +132,9 @@ Then reload: `M-x doom/reload`
 (spacemacs/set-leader-keys "aNo" #'nanoclaw-org-send)
 ```
 
-Then reload: `M-x dotspacemacs/sync-configuration-layers` or restart Emacs.
+Reload: `M-x dotspacemacs/sync-configuration-layers` or restart Emacs.
 
-**Vanilla Emacs** — add to `~/.emacs.d/init.el` (or `~/.emacs`):
+**Vanilla Emacs** — add to `~/.emacs.d/init.el`:
 
 ```elisp
 ;; NanoClaw — personal AI assistant channel
@@ -141,61 +144,75 @@ Then reload: `M-x dotspacemacs/sync-configuration-layers` or restart Emacs.
 (global-set-key (kbd "C-c n o") #'nanoclaw-org-send)
 ```
 
-Then reload: `M-x eval-buffer` or restart Emacs.
+Reload: `M-x eval-buffer` or restart Emacs.
 
-If `EMACS_AUTH_TOKEN` was set, also add (any distribution):
+Replace `~/src/nanoclaw/emacs/nanoclaw.el` with your actual NanoClaw checkout path.
+
+If `EMACS_AUTH_TOKEN` is set, also add (any distribution):
 
 ```elisp
 (setq nanoclaw-auth-token "<your-token>")
 ```
 
-If `EMACS_CHANNEL_PORT` was changed from the default, also add:
+If you changed `EMACS_CHANNEL_PORT` from the default:
 
 ```elisp
 (setq nanoclaw-port <your-port>)
 ```
 
-### Restart NanoClaw
+## Restart NanoClaw
 
 ```bash
 pnpm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw   # macOS
+# systemctl --user restart nanoclaw                # Linux
 ```
 
-## Phase 4: Verify
+## Verify
 
-### Test the HTTP endpoint
+### HTTP endpoint
 
 ```bash
-curl -s "http://localhost:8766/api/messages?since=0"
+curl -s http://localhost:8766/api/messages?since=0
 ```
 
-Expected: `{"messages":[]}`
-
-If you set `EMACS_AUTH_TOKEN`:
+Expected: `{"messages":[]}`. With an auth token:
 
 ```bash
-curl -s -H "Authorization: Bearer <token>" "http://localhost:8766/api/messages?since=0"
+curl -s -H "Authorization: Bearer <token>" http://localhost:8766/api/messages?since=0
 ```
 
-### Test from Emacs
+### From Emacs
 
 Tell the user:
 
 > 1. Open the chat buffer with your keybinding (`SPC N c`, `SPC a N c`, or `C-c n c`)
-> 2. Type a message and press `RET`
-> 3. A response from Andy should appear within a few seconds
+> 2. Type a message and press `C-c C-c` to send (RET inserts newlines)
+> 3. A response should appear within a few seconds
 >
 > For org-mode: open any `.org` file, position the cursor on a heading, and use `SPC N o` / `SPC a N o` / `C-c n o`
 
-### Check logs if needed
+### Log line
 
-```bash
-tail -f logs/nanoclaw.log
-```
+`tail -f logs/nanoclaw.log` should show `Emacs channel listening` at startup.
 
-Look for `Emacs channel listening` at startup and `Emacs message received` when a message is sent.
+## Channel Info
+
+- **type**: `emacs`
+- **terminology**: Single local buffer. There are no "groups" or separate chats — one host = one chat, addressed by a `platform_id` string (default `default`).
+- **how-to-find-id**: The platform id is whatever you set in `EMACS_PLATFORM_ID` (default `default`). User handles are arbitrary; your OS username or first name is fine (e.g. `emacs:<username>`).
+- **supports-threads**: no
+- **typical-use**: Single developer talking to the assistant from within Emacs, alongside whatever other channel they use (Slack, Telegram, Discord).
+- **default-isolation**: Same agent group as the primary DM, with `session-mode = agent-shared` so a conversation started elsewhere continues in Emacs. Pick a separate folder only if you specifically want an Emacs-only persona.
+
+### Features
+
+- Interactive chat buffer (`nanoclaw-chat`) with markdown → org-mode rendering
+- Org integration (`nanoclaw-org-send`) — sends the current subtree or region; reply lands as a child heading
+- Optional bearer-token auth for the local endpoint
+- Single-user: the adapter exposes exactly one messaging group per host
+
+Not applicable (design): multi-user channels, threads, cold DM initiation, typing indicators, attachments.
 
 ## Troubleshooting
 
@@ -205,38 +222,43 @@ Look for `Emacs channel listening` at startup and `Emacs message received` when 
 Error: listen EADDRINUSE: address already in use :::8766
 ```
 
-Either a stale NanoClaw process is running, or 8766 is taken by another app.
-
-Find and kill the stale process:
+Either a stale NanoClaw is running or another app has the port. Kill stale process or change port:
 
 ```bash
 lsof -ti :8766 | xargs kill -9
+# or set EMACS_CHANNEL_PORT in .env and mirror in Emacs config (nanoclaw-port)
 ```
 
-Or change the port in `.env` (`EMACS_CHANNEL_PORT=8767`) and update `nanoclaw-port` in Emacs config.
+### Adapter not starting
+
+If `grep "Emacs channel listening" logs/nanoclaw.log` returns nothing, check that `EMACS_ENABLED=true` is in `.env` and that the adapter import is present:
+
+```bash
+grep -q '^EMACS_ENABLED=true' .env && echo "enabled" || echo "not enabled"
+grep -q "import './emacs.js'" src/channels/index.ts && echo "imported" || echo "not imported"
+```
 
 ### No response from agent
 
-Check:
-1. NanoClaw is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
-2. Emacs group is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid = 'emacs:default'"`
-3. Logs show activity: `tail -50 logs/nanoclaw.log`
+1. NanoClaw running: `launchctl list | grep nanoclaw` (macOS) / `systemctl --user status nanoclaw` (Linux)
+2. Messaging group wired: `sqlite3 data/v2.db "SELECT mg.platform_id, ag.folder FROM messaging_groups mg JOIN messaging_group_agents mga ON mg.id = mga.messaging_group_id JOIN agent_groups ag ON ag.id = mga.agent_group_id WHERE mg.channel_type = 'emacs'"`
+3. Logs show inbound: `grep 'channel_type=emacs\|Emacs' logs/nanoclaw.log | tail -20`
 
-If the group is not registered, it will be created automatically on the next NanoClaw restart.
+If no messaging group row exists, run the `register` command above.
 
 ### Auth token mismatch (401 Unauthorized)
 
-Verify the token in Emacs matches `.env`:
-
 ```elisp
-;; M-x describe-variable RET nanoclaw-auth-token RET
+M-x describe-variable RET nanoclaw-auth-token RET
 ```
 
-Must exactly match `EMACS_AUTH_TOKEN` in `.env`.
+Must match `EMACS_AUTH_TOKEN` in `.env`. If you didn't set one server-side, clear it in Emacs too:
+
+```elisp
+(setq nanoclaw-auth-token nil)
+```
 
 ### nanoclaw.el not loading
-
-Check the path is correct:
 
 ```bash
 ls ~/src/nanoclaw/emacs/nanoclaw.el
@@ -244,27 +266,9 @@ ls ~/src/nanoclaw/emacs/nanoclaw.el
 
 If NanoClaw is cloned elsewhere, update the `load`/`load-file` path in your Emacs config.
 
-## After Setup
-
-If running `pnpm run dev` while the service is active:
-
-```bash
-# macOS:
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-pnpm run dev
-# When done testing:
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
-
-# Linux:
-# systemctl --user stop nanoclaw
-# pnpm run dev
-# systemctl --user start nanoclaw
-```
-
 ## Agent Formatting
 
-The Emacs bridge converts markdown → org-mode automatically. Agents should
-output standard markdown — **not** org-mode syntax. The conversion handles:
+The Emacs bridge converts markdown → org-mode automatically. Agents should output standard markdown, **not** org-mode syntax:
 
 | Markdown | Org-mode |
 |----------|----------|
@@ -274,16 +278,19 @@ output standard markdown — **not** org-mode syntax. The conversion handles:
 | `` `code` `` | `~code~` |
 | ` ```lang ` | `#+begin_src lang` |
 
-If an agent outputs org-mode directly, bold/italic/etc. will be double-converted
-and render incorrectly.
+If an agent outputs org-mode directly, markers get double-converted and render incorrectly.
 
 ## Removal
 
-To remove the Emacs channel:
+```bash
+rm src/channels/emacs.ts src/channels/emacs.test.ts emacs/nanoclaw.el
+# Remove the `import './emacs.js';` line from src/channels/index.ts
+# Remove EMACS_* lines from .env
+pnpm run build
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw   # macOS
+# systemctl --user restart nanoclaw                # Linux
 
-1. Delete `src/channels/emacs.ts`, `src/channels/emacs.test.ts`, and `emacs/nanoclaw.el`
-2. Remove `import './emacs.js'` from `src/channels/index.ts`
-3. Remove the NanoClaw block from your Emacs config file
-4. Remove Emacs registration from SQLite: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid = 'emacs:default'"`
-5. Remove `EMACS_CHANNEL_PORT` and `EMACS_AUTH_TOKEN` from `.env` if set
-6. Rebuild: `pnpm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `pnpm run build && systemctl --user restart nanoclaw` (Linux)
+# Remove the NanoClaw block from your Emacs config
+# Optionally clean up the messaging group:
+sqlite3 data/v2.db "DELETE FROM messaging_group_agents WHERE messaging_group_id IN (SELECT id FROM messaging_groups WHERE channel_type='emacs'); DELETE FROM messaging_groups WHERE channel_type='emacs';"
+```

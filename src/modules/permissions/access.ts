@@ -1,14 +1,13 @@
 /**
- * Access control (permissions module half of src/access.ts).
+ * Access control.
  *
  * Privilege is user-level, not group-level. A user holds zero or more roles
  * (owner | admin) via `user_roles`, and is optionally "known" in specific
  * agent groups via `agent_group_members`. Admins are implicitly members of
  * the groups they administer.
  *
- * The approver-picking functions (pickApprover, pickApprovalDelivery) stay
- * in src/access.ts for now — they move into the approvals module in the
- * planned PR #7 re-tier.
+ * Approver-picking (`pickApprover`, `pickApprovalDelivery`) lives in the
+ * approvals module — see `src/modules/approvals/primitive.ts`.
  */
 import { isMember } from './db/agent-group-members.js';
 import { isAdminOfAgentGroup, isGlobalAdmin, isOwner } from './db/user-roles.js';

@@ -5,6 +5,11 @@
  * pending_approvals row whose action matches. Each handler mutates the
  * container config, rebuilds/kills the container as needed, and lets the
  * host sweep respawn it on the new image on the next message.
+ *
+ * install_packages: rebuild image + kill container (apt/npm global installs
+ *   must be baked into the image layer).
+ * add_mcp_server: kill container only — bun runs TS directly, so a pure
+ *   MCP wiring change needs nothing more than a process restart.
  */
 import { updateContainerConfig } from '../../container-config.js';
 import { buildAgentGroupImage, killContainer } from '../../container-runner.js';
@@ -24,7 +29,10 @@ export const applyInstallPackages: ApprovalHandler = async ({ session, payload, 
     if (payload.npm) cfg.packages.npm.push(...(payload.npm as string[]));
   });
 
-  const pkgs = [...((payload.apt as string[] | undefined) || []), ...((payload.npm as string[] | undefined) || [])].join(', ');
+  const pkgs = [
+    ...((payload.apt as string[] | undefined) || []),
+    ...((payload.npm as string[] | undefined) || []),
+  ].join(', ');
   log.info('Package install approved', { agentGroupId: session.agent_group_id, userId });
   try {
     await buildAgentGroupImage(session.agent_group_id);
@@ -51,21 +59,9 @@ export const applyInstallPackages: ApprovalHandler = async ({ session, payload, 
     log.info('Container rebuild completed (bundled with install)', { agentGroupId: session.agent_group_id });
   } catch (e) {
     notify(
-      `Packages added to config (${pkgs}) but rebuild failed: ${e instanceof Error ? e.message : String(e)}. Call request_rebuild to retry.`,
+      `Packages added to config (${pkgs}) but rebuild failed: ${e instanceof Error ? e.message : String(e)}. Tell the user — an admin will need to retry the install_packages request or inspect the build logs.`,
     );
     log.error('Bundled rebuild failed after install approval', { agentGroupId: session.agent_group_id, err: e });
-  }
-};
-
-export const applyRequestRebuild: ApprovalHandler = async ({ session, userId, notify }) => {
-  try {
-    await buildAgentGroupImage(session.agent_group_id);
-    killContainer(session.id, 'rebuild applied');
-    notify('Container image rebuilt. Your container will restart with the new image on the next message.');
-    log.info('Container rebuild approved and completed', { agentGroupId: session.agent_group_id, userId });
-  } catch (e) {
-    notify(`Rebuild failed: ${e instanceof Error ? e.message : String(e)}`);
-    log.error('Container rebuild failed', { agentGroupId: session.agent_group_id, err: e });
   }
 };
 

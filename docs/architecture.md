@@ -876,7 +876,7 @@ Messages starting with `/` are checked against three lists:
 - Commands that don't make sense in the NanoClaw context or could cause issues
 - Silently dropped — no error, no forwarding
 
-The command lists are hardcoded in the agent-runner. Admin verification: the host passes `NANOCLAW_ADMIN_USER_IDS` (a comma-separated list of owner + global-admin + scoped-admin user ids for the current agent group, see `src/container-runner.ts`) to the container. The agent-runner membership-tests the inbound `senderId` against that set before forwarding admin commands.
+The command lists are hardcoded in the agent-runner. Admin verification happens host-side before the message ever reaches the container: `src/command-gate.ts` queries `user_roles` (owner / global admin / scoped-admin-of-this-agent-group) and either passes the message through, drops it, or routes it elsewhere. The container has no notion of admin identity — no env var, no DB query, no per-message check.
 
 ### Recurring Tasks
 

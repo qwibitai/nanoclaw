@@ -6,7 +6,11 @@
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 
 import type { ChannelAdapter, OutboundMessage } from '../../channels/adapter.js';
-import { initChannelAdapters, registerChannelAdapter, teardownChannelAdapters } from '../../channels/channel-registry.js';
+import {
+  initChannelAdapters,
+  registerChannelAdapter,
+  teardownChannelAdapters,
+} from '../../channels/channel-registry.js';
 import { closeDb, createAgentGroup, createMessagingGroup, initTestDb, runMigrations } from '../../db/index.js';
 import { canAccessAgentGroup } from './access.js';
 import { addMember, isMember } from './db/agent-group-members.js';
@@ -60,6 +64,7 @@ async function mountMockAdapter(
   await initChannelAdapters(() => ({
     conversations: [],
     onInbound: () => {},
+    onInboundEvent: () => {},
     onMetadata: () => {},
     onAction: () => {},
   }));

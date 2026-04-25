@@ -1,5 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import Database from 'better-sqlite3';
 
@@ -17,58 +19,63 @@ describe('environment detection', () => {
   });
 });
 
-describe('registered groups DB query', () => {
-  let db: Database.Database;
+describe('detectRegisteredGroups', () => {
+  let tempDir: string;
 
   beforeEach(() => {
-    db = new Database(':memory:');
-    db.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
-      jid TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
-      trigger_pattern TEXT NOT NULL,
-      added_at TEXT NOT NULL,
-      container_config TEXT,
-      requires_trigger INTEGER DEFAULT 1
-    )`);
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-env-test-'));
+    fs.mkdirSync(path.join(tempDir, 'data'), { recursive: true });
   });
 
-  it('returns 0 for empty table', () => {
-    const row = db
-      .prepare('SELECT COUNT(*) as count FROM registered_groups')
-      .get() as { count: number };
-    expect(row.count).toBe(0);
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('returns correct count after inserts', () => {
-    db.prepare(
-      `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(
-      '123@g.us',
-      'Group 1',
-      'group-1',
-      '@Andy',
-      '2024-01-01T00:00:00.000Z',
-      1,
-    );
+  it('returns false when no registration state exists', async () => {
+    const { detectRegisteredGroups } = await import('./environment.js');
+    expect(detectRegisteredGroups(tempDir)).toBe(false);
+  });
 
-    db.prepare(
-      `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(
-      '456@g.us',
-      'Group 2',
-      'group-2',
-      '@Andy',
-      '2024-01-01T00:00:00.000Z',
-      1,
-    );
+  it('detects pre-migration registered_groups.json', async () => {
+    const { detectRegisteredGroups } = await import('./environment.js');
+    fs.writeFileSync(path.join(tempDir, 'data', 'registered_groups.json'), '[]');
+    expect(detectRegisteredGroups(tempDir)).toBe(true);
+  });
 
-    const row = db
-      .prepare('SELECT COUNT(*) as count FROM registered_groups')
-      .get() as { count: number };
-    expect(row.count).toBe(2);
+  it('returns false for an empty v2 central DB', async () => {
+    const { detectRegisteredGroups } = await import('./environment.js');
+    const db = new Database(path.join(tempDir, 'data', 'v2.db'));
+    db.exec(`
+      CREATE TABLE agent_groups (id TEXT PRIMARY KEY);
+      CREATE TABLE messaging_group_agents (
+        id TEXT PRIMARY KEY,
+        messaging_group_id TEXT NOT NULL,
+        agent_group_id TEXT NOT NULL
+      );
+    `);
+    db.close();
+
+    expect(detectRegisteredGroups(tempDir)).toBe(false);
+  });
+
+  it('detects wired agent groups in the v2 central DB', async () => {
+    const { detectRegisteredGroups } = await import('./environment.js');
+    const db = new Database(path.join(tempDir, 'data', 'v2.db'));
+    db.exec(`
+      CREATE TABLE agent_groups (id TEXT PRIMARY KEY);
+      CREATE TABLE messaging_group_agents (
+        id TEXT PRIMARY KEY,
+        messaging_group_id TEXT NOT NULL,
+        agent_group_id TEXT NOT NULL
+      );
+    `);
+    db.prepare('INSERT INTO agent_groups (id) VALUES (?)').run('ag-1');
+    db.prepare(
+      'INSERT INTO messaging_group_agents (id, messaging_group_id, agent_group_id) VALUES (?, ?, ?)',
+    ).run('mga-1', 'mg-1', 'ag-1');
+    db.close();
+
+    expect(detectRegisteredGroups(tempDir)).toBe(true);
   });
 });
 

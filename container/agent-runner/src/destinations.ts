@@ -72,8 +72,26 @@ export function findByRouting(
   return row ? rowToEntry(row) : undefined;
 }
 
-/** Generate the system-prompt addendum describing destinations and syntax. */
-export function buildSystemPromptAddendum(): string {
+/**
+ * Generate the system-prompt addendum: agent identity + destination map.
+ *
+ * Identity is injected here (not in the shared CLAUDE.md) because it's
+ * per-agent-group and changes when the operator renames an agent, while
+ * the shared base is identical across all agents.
+ */
+export function buildSystemPromptAddendum(assistantName?: string): string {
+  const sections: string[] = [];
+
+  if (assistantName) {
+    sections.push(['# You are ' + assistantName, '', `Your name is **${assistantName}**. Use it when the channel asks who you are, when introducing yourself, and when signing any message that explicitly calls for a signature.`].join('\n'));
+  }
+
+  sections.push(buildDestinationsSection());
+
+  return sections.join('\n\n');
+}
+
+function buildDestinationsSection(): string {
   const all = getAllDestinations();
 
   if (all.length === 0) {

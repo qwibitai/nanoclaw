@@ -14,6 +14,8 @@ import Database from 'better-sqlite3';
 import { DATA_DIR } from '../src/config.js';
 import { readEnvFile } from '../src/env.js';
 import { log } from '../src/log.js';
+import { pingCliAgent, type PingResult } from './lib/agent-ping.js';
+import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
 import {
   getPlatform,
   getServiceManager,
@@ -29,19 +31,38 @@ export async function run(_args: string[]): Promise<void> {
 
   log.info('Starting verification');
 
-  // 1. Check service status
-  let service = 'not_found';
+  // 1. Check service status + detect checkout mismatch.
+  //
+  // Why the mismatch matters: the host binds `<DATA_DIR>/cli.sock` relative
+  // to the project root it was started from. If the running service is from
+  // a sibling checkout (common for developers with multiple clones), this
+  // repo's `data/cli.sock` won't exist — AGENT_PING would return a
+  // misleading `socket_error`. Surface the mismatch directly instead.
+  let service:
+    | 'not_found'
+    | 'stopped'
+    | 'running'
+    | 'running_other_checkout' = 'not_found';
+  let runningFromPath: string | null = null;
   const mgr = getServiceManager();
+
+  const launchdLabel = getLaunchdLabel(projectRoot);
+  const systemdUnit = getSystemdUnit(projectRoot);
 
   if (mgr === 'launchd') {
     try {
       const output = execSync('launchctl list', { encoding: 'utf-8' });
-      if (output.includes('com.nanoclaw')) {
-        // Check if it has a PID (actually running)
-        const line = output.split('\n').find((l) => l.includes('com.nanoclaw'));
-        if (line) {
-          const pidField = line.trim().split(/\s+/)[0];
-          service = pidField !== '-' && pidField ? 'running' : 'stopped';
+      const line = output.split('\n').find((l) => l.includes(launchdLabel));
+      if (line) {
+        const pidField = line.trim().split(/\s+/)[0];
+        if (pidField !== '-' && pidField) {
+          service = 'running';
+          const pid = Number(pidField);
+          if (Number.isInteger(pid) && pid > 0) {
+            runningFromPath = resolveBinaryScript(pid);
+          }
+        } else {
+          service = 'stopped';
         }
       }
     } catch {
@@ -50,14 +71,26 @@ export async function run(_args: string[]): Promise<void> {
   } else if (mgr === 'systemd') {
     const prefix = isRoot() ? 'systemctl' : 'systemctl --user';
     try {
-      execSync(`${prefix} is-active nanoclaw`, { stdio: 'ignore' });
+      execSync(`${prefix} is-active ${systemdUnit}`, { stdio: 'ignore' });
       service = 'running';
+      try {
+        const pidStr = execSync(
+          `${prefix} show ${systemdUnit} -p MainPID --value`,
+          { encoding: 'utf-8' },
+        ).trim();
+        const pid = Number(pidStr);
+        if (Number.isInteger(pid) && pid > 0) {
+          runningFromPath = resolveBinaryScript(pid);
+        }
+      } catch {
+        // couldn't read MainPID; leave runningFromPath null
+      }
     } catch {
       try {
         const output = execSync(`${prefix} list-unit-files`, {
           encoding: 'utf-8',
         });
-        if (output.includes('nanoclaw')) {
+        if (output.includes(systemdUnit)) {
           service = 'stopped';
         }
       } catch {
@@ -74,26 +107,31 @@ export async function run(_args: string[]): Promise<void> {
         if (raw && Number.isInteger(pid) && pid > 0) {
           process.kill(pid, 0);
           service = 'running';
+          runningFromPath = resolveBinaryScript(pid);
         }
       } catch {
         service = 'stopped';
       }
     }
   }
-  log.info('Service status', { service });
+
+  if (
+    service === 'running' &&
+    runningFromPath &&
+    !isPathInside(runningFromPath, projectRoot)
+  ) {
+    service = 'running_other_checkout';
+  }
+
+  log.info('Service status', { service, runningFromPath });
 
   // 2. Check container runtime
   let containerRuntime = 'none';
   try {
-    execSync('command -v container', { stdio: 'ignore' });
-    containerRuntime = 'apple-container';
+    execSync('docker info', { stdio: 'ignore' });
+    containerRuntime = 'docker';
   } catch {
-    try {
-      execSync('docker info', { stdio: 'ignore' });
-      containerRuntime = 'docker';
-    } catch {
-      // No runtime
-    }
+    // Docker not running
   }
 
   // 3. Check credentials
@@ -180,14 +218,24 @@ export async function run(_args: string[]): Promise<void> {
     mountAllowlist = 'configured';
   }
 
-  // Determine overall status
-  const status =
-    service === 'running' &&
-    credentials !== 'missing' &&
-    anyChannelConfigured &&
-    registeredGroups > 0
-      ? 'success'
-      : 'failed';
+  // 7. End-to-end: ping the CLI agent and confirm it replies. Only run if
+  // everything upstream looks healthy, since a broken socket would just hang.
+  let agentPing: 'ok' | 'no_reply' | 'socket_error' | 'auth_error' | 'skipped' = 'skipped';
+  if (service === 'running' && registeredGroups > 0) {
+    log.info('Pinging CLI agent');
+    agentPing = await pingCliAgent();
+    log.info('Agent ping result', { agentPing });
+  }
+
+  // Determine overall status. A CLI-only install is valid when the local
+  // agent round-trip succeeds; messaging app credentials are optional.
+  const status = determineVerifyStatus({
+    service,
+    credentials,
+    anyChannelConfigured,
+    registeredGroups,
+    agentPing,
+  });
 
   log.info('Verification complete', { status, channelAuth });
 
@@ -199,9 +247,55 @@ export async function run(_args: string[]): Promise<void> {
     CHANNEL_AUTH: JSON.stringify(channelAuth),
     REGISTERED_GROUPS: registeredGroups,
     MOUNT_ALLOWLIST: mountAllowlist,
+    AGENT_PING: agentPing,
     STATUS: status,
     LOG: 'logs/setup.log',
   });
 
   if (status === 'failed') process.exit(1);
+}
+
+export function determineVerifyStatus(input: {
+  service: 'not_found' | 'stopped' | 'running' | 'running_other_checkout';
+  credentials: string;
+  anyChannelConfigured: boolean;
+  registeredGroups: number;
+  agentPing: PingResult | 'skipped';
+}): 'success' | 'failed' {
+  const cliAgentResponds = input.agentPing === 'ok';
+  const hasUsableChannel = input.anyChannelConfigured || cliAgentResponds;
+
+  return input.service === 'running' &&
+    input.credentials !== 'missing' &&
+    hasUsableChannel &&
+    input.registeredGroups > 0 &&
+    (cliAgentResponds || input.agentPing === 'skipped')
+    ? 'success'
+    : 'failed';
+}
+
+/**
+ * Given a PID, resolve the script path the process is executing (i.e. the
+ * first `.js` / `.ts` / `.mjs` arg after `node`). Returns null on any
+ * error — callers should treat null as "couldn't tell" and skip the
+ * mismatch check rather than flag a false positive.
+ */
+function resolveBinaryScript(pid: number): string | null {
+  try {
+    // BSD ps (macOS) and util-linux both honour `-o command=` (full argv,
+    // no header). Node argv: "node /path/to/dist/index.js ...".
+    const out = execSync(`ps -p ${pid} -o command=`, {
+      encoding: 'utf-8',
+    }).trim();
+    const tokens = out.split(/\s+/);
+    const script = tokens.find((t) => /\.(js|mjs|cjs|ts)$/.test(t));
+    return script ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function isPathInside(candidate: string, parent: string): boolean {
+  const rel = path.relative(parent, candidate);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }

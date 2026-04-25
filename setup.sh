@@ -6,9 +6,17 @@ set -euo pipefail
 # This is the only bash script in the setup flow.
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_FILE="$PROJECT_ROOT/logs/setup.log"
 
-mkdir -p "$PROJECT_ROOT/logs"
+# Where verbose bootstrap logs go. nanoclaw.sh captures setup.sh's stdout to
+# the per-step raw log, but legacy code in this script + install-node.sh
+# also calls `log` which writes to a file. Route those to the raw log so
+# they don't contaminate the progression log (logs/setup.log).
+# Default: write to the raw bootstrap log if nanoclaw.sh pointed us there,
+# else fall back to a dedicated bootstrap log (keeps standalone `bash
+# setup.sh` invocations working).
+LOG_FILE="${NANOCLAW_BOOTSTRAP_LOG:-${PROJECT_ROOT}/logs/bootstrap.log}"
+
+mkdir -p "$(dirname "$LOG_FILE")"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [bootstrap] $*" >> "$LOG_FILE"; }
 
@@ -72,19 +80,63 @@ install_deps() {
 
   cd "$PROJECT_ROOT"
 
-  # Enable corepack so `pnpm` shim lands on PATH.
-  log "Enabling corepack"
-  corepack enable >> "$LOG_FILE" 2>&1 || true
+  # Corepack's first-use "Do you want to continue? [Y/n]" prompt would hang
+  # the script since we redirect stdout/stderr to the log file — the prompt
+  # is invisible but corepack still blocks on stdin. Auto-accept.
+  export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
-  # On Linux/WSL with system-wide Node (e.g. apt-installed to /usr/bin),
-  # corepack needs root to symlink /usr/bin/pnpm. Retry with sudo when pnpm
-  # isn't on PATH. macOS Homebrew installs land in a user-writable prefix,
-  # and a sudo retry there would create root-owned shims inside /opt/homebrew
-  # that later break brew — so the retry is Linux-only.
-  if ! command -v pnpm >/dev/null 2>&1 && [ "$PLATFORM" = "linux" ] \
-      && command -v sudo >/dev/null 2>&1; then
-    log "pnpm not on PATH after corepack enable — retrying with sudo"
-    sudo corepack enable >> "$LOG_FILE" 2>&1 || true
+  # Preferred path: enable corepack so `pnpm` shim lands on PATH.
+  if command -v corepack >/dev/null 2>&1; then
+    log "Enabling corepack"
+    corepack enable >> "$LOG_FILE" 2>&1 || true
+
+    # On Linux/WSL with system-wide Node (e.g. apt-installed to /usr/bin),
+    # corepack needs root to symlink /usr/bin/pnpm. macOS Homebrew installs
+    # land in a user-writable prefix, and a sudo retry there would create
+    # root-owned shims inside /opt/homebrew that later break brew — so the
+    # retry is Linux-only.
+    if ! command -v pnpm >/dev/null 2>&1 && [ "$PLATFORM" = "linux" ] \
+        && command -v sudo >/dev/null 2>&1; then
+      log "pnpm not on PATH after corepack enable — retrying with sudo"
+      sudo corepack enable >> "$LOG_FILE" 2>&1 || true
+    fi
+  else
+    log "corepack not available — will fall back to npm-install pnpm"
+  fi
+
+  # Fallback: some Node installs (older nvm, node@22 keg-only, minimal
+  # distro packages) don't include corepack. Install pnpm directly at the
+  # version pinned via package.json's `packageManager` field.
+  if ! command -v pnpm >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    local pinned
+    pinned=$(grep -E '"packageManager"' "$PROJECT_ROOT/package.json" 2>/dev/null \
+      | head -1 \
+      | sed -E 's/.*"pnpm@([^"]+)".*/\1/')
+    [ -z "$pinned" ] && pinned="latest"
+    log "Installing pnpm@${pinned} via npm"
+    npm install -g "pnpm@${pinned}" >> "$LOG_FILE" 2>&1 \
+      || ([ "$PLATFORM" = "linux" ] && command -v sudo >/dev/null 2>&1 \
+            && sudo npm install -g "pnpm@${pinned}" >> "$LOG_FILE" 2>&1) \
+      || true
+  fi
+
+  # `npm install -g` writes to npm's global prefix, which isn't always on the
+  # shell PATH — common on macOS where the user has `npm config set prefix
+  # ~/.npm-global` to avoid sudo, or on Linux where /usr/local/bin isn't in
+  # PATH. Discover the prefix and prepend its bin dir so `command -v pnpm`
+  # sees the new install.
+  if ! command -v pnpm >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    local npm_prefix
+    npm_prefix=$(npm config get prefix 2>/dev/null)
+    if [ -n "$npm_prefix" ] && [ -x "$npm_prefix/bin/pnpm" ]; then
+      export PATH="$npm_prefix/bin:$PATH"
+      log "Prepended npm prefix bin to PATH: $npm_prefix/bin"
+    fi
+  fi
+
+  if ! command -v pnpm >/dev/null 2>&1; then
+    log "pnpm not on PATH after corepack + npm fallback"
+    return
   fi
 
   log "Running pnpm install --frozen-lockfile"
@@ -131,6 +183,16 @@ log "=== Bootstrap started ==="
 detect_platform
 
 check_node
+if [ "$NODE_OK" = "false" ]; then
+  log "Node missing or too old — running setup/install-node.sh"
+  echo "Node not found — installing via setup/install-node.sh"
+  if bash "$PROJECT_ROOT/setup/install-node.sh" 2>&1 | tee -a "$LOG_FILE"; then
+    hash -r 2>/dev/null || true
+    check_node
+  else
+    log "install-node.sh failed"
+  fi
+fi
 install_deps
 check_build_tools
 
@@ -144,11 +206,20 @@ elif [ "$NATIVE_OK" = "false" ]; then
   STATUS="native_failed"
 fi
 
-# Anonymous setup start event (non-blocking, best-effort)
-curl -sS --max-time 3 -X POST https://us.i.posthog.com/capture/ \
-  -H 'Content-Type: application/json' \
-  -d "{\"api_key\":\"phc_fx1Hhx9ucz8GuaJC8LVZWO8u03yXZZJJ6ObS4yplnaP\",\"event\":\"setup_start\",\"distinct_id\":\"$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo unknown)\",\"properties\":{\"platform\":\"$PLATFORM\",\"is_wsl\":\"$IS_WSL\",\"is_root\":\"$IS_ROOT\",\"node_version\":\"$NODE_VERSION\",\"deps_ok\":\"$DEPS_OK\",\"native_ok\":\"$NATIVE_OK\",\"has_build_tools\":\"$HAS_BUILD_TOOLS\"}}" \
-  >/dev/null 2>&1 &
+# Anonymous setup start event (non-blocking, best-effort). Uses the
+# persisted distinct_id from data/install-id so bash-side events and the
+# node-side funnel share one id.
+# shellcheck source=setup/lib/diagnostics.sh
+source "$PROJECT_ROOT/setup/lib/diagnostics.sh"
+ph_event setup_start \
+  platform="$PLATFORM" \
+  is_wsl="$IS_WSL" \
+  is_root="$IS_ROOT" \
+  node_version="$NODE_VERSION" \
+  deps_ok="$DEPS_OK" \
+  native_ok="$NATIVE_OK" \
+  has_build_tools="$HAS_BUILD_TOOLS" \
+  status="$STATUS"
 
 cat <<EOF
 === NANOCLAW SETUP: BOOTSTRAP ===

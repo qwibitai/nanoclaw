@@ -1,15 +1,8 @@
 /**
  * Per-group container config, stored as a plain JSON file at
- * `groups/<folder>/container.json`. Replaces the former
- * `agent_groups.container_config` DB column.
- *
- * Shape:
- *   {
- *     mcpServers:      { [name]: { command, args, env } }
- *     packages:        { apt: string[], npm: string[] }
- *     imageTag?:       string                    // set by buildAgentGroupImage on rebuild
- *     additionalMounts?: Array<{hostPath, containerPath, readonly}>
- *   }
+ * `groups/<folder>/container.json`. Mounted read-only inside the container
+ * at `/workspace/agent/container.json` — the runner reads it at startup but
+ * cannot modify it. Config changes go through the self-mod approval flow.
  *
  * All fields are optional — a missing file or a partial file both resolve
  * to sensible defaults. Writes are atomic-enough (write-then-rename is not
@@ -25,6 +18,10 @@ export interface McpServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  // Optional always-in-context guidance. When set, the host writes the
+  // content to `.claude-fragments/mcp-<name>.md` at spawn and imports it
+  // into the composed CLAUDE.md.
+  instructions?: string;
 }
 
 export interface AdditionalMountConfig {
@@ -38,6 +35,18 @@ export interface ContainerConfig {
   packages: { apt: string[]; npm: string[] };
   imageTag?: string;
   additionalMounts: AdditionalMountConfig[];
+  /** Which skills to enable — array of skill names or "all" (default). */
+  skills: string[] | 'all';
+  /** Agent provider name (e.g. "claude", "opencode"). Default: "claude". */
+  provider?: string;
+  /** Agent group display name (used in transcript archiving). */
+  groupName?: string;
+  /** Assistant display name (used in system prompt / responses). */
+  assistantName?: string;
+  /** Agent group ID — set by the host, read by the runner. */
+  agentGroupId?: string;
+  /** Max messages per prompt. Falls back to code default if unset. */
+  maxMessagesPerPrompt?: number;
 }
 
 function emptyConfig(): ContainerConfig {
@@ -45,6 +54,7 @@ function emptyConfig(): ContainerConfig {
     mcpServers: {},
     packages: { apt: [], npm: [] },
     additionalMounts: [],
+    skills: 'all',
   };
 }
 
@@ -71,6 +81,12 @@ export function readContainerConfig(folder: string): ContainerConfig {
       },
       imageTag: raw.imageTag,
       additionalMounts: raw.additionalMounts ?? [],
+      skills: raw.skills ?? 'all',
+      provider: raw.provider,
+      groupName: raw.groupName,
+      assistantName: raw.assistantName,
+      agentGroupId: raw.agentGroupId,
+      maxMessagesPerPrompt: raw.maxMessagesPerPrompt,
     };
   } catch (err) {
     console.error(`[container-config] failed to parse ${p}: ${String(err)}`);

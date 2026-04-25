@@ -3,8 +3,8 @@ import type { Migration } from './index.js';
 /**
  * `pending_approvals` table — host-side records for any approval-requiring
  * request. Used by:
- *   - install_packages / request_rebuild / add_mcp_server  (session-bound,
- *     `session_id` set, status stays at default 'pending' until handled)
+ *   - install_packages / add_mcp_server  (session-bound, `session_id` set,
+ *     status stays at default 'pending' until handled)
  *   - OneCLI credential approvals from the SDK `configureManualApproval`
  *     callback (session_id may be null, action='onecli_credential').
  *

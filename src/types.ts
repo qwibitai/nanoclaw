@@ -17,6 +17,16 @@ export interface MessagingGroup {
   name: string | null;
   is_group: number; // 0 | 1
   unknown_sender_policy: UnknownSenderPolicy;
+  /**
+   * When set, the owner explicitly denied registering this channel — the
+   * router drops silently and does not re-escalate. Cleared by any explicit
+   * wiring mutation (admin command). See migration 012.
+   *
+   * Optional on the TS type so pre-migration-012 callers that build
+   * MessagingGroup objects in code (fixtures, etc.) don't need to update;
+   * the column itself defaults to NULL in SQLite.
+   */
+  denied_at?: string | null;
   created_at: string;
 }
 
@@ -67,12 +77,23 @@ export interface UserDm {
   resolved_at: string;
 }
 
+export type EngageMode = 'pattern' | 'mention' | 'mention-sticky';
+export type SenderScope = 'all' | 'known';
+export type IgnoredMessagePolicy = 'drop' | 'accumulate';
+
 export interface MessagingGroupAgent {
   id: string;
   messaging_group_id: string;
   agent_group_id: string;
-  trigger_rules: string | null; // JSON: { pattern, mentionOnly, excludeSenders, includeSenders }
-  response_scope: 'all' | 'triggered' | 'allowlisted';
+  engage_mode: EngageMode;
+  /**
+   * Regex source string used when engage_mode='pattern'. `'.'` is the sentinel
+   * for "match every message" (the "always" flavor). Ignored for 'mention' /
+   * 'mention-sticky' modes.
+   */
+  engage_pattern: string | null;
+  sender_scope: SenderScope;
+  ignored_message_policy: IgnoredMessagePolicy;
   session_mode: 'shared' | 'per-thread' | 'agent-shared';
   priority: number;
   created_at: string;

@@ -9,9 +9,15 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$SCRIPT_DIR"
 
-IMAGE_NAME="nanoclaw-agent"
+# Derive the image name from the project root so two NanoClaw installs on the
+# same host don't overwrite each other's `nanoclaw-agent:latest` tag. Matches
+# setup/lib/install-slug.sh + src/install-slug.ts.
+# shellcheck source=../setup/lib/install-slug.sh
+source "$PROJECT_ROOT/setup/lib/install-slug.sh"
+IMAGE_NAME="$(container_image_base)"
 TAG="${1:-latest}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 

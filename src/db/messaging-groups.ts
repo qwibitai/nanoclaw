@@ -37,6 +37,37 @@ export function getMessagingGroupByPlatform(channelType: string, platformId: str
     .get(channelType, platformId) as MessagingGroup | undefined;
 }
 
+/**
+ * Combined lookup for the router's fast-drop path. Returns the messaging
+ * group (if it exists) and a count of wired agents in one query — lets
+ * `routeInbound` short-circuit messages for unwired / unknown channels
+ * with a single DB read instead of four (mg lookup, sender upsert, agents
+ * lookup, dropped_messages insert).
+ *
+ * Returns `null` when no messaging_groups row exists for this channel.
+ * Returns `{ mg, agentCount: 0 }` when the row exists but has no wired
+ * agents. Uses the `UNIQUE(channel_type, platform_id)` index plus the
+ * `UNIQUE(messaging_group_id, agent_group_id)` index for the JOIN — both
+ * covered by existing SQLite auto-indexes from the UNIQUE constraints.
+ */
+export function getMessagingGroupWithAgentCount(
+  channelType: string,
+  platformId: string,
+): { mg: MessagingGroup; agentCount: number } | null {
+  const row = getDb()
+    .prepare(
+      `SELECT mg.*, COUNT(mga.id) AS agent_count
+         FROM messaging_groups mg
+    LEFT JOIN messaging_group_agents mga ON mga.messaging_group_id = mg.id
+        WHERE mg.channel_type = ? AND mg.platform_id = ?
+     GROUP BY mg.id`,
+    )
+    .get(channelType, platformId) as (MessagingGroup & { agent_count: number }) | undefined;
+  if (!row) return null;
+  const { agent_count, ...mg } = row;
+  return { mg: mg as MessagingGroup, agentCount: agent_count };
+}
+
 export function getAllMessagingGroups(): MessagingGroup[] {
   return getDb().prepare('SELECT * FROM messaging_groups ORDER BY name').all() as MessagingGroup[];
 }
@@ -69,6 +100,20 @@ export function deleteMessagingGroup(id: string): void {
   getDb().prepare('DELETE FROM messaging_groups WHERE id = ?').run(id);
 }
 
+/**
+ * Mark a messaging group as denied by the owner (channel-registration flow).
+ * Future mentions on this channel silently drop until an admin explicitly
+ * wires it via `createMessagingGroupAgent`, which implicitly clears the
+ * denied state by making `agentCount > 0` — the router's denied-channel
+ * check sits on the `agentCount === 0` branch.
+ *
+ * Passing null unsets the flag (used by tests or a future "unblock channel"
+ * admin command).
+ */
+export function setMessagingGroupDeniedAt(id: string, deniedAt: string | null): void {
+  getDb().prepare('UPDATE messaging_groups SET denied_at = ? WHERE id = ?').run(deniedAt, id);
+}
+
 // ── Messaging Group Agents ──
 
 /**
@@ -87,8 +132,16 @@ export function deleteMessagingGroup(id: string): void {
 export function createMessagingGroupAgent(mga: MessagingGroupAgent): void {
   getDb()
     .prepare(
-      `INSERT INTO messaging_group_agents (id, messaging_group_id, agent_group_id, trigger_rules, response_scope, session_mode, priority, created_at)
-       VALUES (@id, @messaging_group_id, @agent_group_id, @trigger_rules, @response_scope, @session_mode, @priority, @created_at)`,
+      `INSERT INTO messaging_group_agents (
+         id, messaging_group_id, agent_group_id,
+         engage_mode, engage_pattern, sender_scope, ignored_message_policy,
+         session_mode, priority, created_at
+       )
+       VALUES (
+         @id, @messaging_group_id, @agent_group_id,
+         @engage_mode, @engage_pattern, @sender_scope, @ignored_message_policy,
+         @session_mode, @priority, @created_at
+       )`,
     )
     .run(mga);
 
@@ -160,7 +213,12 @@ export function getMessagingGroupAgent(id: string): MessagingGroupAgent | undefi
 
 export function updateMessagingGroupAgent(
   id: string,
-  updates: Partial<Pick<MessagingGroupAgent, 'trigger_rules' | 'response_scope' | 'session_mode' | 'priority'>>,
+  updates: Partial<
+    Pick<
+      MessagingGroupAgent,
+      'engage_mode' | 'engage_pattern' | 'sender_scope' | 'ignored_message_policy' | 'session_mode' | 'priority'
+    >
+  >,
 ): void {
   const fields: string[] = [];
   const values: Record<string, unknown> = { id };

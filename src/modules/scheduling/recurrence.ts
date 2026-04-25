@@ -13,6 +13,7 @@
  */
 import type Database from 'better-sqlite3';
 
+import { TIMEZONE } from '../../config.js';
 import { log } from '../../log.js';
 import type { Session } from '../../types.js';
 import { clearRecurrence, getCompletedRecurring, insertRecurrence } from './db.js';
@@ -23,7 +24,11 @@ export async function handleRecurrence(inDb: Database.Database, session: Session
   for (const msg of recurring) {
     try {
       const { CronExpressionParser } = await import('cron-parser');
-      const interval = CronExpressionParser.parse(msg.recurrence);
+      // Interpret the cron expression in the user's timezone. v1 did this
+      // (src/v1/task-scheduler.ts:20-49); without it, a task written "0 9 * * *"
+      // by an agent running in a user's local TZ fires at 09:00 UTC instead of
+      // 09:00 user-local.
+      const interval = CronExpressionParser.parse(msg.recurrence, { tz: TIMEZONE });
       const nextRun = interval.next().toISOString();
       const prefix = msg.kind === 'task' ? 'task' : 'msg';
       const newId = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

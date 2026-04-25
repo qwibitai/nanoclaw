@@ -1,9 +1,13 @@
 /**
- * Self-modification MCP tools: install_packages, add_mcp_server, request_rebuild.
+ * Self-modification MCP tools: install_packages, add_mcp_server.
  *
- * All three are fire-and-forget — the tool writes a system action row and
- * returns immediately. The host processes the request (including admin
- * approval) and notifies the agent via a chat message when complete.
+ * Both are fire-and-forget — the tool writes a system action row and returns
+ * immediately. The host processes the request (including admin approval)
+ * and notifies the agent via a chat message when complete. Admin approval
+ * is approval to apply the change: `install_packages` auto-rebuilds the
+ * per-agent image and restarts the container; `add_mcp_server` just
+ * updates `container.json` and restarts (bun runs TS directly — no build
+ * step needed for a pure MCP wiring change).
  *
  * Package names are sanitized here at the tool boundary AND re-validated on
  * the host side (defense in depth).
@@ -36,7 +40,7 @@ export const installPackages: McpToolDefinition = {
   tool: {
     name: 'install_packages',
     description:
-      'Install apt and/or npm packages into YOUR per-agent container image. Requires admin approval; fire-and-forget. After approval, call `request_rebuild` to apply.',
+      'Install apt and/or npm packages into YOUR per-agent container image. Requires admin approval; fire-and-forget. On approval, the image is rebuilt and the container is restarted automatically.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -113,32 +117,4 @@ export const addMcpServer: McpToolDefinition = {
   },
 };
 
-export const requestRebuild: McpToolDefinition = {
-  tool: {
-    name: 'request_rebuild',
-    description:
-      'Rebuild YOUR container image to pick up approved `install_packages` / `add_mcp_server` changes. Requires admin approval; fire-and-forget.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {
-        reason: { type: 'string', description: 'Why the rebuild is needed' },
-      },
-    },
-  },
-  async handler(args) {
-    const requestId = generateId();
-    writeMessageOut({
-      id: requestId,
-      kind: 'system',
-      content: JSON.stringify({
-        action: 'request_rebuild',
-        reason: (args.reason as string) || '',
-      }),
-    });
-
-    log(`request_rebuild: ${requestId}`);
-    return ok(`Rebuild request submitted. You will be notified when admin approves or rejects.`);
-  },
-};
-
-registerTools([installPackages, addMcpServer, requestRebuild]);
+registerTools([installPackages, addMcpServer]);

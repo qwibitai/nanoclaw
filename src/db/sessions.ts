@@ -1,5 +1,5 @@
 import type { PendingApproval, PendingQuestion, Session } from '../types.js';
-import { getDb } from './connection.js';
+import { getDb, hasTable } from './connection.js';
 
 // ── Sessions ──
 
@@ -25,6 +25,31 @@ export function findSession(messagingGroupId: string, threadId: string | null): 
   return getDb()
     .prepare('SELECT * FROM sessions WHERE messaging_group_id = ? AND thread_id IS NULL AND status = ?')
     .get(messagingGroupId, 'active') as Session | undefined;
+}
+
+/**
+ * Session lookup scoped to a specific agent group. Needed when multiple
+ * agents are wired to the same messaging group + thread (fan-out) — the
+ * plain `findSession` would return whichever agent's session happened to
+ * be first and route to the wrong container.
+ */
+export function findSessionForAgent(
+  agentGroupId: string,
+  messagingGroupId: string,
+  threadId: string | null,
+): Session | undefined {
+  if (threadId) {
+    return getDb()
+      .prepare(
+        "SELECT * FROM sessions WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id = ? AND status = 'active'",
+      )
+      .get(agentGroupId, messagingGroupId, threadId) as Session | undefined;
+  }
+  return getDb()
+    .prepare(
+      "SELECT * FROM sessions WHERE agent_group_id = ? AND messaging_group_id = ? AND thread_id IS NULL AND status = 'active'",
+    )
+    .get(agentGroupId, messagingGroupId) as Session | undefined;
 }
 
 /** Find an active session scoped to an agent group (ignoring messaging group). */
@@ -72,10 +97,16 @@ export function deleteSession(id: string): void {
 
 // ── Pending Questions ──
 
-export function createPendingQuestion(pq: PendingQuestion): void {
-  getDb()
+/**
+ * Insert a pending question row. Idempotent: when delivery fails and retries,
+ * the second attempt calls this with the same question_id — without `OR
+ * IGNORE` that would throw UNIQUE and prevent the retry from reaching the
+ * actual send step. Returns true if a new row was inserted.
+ */
+export function createPendingQuestion(pq: PendingQuestion): boolean {
+  const result = getDb()
     .prepare(
-      `INSERT INTO pending_questions (question_id, session_id, message_out_id, platform_id, channel_type, thread_id, title, options_json, created_at)
+      `INSERT OR IGNORE INTO pending_questions (question_id, session_id, message_out_id, platform_id, channel_type, thread_id, title, options_json, created_at)
        VALUES (@question_id, @session_id, @message_out_id, @platform_id, @channel_type, @thread_id, @title, @options_json, @created_at)`,
     )
     .run({
@@ -89,6 +120,7 @@ export function createPendingQuestion(pq: PendingQuestion): void {
       options_json: JSON.stringify(pq.options),
       created_at: pq.created_at,
     });
+  return result.changes > 0;
 }
 
 export function getPendingQuestion(questionId: string): PendingQuestion | undefined {
@@ -106,16 +138,21 @@ export function deletePendingQuestion(questionId: string): void {
 
 // ── Pending Approvals ──
 
+/**
+ * Insert a pending approval row. Idempotent for the same reason as
+ * createPendingQuestion: delivery retries with the same approval_id must not
+ * fail on UNIQUE before the send step gets a chance to succeed.
+ */
 export function createPendingApproval(
   pa: Partial<PendingApproval> &
     Pick<
       PendingApproval,
       'approval_id' | 'request_id' | 'action' | 'payload' | 'created_at' | 'title' | 'options_json'
     >,
-): void {
-  getDb()
+): boolean {
+  const result = getDb()
     .prepare(
-      `INSERT INTO pending_approvals
+      `INSERT OR IGNORE INTO pending_approvals
          (approval_id, session_id, request_id, action, payload, created_at,
           agent_group_id, channel_type, platform_id, platform_message_id, expires_at, status,
           title, options_json)
@@ -134,6 +171,7 @@ export function createPendingApproval(
       status: 'pending',
       ...pa,
     });
+  return result.changes > 0;
 }
 
 export function getPendingApproval(approvalId: string): PendingApproval | undefined {
@@ -167,6 +205,23 @@ export function getAskQuestionRender(
   const a = getDb().prepare('SELECT title, options_json FROM pending_approvals WHERE approval_id = ?').get(id) as
     | { title: string; options_json: string }
     | undefined;
-  if (!a || !a.title) return undefined;
-  return { title: a.title, options: JSON.parse(a.options_json) };
+  if (a?.title) return { title: a.title, options: JSON.parse(a.options_json) };
+
+  // Channel-registration + unknown-sender approvals persist title/options_json
+  // the same way pending_approvals does — just SELECT and return.
+  if (hasTable(getDb(), 'pending_channel_approvals')) {
+    const c = getDb()
+      .prepare('SELECT title, options_json FROM pending_channel_approvals WHERE messaging_group_id = ?')
+      .get(id) as { title: string; options_json: string } | undefined;
+    if (c?.title) return { title: c.title, options: JSON.parse(c.options_json) };
+  }
+
+  if (hasTable(getDb(), 'pending_sender_approvals')) {
+    const s = getDb().prepare('SELECT title, options_json FROM pending_sender_approvals WHERE id = ?').get(id) as
+      | { title: string; options_json: string }
+      | undefined;
+    if (s?.title) return { title: s.title, options: JSON.parse(s.options_json) };
+  }
+
+  return undefined;
 }

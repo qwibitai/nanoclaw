@@ -14,13 +14,13 @@ afterEach(() => {
   closeSessionDb();
 });
 
-function insertMessage(id: string, kind: string, content: object, opts?: { processAfter?: string }) {
+function insertMessage(id: string, kind: string, content: object, opts?: { processAfter?: string; trigger?: 0 | 1 }) {
   getInboundDb()
     .prepare(
-      `INSERT INTO messages_in (id, kind, timestamp, status, process_after, content)
-     VALUES (?, ?, datetime('now'), 'pending', ?, ?)`,
+      `INSERT INTO messages_in (id, kind, timestamp, status, process_after, trigger, content)
+     VALUES (?, ?, datetime('now'), 'pending', ?, ?, ?)`,
     )
-    .run(id, kind, opts?.processAfter ?? null, JSON.stringify(content));
+    .run(id, kind, opts?.processAfter ?? null, opts?.trigger ?? 1, JSON.stringify(content));
 }
 
 describe('formatter', () => {
@@ -81,6 +81,51 @@ describe('formatter', () => {
     const prompt = formatMessages(messages);
     expect(prompt).toContain('A&lt;B');
     expect(prompt).toContain('x &gt; y &amp;&amp; z');
+  });
+});
+
+describe('accumulate gate (trigger column)', () => {
+  it('getPendingMessages returns both trigger=0 and trigger=1 rows', () => {
+    // trigger=0 rides along as context, trigger=1 is the wake-eligible row.
+    // The poll loop's gate depends on this data contract.
+    insertMessage('m1', 'chat', { sender: 'A', text: 'chit chat' }, { trigger: 0 });
+    insertMessage('m2', 'chat', { sender: 'B', text: 'actual mention' }, { trigger: 1 });
+    const messages = getPendingMessages();
+    expect(messages).toHaveLength(2);
+    const byId = Object.fromEntries(messages.map((m) => [m.id, m]));
+    expect(byId.m1.trigger).toBe(0);
+    expect(byId.m2.trigger).toBe(1);
+  });
+
+  it('trigger=0-only batch: gate predicate `some(trigger===1)` is false', () => {
+    insertMessage('m1', 'chat', { sender: 'A', text: 'noise' }, { trigger: 0 });
+    insertMessage('m2', 'chat', { sender: 'B', text: 'more noise' }, { trigger: 0 });
+    const messages = getPendingMessages();
+    // This is the exact predicate the poll loop uses to skip accumulate-only
+    // batches — gate should be false, so the loop sleeps without waking the agent.
+    expect(messages.some((m) => m.trigger === 1)).toBe(false);
+  });
+
+  it('mixed batch: gate is true → loop proceeds, accumulated rows ride along', () => {
+    insertMessage('m1', 'chat', { sender: 'A', text: 'earlier chatter' }, { trigger: 0 });
+    insertMessage('m2', 'chat', { sender: 'B', text: 'the real mention' }, { trigger: 1 });
+    const messages = getPendingMessages();
+    expect(messages.some((m) => m.trigger === 1)).toBe(true);
+    // Both messages are present for the formatter → agent sees the prior context.
+    expect(messages.map((m) => m.id).sort()).toEqual(['m1', 'm2']);
+  });
+
+  it('trigger column defaults to 1 for legacy inserts without explicit value', () => {
+    // The schema default is 1 (see src/db/schema.ts INBOUND_SCHEMA) — existing
+    // rows / tests without the column set are effectively wake-eligible.
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, content)
+         VALUES ('m1', 'chat', datetime('now'), 'pending', '{"text":"hi"}')`,
+      )
+      .run();
+    const [msg] = getPendingMessages();
+    expect(msg.trigger).toBe(1);
   });
 });
 

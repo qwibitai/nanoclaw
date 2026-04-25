@@ -1,5 +1,6 @@
 import { findByRouting } from './destinations.js';
 import type { MessageInRow } from './db/messages-in.js';
+import { TIMEZONE, formatLocalTime } from './timezone.js';
 
 /**
  * Command categories for messages starting with '/'.
@@ -11,7 +12,7 @@ import type { MessageInRow } from './db/messages-in.js';
 export type CommandCategory = 'admin' | 'filtered' | 'passthrough' | 'none';
 
 const ADMIN_COMMANDS = new Set(['/remote-control', '/clear', '/compact', '/context', '/cost', '/files']);
-const FILTERED_COMMANDS = new Set(['/help', '/login', '/logout', '/doctor', '/config']);
+const FILTERED_COMMANDS = new Set(['/help', '/login', '/logout', '/doctor', '/config', '/start']);
 
 export interface CommandInfo {
   category: CommandCategory;
@@ -54,6 +55,17 @@ export function categorizeMessage(msg: MessageInRow): CommandInfo {
   return { category: 'passthrough', command, text, senderId };
 }
 
+/**
+ * Narrow check for /clear — the only command the runner handles directly.
+ * All other command gating (filtered, admin) is done by the host router
+ * before messages reach the container.
+ */
+export function isClearCommand(msg: MessageInRow): boolean {
+  const content = parseContent(msg.content);
+  const text = (content.text || '').trim();
+  return text.toLowerCase().startsWith('/clear');
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractSenderId(msg: MessageInRow, content: any): string | null {
   const raw: string | null = content?.senderId || content?.author?.userId || null;
@@ -92,10 +104,19 @@ export function extractRouting(messages: MessageInRow[]): RoutingContext {
 
 /**
  * Format a batch of messages_in rows into a prompt string.
+ *
+ * Prepends a `<context timezone="<IANA>" />` header so the agent always knows
+ * what timezone it's in — every timestamp it sees in message bodies is the
+ * user's local time, and every time it produces (schedules, suggests) should
+ * be interpreted as local time in that same zone. This header is v1 behavior
+ * (src/v1/router.ts:20-22); dropping it led to misinterpretations where the
+ * agent scheduled tasks for the wrong hour.
+ *
  * Strips routing fields — the agent never sees platform_id, channel_type, thread_id.
  */
 export function formatMessages(messages: MessageInRow[]): string {
-  if (messages.length === 0) return '';
+  const header = `<context timezone="${escapeXml(TIMEZONE)}" />\n`;
+  if (messages.length === 0) return header;
 
   // Group by kind
   const chatMessages = messages.filter((m) => m.kind === 'chat' || m.kind === 'chat-sdk');
@@ -118,7 +139,7 @@ export function formatMessages(messages: MessageInRow[]): string {
     parts.push(...systemMessages.map(formatSystemMessage));
   }
 
-  return parts.join('\n\n');
+  return header + parts.join('\n\n');
 }
 
 function formatChatMessages(messages: MessageInRow[]): string {
@@ -137,9 +158,10 @@ function formatChatMessages(messages: MessageInRow[]): string {
 function formatSingleChat(msg: MessageInRow): string {
   const content = parseContent(msg.content);
   const sender = content.sender || content.author?.fullName || content.author?.userName || 'Unknown';
-  const time = formatTime(msg.timestamp);
+  const time = formatLocalTime(msg.timestamp, TIMEZONE);
   const text = content.text || '';
   const idAttr = msg.seq != null ? ` id="${msg.seq}"` : '';
+  const replyAttr = content.replyTo?.id ? ` reply_to="${escapeXml(String(content.replyTo.id))}"` : '';
   const replyPrefix = formatReplyContext(content.replyTo);
   const attachmentsSuffix = formatAttachments(content.attachments);
 
@@ -154,7 +176,7 @@ function formatSingleChat(msg: MessageInRow): string {
       ? ` from="unknown:${escapeXml(msg.channel_type || '')}:${escapeXml(msg.platform_id || '')}"`
       : '';
 
-  return `<message${idAttr}${fromAttr} sender="${escapeXml(sender)}" time="${time}">${replyPrefix}${escapeXml(text)}${attachmentsSuffix}</message>`;
+  return `<message${idAttr}${fromAttr} sender="${escapeXml(sender)}" time="${escapeXml(time)}"${replyAttr}>${replyPrefix}${escapeXml(text)}${attachmentsSuffix}</message>`;
 }
 
 function formatTaskMessage(msg: MessageInRow): string {
@@ -179,13 +201,22 @@ function formatSystemMessage(msg: MessageInRow): string {
   return `[SYSTEM RESPONSE]\n\nAction: ${content.action || 'unknown'}\nStatus: ${content.status || 'unknown'}\nResult: ${JSON.stringify(content.result || null)}`;
 }
 
+/**
+ * Render the quoted original inside the <message> body.
+ *
+ * Matches v1 format (src/v1/router.ts:10-18): `<quoted_message from="X">Y</quoted_message>`.
+ * Requires BOTH sender and text — if only id is present the reply_to attribute
+ * on the parent <message> carries the link without an inline preview.
+ *
+ * No truncation here (v1 didn't truncate).
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function formatReplyContext(replyTo: any): string {
   if (!replyTo) return '';
-  const sender = replyTo.sender || 'Unknown';
-  const text = replyTo.text || '';
-  const preview = text.length > 100 ? text.slice(0, 100) + '…' : text;
-  return `\n<reply-to sender="${escapeXml(sender)}">${escapeXml(preview)}</reply-to>\n`;
+  const sender = replyTo.sender;
+  const text = replyTo.text;
+  if (!sender || !text) return '';
+  return `\n  <quoted_message from="${escapeXml(sender)}">${escapeXml(text)}</quoted_message>\n`;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -213,15 +244,15 @@ function parseContent(json: string): any {
   }
 }
 
-function formatTime(timestamp: string): string {
-  try {
-    const d = new Date(timestamp);
-    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-  } catch {
-    return timestamp;
-  }
-}
-
 function escapeXml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Strip `<internal>...</internal>` blocks from agent output, then trim.
+ * Ported from v1 (src/v1/router.ts:25-27). Used to remove the agent's
+ * own scratchpad/reasoning before a reply goes out over a channel.
+ */
+export function stripInternalTags(text: string): string {
+  return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }

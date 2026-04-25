@@ -201,7 +201,7 @@ Access layer: `src/db/agent-destinations.ts`.
 
 Two workflows share this table:
 
-- **Session-bound MCP approvals** — `install_packages`, `request_rebuild`, `add_mcp_server`. `session_id` is set.
+- **Session-bound MCP approvals** — `install_packages`, `add_mcp_server`. `session_id` is set.
 - **OneCLI credential approvals** — `session_id` may be NULL; `agent_group_id` + `channel_type` + `platform_id` route the admin card.
 
 ```sql

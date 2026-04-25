@@ -9,9 +9,19 @@ import path from 'path';
 
 import { OneCLI } from '@onecli-sh/sdk';
 
-import { CONTAINER_IMAGE, DATA_DIR, GROUPS_DIR, IDLE_TIMEOUT, ONECLI_URL, TIMEZONE } from './config.js';
+import {
+  CONTAINER_IMAGE,
+  CONTAINER_IMAGE_BASE,
+  CONTAINER_INSTALL_LABEL,
+  DATA_DIR,
+  GROUPS_DIR,
+  ONECLI_API_KEY,
+  ONECLI_URL,
+  TIMEZONE,
+} from './config.js';
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
@@ -27,6 +37,7 @@ import {
   type VolumeMount,
 } from './providers/provider-container-registry.js';
 import {
+  heartbeatPath,
   markContainerRunning,
   markContainerStopped,
   sessionDir,
@@ -34,7 +45,7 @@ import {
 } from './session-manager.js';
 import type { AgentGroup, Session } from './types.js';
 
-const onecli = new OneCLI({ url: ONECLI_URL });
+const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 
 /** Active containers tracked by session ID. */
 const activeContainers = new Map<string, { process: ChildProcess; containerName: string }>();
@@ -96,19 +107,41 @@ async function spawnContainer(session: Session): Promise<void> {
   }
   writeSessionRouting(agentGroup.id, session.id);
 
+  // Read container config once — threaded through provider resolution,
+  // buildMounts, and buildContainerArgs so we don't re-read the file.
+  const containerConfig = readContainerConfig(agentGroup.folder);
+
+  // Ensure container.json has the agent group identity fields the runner needs.
+  // Written at spawn time so the runner can read them from the RO mount.
+  ensureRuntimeFields(containerConfig, agentGroup);
+
   // Resolve the effective provider + any host-side contribution it declares
   // (extra mounts, env passthrough). Computed once and threaded through both
   // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
-  const { provider, contribution } = resolveProviderContribution(session, agentGroup);
+  const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
 
-  const mounts = buildMounts(agentGroup, session, contribution);
+  const mounts = buildMounts(agentGroup, session, containerConfig, contribution);
   const containerName = `nanoclaw-v2-${agentGroup.folder}-${Date.now()}`;
   // OneCLI agent identifier is always the agent group id — stable across
   // sessions and reversible via getAgentGroup() for approval routing.
   const agentIdentifier = agentGroup.id;
-  const args = await buildContainerArgs(mounts, containerName, agentGroup, provider, contribution, agentIdentifier);
+  const args = await buildContainerArgs(
+    mounts,
+    containerName,
+    agentGroup,
+    containerConfig,
+    provider,
+    contribution,
+    agentIdentifier,
+  );
 
   log.info('Spawning container', { sessionId: session.id, agentGroup: agentGroup.name, containerName });
+
+  // Clear any orphan heartbeat from a previous container instance — the
+  // sweep's ceiling check treats a missing file as "fresh spawn, give grace"
+  // (host-sweep.ts line 87). Without this, the stale mtime can trigger an
+  // immediate kill before the new container touches the file itself.
+  fs.rmSync(heartbeatPath(agentGroup.id, session.id), { force: true });
 
   const container = spawn(CONTAINER_RUNTIME_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
@@ -125,22 +158,12 @@ async function spawnContainer(session: Session): Promise<void> {
   // stdout is unused in v2 (all IO is via session DB)
   container.stdout?.on('data', () => {});
 
-  // Idle timeout: kill container after IDLE_TIMEOUT of no activity
-  let idleTimer = setTimeout(() => killContainer(session.id, 'idle timeout'), IDLE_TIMEOUT);
-
-  const resetIdle = () => {
-    clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => killContainer(session.id, 'idle timeout'), IDLE_TIMEOUT);
-  };
-
-  // Reset idle timer when the host detects new messages_out (called by delivery.ts)
-  const entry = activeContainers.get(session.id);
-  if (entry) {
-    (entry as { resetIdle?: () => void }).resetIdle = resetIdle;
-  }
+  // No host-side idle timeout. Stale/stuck detection is driven by the host
+  // sweep reading heartbeat mtime + processing_ack claim age + container_state
+  // (see src/host-sweep.ts). This avoids killing long-running legitimate work
+  // on a wall-clock timer.
 
   container.on('close', (code) => {
-    clearTimeout(idleTimer);
     activeContainers.delete(session.id);
     markContainerStopped(session.id);
     stopTypingRefresh(session.id);
@@ -148,18 +171,11 @@ async function spawnContainer(session: Session): Promise<void> {
   });
 
   container.on('error', (err) => {
-    clearTimeout(idleTimer);
     activeContainers.delete(session.id);
     markContainerStopped(session.id);
     stopTypingRefresh(session.id);
     log.error('Container spawn error', { sessionId: session.id, err });
   });
-}
-
-/** Reset the idle timer for a session's container (called when messages_out are delivered). */
-export function resetContainerIdleTimer(sessionId: string): void {
-  const entry = activeContainers.get(sessionId) as { resetIdle?: () => void } | undefined;
-  entry?.resetIdle?.();
 }
 
 /** Kill a container for a session. */
@@ -175,11 +191,31 @@ export function killContainer(sessionId: string, reason: string): void {
   }
 }
 
+/**
+ * Resolve the provider name for a session using the precedence documented in
+ * the provider-install skills:
+ *
+ *   sessions.agent_provider
+ *     → agent_groups.agent_provider
+ *     → container.json `provider`
+ *     → 'claude'
+ *
+ * Pure so the precedence can be unit-tested without a DB or filesystem.
+ */
+export function resolveProviderName(
+  sessionProvider: string | null | undefined,
+  agentGroupProvider: string | null | undefined,
+  containerConfigProvider: string | null | undefined,
+): string {
+  return (sessionProvider || agentGroupProvider || containerConfigProvider || 'claude').toLowerCase();
+}
+
 function resolveProviderContribution(
   session: Session,
   agentGroup: AgentGroup,
+  containerConfig: import('./container-config.js').ContainerConfig,
 ): { provider: string; contribution: ProviderContainerContribution } {
-  const provider = (session.agent_provider || agentGroup.agent_provider || 'claude').toLowerCase();
+  const provider = resolveProviderName(session.agent_provider, agentGroup.agent_provider, containerConfig.provider);
   const fn = getProviderContainerConfig(provider);
   const contribution = fn
     ? fn({
@@ -194,14 +230,23 @@ function resolveProviderContribution(
 function buildMounts(
   agentGroup: AgentGroup,
   session: Session,
+  containerConfig: import('./container-config.js').ContainerConfig,
   providerContribution: ProviderContainerContribution,
 ): VolumeMount[] {
+  const projectRoot = process.cwd();
+
   // Per-group filesystem state lives forever after first creation. Init is
   // idempotent: it only writes paths that don't already exist, so this call
-  // is a no-op for groups that have spawned before. Pulling in upstream
-  // built-in skill or agent-runner source updates is an explicit operation
-  // (host-mediated tools), not something the spawn path does silently.
+  // is a no-op for groups that have spawned before.
   initGroupFilesystem(agentGroup);
+
+  // Sync skill symlinks based on container.json selection before mounting.
+  const claudeDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id, '.claude-shared');
+  syncSkillSymlinks(claudeDir, containerConfig);
+
+  // Compose CLAUDE.md fresh every spawn from the shared base, enabled skill
+  // fragments, and MCP server instructions. See `claude-md-compose.ts`.
+  composeGroupClaudeMd(agentGroup);
 
   const mounts: VolumeMount[] = [];
   const sessDir = sessionDir(agentGroup.id, session.id);
@@ -210,28 +255,60 @@ function buildMounts(
   // Session folder at /workspace (contains inbound.db, outbound.db, outbox/, .claude/)
   mounts.push({ hostPath: sessDir, containerPath: '/workspace', readonly: false });
 
-  // Agent group folder at /workspace/agent
+  // Agent group folder at /workspace/agent (RW for working files + CLAUDE.local.md)
   mounts.push({ hostPath: groupDir, containerPath: '/workspace/agent', readonly: false });
 
-  // Global memory directory — always read-only. Edits to global config
-  // happen through the approval flow, not by handing one workspace RW.
+  // container.json — nested RO mount on top of RW group dir so the agent
+  // can read its config but cannot modify it.
+  const containerJsonPath = path.join(groupDir, 'container.json');
+  if (fs.existsSync(containerJsonPath)) {
+    mounts.push({ hostPath: containerJsonPath, containerPath: '/workspace/agent/container.json', readonly: true });
+  }
+
+  // Composer-managed CLAUDE.md artifacts — nested RO mounts. These are
+  // regenerated from the shared base + fragments on every spawn; any
+  // agent-side writes would be clobbered, so enforce read-only. Only
+  // CLAUDE.local.md (per-group memory) remains RW via the group-dir mount.
+  // `.claude-shared.md` is a symlink whose target (`/app/CLAUDE.md`) is
+  // already RO-mounted, so writes through it fail regardless — no need for
+  // a nested mount there.
+  const composedClaudeMd = path.join(groupDir, 'CLAUDE.md');
+  if (fs.existsSync(composedClaudeMd)) {
+    mounts.push({ hostPath: composedClaudeMd, containerPath: '/workspace/agent/CLAUDE.md', readonly: true });
+  }
+  const fragmentsDir = path.join(groupDir, '.claude-fragments');
+  if (fs.existsSync(fragmentsDir)) {
+    mounts.push({ hostPath: fragmentsDir, containerPath: '/workspace/agent/.claude-fragments', readonly: true });
+  }
+
+  // Global memory directory — always read-only.
   const globalDir = path.join(GROUPS_DIR, 'global');
   if (fs.existsSync(globalDir)) {
     mounts.push({ hostPath: globalDir, containerPath: '/workspace/global', readonly: true });
   }
 
+  // Shared CLAUDE.md — read-only, imported by the composed entry point via
+  // the `.claude-shared.md` symlink inside the group dir.
+  const sharedClaudeMd = path.join(process.cwd(), 'container', 'CLAUDE.md');
+  if (fs.existsSync(sharedClaudeMd)) {
+    mounts.push({ hostPath: sharedClaudeMd, containerPath: '/app/CLAUDE.md', readonly: true });
+  }
+
   // Per-group .claude-shared at /home/node/.claude (Claude state, settings,
-  // skills — initialized once at group creation, persistent thereafter)
-  const claudeDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id, '.claude-shared');
+  // skill symlinks)
   mounts.push({ hostPath: claudeDir, containerPath: '/home/node/.claude', readonly: false });
 
-  // Per-group agent-runner source at /app/src (initialized once at group
-  // creation, persistent thereafter — agents can modify their runner)
-  const groupRunnerDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id, 'agent-runner-src');
-  mounts.push({ hostPath: groupRunnerDir, containerPath: '/app/src', readonly: false });
+  // Shared agent-runner source — read-only, same code for all groups.
+  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
+  mounts.push({ hostPath: agentRunnerSrc, containerPath: '/app/src', readonly: true });
 
-  // Additional mounts from container config (groups/<folder>/container.json)
-  const containerConfig = readContainerConfig(agentGroup.folder);
+  // Shared skills — read-only, symlinks in .claude-shared/skills/ point here.
+  const skillsSrc = path.join(projectRoot, 'container', 'skills');
+  if (fs.existsSync(skillsSrc)) {
+    mounts.push({ hostPath: skillsSrc, containerPath: '/app/skills', readonly: true });
+  }
+
+  // Additional mounts from container config
   if (containerConfig.additionalMounts && containerConfig.additionalMounts.length > 0) {
     const validated = validateAdditionalMounts(containerConfig.additionalMounts, agentGroup.name);
     mounts.push(...validated);
@@ -245,29 +322,110 @@ function buildMounts(
   return mounts;
 }
 
+/**
+ * Sync skill symlinks in .claude-shared/skills/ to match the container.json
+ * selection. Each symlink points to a container path (/app/skills/<name>)
+ * so it's dangling on the host but valid inside the container.
+ */
+function syncSkillSymlinks(claudeDir: string, containerConfig: import('./container-config.js').ContainerConfig): void {
+  const skillsDir = path.join(claudeDir, 'skills');
+  if (!fs.existsSync(skillsDir)) {
+    fs.mkdirSync(skillsDir, { recursive: true });
+  }
+
+  // Determine desired skill set
+  const projectRoot = process.cwd();
+  const sharedSkillsDir = path.join(projectRoot, 'container', 'skills');
+  let desired: string[];
+  if (containerConfig.skills === 'all') {
+    // Recompute from shared dir — newly-added upstream skills appear automatically
+    desired = fs.existsSync(sharedSkillsDir)
+      ? fs.readdirSync(sharedSkillsDir).filter((e) => {
+          try {
+            return fs.statSync(path.join(sharedSkillsDir, e)).isDirectory();
+          } catch {
+            return false;
+          }
+        })
+      : [];
+  } else {
+    desired = containerConfig.skills;
+  }
+
+  const desiredSet = new Set(desired);
+
+  // Remove symlinks not in the desired set
+  for (const entry of fs.readdirSync(skillsDir)) {
+    const entryPath = path.join(skillsDir, entry);
+    let isSymlink = false;
+    try {
+      isSymlink = fs.lstatSync(entryPath).isSymbolicLink();
+    } catch {
+      continue;
+    }
+    if (isSymlink && !desiredSet.has(entry)) {
+      fs.unlinkSync(entryPath);
+    }
+  }
+
+  // Create symlinks for desired skills (container path targets)
+  for (const skill of desired) {
+    const linkPath = path.join(skillsDir, skill);
+    let exists = false;
+    try {
+      fs.lstatSync(linkPath);
+      exists = true;
+    } catch {
+      /* missing */
+    }
+    if (!exists) {
+      fs.symlinkSync(`/app/skills/${skill}`, linkPath);
+    }
+  }
+}
+
+/**
+ * Ensure container.json has the runtime identity fields the runner needs.
+ * Written at spawn time so they're always current even if the DB values
+ * change (e.g. group rename). Only writes if values differ to avoid
+ * unnecessary file churn.
+ */
+function ensureRuntimeFields(
+  containerConfig: import('./container-config.js').ContainerConfig,
+  agentGroup: AgentGroup,
+): void {
+  let dirty = false;
+  if (containerConfig.agentGroupId !== agentGroup.id) {
+    containerConfig.agentGroupId = agentGroup.id;
+    dirty = true;
+  }
+  if (containerConfig.groupName !== agentGroup.name) {
+    containerConfig.groupName = agentGroup.name;
+    dirty = true;
+  }
+  if (containerConfig.assistantName !== agentGroup.name) {
+    containerConfig.assistantName = agentGroup.name;
+    dirty = true;
+  }
+  if (dirty) {
+    writeContainerConfig(agentGroup.folder, containerConfig);
+  }
+}
+
 async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentGroup: AgentGroup,
+  containerConfig: import('./container-config.js').ContainerConfig,
   provider: string,
   providerContribution: ProviderContainerContribution,
   agentIdentifier?: string,
 ): Promise<string[]> {
-  const args: string[] = ['run', '--rm', '--name', containerName];
+  const args: string[] = ['run', '--rm', '--name', containerName, '--label', CONTAINER_INSTALL_LABEL];
 
-  // Environment
+  // Environment — only vars read by code we don't own.
+  // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
-  args.push('-e', `AGENT_PROVIDER=${provider}`);
-  // Two-DB split: container reads inbound.db, writes outbound.db
-  args.push('-e', 'SESSION_INBOUND_DB_PATH=/workspace/inbound.db');
-  args.push('-e', 'SESSION_OUTBOUND_DB_PATH=/workspace/outbound.db');
-  args.push('-e', 'SESSION_HEARTBEAT_PATH=/workspace/.heartbeat');
-
-  if (agentGroup.name) {
-    args.push('-e', `NANOCLAW_ASSISTANT_NAME=${agentGroup.name}`);
-  }
-  args.push('-e', `NANOCLAW_AGENT_GROUP_ID=${agentGroup.id}`);
-  args.push('-e', `NANOCLAW_AGENT_GROUP_NAME=${agentGroup.name}`);
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {
@@ -276,39 +434,8 @@ async function buildContainerArgs(
     }
   }
 
-  // Users allowed to run admin commands (e.g. /clear) inside this container.
-  // Computed at wake time: owners + global admins + admins scoped to this
-  // agent group. Role changes take effect on next container spawn.
-  //
-  // SQL inlined to keep core independent of the permissions module — we
-  // guard on the `user_roles` table directly. If the permissions module
-  // isn't installed, the table doesn't exist and the set stays empty; the
-  // formatter treats an empty admin set as permissionless mode (every
-  // sender is admin).
-  const adminUserIds = new Set<string>();
-  if (hasTable(getDb(), 'user_roles')) {
-    const db = getDb();
-    const owners = db
-      .prepare("SELECT user_id FROM user_roles WHERE role = 'owner' AND agent_group_id IS NULL")
-      .all() as Array<{ user_id: string }>;
-    const globalAdmins = db
-      .prepare("SELECT user_id FROM user_roles WHERE role = 'admin' AND agent_group_id IS NULL")
-      .all() as Array<{ user_id: string }>;
-    const scopedAdmins = db
-      .prepare("SELECT user_id FROM user_roles WHERE role = 'admin' AND agent_group_id = ?")
-      .all(agentGroup.id) as Array<{ user_id: string }>;
-    for (const r of owners) adminUserIds.add(r.user_id);
-    for (const r of globalAdmins) adminUserIds.add(r.user_id);
-    for (const r of scopedAdmins) adminUserIds.add(r.user_id);
-  }
-  if (adminUserIds.size > 0) {
-    args.push('-e', `NANOCLAW_ADMIN_USER_IDS=${Array.from(adminUserIds).join(',')}`);
-  }
-
   // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls
   // are routed through the agent vault for credential injection.
-  // Must ensureAgent first for non-admin groups, otherwise applyContainerConfig
-  // rejects the unknown agent identifier and returns false.
   try {
     if (agentIdentifier) {
       await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
@@ -343,16 +470,7 @@ async function buildContainerArgs(
     }
   }
 
-  // Pass additional MCP servers from container config (groups/<folder>/container.json)
-  const containerConfig = readContainerConfig(agentGroup.folder);
-  if (containerConfig.mcpServers && Object.keys(containerConfig.mcpServers).length > 0) {
-    args.push('-e', `NANOCLAW_MCP_SERVERS=${JSON.stringify(containerConfig.mcpServers)}`);
-  }
-
   // Override entrypoint: run v2 entry point directly via Bun (no tsc, no stdin).
-  // The image's ENTRYPOINT (tini → entrypoint.sh) handles the stdin-piped
-  // invocation path; the host-spawned sessions don't need stdin because all
-  // IO flows through the mounted session DBs.
   args.push('--entrypoint', 'bash');
 
   // Use per-agent-group image if one has been built, otherwise base image
@@ -391,7 +509,7 @@ export async function buildAgentGroupImage(agentGroupId: string): Promise<void> 
   }
   dockerfile += 'USER node\n';
 
-  const imageTag = `nanoclaw-agent:${agentGroupId}`;
+  const imageTag = `${CONTAINER_IMAGE_BASE}:${agentGroupId}`;
 
   log.info('Building per-agent-group image', { agentGroupId, imageTag, apt: aptPackages, npm: npmPackages });
 

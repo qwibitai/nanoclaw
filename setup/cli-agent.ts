@@ -1,14 +1,13 @@
 /**
- * Step: cli-agent — Create the first agent wired to the CLI channel.
+ * Step: cli-agent — Create the scratch CLI agent for `/new-setup`.
  *
- * Thin wrapper around `scripts/init-first-agent.ts --cli-only`. Emits a
- * status block so /new-setup SKILL.md can parse the result without having
- * to read the script's plain stdout.
+ * Thin wrapper around `scripts/init-cli-agent.ts`. Emits a status block so
+ * /new-setup SKILL.md can parse the result without having to read the
+ * script's plain stdout.
  *
  * Args:
  *   --display-name <name>   (required) operator's display name
  *   --agent-name   <name>   (optional) agent persona name, defaults to display-name
- *   --welcome      <text>   (optional) system welcome instruction
  */
 import { execFileSync } from 'child_process';
 import path from 'path';
@@ -19,11 +18,9 @@ import { emitStatus } from './status.js';
 function parseArgs(args: string[]): {
   displayName: string;
   agentName?: string;
-  welcome?: string;
 } {
   let displayName: string | undefined;
   let agentName: string | undefined;
-  let welcome: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const key = args[i];
@@ -35,10 +32,6 @@ function parseArgs(args: string[]): {
         break;
       case '--agent-name':
         agentName = val;
-        i++;
-        break;
-      case '--welcome':
-        welcome = val;
         i++;
         break;
     }
@@ -53,20 +46,19 @@ function parseArgs(args: string[]): {
     process.exit(2);
   }
 
-  return { displayName, agentName, welcome };
+  return { displayName, agentName };
 }
 
 export async function run(args: string[]): Promise<void> {
-  const { displayName, agentName, welcome } = parseArgs(args);
+  const { displayName, agentName } = parseArgs(args);
 
   const projectRoot = process.cwd();
-  const script = path.join(projectRoot, 'scripts', 'init-first-agent.ts');
+  const script = path.join(projectRoot, 'scripts', 'init-cli-agent.ts');
 
-  const scriptArgs = ['exec', 'tsx', script, '--cli-only', '--display-name', displayName];
+  const scriptArgs = ['exec', 'tsx', script, '--display-name', displayName];
   if (agentName) scriptArgs.push('--agent-name', agentName);
-  if (welcome) scriptArgs.push('--welcome', welcome);
 
-  log.info('Invoking init-first-agent in cli-only mode', { displayName, agentName });
+  log.info('Invoking init-cli-agent', { displayName, agentName });
 
   try {
     execFileSync('pnpm', scriptArgs, {
@@ -76,7 +68,7 @@ export async function run(args: string[]): Promise<void> {
     });
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string; status?: number };
-    log.error('init-first-agent failed', {
+    log.error('init-cli-agent failed', {
       status: e.status,
       stdout: e.stdout,
       stderr: e.stderr,

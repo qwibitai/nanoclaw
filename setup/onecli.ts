@@ -1,13 +1,15 @@
 /**
  * Step: onecli — Install + configure the OneCLI gateway and CLI.
  *
- * Aggregates what the old /setup + /init-onecli skills ran as loose shell
- * commands. Idempotent: skips install if `onecli` already works, and safely
- * re-applies PATH, api-host, and .env updates.
+ * Two modes:
+ *   (default) run the OneCLI installer, configure api-host, write .env.
+ *   --reuse   skip the installer; reuse the onecli instance already running
+ *             on the host. Required for users who have other apps bound to
+ *             an existing gateway, since re-running the installer rebinds
+ *             the listener and breaks those consumers.
  *
- * Emits ONECLI_URL so /new-setup SKILL.md can forward it downstream (e.g. as
- * ${ONECLI_URL} in status messages). Polls /health to give downstream steps
- * (auth, service) a ready gateway.
+ * Emits ONECLI_URL and polls /health so downstream steps (auth, service)
+ * get a ready gateway.
  */
 import { execFileSync, execSync } from 'child_process';
 import fs from 'fs';
@@ -37,15 +39,27 @@ function onecliVersion(): string | null {
   }
 }
 
-function getApiHost(): string | null {
+/**
+ * Ask the installed onecli CLI for its configured api-host. Returns null if
+ * onecli isn't on PATH, errors, or has no api-host configured.
+ *
+ * Tolerates both JSON output (onecli 1.3+) and older raw-text output.
+ */
+export function getOnecliApiHost(): string | null {
   try {
     const out = execFileSync('onecli', ['config', 'get', 'api-host'], {
       encoding: 'utf-8',
       env: childEnv(),
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    const parsed = JSON.parse(out) as { value?: unknown };
-    return typeof parsed.value === 'string' && parsed.value ? parsed.value : null;
+    try {
+      const parsed = JSON.parse(out) as { data?: unknown; value?: unknown };
+      const val = parsed.data ?? parsed.value;
+      if (typeof val === 'string' && val.trim()) return val.trim();
+    } catch {
+      // not JSON — fall through to URL extraction
+    }
+    return extractUrlFromOutput(out);
   } catch {
     return null;
   }
@@ -83,25 +97,137 @@ function writeEnvOnecliUrl(url: string): void {
   fs.writeFileSync(envFile, content);
 }
 
+// Last-known-good CLI release. Used only if BOTH the upstream installer
+// and the redirect-based version probe fail. Bump deliberately when a
+// new CLI release ships.
+const ONECLI_CLI_FALLBACK_VERSION = '1.3.0';
+const ONECLI_CLI_REPO = 'onecli/onecli-cli';
+
 function installOnecli(): { stdout: string; ok: boolean } {
-  // OneCLI's own install script handles gateway + CLI + PATH.
-  // We run the two canonical installers in sequence and capture stdout so
-  // we can extract the printed URL as a fallback to `onecli config get`.
   let stdout = '';
+
+  // Gateway install (docker-compose based, no rate-limit concerns).
+  const gw = runInstall('curl -fsSL onecli.sh/install | sh');
+  stdout += gw.stdout;
+  if (!gw.ok) {
+    log.error('OneCLI gateway install failed', { stderr: gw.stderr });
+    return { stdout: stdout + (gw.stderr ?? ''), ok: false };
+  }
+
+  // CLI install. The upstream script calls the GitHub releases API
+  // (api.github.com) to resolve the latest tag — which 403s anonymous
+  // callers after 60 requests/hour per IP. Try upstream first; on failure
+  // resolve the version ourselves (via HTTP redirect, which isn't
+  // API-throttled) and download the release archive directly.
+  const upstream = runInstall('curl -fsSL onecli.sh/cli/install | sh');
+  stdout += upstream.stdout;
+  if (upstream.ok) return { stdout, ok: true };
+
+  log.warn('Upstream CLI installer failed — falling back to direct download', {
+    stderr: upstream.stderr,
+  });
+  stdout += (upstream.stderr ?? '') + '\n';
+
+  const fallback = installOnecliCliDirect();
+  stdout += fallback.stdout;
+  if (!fallback.ok) {
+    log.error('OneCLI CLI install failed (both upstream and direct fallback)');
+    return { stdout, ok: false };
+  }
+  return { stdout, ok: true };
+}
+
+function runInstall(cmd: string): { stdout: string; stderr?: string; ok: boolean } {
   try {
-    stdout += execSync('curl -fsSL onecli.sh/install | sh', {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    stdout += execSync('curl -fsSL onecli.sh/cli/install | sh', {
+    const stdout = execSync(cmd, {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     return { stdout, ok: true };
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string };
-    log.error('OneCLI install failed', { stderr: e.stderr });
-    return { stdout: stdout + (e.stdout ?? '') + (e.stderr ?? ''), ok: false };
+    return { stdout: e.stdout ?? '', stderr: e.stderr, ok: false };
+  }
+}
+
+/**
+ * Reinstate the OneCLI CLI install without hitting GitHub's rate-limited
+ * releases API. Resolves the version via the HTTP redirect from
+ * /releases/latest → /releases/tag/vX.Y.Z, then downloads the archive
+ * directly. Falls back to ONECLI_CLI_FALLBACK_VERSION if the redirect
+ * probe also fails.
+ */
+function installOnecliCliDirect(): { stdout: string; ok: boolean } {
+  const lines: string[] = [];
+  const append = (s: string): void => {
+    lines.push(s);
+  };
+
+  const osName =
+    process.platform === 'darwin' ? 'darwin' : process.platform === 'linux' ? 'linux' : null;
+  if (!osName) {
+    append(`Unsupported platform: ${process.platform}`);
+    return { stdout: lines.join('\n'), ok: false };
+  }
+  const arch =
+    process.arch === 'x64' ? 'amd64' : process.arch === 'arm64' ? 'arm64' : null;
+  if (!arch) {
+    append(`Unsupported arch: ${process.arch}`);
+    return { stdout: lines.join('\n'), ok: false };
+  }
+
+  let version: string | null = null;
+  try {
+    const redirect = execSync(
+      `curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/${ONECLI_CLI_REPO}/releases/latest`,
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] },
+    ).trim();
+    const m = redirect.match(/\/tag\/v?([^/]+)$/);
+    if (m) version = m[1];
+  } catch {
+    // redirect probe failed — we'll pin the fallback
+  }
+  if (!version) {
+    version = ONECLI_CLI_FALLBACK_VERSION;
+    append(`Version probe failed; installing pinned fallback ${version}.`);
+  } else {
+    append(`Resolved onecli CLI ${version} via release redirect.`);
+  }
+
+  const archive = `onecli_${version}_${osName}_${arch}.tar.gz`;
+  const url = `https://github.com/${ONECLI_CLI_REPO}/releases/download/v${version}/${archive}`;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onecli-'));
+  const archivePath = path.join(tmpDir, archive);
+
+  try {
+    append(`Downloading ${url}`);
+    execSync(
+      `curl -fsSL -o ${JSON.stringify(archivePath)} ${JSON.stringify(url)}`,
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    execSync(`tar -xzf ${JSON.stringify(archivePath)} -C ${JSON.stringify(tmpDir)}`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let installDir = '/usr/local/bin';
+    try {
+      fs.accessSync(installDir, fs.constants.W_OK);
+    } catch {
+      installDir = LOCAL_BIN;
+      fs.mkdirSync(installDir, { recursive: true });
+    }
+    const binSrc = path.join(tmpDir, 'onecli');
+    const binDest = path.join(installDir, 'onecli');
+    fs.copyFileSync(binSrc, binDest);
+    fs.chmodSync(binDest, 0o755);
+    append(`onecli ${version} installed to ${binDest}.`);
+    return { stdout: lines.join('\n'), ok: true };
+  } catch (err) {
+    const e = err as { stdout?: string; stderr?: string; message?: string };
+    append(`Direct install failed: ${e.stderr ?? e.message ?? String(err)}`);
+    return { stdout: lines.join('\n'), ok: false };
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
@@ -120,61 +246,90 @@ async function pollHealth(url: string, timeoutMs: number): Promise<boolean> {
   return false;
 }
 
-export async function run(_args: string[]): Promise<void> {
+export async function run(args: string[]): Promise<void> {
+  const reuse = args.includes('--reuse');
   ensureShellProfilePath();
 
-  let installOutput = '';
-  let present = !!onecliVersion();
-  if (!present) {
-    log.info('Installing OneCLI gateway and CLI');
-    const res = installOnecli();
-    installOutput = res.stdout;
-    if (!res.ok) {
+  if (reuse) {
+    // Reuse-mode: don't touch the running gateway at all. Just verify it
+    // exists, read its api-host, write ONECLI_URL to .env, and move on.
+    const version = onecliVersion();
+    if (!version) {
       emitStatus('ONECLI', {
         INSTALLED: false,
         STATUS: 'failed',
-        ERROR: 'install_failed',
+        ERROR: 'onecli_not_found_for_reuse',
+        HINT: 'onecli not on PATH. Re-run setup and choose "install fresh".',
         LOG: 'logs/setup.log',
       });
       process.exit(1);
     }
-    present = !!onecliVersion();
-    if (!present) {
+    const url = getOnecliApiHost();
+    if (!url) {
       emitStatus('ONECLI', {
-        INSTALLED: false,
+        INSTALLED: true,
         STATUS: 'failed',
-        ERROR: 'onecli_not_on_path_after_install',
-        HINT: 'Open a new shell or run `export PATH="$HOME/.local/bin:$PATH"` and retry.',
+        ERROR: 'onecli_api_host_not_configured',
+        HINT: 'Existing onecli has no api-host set. Run `onecli config set api-host <url>` or re-run setup with install-fresh.',
         LOG: 'logs/setup.log',
       });
       process.exit(1);
     }
+    writeEnvOnecliUrl(url);
+    log.info('Reusing existing OneCLI', { url });
+    const healthy = await pollHealth(url, 5000);
+    emitStatus('ONECLI', {
+      INSTALLED: true,
+      REUSED: true,
+      ONECLI_URL: url,
+      HEALTHY: healthy,
+      STATUS: 'success',
+      LOG: 'logs/setup.log',
+    });
+    return;
   }
 
-  let url = getApiHost();
-  if (!url && installOutput) {
-    url = extractUrlFromOutput(installOutput);
-    if (url) {
-      try {
-        execFileSync('onecli', ['config', 'set', 'api-host', url], {
-          stdio: 'ignore',
-          env: childEnv(),
-        });
-      } catch (err) {
-        log.warn('onecli config set api-host failed', { err });
-      }
-    }
+  log.info('Installing OneCLI gateway and CLI');
+  const res = installOnecli();
+  if (!res.ok) {
+    emitStatus('ONECLI', {
+      INSTALLED: false,
+      STATUS: 'failed',
+      ERROR: 'install_failed',
+      LOG: 'logs/setup.log',
+    });
+    process.exit(1);
+  }
+  if (!onecliVersion()) {
+    emitStatus('ONECLI', {
+      INSTALLED: false,
+      STATUS: 'failed',
+      ERROR: 'onecli_not_on_path_after_install',
+      HINT: 'Open a new shell or run `export PATH="$HOME/.local/bin:$PATH"` and retry.',
+      LOG: 'logs/setup.log',
+    });
+    process.exit(1);
   }
 
+  const url = extractUrlFromOutput(res.stdout);
   if (!url) {
     emitStatus('ONECLI', {
       INSTALLED: true,
       STATUS: 'failed',
       ERROR: 'could_not_resolve_api_host',
-      HINT: 'Run `onecli config get api-host` to inspect the gateway URL.',
+      HINT: 'Inspect logs/setup.log for the install output.',
       LOG: 'logs/setup.log',
     });
     process.exit(1);
+  }
+
+  try {
+    execFileSync('onecli', ['config', 'set', 'api-host', url], {
+      stdio: 'ignore',
+      env: childEnv(),
+    });
+  } catch (err) {
+    log.warn('onecli config set api-host failed', { err });
   }
 
   writeEnvOnecliUrl(url);

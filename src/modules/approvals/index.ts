@@ -12,9 +12,9 @@
  *     once the delivery adapter is set.
  *   - A shutdown callback that stops the OneCLI handler cleanly.
  *
- * Self-mod flows (install_packages, request_rebuild, add_mcp_server) moved
- * out to `src/modules/self-mod/` in PR #7 — they now register delivery
- * actions + approval handlers via this module's public API.
+ * Self-mod flows (install_packages, add_mcp_server) moved out to
+ * `src/modules/self-mod/` in PR #7 — they now register delivery actions
+ * + approval handlers via this module's public API.
  */
 import { onDeliveryAdapterReady } from '../../delivery.js';
 import { registerResponseHandler, onShutdown } from '../../response-registry.js';

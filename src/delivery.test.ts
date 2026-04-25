@@ -14,7 +14,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 vi.mock('./container-runner.js', () => ({
   wakeContainer: vi.fn().mockResolvedValue(undefined),
-  resetContainerIdleTimer: vi.fn(),
   isContainerRunning: vi.fn().mockReturnValue(false),
   killContainer: vi.fn(),
   buildAgentGroupImage: vi.fn().mockResolvedValue(undefined),

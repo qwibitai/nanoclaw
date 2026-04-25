@@ -19,7 +19,13 @@ START_S=$(date +%s)
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCAL_BIN="$HOME/.local/bin"
-AGENT_IMAGE="nanoclaw-agent:latest"
+
+# Per-checkout install names (match setup/lib/install-slug.ts).
+# shellcheck source=setup/lib/install-slug.sh
+source "$PROJECT_ROOT/setup/lib/install-slug.sh"
+LAUNCHD_LABEL=$(launchd_label)
+SYSTEMD_UNIT=$(systemd_unit)
+AGENT_IMAGE="$(container_image_base):latest"
 
 export PATH="$LOCAL_BIN:$PATH"
 
@@ -144,7 +150,7 @@ probe_service_status() {
     macos)
       command_exists launchctl || { echo "not_configured"; return; }
       local line
-      line=$(with_timeout launchctl list 2>/dev/null | grep "com.nanoclaw") || {
+      line=$(with_timeout launchctl list 2>/dev/null | grep "$LAUNCHD_LABEL") || {
         echo "not_configured"; return; }
       local pid
       pid=$(echo "$line" | awk '{print $1}')
@@ -156,7 +162,7 @@ probe_service_status() {
       ;;
     linux|wsl)
       command_exists systemctl || { echo "not_configured"; return; }
-      if with_timeout systemctl --user is-active nanoclaw >/dev/null 2>&1; then
+      if with_timeout systemctl --user is-active "$SYSTEMD_UNIT" >/dev/null 2>&1; then
         echo "running"
       elif with_timeout systemctl --user cat nanoclaw >/dev/null 2>&1; then
         echo "stopped"

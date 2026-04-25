@@ -10,7 +10,6 @@ import type { ChannelAdapter, ChannelSetup, InboundMessage, OutboundMessage } fr
 // Mock container runner
 vi.mock('../container-runner.js', () => ({
   wakeContainer: vi.fn().mockResolvedValue(undefined),
-  resetContainerIdleTimer: vi.fn(),
   isContainerRunning: vi.fn().mockReturnValue(false),
   getActiveContainerCount: vi.fn().mockReturnValue(0),
   killContainer: vi.fn(),
@@ -65,8 +64,6 @@ function createMockAdapter(
     },
 
     async setTyping() {},
-
-    updateConversations() {},
   };
 }
 
@@ -108,6 +105,7 @@ describe('channel registry', () => {
     await initChannelAdapters(() => ({
       conversations: [],
       onInbound: () => {},
+      onInboundEvent: () => {},
       onMetadata: () => {},
       onAction: () => {},
     }));
@@ -149,8 +147,10 @@ describe('channel + router integration', () => {
       id: 'mga-1',
       messaging_group_id: 'mg-1',
       agent_group_id: 'ag-1',
-      trigger_rules: null,
-      response_scope: 'all',
+      engage_mode: 'pattern',
+      engage_pattern: '.',
+      sender_scope: 'all',
+      ignored_message_policy: 'drop',
       session_mode: 'shared',
       priority: 0,
       created_at: now(),
@@ -209,6 +209,7 @@ describe('channel + router integration', () => {
     await initChannelAdapters(() => ({
       conversations: [],
       onInbound: () => {},
+      onInboundEvent: () => {},
       onMetadata: () => {},
       onAction: () => {},
     }));

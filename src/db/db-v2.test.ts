@@ -178,8 +178,10 @@ describe('messaging group agents', () => {
     id: 'mga-1',
     messaging_group_id: 'mg-1',
     agent_group_id: 'ag-1',
-    trigger_rules: null,
-    response_scope: 'all' as const,
+    engage_mode: 'pattern' as const,
+    engage_pattern: '.',
+    sender_scope: 'all' as const,
+    ignored_message_policy: 'drop' as const,
     session_mode: 'shared' as const,
     priority: 0,
     created_at: now(),
@@ -229,7 +231,8 @@ describe('messaging group agents', () => {
   });
 
   it('auto-creates an agent_destinations row for the wiring', async () => {
-    const { getDestinationByTarget, getDestinations } = await import('../modules/agent-to-agent/db/agent-destinations.js');
+    const { getDestinationByTarget, getDestinations } =
+      await import('../modules/agent-to-agent/db/agent-destinations.js');
     createMessagingGroupAgent(mga());
 
     const dest = getDestinationByTarget('ag-1', 'channel', 'mg-1');

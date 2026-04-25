@@ -23,7 +23,6 @@ import {
 import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles } from './session-manager.js';
-import { resetContainerIdleTimer } from './container-runner.js';
 import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
 import type { OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
@@ -193,7 +192,6 @@ async function drainSession(session: Session): Promise<void> {
         const platformMsgId = await deliverMessage(msg, session, inDb);
         markDelivered(inDb, msg.id, platformMsgId ?? null);
         deliveryAttempts.delete(msg.id);
-        resetContainerIdleTimer(session.id);
 
         // Pause the typing indicator after a real user-facing message
         // lands on the user's screen, so the client has time to visually
@@ -323,7 +321,7 @@ async function deliverMessage(
         questionId: content.questionId,
       });
     } else {
-      createPendingQuestion({
+      const inserted = createPendingQuestion({
         question_id: content.questionId,
         session_id: session.id,
         message_out_id: msg.id,
@@ -334,7 +332,9 @@ async function deliverMessage(
         options: normalizeOptions(rawOptions as never),
         created_at: new Date().toISOString(),
       });
-      log.info('Pending question created', { questionId: content.questionId, sessionId: session.id });
+      if (inserted) {
+        log.info('Pending question created', { questionId: content.questionId, sessionId: session.id });
+      }
     }
   }
 

@@ -19,27 +19,39 @@ CREATE TABLE agent_groups (
 
 -- Platform groups/channels. unknown_sender_policy governs what happens
 -- when a sender we've never seen before posts in this chat.
+-- The column DEFAULT is "strict" (inherited from migration 001), but it
+-- only matters if something inserts without specifying the field, which no
+-- current callsite does. Router auto-create hardcodes "request_approval"
+-- (see src/router.ts:151); setup scripts pick per context.
 CREATE TABLE messaging_groups (
   id                    TEXT PRIMARY KEY,
   channel_type          TEXT NOT NULL,
   platform_id           TEXT NOT NULL,
   name                  TEXT,
   is_group              INTEGER DEFAULT 0,
-  unknown_sender_policy TEXT NOT NULL DEFAULT 'strict', -- 'strict' | 'request_approval' | 'public'
+  unknown_sender_policy TEXT NOT NULL DEFAULT 'strict',
+                        -- 'strict' | 'request_approval' | 'public'
   created_at            TEXT NOT NULL,
   UNIQUE(channel_type, platform_id)
 );
 
--- Which agent groups handle which messaging groups
+-- Which agent groups handle which messaging groups.
+-- engage_mode / engage_pattern / sender_scope / ignored_message_policy are
+-- the four orthogonal axes that together replace v1's opaque trigger_rules
+-- JSON + response_scope enum. See docs/v1-vs-v2/ACTION-ITEMS.md item 1.
 CREATE TABLE messaging_group_agents (
-  id                 TEXT PRIMARY KEY,
-  messaging_group_id TEXT NOT NULL REFERENCES messaging_groups(id),
-  agent_group_id     TEXT NOT NULL REFERENCES agent_groups(id),
-  trigger_rules      TEXT,
-  response_scope     TEXT DEFAULT 'all',
-  session_mode       TEXT DEFAULT 'shared',
-  priority           INTEGER DEFAULT 0,
-  created_at         TEXT NOT NULL,
+  id                     TEXT PRIMARY KEY,
+  messaging_group_id     TEXT NOT NULL REFERENCES messaging_groups(id),
+  agent_group_id         TEXT NOT NULL REFERENCES agent_groups(id),
+  engage_mode            TEXT NOT NULL DEFAULT 'mention',
+                         -- 'pattern' | 'mention' | 'mention-sticky'
+  engage_pattern         TEXT,   -- regex; required when engage_mode='pattern';
+                                 -- '.' means "match every message" (the "always" flavor)
+  sender_scope           TEXT NOT NULL DEFAULT 'all',    -- 'all' | 'known'
+  ignored_message_policy TEXT NOT NULL DEFAULT 'drop',   -- 'drop' | 'accumulate'
+  session_mode           TEXT DEFAULT 'shared',
+  priority               INTEGER DEFAULT 0,
+  created_at             TEXT NOT NULL,
   UNIQUE(messaging_group_id, agent_group_id)
 );
 
@@ -116,6 +128,22 @@ CREATE TABLE pending_questions (
   options_json   TEXT NOT NULL,
   created_at     TEXT NOT NULL
 );
+
+-- Pending approvals for unknown senders (unknown_sender_policy='request_approval').
+-- In-flight dedup via UNIQUE(messaging_group_id, sender_identity): a second
+-- message from the same unknown sender while a card is pending is silently
+-- dropped instead of spamming the admin.
+CREATE TABLE pending_sender_approvals (
+  id                 TEXT PRIMARY KEY,
+  messaging_group_id TEXT NOT NULL REFERENCES messaging_groups(id),
+  agent_group_id     TEXT NOT NULL REFERENCES agent_groups(id),
+  sender_identity    TEXT NOT NULL,    -- namespaced user id (channel_type:handle)
+  sender_name        TEXT,
+  original_message   TEXT NOT NULL,    -- JSON of the original InboundEvent
+  approver_user_id   TEXT NOT NULL,
+  created_at         TEXT NOT NULL,
+  UNIQUE(messaging_group_id, sender_identity)
+);
 `;
 
 /**
@@ -138,6 +166,8 @@ CREATE TABLE IF NOT EXISTS messages_in (
   recurrence     TEXT,
   series_id      TEXT,
   tries          INTEGER DEFAULT 0,
+  trigger        INTEGER NOT NULL DEFAULT 1,
+                 -- 0 = accumulated context (don't wake), 1 = wake agent
   platform_id    TEXT,
   channel_type   TEXT,
   thread_id      TEXT,
@@ -212,5 +242,17 @@ CREATE TABLE IF NOT EXISTS session_state (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+-- Current tool-in-flight state. Single-row table (id=1). Container writes on
+-- PreToolUse and clears on PostToolUse / PostToolUseFailure. Host reads in the
+-- sweep to extend the stuck-tolerance window when Bash is running with a
+-- declared timeout > 60s (long-running scripts shouldn't be flagged as stuck).
+CREATE TABLE IF NOT EXISTS container_state (
+  id                       INTEGER PRIMARY KEY CHECK (id = 1),
+  current_tool             TEXT,
+  tool_declared_timeout_ms INTEGER,
+  tool_started_at          TEXT,
+  updated_at               TEXT NOT NULL
 );
 `;

@@ -8,6 +8,7 @@
 import { getInboundDb } from '../db/connection.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting } from '../db/session-routing.js';
+import { TIMEZONE, parseZonedToUtc } from '../timezone.js';
 import { registerTools } from './server.js';
 import type { McpToolDefinition } from './types.js';
 
@@ -35,13 +36,21 @@ export const scheduleTask: McpToolDefinition = {
   tool: {
     name: 'schedule_task',
     description:
-      'Schedule a one-shot or recurring task. The task will be processed at the specified time. Use cron expressions for recurring tasks.',
+      `Schedule a one-shot or recurring task. The user's timezone is declared in the <context timezone="..."/> header of your prompt — interpret the user's "9pm" etc. in that zone. Cron expressions are interpreted in the user's timezone too.`,
     inputSchema: {
       type: 'object' as const,
       properties: {
         prompt: { type: 'string', description: 'Task instructions/prompt' },
-        processAfter: { type: 'string', description: 'ISO timestamp for first run (e.g., 2024-01-15T09:00:00Z)' },
-        recurrence: { type: 'string', description: 'Cron expression for recurring tasks (e.g., "0 9 * * 1-5" for weekdays at 9am)' },
+        processAfter: {
+          type: 'string',
+          description:
+            `ISO 8601 timestamp for the first run. Accepts either UTC (ending in "Z" or "+00:00") or a naive local timestamp (no offset) which is interpreted in the user's timezone (e.g. "2026-01-15T21:00:00" = 9pm user-local). Prefer naive local.`,
+        },
+        recurrence: {
+          type: 'string',
+          description:
+            'Cron expression for recurring tasks (e.g., "0 9 * * 1-5" = weekdays at 9am user-local). Evaluated in the user\'s timezone.',
+        },
         script: { type: 'string', description: 'Optional pre-agent script to run before processing' },
       },
       required: ['prompt', 'processAfter'],
@@ -49,8 +58,17 @@ export const scheduleTask: McpToolDefinition = {
   },
   async handler(args) {
     const prompt = args.prompt as string;
-    const processAfter = args.processAfter as string;
-    if (!prompt || !processAfter) return err('prompt and processAfter are required');
+    const processAfterIn = args.processAfter as string;
+    if (!prompt || !processAfterIn) return err('prompt and processAfter are required');
+
+    let processAfter: string;
+    try {
+      const d = parseZonedToUtc(processAfterIn, TIMEZONE);
+      if (Number.isNaN(d.getTime())) return err(`invalid processAfter: ${processAfterIn}`);
+      processAfter = d.toISOString();
+    } catch {
+      return err(`invalid processAfter: ${processAfterIn}`);
+    }
 
     const id = generateId();
     const r = routing();
@@ -233,7 +251,11 @@ export const updateTask: McpToolDefinition = {
           type: 'string',
           description: 'New cron expression (optional). Pass empty string to clear and make the task one-shot.',
         },
-        processAfter: { type: 'string', description: 'New ISO timestamp for the next run (optional)' },
+        processAfter: {
+          type: 'string',
+          description:
+            `New ISO 8601 timestamp for the next run (optional). Accepts either UTC (ending in "Z" / "+00:00") or a naive local timestamp interpreted in the user's timezone.`,
+        },
         script: {
           type: 'string',
           description: 'New pre-agent script (optional). Pass empty string to clear.',
@@ -248,7 +270,15 @@ export const updateTask: McpToolDefinition = {
 
     const update: Record<string, unknown> = { taskId };
     if (typeof args.prompt === 'string') update.prompt = args.prompt;
-    if (typeof args.processAfter === 'string') update.processAfter = args.processAfter;
+    if (typeof args.processAfter === 'string') {
+      try {
+        const d = parseZonedToUtc(args.processAfter, TIMEZONE);
+        if (Number.isNaN(d.getTime())) return err(`invalid processAfter: ${args.processAfter}`);
+        update.processAfter = d.toISOString();
+      } catch {
+        return err(`invalid processAfter: ${args.processAfter}`);
+      }
+    }
     // Empty string clears recurrence/script; undefined leaves them as-is.
     if (typeof args.recurrence === 'string') update.recurrence = args.recurrence === '' ? null : args.recurrence;
     if (typeof args.script === 'string') update.script = args.script === '' ? null : args.script;

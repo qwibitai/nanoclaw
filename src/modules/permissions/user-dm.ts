@@ -136,11 +136,14 @@ async function resolveDmPlatformId(channelType: string, handle: string): Promise
 function parseUserId(user: User): { channelType: string; handle: string } | { channelType: null; handle: null } {
   const idx = user.id.indexOf(':');
   if (idx < 0) return { channelType: null, handle: null };
-  const channelType = user.id.slice(0, idx);
+  const prefix = user.id.slice(0, idx);
   const handle = user.id.slice(idx + 1);
-  if (!channelType || !handle) return { channelType: null, handle: null };
-  // The `kind` on users mirrors the channel_type prefix in our current
-  // scheme. Pull it from `user.kind` if we ever decouple them later, but
-  // today the id prefix is authoritative.
-  return { channelType, handle };
+  if (!prefix || !handle) return { channelType: null, handle: null };
+  // Teams user IDs use a `29:` prefix, not `teams:`. When the id prefix
+  // isn't a registered adapter, fall back to user.kind and treat the full
+  // id as the handle.
+  if (!getChannelAdapter(prefix) && user.kind && getChannelAdapter(user.kind)) {
+    return { channelType: user.kind, handle: user.id };
+  }
+  return { channelType: prefix, handle };
 }

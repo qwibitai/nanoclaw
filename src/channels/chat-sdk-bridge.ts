@@ -21,7 +21,7 @@ import { SqliteStateAdapter } from '../state-sqlite.js';
 import { registerWebhookAdapter } from '../webhook-server.js';
 import { getAskQuestionRender } from '../db/sessions.js';
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
-import type { ChannelAdapter, ChannelSetup, ConversationConfig, InboundMessage } from './adapter.js';
+import type { ChannelAdapter, ChannelSetup, InboundMessage } from './adapter.js';
 
 /** Adapter with optional gateway support (e.g., Discord). */
 interface GatewayAdapter extends Adapter {
@@ -63,6 +63,58 @@ export interface ChatSdkBridgeConfig {
    * quirk (e.g. Telegram's legacy Markdown parse mode).
    */
   transformOutboundText?: (text: string) => string;
+  /**
+   * Maximum text length the underlying adapter accepts in a single message.
+   * When set, the bridge splits outbound text longer than this on paragraph
+   * → line → hard-char boundaries and posts multiple messages. Without this,
+   * adapters like Discord (2000) and Telegram (4096) silently truncate
+   * mid-response. The returned id is the first chunk's id so subsequent edits
+   * and reactions still target the head of the reply.
+   */
+  maxTextLength?: number;
+}
+
+/**
+ * Split `text` into chunks no larger than `limit`, preferring paragraph
+ * breaks, then line breaks, then a hard character cut as a last resort.
+ * Preserves code fences only structurally — a fenced block that straddles a
+ * chunk boundary will render as two independent blocks on the receiving
+ * platform, which is the same behavior as manually re-opening a fence.
+ */
+/**
+ * Decode the actual option value from a button callback. Buttons are encoded
+ * with an integer index (to keep under Telegram's 64-byte callback_data cap),
+ * and the real value is looked up via `getAskQuestionRender(questionId)`.
+ * Falls back to treating the tail as a literal value so old in-flight cards
+ * (encoded before this shortening landed) still resolve.
+ */
+function resolveSelectedOption(
+  render: { options: NormalizedOption[] } | undefined,
+  eventValue: string | undefined,
+  tail: string | undefined,
+): string {
+  const candidate = eventValue ?? tail ?? '';
+  if (render && /^\d+$/.test(candidate)) {
+    const idx = Number(candidate);
+    if (render.options[idx]) return render.options[idx].value;
+  }
+  return candidate;
+}
+
+export function splitForLimit(text: string, limit: number): string[] {
+  if (text.length <= limit) return [text];
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > limit) {
+    let cut = remaining.lastIndexOf('\n\n', limit);
+    if (cut <= 0) cut = remaining.lastIndexOf('\n', limit);
+    if (cut <= 0) cut = remaining.lastIndexOf(' ', limit);
+    if (cut <= 0) cut = limit;
+    chunks.push(remaining.slice(0, cut).trimEnd());
+    remaining = remaining.slice(cut).trimStart();
+  }
+  if (remaining.length > 0) chunks.push(remaining);
+  return chunks;
 }
 
 export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter {
@@ -71,18 +123,13 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
   let chat: Chat;
   let state: SqliteStateAdapter;
   let setupConfig: ChannelSetup;
-  let conversations: Map<string, ConversationConfig>;
   let gatewayAbort: AbortController | null = null;
 
-  function buildConversationMap(configs: ConversationConfig[]): Map<string, ConversationConfig> {
-    const map = new Map<string, ConversationConfig>();
-    for (const conv of configs) {
-      map.set(conv.platformId, conv);
-    }
-    return map;
-  }
-
-  async function messageToInbound(message: ChatMessage): Promise<InboundMessage> {
+  async function messageToInbound(
+    message: ChatMessage,
+    isMention: boolean,
+    isGroup?: boolean,
+  ): Promise<InboundMessage> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const serialized = message.toJSON() as Record<string, any>;
 
@@ -138,6 +185,8 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       kind: 'chat-sdk',
       content: serialized,
       timestamp: message.metadata.dateSent.toISOString(),
+      isMention,
+      isGroup,
     };
   }
 
@@ -148,7 +197,6 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
 
     async setup(hostConfig: ChannelSetup) {
       setupConfig = hostConfig;
-      conversations = buildConversationMap(hostConfig.conversations);
 
       state = new SqliteStateAdapter();
 
@@ -160,23 +208,35 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         logger: 'silent',
       });
 
-      // Subscribed threads — forward all messages
+      // Four SDK dispatch paths — bridge just forwards. All per-wiring
+      // engage / accumulate / drop / subscribe decisions live in the host
+      // router (src/router.ts routeInbound / evaluateEngage). The bridge
+      // only resolves channel ids and sets the platform-confirmed isMention
+      // flag that routeInbound evaluates; the router calls back into
+      // bridge.subscribe(...) when a mention-sticky wiring engages.
+
+      // Subscribed threads — every message in a thread we've previously
+      // engaged. Carry the SDK's `message.isMention` through so mention-mode
+      // wirings still fire on in-thread mentions.
       chat.onSubscribedMessage(async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
-        await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message));
+        await setupConfig.onInbound(
+          channelId,
+          thread.id,
+          await messageToInbound(message, message.isMention === true, true),
+        );
       });
 
-      // @mention in unsubscribed thread — forward + subscribe
+      // @mention in an unsubscribed thread — SDK-confirmed bot mention.
       chat.onNewMention(async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
-        await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message));
-        await thread.subscribe();
+        await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, true, true));
       });
 
-      // DMs — always forward + subscribe. Pass thread.id so sub-thread
-      // context carries through to delivery (Slack users can open threads
-      // inside a DM). The router collapses DM sub-threads to one session
-      // (is_group=0 short-circuits the per-thread escalation).
+      // DMs — by definition addressed to the bot. Thread id flows through
+      // so sub-thread context reaches delivery (Slack users can open threads
+      // inside a DM). Router collapses DM sub-threads to one session via
+      // is_group=0 short-circuit.
       chat.onDirectMessage(async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
         log.info('Inbound DM received', {
@@ -185,8 +245,22 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           sender: (message.author as any)?.fullName ?? (message.author as any)?.userId ?? 'unknown',
           threadId: thread.id,
         });
-        await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message));
-        await thread.subscribe();
+        await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, true, false));
+      });
+
+      // Plain messages in unsubscribed threads.
+      //
+      // Chat SDK dispatch (handling-events.mdx §"Handler dispatch order") is
+      // exclusive: subscribed → onSubscribedMessage; unsubscribed+mention →
+      // onNewMention; unsubscribed+pattern-match → onNewMessage. Registering
+      // with `/./` lets the router see every plain message on every
+      // unsubscribed thread the bot can see. The router short-circuits via
+      // getMessagingGroupWithAgentCount (~1 DB read) for unwired channels,
+      // so forwarding every one is cheap enough to not need a bridge-side
+      // flood gate.
+      chat.onNewMessage(/./, async (thread, message) => {
+        const channelId = adapter.channelIdFromThreadId(thread.id);
+        await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, false, true));
       });
 
       // Handle button clicks (ask_user_question)
@@ -195,11 +269,15 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         const parts = event.actionId.split(':');
         if (parts.length < 3) return;
         const questionId = parts[1];
-        const selectedOption = event.value || '';
+        const tail = parts.slice(2).join(':');
         const userId = event.user?.userId || '';
 
         // Resolve render metadata BEFORE dispatching onAction (which deletes the row).
         const render = getAskQuestionRender(questionId);
+        // New format: button id/value is an integer index into options (kept
+        // short to fit Telegram's 64-byte callback_data cap). Old format:
+        // the full value is embedded in actionId/value directly.
+        const selectedOption = resolveSelectedOption(render, event.value, tail);
         const title = render?.title ?? '❓ Question';
         const matched = render?.options.find((o) => o.value === selectedOption);
         const selectedLabel = matched?.selectedLabel ?? selectedOption ?? '(clicked)';
@@ -303,8 +381,13 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           children: [
             CardText(question),
             Actions(
-              options.map((opt) =>
-                Button({ id: `ncq:${questionId}:${opt.value}`, label: opt.label, value: opt.value }),
+              // Encode button id/value with the option index rather than the
+              // full value. Telegram caps callback_data at 64 bytes, and
+              // long values (e.g. ISO datetimes, URLs) push the JSON payload
+              // well past that. The onAction handlers resolve the index back
+              // to the real value via getAskQuestionRender(questionId).
+              options.map((opt, idx) =>
+                Button({ id: `ncq:${questionId}:${idx}`, label: opt.label, value: String(idx) }),
               ),
             ),
           ],
@@ -325,13 +408,23 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           data: f.data,
           filename: f.filename,
         }));
-        if (fileUploads && fileUploads.length > 0) {
-          const result = await adapter.postMessage(tid, { markdown: text, files: fileUploads });
-          return result?.id;
-        } else {
-          const result = await adapter.postMessage(tid, { markdown: text });
-          return result?.id;
+        // Split if over the adapter's max length. Files ride on the first
+        // chunk so the head of the reply still carries them.
+        const chunks =
+          config.maxTextLength && text.length > config.maxTextLength
+            ? splitForLimit(text, config.maxTextLength)
+            : [text];
+        let firstId: string | undefined;
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          const attachFiles = i === 0 && fileUploads && fileUploads.length > 0;
+          const result = await adapter.postMessage(
+            tid,
+            attachFiles ? { markdown: chunk, files: fileUploads } : { markdown: chunk },
+          );
+          if (i === 0) firstId = result?.id;
         }
+        return firstId;
       } else if (message.files && message.files.length > 0) {
         // Files only, no text
         const fileUploads = message.files.map((f: { data: Buffer; filename: string }) => ({
@@ -358,8 +451,13 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       return true;
     },
 
-    updateConversations(configs: ConversationConfig[]) {
-      conversations = buildConversationMap(configs);
+    async subscribe(_platformId: string, threadId: string) {
+      // Chat SDK's subscription state lives on the StateAdapter (not on the
+      // Chat instance itself). SqliteStateAdapter.subscribe is idempotent —
+      // a second call on an already-subscribed thread is a no-op. threadId
+      // is the SDK's thread id, which is what the router already has from
+      // the original inbound event.
+      await state.subscribe(threadId);
     },
   };
 
@@ -441,18 +539,21 @@ async function handleForwardedEvent(
     // type 3 = MessageComponent (button/select)
     if (interaction.type === 3) {
       const customId = (interaction.data as Record<string, unknown>)?.custom_id as string;
-      const user = (interaction.member as Record<string, unknown>)?.user as Record<string, string> | undefined;
+      // In guilds the clicker is at interaction.member.user; in DMs it's interaction.user directly.
+      const user =
+        ((interaction.member as Record<string, unknown>)?.user as Record<string, string> | undefined) ??
+        (interaction.user as Record<string, string> | undefined);
       const interactionId = interaction.id as string;
       const interactionToken = interaction.token as string;
 
       // Parse the selected option from custom_id
       let questionId: string | undefined;
-      let selectedOption: string | undefined;
+      let tail: string | undefined;
       if (customId?.startsWith('ncq:')) {
         const colonIdx = customId.indexOf(':', 4); // after "ncq:"
         if (colonIdx !== -1) {
           questionId = customId.slice(4, colonIdx);
-          selectedOption = customId.slice(colonIdx + 1);
+          tail = customId.slice(colonIdx + 1);
         }
       }
 
@@ -461,6 +562,9 @@ async function handleForwardedEvent(
         ((interaction.message as Record<string, unknown>)?.embeds as Array<Record<string, unknown>>) || [];
       const originalDescription = (originalEmbeds[0]?.description as string) || '';
       const render = questionId ? getAskQuestionRender(questionId) : undefined;
+      // Discord custom_id mirrors the new index-based encoding (see Button
+      // construction). Decode back to the real option value for downstream.
+      const selectedOption = resolveSelectedOption(render, tail, tail);
       const cardTitle = render?.title ?? ((originalEmbeds[0]?.title as string) || '❓ Question');
       const matchedOpt = render?.options.find((o) => o.value === selectedOption);
       const selectedLabel = matchedOpt?.selectedLabel ?? selectedOption ?? customId;

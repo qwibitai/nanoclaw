@@ -4,13 +4,13 @@ Admin-gated approval flow for agent self-modification and OneCLI credential acce
 
 ### Two flows
 
-**Agent-initiated (DB-backed, fire-and-forget).** The container writes a `system`-kind outbound row with one of three actions — `install_packages`, `request_rebuild`, `add_mcp_server`. The module's delivery-action handlers validate, route to the right approver's DM, and persist a `pending_approvals` row. When the admin clicks a button, the registered response handler applies the change (config update → image rebuild → container kill) and notifies the agent via system chat.
+**Agent-initiated (DB-backed, fire-and-forget).** The container writes a `system`-kind outbound row with one of two actions — `install_packages`, `add_mcp_server`. The module's delivery-action handlers validate, route to the right approver's DM, and persist a `pending_approvals` row. When the admin clicks a button, the registered response handler applies the change (config update → image rebuild if needed → container kill) and notifies the agent via system chat.
 
 **OneCLI credential (long-poll).** The OneCLI gateway holds an HTTP connection open when it needs credential approval. `onecli-approvals.ts` delivers a card, persists a `pending_approvals` row (action = `onecli_credential`), and waits on an in-memory Promise that resolves on click or expiry timer. Survives host restart: the startup sweep edits stale cards to "Expired (host restarted)" and drops the rows.
 
 ### Wiring
 
-- **Delivery actions:** `install_packages`, `request_rebuild`, `add_mcp_server` via `registerDeliveryAction`.
+- **Delivery actions:** `install_packages`, `add_mcp_server` via `registerDeliveryAction`.
 - **Response handler:** single handler claims both agent-initiated and OneCLI approvals. OneCLI is tried first (in-memory Promise); falls through to `pending_approvals` lookup.
 - **Adapter-ready hook (`onDeliveryAdapterReady`):** starts the OneCLI manual-approval handler once the delivery adapter is set.
 - **Shutdown hook (`onShutdown`):** stops the OneCLI handler.

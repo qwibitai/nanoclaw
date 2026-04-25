@@ -20,7 +20,7 @@
 import { OneCLI, type ApprovalRequest, type ManualApprovalHandle } from '@onecli-sh/sdk';
 
 import { pickApprovalDelivery, pickApprover } from './primitive.js';
-import { ONECLI_URL } from '../../config.js';
+import { ONECLI_API_KEY, ONECLI_URL } from '../../config.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
 import {
   createPendingApproval,
@@ -36,7 +36,7 @@ export const ONECLI_ACTION = 'onecli_credential';
 
 type Decision = 'approve' | 'deny';
 
-const onecli = new OneCLI({ url: ONECLI_URL });
+const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 
 interface PendingState {
   resolve: (decision: Decision) => void;

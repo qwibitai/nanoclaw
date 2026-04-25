@@ -1,10 +1,12 @@
 /**
  * Delivery-action handlers for agent-initiated self-modification requests.
  *
- * Three actions the container can write into messages_out (via the self-mod
- * MCP tools): install_packages, request_rebuild, add_mcp_server. Each one
- * validates input and queues an approval request. The admin's approval
- * triggers the matching approval handler in ./apply.ts.
+ * Two actions the container can write into messages_out (via the self-mod
+ * MCP tools): install_packages, add_mcp_server. Each one validates input
+ * and queues an approval request. The admin's approval triggers the
+ * matching approval handler in ./apply.ts, which also performs the
+ * required follow-up (rebuild+restart for install_packages, restart-only
+ * for add_mcp_server).
  *
  * Host-side sanitization for install_packages is defense-in-depth — the MCP
  * tool validates first. Both layers matter: the DB row carries the payload
@@ -58,23 +60,6 @@ export async function handleInstallPackages(content: Record<string, unknown>, se
     payload: { apt, npm, reason },
     title: 'Install Packages Request',
     question: `Agent "${agentGroup.name}" is attempting to install a package + rebuild container:\n${packageList}${reason ? `\nReason: ${reason}` : ''}`,
-  });
-}
-
-export async function handleRequestRebuild(content: Record<string, unknown>, session: Session): Promise<void> {
-  const agentGroup = getAgentGroup(session.agent_group_id);
-  if (!agentGroup) {
-    notifyAgent(session, 'request_rebuild failed: agent group not found.');
-    return;
-  }
-  const reason = (content.reason as string) || '';
-  await requestApproval({
-    session,
-    agentName: agentGroup.name,
-    action: 'request_rebuild',
-    payload: { reason },
-    title: 'Rebuild Request',
-    question: `Agent "${agentGroup.name}" is attempting to rebuild container.${reason ? `\nReason: ${reason}` : ''}`,
   });
 }
 

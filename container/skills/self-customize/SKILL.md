@@ -11,9 +11,9 @@ You can modify your own environment. Different kinds of changes have different w
 
 **What needs to change?**
 
-- **Your CLAUDE.md or files in your workspace** → Edit directly, no approval needed. Your workspace (`/workspace/agent/`) is persisted on the host.
-- **System package (apt) or global npm package** → `install_packages` → `request_rebuild`. Requires admin approval.
-- **MCP server** → `add_mcp_server` → `request_rebuild`. No approval needed, but rebuild required to apply.
+- **`CLAUDE.local.md` or files in your workspace** → Edit directly, no approval needed. Your workspace (`/workspace/agent/`) is persisted on the host. (Note: the composed `CLAUDE.md` itself is read-only and regenerated every spawn — write to `CLAUDE.local.md` instead.)
+- **System package (apt) or global npm package** → `install_packages`. Requires admin approval. On approval, image rebuild + container restart happen automatically.
+- **MCP server** → `add_mcp_server`. Requires admin approval. On approval, container restarts with the new server wired up (no rebuild — bun runs TS directly).
 - **Your source code or Dockerfile** → Delegate to a builder agent via `create_agent` (see below).
 - **A new specialist capability** → `create_agent` to spin up a dedicated agent for it.
 
@@ -25,7 +25,7 @@ For anything that requires editing source files (your own code, Dockerfile, etc.
 2. Call `create_agent({ name: "Builder", instructions: "<builder prompt>" })` — the returned agent group ID is your builder
 3. Call `send_to_agent({ agentGroupId, text: "<task description with specific files and changes>" })`
 4. The builder works in its own container, makes the changes, and reports back
-5. You review the builder's summary, confirm with the user, then call `request_rebuild` if the changes require it
+5. You review the builder's summary and confirm with the user. Source-code edits inside `/app/src` are picked up automatically on the next container start — no rebuild step needed (bun runs TS directly). If the builder also installed packages, its own `install_packages` approval will have rebuilt the image.
 
 ### Builder Agent Instructions (use as CLAUDE.md when creating)
 
@@ -64,12 +64,11 @@ The limits are **per builder task**, not per session. A 500-line feature is fine
 User: "Can you add a tool for reading RSS feeds?"
 
 1. Check [mcp.so](https://mcp.so) for an existing RSS MCP server
-2. If one exists → `add_mcp_server({ name: "rss", command: "npx", args: ["some-rss-mcp"] })` → `request_rebuild` → done
+2. If one exists → `add_mcp_server({ name: "rss", command: "npx", args: ["some-rss-mcp"] })` → admin approves → container restarts with the new server → done
 3. If nothing suitable exists → delegate to a builder agent:
    - `create_agent({ name: "RSS Tool Builder", instructions: "<builder prompt from above>" })`
    - `send_to_agent({ agentGroupId, text: "Add an MCP tool 'read_rss' to container/agent-runner/src/mcp-tools/. It should fetch an RSS URL and return the latest N items. Register it in mcp-tools/index.ts. Target: <200 new lines." })`
-   - Wait for builder's report
-   - `request_rebuild` if needed
+   - Wait for builder's report — new tool code is picked up on the next container start (bun runs TS directly)
 
 ## Example: Installing a System Tool
 
@@ -78,10 +77,8 @@ User: "Can you transcribe audio?"
 1. Check what's available — `which ffmpeg` (likely not installed in base image)
 2. Decide approach: `@xenova/transformers` (npm, workspace-local) or `whisper.cpp` (apt + compile)
 3. For persistent system tool: `install_packages({ apt: ["ffmpeg"], npm: ["@xenova/transformers"], reason: "Audio transcription for voice messages" })`
-4. Wait for admin approval
-5. `request_rebuild({ reason: "Apply audio transcription packages" })`
-6. Wait for admin approval
-7. Test the new capability once the container restarts
+4. Wait for admin approval — on approve, the image is rebuilt and your container is restarted automatically
+5. Test the new capability once the container restarts
 
 ## When NOT to Self-Customize
 

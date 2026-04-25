@@ -87,18 +87,17 @@ The script:
 2. Creates the `agent_groups` row and calls `initGroupFilesystem` at `groups/dm-with-<name>/`.
 3. Reuses or creates the DM `messaging_groups` row.
 4. Wires them via `messaging_group_agents` (which auto-creates the companion `agent_destinations` row).
-5. Resolves the session (creates `inbound.db` / `outbound.db`).
-6. Writes a `kind: 'chat'`, `sender: 'system'` welcome message into `inbound.db`.
+5. Hands the welcome message to the running service via its CLI socket (`data/cli.sock`), targeting the DM messaging group. The service routes it into the DM session, which wakes the container synchronously. If the socket isn't reachable (service down), falls back to a direct `inbound.db` write that the next host sweep picks up.
 
 Show the script's output to the user.
 
 ## 5. Verify
 
-Host sweep runs every ~60s. Within one sweep window the container wakes, the agent processes the system message, and the reply flows through `outbound.db` to the channel.
+The welcome DM is queued synchronously; the only wait is container cold-start (~60s on first launch) before the agent processes the message and the reply flows through `outbound.db` to the channel.
 
 Do not tail the log or poll in a sleep loop. Ask the user in plain text:
 
-> The welcome DM should arrive within ~60 seconds. Let me know when you've received it (or if it doesn't arrive within two minutes).
+> The welcome DM should arrive shortly. Let me know when you've received it (or if it doesn't arrive within two minutes).
 
 Wait for the user's reply. If they confirm receipt, the skill is done.
 

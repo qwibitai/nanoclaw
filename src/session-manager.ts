@@ -17,7 +17,14 @@ import path from 'path';
 import type { OutboundFile } from './channels/adapter.js';
 import { DATA_DIR } from './config.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
-import { createSession, findSession, findSessionByAgentGroup, getSession, updateSession } from './db/sessions.js';
+import {
+  createSession,
+  findSession,
+  findSessionByAgentGroup,
+  findSessionForAgent,
+  getSession,
+  updateSession,
+} from './db/sessions.js';
 import {
   ensureSchema,
   openInboundDb as openInboundDbRaw,
@@ -89,7 +96,9 @@ export function resolveSession(
     }
   } else if (messagingGroupId) {
     const lookupThreadId = sessionMode === 'shared' ? null : threadId;
-    const existing = findSession(messagingGroupId, lookupThreadId);
+    // Scope lookup by agent_group_id so fan-out to multiple agents in the
+    // same chat doesn't accidentally deliver to the wrong agent's session.
+    const existing = findSessionForAgent(agentGroupId, messagingGroupId, lookupThreadId);
     if (existing) {
       return { session: existing, created: false };
     }
@@ -187,6 +196,13 @@ export function writeSessionMessage(
     content: string;
     processAfter?: string | null;
     recurrence?: string | null;
+    /**
+     * 1 = this message should wake the agent (the default); 0 = accumulate
+     * as context only, don't wake. Host's countDueMessages gates on this
+     * column; the container still reads all prior messages as context when
+     * a trigger-1 message does arrive.
+     */
+    trigger?: 0 | 1;
   },
 ): void {
   // Extract base64 attachment data, save to inbox, replace with file paths
@@ -204,6 +220,7 @@ export function writeSessionMessage(
       content,
       processAfter: message.processAfter ?? null,
       recurrence: message.recurrence ?? null,
+      trigger: message.trigger ?? 1,
     });
   } finally {
     db.close();
@@ -260,6 +277,34 @@ export function openInboundDb(agentGroupId: string, sessionId: string): Database
 /** Open the outbound DB for a session (host reads only). */
 export function openOutboundDb(agentGroupId: string, sessionId: string): Database.Database {
   return openOutboundDbRaw(outboundDbPath(agentGroupId, sessionId));
+}
+
+/**
+ * Write a message directly to a session's outbound DB so the host delivery
+ * loop picks it up. Used by the command gate to send denial responses
+ * without waking a container.
+ */
+export function writeOutboundDirect(
+  agentGroupId: string,
+  sessionId: string,
+  message: {
+    id: string;
+    kind: string;
+    platformId: string | null;
+    channelType: string | null;
+    threadId: string | null;
+    content: string;
+  },
+): void {
+  const db = openOutboundDb(agentGroupId, sessionId);
+  try {
+    db.prepare(
+      `INSERT OR IGNORE INTO messages_out (id, seq, timestamp, kind, platform_id, channel_type, thread_id, content)
+       VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 2 FROM messages_out), datetime('now'), ?, ?, ?, ?, ?)`,
+    ).run(message.id, message.kind, message.platformId, message.channelType, message.threadId, message.content);
+  } finally {
+    db.close();
+  }
 }
 
 /**

@@ -3,6 +3,7 @@ import path from 'path';
 
 import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 
+import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import { registerProvider } from './provider-registry.js';
 import type { AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 
@@ -10,10 +11,28 @@ function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
 }
 
-// Deferred SDK builtins that would sidestep nanoclaw's own scheduling.
-// Scheduling goes through mcp__nanoclaw__schedule_task so that tasks are
-// durable across sessions/restarts and gated by our pre-task script hook.
-const SDK_DISALLOWED_TOOLS = ['CronCreate', 'CronDelete', 'CronList', 'ScheduleWakeup'];
+// Deferred SDK builtins that either sidestep nanoclaw's own scheduling or
+// don't fit our async message-passing model (they're designed for Claude
+// Code's interactive UI and would hang here).
+//
+// - CronCreate / CronDelete / CronList / ScheduleWakeup: we have durable
+//   scheduling via mcp__nanoclaw__schedule_task.
+// - AskUserQuestion: SDK returns a placeholder instead of blocking on a
+//   real answer — we have mcp__nanoclaw__ask_user_question that persists
+//   the question and blocks on the real reply.
+// - EnterPlanMode / ExitPlanMode / EnterWorktree / ExitWorktree: Claude
+//   Code UI affordances; in a headless container they'd appear stuck.
+const SDK_DISALLOWED_TOOLS = [
+  'CronCreate',
+  'CronDelete',
+  'CronList',
+  'ScheduleWakeup',
+  'AskUserQuestion',
+  'EnterPlanMode',
+  'ExitPlanMode',
+  'EnterWorktree',
+  'ExitWorktree',
+];
 
 // Tool allowlist for NanoClaw agent containers
 const TOOL_ALLOWLIST = [
@@ -122,6 +141,43 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
   return lines.join('\n');
 }
 
+/**
+ * PreToolUse hook: record the current tool + its declared timeout so the host
+ * sweep can widen its stuck tolerance while Bash is running a long-declared
+ * script. Defense-in-depth: if SDK_DISALLOWED_TOOLS slips through somehow,
+ * block the call here instead of letting the agent hang.
+ */
+const preToolUseHook: HookCallback = async (input) => {
+  const i = input as { tool_name?: string; tool_input?: Record<string, unknown> };
+  const toolName = i.tool_name ?? '';
+  if (SDK_DISALLOWED_TOOLS.includes(toolName)) {
+    return {
+      decision: 'block',
+      stopReason: `Tool '${toolName}' is not available in this environment — use the nanoclaw equivalent.`,
+    } as unknown as ReturnType<HookCallback>;
+  }
+  // Bash exposes its timeout via the tool_input.timeout field (ms). Any other
+  // tool: no declared timeout.
+  const declaredTimeoutMs =
+    toolName === 'Bash' && typeof i.tool_input?.timeout === 'number' ? (i.tool_input.timeout as number) : null;
+  try {
+    setContainerToolInFlight(toolName, declaredTimeoutMs);
+  } catch (err) {
+    log(`PreToolUse: failed to record container_state: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return { continue: true };
+};
+
+/** Clear in-flight tool on PostToolUse / PostToolUseFailure. */
+const postToolUseHook: HookCallback = async () => {
+  try {
+    clearContainerToolInFlight();
+  } catch (err) {
+    log(`PostToolUse: failed to clear container_state: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return { continue: true };
+};
+
 function createPreCompactHook(assistantName?: string): HookCallback {
   return async (input) => {
     const preCompact = input as PreCompactHookInput;
@@ -215,6 +271,7 @@ export class ClaudeProvider implements AgentProvider {
         cwd: input.cwd,
         additionalDirectories: this.additionalDirectories,
         resume: input.continuation,
+        pathToClaudeCodeExecutable: '/pnpm/claude',
         systemPrompt: instructions ? { type: 'preset' as const, preset: 'claude_code' as const, append: instructions } : undefined,
         allowedTools: TOOL_ALLOWLIST,
         disallowedTools: SDK_DISALLOWED_TOOLS,
@@ -224,6 +281,9 @@ export class ClaudeProvider implements AgentProvider {
         settingSources: ['project', 'user'],
         mcpServers: this.mcpServers,
         hooks: {
+          PreToolUse: [{ hooks: [preToolUseHook] }],
+          PostToolUse: [{ hooks: [postToolUseHook] }],
+          PostToolUseFailure: [{ hooks: [postToolUseHook] }],
           PreCompact: [{ hooks: [createPreCompactHook(this.assistantName)] }],
         },
       },

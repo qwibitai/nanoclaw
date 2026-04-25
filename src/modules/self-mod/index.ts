@@ -3,26 +3,28 @@
  *
  * Optional tier. Depends on the approvals default module for the request/
  * handler plumbing. On install the module registers:
- *   - Three delivery actions (install_packages, request_rebuild, add_mcp_server)
- *     that validate input and queue an approval via requestApproval().
- *   - Three matching approval handlers that run on approve: mutate the
- *     container config, rebuild the image, kill the container so the next
- *     wake picks up the change.
+ *   - Two delivery actions (install_packages, add_mcp_server) that validate
+ *     input and queue an approval via requestApproval().
+ *   - Two matching approval handlers that run on approve and perform the
+ *     complete follow-up:
+ *       install_packages → update container.json, rebuild image, kill
+ *         container (next wake respawns on the new image), schedule a
+ *         verify-and-report follow-up prompt.
+ *       add_mcp_server → update container.json, kill container. No image
+ *         rebuild — bun runs TS directly, so the new MCP server is wired
+ *         by the next container start.
  *
- * Without this module: the three MCP tools in the container still write
- * outbound system messages with these actions, but delivery logs
- * "Unknown system action" and drops them. Admin never sees a card; nothing
- * changes.
+ * Without this module: the MCP tools in the container still write outbound
+ * system messages with these actions, but delivery logs "Unknown system
+ * action" and drops them. Admin never sees a card; nothing changes.
  */
 import { registerDeliveryAction } from '../../delivery.js';
 import { registerApprovalHandler } from '../approvals/index.js';
-import { applyAddMcpServer, applyInstallPackages, applyRequestRebuild } from './apply.js';
-import { handleAddMcpServer, handleInstallPackages, handleRequestRebuild } from './request.js';
+import { applyAddMcpServer, applyInstallPackages } from './apply.js';
+import { handleAddMcpServer, handleInstallPackages } from './request.js';
 
 registerDeliveryAction('install_packages', handleInstallPackages);
-registerDeliveryAction('request_rebuild', handleRequestRebuild);
 registerDeliveryAction('add_mcp_server', handleAddMcpServer);
 
 registerApprovalHandler('install_packages', applyInstallPackages);
-registerApprovalHandler('request_rebuild', applyRequestRebuild);
 registerApprovalHandler('add_mcp_server', applyAddMcpServer);

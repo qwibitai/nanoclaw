@@ -1,41 +1,5 @@
 {
   "sandbox": {
     "enabled": false
-  },
-  "permissions": {
-    "allow": [
-      "Bash(bash setup.sh*)",
-      "Bash(git remote *)",
-      "Bash(pnpm exec tsx setup/index.ts*)",
-      "Bash(pnpm exec tsx scripts/init-first-agent.ts*)",
-      "Bash(pnpm install @chat-adapter/*)",
-      "Bash(pnpm install chat-adapter-imessage*)",
-      "Bash(pnpm install @bitbasti/chat-adapter-webex*)",
-      "Bash(pnpm install @resend/chat-sdk-adapter*)",
-      "Bash(pnpm install @whiskeysockets/baileys*)",
-      "Bash(pnpm install @beeper/chat-adapter-matrix*)",
-      "Bash(pnpm install @nanoco/nanoclaw-dashboard*)",
-      "Bash(pnpm install --frozen-lockfile*)",
-      "Bash(pnpm run build*)",
-      "Bash(curl -fsSL onecli.sh*)",
-      "Bash(onecli *)",
-      "Bash(grep -q *)",
-      "Bash(echo *>> .env)",
-      "Bash(ls *)",
-      "Bash(cat ~/.config/nanoclaw/*)",
-      "Bash(tail *logs/*)",
-      "Bash(launchctl *nanoclaw*)",
-      "Bash(sqlite3 data/*)",
-      "Bash(docker info*)",
-      "Bash(docker logs *)",
-      "Bash(mkdir -p *)",
-      "Bash(cp .env *)",
-      "Bash(rsync -a .claude/skills/*)",
-      "Bash(head *)",
-      "Bash(xattr *)",
-      "Bash(find ~/.npm *)",
-      "Bash(which onecli*)",
-      "Bash(./container/build.sh*)"
-    ]
   }
 }
