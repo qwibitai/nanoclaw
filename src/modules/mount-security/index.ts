@@ -90,6 +90,33 @@ export function loadMountAllowlist(): MountAllowlist | null {
       throw new Error('allowedRoots must be an array');
     }
 
+    // Each entry must be an object with at least { path: string }. Bare strings
+    // (e.g. `"allowedRoots": ["/foo"]`) are a common mistake — accepting them
+    // silently means findAllowedRoot() can't read root.path and every mount
+    // gets rejected with a confusing "no allowed root" error. Reject up-front
+    // so the operator sees the real problem.
+    for (let i = 0; i < allowlist.allowedRoots.length; i++) {
+      const root = allowlist.allowedRoots[i] as unknown;
+      if (typeof root !== 'object' || root === null || Array.isArray(root)) {
+        throw new Error(
+          `allowedRoots[${i}] must be an object like { "path": "/abs/path", "allowReadWrite": false }, got ${
+            root === null ? 'null' : Array.isArray(root) ? 'array' : typeof root
+          }`,
+        );
+      }
+      const { path: rootPath, allowReadWrite } = root as { path?: unknown; allowReadWrite?: unknown };
+      if (typeof rootPath !== 'string' || rootPath.length === 0) {
+        throw new Error(
+          `allowedRoots[${i}].path must be a non-empty string`,
+        );
+      }
+      if (allowReadWrite !== undefined && typeof allowReadWrite !== 'boolean') {
+        throw new Error(
+          `allowedRoots[${i}].allowReadWrite must be a boolean if provided`,
+        );
+      }
+    }
+
     if (!Array.isArray(allowlist.blockedPatterns)) {
       throw new Error('blockedPatterns must be an array');
     }
@@ -238,6 +265,46 @@ export function validateMount(mount: AdditionalMount): MountValidationResult {
     };
   }
 
+  // Structural validation up-front. The two repeat mistakes here are
+  // (a) using Docker's shorthand keys (source/target/mode) instead of
+  //     hostPath/containerPath/readonly, and
+  // (b) omitting hostPath entirely.
+  // Without these guards the code falls into path.basename(undefined) and
+  // throws a TypeError that propagates out of validateAdditionalMounts and
+  // crashes the spawn — the operator sees a stack trace, not a useful
+  // explanation. Catch it here and return a structured rejection.
+  if (typeof mount !== 'object' || mount === null || Array.isArray(mount)) {
+    return {
+      allowed: false,
+      reason: `Mount entry must be an object with { hostPath, containerPath?, readonly? }, got ${
+        mount === null ? 'null' : Array.isArray(mount) ? 'array' : typeof mount
+      }`,
+    };
+  }
+  if (typeof mount.hostPath !== 'string' || mount.hostPath.length === 0) {
+    const keys = Object.keys(mount as unknown as Record<string, unknown>);
+    const hint =
+      keys.includes('source') || keys.includes('target') || keys.includes('mode')
+        ? ` (looks like Docker shorthand — use "hostPath"/"containerPath"/"readonly" instead of "source"/"target"/"mode")`
+        : '';
+    return {
+      allowed: false,
+      reason: `Mount entry missing required field "hostPath" (string). Got keys: [${keys.join(', ')}]${hint}`,
+    };
+  }
+  if (mount.containerPath !== undefined && typeof mount.containerPath !== 'string') {
+    return {
+      allowed: false,
+      reason: `Mount entry "containerPath" must be a string if provided, got ${typeof mount.containerPath}`,
+    };
+  }
+  if (mount.readonly !== undefined && typeof mount.readonly !== 'boolean') {
+    return {
+      allowed: false,
+      reason: `Mount entry "readonly" must be a boolean if provided, got ${typeof mount.readonly}`,
+    };
+  }
+
   // Derive containerPath from hostPath basename if not specified
   const containerPath = mount.containerPath || path.basename(mount.hostPath);
 
@@ -343,10 +410,13 @@ export function validateAdditionalMounts(
         reason: result.reason,
       });
     } else {
+      // mount may be malformed (null, string, etc.) — read fields defensively
+      // so the warn log itself can't throw.
+      const m = (mount ?? {}) as Partial<AdditionalMount>;
       log.warn('Additional mount REJECTED', {
         group: groupName,
-        requestedPath: mount.hostPath,
-        containerPath: mount.containerPath,
+        requestedPath: typeof m.hostPath === 'string' ? m.hostPath : '<missing>',
+        containerPath: typeof m.containerPath === 'string' ? m.containerPath : undefined,
         reason: result.reason,
       });
     }
