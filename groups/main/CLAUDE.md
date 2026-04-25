@@ -257,6 +257,94 @@ Read `/workspace/project/data/registered_groups.json` and format it nicely.
 
 ---
 
+## Daily News Briefing Management
+
+You manage a daily news briefing system. Users can ask you to customize it conversationally and you use the management tool to apply changes.
+
+**Management tool:** `python /workspace/group/news-briefing-poc/manage_briefing.py <command>`
+
+### Command reference
+
+| What the user says | Command to run |
+|--------------------|----------------|
+| "Show me the briefing config" / "what categories do we have" | `list` |
+| "What ongoing situations are we tracking" | `list-situations` |
+| "Seed situations from past reports" / "populate from history" | `summarize-reports 14` then read output and call `add-situation` + `add-event` for each story |
+| "Add [U.S.-Iran war] as an ongoing story" | `add-situation us_iran_war "U.S.-Iran War" --status "Ceasefire in effect" --severity high` |
+| "Update the Iran situation status" | `update-situation us_iran_war --status "New status here"` |
+| "Add an event to the Iran situation on April 10" | `add-event us_iran_war 2026-04-10 "What happened"` |
+| "Stop tracking the Iran situation" | `remove-situation us_iran_war` |
+| "Add a [politics] category" | `add-category politics --topics "topic 1" "topic 2"` |
+| "Remove the culture category" | `remove-category culture` |
+| "Disable culture for now" | `disable-category culture` |
+| "Re-enable culture" | `enable-category culture` |
+| "Add [quantum computing] to technology topics" | `add-topic technology "quantum computing breakthroughs"` |
+| "Remove [celebrity news] from culture" | `remove-topic culture "celebrity news"` |
+| "Add krebsonsecurity.com to cybersecurity sources" | `add-source cybersecurity "krebsonsecurity.com"` |
+| "Remove wired.com from tech sources" | `remove-source technology "wired.com"` |
+| "Focus the economy section on investment opportunities" | `set-style economy_finance "Focus on actionable investment insights for retail investors."` |
+| "Stop the extra focus on the economy section" | `clear-style economy_finance` |
+| "Move cybersecurity above technology" | `set-priority cybersecurity 2` |
+| "Show 7 articles per category" | `set-max-articles 7` |
+
+**Category names** (use slugified form: lowercase, underscores):
+- `world_highlights`, `technology`, `cybersecurity`, `economy_finance`, `culture`, `custom_tracking`
+- New categories you add get slugified automatically
+
+**After any change**, confirm what was updated and mention the change takes effect in the next briefing.
+
+### Regenerating Today's Briefing
+
+When asked to "regenerate", "run now", or "generate today's briefing", follow these steps **in order** — do not skip any:
+
+**Step 1 — Get the research plan** (this clears stale results AND outputs exactly what to search for):
+```bash
+python /workspace/group/news-briefing-poc/run_live_briefing.py
+```
+Read the output carefully. It lists every category, every query to run, and every priority source to fetch.
+
+**Step 2 — Execute EVERY search in the plan** (⚠️ this step is mandatory — do NOT skip):
+For each category in the output:
+1. Run the `🌐 Broad sweep` query via WebSearch
+2. Run the `⚡ Major events` query via WebSearch
+3. Run each `🔍 Topic` query via WebSearch
+4. If `📌 Priority sources` are listed, WebFetch each one to check for breaking headlines
+
+Then save ONE result file per category to the path shown in the plan:
+`/workspace/group/news-briefing-poc/agents/results/result_research_{category_id}_{YYYYMMDD}.json`
+
+Result file format:
+```json
+{
+  "category": "category_id",
+  "research_date": "YYYY-MM-DD",
+  "articles": [
+    {
+      "title": "headline",
+      "summary": "2-3 sentence summary",
+      "impact": "why it matters",
+      "url": "source url",
+      "published": "YYYY-MM-DD HH:MM",
+      "source": "Publication name",
+      "relevance_score": 8
+    }
+  ],
+  "key_trends": [],
+  "notable_absence": "",
+  "situation_updates": []
+}
+```
+
+**Step 3 — Verify result files exist, then compile**:
+```bash
+ls /workspace/group/news-briefing-poc/agents/results/result_*.json
+python /workspace/group/news-briefing-poc/main.py
+```
+
+⚠️ Do NOT run main.py before all result files are saved — it will produce 0 articles.
+
+---
+
 ## Global Memory
 
 You can read and write to `/workspace/global/CLAUDE.md` for facts that should apply to all groups. Only update global memory when explicitly asked to "remember this globally" or similar.
