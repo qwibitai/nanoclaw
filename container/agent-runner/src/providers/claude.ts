@@ -4,6 +4,7 @@ import path from 'path';
 import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
+import { recordUsage } from '../db/usage.js';
 import { registerProvider } from './provider-registry.js';
 import type { AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 
@@ -293,6 +294,8 @@ export class ClaudeProvider implements AgentProvider {
 
     async function* translateEvents(): AsyncGenerator<ProviderEvent> {
       let messageCount = 0;
+      // Track latest model from assistant messages — `result` doesn't carry it.
+      let lastModel: string | null = null;
       for await (const message of sdkResult) {
         if (aborted) return;
         messageCount++;
@@ -300,9 +303,44 @@ export class ClaudeProvider implements AgentProvider {
         // Yield activity for every SDK event so the poll loop knows the agent is working
         yield { type: 'activity' };
 
+        if (message.type === 'assistant') {
+          const m = (message as { message?: { model?: string } }).message;
+          if (m?.model) lastModel = m.model;
+        }
+
         if (message.type === 'system' && message.subtype === 'init') {
           yield { type: 'init', continuation: message.session_id };
         } else if (message.type === 'result') {
+          // Fork-only mod: log usage to outbound.db for the dashboard's Costs panel.
+          try {
+            const r = message as {
+              session_id?: string;
+              subtype?: string;
+              num_turns?: number;
+              duration_ms?: number;
+              total_cost_usd?: number;
+              usage?: {
+                input_tokens?: number;
+                output_tokens?: number;
+                cache_creation_input_tokens?: number;
+                cache_read_input_tokens?: number;
+              };
+            };
+            recordUsage({
+              sdkSessionId: r.session_id ?? null,
+              model: lastModel,
+              numTurns: r.num_turns ?? 0,
+              durationMs: r.duration_ms ?? 0,
+              inputTokens: r.usage?.input_tokens ?? 0,
+              outputTokens: r.usage?.output_tokens ?? 0,
+              cacheCreationInputTokens: r.usage?.cache_creation_input_tokens ?? 0,
+              cacheReadInputTokens: r.usage?.cache_read_input_tokens ?? 0,
+              totalCostUsd: r.total_cost_usd ?? 0,
+              resultSubtype: r.subtype ?? null,
+            });
+          } catch (err) {
+            log(`recordUsage failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
           const text = 'result' in message ? (message as { result?: string }).result ?? null : null;
           yield { type: 'result', text };
         } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'api_retry') {
