@@ -189,6 +189,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   );
                   continue;
                 }
+                // JID 前缀补全：agent 可能传 oc_xxx（无 fs: 前缀）
+                if (data.chatJid && !data.chatJid.includes(':') && data.chatJid.startsWith('oc_')) {
+                  data.chatJid = `fs:${data.chatJid}`;
+                }
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
                 const isSameGroup = targetGroup && targetGroup.folder === sourceGroup;
