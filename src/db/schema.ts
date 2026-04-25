@@ -171,7 +171,9 @@ CREATE TABLE IF NOT EXISTS messages_in (
   platform_id    TEXT,
   channel_type   TEXT,
   thread_id      TEXT,
-  content        TEXT NOT NULL
+  content        TEXT NOT NULL,
+  origin_session_id TEXT
+                 -- session that sent this A2A message; NULL for non-A2A
 );
 CREATE INDEX IF NOT EXISTS idx_messages_in_series ON messages_in(series_id);
 
@@ -223,7 +225,10 @@ CREATE TABLE IF NOT EXISTS messages_out (
   platform_id    TEXT,
   channel_type   TEXT,
   thread_id      TEXT,
-  content        TEXT NOT NULL
+  content        TEXT NOT NULL,
+  origin_session_id TEXT
+                 -- echoed from inbound row's origin_session_id; host uses this
+                 -- to route A2A replies back to the originating session directly
 );
 
 -- Container tracks processing status here instead of updating messages_in.

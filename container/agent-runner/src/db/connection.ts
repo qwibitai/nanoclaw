@@ -74,6 +74,14 @@ export function getOutboundDb(): Database {
         updated_at               TEXT NOT NULL
       );
     `);
+    // origin_session_id: used by the host to route A2A replies back to the
+    // exact originating session. Forward-compat for older outbound.db files.
+    const outCols = new Set(
+      (_outbound.prepare("PRAGMA table_info('messages_out')").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!outCols.has('origin_session_id')) {
+      _outbound.exec('ALTER TABLE messages_out ADD COLUMN origin_session_id TEXT');
+    }
   }
   return _outbound;
 }
@@ -148,20 +156,21 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
   _inbound.exec('PRAGMA foreign_keys = ON');
   _inbound.exec(`
     CREATE TABLE messages_in (
-      id             TEXT PRIMARY KEY,
-      seq            INTEGER UNIQUE,
-      kind           TEXT NOT NULL,
-      timestamp      TEXT NOT NULL,
-      status         TEXT DEFAULT 'pending',
-      process_after  TEXT,
-      recurrence     TEXT,
-      series_id      TEXT,
-      tries          INTEGER DEFAULT 0,
-      trigger        INTEGER NOT NULL DEFAULT 1,
-      platform_id    TEXT,
-      channel_type   TEXT,
-      thread_id      TEXT,
-      content        TEXT NOT NULL
+      id                TEXT PRIMARY KEY,
+      seq               INTEGER UNIQUE,
+      kind              TEXT NOT NULL,
+      timestamp         TEXT NOT NULL,
+      status            TEXT DEFAULT 'pending',
+      process_after     TEXT,
+      recurrence        TEXT,
+      series_id         TEXT,
+      tries             INTEGER DEFAULT 0,
+      trigger           INTEGER NOT NULL DEFAULT 1,
+      platform_id       TEXT,
+      channel_type      TEXT,
+      thread_id         TEXT,
+      content           TEXT NOT NULL,
+      origin_session_id TEXT
     );
     CREATE TABLE delivered (
       message_out_id      TEXT PRIMARY KEY,
@@ -183,17 +192,18 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
   _outbound.exec('PRAGMA foreign_keys = ON');
   _outbound.exec(`
     CREATE TABLE messages_out (
-      id             TEXT PRIMARY KEY,
-      seq            INTEGER UNIQUE,
-      in_reply_to    TEXT,
-      timestamp      TEXT NOT NULL,
-      deliver_after  TEXT,
-      recurrence     TEXT,
-      kind           TEXT NOT NULL,
-      platform_id    TEXT,
-      channel_type   TEXT,
-      thread_id      TEXT,
-      content        TEXT NOT NULL
+      id                TEXT PRIMARY KEY,
+      seq               INTEGER UNIQUE,
+      in_reply_to       TEXT,
+      timestamp         TEXT NOT NULL,
+      deliver_after     TEXT,
+      recurrence        TEXT,
+      kind              TEXT NOT NULL,
+      platform_id       TEXT,
+      channel_type      TEXT,
+      thread_id         TEXT,
+      content           TEXT NOT NULL,
+      origin_session_id TEXT
     );
     CREATE TABLE processing_ack (
       message_id     TEXT PRIMARY KEY,

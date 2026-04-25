@@ -118,6 +118,8 @@ export interface RoutableAgentMessage {
   id: string;
   platform_id: string | null;
   content: string;
+  /** Populated when this is a reply from an agent that received an A2A message. */
+  origin_session_id?: string | null;
 }
 
 export async function routeAgentMessage(msg: RoutableAgentMessage, session: Session): Promise<void> {
@@ -136,7 +138,35 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
   if (!getAgentGroup(targetAgentGroupId)) {
     throw new Error(`target agent group ${targetAgentGroupId} not found for message ${msg.id}`);
   }
-  const { session: targetSession } = resolveSession(targetAgentGroupId, null, null, 'agent-shared');
+  // Resolve target session. If the source message has origin_session_id (this is a
+  // reply to an A2A message), deliver back to that exact session — bypassing
+  // findSessionByAgentGroup, which picks "most recently active" and can route to
+  // the wrong session when multiple active sessions exist for the same agent
+  // group (e.g. one per channel). Falls back to resolveSession when origin is
+  // stale/archived/cross-group.
+  let targetSession: Session;
+  if (msg.origin_session_id) {
+    const originSession = getSession(msg.origin_session_id);
+    if (originSession && originSession.agent_group_id === targetAgentGroupId && originSession.status === 'active') {
+      targetSession = originSession;
+      log.info('Agent reply threaded to origin session', {
+        from: session.agent_group_id,
+        to: targetAgentGroupId,
+        originSession: originSession.id,
+      });
+    } else {
+      log.warn('Origin session unavailable, falling back to findSessionByAgentGroup', {
+        originSessionId: msg.origin_session_id,
+        targetAgentGroupId,
+      });
+      const { session: resolved } = resolveSession(targetAgentGroupId, null, null, 'agent-shared');
+      targetSession = resolved;
+    }
+  } else {
+    const { session: resolved } = resolveSession(targetAgentGroupId, null, null, 'agent-shared');
+    targetSession = resolved;
+  }
+
   const a2aMsgId = `a2a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // If the source message references files (via `send_file`), forward the
@@ -154,6 +184,7 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
     channelType: 'agent',
     threadId: null,
     content: forwardedContent,
+    originSessionId: session.id,
   });
   log.info('Agent message routed', {
     from: session.agent_group_id,
