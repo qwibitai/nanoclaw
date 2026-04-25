@@ -1,0 +1,19 @@
+{
+  "entries": {
+    "actions/github-script@v9": {
+      "repo": "actions/github-script",
+      "version": "v9",
+      "sha": "3a2844b7e9c422d3c10d287c895573f7108da1b3"
+    },
+    "github/gh-aw-actions/setup@v0.71.0": {
+      "repo": "github/gh-aw-actions/setup",
+      "version": "v0.71.0",
+      "sha": "49157453228f9641824955e35cbeccbca74ee0fd"
+    },
+    "tesslio/setup-tessl@v2": {
+      "repo": "tesslio/setup-tessl",
+      "version": "v2",
+      "sha": "25ec223fc0da33b41b8044ff5ab2b85235f4f91e"
+    }
+  }
+}
