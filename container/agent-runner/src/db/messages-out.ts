@@ -57,12 +57,24 @@ export function writeMessageOut(msg: WriteMessageOut): number {
 
   // Propagate origin_session_id from the triggering inbound row so the host
   // delivery path can route A2A replies directly back to the originating session.
+  // Defensive: if the inbound DB pre-dates the routing-fix migration (e.g. a
+  // session DB hand-copied into a freshly-deployed install before the host
+  // boot-time migration ran), the SELECT throws "no such column". Treat that
+  // as "no origin info available" and let the host fall back to its existing
+  // findSessionByAgentGroup path. Avoids crashing the container on a mismatch
+  // the host's eager startup migration is supposed to prevent.
   let originSessionId: string | null = null;
   if (msg.in_reply_to) {
-    const inRow = inbound
-      .prepare('SELECT origin_session_id FROM messages_in WHERE id = ?')
-      .get(msg.in_reply_to) as { origin_session_id: string | null } | undefined;
-    originSessionId = inRow?.origin_session_id ?? null;
+    try {
+      const inRow = inbound.prepare('SELECT origin_session_id FROM messages_in WHERE id = ?').get(msg.in_reply_to) as
+        | { origin_session_id: string | null }
+        | undefined;
+      originSessionId = inRow?.origin_session_id ?? null;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/no such column/i.test(msg)) throw err;
+      // Column missing → migration hasn't run on this DB yet. Soft-fail.
+    }
   }
 
   // bun:sqlite requires named parameters to be passed with the prefix character
@@ -104,9 +116,7 @@ export function getMessageIdBySeq(seq: number): string | null {
   const inbound = getInboundDb();
 
   // Inbound messages: ID is already the platform message ID
-  const inRow = inbound.prepare('SELECT id FROM messages_in WHERE seq = ?').get(seq) as
-    | { id: string }
-    | undefined;
+  const inRow = inbound.prepare('SELECT id FROM messages_in WHERE seq = ?').get(seq) as { id: string } | undefined;
   if (inRow) return inRow.id;
 
   // Outbound messages: look up platform message ID from delivered table
