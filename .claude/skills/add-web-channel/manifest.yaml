@@ -1,0 +1,21 @@
+skill: web-channel
+version: 1.0.0
+description: "Web browser interface via Redis Streams bridge with a Next.js template."
+core_version: 0.1.0
+adds:
+  - src/channels/web.ts
+  - src/channels/web.test.ts
+modifies:
+  - src/channels/index.ts
+  - src/config.ts
+  - .env.example
+structured:
+  npm_dependencies:
+    redis: "^4.7.0"
+  env_additions:
+    - WEB_CHANNEL_ENABLED
+    - WEB_CHANNEL_REDIS_URL
+    - WEB_CHANNEL_SECRET
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/web.test.ts"
