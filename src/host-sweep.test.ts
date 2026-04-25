@@ -5,7 +5,12 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { ABSOLUTE_CEILING_MS, CLAIM_STUCK_MS, decideStuckAction } from './host-sweep.js';
+import {
+  ABSOLUTE_CEILING_MS,
+  CLAIM_STUCK_MS,
+  decideStuckAction,
+  parseSqliteDatetime,
+} from './host-sweep.js';
 
 const BASE = Date.parse('2026-04-20T12:00:00.000Z');
 
@@ -142,5 +147,45 @@ describe('decideStuckAction', () => {
       claims: [{ message_id: 'x', status_changed: 'not-a-date' }],
     });
     expect(res.action).toBe('ok');
+  });
+
+  it("treats SQLite datetime('now') strings as UTC even on a non-UTC host", () => {
+    // Regression: container writes processing_ack.status_changed via
+    // datetime('now'), which is UTC but emits 'YYYY-MM-DD HH:MM:SS' with no
+    // timezone marker. JavaScript's Date.parse treats unmarked strings as
+    // local time, so on a JST host the parsed instant was 9 hours in the
+    // past — every fresh claim looked instantly stuck and the host killed
+    // the container before it could finish its first turn.
+    const sqliteNow = new Date(BASE - 5_000)
+      .toISOString()
+      .replace('T', ' ')
+      .replace(/\.\d+Z$/, ''); // strip the Z so the value mirrors what SQLite stores
+
+    const res = decideStuckAction({
+      now: BASE,
+      heartbeatMtimeMs: BASE - 2_000,
+      containerState: null,
+      claims: [{ message_id: 'msg-1', status_changed: sqliteNow }],
+    });
+    expect(res.action).toBe('ok');
+  });
+});
+
+describe('parseSqliteDatetime', () => {
+  it("parses datetime('now') format as UTC", () => {
+    const utc = parseSqliteDatetime('2026-04-25 01:33:04');
+    expect(new Date(utc).toISOString()).toBe('2026-04-25T01:33:04.000Z');
+  });
+
+  it('respects an explicit Z marker', () => {
+    expect(parseSqliteDatetime('2026-04-25T01:33:04.000Z')).toBe(
+      Date.parse('2026-04-25T01:33:04.000Z'),
+    );
+  });
+
+  it('respects an explicit offset', () => {
+    expect(parseSqliteDatetime('2026-04-25T10:33:04+09:00')).toBe(
+      Date.parse('2026-04-25T01:33:04.000Z'),
+    );
   });
 });
