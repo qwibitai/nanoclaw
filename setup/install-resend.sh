@@ -11,6 +11,12 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
+# Resolve and validate the trusted remote that carries the executable channel adapter code.
+# shellcheck source=setup/lib/channels-remote.sh
+source "$PROJECT_ROOT/setup/lib/channels-remote.sh"
+CHANNELS_REMOTE=$(resolve_channels_remote)
+CHANNELS_BRANCH="${CHANNELS_REMOTE}/channels"
+
 echo "=== NANOCLAW SETUP: INSTALL_RESEND ==="
 
 needs_install=false
@@ -26,10 +32,10 @@ if ! $needs_install; then
 fi
 
 echo "STEP: fetch-channels-branch"
-git fetch origin channels
+git fetch "$CHANNELS_REMOTE" channels
 
 echo "STEP: copy-files"
-git show origin/channels:src/channels/resend.ts > src/channels/resend.ts
+git show "${CHANNELS_BRANCH}:src/channels/resend.ts" > src/channels/resend.ts
 
 echo "STEP: register-import"
 if ! grep -q "import './resend.js';" src/channels/index.ts; then
