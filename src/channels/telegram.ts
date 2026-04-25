@@ -13,8 +13,107 @@ import { upsertUser } from '../modules/permissions/db/users.js';
 import { createChatSdkBridge, type ReplyContext } from './chat-sdk-bridge.js';
 import { sanitizeTelegramLegacyMarkdown } from './telegram-markdown-sanitize.js';
 import { registerChannelAdapter } from './channel-registry.js';
-import type { ChannelAdapter, ChannelSetup, InboundMessage } from './adapter.js';
+import type { ChannelAdapter, ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
 import { tryConsume } from './telegram-pairing.js';
+
+/**
+ * File-extension → Telegram API method mapping for inline-rendered media.
+ *
+ * The default chat-adapter path uploads every file via sendDocument, which
+ * Telegram renders as a download attachment. To get inline previews (Issue #2)
+ * we detect by extension and dispatch to sendPhoto / sendVideo / sendAudio
+ * directly.
+ */
+type MediaKind = 'photo' | 'video' | 'audio';
+
+const MEDIA_EXTENSIONS: Record<string, MediaKind> = {
+  '.png': 'photo',
+  '.jpg': 'photo',
+  '.jpeg': 'photo',
+  '.gif': 'photo',
+  '.webp': 'photo',
+  '.mp4': 'video',
+  '.mov': 'video',
+  '.webm': 'video',
+  '.mp3': 'audio',
+  '.ogg': 'audio',
+  '.wav': 'audio',
+  '.m4a': 'audio',
+};
+
+const TELEGRAM_API_METHOD: Record<MediaKind, string> = {
+  photo: 'sendPhoto',
+  video: 'sendVideo',
+  audio: 'sendAudio',
+};
+
+const TELEGRAM_API_FIELD: Record<MediaKind, string> = {
+  photo: 'photo',
+  video: 'video',
+  audio: 'audio',
+};
+
+const TELEGRAM_CAPTION_MAX = 1024;
+
+function detectMediaKind(filename: string): MediaKind | null {
+  const idx = filename.lastIndexOf('.');
+  if (idx === -1) return null;
+  return MEDIA_EXTENSIONS[filename.slice(idx).toLowerCase()] ?? null;
+}
+
+function extractCaption(content: unknown): string {
+  if (!content || typeof content !== 'object') return '';
+  const c = content as Record<string, unknown>;
+  const raw = (typeof c.markdown === 'string' && c.markdown) || (typeof c.text === 'string' && c.text) || '';
+  if (!raw) return '';
+  const sanitized = sanitizeTelegramLegacyMarkdown(raw);
+  return sanitized.length > TELEGRAM_CAPTION_MAX ? sanitized.slice(0, TELEGRAM_CAPTION_MAX) : sanitized;
+}
+
+/**
+ * Send a single media file via Telegram's typed media API so it renders
+ * inline. Returns the chat-sdk composite message id (chatId:msgId) on success.
+ * Throws on any non-2xx so callers can fall back to the bridge.
+ */
+async function sendTelegramMedia(
+  token: string,
+  platformId: string,
+  threadId: string | null,
+  file: { filename: string; data: Buffer },
+  kind: MediaKind,
+  caption: string,
+): Promise<string | undefined> {
+  // platformId is "telegram:<chatId>"; strip the prefix.
+  const chatId = (threadId ?? platformId).split(':').slice(1).join(':');
+  if (!chatId) return undefined;
+
+  const form = new FormData();
+  form.set('chat_id', chatId);
+  if (caption) form.set('caption', caption);
+  // Buffer is a Uint8Array but Node 22's @types/node uses `Buffer<ArrayBufferLike>`
+  // which the DOM Blob ctor's BlobPart type doesn't accept directly. Slice into a
+  // plain ArrayBuffer to satisfy the type without an unsafe cast or extra copy.
+  const ab = file.data.buffer.slice(file.data.byteOffset, file.data.byteOffset + file.data.byteLength) as ArrayBuffer;
+  form.set(TELEGRAM_API_FIELD[kind], new Blob([ab]), file.filename);
+
+  const res = await fetch(`https://api.telegram.org/bot${token}/${TELEGRAM_API_METHOD[kind]}`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Telegram ${TELEGRAM_API_METHOD[kind]} ${res.status} ${res.statusText}: ${body.slice(0, 200)}`);
+  }
+  const json = (await res.json()) as {
+    ok: boolean;
+    result?: { message_id?: number; chat?: { id?: number } };
+    description?: string;
+  };
+  if (!json.ok || !json.result?.message_id || json.result.chat?.id === undefined) {
+    throw new Error(`Telegram ${TELEGRAM_API_METHOD[kind]} unexpected response: ${JSON.stringify(json).slice(0, 200)}`);
+  }
+  return `${json.result.chat.id}:${json.result.message_id}`;
+}
 
 /**
  * Retry a one-shot operation that can fail on transient network errors at
@@ -222,6 +321,34 @@ registerChannelAdapter('telegram', {
           onInbound: createPairingInterceptor(botUsernamePromise, hostConfig.onInbound, token),
         };
         return withRetry(() => bridge.setup(intercepted), 'bridge.setup');
+      },
+      async deliver(platformId: string, threadId: string | null, message: OutboundMessage) {
+        // Issue #2: route image / video / audio files through Telegram's typed
+        // media APIs so they render inline. The chat-sdk bridge always uses
+        // sendDocument, which renders as a download attachment.
+        //
+        // Telegram allows exactly one media file per message; multi-file or
+        // non-media payloads fall through to the bridge (which packages them
+        // as documents — the right behaviour for arbitrary attachments).
+        const files = message.files;
+        if (files && files.length === 1) {
+          const file = files[0]!;
+          const kind = detectMediaKind(file.filename);
+          if (kind) {
+            try {
+              return await sendTelegramMedia(token, platformId, threadId, file, kind, extractCaption(message.content));
+            } catch (err) {
+              log.warn('Telegram direct media send failed, falling back to sendDocument', {
+                method: TELEGRAM_API_METHOD[kind],
+                file: file.filename,
+                err,
+              });
+              // Intentional fall-through to the bridge so the user at least
+              // gets the file as a downloadable document.
+            }
+          }
+        }
+        return bridge.deliver(platformId, threadId, message);
       },
     };
     return wrapped;
