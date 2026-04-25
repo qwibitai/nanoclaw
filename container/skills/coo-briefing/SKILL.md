@@ -246,12 +246,16 @@ Always use this max date as the anchor -- do NOT filter to today's date. Show MT
 
 Two windows: MTD (1st of the month of max data date) + YTD (Jan 1). Each: count + total $ comps.
 
-Show top issues SIDE BY SIDE in two columns:
-- Left column: "Top Issues MTD" -- top 3-5 by frequency for current month, with count + $ comp
-- Right column: "Top Issues YTD" -- top 3-5 by frequency for year to date, with count + $ comp
-Display NEXT TO each other (two-column layout for the issues only, not the summary numbers above).
+**Volume is not a problem.** High glitch counts are encouraged -- staff are being trained to log everything. Do NOT flag or comment on total volume being high.
 
-**Daily mode:** Filter to glitches where parsed_date >= yesterday's date. Show count and total comps for the day. If zero new glitches, show "ALICE: 0 new glitches today." Show MTD total in parentheses for context. Still flag any individual comp > $500.
+**What to watch: TYPE TRENDS.** Compare MTD glitch type counts vs the prior month (or vs YTD average per month). Flag any glitch type where MTD frequency is notably elevated vs the baseline -- e.g., a spike in plumbing issues, noise complaints, AC problems, housekeeping misses. Surface these as "Trend: [Type] up X vs prior month" in the action items only if the spike is meaningful (roughly 2x or more vs baseline).
+
+Show top issue types SIDE BY SIDE in two columns:
+- Left column: "Top Issues MTD" -- top 5 by frequency for current month, with count + $ comp
+- Right column: "Trend Alerts" -- any type where MTD count is notably elevated vs prior month baseline, with delta. If no trend spikes, show "No unusual trends."
+Display NEXT TO each other (two-column layout, not the summary numbers above).
+
+**Daily mode:** Filter to glitches where parsed_date >= yesterday. Show count and total comps for the day. If zero new glitches, show "ALICE: 0 new glitches today." Show MTD total in parentheses for context. Only flag an individual comp if > $500.
 
 Comp formula: `TRY_TO_NUMBER(REPLACE(REPLACE(COMPENSATION,'$',''),',',''))`
 
@@ -394,7 +398,7 @@ This gives Gabe full F&B visibility by outlet. Do NOT truncate to top 3 -- show 
    - STR: Total RevPAR Index R28 < 65 = critical, < 85 = alert, < 95 = watch
    - Duetto: Fcst vs Budget < -7% = alert, < -5% = watch
    - Lighthouse: vs comp < -20% = alert, OTB < 30% with high comp OTB = alert
-   - ALICE: comp > $30/glitch = alert, volume > 600 MTD = alert
+   - ALICE: flag trend spikes only (a glitch TYPE spiking 2x vs prior month baseline). Do NOT flag high total volume -- volume is encouraged. Individual comp > $500 = flag.
    - Revinate: avg < 3.8 = critical, < 4.1 = alert, < 4.3 = watch
    If fewer than 3 anomalies, pad with positive observations.
 4. **COO Action Items -- Bottom Summary** -- LAST section of the email, after all hotel detail. This is a consolidated roll-up for quick scanning. Format:
