@@ -23,6 +23,7 @@ ARG CLAUDE_CODE_VERSION=2.1.116
 ARG AGENT_BROWSER_VERSION=latest
 ARG VERCEL_VERSION=latest
 ARG BUN_VERSION=1.3.12
+ARG WHISPER_CLI_VERSION=1.7.5
 
 # ---- System dependencies -----------------------------------------------------
 # tini: correct PID 1 / signal forwarding so outbound.db writes finalize on
@@ -48,6 +49,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libxshmfence1 \
         ca-certificates \
         curl \
+        ffmpeg \
         git \
         tini \
         unzip \
@@ -103,6 +105,13 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+# whisper-cli: local Whisper transcription binary. Container-side voice
+# transcription tries this first before any external API fallback. Pinned to
+# satisfy the supply-chain policy and so model files stay compatible with the
+# binary version. ffmpeg (above) handles audio normalization before invocation.
+RUN --mount=type=cache,target=/root/.cache/pnpm \
+    pnpm install -g "whisper-cli@${WHISPER_CLI_VERSION}"
 
 # ---- Entrypoint --------------------------------------------------------------
 COPY entrypoint.sh /app/entrypoint.sh

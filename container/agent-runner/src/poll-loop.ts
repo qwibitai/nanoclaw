@@ -2,12 +2,15 @@ import { findByName, getAllDestinations, type DestinationEntry } from './destina
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
 import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
+import { clearContinuation, migrateLegacyContinuation, setContinuation } from './db/session-state.js';
 import {
-  clearContinuation,
-  migrateLegacyContinuation,
-  setContinuation,
-} from './db/session-state.js';
-import { formatMessages, extractRouting, categorizeMessage, isClearCommand, stripInternalTags, type RoutingContext } from './formatter.js';
+  formatMessages,
+  extractRouting,
+  categorizeMessage,
+  isClearCommand,
+  stripInternalTags,
+  type RoutingContext,
+} from './formatter.js';
 import type { AgentProvider, AgentQuery, ProviderEvent } from './providers/types.js';
 
 const POLL_INTERVAL_MS = 1000;
@@ -154,6 +157,14 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
       continue;
     }
 
+    // Auto-transcribe: any audio attachments get inlined as
+    // `[Voice (source): "..."]` so the agent sees text. Source label is
+    // mandatory so the agent can disclose to the user when audio was
+    // processed remotely. Sovereign default is local-only — see
+    // transcription.ts.
+    const { autoTranscribeMessages } = await import('./auto-transcribe.js');
+    keep = await autoTranscribeMessages(keep);
+
     // Format messages: passthrough commands get raw text (only if the
     // provider natively handles slash commands), others get XML.
     const prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
@@ -260,7 +271,9 @@ async function processQuery(
   // Stream liveness is decided host-side via the heartbeat file + processing
   // claim age (see src/host-sweep.ts); if something is truly stuck, the host
   // will kill the container and messages get reset to pending.
-  const pollHandle = setInterval(() => {
+  // Async because autoTranscribeMessages does subprocess + HTTP work — the
+  // setInterval callback must be `async` for the await to be legal.
+  const pollHandle = setInterval(async () => {
     if (done) return;
 
     // Skip system messages (MCP tool responses) and /clear (needs fresh query).
@@ -279,7 +292,11 @@ async function processQuery(
       const newIds = newMessages.map((m) => m.id);
       markProcessing(newIds);
 
-      const prompt = formatMessages(newMessages);
+      // Inline transcription on follow-ups too — voice notes can arrive
+      // mid-conversation, not just on the initial batch.
+      const { autoTranscribeMessages } = await import('./auto-transcribe.js');
+      const preprocessed = await autoTranscribeMessages(newMessages);
+      const prompt = formatMessages(preprocessed);
       log(`Pushing ${newMessages.length} follow-up message(s) into active query`);
       query.push(prompt);
 
@@ -331,7 +348,9 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       log(`Result: ${event.text ? event.text.slice(0, 200) : '(empty)'}`);
       break;
     case 'error':
-      log(`Error: ${event.message} (retryable: ${event.retryable}${event.classification ? `, ${event.classification}` : ''})`);
+      log(
+        `Error: ${event.message} (retryable: ${event.retryable}${event.classification ? `, ${event.classification}` : ''})`,
+      );
       break;
     case 'progress':
       log(`Progress: ${event.message}`);
