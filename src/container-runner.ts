@@ -525,7 +525,23 @@ async function buildContainerArgs(
   const imageTag = containerConfig.imageTag || CONTAINER_IMAGE;
   args.push(imageTag);
 
-  args.push('-c', 'exec bun run /app/src/index.ts');
+  // OneCLI gateway MITMs HTTPS via a self-signed CA mounted at
+  // /tmp/onecli-gateway-ca.pem. Native binaries (gh, curl, git, Python)
+  // need a CA bundle that combines the system roots with the gateway CA;
+  // the SDK's host-side bundler bails on Windows. We replicate the same
+  // setup container/entrypoint.sh does, since this dynamic-spawn path
+  // overrides --entrypoint and doesn't run entrypoint.sh.
+  args.push(
+    '-c',
+    [
+      'GATEWAY_CA="/tmp/onecli-gateway-ca.pem"',
+      'SYSTEM_CA="/etc/ssl/certs/ca-certificates.crt"',
+      'COMBINED_CA="/tmp/onecli-combined-ca.pem"',
+      'if [ -r "$GATEWAY_CA" ] && [ -r "$SYSTEM_CA" ] && [ ! -f "$COMBINED_CA" ]; then cat "$SYSTEM_CA" "$GATEWAY_CA" > "$COMBINED_CA" 2>/dev/null || true; fi',
+      'if [ -f "$COMBINED_CA" ]; then export SSL_CERT_FILE="$COMBINED_CA" CURL_CA_BUNDLE="$COMBINED_CA" GIT_SSL_CAINFO="$COMBINED_CA" REQUESTS_CA_BUNDLE="$COMBINED_CA"; fi',
+      'exec bun run /app/src/index.ts',
+    ].join('; '),
+  );
 
   return args;
 }
