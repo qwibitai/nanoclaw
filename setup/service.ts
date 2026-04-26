@@ -339,10 +339,24 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
 
   // Enable lingering so the user service survives SSH logout.
   // Without linger, systemd terminates all user processes when the last session closes.
+  //
+  // `loginctl enable-linger` (no arg) authorises via polkit — which on
+  // minimal/headless boxes spawns `pkttyagent` to prompt the user, and
+  // pkttyagent isn't installed, producing a noisy "Failed to execute
+  // /usr/bin/pkttyagent" line in the spinner. Going through sudo bypasses
+  // polkit entirely (sudo→root has the privilege directly). `sudo -n`
+  // because the spinner captures stdio and an interactive prompt would
+  // hang on /dev/null; if the cache expired we fall through to the
+  // existing warn-and-continue path.
   if (!runningAsRoot) {
+    const user = execSync('whoami', { encoding: 'utf-8' }).trim();
+    const sudoState = ensureSudoCached();
+    const cmd = sudoState === 'cached'
+      ? `sudo -n loginctl enable-linger ${user}`
+      : 'loginctl enable-linger';
     try {
-      execSync('loginctl enable-linger', { stdio: 'ignore' });
-      log.info('Enabled loginctl linger for current user');
+      execSync(cmd, { stdio: 'ignore' });
+      log.info('Enabled loginctl linger for current user', { via: sudoState === 'cached' ? 'sudo' : 'polkit' });
     } catch (err) {
       log.warn(
         'loginctl enable-linger failed — service may stop on SSH logout',
