@@ -275,14 +275,14 @@ If a main group already exists on another channel (e.g. `whatsapp_main`), ask th
 
 Present these options for the main control room:
 
-1. `control` — "Control Room" (recommended — clear purpose)
+1. `control-room` — "Control Room" (recommended — clear purpose)
 2. `bridge` — "Bridge" (Star Trek inspired)
 3. `main` — "Main" (simple and direct)
 4. Custom — let the user type their own
 
 ### Create the room and register
 
-Once the user picks a name (e.g. `control`), create the chat room and register it as the main group:
+Once the user picks a name (e.g. `control-room`), create the chat room and register it as the main group:
 
 ```bash
 # Read assistant name from .env
@@ -300,7 +300,7 @@ npx tsx setup/index.ts --step register \
   --no-trigger-required
 ```
 
-Replace `<room_id>` and `<room_name>` with the user's choice (e.g. `control` / `Control Room`).
+Replace `<room_id>` and `<room_name>` with the user's choice (e.g. `control-room` / `Control Room`).
 
 ### Seed the room in chat-db
 
