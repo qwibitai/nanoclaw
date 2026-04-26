@@ -34,8 +34,12 @@ const SDK_DISALLOWED_TOOLS = [
   'ExitWorktree',
 ];
 
-// Tool allowlist for NanoClaw agent containers
-const TOOL_ALLOWLIST = [
+// Static (non-MCP) tool allowlist for NanoClaw agent containers.
+// MCP entries are appended per-instance from the configured mcpServers map
+// (see ClaudeProvider constructor) — Claude Code 2.1.116+ treats
+// `--allowedTools` as a hard whitelist, so any MCP server not listed here
+// has its child process never spawned, regardless of `bypassPermissions`.
+const STATIC_TOOL_ALLOWLIST = [
   'Bash',
   'Read',
   'Write',
@@ -54,7 +58,6 @@ const TOOL_ALLOWLIST = [
   'ToolSearch',
   'Skill',
   'NotebookEdit',
-  'mcp__nanoclaw__*',
 ];
 
 interface SDKUserMessage {
@@ -243,6 +246,7 @@ export class ClaudeProvider implements AgentProvider {
   private mcpServers: Record<string, McpServerConfig>;
   private env: Record<string, string | undefined>;
   private additionalDirectories?: string[];
+  private allowedTools: string[];
 
   constructor(options: ProviderOptions = {}) {
     this.assistantName = options.assistantName;
@@ -252,6 +256,10 @@ export class ClaudeProvider implements AgentProvider {
       ...(options.env ?? {}),
       CLAUDE_CODE_AUTO_COMPACT_WINDOW,
     };
+    this.allowedTools = [
+      ...STATIC_TOOL_ALLOWLIST,
+      ...Object.keys(this.mcpServers).map((name) => `mcp__${name}__*`),
+    ];
   }
 
   isSessionInvalid(err: unknown): boolean {
@@ -273,7 +281,7 @@ export class ClaudeProvider implements AgentProvider {
         resume: input.continuation,
         pathToClaudeCodeExecutable: '/pnpm/claude',
         systemPrompt: instructions ? { type: 'preset' as const, preset: 'claude_code' as const, append: instructions } : undefined,
-        allowedTools: TOOL_ALLOWLIST,
+        allowedTools: this.allowedTools,
         disallowedTools: SDK_DISALLOWED_TOOLS,
         env: this.env,
         permissionMode: 'bypassPermissions',
