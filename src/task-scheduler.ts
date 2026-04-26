@@ -13,6 +13,7 @@ import {
   getDueTasks,
   getTaskById,
   logTaskRun,
+  type StoredSession,
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
@@ -65,7 +66,7 @@ export function computeNextRun(task: ScheduledTask): string | null {
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
-  getSessions: () => Record<string, string>;
+  getSessions: () => Record<string, StoredSession>;
   queue: GroupQueue;
   onProcess: (
     groupJid: string,
@@ -152,7 +153,7 @@ async function runTask(
   // グループコンテキストモードの場合、グループの現在のセッションを使用します
   // session キーは group_jid（Phase 3 で group_folder から変更）
   const sessions = deps.getSessions();
-  const sessionId =
+  const session =
     task.context_mode === 'group' ? sessions[task.chat_jid] : undefined;
 
   // タスクが結果を出力した後、速やかにコンテナを閉じます。
@@ -174,12 +175,14 @@ async function runTask(
       group,
       {
         prompt: task.prompt,
-        sessionId,
+        sessionId: session?.sessionId,
+        sessionProviderName: session?.providerName,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
         groupType,
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
+        selectedProvider: group.provider,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName),

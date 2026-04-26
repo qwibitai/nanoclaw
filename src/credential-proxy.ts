@@ -8,7 +8,16 @@ import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
 
 import { logger } from './logger.js';
-import { detectActiveProviderConfig } from './provider-config.js';
+import { resolveProviderConfig } from './provider-config.js';
+
+const PROVIDER_ROUTE_PREFIX = '/__provider/';
+
+interface ProxyTarget {
+  name: string;
+  provider: 'anthropic' | 'openai';
+  apiKey: string;
+  upstreamBaseURL: string;
+}
 
 function buildUpstreamPath(upstreamUrl: URL, requestUrl?: string): string {
   const incomingPath = requestUrl?.startsWith('/')
@@ -45,8 +54,6 @@ function injectAuthHeaders(
     return;
   }
 
-  // OpenAI 互換 API は Authorization Bearer を使うのが標準だが、
-  // x-api-key を使う実装にも対応できるよう、存在時は両方を置き換える。
   delete headers['authorization'];
   headers['authorization'] = `Bearer ${apiKey}`;
 
@@ -56,67 +63,104 @@ function injectAuthHeaders(
   }
 }
 
+function buildProxyTargets(): Record<string, ProxyTarget> {
+  const resolvedConfig = resolveProviderConfig();
+  const targets: Record<string, ProxyTarget> = {};
+
+  for (const [name, provider] of Object.entries(resolvedConfig.providers)) {
+    if (provider.provider !== 'anthropic' && provider.provider !== 'openai') {
+      continue;
+    }
+    targets[name] = {
+      name,
+      provider: provider.provider,
+      apiKey: provider.apiKey!,
+      upstreamBaseURL: provider.upstreamBaseURL!,
+    };
+  }
+
+  return targets;
+}
+
+function resolveProxyTarget(
+  requestUrl: string | undefined,
+  targets: Record<string, ProxyTarget>,
+): { target: ProxyTarget; upstreamPath: string } | undefined {
+  if (!requestUrl || !requestUrl.startsWith(PROVIDER_ROUTE_PREFIX)) {
+    return undefined;
+  }
+
+  const rest = requestUrl.slice(PROVIDER_ROUTE_PREFIX.length);
+  const slashIndex = rest.indexOf('/');
+  const queryIndex = rest.indexOf('?');
+  const endIndex =
+    slashIndex === -1 && queryIndex === -1
+      ? rest.length
+      : slashIndex === -1
+        ? queryIndex
+        : queryIndex === -1
+          ? slashIndex
+          : Math.min(slashIndex, queryIndex);
+  const namePart = rest.slice(0, endIndex);
+  let providerName: string;
+  try {
+    providerName = decodeURIComponent(namePart);
+  } catch {
+    return undefined;
+  }
+  const target = targets[providerName];
+  if (!target) return undefined;
+
+  const suffix = rest.slice(endIndex) || '/';
+  return { target, upstreamPath: suffix };
+}
+
+const CONFIG_REFRESH_INTERVAL_MS = 30_000;
+
 export function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
 ): Promise<Server> {
-  const providerConfig = detectActiveProviderConfig();
-
-  if (!providerConfig.usesCredentialProxy) {
-    return new Promise((resolve, reject) => {
-      const server = createServer((_req, res) => {
-        res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
-        res.end(
-          `Credential proxy is disabled for provider ${providerConfig.provider}.`,
-        );
-      });
-
-      server.listen(port, host, () => {
-        logger.info(
-          {
-            port,
-            host,
-            provider: providerConfig.provider,
-            usesCredentialProxy: false,
-          },
-          'Credential proxy started in disabled mode',
-        );
-        resolve(server);
-      });
-
-      server.on('error', reject);
-    });
-  }
-
-  if (
-    providerConfig.provider !== 'anthropic' &&
-    providerConfig.provider !== 'openai'
-  ) {
-    throw new Error(
-      `Credential proxy cannot route provider ${providerConfig.provider}.`,
-    );
-  }
-  const proxiedProvider = providerConfig.provider;
-
-  const upstreamUrl = new URL(providerConfig.upstreamBaseURL!);
-  const isHttps = upstreamUrl.protocol === 'https:';
-  const makeRequest = isHttps ? httpsRequest : httpRequest;
-
   return new Promise((resolve, reject) => {
+    let cachedTargets: Record<string, ProxyTarget>;
+    try {
+      cachedTargets = buildProxyTargets();
+    } catch (err) {
+      return reject(err);
+    }
+
+    const refreshTimer = setInterval(() => {
+      try {
+        cachedTargets = buildProxyTargets();
+      } catch (err) {
+        logger.error({ err }, 'Credential proxy: failed to refresh targets');
+      }
+    }, CONFIG_REFRESH_INTERVAL_MS);
+    refreshTimer.unref();
+
     const server = createServer((req, res) => {
+      const targets = cachedTargets;
+      const routed = resolveProxyTarget(req.url, targets);
+
+      if (!routed) {
+        if (Object.keys(targets).length === 0) {
+          res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
+          res.end('Credential proxy is disabled for the configured providers.');
+          return;
+        }
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end('Unknown provider route');
+        return;
+      }
+
+      const upstreamUrl = new URL(routed.target.upstreamBaseURL);
+      const isHttps = upstreamUrl.protocol === 'https:';
+      const makeRequest = isHttps ? httpsRequest : httpRequest;
+
       const chunks: Buffer[] = [];
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
         const body = Buffer.concat(chunks);
-        if (!providerConfig.apiKey) {
-          logger.error(
-            { provider: providerConfig.provider },
-            'API key is missing for proxied provider',
-          );
-          res.writeHead(500);
-          res.end('Credential proxy misconfiguration');
-          return;
-        }
 
         const headers: Record<string, string | number | string[] | undefined> =
           {
@@ -125,28 +169,30 @@ export function startCredentialProxy(
             'content-length': body.length,
           };
 
-        // プロキシによって転送してはならないホップバイホップ・ヘッダーを削除
         delete headers['connection'];
         delete headers['keep-alive'];
         delete headers['transfer-encoding'];
 
-        injectAuthHeaders(headers, proxiedProvider, providerConfig.apiKey);
+        injectAuthHeaders(
+          headers,
+          routed.target.provider,
+          routed.target.apiKey,
+        );
 
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: buildUpstreamPath(upstreamUrl, req.url),
+            path: buildUpstreamPath(upstreamUrl, routed.upstreamPath),
             method: req.method,
             headers,
           } as RequestOptions,
           (upRes) => {
             res.writeHead(upRes.statusCode!, upRes.headers);
             upRes.pipe(res);
-            // ストリーミング中の接続断を適切に処理
             upRes.on('error', (err) => {
               logger.error(
-                { err, url: req.url },
+                { err, url: req.url, provider: routed.target.name },
                 'Credential proxy upstream response error',
               );
               if (!res.destroyed) res.destroy();
@@ -154,8 +200,6 @@ export function startCredentialProxy(
           },
         );
 
-        // TCPキープアライブを有効化して長いストリーミング中の ETIMEDOUT を防ぐ。
-        // 30_000 は最初の keepalive probe までの初期遅延（ms）で、以降の間隔は OS 依存。
         const applyKeepAlive = () => {
           if (!upstream.socket) return false;
           upstream.socket.setKeepAlive(true, 30_000);
@@ -167,7 +211,6 @@ export function startCredentialProxy(
           });
         }
 
-        // 下流（コンテナ側）が切断したら upstream を即時中止する。
         res.on('close', () => {
           if (!res.writableEnded && !upstream.destroyed) {
             upstream.destroy();
@@ -176,7 +219,7 @@ export function startCredentialProxy(
 
         upstream.on('error', (err) => {
           logger.error(
-            { err, url: req.url },
+            { err, url: req.url, provider: routed.target.name },
             'Credential proxy upstream error',
           );
           if (!res.headersSent) {
@@ -194,12 +237,19 @@ export function startCredentialProxy(
 
     server.listen(port, host, () => {
       logger.info(
-        { port, host, provider: providerConfig.provider },
+        { port, host, providers: Object.keys(cachedTargets) },
         'Credential proxy started',
       );
       resolve(server);
     });
 
-    server.on('error', reject);
+    server.on('error', (err) => {
+      clearInterval(refreshTimer);
+      reject(err);
+    });
+
+    server.on('close', () => {
+      clearInterval(refreshTimer);
+    });
   });
 }

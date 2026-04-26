@@ -27,6 +27,7 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  deleteSession,
   finalizeSpawnedThread,
   getAllChats,
   getAllRegisteredGroups,
@@ -68,12 +69,22 @@ import {
   RegisteredGroup,
 } from './types.js';
 import { logger } from './logger.js';
+import {
+  resolveProviderConfig,
+  resolveProviderExecutionConfig,
+} from './provider-config.js';
 
 // リファクタリング中の後方互換性のために再エクスポート
 export { escapeXml, formatMessages } from './router.js';
 
 let lastTimestamp = '';
-let sessions: Record<string, string> = {};
+let sessions: Record<
+  string,
+  {
+    sessionId: string;
+    providerName?: string;
+  }
+> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
@@ -566,7 +577,7 @@ async function runAgent(
 ): Promise<'success' | 'error'> {
   const groupType = resolveGroupType(group);
   const isPrivileged = groupType === 'main' || groupType === 'override';
-  const sessionId = sessions[chatJid];
+  const session = sessions[chatJid];
 
   // コンテナが読み取るためのタスクスナップショットを更新（グループでフィルタリング）
   const tasks = getAllTasks();
@@ -593,8 +604,11 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[chatJid] = output.newSessionId;
-          setSession(chatJid, output.newSessionId);
+          sessions[chatJid] = {
+            sessionId: output.newSessionId,
+            providerName: output.providerName,
+          };
+          setSession(chatJid, output.newSessionId, output.providerName);
         }
         await onOutput(output);
       }
@@ -605,11 +619,13 @@ async function runAgent(
       group,
       {
         prompt,
-        sessionId,
+        sessionId: session?.sessionId,
         groupFolder: group.folder,
         chatJid,
         groupType,
         assistantName: ASSISTANT_NAME,
+        selectedProvider: group.provider,
+        sessionProviderName: session?.providerName,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName),
@@ -617,8 +633,11 @@ async function runAgent(
     );
 
     if (output.newSessionId) {
-      sessions[chatJid] = output.newSessionId;
-      setSession(chatJid, output.newSessionId);
+      sessions[chatJid] = {
+        sessionId: output.newSessionId,
+        providerName: output.providerName,
+      };
+      setSession(chatJid, output.newSessionId, output.providerName);
     }
 
     if (output.status === 'error') {
@@ -826,6 +845,67 @@ async function main(): Promise<void> {
     }
   }
 
+  async function handleProviderCommand(
+    chatJid: string,
+    msg: InboundMessage,
+  ): Promise<void> {
+    if (!chatJid.startsWith('dc:')) return;
+
+    const channel = findChannel(channels, chatJid);
+    if (!channel) return;
+
+    const group = registeredGroups[chatJid];
+    if (!group || !hasPrivilege(group)) {
+      await channel.sendMessage(
+        chatJid,
+        'Provider switching is only available in privileged groups (main/override).',
+      );
+      return;
+    }
+
+    const resolved = resolveProviderConfig();
+    const parts = msg.content.trim().split(/\s+/);
+
+    if (parts.length === 1) {
+      const execution = resolveProviderExecutionConfig(
+        resolved,
+        group.provider,
+      );
+      const currentName = execution.defaultProvider;
+      const current = execution.providers[currentName];
+      await channel.sendMessage(
+        chatJid,
+        `Current provider: ${currentName} (${current.provider}, ${current.model})`,
+      );
+      return;
+    }
+
+    const requested = parts[1];
+    if (!resolved.providers[requested]) {
+      await channel.sendMessage(
+        chatJid,
+        `Unknown provider "${requested}". Available: ${Object.keys(resolved.providers).join(', ')}`,
+      );
+      return;
+    }
+
+    const updatedGroup: RegisteredGroup = {
+      ...group,
+      provider: requested === resolved.defaultProvider ? undefined : requested,
+    };
+    registeredGroups[chatJid] = updatedGroup;
+    setRegisteredGroup(chatJid, updatedGroup);
+
+    delete sessions[chatJid];
+    deleteSession(chatJid);
+
+    const selected = resolved.providers[requested];
+    await channel.sendMessage(
+      chatJid,
+      `Provider switched to ${requested} (${selected.provider}, ${selected.model}). Session context was reset.`,
+    );
+  }
+
   // チャネルコールバック（すべてのチャネルで共有）
   const channelOpts = {
     onMessage: (chatJid: string, msg: InboundMessage) => {
@@ -834,6 +914,15 @@ async function main(): Promise<void> {
       if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
         handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'Remote control command error'),
+        );
+        return;
+      }
+      if (
+        chatJid.startsWith('dc:') &&
+        (trimmed === '/provider' || trimmed.startsWith('/provider '))
+      ) {
+        handleProviderCommand(chatJid, msg).catch((err) =>
+          logger.error({ err, chatJid }, 'Provider command error'),
         );
         return;
       }

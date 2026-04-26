@@ -31,6 +31,7 @@ import { fileURLToPath } from 'url';
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
+  sessionProviderName?: string;
   groupFolder: string;
   chatJid: string;
   // NOTE: ホスト側の GroupType (src/types.ts) と同期が必要。コンテナはホストのソースを import できないため、ここで再定義している。
@@ -39,12 +40,14 @@ interface ContainerInput {
   groupType?: 'override' | 'main' | 'chat' | 'thread';
   isScheduledTask?: boolean;
   assistantName?: string;
+  selectedProvider?: string;
 }
 
 interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
+  providerName?: string;
   error?: string;
 }
 
@@ -75,11 +78,18 @@ interface CodexOAuthCredentials {
 }
 
 interface SessionProviderConfig {
+  name: string;
   provider: SessionProvider;
   model: string;
   apiKey?: string;
   baseURL?: string;
   codexOAuth?: CodexOAuthOptions;
+}
+
+interface ResolvedSessionProviders {
+  providers: Record<string, SessionProviderConfig>;
+  defaultProvider: string;
+  fallbackProviders: string[];
 }
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
@@ -290,44 +300,131 @@ function parseCodexOAuthJson(oauthJson: string): CodexOAuthOptions {
   return { credentials: credentials as CodexOAuthOptions['credentials'] };
 }
 
-function resolveSessionProviderConfig(env: NodeJS.ProcessEnv): SessionProviderConfig {
+function resolveLegacySessionProviderConfig(
+  env: NodeJS.ProcessEnv,
+): ResolvedSessionProviders {
   if (env.ANTHROPIC_API_KEY) {
     return {
-      provider: 'anthropic',
-      model: DEFAULT_MODEL_BY_PROVIDER.anthropic,
-      apiKey: env.ANTHROPIC_API_KEY,
-      baseURL: env.ANTHROPIC_BASE_URL,
+      providers: {
+        default: {
+          name: 'default',
+          provider: 'anthropic',
+          model: DEFAULT_MODEL_BY_PROVIDER.anthropic,
+          apiKey: env.ANTHROPIC_API_KEY,
+          baseURL: env.ANTHROPIC_BASE_URL,
+        },
+      },
+      defaultProvider: 'default',
+      fallbackProviders: [],
     };
   }
 
   if (env.OPENAI_API_KEY) {
     return {
-      provider: 'openai',
-      model: DEFAULT_MODEL_BY_PROVIDER.openai,
-      apiKey: env.OPENAI_API_KEY,
-      baseURL: env.OPENAI_BASE_URL,
+      providers: {
+        default: {
+          name: 'default',
+          provider: 'openai',
+          model: DEFAULT_MODEL_BY_PROVIDER.openai,
+          apiKey: env.OPENAI_API_KEY,
+          baseURL: env.OPENAI_BASE_URL,
+        },
+      },
+      defaultProvider: 'default',
+      fallbackProviders: [],
     };
   }
 
   if (env.GEMINI_API_KEY) {
     return {
-      provider: 'google',
-      model: DEFAULT_MODEL_BY_PROVIDER.google,
-      apiKey: env.GEMINI_API_KEY,
+      providers: {
+        default: {
+          name: 'default',
+          provider: 'google',
+          model: DEFAULT_MODEL_BY_PROVIDER.google,
+          apiKey: env.GEMINI_API_KEY,
+        },
+      },
+      defaultProvider: 'default',
+      fallbackProviders: [],
     };
   }
 
   if (env.OAS_CODEX_OAUTH_JSON) {
     return {
-      provider: 'codex',
-      model: DEFAULT_MODEL_BY_PROVIDER.codex,
-      codexOAuth: parseCodexOAuthJson(env.OAS_CODEX_OAUTH_JSON),
+      providers: {
+        default: {
+          name: 'default',
+          provider: 'codex',
+          model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          codexOAuth: parseCodexOAuthJson(env.OAS_CODEX_OAUTH_JSON),
+        },
+      },
+      defaultProvider: 'default',
+      fallbackProviders: [],
     };
   }
 
   throw new Error(
     'No provider credentials found. Set one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or OAS_CODEX_OAUTH_JSON.',
   );
+}
+
+function resolveSessionProviders(env: NodeJS.ProcessEnv): ResolvedSessionProviders {
+  const raw = env.NANOCLAW_PROVIDER_CONFIG_JSON;
+  if (!raw) {
+    return resolveLegacySessionProviderConfig(env);
+  }
+
+  const parsed = JSON.parse(raw) as {
+    providers?: Record<
+      string,
+      {
+        provider: SessionProvider;
+        model: string;
+        apiKey?: string;
+        baseURL?: string;
+        codexOAuthJson?: string;
+      }
+    >;
+    defaultProvider?: string;
+    fallbackProviders?: string[];
+  };
+
+  if (!parsed.providers || typeof parsed.providers !== 'object') {
+    throw new Error('NANOCLAW_PROVIDER_CONFIG_JSON requires a providers object.');
+  }
+
+  const providers: Record<string, SessionProviderConfig> = {};
+  for (const [name, config] of Object.entries(parsed.providers)) {
+    providers[name] = {
+      name,
+      provider: config.provider,
+      model: config.model,
+      ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+      ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      ...(config.codexOAuthJson
+        ? { codexOAuth: parseCodexOAuthJson(config.codexOAuthJson) }
+        : {}),
+    };
+  }
+
+  const defaultProvider = parsed.defaultProvider;
+  if (!defaultProvider || !providers[defaultProvider]) {
+    throw new Error(
+      'NANOCLAW_PROVIDER_CONFIG_JSON defaultProvider is missing or unknown.',
+    );
+  }
+
+  const fallbackProviders = (parsed.fallbackProviders || []).filter((name) => {
+    return name !== defaultProvider && !!providers[name];
+  });
+
+  return {
+    providers,
+    defaultProvider,
+    fallbackProviders,
+  };
 }
 
 function extractAssistantText(message: SDKMessage): string | null {
@@ -593,6 +690,8 @@ function waitForIpcMessage(): Promise<string | null> {
 
 async function createOrResumeSession(
   requestedSessionId: string | undefined,
+  requestedSessionProviderName: string | undefined,
+  providerConfig: SessionProviderConfig,
   storage: FileStorage,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
@@ -601,36 +700,39 @@ async function createOrResumeSession(
   systemPrompt: string | undefined,
 ): Promise<Session> {
   const privileged = isPrivilegedGroup(groupType);
-  const providerConfig = resolveSessionProviderConfig(process.env);
   const hooks = createHooks(containerInput.assistantName);
 
-  if (requestedSessionId) {
+  if (requestedSessionId &&
+      (requestedSessionProviderName === providerConfig.name ||
+       requestedSessionProviderName === undefined)) {
     if (!isUuid(requestedSessionId)) {
       log(
-        `非 UUID の sessionId (${requestedSessionId}) を受信したため、新規セッションを開始します`,
+        `非 UUID の sessionId (${requestedSessionId}) を受信しました。セッション復帰を試みます。`,
       );
-    } else {
-      try {
-        const resumeOptions = {
-          storage,
-          ...(providerConfig.apiKey ? { apiKey: providerConfig.apiKey } : {}),
-          ...(providerConfig.codexOAuth
-            ? { codexOAuth: providerConfig.codexOAuth }
-            : {}),
-          permissionMode: 'bypassPermissions' as const,
-          allowDangerouslySkipPermissions: true,
-          hooks,
-        };
-        const resumed = await resumeSession(requestedSessionId, {
-          ...resumeOptions,
-        });
-        log(`セッションを再開しました: ${resumed.id}`);
-        return resumed;
-      } catch (err) {
-        log(
-          `セッション再開に失敗したため、新規作成へフォールバックします: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
+    }
+    try {
+      const resumeOptions = {
+        storage,
+        ...(providerConfig.apiKey ? { apiKey: providerConfig.apiKey } : {}),
+        ...(providerConfig.baseURL ? { baseURL: providerConfig.baseURL } : {}),
+        ...(providerConfig.codexOAuth
+          ? { codexOAuth: providerConfig.codexOAuth }
+          : {}),
+        permissionMode: 'bypassPermissions' as const,
+        allowDangerouslySkipPermissions: true,
+        hooks,
+      };
+      const resumed = await resumeSession(requestedSessionId, {
+        ...resumeOptions,
+      });
+      log(
+        `セッションを再開しました: ${resumed.id} (provider: ${providerConfig.name})`,
+      );
+      return resumed;
+    } catch (err) {
+      log(
+        `セッション再開に失敗したため、新規作成へフォールバックします: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -667,7 +769,7 @@ async function createOrResumeSession(
   });
 
   log(
-    `新規セッションを作成しました: ${created.id} (provider: ${providerConfig.provider})`,
+    `新規セッションを作成しました: ${created.id} (provider: ${providerConfig.name})`,
   );
   return created;
 }
@@ -684,10 +786,12 @@ async function runQuery(
   sdkEnv: Record<string, string | undefined>,
 ): Promise<{
   newSessionId?: string;
+  providerName?: string;
   shouldExit: boolean;
 }> {
   const groupType = resolveGroupType(containerInput.groupType);
   const privileged = isPrivilegedGroup(groupType);
+  const resolvedProviders = resolveSessionProviders(process.env);
 
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
@@ -698,169 +802,223 @@ async function runQuery(
   fs.mkdirSync(SESSION_STORAGE_DIR, { recursive: true });
   const storage = new FileStorage({ directory: SESSION_STORAGE_DIR });
 
-  let session: Session | undefined;
-  let latestAssistantText: string | null = null;
-  let streamedMessageCount = 0;
-  let shouldExit = false;
-  let ipcPollingActive = false;
-  let ipcPollTimer: NodeJS.Timeout | undefined;
-  let followupSendChain = Promise.resolve();
+  const preferredProvider =
+    containerInput.selectedProvider &&
+    resolvedProviders.providers[containerInput.selectedProvider]
+      ? containerInput.selectedProvider
+      : resolvedProviders.defaultProvider;
+  const providerAttemptOrder = [
+    preferredProvider,
+    ...[resolvedProviders.defaultProvider, ...resolvedProviders.fallbackProviders]
+      .filter((name) => name !== preferredProvider)
+      .filter((name, index, values) => values.indexOf(name) === index),
+  ];
 
-  try {
-    session = await createOrResumeSession(
-      sessionId,
-      storage,
-      containerInput,
-      sdkEnv,
-      mcpServerPath,
-      groupType,
-      globalClaudeMd,
-    );
+  let resumeSessionId = sessionId;
+  let resumeProviderName = containerInput.sessionProviderName;
+  let lastError: Error | undefined;
 
-    const stopIpcPolling = () => {
+  for (let attemptIndex = 0; attemptIndex < providerAttemptOrder.length; attemptIndex += 1) {
+    const providerName = providerAttemptOrder[attemptIndex]!;
+    const providerConfig = resolvedProviders.providers[providerName];
+    let session: Session | undefined;
+    let latestAssistantText: string | null = null;
+    let streamedMessageCount = 0;
+    let shouldExit = false;
+    let ipcPollingActive = false;
+    let ipcPollTimer: NodeJS.Timeout | undefined;
+    let followupSendChain = Promise.resolve();
+    let sessionClosed = false;
+
+    try {
+      session = await createOrResumeSession(
+        resumeSessionId,
+        resumeProviderName,
+        providerConfig,
+        storage,
+        containerInput,
+        sdkEnv,
+        mcpServerPath,
+        groupType,
+        globalClaudeMd,
+      );
+
+      const stopIpcPolling = () => {
+        ipcPollingActive = false;
+        if (ipcPollTimer) {
+          clearTimeout(ipcPollTimer);
+          ipcPollTimer = undefined;
+        }
+      };
+
+      const requestExit = (reason: string) => {
+        if (shouldExit) return;
+        shouldExit = true;
+        log(reason);
+        stopIpcPolling();
+        sessionClosed = true;
+        void session
+          ?.close()
+          .catch((err) =>
+            log(
+              `プリエンプション時のセッションクローズに失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+          );
+      };
+
+      const enqueueIpcFollowups = () => {
+        const pending = drainIpcInput();
+        if (pending.length === 0) return;
+
+        const messages = [...pending];
+        followupSendChain = followupSendChain
+          .then(async () => {
+            for (const text of messages) {
+              if (shouldExit) return;
+              log(
+                `実行中セッションに IPC フォローアップを反映します (${text.length} 文字)`,
+              );
+              await session!.send(text);
+            }
+          })
+          .catch((err) => {
+            if (shouldExit) return;
+            log(
+              `実行中 IPC フォローアップ反映に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+      };
+
+      const pollIpcDuringStream = () => {
+        if (!ipcPollingActive || shouldExit) return;
+        if (shouldClose()) {
+          requestExit('_close センチネルを検知したため、実行中クエリを終了します');
+          return;
+        }
+
+        enqueueIpcFollowups();
+        ipcPollTimer = setTimeout(pollIpcDuringStream, IPC_POLL_MS);
+      };
+
+      if (shouldClose()) {
+        requestExit(
+          '_close センチネルを検知したため、クエリ開始前に出力を抑止して終了します',
+        );
+        return {
+          newSessionId: session.id,
+          providerName,
+          shouldExit,
+        };
+      }
+
+      await session.send(prompt);
+
+      ipcPollingActive = true;
+      ipcPollTimer = setTimeout(pollIpcDuringStream, IPC_POLL_MS);
+      enqueueIpcFollowups();
+
+      try {
+        for await (const message of session.stream()) {
+          if (shouldExit) break;
+
+          streamedMessageCount++;
+          log(
+            `[provider=${providerName}] [メッセージ #${streamedMessageCount}] type=${message.type}`,
+          );
+
+          const assistantText = extractAssistantText(message);
+          if (assistantText) {
+            latestAssistantText = assistantText;
+          }
+
+          if (shouldClose()) {
+            requestExit(
+              '_close センチネルを検知したため、ストリーミング出力を停止します',
+            );
+            break;
+          }
+
+          enqueueIpcFollowups();
+        }
+      } catch (err) {
+        if (!shouldExit) {
+          throw err;
+        }
+        log(
+          `プリエンプションによりストリームを終了しました: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      stopIpcPolling();
+      await followupSendChain;
+
+      if (!shouldExit && shouldClose()) {
+        requestExit('_close センチネルを検知したため、クエリ結果出力を抑止します');
+      }
+
+      if (shouldExit) {
+        log(
+          `クエリをプリエンプション終了しました。provider=${providerName}, streamedMessageCount=${streamedMessageCount}`,
+        );
+        return {
+          newSessionId: session.id,
+          providerName,
+          shouldExit,
+        };
+      }
+
+      writeOutput({
+        status: 'success',
+        result: latestAssistantText,
+        newSessionId: session.id,
+        providerName,
+      });
+
+      log(
+        `クエリ終了。provider=${providerName}, streamedMessageCount=${streamedMessageCount}, resultLength=${latestAssistantText?.length || 0}`,
+      );
+      return {
+        newSessionId: session.id,
+        providerName,
+        shouldExit: false,
+      };
+    } catch (err) {
+      const attemptError =
+        err instanceof Error ? err : new Error(String(err));
+      lastError = attemptError;
+      const canFallback =
+        streamedMessageCount === 0 &&
+        attemptIndex < providerAttemptOrder.length - 1 &&
+        !shouldExit;
+      if (canFallback) {
+        log(
+          `provider ${providerName} failed before first stream chunk; falling back: ${attemptError.message}`,
+        );
+        resumeSessionId = undefined;
+        resumeProviderName = undefined;
+        continue;
+      }
+      throw attemptError;
+    } finally {
       ipcPollingActive = false;
       if (ipcPollTimer) {
         clearTimeout(ipcPollTimer);
         ipcPollTimer = undefined;
       }
-    };
-
-    const requestExit = (reason: string) => {
-      if (shouldExit) return;
-      shouldExit = true;
-      log(reason);
-      stopIpcPolling();
-      // stream() が次のイベント待ちでブロックしていても、close で早期終了させる。
-      void session
-        ?.close()
-        .catch((err) =>
+      await followupSendChain;
+      if (session && !sessionClosed) {
+        try {
+          await session.close();
+        } catch (err) {
           log(
-            `プリエンプション時のセッションクローズに失敗しました: ${err instanceof Error ? err.message : String(err)}`,
-          ),
-        );
-    };
-
-    const enqueueIpcFollowups = () => {
-      const pending = drainIpcInput();
-      if (pending.length === 0) return;
-
-      const messages = [...pending];
-      followupSendChain = followupSendChain
-        .then(async () => {
-          for (const text of messages) {
-            if (shouldExit) return;
-            log(
-              `実行中セッションに IPC フォローアップを反映します (${text.length} 文字)`,
-            );
-            await session!.send(text);
-          }
-        })
-        .catch((err) => {
-          if (shouldExit) return;
-          log(
-            `実行中 IPC フォローアップ反映に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+            `セッションクローズに失敗しました: ${err instanceof Error ? err.message : String(err)}`,
           );
-        });
-    };
-
-    const pollIpcDuringStream = () => {
-      if (!ipcPollingActive || shouldExit) return;
-      if (shouldClose()) {
-        requestExit('_close センチネルを検知したため、実行中クエリを終了します');
-        return;
-      }
-
-      enqueueIpcFollowups();
-      ipcPollTimer = setTimeout(pollIpcDuringStream, IPC_POLL_MS);
-    };
-
-    if (shouldClose()) {
-      requestExit(
-        '_close センチネルを検知したため、クエリ開始前に出力を抑止して終了します',
-      );
-      return { newSessionId: session.id, shouldExit };
-    }
-
-    await session.send(prompt);
-
-    ipcPollingActive = true;
-    ipcPollTimer = setTimeout(pollIpcDuringStream, IPC_POLL_MS);
-
-    // stream が動き始めた直後に到着していた IPC を取りこぼさない。
-    enqueueIpcFollowups();
-
-    try {
-      for await (const message of session.stream()) {
-        if (shouldExit) break;
-
-        streamedMessageCount++;
-        log(`[メッセージ #${streamedMessageCount}] type=${message.type}`);
-
-        const assistantText = extractAssistantText(message);
-        if (assistantText) {
-          latestAssistantText = assistantText;
         }
-
-        if (shouldClose()) {
-          requestExit(
-            '_close センチネルを検知したため、ストリーミング出力を停止します',
-          );
-          break;
-        }
-
-        // ストリーミング中に届いたフォローアップを都度セッションへ送る。
-        enqueueIpcFollowups();
-      }
-    } catch (err) {
-      if (!shouldExit) {
-        throw err;
-      }
-      log(
-        `プリエンプションによりストリームを終了しました: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    stopIpcPolling();
-    await followupSendChain;
-
-    if (!shouldExit && shouldClose()) {
-      requestExit('_close センチネルを検知したため、クエリ結果出力を抑止します');
-    }
-
-    if (shouldExit) {
-      log(
-        `クエリをプリエンプション終了しました。streamedMessageCount=${streamedMessageCount}`,
-      );
-      return { newSessionId: session.id, shouldExit };
-    }
-
-    writeOutput({
-      status: 'success',
-      result: latestAssistantText,
-      newSessionId: session.id,
-    });
-
-    log(
-      `クエリ終了。streamedMessageCount=${streamedMessageCount}, resultLength=${latestAssistantText?.length || 0}`,
-    );
-    return { newSessionId: session.id, shouldExit: false };
-  } finally {
-    ipcPollingActive = false;
-    if (ipcPollTimer) {
-      clearTimeout(ipcPollTimer);
-      ipcPollTimer = undefined;
-    }
-    await followupSendChain;
-    if (session) {
-      try {
-        await session.close();
-      } catch (err) {
-        log(
-          `セッションクローズに失敗しました: ${err instanceof Error ? err.message : String(err)}`,
-        );
       }
     }
   }
+
+  throw lastError ?? new Error('No provider attempts succeeded.');
 }
 
 async function main(): Promise<void> {
@@ -929,6 +1087,9 @@ async function main(): Promise<void> {
       );
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
+        if (queryResult.providerName) {
+          containerInput.sessionProviderName = queryResult.providerName;
+        }
       }
 
       // runQuery 内で _close を検知した場合は、追加 OUTPUT を出さずに終了する。
@@ -944,7 +1105,12 @@ async function main(): Promise<void> {
       }
 
       // ホストが追跡できるようにセッション更新を出力
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+      writeOutput({
+        status: 'success',
+        result: null,
+        newSessionId: sessionId,
+        providerName: containerInput.sessionProviderName,
+      });
 
       log('クエリが終了しました。次の IPC メッセージを待機中...');
 
@@ -967,6 +1133,7 @@ async function main(): Promise<void> {
       status: 'error',
       result: null,
       newSessionId: sessionId,
+      providerName: containerInput.sessionProviderName,
       error: errorMessage,
     });
     process.exit(1);
