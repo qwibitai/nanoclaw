@@ -1,20 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  mockDetectAuthMode,
-  mockStartCredentialProxy,
   mockReadEnvFile,
   mockEmitStatus,
 } = vi.hoisted(() => ({
-  mockDetectAuthMode: vi.fn(),
-  mockStartCredentialProxy: vi.fn(),
   mockReadEnvFile: vi.fn(),
   mockEmitStatus: vi.fn(),
-}));
-
-vi.mock('../src/credential-proxy.js', () => ({
-  detectAuthMode: mockDetectAuthMode,
-  startCredentialProxy: mockStartCredentialProxy,
 }));
 
 vi.mock('../src/env.js', () => ({
@@ -47,13 +38,7 @@ describe('credentials setup step', () => {
   beforeEach(() => {
     mockEmitStatus.mockReset();
     mockReadEnvFile.mockReset();
-    mockDetectAuthMode.mockReset();
-    mockStartCredentialProxy.mockReset();
     global.fetch = vi.fn() as typeof fetch;
-    mockStartCredentialProxy.mockResolvedValue({
-      address: () => ({ port: 43123 }),
-      close: (cb: () => void) => cb(),
-    });
   });
 
   it('passes API-key auth probe and model probe', async () => {
@@ -62,7 +47,6 @@ describe('credentials setup step', () => {
       ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
       ANTHROPIC_MODEL: 'claude-3-5-haiku-latest',
     });
-    mockDetectAuthMode.mockReturnValue('api-key');
 
     vi.mocked(global.fetch)
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
@@ -86,7 +70,6 @@ describe('credentials setup step', () => {
       CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
       ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
     });
-    mockDetectAuthMode.mockReturnValue('oauth');
 
     vi.mocked(global.fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ error: { message: 'Invalid OAuth token' } }), {
@@ -117,7 +100,6 @@ describe('credentials setup step', () => {
       ANTHROPIC_AUTH_TOKEN: 'oauth-token',
       ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
     });
-    mockDetectAuthMode.mockReturnValue('oauth');
 
     vi.mocked(global.fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ api_key: 'temp-key' }), { status: 200 }),
@@ -138,7 +120,6 @@ describe('credentials setup step', () => {
     mockReadEnvFile.mockReturnValue({
       ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
     });
-    mockDetectAuthMode.mockReturnValue('oauth');
 
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
       throw new Error('process.exit');

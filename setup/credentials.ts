@@ -1,12 +1,8 @@
-import type { AddressInfo } from 'net';
-
-import {
-  detectAuthMode,
-  startCredentialProxy,
-} from '../src/credential-proxy.js';
 import { readEnvFile } from '../src/env.js';
 import { log } from '../src/log.js';
 import { emitStatus } from './status.js';
+
+type AuthMode = 'api-key' | 'oauth';
 
 type ProbeOutcome = {
   ok: boolean;
@@ -16,7 +12,7 @@ type ProbeOutcome = {
 };
 
 export type CredentialCheckResult = {
-  authMode: 'api-key' | 'oauth';
+  authMode: AuthMode;
   upstream: string;
   model: string;
   authProbe: 'ok' | 'failed' | 'missing';
@@ -84,6 +80,7 @@ export function extractTemporaryApiKey(payload: unknown): string | null {
 export async function checkCredentials(): Promise<CredentialCheckResult> {
   const secrets = readEnvFile([
     'ANTHROPIC_API_KEY',
+    'OPENROUTER_API_KEY',
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_AUTH_TOKEN',
     'ANTHROPIC_BASE_URL',
@@ -91,13 +88,15 @@ export async function checkCredentials(): Promise<CredentialCheckResult> {
   ]);
 
   const upstream = secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
-  const authMode = detectAuthMode();
+  const authMode = detectAuthMode(upstream, secrets);
   const configuredModel = secrets.ANTHROPIC_MODEL || '';
+  const apiKey = pickApiKey(upstream, secrets);
+  const oauthToken = secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
 
   const hasCredential =
     authMode === 'api-key'
-      ? Boolean(secrets.ANTHROPIC_API_KEY)
-      : Boolean(secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN);
+      ? Boolean(apiKey)
+      : Boolean(oauthToken);
 
   if (!hasCredential) {
     return {
@@ -115,10 +114,6 @@ export async function checkCredentials(): Promise<CredentialCheckResult> {
 
   log.info('Starting credential sanity check', { authMode, upstream, configuredModel });
 
-  const server = await startCredentialProxy(0);
-  const proxyPort = (server.address() as AddressInfo).port;
-  const proxyBaseUrl = `http://127.0.0.1:${proxyPort}`;
-
   let authProbe: ProbeOutcome = { ok: false, error: 'not_run' };
   let modelProbe: ProbeOutcome = { ok: true };
   let modelProbeStatus: CredentialCheckResult['modelProbe'] = 'skipped';
@@ -126,14 +121,15 @@ export async function checkCredentials(): Promise<CredentialCheckResult> {
   try {
     authProbe =
       authMode === 'api-key'
-        ? await probeApiKeyAuth(proxyBaseUrl)
-        : await probeOAuthAuth(proxyBaseUrl);
+        ? await probeApiKeyAuth(upstream, apiKey || '')
+        : await probeOAuthAuth(upstream, oauthToken || '');
 
     if (authProbe.ok && configuredModel) {
       modelProbe = await probeConfiguredModel(
-        proxyBaseUrl,
+        upstream,
         authMode,
         configuredModel,
+        apiKey,
         authProbe.tempApiKey,
       );
       modelProbeStatus = modelProbe.ok ? 'ok' : 'failed';
@@ -141,8 +137,6 @@ export async function checkCredentials(): Promise<CredentialCheckResult> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     authProbe = { ok: false, error: trimErrorMessage(message) };
-  } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
   const status =
@@ -163,9 +157,19 @@ export async function checkCredentials(): Promise<CredentialCheckResult> {
   };
 }
 
-async function probeApiKeyAuth(proxyBaseUrl: string): Promise<ProbeOutcome> {
-  const response = await fetch(`${proxyBaseUrl}/v1/models`, {
-    headers: { 'x-api-key': 'placeholder' },
+function detectAuthMode(upstream: string, secrets: Record<string, string>): AuthMode {
+  return pickApiKey(upstream, secrets) ? 'api-key' : 'oauth';
+}
+
+function pickApiKey(upstream: string, secrets: Record<string, string>): string {
+  const isOpenRouter = new URL(upstream).hostname.includes('openrouter.ai');
+  if (isOpenRouter && secrets.OPENROUTER_API_KEY) return secrets.OPENROUTER_API_KEY;
+  return secrets.ANTHROPIC_API_KEY || '';
+}
+
+async function probeApiKeyAuth(upstream: string, apiKey: string): Promise<ProbeOutcome> {
+  const response = await fetch(`${upstream}/v1/models`, {
+    headers: { 'x-api-key': apiKey },
     signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
   });
 
@@ -180,13 +184,16 @@ async function probeApiKeyAuth(proxyBaseUrl: string): Promise<ProbeOutcome> {
   return { ok: true, statusCode: response.status };
 }
 
-async function probeOAuthAuth(proxyBaseUrl: string): Promise<ProbeOutcome> {
+async function probeOAuthAuth(
+  upstream: string,
+  oauthToken: string,
+): Promise<ProbeOutcome> {
   const response = await fetch(
-    `${proxyBaseUrl}/api/oauth/claude_cli/create_api_key`,
+    `${upstream}/api/oauth/claude_cli/create_api_key`,
     {
       method: 'POST',
       headers: {
-        authorization: 'Bearer placeholder',
+        authorization: `Bearer ${oauthToken}`,
         'content-type': 'application/json',
       },
       body: '{}',
@@ -217,17 +224,25 @@ async function probeOAuthAuth(proxyBaseUrl: string): Promise<ProbeOutcome> {
 }
 
 async function probeConfiguredModel(
-  proxyBaseUrl: string,
-  authMode: 'api-key' | 'oauth',
+  upstream: string,
+  authMode: AuthMode,
   model: string,
+  apiKey?: string,
   tempApiKey?: string,
 ): Promise<ProbeOutcome> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
+    'anthropic-version': '2023-06-01',
   };
 
   if (authMode === 'api-key') {
-    headers['x-api-key'] = 'placeholder';
+    if (!apiKey) {
+      return {
+        ok: false,
+        error: 'API key mode selected but no API key available',
+      };
+    }
+    headers['x-api-key'] = apiKey;
   } else if (tempApiKey) {
     headers['x-api-key'] = tempApiKey;
   } else {
@@ -237,7 +252,7 @@ async function probeConfiguredModel(
     };
   }
 
-  const response = await fetch(`${proxyBaseUrl}/v1/messages`, {
+  const response = await fetch(`${upstream}/v1/messages`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
