@@ -50,9 +50,11 @@ export class DiscordChannel implements Channel {
   private client: Client | null = null;
   private opts: DiscordChannelOpts;
   private botToken: string;
+  private allowedBotIds: Set<string>;
 
-  constructor(botToken: string, opts: DiscordChannelOpts) {
+  constructor(botToken: string, allowedBotIds: Set<string>, opts: DiscordChannelOpts) {
     this.botToken = botToken;
+    this.allowedBotIds = allowedBotIds;
     this.opts = opts;
   }
 
@@ -66,29 +68,7 @@ export class DiscordChannel implements Channel {
       ],
     });
 
-    const { DISCORD_ALLOWED_BOT_IDS: allowedBotIdsFile } = readEnvFile([
-      'DISCORD_ALLOWED_BOT_IDS',
-    ]);
-    const allowedBotIdsRaw =
-      process.env.DISCORD_ALLOWED_BOT_IDS ?? allowedBotIdsFile;
-    const discordIdPattern = /^\d{17,20}$/;
-    const allowedBotIds = new Set(
-      allowedBotIdsRaw
-        ? allowedBotIdsRaw
-            .split(',')
-            .map((s) => s.trim())
-            .filter((id) => {
-              if (!discordIdPattern.test(id)) {
-                logger.warn(
-                  { id },
-                  'DISCORD_ALLOWED_BOT_IDS: invalid ID skipped',
-                );
-                return false;
-              }
-              return true;
-            })
-        : [],
-    );
+    const allowedBotIds = this.allowedBotIds;
 
     this.client.on(Events.MessageCreate, async (message: Message) => {
       if (message.author.bot && !allowedBotIds.has(message.author.id)) return;
@@ -400,12 +380,29 @@ export class DiscordChannel implements Channel {
 }
 
 registerChannel('discord', (opts: ChannelOpts) => {
-  const envVars = readEnvFile(['DISCORD_BOT_TOKEN']);
+  const envVars = readEnvFile(['DISCORD_BOT_TOKEN', 'DISCORD_ALLOWED_BOT_IDS']);
   const token =
     process.env.DISCORD_BOT_TOKEN || envVars.DISCORD_BOT_TOKEN || '';
   if (!token) {
     logger.warn('Discord: DISCORD_BOT_TOKEN not set');
     return null;
   }
-  return new DiscordChannel(token, opts);
+  const allowedBotIdsRaw =
+    process.env.DISCORD_ALLOWED_BOT_IDS ?? envVars.DISCORD_ALLOWED_BOT_IDS;
+  const discordIdPattern = /^\d{17,20}$/;
+  const allowedBotIds = new Set(
+    allowedBotIdsRaw
+      ? allowedBotIdsRaw
+          .split(',')
+          .map((s) => s.trim())
+          .filter((id) => {
+            if (!discordIdPattern.test(id)) {
+              logger.warn({ id }, 'DISCORD_ALLOWED_BOT_IDS: invalid ID skipped');
+              return false;
+            }
+            return true;
+          })
+      : [],
+  );
+  return new DiscordChannel(token, allowedBotIds, opts);
 });
