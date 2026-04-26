@@ -91,9 +91,9 @@ export class DiscordChannel implements Channel {
     );
 
     this.client.on(Events.MessageCreate, async (message: Message) => {
-      const isAllowedBot =
-        message.author.bot && allowedBotIds.has(message.author.id);
-      if (message.author.bot && !isAllowedBot) return;
+      if (message.author.bot && !allowedBotIds.has(message.author.id)) return;
+      const isAllowedBot = message.author.bot;
+
 
       const isThread = message.channel.isThread();
       const channelId = message.channelId;
