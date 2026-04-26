@@ -14,13 +14,53 @@ import path from 'path';
 
 import { GROUPS_DIR } from './config.js';
 
-export interface McpServerConfig {
+/**
+ * MCP server configuration. Two transports supported (matches Claude Agent
+ * SDK's native `mcpServers` shape — both pass through `sdkQuery({mcpServers})`
+ * unchanged in `container/agent-runner/src/providers/claude.ts`):
+ *
+ *   - **stdio** (the historical default): `command` + optional `args`/`env`,
+ *     spawned in-process by the agent runner.
+ *   - **http**: an HTTP-transport MCP endpoint reachable from the container
+ *     (`url` + optional `headers`). Used by Paraclaw to wire a Parachute
+ *     Vault MCP server in via `Authorization: Bearer pvt_…`.
+ *
+ * The `type` field is optional for back-compat — when absent, presence of
+ * `command` implies stdio. New entries should set `type` explicitly.
+ *
+ * `instructions` is transport-agnostic: when set, the host writes the
+ * content to `.claude-fragments/mcp-<name>.md` at spawn and imports it
+ * into the composed CLAUDE.md.
+ */
+export type McpServerConfig =
+  | StdioMcpServerConfig
+  | HttpMcpServerConfig
+  | LegacyMcpServerConfig;
+
+export interface StdioMcpServerConfig {
+  type: 'stdio';
   command: string;
   args?: string[];
   env?: Record<string, string>;
-  // Optional always-in-context guidance. When set, the host writes the
-  // content to `.claude-fragments/mcp-<name>.md` at spawn and imports it
-  // into the composed CLAUDE.md.
+  instructions?: string;
+}
+
+export interface HttpMcpServerConfig {
+  type: 'http';
+  url: string;
+  headers?: Record<string, string>;
+  instructions?: string;
+}
+
+/**
+ * Pre-`type` stdio shape. Treated as `{ type: 'stdio', ... }`; kept as its
+ * own variant so existing container.json files (and any legacy code paths
+ * that construct configs without `type`) still type-check.
+ */
+export interface LegacyMcpServerConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
   instructions?: string;
 }
 

@@ -1,3 +1,15 @@
+# Paraclaw — the Parachute distribution of NanoClaw
+
+> **You're looking at a fork.** Paraclaw is the [Parachute](https://parachute.computer) distribution of [NanoClaw](https://github.com/qwibitai/nanoclaw) — same trunk, plus a small additive layer that grants each agent group access to a [Parachute Vault](https://github.com/ParachuteComputer/parachute-vault) over MCP. We track upstream NanoClaw closely; the entire diff lives in `src/parachute/`, `scripts/parachute.ts`, `docs/parachute-integration.md`, plus one back-compat-preserving widening of `McpServerConfig` in `src/container-config.ts`. Everything else is upstream.
+>
+> **What Parachute brings:** scoped vault tokens (`vault:read` / `vault:write` / `vault:admin`) as the agent's identity primitive, the user's open knowledge graph as the substrate for whatever the agent reads or writes, and (next) a web UI for spinning up claws without dropping into the terminal.
+>
+> **What NanoClaw brings:** containerized per-agent-group isolation, multi-channel messaging adapters, the message-queue model, the agent runner, OneCLI integration for third-party credentials. We don't reinvent any of it.
+>
+> **Quick start for the Parachute path:** see [`docs/parachute-integration.md`](docs/parachute-integration.md). The full upstream NanoClaw documentation that follows is the substrate we compose with.
+
+---
+
 <p align="center">
   <img src="assets/nanoclaw-logo.png" alt="NanoClaw" width="400">
 </p>

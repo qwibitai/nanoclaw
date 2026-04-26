@@ -18,6 +18,7 @@
     "setup:auto": "tsx setup/auto.ts",
     "chat": "tsx scripts/chat.ts",
     "auth": "tsx src/whatsapp-auth.ts",
+    "parachute": "tsx scripts/parachute.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",
