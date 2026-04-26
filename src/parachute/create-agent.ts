@@ -11,10 +11,7 @@
  * (`init-first-agent.ts` etc.) stay on the same NanoClaw helpers and are
  * untouched.
  */
-import {
-  createAgentGroup as dbCreateAgentGroup,
-  getAgentGroupByFolder,
-} from '../db/agent-groups.js';
+import { createAgentGroup as dbCreateAgentGroup, getAgentGroupByFolder } from '../db/agent-groups.js';
 import { initGroupFilesystem } from '../group-init.js';
 import { normalizeName } from '../modules/agent-to-agent/db/agent-destinations.js';
 import type { AgentGroup } from '../types.js';
@@ -42,8 +39,7 @@ export function validateFolderSlug(slug: string): FolderValidation {
   if (!FOLDER_RE.test(slug)) {
     return {
       ok: false,
-      reason:
-        'folder slug must be lowercase letters, digits, and dashes; cannot start or end with a dash',
+      reason: 'folder slug must be lowercase letters, digits, and dashes; cannot start or end with a dash',
     };
   }
   return { ok: true };
