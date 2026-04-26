@@ -3,7 +3,7 @@
  *
  * Controlled by env vars:
  *   CHAT_SERVER_ENABLED=true       (default: false)
- *   CHAT_SERVER_PORT=3100          (default: 443 when TLS configured, else 3100)
+ *   CHAT_SERVER_PORT=3100          (default: 3100)
  *   CHAT_SERVER_HOST=127.0.0.1    (default: 127.0.0.1 — localhost only)
  *   TLS_CERT=path/to/cert.crt     (optional — enables HTTPS)
  *   TLS_KEY=path/to/cert.key      (optional — required with TLS_CERT)
@@ -759,19 +759,10 @@ export async function startChatServer(): Promise<void> {
     return;
   }
 
+  const port = parseInt(process.env.CHAT_SERVER_PORT || '3100');
+  const host = process.env.CHAT_SERVER_HOST || '127.0.0.1';
   const tlsCert = process.env.TLS_CERT;
   const tlsKey = process.env.TLS_KEY;
-  const tlsEnabled = !!(tlsCert && tlsKey);
-  // When TLS is configured, default to the standard HTTPS port so users
-  // don't need to type `:3100` in the browser URL. Plain HTTP keeps the
-  // 3100 default (80 also requires privileges and is less commonly
-  // wanted for a personal server). Override with CHAT_SERVER_PORT.
-  // Note: binding < 1024 as a non-root user requires
-  //   sudo setcap 'cap_net_bind_service=+ep' $(readlink -f $(which node))
-  const port = parseInt(
-    process.env.CHAT_SERVER_PORT || (tlsEnabled ? '443' : '3100'),
-  );
-  const host = process.env.CHAT_SERVER_HOST || '127.0.0.1';
 
   initChatDatabase(DATA_DIR);
   initWebPush();
