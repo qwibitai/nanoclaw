@@ -19,7 +19,6 @@ import { DATA_DIR } from './config.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import {
   createSession,
-  findSession,
   findSessionByAgentGroup,
   findSessionForAgent,
   getSession,
@@ -35,6 +34,18 @@ import {
 } from './db/session-db.js';
 import { log } from './log.js';
 import type { Session } from './types.js';
+
+function isSafePathSegment(name: string): boolean {
+  if (typeof name !== 'string' || name.length === 0) return false;
+  if (name === '.' || name === '..') return false;
+  if (/[\\/\0]/.test(name)) return false;
+  return path.basename(name) === name;
+}
+
+function isPathInside(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
 
 /** Root directory for all session data. */
 export function sessionsBaseDir(): string {
@@ -352,14 +363,48 @@ export function readOutboxFiles(
   messageId: string,
   filenames: string[],
 ): OutboundFile[] | undefined {
+  if (!isSafePathSegment(messageId)) {
+    log.warn('Rejecting unsafe outbox message id', { messageId });
+    return undefined;
+  }
+
   const outboxDir = path.join(sessionDir(agentGroupId, sessionId), 'outbox', messageId);
   if (!fs.existsSync(outboxDir)) return undefined;
+
+  let realOutboxDir: string;
+  try {
+    const stat = fs.lstatSync(outboxDir);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      log.warn('Rejecting unsafe outbox directory', { messageId, outboxDir });
+      return undefined;
+    }
+    realOutboxDir = fs.realpathSync(outboxDir);
+  } catch (err) {
+    log.warn('Failed to inspect outbox directory', { messageId, err });
+    return undefined;
+  }
+
   const files: OutboundFile[] = [];
   for (const filename of filenames) {
+    if (!isSafePathSegment(filename)) {
+      log.warn('Rejecting unsafe outbox filename', { messageId, filename });
+      continue;
+    }
+
     const filePath = path.join(outboxDir, filename);
-    if (fs.existsSync(filePath)) {
-      files.push({ filename, data: fs.readFileSync(filePath) });
-    } else {
+    try {
+      const stat = fs.lstatSync(filePath);
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        log.warn('Rejecting unsafe outbox file', { messageId, filename });
+        continue;
+      }
+      const realFilePath = fs.realpathSync(filePath);
+      if (!isPathInside(realOutboxDir, realFilePath)) {
+        log.warn('Rejecting outbox file outside message directory', { messageId, filename });
+        continue;
+      }
+      files.push({ filename, data: fs.readFileSync(realFilePath) });
+    } catch {
       log.warn('Outbox file not found', { messageId, filename });
     }
   }
@@ -373,10 +418,26 @@ export function readOutboxFiles(
  * thrown error would trigger the delivery retry path and deliver twice.
  */
 export function clearOutbox(agentGroupId: string, sessionId: string, messageId: string): void {
+  if (!isSafePathSegment(messageId)) {
+    log.warn('Rejecting unsafe outbox cleanup message id', { messageId });
+    return;
+  }
+
   const outboxDir = path.join(sessionDir(agentGroupId, sessionId), 'outbox', messageId);
   if (!fs.existsSync(outboxDir)) return;
   try {
-    fs.rmSync(outboxDir, { recursive: true, force: true });
+    const stat = fs.lstatSync(outboxDir);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      log.warn('Rejecting unsafe outbox cleanup directory', { messageId, outboxDir });
+      return;
+    }
+    const realOutboxBase = fs.realpathSync(path.join(sessionDir(agentGroupId, sessionId), 'outbox'));
+    const realOutboxDir = fs.realpathSync(outboxDir);
+    if (!isPathInside(realOutboxBase, realOutboxDir)) {
+      log.warn('Rejecting outbox cleanup outside session outbox', { messageId, outboxDir });
+      return;
+    }
+    fs.rmSync(realOutboxDir, { recursive: true, force: true });
   } catch (err) {
     log.warn('Outbox cleanup failed (message already delivered)', { messageId, err });
   }
