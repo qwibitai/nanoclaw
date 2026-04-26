@@ -68,11 +68,9 @@ export class DiscordChannel implements Channel {
       ],
     });
 
-    const allowedBotIds = this.allowedBotIds;
-
     this.client.on(Events.MessageCreate, async (message: Message) => {
-      if (message.author.bot && !allowedBotIds.has(message.author.id)) return;
-      const isPermittedBot = message.author.bot && allowedBotIds.has(message.author.id);
+      if (message.author.bot && !this.allowedBotIds.has(message.author.id)) return;
+      const isPermittedBot = message.author.bot && this.allowedBotIds.has(message.author.id);
 
       const isThread = message.channel.isThread();
       const channelId = message.channelId;
@@ -251,7 +249,7 @@ export class DiscordChannel implements Channel {
           {
             username: readyClient.user.tag,
             id: readyClient.user.id,
-            allowedBotIds: [...allowedBotIds],
+            allowedBotIds: [...this.allowedBotIds],
           },
           'Discord bot connected',
         );
@@ -259,9 +257,9 @@ export class DiscordChannel implements Channel {
         console.log(
           `  Use /chatid command or check channel IDs in Discord settings`,
         );
-        if (allowedBotIds.size > 0) {
+        if (this.allowedBotIds.size > 0) {
           console.log(
-            `  Allowed bot IDs (bypass filter): ${[...allowedBotIds].join(', ')}`,
+            `  Allowed bot IDs (bypass filter): ${[...this.allowedBotIds].join(', ')}`,
           );
         }
         console.log();
