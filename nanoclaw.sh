@@ -129,10 +129,10 @@ rm -f  "$PROGRESS_LOG"
 mkdir -p "$STEPS_DIR" "$LOGS_DIR"
 write_header
 
-# NanoClaw wordmark + subtitle — setup:auto will see NANOCLAW_BOOTSTRAPPED=1
-# and skip printing these again, so the flow stays visually continuous.
-printf '\n  %s%s\n' "$(bold 'Nano')" "$(brand_bold 'Claw')"
-printf '  %s\n\n' "$(dim 'Setting up your personal AI assistant')"
+# NanoClaw wordmark — clack's intro carries the "let's get you set up" framing,
+# so we don't print a subtitle here. setup:auto sees NANOCLAW_BOOTSTRAPPED=1 and
+# skips re-printing the wordmark, keeping the flow visually continuous.
+printf '\n  %s%s\n\n' "$(bold 'Nano')" "$(brand_bold 'Claw')"
 
 # ─── pre-flight: Homebrew on macOS ─────────────────────────────────────
 # setup/install-node.sh and setup/install-docker.sh both require `brew` on
@@ -190,7 +190,7 @@ BOOTSTRAP_START=$(date +%s)
 
 # One-line "why" that teaches a differentiator while the user waits.
 printf '%s  %s\n' "$(gray '│')" \
-  "$(dim "NanoClaw is small and runs entirely on your machine. Yours to modify.")"
+  "$(dim "Small. Runs on your machine. Yours to modify.")"
 spinner_start "$BOOTSTRAP_LABEL"
 
 # Run in the background so we can tick elapsed time. Capture exit code via
@@ -222,7 +222,7 @@ rm -f "$BOOTSTRAP_EXIT_FILE"
 BOOTSTRAP_DUR=$(( $(date +%s) - BOOTSTRAP_START ))
 
 if [ "$BOOTSTRAP_RC" -eq 0 ]; then
-  spinner_success "Basics installed" "$BOOTSTRAP_DUR"
+  spinner_success "Basics ready" "$BOOTSTRAP_DUR"
   write_bootstrap_entry success "$BOOTSTRAP_DUR" "$BOOTSTRAP_RAW"
 else
   spinner_failure "Couldn't install the basics" "$BOOTSTRAP_DUR"
@@ -259,4 +259,5 @@ fi
 # --silent suppresses pnpm's `> nanoclaw@2.0.0 setup:auto / > tsx setup/auto.ts`
 # preamble so the flow continues visually from "Basics installed" straight
 # into setup:auto's spinner. exec so signals (Ctrl-C) propagate directly.
-exec pnpm --silent run setup:auto
+# `-- "$@"` forwards any flags (e.g. --onecli-api-host) to setup:auto.
+exec pnpm --silent run setup:auto -- "$@"

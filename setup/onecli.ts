@@ -86,15 +86,20 @@ function ensureShellProfilePath(): void {
   }
 }
 
-function writeEnvOnecliUrl(url: string): void {
+function writeEnvVar(name: string, value: string): void {
   const envFile = path.join(process.cwd(), '.env');
   let content = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf-8') : '';
-  if (/^ONECLI_URL=/m.test(content)) {
-    content = content.replace(/^ONECLI_URL=.*$/m, `ONECLI_URL=${url}`);
+  const re = new RegExp(`^${name}=.*$`, 'm');
+  if (re.test(content)) {
+    content = content.replace(re, `${name}=${value}`);
   } else {
-    content = content.trimEnd() + (content ? '\n' : '') + `ONECLI_URL=${url}\n`;
+    content = content.trimEnd() + (content ? '\n' : '') + `${name}=${value}\n`;
   }
   fs.writeFileSync(envFile, content);
+}
+
+function writeEnvOnecliUrl(url: string): void {
+  writeEnvVar('ONECLI_URL', url);
 }
 
 // Last-known-good CLI release. Used only if BOTH the upstream installer
@@ -102,6 +107,13 @@ function writeEnvOnecliUrl(url: string): void {
 // new CLI release ships.
 const ONECLI_CLI_FALLBACK_VERSION = '1.3.0';
 const ONECLI_CLI_REPO = 'onecli/onecli-cli';
+
+function installOnecliCliOnly(): { stdout: string; ok: boolean } {
+  const upstream = runInstall('curl -fsSL onecli.sh/cli/install | sh');
+  if (upstream.ok) return { stdout: upstream.stdout, ok: true };
+  const fallback = installOnecliCliDirect();
+  return { stdout: upstream.stdout + (upstream.stderr ?? '') + '\n' + fallback.stdout, ok: fallback.ok };
+}
 
 function installOnecli(): { stdout: string; ok: boolean } {
   let stdout = '';
@@ -163,14 +175,12 @@ function installOnecliCliDirect(): { stdout: string; ok: boolean } {
     lines.push(s);
   };
 
-  const osName =
-    process.platform === 'darwin' ? 'darwin' : process.platform === 'linux' ? 'linux' : null;
+  const osName = process.platform === 'darwin' ? 'darwin' : process.platform === 'linux' ? 'linux' : null;
   if (!osName) {
     append(`Unsupported platform: ${process.platform}`);
     return { stdout: lines.join('\n'), ok: false };
   }
-  const arch =
-    process.arch === 'x64' ? 'amd64' : process.arch === 'arm64' ? 'arm64' : null;
+  const arch = process.arch === 'x64' ? 'amd64' : process.arch === 'arm64' ? 'arm64' : null;
   if (!arch) {
     append(`Unsupported arch: ${process.arch}`);
     return { stdout: lines.join('\n'), ok: false };
@@ -201,10 +211,9 @@ function installOnecliCliDirect(): { stdout: string; ok: boolean } {
 
   try {
     append(`Downloading ${url}`);
-    execSync(
-      `curl -fsSL -o ${JSON.stringify(archivePath)} ${JSON.stringify(url)}`,
-      { stdio: ['ignore', 'pipe', 'pipe'] },
-    );
+    execSync(`curl -fsSL -o ${JSON.stringify(archivePath)} ${JSON.stringify(url)}`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     execSync(`tar -xzf ${JSON.stringify(archivePath)} -C ${JSON.stringify(tmpDir)}`, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -231,7 +240,7 @@ function installOnecliCliDirect(): { stdout: string; ok: boolean } {
   }
 }
 
-async function pollHealth(url: string, timeoutMs: number): Promise<boolean> {
+export async function pollHealth(url: string, timeoutMs: number): Promise<boolean> {
   // `/api/health` matches the path probe.sh uses — keep them aligned.
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -248,7 +257,63 @@ async function pollHealth(url: string, timeoutMs: number): Promise<boolean> {
 
 export async function run(args: string[]): Promise<void> {
   const reuse = args.includes('--reuse');
+  const remoteUrlIdx = args.indexOf('--remote-url');
+  const remoteUrl = remoteUrlIdx !== -1 ? args[remoteUrlIdx + 1] : null;
   ensureShellProfilePath();
+
+  if (remoteUrl) {
+    // Remote-mode: install only the CLI, point it at the remote gateway, and
+    // record the URL in .env. No local gateway is started.
+    log.info('Installing OneCLI CLI for remote gateway', { remoteUrl });
+    const res = installOnecliCliOnly();
+    if (!res.ok || !onecliVersion()) {
+      emitStatus('ONECLI', {
+        INSTALLED: false,
+        STATUS: 'failed',
+        ERROR: 'cli_install_failed',
+        HINT: 'CLI binary install failed. Make sure curl is installed and ~/.local/bin is writable.',
+        LOG: 'logs/setup.log',
+      });
+      process.exit(1);
+    }
+    try {
+      execFileSync('onecli', ['config', 'set', 'api-host', remoteUrl], {
+        stdio: 'ignore',
+        env: childEnv(),
+      });
+    } catch (err) {
+      log.warn('onecli config set api-host failed', { err });
+    }
+    writeEnvOnecliUrl(remoteUrl);
+    log.info('Wrote ONECLI_URL to .env', { url: remoteUrl });
+    const remoteToken = process.env.NANOCLAW_ONECLI_API_TOKEN?.trim();
+    if (remoteToken) {
+      // Two auth surfaces: `onecli auth login` persists the key for CLI
+      // calls during setup itself (e.g. detecting an existing Anthropic
+      // secret via `onecli secrets list`), and ONECLI_API_KEY in .env is
+      // read by the runtime SDK at request time. Both are needed.
+      try {
+        execFileSync('onecli', ['auth', 'login', '--api-key', remoteToken], {
+          stdio: 'ignore',
+          env: childEnv(),
+        });
+      } catch (err) {
+        log.warn('onecli auth login failed', { err });
+      }
+      writeEnvVar('ONECLI_API_KEY', remoteToken);
+      log.info('Wrote ONECLI_API_KEY to .env');
+    }
+    const healthy = await pollHealth(remoteUrl, 5000);
+    emitStatus('ONECLI', {
+      INSTALLED: true,
+      REMOTE: true,
+      ONECLI_URL: remoteUrl,
+      HEALTHY: healthy,
+      STATUS: 'success',
+      LOG: 'logs/setup.log',
+    });
+    return;
+  }
 
   if (reuse) {
     // Reuse-mode: don't touch the running gateway at all. Just verify it
