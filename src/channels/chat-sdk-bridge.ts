@@ -501,7 +501,10 @@ async function handleForwardedEvent(
     // type 3 = MessageComponent (button/select)
     if (interaction.type === 3) {
       const customId = (interaction.data as Record<string, unknown>)?.custom_id as string;
-      const user = (interaction.member as Record<string, unknown>)?.user as Record<string, string> | undefined;
+      // Guild-context interactions put the user at interaction.member.user;
+      // DM-context interactions put it at interaction.user (no member wrapper).
+      const user = ((interaction.member as Record<string, unknown>)?.user
+        ?? interaction.user) as Record<string, string> | undefined;
       const interactionId = interaction.id as string;
       const interactionToken = interaction.token as string;
 
