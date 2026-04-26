@@ -42,6 +42,11 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import {
+  startChatServer,
+  stopChatServer,
+  setOnGroupUpdated,
+} from './chat-server.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -456,6 +461,7 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    await stopChatServer();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -496,6 +502,13 @@ async function main(): Promise<void> {
     logger.fatal('No channels connected');
     process.exit(1);
   }
+
+  // Start the embedded chat server (no-op if CHAT_SERVER_ENABLED != 'true').
+  // Wire group-update notifications so the PWA reflects bot edits live.
+  setOnGroupUpdated(() => {
+    registeredGroups = getAllRegisteredGroups();
+  });
+  await startChatServer();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

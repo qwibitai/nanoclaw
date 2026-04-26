@@ -82,6 +82,14 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS message_routes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_folder TEXT NOT NULL,
+      target_jid TEXT NOT NULL,
+      timestamp TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_message_routes_source ON message_routes(source_folder);
+    CREATE INDEX IF NOT EXISTS idx_message_routes_ts ON message_routes(timestamp);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -622,6 +630,62 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+export function updateRegisteredGroup(
+  jid: string,
+  updates: Partial<Pick<RegisteredGroup, 'name' | 'trigger' | 'requiresTrigger'>>,
+): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (updates.name !== undefined) {
+    fields.push('name = ?');
+    values.push(updates.name);
+  }
+  if (updates.trigger !== undefined) {
+    fields.push('trigger_pattern = ?');
+    values.push(updates.trigger);
+  }
+  if (updates.requiresTrigger !== undefined) {
+    fields.push('requires_trigger = ?');
+    values.push(updates.requiresTrigger ? 1 : 0);
+  }
+  if (fields.length === 0) return;
+  values.push(jid);
+  db.prepare(
+    `UPDATE registered_groups SET ${fields.join(', ')} WHERE jid = ?`,
+  ).run(...values);
+}
+
+export function deleteRegisteredGroup(jid: string): void {
+  db.prepare('DELETE FROM registered_groups WHERE jid = ?').run(jid);
+}
+
+export function logMessageRoute(sourceFolder: string, targetJid: string): void {
+  db.prepare(
+    'INSERT INTO message_routes (source_folder, target_jid, timestamp) VALUES (?, ?, ?)',
+  ).run(sourceFolder, targetJid, new Date().toISOString());
+}
+
+export function getMessageRoutes(
+  sinceDays = 7,
+): Array<{ source_folder: string; target_jid: string; count: number }> {
+  const since = new Date(
+    Date.now() - sinceDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  return db
+    .prepare(
+      `SELECT source_folder, target_jid, COUNT(*) as count
+       FROM message_routes
+       WHERE timestamp > ?
+       GROUP BY source_folder, target_jid
+       ORDER BY count DESC`,
+    )
+    .all(since) as Array<{
+    source_folder: string;
+    target_jid: string;
+    count: number;
+  }>;
 }
 
 // --- JSON migration ---
