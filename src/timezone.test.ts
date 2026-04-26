@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import { formatLocalTime } from './timezone.js';
 
-// --- formatLocalTime ---
+// --- formatLocalTime のテスト ---
 
 describe('formatLocalTime', () => {
   it('UTC をローカル時刻表示に変換する', () => {
