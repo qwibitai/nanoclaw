@@ -90,3 +90,46 @@ export async function detachVault(folder: string, mcpName?: string): Promise<Age
   );
   return r.group;
 }
+
+export interface FolderAvailability {
+  slug: string;
+  valid: boolean;
+  available: boolean;
+  reason?: string;
+}
+
+export async function checkFolderAvailability(slug: string): Promise<FolderAvailability> {
+  return request<FolderAvailability>(
+    `/folder-availability/${encodeURIComponent(slug)}`,
+  );
+}
+
+export async function fetchFolderSuggestion(name: string): Promise<string> {
+  const r = await request<{ name: string; slug: string }>(
+    `/folder-suggestion?name=${encodeURIComponent(name)}`,
+  );
+  return r.slug;
+}
+
+export interface CreateGroupInput {
+  name: string;
+  folder: string;
+  instructions?: string;
+  vault?: {
+    scope: VaultScope;
+    vaultBaseUrl?: string;
+    tokenLabel?: string;
+    token?: string;
+    mcpName?: string;
+  };
+}
+
+export async function createGroup(input: CreateGroupInput): Promise<{
+  group: AgentGroupView;
+  mintedVaultToken: boolean;
+}> {
+  return request<{ group: AgentGroupView; mintedVaultToken: boolean }>(
+    `/groups`,
+    { method: "POST", json: input },
+  );
+}

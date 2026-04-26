@@ -1,6 +1,7 @@
 import { Link, Route, Routes } from "react-router-dom";
 import { GroupList } from "./routes/GroupList.tsx";
 import { GroupDetail } from "./routes/GroupDetail.tsx";
+import { NewGroupWizard } from "./routes/NewGroupWizard.tsx";
 
 export function App() {
   return (
@@ -21,6 +22,7 @@ export function App() {
 
       <Routes>
         <Route path="/" element={<GroupList />} />
+        <Route path="/groups/new" element={<NewGroupWizard />} />
         <Route path="/groups/:folder" element={<GroupDetail />} />
         <Route path="*" element={<div className="empty">404 — back to <Link to="/">groups</Link>.</div>} />
       </Routes>

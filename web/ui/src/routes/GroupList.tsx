@@ -73,22 +73,17 @@ export function GroupList() {
         <div className="empty empty-rich">
           <p className="empty-headline">No agent groups yet.</p>
           <p className="muted">
-            Paraclaw will spin up agent groups from here soon
-            {" "}
-            (
-            <a
-              href="https://github.com/ParachuteComputer/paraclaw/issues/1"
-              target="_blank"
-              rel="noreferrer"
-            >
-              #1: new-agent wizard
-            </a>
-            ). Until then, bootstrap your first group via:
+            Spin up your first agent group in a few clicks — or bootstrap from
+            the CLI if you prefer.
           </p>
           <ul className="empty-paths">
             <li>
+              <strong>New agent wizard</strong> —
+              name + folder + optional vault attach.
+            </li>
+            <li>
               <strong>Claude Code skill</strong> —
-              run <code>/init-first-agent</code> to walk through channel pick + identity + welcome DM.
+              run <code>/init-first-agent</code> for channel pick + identity + welcome DM.
             </li>
             <li>
               <strong>CLI setup</strong> —
@@ -96,6 +91,7 @@ export function GroupList() {
             </li>
           </ul>
           <div className="actions" style={{ justifyContent: "center", marginTop: "1rem" }}>
+            <Link to="/groups/new"><button>+ New agent group</button></Link>
             <button className="secondary" onClick={reload}>Refresh</button>
           </div>
         </div>
@@ -105,7 +101,10 @@ export function GroupList() {
 
   return (
     <div>
-      <h2>Agent groups ({state.groups.length})</h2>
+      <div className="list-header">
+        <h2>Agent groups ({state.groups.length})</h2>
+        <Link to="/groups/new"><button>+ New agent group</button></Link>
+      </div>
       {state.groups.map((g) => (
         <Link
           key={g.id}

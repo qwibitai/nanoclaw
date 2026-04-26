@@ -27,6 +27,8 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 
 import { DATA_DIR, GROUPS_DIR } from '../../../src/config.js';
+import { initDb } from '../../../src/db/connection.js';
+import { runMigrations } from '../../../src/db/migrations/index.js';
 import {
   attachVaultToGroup,
   detachVaultFromGroup,
@@ -34,6 +36,12 @@ import {
   DEFAULT_VAULT_MCP_NAME,
 } from '../../../src/parachute/vault-mcp.js';
 import type { VaultScope } from '../../../src/parachute/types.js';
+import {
+  createParachuteAgentGroup,
+  isFolderTaken,
+  suggestFolderSlug,
+  validateFolderSlug,
+} from '../../../src/parachute/create-agent.js';
 
 const CENTRAL_DB_PATH = path.join(DATA_DIR, 'v2.db');
 
@@ -41,6 +49,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIST = path.resolve(__dirname, '../../ui/dist');
 const PORT = Number(process.env.PARACLAW_WEB_PORT ?? 4944);
 const HOST = process.env.PARACLAW_WEB_BIND ?? '127.0.0.1';
+
+// NanoClaw's mutating helpers (createAgentGroup, etc.) talk to a
+// process-singleton DB connection (`getDb`). Initialize it once at boot so
+// the wizard endpoint can write. WAL mode + foreign_keys ON are set inside.
+// Concurrent with a running NanoClaw service (also WAL) is fine — SQLite
+// handles multiple writers per file. Migrations are idempotent.
+const centralDb = initDb(CENTRAL_DB_PATH);
+runMigrations(centralDb);
 
 interface AgentGroupRow {
   id: string;
@@ -174,7 +190,7 @@ async function handleApi(
   if (pathname === '/api/health' && method === 'GET') {
     json(res, 200, {
       service: 'paraclaw-web-server',
-      version: '0.0.1',
+      version: '0.0.3-rc.1',
       data_dir: DATA_DIR,
       groups_dir: GROUPS_DIR,
     });
@@ -188,6 +204,100 @@ async function handleApi(
     } catch (err) {
       error(res, 500, err instanceof Error ? err.message : String(err));
     }
+    return;
+  }
+
+  if (pathname === '/api/groups' && method === 'POST') {
+    try {
+      const body = await readJsonBody<{
+        name?: string;
+        folder?: string;
+        instructions?: string;
+        vault?: {
+          scope?: string;
+          vaultBaseUrl?: string;
+          tokenLabel?: string;
+          token?: string;
+          mcpName?: string;
+        };
+      }>(req);
+
+      const name = (body.name ?? '').trim();
+      const folder = (body.folder ?? '').trim();
+      if (!name) {
+        error(res, 400, 'name is required');
+        return;
+      }
+      const folderCheck = validateFolderSlug(folder);
+      if (!folderCheck.ok) {
+        error(res, 400, folderCheck.reason);
+        return;
+      }
+      if (isFolderTaken(folder)) {
+        error(res, 409, `agent group folder already exists: ${folder}`);
+        return;
+      }
+
+      let vaultArg:
+        | Parameters<typeof createParachuteAgentGroup>[0]['vault']
+        | undefined;
+      let mintedVaultToken = false;
+      if (body.vault) {
+        const scope = (body.vault.scope ?? 'vault:read') as VaultScope;
+        if (!VALID_SCOPES.includes(scope)) {
+          error(res, 400, `invalid vault.scope: ${scope}`);
+          return;
+        }
+        const tokenLabel = body.vault.tokenLabel ?? `claw-${folder}`;
+        let token = body.vault.token;
+        if (!token) {
+          const minted = await mintVaultToken({ scope, label: tokenLabel });
+          token = minted.token;
+          mintedVaultToken = true;
+        }
+        vaultArg = {
+          scope,
+          vaultBaseUrl: body.vault.vaultBaseUrl,
+          tokenLabel,
+          token,
+          mcpName: body.vault.mcpName,
+        };
+      }
+
+      const created = createParachuteAgentGroup({
+        name,
+        folder,
+        instructions: body.instructions?.trim() || undefined,
+        vault: vaultArg,
+      });
+
+      const view = getAgentGroup(created.group.folder);
+      json(res, 201, { group: view, mintedVaultToken });
+    } catch (err) {
+      error(res, 500, err instanceof Error ? err.message : String(err));
+    }
+    return;
+  }
+
+  // GET /api/folder-availability/:slug — used by the new-agent wizard for
+  // live "is this slug free?" feedback.
+  const folderAvail = pathname.match(/^\/api\/folder-availability\/([^/]+)$/);
+  if (folderAvail && method === 'GET') {
+    const slug = decodeURIComponent(folderAvail[1]);
+    const v = validateFolderSlug(slug);
+    if (!v.ok) {
+      json(res, 200, { slug, valid: false, available: false, reason: v.reason });
+      return;
+    }
+    json(res, 200, { slug, valid: true, available: !isFolderTaken(slug) });
+    return;
+  }
+
+  // GET /api/folder-suggestion?name=... — wizard uses this to seed the slug
+  // input from the agent name.
+  if (pathname === '/api/folder-suggestion' && method === 'GET') {
+    const name = url.searchParams.get('name') ?? '';
+    json(res, 200, { name, slug: suggestFolderSlug(name) });
     return;
   }
 

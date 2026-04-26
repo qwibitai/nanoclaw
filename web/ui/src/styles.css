@@ -297,3 +297,62 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 1.5rem 0; }
   font-size: 0.82rem;
   color: var(--warn);
 }
+
+/* List header (with CTA on the right) */
+.list-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.list-header h2 { margin: 0; }
+
+/* Wizard step indicator */
+.wizard-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.25rem;
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+.wizard-step {
+  padding: 0.4rem 0.8rem;
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.wizard-step.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 500;
+}
+
+/* Wizard form bits */
+.wizard-toggle {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  color: var(--fg) !important;
+  font-size: 0.95rem !important;
+  font-weight: 400 !important;
+  margin: 0 !important;
+}
+.wizard-toggle input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+.wizard-folder-ok {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+.wizard-folder-error {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  color: var(--error);
+}
