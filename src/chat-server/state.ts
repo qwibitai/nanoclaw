@@ -123,7 +123,10 @@ export function broadcastRooms(): void {
 }
 
 // ── Message hook for channel adapter ──────────────────────────────────────
-export type ChatMessageCallback = (roomId: string, message: ChatMessage) => void;
+export type ChatMessageCallback = (
+  roomId: string,
+  message: ChatMessage,
+) => void;
 
 let onNewMessageCallback: ChatMessageCallback | null = null;
 let onGroupUpdatedCallback: (() => void) | null = null;
