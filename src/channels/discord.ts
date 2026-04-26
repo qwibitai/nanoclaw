@@ -52,7 +52,11 @@ export class DiscordChannel implements Channel {
   private botToken: string;
   private allowedBotIds: Set<string>;
 
-  constructor(botToken: string, allowedBotIds: Set<string>, opts: DiscordChannelOpts) {
+  constructor(
+    botToken: string,
+    allowedBotIds: Set<string>,
+    opts: DiscordChannelOpts,
+  ) {
     this.botToken = botToken;
     this.allowedBotIds = allowedBotIds;
     this.opts = opts;
@@ -69,7 +73,8 @@ export class DiscordChannel implements Channel {
     });
 
     this.client.on(Events.MessageCreate, async (message: Message) => {
-      if (message.author.bot && !this.allowedBotIds.has(message.author.id)) return;
+      if (message.author.bot && !this.allowedBotIds.has(message.author.id))
+        return;
       const isPermittedBot = message.author.bot; // 早期returnを通過した bot は許可済み
 
       const isThread = message.channel.isThread();
@@ -395,7 +400,10 @@ registerChannel('discord', (opts: ChannelOpts) => {
           .map((s) => s.trim())
           .filter((id) => {
             if (!discordIdPattern.test(id)) {
-              logger.warn({ id }, 'DISCORD_ALLOWED_BOT_IDS: invalid ID skipped');
+              logger.warn(
+                { id },
+                'DISCORD_ALLOWED_BOT_IDS: invalid ID skipped',
+              );
               return false;
             }
             return true;
