@@ -41,6 +41,7 @@ describe('poll loop integration', () => {
 
     await waitFor(() => getUndeliveredMessages().length > 0, 2000);
     controller.abort();
+    await loopPromise.catch(() => {});
 
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
@@ -52,8 +53,6 @@ describe('poll loop integration', () => {
     // Input message should be acked (not pending)
     const pending = getPendingMessages();
     expect(pending).toHaveLength(0);
-
-    await loopPromise.catch(() => {});
   });
 
   it('should process multiple messages in a batch', async () => {
@@ -66,12 +65,11 @@ describe('poll loop integration', () => {
 
     await waitFor(() => getUndeliveredMessages().length > 0, 2000);
     controller.abort();
+    await loopPromise.catch(() => {});
 
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
     expect(JSON.parse(out[0].content).text).toBe('Got both messages');
-
-    await loopPromise.catch(() => {});
   });
 
   it('should process messages arriving after loop starts', async () => {
@@ -85,24 +83,24 @@ describe('poll loop integration', () => {
 
     await waitFor(() => getUndeliveredMessages().length > 0, 2000);
     controller.abort();
+    await loopPromise.catch(() => {});
 
     const out = getUndeliveredMessages();
     expect(out.length).toBeGreaterThanOrEqual(1);
-
-    await loopPromise.catch(() => {});
   });
 });
 
-// Helper: run poll loop until aborted or timeout
+// Helper: run the poll loop until aborted or timeout. The loop now honours the
+// abort signal directly, so we just race against the timeout as a safety net
+// — the abort path no longer leaves an unawaited inner loop polling after the
+// test completes.
 async function runPollLoopWithTimeout(provider: MockProvider, signal: AbortSignal, timeoutMs: number): Promise<void> {
   return Promise.race([
     runPollLoop({
       provider,
       providerName: 'mock',
       cwd: '/tmp',
-    }),
-    new Promise<void>((_, reject) => {
-      signal.addEventListener('abort', () => reject(new Error('aborted')));
+      signal,
     }),
     new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
   ]);
