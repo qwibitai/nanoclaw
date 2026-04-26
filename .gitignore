@@ -37,3 +37,10 @@ groups/global/*
 
 agents-sdk-docs
 .worktrees/
+.gstack/
+
+# Personal session-color tag + notify hook runtime state
+.claude/session-color
+.claude/.notify-state/
+.claude/.notify-on-stop
+.claude/skills/gstack/
