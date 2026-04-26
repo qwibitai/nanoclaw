@@ -74,6 +74,23 @@ export function getOutboundDb(): Database {
         updated_at               TEXT NOT NULL
       );
     `);
+    // task_run_logs: one row per scheduled-task occurrence the agent processes.
+    // Restores the v1 observability surface (v1 had this in store/messages.db).
+    // Container is the sole writer; the agent reads it via list_task_runs MCP.
+    _outbound.exec(`
+      CREATE TABLE IF NOT EXISTS task_run_logs (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id      TEXT NOT NULL,
+        series_id    TEXT,
+        run_at       TEXT NOT NULL,
+        duration_ms  INTEGER NOT NULL,
+        status       TEXT NOT NULL,
+        result       TEXT,
+        error        TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_run_logs_task   ON task_run_logs(task_id, run_at);
+      CREATE INDEX IF NOT EXISTS idx_task_run_logs_series ON task_run_logs(series_id, run_at);
+    `);
   }
   return _outbound;
 }

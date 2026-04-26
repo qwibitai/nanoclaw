@@ -8,6 +8,7 @@
 import { getInboundDb } from '../db/connection.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting } from '../db/session-routing.js';
+import { listTaskRuns } from '../db/task-run-logs.js';
 import { TIMEZONE, parseZonedToUtc } from '../timezone.js';
 import { registerTools } from './server.js';
 import type { McpToolDefinition } from './types.js';
@@ -296,4 +297,39 @@ export const updateTask: McpToolDefinition = {
   },
 };
 
-registerTools([scheduleTask, listTasks, updateTask, cancelTask, pauseTask, resumeTask]);
+export const listTaskRunsTool: McpToolDefinition = {
+  tool: {
+    name: 'list_task_runs',
+    description:
+      'List execution history for scheduled tasks. Returns one row per task occurrence the container processed (newest first), including duration and final status. Pass `taskId` (the series id from list_tasks, or a single occurrence id) to filter; omit it to see the most recent runs across all tasks.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'Optional task or series id (matches both task_id and series_id). Omit to see all recent runs.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max rows to return (default 50, capped at 500).',
+        },
+      },
+    },
+  },
+  async handler(args) {
+    const taskId = args.taskId as string | undefined;
+    const limit = typeof args.limit === 'number' ? args.limit : undefined;
+    const rows = listTaskRuns({ taskOrSeriesId: taskId, limit });
+    if (rows.length === 0) {
+      return ok(taskId ? `No runs found for task ${taskId}.` : 'No task runs recorded yet.');
+    }
+    const lines = rows.map((r) => {
+      const head = `${r.run_at} [${r.status}] ${r.task_id}${r.series_id ? ` (series ${r.series_id})` : ''} — ${r.duration_ms}ms`;
+      const detail = r.error ? `\n    error: ${r.error.slice(0, 200)}` : '';
+      return head + detail;
+    });
+    return ok(lines.join('\n'));
+  },
+};
+
+registerTools([scheduleTask, listTasks, listTaskRunsTool, updateTask, cancelTask, pauseTask, resumeTask]);

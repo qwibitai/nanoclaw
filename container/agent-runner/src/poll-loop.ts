@@ -2,6 +2,7 @@ import { findByName, getAllDestinations, type DestinationEntry } from './destina
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
 import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
+import { recordTaskRun } from './db/task-run-logs.js';
 import {
   clearContinuation,
   migrateLegacyContinuation,
@@ -131,6 +132,11 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
       continue;
     }
 
+    // Snapshot tasks before pre-task scripts run so we can attribute the
+    // skipped/completed/failed status correctly to each task row in the
+    // task_run_logs table afterwards.
+    const tasksInBatch = normalMessages.filter((m) => m.kind === 'task');
+
     // Pre-task scripts: for any task rows with a `script`, run it before the
     // provider call. Scripts returning wakeAgent=false (or erroring) gate
     // their own task row only — surviving messages still go to the agent.
@@ -146,6 +152,19 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     if (skipped.length > 0) {
       markCompleted(skipped);
       log(`Pre-task script skipped ${skipped.length} task(s): ${skipped.join(', ')}`);
+      // Log skipped tasks. Duration is approximate (the pre-task script
+      // ran but we don't capture its individual time here); use 0 as a
+      // placeholder — the meaningful field is status='skipped'.
+      const skippedSet = new Set(skipped);
+      for (const task of tasksInBatch.filter((t) => skippedSet.has(t.id))) {
+        recordTaskRun({
+          task_id: task.id,
+          series_id: task.series_id,
+          run_at: new Date().toISOString(),
+          duration_ms: 0,
+          status: 'skipped',
+        });
+      }
     }
     // MODULE-HOOK:scheduling-pre-task:end
 
@@ -170,6 +189,9 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // Process the query while concurrently polling for new messages
     const skippedSet = new Set(skipped);
     const processingIds = ids.filter((id) => !commandIds.includes(id) && !skippedSet.has(id));
+    const tasksKept = tasksInBatch.filter((t) => !skippedSet.has(t.id));
+    const batchStartedAt = Date.now();
+    let batchError: string | null = null;
     try {
       const result = await processQuery(query, routing, processingIds, config.providerName);
       if (result.continuation && result.continuation !== continuation) {
@@ -179,6 +201,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       log(`Query error: ${errMsg}`);
+      batchError = errMsg;
 
       // Stale/corrupt continuation recovery: ask the provider whether
       // this error means the stored continuation is unusable, and clear
@@ -204,6 +227,26 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // (e.g. stream closed unexpectedly).
     markCompleted(processingIds);
     log(`Completed ${ids.length} message(s)`);
+
+    // Log task runs for any task messages that went through the agent.
+    // Duration is the batch processing time — when several tasks ride
+    // along in one prompt, they share that time, which is a faithful
+    // record of "this is how long the agent spent producing the reply
+    // covering this task."
+    if (tasksKept.length > 0) {
+      const runAt = new Date(batchStartedAt).toISOString();
+      const durationMs = Date.now() - batchStartedAt;
+      for (const task of tasksKept) {
+        recordTaskRun({
+          task_id: task.id,
+          series_id: task.series_id,
+          run_at: runAt,
+          duration_ms: durationMs,
+          status: batchError ? 'failed' : 'completed',
+          error: batchError,
+        });
+      }
+    }
   }
 }
 
