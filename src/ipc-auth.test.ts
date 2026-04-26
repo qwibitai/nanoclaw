@@ -12,7 +12,7 @@ import {
 import { processTaskIpc, IpcDeps } from './ipc.js';
 import { RegisteredGroup } from './types.js';
 
-// Set up registered groups used across tests
+// テスト全体で使用する登録済みグループを設定
 const MAIN_GROUP: RegisteredGroup = {
   name: 'Main',
   folder: 'discord_main',
@@ -47,7 +47,7 @@ beforeEach(() => {
     'dc:third': THIRD_GROUP,
   };
 
-  // Populate DB as well
+  // DB も同様に初期化
   setRegisteredGroup('dc:main', MAIN_GROUP);
   setRegisteredGroup('dc:other', OTHER_GROUP);
   setRegisteredGroup('dc:third', THIRD_GROUP);
@@ -58,7 +58,7 @@ beforeEach(() => {
     registerGroup: (jid, group) => {
       groups[jid] = group;
       setRegisteredGroup(jid, group);
-      // Mock the fs.mkdirSync that registerGroup does
+      // registerGroup 内で呼ばれる fs.mkdirSync をモック
     },
     syncGroups: async () => {},
     getAvailableGroups: () => [],
@@ -66,7 +66,7 @@ beforeEach(() => {
   };
 });
 
-// --- schedule_task authorization ---
+// --- schedule_task の認可 ---
 
 describe('schedule_task authorization', () => {
   it('main group can schedule for another group', async () => {
@@ -83,7 +83,7 @@ describe('schedule_task authorization', () => {
       deps,
     );
 
-    // Verify task was created in DB for the other group
+    // 他のグループ用に DB にタスクが作成されたことを確認
     const allTasks = getAllTasks();
     expect(allTasks.length).toBe(1);
     expect(allTasks[0].group_folder).toBe('other-group');
@@ -145,7 +145,7 @@ describe('schedule_task authorization', () => {
   });
 });
 
-// --- pause_task authorization ---
+// --- pause_task の認可 ---
 
 describe('pause_task authorization', () => {
   beforeEach(() => {
@@ -206,7 +206,7 @@ describe('pause_task authorization', () => {
   });
 });
 
-// --- resume_task authorization ---
+// --- resume_task の認可 ---
 
 describe('resume_task authorization', () => {
   beforeEach(() => {
@@ -255,7 +255,7 @@ describe('resume_task authorization', () => {
   });
 });
 
-// --- cancel_task authorization ---
+// --- cancel_task の認可 ---
 
 describe('cancel_task authorization', () => {
   it('main group can cancel any task', async () => {
@@ -328,7 +328,7 @@ describe('cancel_task authorization', () => {
   });
 });
 
-// --- register_group authorization ---
+// --- register_group の認可 ---
 
 describe('register_group authorization', () => {
   it('non-main group cannot register a group', async () => {
@@ -345,7 +345,7 @@ describe('register_group authorization', () => {
       deps,
     );
 
-    // registeredGroups should not have changed
+    // registeredGroups は変更されていないはず
     expect(groups['dc:new']).toBeUndefined();
   });
 
@@ -367,22 +367,22 @@ describe('register_group authorization', () => {
   });
 });
 
-// --- refresh_groups authorization ---
+// --- refresh_groups の認可 ---
 
 describe('refresh_groups authorization', () => {
   it('non-main group cannot trigger refresh', async () => {
-    // This should be silently blocked (no crash, no effect)
+    // これは静かにブロックされるべき（クラッシュも効果もない）
     await processTaskIpc({ type: 'refresh_groups' }, 'dc:other', false, deps);
-    // If we got here without error, the auth gate worked
+    // エラーなしでここまで来たら認可ゲートが機能した
   });
 });
 
-// --- IPC message authorization ---
-// Tests the authorization pattern from startIpcWatcher (ipc.ts).
-// The logic: isPrivileged || targetChatJid === sourceChatJid
+// --- IPC メッセージの認可 ---
+// ipc.ts の startIpcWatcher の認可パターンをテスト
+// ロジック: isPrivileged || targetChatJid === sourceChatJid
 
 describe('IPC message authorization', () => {
-  // Replicate the exact check from the IPC watcher
+  // IPC ウォッチャーの正確なチェックを再現
   function isMessageAuthorized(
     sourceChatJid: string,
     isPrivileged: boolean,
@@ -415,7 +415,7 @@ describe('IPC message authorization', () => {
   });
 });
 
-// --- schedule_task with cron and interval types ---
+// --- cron と interval タイプの schedule_task ---
 
 describe('schedule_task schedule types', () => {
   it('creates task with cron schedule and computes next_run', async () => {
@@ -424,7 +424,7 @@ describe('schedule_task schedule types', () => {
         type: 'schedule_task',
         prompt: 'cron task',
         schedule_type: 'cron',
-        schedule_value: '0 9 * * *', // every day at 9am
+        schedule_value: '0 9 * * *', // 毎日午前9時
         targetJid: 'dc:other',
       },
       'dc:main',
@@ -436,7 +436,7 @@ describe('schedule_task schedule types', () => {
     expect(tasks).toHaveLength(1);
     expect(tasks[0].schedule_type).toBe('cron');
     expect(tasks[0].next_run).toBeTruthy();
-    // next_run should be a valid ISO date in the future
+    // next_run は将来の有効な ISO 日付であるべき
     expect(new Date(tasks[0].next_run!).getTime()).toBeGreaterThan(
       Date.now() - 60000,
     );
@@ -467,7 +467,7 @@ describe('schedule_task schedule types', () => {
         type: 'schedule_task',
         prompt: 'interval task',
         schedule_type: 'interval',
-        schedule_value: '3600000', // 1 hour
+        schedule_value: '3600000', // 1時間
         targetJid: 'dc:other',
       },
       'dc:main',
@@ -478,7 +478,7 @@ describe('schedule_task schedule types', () => {
     const tasks = getAllTasks();
     expect(tasks).toHaveLength(1);
     expect(tasks[0].schedule_type).toBe('interval');
-    // next_run should be ~1 hour from now
+    // next_run は今から約1時間後であるべき
     const nextRun = new Date(tasks[0].next_run!).getTime();
     expect(nextRun).toBeGreaterThanOrEqual(before + 3600000 - 1000);
     expect(nextRun).toBeLessThanOrEqual(Date.now() + 3600000 + 1000);
@@ -536,7 +536,7 @@ describe('schedule_task schedule types', () => {
   });
 });
 
-// --- context_mode defaulting ---
+// --- context_mode のデフォルト値 ---
 
 describe('schedule_task context_mode', () => {
   it('accepts context_mode=group', async () => {
@@ -615,7 +615,7 @@ describe('schedule_task context_mode', () => {
   });
 });
 
-// --- register_group success path ---
+// --- register_group の成功パス ---
 
 describe('register_group success', () => {
   it('main group can register a new group', async () => {
@@ -632,7 +632,7 @@ describe('register_group success', () => {
       deps,
     );
 
-    // Verify group was registered in DB
+    // グループが DB に登録されたことを確認
     const group = getRegisteredGroup('dc:new');
     expect(group).toBeDefined();
     expect(group!.name).toBe('New Group');
@@ -646,7 +646,7 @@ describe('register_group success', () => {
         type: 'register_group',
         jid: 'dc:partial',
         name: 'Partial',
-        // missing folder and trigger
+        // folder と trigger が欠落
       },
       'dc:main',
       true,

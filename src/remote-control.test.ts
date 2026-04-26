@@ -1,12 +1,12 @@
 import fs from 'fs';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Mock config before importing the module under test
+// テスト対象モジュールをインポートする前に config をモック化
 vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-rc-test',
 }));
 
-// Mock child_process
+// child_process をモック化
 const spawnMock = vi.fn();
 vi.mock('child_process', () => ({
   spawn: (...args: any[]) => spawnMock(...args),
@@ -21,7 +21,7 @@ import {
   _getStateFilePath,
 } from './remote-control.js';
 
-// --- Helpers ---
+// --- ヘルパー ---
 
 function createMockProcess(pid = 12345) {
   return {
@@ -41,7 +41,7 @@ describe('remote-control', () => {
   let openSyncSpy: ReturnType<typeof vi.spyOn>;
   let closeSyncSpy: ReturnType<typeof vi.spyOn>;
 
-  // Track what readFileSync should return for the stdout file
+  // readFileSync が stdout ファイルに対して返すべき内容を追跡する
   let stdoutFileContent: string;
 
   beforeEach(() => {
@@ -49,7 +49,7 @@ describe('remote-control', () => {
     spawnMock.mockReset();
     stdoutFileContent = '';
 
-    // Default fs mocks
+    // デフォルトの fs モック
     mkdirSyncSpy = vi
       .spyOn(fs, 'mkdirSync')
       .mockImplementation(() => undefined as any);
@@ -60,7 +60,7 @@ describe('remote-control', () => {
     openSyncSpy = vi.spyOn(fs, 'openSync').mockReturnValue(42 as any);
     closeSyncSpy = vi.spyOn(fs, 'closeSync').mockImplementation(() => {});
 
-    // readFileSync: return stdoutFileContent for the stdout file, state file, etc.
+    // readFileSync: stdout ファイルや状態ファイルなどに対して stdoutFileContent を返す
     readFileSyncSpy = vi.spyOn(fs, 'readFileSync').mockImplementation(((
       p: string,
     ) => {
@@ -77,14 +77,14 @@ describe('remote-control', () => {
     vi.restoreAllMocks();
   });
 
-  // --- startRemoteControl ---
+  // --- startRemoteControl のテスト ---
 
   describe('startRemoteControl', () => {
     it('spawns claude remote-control and returns the URL', async () => {
       const proc = createMockProcess();
       spawnMock.mockReturnValue(proc);
 
-      // Simulate URL appearing in stdout file on first poll
+      // 最初のポーリングで stdout ファイルに URL が出現するのをシミュレート
       stdoutFileContent =
         'Session URL: https://claude.ai/code?bridge=env_abc123\n';
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
@@ -113,7 +113,7 @@ describe('remote-control', () => {
 
       const spawnCall = spawnMock.mock.calls[0];
       const options = spawnCall[2];
-      // stdio[0] is 'pipe' so we can write 'y' to accept the prompt
+      // stdio[0] は 'pipe' なので、プロンプトに 'y' を書き込める
       expect(options.stdio[0]).toBe('pipe');
       expect(typeof options.stdio[1]).toBe('number');
       expect(typeof options.stdio[2]).toBe('number');
@@ -127,7 +127,7 @@ describe('remote-control', () => {
 
       await startRemoteControl('user1', 'tg:123', '/project');
 
-      // Two openSync calls (stdout + stderr), two closeSync calls
+      // openSync が2回（stdout + stderr）、closeSync が2回呼ばれる
       expect(openSyncSpy).toHaveBeenCalledTimes(2);
       expect(closeSyncSpy).toHaveBeenCalledTimes(2);
     });
@@ -154,7 +154,7 @@ describe('remote-control', () => {
 
       await startRemoteControl('user1', 'tg:123', '/project');
 
-      // Second call should return existing URL without spawning
+      // 2回目の呼び出しでは、新規起動せずに既存の URL を返すべき
       const result = await startRemoteControl('user2', 'tg:456', '/project');
       expect(result).toEqual({
         ok: true,
@@ -168,14 +168,14 @@ describe('remote-control', () => {
       const proc2 = createMockProcess(22222);
       spawnMock.mockReturnValueOnce(proc1).mockReturnValueOnce(proc2);
 
-      // First start: process alive, URL found
+      // 最初の起動: プロセスは生存、URL が見つかる
       const killSpy = vi
         .spyOn(process, 'kill')
         .mockImplementation((() => true) as any);
       stdoutFileContent = 'https://claude.ai/code?bridge=env_first\n';
       await startRemoteControl('user1', 'tg:123', '/project');
 
-      // Old process (11111) is dead, new process (22222) is alive
+      // 古いプロセス（11111）は終了、新しいプロセス（22222）は生存
       killSpy.mockImplementation(((pid: number, sig: any) => {
         if (pid === 11111 && (sig === 0 || sig === undefined)) {
           throw new Error('ESRCH');
@@ -198,7 +198,7 @@ describe('remote-control', () => {
       spawnMock.mockReturnValue(proc);
       stdoutFileContent = '';
 
-      // Process is dead (poll will detect this)
+      // プロセスは終了している（ポーリングで検出される）
       vi.spyOn(process, 'kill').mockImplementation((() => {
         throw new Error('ESRCH');
       }) as any);
@@ -219,7 +219,7 @@ describe('remote-control', () => {
 
       const promise = startRemoteControl('user1', 'tg:123', '/project');
 
-      // Advance past URL_TIMEOUT_MS (30s), with enough steps for polls
+      // URL_TIMEOUT_MS（30秒）を超過するまで、十分なポーリング回数で進める
       for (let i = 0; i < 160; i++) {
         await vi.advanceTimersByTimeAsync(200);
       }
@@ -246,7 +246,7 @@ describe('remote-control', () => {
     });
   });
 
-  // --- stopRemoteControl ---
+  // --- stopRemoteControl のテスト ---
 
   describe('stopRemoteControl', () => {
     it('kills the process and clears state', async () => {
@@ -275,7 +275,7 @@ describe('remote-control', () => {
     });
   });
 
-  // --- restoreRemoteControl ---
+  // --- restoreRemoteControl のテスト ---
 
   describe('restoreRemoteControl', () => {
     it('restores session if state file exists and process is alive', () => {
@@ -323,7 +323,7 @@ describe('remote-control', () => {
     });
 
     it('does nothing if no state file exists', () => {
-      // readFileSyncSpy default throws ENOENT for .json
+      // readFileSyncSpy はデフォルトで .json に対して ENOENT を投げる
       restoreRemoteControl();
       expect(getActiveSession()).toBeNull();
     });
@@ -340,7 +340,7 @@ describe('remote-control', () => {
       expect(unlinkSyncSpy).toHaveBeenCalled();
     });
 
-    // ** This is the key integration test: restore → stop must work **
+    // ** これは重要な統合テスト: restore → stop が必ず動作すること **
     it('stopRemoteControl works after restoreRemoteControl', () => {
       const session = {
         pid: 77777,

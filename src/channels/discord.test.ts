@@ -1,20 +1,20 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
-// --- Mocks ---
+// --- モック ---
 
-// Mock registry (registerChannel runs at import time)
+// レジストリのモック（registerChannel はインポート時に実行される）
 vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
 
-// Mock env reader (used by the factory, not needed in unit tests)
+// 環境変数リーダーのモック（ファクトリで使用されるが、ユニットテストでは不要）
 vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 
-// Mock config
+// 設定のモック
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
 }));
 
-// Mock logger
+// ロガーのモック
 vi.mock('../logger.js', () => ({
   logger: {
     debug: vi.fn(),
@@ -24,7 +24,7 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
-// --- discord.js mock ---
+// --- discord.js のモック ---
 
 type Handler = (...args: any[]) => any;
 
@@ -76,7 +76,7 @@ vi.mock('discord.js', () => {
 
     async login(_token: string) {
       this._ready = true;
-      // Fire the ready event
+      // ready イベントを発火させる
       const readyHandlers = this.eventHandlers.get('ready') || [];
       for (const h of readyHandlers) {
         h({ user: this.user });
@@ -99,10 +99,10 @@ vi.mock('discord.js', () => {
     }
   }
 
-  // Mock TextChannel type
+  // TextChannel 型のモック
   class TextChannel {}
 
-  // Mock ThreadChannel type
+  // ThreadChannel 型のモック
   class ThreadChannel {}
 
   return {
@@ -117,7 +117,7 @@ vi.mock('discord.js', () => {
 
 import { DiscordChannel, DiscordChannelOpts } from './discord.js';
 
-// --- Test helpers ---
+// --- テスト用ヘルパー ---
 
 function createTestOpts(
   overrides?: Partial<DiscordChannelOpts>,
@@ -159,7 +159,7 @@ function createMessage(overrides: {
 }) {
   const channelId = overrides.channelId ?? '1234567890123456';
   const authorId = overrides.authorId ?? '55512345';
-  const botId = '999888777'; // matches mock client user id
+  const botId = '999888777'; // モッククライアントのユーザーIDと一致
   const isThreadChannel = overrides.isThread ?? false;
 
   const mentionsMap = new Map();
@@ -216,7 +216,7 @@ async function triggerMessage(message: any) {
   for (const h of handlers) await h(message);
 }
 
-// --- Tests ---
+// --- テスト ---
 
 describe('DiscordChannel', () => {
   beforeEach(() => {
@@ -227,7 +227,7 @@ describe('DiscordChannel', () => {
     vi.restoreAllMocks();
   });
 
-  // --- Connection lifecycle ---
+  // --- 接続ライフサイクル ---
 
   describe('connection lifecycle', () => {
     it('resolves connect() when client is ready', async () => {
@@ -269,7 +269,7 @@ describe('DiscordChannel', () => {
     });
   });
 
-  // --- Text message handling ---
+  // --- テキストメッセージ処理 ---
 
   describe('text message handling', () => {
     it('delivers message for registered channel', async () => {
@@ -436,7 +436,7 @@ describe('DiscordChannel', () => {
     });
   });
 
-  // --- @mention translation ---
+  // --- @メンション変換 ---
 
   describe('@mention translation', () => {
     it('translates <@botId> mention to trigger format', async () => {
@@ -471,8 +471,8 @@ describe('DiscordChannel', () => {
       });
       await triggerMessage(msg);
 
-      // Should NOT prepend @Andy — already starts with trigger
-      // But the <@botId> should still be stripped
+      // @Andy を先頭に付加しない — すでにトリガーで始まっている
+      // ただし <@botId> は除去される
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
@@ -521,7 +521,7 @@ describe('DiscordChannel', () => {
     });
   });
 
-  // --- Attachments ---
+  // --- 添付ファイル ---
 
   describe('attachments', () => {
     it('stores image attachment with placeholder', async () => {
@@ -641,7 +641,7 @@ describe('DiscordChannel', () => {
     });
   });
 
-  // --- Reply context ---
+  // --- リプライ文脈 ---
 
   describe('reply context', () => {
     it('includes reply author in content', async () => {
@@ -665,7 +665,7 @@ describe('DiscordChannel', () => {
     });
   });
 
-  // --- sendMessage ---
+  // --- メッセージ送信 ---
 
   describe('sendMessage', () => {
     it('sends message via channel', async () => {
@@ -701,7 +701,7 @@ describe('DiscordChannel', () => {
         new Error('Channel not found'),
       );
 
-      // Should not throw
+      // 例外を投げないこと
       await expect(
         channel.sendMessage('dc:1234567890123456', 'Will fail'),
       ).resolves.toBeUndefined();
@@ -711,10 +711,10 @@ describe('DiscordChannel', () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', new Set(), opts);
 
-      // Don't connect — client is null
+      // 接続しない — client が null
       await channel.sendMessage('dc:1234567890123456', 'No client');
 
-      // No error, no API call
+      // エラーも API 呼び出しもない
     });
 
     it('splits messages exceeding 2000 characters', async () => {
@@ -737,7 +737,7 @@ describe('DiscordChannel', () => {
     });
   });
 
-  // --- createThread ---
+  // --- スレッド作成 ---
 
   describe('createThread', () => {
     it('creates message-linked thread when messageId is provided', async () => {
@@ -831,7 +831,7 @@ describe('DiscordChannel', () => {
     });
   });
 
-  // --- ownsJid ---
+  // --- JID の所有判定 ---
 
   describe('ownsJid', () => {
     it('owns dc: JIDs', () => {
@@ -871,7 +871,7 @@ describe('DiscordChannel', () => {
     });
   });
 
-  // --- setTyping ---
+  // --- タイピング表示 ---
 
   describe('setTyping', () => {
     it('sends typing indicator when isTyping is true', async () => {
@@ -897,7 +897,7 @@ describe('DiscordChannel', () => {
 
       await channel.setTyping('dc:1234567890123456', false);
 
-      // channels.fetch should NOT be called
+      // channels.fetch は呼ばれないこと
       expect(currentClient().channels.fetch).not.toHaveBeenCalled();
     });
 
@@ -905,14 +905,14 @@ describe('DiscordChannel', () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', new Set(), opts);
 
-      // Don't connect
+      // 接続しない
       await channel.setTyping('dc:1234567890123456', true);
 
-      // No error
+      // エラーは出ない
     });
   });
 
-  // --- Channel properties ---
+  // --- チャンネルプロパティ ---
 
   describe('channel properties', () => {
     it('has name "discord"', () => {
@@ -925,7 +925,7 @@ describe('DiscordChannel', () => {
     });
   });
 
-  // --- Allowed bot filtering ---
+  // --- 許可Botフィルタリング ---
 
   describe('allowed bot filtering', () => {
     const ALLOWED_BOT_ID = '111222333444555666';
@@ -1019,7 +1019,7 @@ describe('DiscordChannel', () => {
     });
   });
 
-  // --- Thread detection ---
+  // --- スレッド検出 ---
 
   describe('thread detection', () => {
     it('sets is_thread=true and place_type=public_thread for thread messages', async () => {
@@ -1123,7 +1123,7 @@ describe('DiscordChannel', () => {
       });
       await triggerMessage(msg);
 
-      // Should deliver even though thread itself is not registered yet
+      // スレッド自体はまだ登録されていないが配信されること
       expect(opts.onMessage).toHaveBeenCalledWith(
         `dc:${threadId}`,
         expect.objectContaining({
@@ -1143,7 +1143,7 @@ describe('DiscordChannel', () => {
             folder: 'test-server',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
-            // no thread_defaults
+            // thread_defaults なし
           },
         })),
       });

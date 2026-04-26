@@ -6,14 +6,14 @@ import {
   getRegisteredChannelNames,
 } from './registry.js';
 
-// The registry is module-level state, so we need a fresh module per test.
-// We use dynamic import with cache-busting to isolate tests.
-// However, since vitest runs each file in its own context and we control
-// registration order, we can test the public API directly.
+// レジストリはモジュールレベルの状態なので、テストごとに新しいモジュールが必要。
+// テストを分離するためにキャッシュバスティング付きの動的インポートを使用できる。
+// ただし vitest は各ファイルを独自のコンテキストで実行し、登録順序を制御できるため、
+// 公開APIを直接テストできる。
 
 describe('channel registry', () => {
-  // Note: registry is shared module state across tests in this file.
-  // Tests are ordered to account for cumulative registrations.
+  // 注: レジストリはこのファイルのテスト間で共有されるモジュール状態。
+  // 累積登録を考慮してテスト順序を調整している。
 
   it('getChannelFactory returns undefined for unknown channel', () => {
     expect(getChannelFactory('nonexistent')).toBeUndefined();

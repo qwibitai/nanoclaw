@@ -8,7 +8,7 @@ beforeEach(() => {
   _setRegisteredGroups({});
 });
 
-// --- JID ownership patterns ---
+// --- JID 所有パターン ---
 
 describe('JID ownership patterns', () => {
   it('Discord JID: starts with dc:', () => {
@@ -17,7 +17,7 @@ describe('JID ownership patterns', () => {
   });
 });
 
-// --- getAvailableGroups ---
+// --- getAvailableGroups のテスト ---
 
 describe('getAvailableGroups', () => {
   it('returns only groups, excludes DMs', () => {
@@ -128,9 +128,9 @@ describe('getAvailableGroups', () => {
   });
 
   it('excludes non-group chats regardless of JID format', () => {
-    // Unknown JID format stored without is_group should not appear
+    // is_group なしで保存された不明な JID 形式は表示されないべき
     storeChatMetadata('unknown-format', '2024-01-01T00:00:01.000Z', 'Unknown');
-    // Explicitly non-group with unusual JID
+    // 明示的に非グループで珍しい JID
     storeChatMetadata(
       'other:abc',
       '2024-01-01T00:00:02.000Z',
@@ -138,7 +138,7 @@ describe('getAvailableGroups', () => {
       'custom',
       false,
     );
-    // A real group for contrast
+    // 対比用の実際のグループ
     storeChatMetadata(
       'dc:group',
       '2024-01-01T00:00:03.000Z',

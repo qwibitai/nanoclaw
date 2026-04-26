@@ -45,7 +45,7 @@ function parseIpcChannelMode(
   }
 
   if (typeof value === 'string') {
-    // Legacy alias: url_watch → thread_per_message
+    // 旧エイリアス: url_watch → thread_per_message
     if (value === 'url_watch') {
       return 'thread_per_message';
     }

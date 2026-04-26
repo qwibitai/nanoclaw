@@ -112,7 +112,7 @@ describe('formatMessages', () => {
   });
 
   it('converts timestamps to local time for given timezone', () => {
-    // 2024-01-01T18:30:00Z in America/New_York (EST) = 1:30 PM
+    // 2024-01-01T18:30:00Z を America/New_York (EST) で変換すると 1:30 PM
     const result = formatMessages(
       [makeMsg({ timestamp: '2024-01-01T18:30:00.000Z' })],
       'America/New_York',
@@ -156,12 +156,12 @@ describe('TRIGGER_PATTERN', () => {
   });
 
   it('matches with leading whitespace after trim', () => {
-    // The actual usage trims before testing: TRIGGER_PATTERN.test(m.content.trim())
+    // 実際の使用ではテスト前に trim している: TRIGGER_PATTERN.test(m.content.trim())
     expect(TRIGGER_PATTERN.test(`@${name} hey`.trim())).toBe(true);
   });
 });
 
-// --- Outbound formatting (internal tag stripping + prefix) ---
+// --- 送信フォーマット（内部タグ除去 + プレフィックス）---
 
 describe('stripInternalTags', () => {
   it('strips single-line internal tags', () => {
@@ -203,11 +203,11 @@ describe('formatOutbound', () => {
   });
 });
 
-// --- Trigger gating with requiresTrigger flag ---
+// --- requiresTrigger フラグによるトリガーゲーティング ---
 
 describe('trigger gating (requiresTrigger interaction)', () => {
-  // Replicates the exact logic from processGroupMessages and startMessageLoop:
-  //   if (!isMainGroup && group.requiresTrigger !== false) { check trigger }
+  // processGroupMessages と startMessageLoop の正確なロジックを再現:
+  //   if (!isMainGroup && group.requiresTrigger !== false) { トリガーチェック }
   function shouldRequireTrigger(
     isMainGroup: boolean,
     requiresTrigger: boolean | undefined,

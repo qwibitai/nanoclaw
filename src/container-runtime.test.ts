@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock logger
+// logger のモック
 vi.mock('./logger.js', () => ({
   logger: {
     debug: vi.fn(),
@@ -10,7 +10,7 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
-// Mock child_process — store the mock fn so tests can configure it
+// child_process のモック — テストで設定できるようモック関数を保持する
 const mockExecSync = vi.fn();
 vi.mock('child_process', () => ({
   execSync: (...args: unknown[]) => mockExecSync(...args),
@@ -29,7 +29,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// --- Pure functions ---
+// --- 純粋関数 ---
 
 describe('readonlyMountArgs', () => {
   it('returns -v flag with :ro suffix', () => {
@@ -80,16 +80,16 @@ describe('ensureContainerRuntimeRunning', () => {
 
 describe('cleanupOrphans', () => {
   it('stops orphaned nanoclaw containers', () => {
-    // docker ps returns container names, one per line
+    // docker ps はコンテナ名を1行ずつ返す
     mockExecSync.mockReturnValueOnce(
       'nanoclaw-group1-111\nnanoclaw-group2-222\n',
     );
-    // stop calls succeed
+    // stop 呼び出しは成功する
     mockExecSync.mockReturnValue('');
 
     cleanupOrphans();
 
-    // ps + 2 stop calls
+    // ps + 2 回の stop 呼び出し
     expect(mockExecSync).toHaveBeenCalledTimes(3);
     expect(mockExecSync).toHaveBeenNthCalledWith(
       2,
@@ -121,7 +121,7 @@ describe('cleanupOrphans', () => {
       throw new Error('docker not available');
     });
 
-    cleanupOrphans(); // should not throw
+    cleanupOrphans(); // スローしないこと
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
@@ -131,14 +131,14 @@ describe('cleanupOrphans', () => {
 
   it('continues stopping remaining containers when one stop fails', () => {
     mockExecSync.mockReturnValueOnce('nanoclaw-a-1\nnanoclaw-b-2\n');
-    // First stop fails
+    // 1 回目の stop が失敗
     mockExecSync.mockImplementationOnce(() => {
       throw new Error('already stopped');
     });
-    // Second stop succeeds
+    // 2 回目の stop が成功
     mockExecSync.mockReturnValueOnce('');
 
-    cleanupOrphans(); // should not throw
+    cleanupOrphans(); // スローしないこと
 
     expect(mockExecSync).toHaveBeenCalledTimes(3);
     expect(logger.info).toHaveBeenCalledWith(

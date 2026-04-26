@@ -65,7 +65,7 @@ describe('_autoRegisterThread (actual auto-registration path)', () => {
     vi.clearAllMocks();
   });
 
-  it('creates a child group entry in registeredGroups', () => {
+  it('registeredGroups に子グループのエントリを作成する', () => {
     const msg: InboundMessage = {
       id: 'msg1',
       chat_jid: threadJid,
@@ -81,7 +81,7 @@ describe('_autoRegisterThread (actual auto-registration path)', () => {
     expect(registeredGroups[threadJid]).toBeDefined();
   });
 
-  it('auto-registered child group reflects thread_defaults.type (chat)', () => {
+  it('自動登録された子グループは thread_defaults.type（chat）を反映する', () => {
     const parentWithChatType: RegisteredGroup = {
       ...parent,
       thread_defaults: { type: 'chat', requiresTrigger: false },
@@ -105,7 +105,7 @@ describe('_autoRegisterThread (actual auto-registration path)', () => {
     );
   });
 
-  it('child group inherits folder from parent', () => {
+  it('子グループは親からフォルダを継承する', () => {
     const msg: InboundMessage = {
       id: 'msg3',
       chat_jid: threadJid,
@@ -121,7 +121,7 @@ describe('_autoRegisterThread (actual auto-registration path)', () => {
     expect(registeredGroups[threadJid].folder).toBe(parent.folder);
   });
 
-  it('persists child group via setRegisteredGroup', () => {
+  it('setRegisteredGroup 経由で子グループを永続化する', () => {
     const msg: InboundMessage = {
       id: 'msg4',
       chat_jid: threadJid,
@@ -140,7 +140,7 @@ describe('_autoRegisterThread (actual auto-registration path)', () => {
     );
   });
 
-  it('child group requiresTrigger inherits from thread_defaults', () => {
+  it('子グループの requiresTrigger は thread_defaults から継承される', () => {
     const parentWithTrigger: RegisteredGroup = {
       ...parent,
       thread_defaults: { type: 'thread', requiresTrigger: true },
@@ -160,7 +160,7 @@ describe('_autoRegisterThread (actual auto-registration path)', () => {
     expect(registeredGroups[threadJid].requiresTrigger).toBe(true);
   });
 
-  it('does not create a privileged group type even when parent is main', () => {
+  it('親が main の場合でも特権グループタイプを作成しない', () => {
     const msg: InboundMessage = {
       id: 'msg6',
       chat_jid: threadJid,
@@ -179,7 +179,7 @@ describe('_autoRegisterThread (actual auto-registration path)', () => {
     expect(childType).toBe('thread');
   });
 
-  it('falls back to thread when parent thread_defaults.type is invalid at runtime', () => {
+  it('親の thread_defaults.type が実行時に無効な場合、thread にフォールバックする', () => {
     const corruptedParent: RegisteredGroup = {
       ...parent,
       // runtime 破損データ（DB/JSON改変）を再現するために型制約を意図的にバイパス
