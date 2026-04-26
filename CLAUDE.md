@@ -77,6 +77,7 @@ Exactly one writer per file — no cross-mount lock contention. Heartbeat is a f
 | `container/skills/` | Container skills mounted into every agent session |
 | `groups/<folder>/` | Per-agent-group filesystem (CLAUDE.md, skills, per-group `agent-runner-src/` overlay) |
 | `scripts/init-first-agent.ts` | Bootstrap the first DM-wired agent (used by `/init-first-agent` skill) |
+| `setup/migrate-v1.ts` + `setup/migrate-v1/` | v1→v2 migration (**experimental**); runs inside `setup/auto.ts` before channel pairing. Seeds `agent_groups` + `messaging_groups` + wirings from v1's `registered_groups`, copies group folders, merges `.env`, installs channel adapters, ports scheduled tasks. Writes `logs/setup-migration/handoff.json` for the `/migrate-from-v1` skill to pick up (owner seeding + fork customizations). |
 
 ## Channels and Providers (skill-installed)
 
@@ -211,6 +212,7 @@ This project uses pnpm with `minimumReleaseAge: 4320` (3 days) in `pnpm-workspac
 | [docs/setup-wiring.md](docs/setup-wiring.md) | What's wired, what's open in the setup flow |
 | [docs/architecture-diagram.md](docs/architecture-diagram.md) | Diagram version of the architecture |
 | [docs/build-and-runtime.md](docs/build-and-runtime.md) | Runtime split (Node host + Bun container), lockfiles, image build surface, CI, key invariants |
+| [docs/v1-to-v2-changes.md](docs/v1-to-v2-changes.md) | v1→v2 architecture diff — vocabulary for where v1 things moved. Referenced by the migration step and `/migrate-from-v1` skill |
 
 ## Container Build Cache
 

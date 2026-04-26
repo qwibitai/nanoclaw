@@ -4,6 +4,10 @@ All notable changes to NanoClaw will be documented in this file.
 
 For detailed release notes, see the [full changelog on the documentation site](https://docs.nanoclaw.dev/changelog).
 
+## [Unreleased]
+
+- **v1 → v2 migration (experimental).** `bash nanoclaw.sh` now detects a v1 install (`~/nanoclaw`, `~/.nanoclaw`, siblings of the v2 checkout, or `$NANOCLAW_V1_PATH`) and runs a best-effort port before channel pairing: seeds `agent_groups`/`messaging_groups`/wirings from v1's `registered_groups` (with trigger_pattern → engage_mode/engage_pattern), copies group folders, merges `.env`, installs v2 channel adapters, and ports `scheduled_tasks`. Hands off to `/migrate-from-v1` for owner seeding and fork customizations. Experimental — back up `data/v2.db` and `groups/` first; see [docs/v1-to-v2-changes.md](docs/v1-to-v2-changes.md).
+
 ## [2.0.0] - 2026-04-22
 
 Major version. NanoClaw v2 is a substantial architectural rewrite. Existing forks should run `/migrate-nanoclaw` (clean-base replay of customizations) or `/update-nanoclaw` (selective cherry-pick) before resuming work.
