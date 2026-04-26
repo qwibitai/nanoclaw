@@ -66,9 +66,11 @@ export class DiscordChannel implements Channel {
       ],
     });
 
-    const { DISCORD_ALLOWED_BOT_IDS: allowedBotIdsRaw } = readEnvFile([
+    const { DISCORD_ALLOWED_BOT_IDS: allowedBotIdsFile } = readEnvFile([
       'DISCORD_ALLOWED_BOT_IDS',
     ]);
+    const allowedBotIdsRaw =
+      process.env.DISCORD_ALLOWED_BOT_IDS ?? allowedBotIdsFile;
     const allowedBotIds = new Set(
       allowedBotIdsRaw ? allowedBotIdsRaw.split(',').map((s) => s.trim()) : [],
     );
