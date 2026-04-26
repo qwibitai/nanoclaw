@@ -74,7 +74,7 @@ export function decideStuckAction(args: {
   claims: Array<{ message_id: string; status_changed: string }>;
 }): StuckDecision {
   const { now, heartbeatMtimeMs, containerState, claims } = args;
-  const declaredBashMs = bashTimeoutMs(containerState);
+  const declaredToolMs = declaredToolTimeoutMs(containerState);
 
   // Ceiling check only applies when we have an actual heartbeat timestamp.
   // A freshly-spawned container hasn't had any SDK activity yet so no
@@ -86,13 +86,13 @@ export function decideStuckAction(args: {
   // claim-stuck check below handles it.
   if (heartbeatMtimeMs !== 0) {
     const heartbeatAge = now - heartbeatMtimeMs;
-    const ceiling = Math.max(ABSOLUTE_CEILING_MS, declaredBashMs ?? 0);
+    const ceiling = Math.max(ABSOLUTE_CEILING_MS, declaredToolMs ?? 0);
     if (heartbeatAge > ceiling) {
       return { action: 'kill-ceiling', heartbeatAgeMs: heartbeatAge, ceilingMs: ceiling };
     }
   }
 
-  const tolerance = Math.max(CLAIM_STUCK_MS, declaredBashMs ?? 0);
+  const tolerance = Math.max(CLAIM_STUCK_MS, declaredToolMs ?? 0);
   for (const claim of claims) {
     const claimedAt = Date.parse(claim.status_changed);
     if (Number.isNaN(claimedAt)) continue;
@@ -206,8 +206,8 @@ function heartbeatMtimeMs(agentGroupId: string, sessionId: string): number {
   }
 }
 
-function bashTimeoutMs(state: ContainerState | null): number | null {
-  if (!state || state.current_tool !== 'Bash') return null;
+function declaredToolTimeoutMs(state: ContainerState | null): number | null {
+  if (!state || !state.current_tool) return null;
   return typeof state.tool_declared_timeout_ms === 'number' ? state.tool_declared_timeout_ms : null;
 }
 

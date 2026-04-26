@@ -3,7 +3,7 @@ import path from 'path';
 
 import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 
-import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
+import { clearContainerToolInFlight, setContainerToolInFlight, touchHeartbeat } from '../db/connection.js';
 import { registerProvider } from './provider-registry.js';
 import type { AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 
@@ -145,36 +145,54 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
 }
 
 /**
- * PreToolUse hook: record the current tool + its declared timeout so the host
- * sweep can widen its stuck tolerance while Bash is running a long-declared
- * script. Defense-in-depth: if SDK_DISALLOWED_TOOLS slips through somehow,
- * block the call here instead of letting the agent hang.
+ * PreToolUse hook factory: record the current tool + its declared timeout so
+ * the host sweep can widen its stuck tolerance while a long tool runs. The
+ * declared timeout is read from `tool_input.timeout` for Bash, and from the
+ * MCP server config for `mcp__<server>__*` tools — without it, an MCP that
+ * legitimately takes >30 min racing against the absolute-ceiling kill (see
+ * incident 2026-04-26: sk-agent.list_agents hung in mcp-remote bridge,
+ * heartbeat stalled, host killed at the same instant the SDK would have
+ * timed out internally). Also touches the heartbeat so the kill clock starts
+ * fresh from tool start. Defense-in-depth: if SDK_DISALLOWED_TOOLS slips
+ * through somehow, block the call here instead of letting the agent hang.
  */
-const preToolUseHook: HookCallback = async (input) => {
-  const i = input as { tool_name?: string; tool_input?: Record<string, unknown> };
-  const toolName = i.tool_name ?? '';
-  if (SDK_DISALLOWED_TOOLS.includes(toolName)) {
-    return {
-      decision: 'block',
-      stopReason: `Tool '${toolName}' is not available in this environment — use the nanoclaw equivalent.`,
-    } as unknown as ReturnType<HookCallback>;
-  }
-  // Bash exposes its timeout via the tool_input.timeout field (ms). Any other
-  // tool: no declared timeout.
-  const declaredTimeoutMs =
-    toolName === 'Bash' && typeof i.tool_input?.timeout === 'number' ? (i.tool_input.timeout as number) : null;
-  try {
-    setContainerToolInFlight(toolName, declaredTimeoutMs);
-  } catch (err) {
-    log(`PreToolUse: failed to record container_state: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  return { continue: true };
-};
+function createPreToolUseHook(mcpServers: Record<string, McpServerConfig>): HookCallback {
+  return async (input) => {
+    const i = input as { tool_name?: string; tool_input?: Record<string, unknown> };
+    const toolName = i.tool_name ?? '';
+    if (SDK_DISALLOWED_TOOLS.includes(toolName)) {
+      return {
+        decision: 'block',
+        stopReason: `Tool '${toolName}' is not available in this environment — use the nanoclaw equivalent.`,
+      } as unknown as ReturnType<HookCallback>;
+    }
+    let declaredTimeoutMs: number | null = null;
+    if (toolName === 'Bash' && typeof i.tool_input?.timeout === 'number') {
+      declaredTimeoutMs = i.tool_input.timeout as number;
+    } else if (toolName.startsWith('mcp__')) {
+      const serverName = toolName.split('__')[1];
+      const serverCfg = serverName ? mcpServers[serverName] : undefined;
+      const cfgTimeout = (serverCfg as { timeout?: number } | undefined)?.timeout;
+      if (typeof cfgTimeout === 'number') declaredTimeoutMs = cfgTimeout * 1000;
+    }
+    try {
+      setContainerToolInFlight(toolName, declaredTimeoutMs);
+      touchHeartbeat();
+    } catch (err) {
+      log(`PreToolUse: failed to record container_state: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return { continue: true };
+  };
+}
 
-/** Clear in-flight tool on PostToolUse / PostToolUseFailure. */
+/**
+ * Clear in-flight tool on PostToolUse / PostToolUseFailure. Refreshes the
+ * heartbeat so the next tool/turn gets a fresh kill window.
+ */
 const postToolUseHook: HookCallback = async () => {
   try {
     clearContainerToolInFlight();
+    touchHeartbeat();
   } catch (err) {
     log(`PostToolUse: failed to clear container_state: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -289,7 +307,7 @@ export class ClaudeProvider implements AgentProvider {
         settingSources: ['project', 'user'],
         mcpServers: this.mcpServers,
         hooks: {
-          PreToolUse: [{ hooks: [preToolUseHook] }],
+          PreToolUse: [{ hooks: [createPreToolUseHook(this.mcpServers)] }],
           PostToolUse: [{ hooks: [postToolUseHook] }],
           PostToolUseFailure: [{ hooks: [postToolUseHook] }],
           PreCompact: [{ hooks: [createPreCompactHook(this.assistantName)] }],
