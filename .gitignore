@@ -18,6 +18,8 @@ groups/global/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
 !groups/global/fb-posting-workflow.md
+!groups/global/authority.md
+!groups/global/authority-test-cases.md
 
 # Secrets
 *.keys.json

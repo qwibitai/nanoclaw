@@ -48,6 +48,59 @@ function recordIpcFile(group: string): boolean {
   return true; // under limit
 }
 
+/**
+ * Format an escalation IPC payload as a WhatsApp-friendly message for Blayke.
+ * Uses WhatsApp formatting (single asterisks, underscores) — never markdown.
+ */
+function formatEscalationMessage(
+  data: {
+    summary: string;
+    context: string;
+    recommendation: string;
+    options?: string[];
+    severity?: 'routine' | 'urgent' | 'critical';
+    customer_channel?: string | null;
+    customer_id?: string | null;
+  },
+  sourceGroup: string,
+): string {
+  const severity = data.severity || 'urgent';
+  const badge = severity === 'critical' ? '🚨' : severity === 'urgent' ? '⚠' : '🔔';
+  const header = `*${badge} ESCALATION* (${severity})`;
+
+  const subjectParts: string[] = [];
+  if (data.customer_channel) subjectParts.push(data.customer_channel);
+  if (data.customer_id) subjectParts.push(data.customer_id);
+  const subject = subjectParts.length ? `_${subjectParts.join(' · ')}_` : `_from ${sourceGroup}_`;
+
+  const lines = [
+    header,
+    subject,
+    '',
+    data.summary,
+    '',
+    `*Andy's take:* ${data.recommendation}`,
+  ];
+
+  if (data.options && data.options.length > 0) {
+    lines.push('');
+    lines.push('Options:');
+    for (const opt of data.options) {
+      lines.push(`• ${opt}`);
+    }
+  }
+
+  if (data.context && data.context.trim()) {
+    lines.push('');
+    lines.push(`_Context:_ ${data.context}`);
+  }
+
+  lines.push('');
+  lines.push('Reply YES / NO / [counter]');
+
+  return lines.join('\n');
+}
+
 let ipcWatcherRunning = false;
 
 export function startIpcWatcher(deps: IpcDeps): void {
@@ -130,6 +183,36 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
+                  );
+                }
+              } else if (data.type === 'escalation' && data.summary && data.recommendation) {
+                // Route escalation to the main group's chat regardless of source group.
+                // Any registered group can escalate; only the main JID receives the ping.
+                const mainEntry = Object.entries(registeredGroups).find(
+                  ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+                );
+                if (!mainEntry) {
+                  logger.warn(
+                    { sourceGroup },
+                    'Escalation dropped: main group not registered',
+                  );
+                } else {
+                  const [mainJid] = mainEntry;
+                  const text = formatEscalationMessage(data, sourceGroup);
+                  await deps.sendMessage(mainJid, text);
+                  logger.info(
+                    {
+                      audit: 'escalate',
+                      sourceGroup,
+                      severity: data.severity,
+                      summary: data.summary,
+                      customer_channel: data.customer_channel,
+                      customer_id: data.customer_id,
+                      sourceChatJid: data.sourceChatJid,
+                      recommendation: data.recommendation,
+                      options: data.options,
+                    },
+                    'Escalation routed to main',
                   );
                 }
               }
