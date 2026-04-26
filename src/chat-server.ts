@@ -1277,163 +1277,6 @@ async function handleHttp(
     return json(200, { ok: true });
   }
 
-  // ── ElevenLabs STT: batch accuracy pass (Scribe v2) ──────────────────────
-  // Called by the PWA after realtime dictation ends. The webm blob gets
-  // forwarded to ElevenLabs' /v1/speech-to-text for a more accurate final
-  // transcript that replaces the live/partial text in the input.
-  if (url.pathname === '/api/stt/transcribe' && method === 'POST') {
-    const apiKey = process.env.ELEVENLABS_API_KEY;
-    if (!apiKey) return json(501, { error: 'ELEVENLABS_API_KEY not set' });
-    const contentType = req.headers['content-type'] || '';
-    if (!contentType.includes('multipart/form-data')) {
-      return json(400, { error: 'Content-Type must be multipart/form-data' });
-    }
-    const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', async () => {
-      try {
-        const body = Buffer.concat(chunks);
-        const bb = Busboy({
-          headers: req.headers,
-          limits: { fileSize: 50 * 1024 * 1024, files: 1 },
-        });
-        let audio: Buffer | null = null;
-        let filename = 'recording.webm';
-        let mime = 'audio/webm';
-        await new Promise<void>((resolve, reject) => {
-          const parts: Buffer[] = [];
-          bb.on('file', (_f, stream, info) => {
-            filename = info.filename || filename;
-            mime = info.mimeType || mime;
-            stream.on('data', (c: Buffer) => parts.push(c));
-            stream.on('end', () => {
-              audio = Buffer.concat(parts);
-            });
-          });
-          bb.on('finish', resolve);
-          bb.on('error', reject);
-          bb.end(body);
-        });
-        if (!audio || (audio as Buffer).length < 100) {
-          logger.warn(
-            { bytes: audio ? (audio as Buffer).length : 0 },
-            'Batch STT: rejecting tiny upload',
-          );
-          return json(400, { error: 'No audio file uploaded' });
-        }
-
-        // Trim trailing silence before forwarding. Scribe/Whisper family
-        // models hallucinate phrases like "I have no luck" / "Thank you" on
-        // pure silence. The `areverse` trick strips silence from the END
-        // without touching inter-word pauses.
-        const trimmed = await new Promise<Buffer>((resolve) => {
-          const ff = spawn('ffmpeg', [
-            '-loglevel',
-            'error',
-            '-i',
-            'pipe:0',
-            '-af',
-            'areverse,silenceremove=start_periods=1:start_duration=0.1:start_threshold=-40dB,areverse',
-            '-c:a',
-            'libopus',
-            '-f',
-            'webm',
-            'pipe:1',
-          ]);
-          const out: Buffer[] = [];
-          const err: Buffer[] = [];
-          ff.stdout.on('data', (c: Buffer) => out.push(c));
-          ff.stderr.on('data', (c: Buffer) => err.push(c));
-          ff.on('close', (code: number) => {
-            if (code === 0) {
-              resolve(Buffer.concat(out));
-            } else {
-              logger.warn(
-                { code, stderr: Buffer.concat(err).toString().slice(-300) },
-                'Batch STT: ffmpeg trim failed, forwarding raw audio',
-              );
-              resolve(audio as Buffer);
-            }
-          });
-          ff.stdin.end(audio as Buffer);
-        });
-
-        logger.info(
-          {
-            bytes: (audio as Buffer).length,
-            trimmedBytes: trimmed.length,
-            mime,
-            filename,
-          },
-          'Batch STT: forwarding to ElevenLabs',
-        );
-        const form = new FormData();
-        form.append(
-          'file',
-          new Blob([trimmed], { type: 'audio/webm' }),
-          'recording.webm',
-        );
-        form.append('model_id', 'scribe_v2');
-        const lang = process.env.ELEVENLABS_LANGUAGE_CODE || 'en';
-        if (lang) form.append('language_code', lang);
-        form.append('tag_audio_events', 'false');
-        const r = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
-          method: 'POST',
-          headers: { 'xi-api-key': apiKey },
-          body: form,
-        });
-        if (!r.ok) {
-          const text = await r.text();
-          logger.error(
-            { status: r.status, text },
-            'ElevenLabs batch STT failed',
-          );
-          return json(502, { error: 'Transcription failed' });
-        }
-        const data = (await r.json()) as { text?: string };
-        logger.info(
-          {
-            chars: (data.text || '').length,
-            preview: (data.text || '').slice(0, 80),
-          },
-          'Batch STT: result',
-        );
-        return json(200, { text: data.text || '' });
-      } catch (err: any) {
-        logger.error({ err: err.message }, 'Batch STT proxy failed');
-        return json(500, { error: 'Transcription failed' });
-      }
-    });
-    return;
-  }
-
-  // ── ElevenLabs STT: diagnostic token-mint endpoint ──────────────────────
-  // Not used by the PWA (which uses the /ws/stt proxy). Exposed so install
-  // scripts and /add-voice-dictation can verify the API key round-trips.
-  if (url.pathname === '/api/stt/token' && method === 'POST') {
-    const apiKey = process.env.ELEVENLABS_API_KEY;
-    if (!apiKey) return json(501, { error: 'ELEVENLABS_API_KEY not set' });
-    try {
-      const r = await fetch(
-        'https://api.elevenlabs.io/v1/single-use-token/realtime_scribe',
-        { method: 'POST', headers: { 'xi-api-key': apiKey } },
-      );
-      if (!r.ok) {
-        const text = await r.text();
-        logger.error(
-          { status: r.status, text },
-          'ElevenLabs token mint failed',
-        );
-        return json(502, { error: 'Token mint failed' });
-      }
-      const { token } = (await r.json()) as { token: string };
-      return json(200, { token });
-    } catch (err: any) {
-      logger.error({ err: err.message }, 'ElevenLabs token mint error');
-      return json(500, { error: 'Token mint error' });
-    }
-  }
-
   // ── Chunked file upload ─────────────────────────────────────────────────
   const chunkMatch = url.pathname.match(
     /^\/api\/rooms\/([^/]+)\/upload\/chunk$/,
@@ -1648,7 +1491,6 @@ async function handleHttp(
 // ── WebSocket handler ──────────────────────────────────────────────────────
 function setupWebSocket(server: http.Server): void {
   const wss = new WebSocketServer({ noServer: true });
-  const sttWss = new WebSocketServer({ noServer: true });
 
   // Ping/pong keepalive — detect stale connections
   const WS_PING_INTERVAL = 30_000;
@@ -1667,7 +1509,7 @@ function setupWebSocket(server: http.Server): void {
 
   server.on('upgrade', async (req, socket, head) => {
     const url = new URL(req.url ?? '/', `http://localhost`);
-    if (url.pathname !== '/ws' && url.pathname !== '/ws/stt') {
+    if (url.pathname !== '/ws') {
       socket.destroy();
       return;
     }
@@ -1680,114 +1522,10 @@ function setupWebSocket(server: http.Server): void {
       return;
     }
 
-    if (url.pathname === '/ws/stt') {
-      sttWss.handleUpgrade(req, socket as any, head, (ws) => {
-        sttWss.emit('connection', ws, req);
-      });
-      return;
-    }
-
     wss.handleUpgrade(req, socket as any, head, (ws) => {
       // Attach identity so the connection handler can use it
       (req as any)._authIdentity = auth.identity;
       wss.emit('connection', ws, req);
-    });
-  });
-
-  sttWss.on('connection', (client: WebSocket, req: http.IncomingMessage) => {
-    const apiKey = process.env.ELEVENLABS_API_KEY;
-    if (!apiKey) {
-      client.close(1011, 'ELEVENLABS_API_KEY not set');
-      return;
-    }
-    // Whitelist forwarded params so a client can't smuggle arbitrary values
-    // upstream (URLSearchParams already escapes, so this is defense-in-depth).
-    const AUDIO_FORMAT_RE =
-      /^(pcm_(8000|16000|22050|24000|44100|48000)|ulaw_8000)$/;
-    const MODEL_ID_RE = /^scribe_v[12](_realtime)?$/;
-    const COMMIT_RE = /^(manual|vad)$/;
-    const qs = new URL(req.url ?? '/', 'http://x').searchParams;
-    const params = new URLSearchParams();
-    const rawModel = qs.get('model_id') || 'scribe_v2_realtime';
-    const rawCommit = qs.get('commit_strategy') || 'vad';
-    const rawFormat = qs.get('audio_format') || 'pcm_48000';
-    if (
-      !MODEL_ID_RE.test(rawModel) ||
-      !COMMIT_RE.test(rawCommit) ||
-      !AUDIO_FORMAT_RE.test(rawFormat)
-    ) {
-      client.close(1008, 'invalid STT params');
-      return;
-    }
-    params.set('model_id', rawModel);
-    params.set('commit_strategy', rawCommit);
-    params.set('audio_format', rawFormat);
-    const lang = qs.get('language_code');
-    if (lang && /^[a-z]{2,3}(-[A-Z]{2})?$/.test(lang))
-      params.set('language_code', lang);
-    const ts = qs.get('include_timestamps');
-    if (ts === 'true' || ts === 'false') params.set('include_timestamps', ts);
-
-    const upstream = new WebSocket(
-      `wss://api.elevenlabs.io/v1/speech-to-text/realtime?${params.toString()}`,
-      { headers: { 'xi-api-key': apiKey } },
-    );
-    // Cap buffered client messages while upstream is connecting so a
-    // misbehaving/authenticated client can't OOM us with PCM chunks.
-    const MAX_QUEUE_BYTES = 2 * 1024 * 1024;
-    let queueBytes = 0;
-    const clientQueue: Array<string | Buffer> = [];
-    upstream.on('open', () => {
-      while (clientQueue.length) upstream.send(clientQueue.shift()!);
-      queueBytes = 0;
-    });
-    upstream.on('message', (data) => {
-      if (client.readyState === WebSocket.OPEN) client.send(data.toString());
-    });
-    upstream.on('close', (code, reason) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.close(code || 1000, reason.toString().slice(0, 120));
-      }
-    });
-    upstream.on('error', (err) => {
-      logger.warn({ err: err.message }, 'STT upstream error');
-      if (client.readyState === WebSocket.OPEN)
-        client.close(1011, 'upstream error');
-    });
-
-    client.on('message', (data, isBinary) => {
-      const payload = isBinary ? (data as Buffer) : data.toString();
-      if (upstream.readyState === WebSocket.OPEN) {
-        upstream.send(payload);
-        return;
-      }
-      if (upstream.readyState !== WebSocket.CONNECTING) return;
-      const size =
-        typeof payload === 'string'
-          ? Buffer.byteLength(payload)
-          : payload.length;
-      if (queueBytes + size > MAX_QUEUE_BYTES) {
-        logger.warn(
-          { queueBytes, size },
-          'STT client queue overflow — closing',
-        );
-        client.close(1009, 'queue overflow before upstream open');
-        return;
-      }
-      queueBytes += size;
-      clientQueue.push(payload as any);
-    });
-    client.on('close', () => {
-      if (
-        upstream.readyState === WebSocket.OPEN ||
-        upstream.readyState === WebSocket.CONNECTING
-      ) {
-        try {
-          upstream.close();
-        } catch {
-          /* socket may already be closing */
-        }
-      }
     });
   });
 

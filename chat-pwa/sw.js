@@ -1,5 +1,5 @@
 const CACHE = 'nanoclaw-chat-v88';
-const ASSETS = ['/', '/index.html', '/app.js', '/pcm-worklet.js', '/style.css', '/marked.min.js', '/dompurify.min.js', '/logo-dark.svg', '/logo-light.svg'];
+const ASSETS = ['/', '/index.html', '/app.js', '/style.css', '/marked.min.js', '/dompurify.min.js', '/logo-dark.svg', '/logo-light.svg'];
 const VENDORED = new Set(['/marked.min.js', '/dompurify.min.js', '/logo-dark.svg', '/logo-light.svg']);
 
 self.addEventListener('install', (e) => {
