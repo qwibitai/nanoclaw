@@ -905,6 +905,88 @@ describe('DiscordChannel', () => {
     });
   });
 
+  // --- Allowed bot filtering ---
+
+  describe('allowed bot filtering', () => {
+    const ALLOWED_BOT_ID = '111222333444555666';
+
+    it('delivers message from allowed bot in thread_per_message channel', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'dc:1234567890123456': {
+            name: 'Test Server #general',
+            folder: 'test-server',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            channel_mode: 'thread_per_message' as const,
+          },
+        })),
+      });
+      const channel = new DiscordChannel('test-token', new Set([ALLOWED_BOT_ID]), opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        isBot: true,
+        authorId: ALLOWED_BOT_ID,
+        content: 'Bot report ready',
+        guildName: 'Test Server',
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          sender: ALLOWED_BOT_ID,
+          content: 'Bot report ready',
+        }),
+      );
+    });
+
+    it('drops allowed bot message in non-thread_per_message channel', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'dc:1234567890123456': {
+            name: 'Test Server #general',
+            folder: 'test-server',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            // channel_mode 未設定 = thread_per_message 以外
+          },
+        })),
+      });
+      const channel = new DiscordChannel('test-token', new Set([ALLOWED_BOT_ID]), opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        isBot: true,
+        authorId: ALLOWED_BOT_ID,
+        content: 'Bot report ready',
+        guildName: 'Test Server',
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onMessage).not.toHaveBeenCalled();
+      expect(opts.onChatMetadata).not.toHaveBeenCalled();
+    });
+
+    it('ignores non-allowed bot even if allowedBotIds is set', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', new Set([ALLOWED_BOT_ID]), opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        isBot: true,
+        authorId: '999111222333444555', // allowedBotIds に含まれない別 Bot
+        content: 'I am another bot',
+        guildName: 'Test Server',
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onMessage).not.toHaveBeenCalled();
+      expect(opts.onChatMetadata).not.toHaveBeenCalled();
+    });
+  });
+
   // --- Thread detection ---
 
   describe('thread detection', () => {
