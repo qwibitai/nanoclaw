@@ -18,14 +18,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr edit "${{ github.event.pull_request.number }}" \
+          if ! gh pr edit "${{ github.event.pull_request.number }}" \
             --repo "${{ github.repository }}" \
-            --add-label "dune-review-requested" \
-            || gh label create "dune-review-requested" \
-                --repo "${{ github.repository }}" \
-                --color "e11d48" \
-                --description "PR queued for Dune agent review" \
-                --force \
-            && gh pr edit "${{ github.event.pull_request.number }}" \
-                --repo "${{ github.repository }}" \
-                --add-label "dune-review-requested"
+            --add-label "dune-review-requested" 2>/dev/null; then
+            gh label create "dune-review-requested" \
+              --repo "${{ github.repository }}" \
+              --color "e11d48" \
+              --description "PR queued for Dune agent review" \
+              --force 2>/dev/null || true
+            gh pr edit "${{ github.event.pull_request.number }}" \
+              --repo "${{ github.repository }}" \
+              --add-label "dune-review-requested"
+          fi
