@@ -94,7 +94,6 @@ export class DiscordChannel implements Channel {
       if (message.author.bot && !allowedBotIds.has(message.author.id)) return;
       const isAllowedBot = message.author.bot;
 
-
       const isThread = message.channel.isThread();
       const channelId = message.channelId;
       const chatJid = `dc:${channelId}`;
