@@ -1,6 +1,6 @@
 {
   "name": "@paraclaw/web-ui",
-  "version": "0.0.1",
+  "version": "0.0.2-rc.1",
   "private": true,
   "description": "Paraclaw web UI — Vite + React + TypeScript. Manages vault attachments per agent group.",
   "license": "AGPL-3.0",
