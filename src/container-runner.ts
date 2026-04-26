@@ -28,6 +28,7 @@ import { initGroupFilesystem } from './group-init.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
+import { readEnvFile } from './env.js';
 // Provider host-side config barrel — each provider that needs host-side
 // container setup self-registers on import.
 import './providers/index.js';
@@ -452,6 +453,15 @@ async function buildContainerArgs(
 
   // Host gateway
   args.push(...hostGatewayArgs());
+
+  // Non-secret model configuration can be passed through safely.
+  // This prevents SDK fallback to a default model when ANTHROPIC_MODEL is set on host.
+  const envModel = process.env.ANTHROPIC_MODEL;
+  const fileModel = envModel ? undefined : readEnvFile(['ANTHROPIC_MODEL']).ANTHROPIC_MODEL;
+  const selectedModel = envModel ?? fileModel;
+  if (selectedModel) {
+    args.push('-e', `ANTHROPIC_MODEL=${selectedModel}`);
+  }
 
   // User mapping
   const hostUid = process.getuid?.();
