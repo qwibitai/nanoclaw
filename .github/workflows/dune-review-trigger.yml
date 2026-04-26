@@ -1,0 +1,30 @@
+name: Request Dune PR Review
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  label-pr:
+    name: Add dune-review-requested label
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr edit "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --add-label "dune-review-requested" \
+            || gh label create "dune-review-requested" \
+                --repo "${{ github.repository }}" \
+                --color "e11d48" \
+                --description "PR queued for Dune agent review" \
+                --force \
+            && gh pr edit "${{ github.event.pull_request.number }}" \
+                --repo "${{ github.repository }}" \
+                --add-label "dune-review-requested"
