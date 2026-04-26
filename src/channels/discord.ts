@@ -92,16 +92,22 @@ export class DiscordChannel implements Channel {
 
     this.client.on(Events.MessageCreate, async (message: Message) => {
       if (message.author.bot && !allowedBotIds.has(message.author.id)) return;
-      const isAllowedBot = message.author.bot;
+      const isPermittedBot = message.author.bot;
 
       const isThread = message.channel.isThread();
       const channelId = message.channelId;
       const chatJid = `dc:${channelId}`;
 
       // 許可Botは thread_per_message チャンネルのみで処理する
-      if (isAllowedBot) {
+      if (isPermittedBot) {
         const group = this.opts.registeredGroups()[chatJid];
-        if (group?.channel_mode !== 'thread_per_message') return;
+        if (group?.channel_mode !== 'thread_per_message') {
+          logger.debug(
+            { botId: message.author.id, chatJid },
+            'allowed bot message dropped: not thread_per_message channel',
+          );
+          return;
+        }
       }
       let content = message.content;
       const timestamp = message.createdAt.toISOString();
