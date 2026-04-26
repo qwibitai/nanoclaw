@@ -48,6 +48,7 @@ import { addMember } from '../src/modules/permissions/db/agent-group-members.js'
 import { getUserRoles, grantRole } from '../src/modules/permissions/db/user-roles.js';
 import { upsertUser } from '../src/modules/permissions/db/users.js';
 import { initGroupFilesystem } from '../src/group-init.js';
+import { namespacedPlatformId } from '../src/platform-id.js';
 import type { AgentGroup, MessagingGroup } from '../src/types.js';
 
 type Role = 'owner' | 'admin' | 'member';
@@ -135,32 +136,6 @@ function parseArgs(argv: string[]): Args {
 
 function namespacedUserId(channel: string, raw: string): string {
   return raw.includes(':') ? raw : `${channel}:${raw}`;
-}
-
-/**
- * Determine whether a platform ID needs a channel-type prefix.
- *
- * Chat SDK adapters (Telegram, Discord, Slack, Teams, etc.) namespace their
- * platform IDs with a channel prefix: "telegram:123456", "discord:guild:chan".
- * The router stores `channel_type` and `platform_id` in separate columns, but
- * Chat SDK adapters send the prefixed form as the platform_id, so this script
- * must match that format.
- *
- * Native adapters (Signal, WhatsApp) use their own ID formats and send them
- * as-is — no channel prefix. Signal sends raw phone numbers (+15551234567)
- * for DMs and "group:<id>" for group chats. WhatsApp sends JIDs containing
- * '@' (<phone>@s.whatsapp.net, <groupId>@g.us). Prefixing these would cause
- * a mismatch between what the adapter sends and what the DB stores, breaking
- * message routing.
- */
-function namespacedPlatformId(channel: string, raw: string): string {
-  if (raw.startsWith(`${channel}:`)) return raw;
-  // Native WhatsApp JIDs contain '@' — no prefix needed.
-  if (raw.includes('@')) return raw;
-  // Native Signal IDs: phone numbers (+...) and group IDs (group:...).
-  if (raw.startsWith('+') || raw.startsWith('group:')) return raw;
-  // Chat SDK adapters — add the channel prefix.
-  return `${channel}:${raw}`;
 }
 
 function generateId(prefix: string): string {

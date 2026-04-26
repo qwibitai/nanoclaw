@@ -67,7 +67,7 @@ Two edits to `container/Dockerfile`, both idempotent (skip if already present):
 **(a)** In the "Pin CLI versions" ARG block (around line 18), add after `ARG CLAUDE_CODE_VERSION=...`:
 
 ```dockerfile
-ARG CODEX_VERSION=0.121.0
+ARG CODEX_VERSION=0.124.0
 ```
 
 **(b)** Add a new standalone `RUN` block for the Codex CLI, after the existing per-CLI install blocks (around line 106, right after the `@anthropic-ai/claude-code` block). The Dockerfile splits each global CLI into its own layer for cache granularity — keep that pattern; do not collapse them into a single combined `pnpm install -g` call:
@@ -128,7 +128,7 @@ Codex also ships first-class local-runner flags — `codex --oss --local-provide
 
 ### Per group / per session
 
-Schema: **`agent_groups.agent_provider`** and **`sessions.agent_provider`**. Set to `codex` for groups or sessions that should use Codex. The container receives `AGENT_PROVIDER` from the resolved value (session overrides group).
+Set `"provider": "codex"` in the group's **`container.json`** (`groups/<folder>/container.json`) — the in-container runner reads `provider` from there, not from the DB. The DB columns **`agent_groups.agent_provider`** and **`sessions.agent_provider`** (session overrides group) only drive host-side provider contribution — per-session `~/.codex` mount, `OPENAI_*` / `CODEX_MODEL` env passthrough — and do not propagate into `container.json` at spawn time. Set both, or just edit `container.json`; if they disagree, the runner uses `container.json` and the host-side resolver falls back through session → group → `container.json` → `'claude'`.
 
 `CODEX_MODEL` applies process-wide via `.env`; if you need different models for different groups, set them via `container_config.env` on the group.
 

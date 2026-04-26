@@ -2,7 +2,11 @@ import { findByName, getAllDestinations, type DestinationEntry } from './destina
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
 import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
-import { getStoredSessionId, setStoredSessionId, clearStoredSessionId } from './db/session-state.js';
+import {
+  clearContinuation,
+  migrateLegacyContinuation,
+  setContinuation,
+} from './db/session-state.js';
 import { formatMessages, extractRouting, categorizeMessage, isClearCommand, stripInternalTags, type RoutingContext } from './formatter.js';
 import type { AgentProvider, AgentQuery, ProviderEvent } from './providers/types.js';
 
@@ -19,6 +23,12 @@ function generateId(): string {
 
 export interface PollLoopConfig {
   provider: AgentProvider;
+  /**
+   * Name of the provider (e.g. "claude", "codex", "opencode"). Used to key
+   * the stored continuation per-provider so flipping providers doesn't
+   * resurrect a stale id from a different backend.
+   */
+  providerName: string;
   cwd: string;
   systemContext?: {
     instructions?: string;
@@ -39,8 +49,9 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   // Resume the agent's prior session from a previous container run if one
   // was persisted. The continuation is opaque to the poll-loop — the
   // provider decides how to use it (Claude resumes a .jsonl transcript,
-  // other providers may reload a thread ID, etc.).
-  let continuation: string | undefined = getStoredSessionId();
+  // other providers may reload a thread ID, etc.). Keyed per-provider so
+  // a Codex thread id never gets handed to Claude or vice versa.
+  let continuation: string | undefined = migrateLegacyContinuation(config.providerName);
 
   if (continuation) {
     log(`Resuming agent session ${continuation}`);
@@ -94,7 +105,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
       if ((msg.kind === 'chat' || msg.kind === 'chat-sdk') && isClearCommand(msg)) {
         log('Clearing session (resetting continuation)');
         continuation = undefined;
-        clearStoredSessionId();
+        clearContinuation(config.providerName);
         writeMessageOut({
           id: generateId(),
           kind: 'chat',
@@ -160,10 +171,10 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     const skippedSet = new Set(skipped);
     const processingIds = ids.filter((id) => !commandIds.includes(id) && !skippedSet.has(id));
     try {
-      const result = await processQuery(query, routing, processingIds);
+      const result = await processQuery(query, routing, processingIds, config.providerName);
       if (result.continuation && result.continuation !== continuation) {
         continuation = result.continuation;
-        setStoredSessionId(continuation);
+        setContinuation(config.providerName, continuation);
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -175,7 +186,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
       if (continuation && config.provider.isSessionInvalid(err)) {
         log(`Stale session detected (${continuation}) — clearing for next retry`);
         continuation = undefined;
-        clearStoredSessionId();
+        clearContinuation(config.providerName);
       }
 
       // Write error response so the user knows something went wrong
@@ -238,6 +249,7 @@ async function processQuery(
   query: AgentQuery,
   routing: RoutingContext,
   initialBatchIds: string[],
+  providerName: string,
 ): Promise<QueryResult> {
   let queryContinuation: string | undefined;
   let done = false;
@@ -288,7 +300,7 @@ async function processQuery(
         // container died between `init` and `result`, the SDK session was
         // effectively orphaned and the next message started a blank
         // Claude session with no prior context.
-        setStoredSessionId(event.continuation);
+        setContinuation(providerName, event.continuation);
       } else if (event.type === 'result') {
         // A result — with or without text — means the turn is done. Mark
         // the initial batch completed now so the host sweep doesn't see

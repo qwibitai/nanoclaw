@@ -191,12 +191,31 @@ export function killContainer(sessionId: string, reason: string): void {
   }
 }
 
+/**
+ * Resolve the provider name for a session using the precedence documented in
+ * the provider-install skills:
+ *
+ *   sessions.agent_provider
+ *     → agent_groups.agent_provider
+ *     → container.json `provider`
+ *     → 'claude'
+ *
+ * Pure so the precedence can be unit-tested without a DB or filesystem.
+ */
+export function resolveProviderName(
+  sessionProvider: string | null | undefined,
+  agentGroupProvider: string | null | undefined,
+  containerConfigProvider: string | null | undefined,
+): string {
+  return (sessionProvider || agentGroupProvider || containerConfigProvider || 'claude').toLowerCase();
+}
+
 function resolveProviderContribution(
   session: Session,
   agentGroup: AgentGroup,
   containerConfig: import('./container-config.js').ContainerConfig,
 ): { provider: string; contribution: ProviderContainerContribution } {
-  const provider = (containerConfig.provider || 'claude').toLowerCase();
+  const provider = resolveProviderName(session.agent_provider, agentGroup.agent_provider, containerConfig.provider);
   const fn = getProviderContainerConfig(provider);
   const contribution = fn
     ? fn({

@@ -20,6 +20,7 @@ import {
 import { isValidGroupFolder } from '../src/group-folder.js';
 import { initGroupFilesystem } from '../src/group-init.js';
 import { log } from '../src/log.js';
+import { namespacedPlatformId } from '../src/platform-id.js';
 import { resolveSession, writeSessionMessage } from '../src/session-manager.js';
 import { emitStatus } from './status.js';
 
@@ -112,12 +113,10 @@ export async function run(args: string[]): Promise<void> {
     process.exit(4);
   }
 
-  // Chat SDK adapters prefix platform IDs with the channel type
-  // (e.g. "telegram:123", "discord:guild:channel"). Normalize here so
-  // the stored ID always matches what the adapter sends at runtime.
-  if (!parsed.platformId.startsWith(`${parsed.channel}:`)) {
-    parsed.platformId = `${parsed.channel}:${parsed.platformId}`;
-  }
+  // Normalize platform_id to the same shape the adapter will emit at runtime,
+  // so the router's (channel_type, platform_id) lookup matches what we store.
+  // Chat SDK adapters prefix, native adapters (WhatsApp/iMessage/Signal) don't.
+  parsed.platformId = namespacedPlatformId(parsed.channel, parsed.platformId);
 
   log.info('Registering channel', parsed);
 
@@ -167,19 +166,22 @@ export async function run(args: string[]): Promise<void> {
   if (!existing) {
     newlyWired = true;
     const mgaId = generateId('mga');
-    const triggerRules = parsed.trigger
-      ? JSON.stringify({
-          pattern: parsed.trigger,
-          requiresTrigger: parsed.requiresTrigger,
-        })
-      : null;
+    // Mirrors scripts/init-first-agent.ts:wireIfMissing so both setup paths
+    // create rows with the same shape. Groups default to 'mention' (bot only
+    // responds when addressed); DMs default to 'pattern'/'.' (respond to
+    // every message). An explicit --trigger overrides the pattern regex.
+    const isGroup = messagingGroup.is_group === 1;
+    const engageMode: 'pattern' | 'mention' = isGroup && !parsed.trigger ? 'mention' : 'pattern';
+    const engagePattern: string | null = engageMode === 'pattern' ? parsed.trigger || '.' : null;
     createMessagingGroupAgent({
       id: mgaId,
       messaging_group_id: messagingGroup.id,
       agent_group_id: agentGroup.id,
-      trigger_rules: triggerRules,
-      response_scope: 'all',
-      session_mode: parsed.sessionMode,
+      engage_mode: engageMode,
+      engage_pattern: engagePattern,
+      sender_scope: 'all',
+      ignored_message_policy: 'drop',
+      session_mode: parsed.sessionMode as 'shared' | 'per-thread' | 'agent-shared',
       priority: 0,
       created_at: new Date().toISOString(),
     });

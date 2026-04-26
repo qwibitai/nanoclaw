@@ -14,7 +14,7 @@ import Database from 'better-sqlite3';
 import { DATA_DIR } from '../src/config.js';
 import { readEnvFile } from '../src/env.js';
 import { log } from '../src/log.js';
-import { pingCliAgent } from './lib/agent-ping.js';
+import { pingCliAgent, type PingResult } from './lib/agent-ping.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
 import {
   getPlatform,
@@ -220,22 +220,22 @@ export async function run(_args: string[]): Promise<void> {
 
   // 7. End-to-end: ping the CLI agent and confirm it replies. Only run if
   // everything upstream looks healthy, since a broken socket would just hang.
-  let agentPing: 'ok' | 'no_reply' | 'socket_error' | 'skipped' = 'skipped';
+  let agentPing: 'ok' | 'no_reply' | 'socket_error' | 'auth_error' | 'skipped' = 'skipped';
   if (service === 'running' && registeredGroups > 0) {
     log.info('Pinging CLI agent');
     agentPing = await pingCliAgent();
     log.info('Agent ping result', { agentPing });
   }
 
-  // Determine overall status
-  const status =
-    service === 'running' &&
-    credentials !== 'missing' &&
-    anyChannelConfigured &&
-    registeredGroups > 0 &&
-    (agentPing === 'ok' || agentPing === 'skipped')
-      ? 'success'
-      : 'failed';
+  // Determine overall status. A CLI-only install is valid when the local
+  // agent round-trip succeeds; messaging app credentials are optional.
+  const status = determineVerifyStatus({
+    service,
+    credentials,
+    anyChannelConfigured,
+    registeredGroups,
+    agentPing,
+  });
 
   log.info('Verification complete', { status, channelAuth });
 
@@ -253,6 +253,25 @@ export async function run(_args: string[]): Promise<void> {
   });
 
   if (status === 'failed') process.exit(1);
+}
+
+export function determineVerifyStatus(input: {
+  service: 'not_found' | 'stopped' | 'running' | 'running_other_checkout';
+  credentials: string;
+  anyChannelConfigured: boolean;
+  registeredGroups: number;
+  agentPing: PingResult | 'skipped';
+}): 'success' | 'failed' {
+  const cliAgentResponds = input.agentPing === 'ok';
+  const hasUsableChannel = input.anyChannelConfigured || cliAgentResponds;
+
+  return input.service === 'running' &&
+    input.credentials !== 'missing' &&
+    hasUsableChannel &&
+    input.registeredGroups > 0 &&
+    (cliAgentResponds || input.agentPing === 'skipped')
+    ? 'success'
+    : 'failed';
 }
 
 /**

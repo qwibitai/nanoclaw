@@ -208,7 +208,7 @@ onecli secrets create --name "OpenCode Zen" --type generic \
 
 ### Per group / per session
 
-Schema: **`agent_groups.agent_provider`** and **`sessions.agent_provider`**. Set to `opencode` for groups or sessions that should use OpenCode. The container receives `AGENT_PROVIDER` from the resolved value (session overrides group).
+Set `"provider": "opencode"` in the group's **`container.json`** (`groups/<folder>/container.json`) — the in-container runner reads `provider` from there, not from the DB. The DB columns **`agent_groups.agent_provider`** and **`sessions.agent_provider`** (session overrides group) only drive host-side provider contribution — per-session XDG mount, `OPENCODE_*` env passthrough — and do not propagate into `container.json` at spawn time. Set both, or just edit `container.json`; if they disagree, the runner uses `container.json` and the host-side resolver falls back through session → group → `container.json` → `'claude'`.
 
 Extra MCP servers still come from **`NANOCLAW_MCP_SERVERS`** / `container_config.mcpServers` on the host; the runner merges them into the same `mcpServers` object passed to **both** Claude and OpenCode providers.
 
