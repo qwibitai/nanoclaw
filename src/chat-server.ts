@@ -24,12 +24,10 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { execFile } from 'child_process';
-import { WebSocketServer, WebSocket } from 'ws';
 import Busboy from 'busboy';
 import { randomUUID } from 'crypto';
-import webPush from 'web-push';
 
-import { ASSISTANT_NAME, DATA_DIR } from './config.js';
+import { DATA_DIR } from './config.js';
 import { redactSensitiveData } from './redact.js';
 import {
   getAllRegisteredGroups,
@@ -55,279 +53,36 @@ import {
   deleteChatRoom,
   getChatMessages,
   getChatMessagesAfterId,
-  deleteChatMessage,
   storeChatMessage,
   storeFileMessage,
-  getChatAgentToken,
   createChatAgentToken,
   listChatAgentTokens,
   upsertPushSubscription,
-  deletePushSubscription,
   deletePushSubscriptionForIdentity,
   getPushSubscriptionOwner,
-  getPushSubscriptionsExcludingIdentity,
 } from './chat-db.js';
 
-// ── In-memory client registry ──────────────────────────────────────────────
-interface WSClient {
-  id: string;
-  ws: WebSocket;
-  identity: string;
-  identity_type: 'user' | 'agent';
-  room_id?: string;
-  isAlive: boolean;
-}
-
-const clients = new Map<string, WSClient>();
-
-function addClient(c: WSClient): void {
-  clients.set(c.id, c);
-}
-function removeClient(id: string): WSClient | undefined {
-  const c = clients.get(id);
-  clients.delete(id);
-  return c;
-}
-export function broadcast(
-  roomId: string,
-  msg: object,
-  excludeId?: string,
-): void {
-  const isMessage = (msg as { type?: string }).type === 'message';
-  // Redact sensitive data before sending to chat clients
-  const outgoing = isMessage
-    ? {
-        ...msg,
-        content: redactSensitiveData(
-          (msg as { content?: string }).content || '',
-        ),
-      }
-    : msg;
-  const payload = JSON.stringify(outgoing);
-  const notifyPayload = isMessage
-    ? JSON.stringify({ type: 'unread', room_id: roomId })
-    : '';
-  for (const c of clients.values()) {
-    if (c.id === excludeId || c.ws.readyState !== WebSocket.OPEN) continue;
-    try {
-      if (c.room_id === roomId) c.ws.send(payload);
-      else if (isMessage) c.ws.send(notifyPayload);
-    } catch {
-      // Socket may have closed between readyState check and send
-    }
-  }
-  // Also fan out to Web Push subscriptions (offline devices). Fire-and-forget.
-  if (isMessage) {
-    const m = msg as {
-      sender?: string;
-      content?: string;
-      id?: string;
-    };
-    const room = getChatRoom(roomId);
-    // Redact before sending to external push services — the payload lands on
-    // OS lock screens and in vendor logs.
-    sendPushForMessage({
-      roomId,
-      roomName: room?.name || roomId,
-      sender: m.sender || 'unknown',
-      content: redactSensitiveData(m.content || ''),
-      messageId: m.id,
-    }).catch((err) =>
-      logger.warn({ err: err.message }, 'sendPushForMessage failed'),
-    );
-  }
-}
-interface MemberInfo {
-  identity: string;
-  identity_type: 'user' | 'agent';
-}
-
-function getMemberList(roomId: string): MemberInfo[] {
-  const seen = new Set<string>();
-  const members: MemberInfo[] = [];
-  for (const c of clients.values()) {
-    if (c.room_id === roomId && !seen.has(c.identity)) {
-      seen.add(c.identity);
-      members.push({ identity: c.identity, identity_type: c.identity_type });
-    }
-  }
-  // Include the agent if it's actively processing for this room
-  if (activeAgents.has(roomId)) {
-    const agentIdentity = activeAgents.get(roomId)!;
-    if (!seen.has(agentIdentity)) {
-      members.push({ identity: agentIdentity, identity_type: 'agent' });
-    }
-  }
-  return members;
-}
-
-// Track which rooms have an active agent (set via typing events from channel adapter)
-const activeAgents = new Map<string, string>(); // roomId -> agent identity
-
-export function setAgentPresence(
-  roomId: string,
-  identity: string,
-  active: boolean,
-): void {
-  const wasBefore = activeAgents.has(roomId);
-  if (active) {
-    activeAgents.set(roomId, identity);
-  } else {
-    activeAgents.delete(roomId);
-  }
-  const isNow = activeAgents.has(roomId);
-  // Broadcast updated member list if agent presence changed
-  if (wasBefore !== isNow) {
-    broadcast(roomId, {
-      type: 'members',
-      room_id: roomId,
-      members: getMemberList(roomId),
-    });
-  }
-}
-
-// ── Message hook for channel adapter ──────────────────────────────────────
-type ChatMessageCallback = (
-  roomId: string,
-  message: import('./chat-db.js').ChatMessage,
-) => void;
-let onNewMessageCallback: ChatMessageCallback | null = null;
-let onGroupUpdatedCallback: (() => void) | null = null;
-
-export function setOnNewMessage(cb: ChatMessageCallback): void {
-  onNewMessageCallback = cb;
-}
-
-export function clearOnNewMessage(): void {
-  onNewMessageCallback = null;
-}
-
-export function broadcastRooms(): void {
-  const payload = JSON.stringify({ type: 'rooms', rooms: getChatRooms() });
-  for (const c of clients.values()) {
-    if (c.ws.readyState === WebSocket.OPEN) c.ws.send(payload);
-  }
-}
-
-export function setOnGroupUpdated(cb: () => void): void {
-  onGroupUpdatedCallback = cb;
-}
-
-export function clearOnGroupUpdated(): void {
-  onGroupUpdatedCallback = null;
-}
+// Re-export the externally-consumed chat-server API so existing import paths
+// from channels/local-chat.ts and src/index.ts keep working.
+export {
+  broadcast,
+  setAgentPresence,
+  setOnNewMessage,
+  clearOnNewMessage,
+  setOnGroupUpdated,
+  clearOnGroupUpdated,
+  broadcastRooms,
+} from './chat-server/state.js';
+import {
+  broadcast,
+  getOnGroupUpdated,
+  getOnNewMessage,
+} from './chat-server/state.js';
+import { initWebPush, isValidPushEndpoint } from './chat-server/push.js';
+import { setupWebSocket } from './chat-server/ws.js';
 
 export function isChatServerRunning(): boolean {
   return server !== null;
-}
-
-// ── Web Push ───────────────────────────────────────────────────────────────
-let webPushReady = false;
-
-// Only accept subscriptions on known push services. Blocks authenticated
-// callers from pointing the server at private-IP or internal HTTPS endpoints
-// (effective SSRF via sendNotification).
-const PUSH_HOSTS_ALLOW = [
-  /\.push\.apple\.com$/,
-  /^fcm\.googleapis\.com$/,
-  /^android\.googleapis\.com$/,
-  /^updates\.push\.services\.mozilla\.com$/,
-  /\.notify\.windows\.com$/,
-];
-
-function isValidPushEndpoint(endpoint: string): boolean {
-  let u: URL;
-  try {
-    u = new URL(endpoint);
-  } catch {
-    return false;
-  }
-  if (u.protocol !== 'https:') return false;
-  return PUSH_HOSTS_ALLOW.some((re) => re.test(u.hostname));
-}
-
-function initWebPush(): void {
-  const pub = process.env.VAPID_PUBLIC_KEY;
-  const priv = process.env.VAPID_PRIVATE_KEY;
-  const sub = process.env.VAPID_SUBJECT || 'mailto:admin@example.com';
-  if (!pub || !priv) {
-    logger.warn('VAPID keys missing — Web Push disabled');
-    return;
-  }
-  webPush.setVapidDetails(sub, pub, priv);
-  webPushReady = true;
-  logger.info('Web Push initialized');
-}
-
-interface BroadcastPushMsg {
-  roomId: string;
-  roomName: string;
-  sender: string;
-  content: string;
-  messageId?: string;
-}
-
-export async function sendPushForMessage(m: BroadcastPushMsg): Promise<void> {
-  if (!webPushReady) {
-    logger.info({ sender: m.sender }, 'Push: skipped (not ready)');
-    return;
-  }
-  const subs = getPushSubscriptionsExcludingIdentity(m.sender);
-  logger.info(
-    { sender: m.sender, roomId: m.roomId, subCount: subs.length },
-    'Push: dispatching',
-  );
-  if (subs.length === 0) return;
-
-  const payload = JSON.stringify({
-    title: `${m.sender} · ${m.roomName}`,
-    body: (m.content || '').slice(0, 160),
-    roomId: m.roomId,
-    messageId: m.messageId,
-    tag: `room-${m.roomId}`,
-  });
-
-  await Promise.all(
-    subs.map(async (row) => {
-      try {
-        const keys = JSON.parse(row.keys_json) as {
-          p256dh: string;
-          auth: string;
-        };
-        const res = await webPush.sendNotification(
-          { endpoint: row.endpoint, keys },
-          payload,
-          { TTL: 60 },
-        );
-        logger.info(
-          {
-            endpointTail: row.endpoint.slice(-24),
-            status: res.statusCode,
-          },
-          'Push: delivered',
-        );
-      } catch (err: any) {
-        // 404/410 means the subscription was revoked on the device — prune it.
-        if (err && (err.statusCode === 404 || err.statusCode === 410)) {
-          deletePushSubscription(row.endpoint);
-          logger.info(
-            { endpoint: row.endpoint },
-            'Pruned dead push subscription',
-          );
-        } else {
-          logger.warn(
-            {
-              err: err.message,
-              statusCode: err.statusCode,
-              body: err.body,
-              endpointTail: row.endpoint.slice(-24),
-            },
-            'Web Push send failed',
-          );
-        }
-      }
-    }),
-  );
 }
 
 // ── File upload helpers ────────────────────────────────────────────────────
@@ -801,7 +556,7 @@ async function handleHttp(
       const updates = JSON.parse(body);
       const jid = decodeURIComponent(botMatch[1]);
       updateRegisteredGroup(jid, updates);
-      if (onGroupUpdatedCallback) onGroupUpdatedCallback();
+      getOnGroupUpdated()?.();
       json(200, { ok: true });
     } catch (err: any) {
       json(400, { error: err.message || 'Invalid JSON' });
@@ -861,9 +616,7 @@ async function handleHttp(
 
       const stored = storeChatMessage(mainRoomId, 'system', 'user', prompt);
       broadcast(mainRoomId, { type: 'message', ...stored });
-      if (onNewMessageCallback) {
-        onNewMessageCallback(mainRoomId, stored);
-      }
+      getOnNewMessage()?.(mainRoomId, stored);
 
       json(200, {
         ok: true,
@@ -1000,9 +753,7 @@ async function handleHttp(
       broadcast(roomId, { type: 'message', ...stored });
 
       // Trigger the channel adapter so the agent processes this message
-      if (onNewMessageCallback) {
-        onNewMessageCallback(roomId, stored);
-      }
+      getOnNewMessage()?.(roomId, stored);
 
       json(200, { ...fileInfo, caption });
     });
@@ -1234,9 +985,7 @@ async function handleHttp(
       caption,
     );
     broadcast(roomId, { type: 'message', ...stored });
-    if (onNewMessageCallback) {
-      onNewMessageCallback(roomId, stored);
-    }
+    getOnNewMessage()?.(roomId, stored);
 
     return json(200, { ...fileMeta, caption });
   }
@@ -1296,235 +1045,6 @@ async function handleHttp(
   json(404, { error: 'Not found' });
 }
 
-// ── WebSocket handler ──────────────────────────────────────────────────────
-function setupWebSocket(server: http.Server): void {
-  const wss = new WebSocketServer({ noServer: true });
-
-  // Ping/pong keepalive — detect stale connections
-  const WS_PING_INTERVAL = 30_000;
-  const pingTimer = setInterval(() => {
-    for (const c of clients.values()) {
-      if (!c.isAlive) {
-        c.ws.terminate();
-        removeClient(c.id);
-        continue;
-      }
-      c.isAlive = false;
-      c.ws.ping();
-    }
-  }, WS_PING_INTERVAL);
-  wss.on('close', () => clearInterval(pingTimer));
-
-  server.on('upgrade', async (req, socket, head) => {
-    const url = new URL(req.url ?? '/', `http://localhost`);
-    if (url.pathname !== '/ws') {
-      socket.destroy();
-      return;
-    }
-
-    // Authenticate the upgrade request
-    const auth = await authenticateRequest(req);
-    if (!auth.ok) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-
-    wss.handleUpgrade(req, socket as any, head, (ws) => {
-      // Attach identity so the connection handler can use it
-      (req as any)._authIdentity = auth.identity;
-      wss.emit('connection', ws, req);
-    });
-  });
-
-  wss.on('connection', (ws: WebSocket, req: http.IncomingMessage) => {
-    const clientId = randomUUID();
-    const remoteIp = (req.socket.remoteAddress ?? '127.0.0.1').replace(
-      /^::ffff:/,
-      '',
-    );
-
-    const client: WSClient = {
-      id: clientId,
-      ws,
-      identity: 'unauthenticated',
-      identity_type: 'user',
-      isAlive: true,
-    };
-    addClient(client);
-
-    ws.on('pong', () => {
-      client.isAlive = true;
-    });
-    ws.on('error', (err) => {
-      logger.warn(
-        { clientId, identity: client.identity, error: err.message },
-        'WebSocket client error',
-      );
-    });
-
-    let authenticated = false;
-
-    const send = (data: object) => ws.send(JSON.stringify(data));
-
-    ws.on('message', async (raw) => {
-      let msg: any;
-      try {
-        msg = JSON.parse(raw.toString());
-      } catch {
-        send({ type: 'error', error: 'Invalid JSON' });
-        return;
-      }
-
-      // ── AUTH ────────────────────────────────────────────────────────────
-      if (msg.type === 'auth') {
-        if (msg.token) {
-          const agent = getChatAgentToken(msg.token);
-          if (!agent) {
-            send({ type: 'error', error: 'Invalid token' });
-            return;
-          }
-          client.identity = agent.agent_id;
-          client.identity_type = 'agent';
-        } else {
-          // Use identity from upgrade auth (token, localhost, proxy, or tailscale)
-          const upgradeIdentity = (req as any)._authIdentity as
-            | string
-            | undefined;
-          client.identity = upgradeIdentity || `user@${remoteIp}`;
-          client.identity_type = 'user';
-        }
-        authenticated = true;
-        send({ type: 'system', message: `Connected as ${client.identity}` });
-        send({ type: 'rooms', rooms: getChatRooms() });
-        return;
-      }
-
-      if (!authenticated) {
-        send({ type: 'error', error: 'Not authenticated' });
-        return;
-      }
-
-      // ── JOIN ─────────────────────────────────────────────────────────────
-      if (msg.type === 'join') {
-        const room = getChatRoom(msg.room_id);
-        if (!room) {
-          send({ type: 'error', error: `Room not found: ${msg.room_id}` });
-          return;
-        }
-        client.room_id = room.id;
-        send({
-          type: 'history',
-          room_id: room.id,
-          messages: getChatMessages(room.id, 50).map((m) => ({
-            ...m,
-            content: redactSensitiveData(m.content),
-          })),
-        });
-        broadcast(
-          room.id,
-          {
-            type: 'system',
-            room_id: room.id,
-            message: `${client.identity} joined`,
-          },
-          clientId,
-        );
-        // Broadcast updated member list to all (including the joiner)
-        broadcast(room.id, {
-          type: 'members',
-          room_id: room.id,
-          members: getMemberList(room.id),
-        });
-        return;
-      }
-
-      // ── TYPING ───────────────────────────────────────────────────────────
-      if (msg.type === 'typing') {
-        if (!client.room_id) return;
-        broadcast(
-          client.room_id,
-          {
-            type: 'typing',
-            room_id: client.room_id,
-            identity: client.identity,
-            identity_type: client.identity_type,
-            is_typing: !!msg.is_typing,
-          },
-          clientId,
-        );
-        return;
-      }
-
-      // ── MESSAGE ───────────────────────────────────────────────────────────
-      if (msg.type === 'message') {
-        if (!client.room_id) {
-          send({ type: 'error', error: 'Join a room first' });
-          return;
-        }
-        if (!msg.content?.trim()) return;
-        const stored = storeChatMessage(
-          client.room_id,
-          client.identity,
-          client.identity_type,
-          msg.content,
-        );
-        const outgoing: Record<string, unknown> = {
-          type: 'message',
-          ...stored,
-        };
-        if (msg.client_id) outgoing.client_id = msg.client_id;
-        // broadcast() handles redaction for all message payloads
-        broadcast(client.room_id, outgoing, clientId);
-        if (onNewMessageCallback && client.identity_type === 'user') {
-          onNewMessageCallback(client.room_id, stored);
-        }
-        // Redact for the sender's own echo
-        send({ ...outgoing, content: redactSensitiveData(stored.content) });
-        return;
-      }
-
-      // ── DELETE MESSAGE ──────────────────────────────────────────────────
-      if (msg.type === 'delete_message') {
-        if (!client.room_id) return;
-        if (!msg.message_id) {
-          send({ type: 'error', error: 'message_id required' });
-          return;
-        }
-        const deleted = deleteChatMessage(msg.message_id, client.identity);
-        if (deleted) {
-          broadcast(client.room_id, {
-            type: 'delete_message',
-            room_id: client.room_id,
-            message_id: msg.message_id,
-          });
-          send({
-            type: 'delete_message',
-            room_id: client.room_id,
-            message_id: msg.message_id,
-          });
-        }
-        return;
-      }
-    });
-
-    ws.on('close', () => {
-      const c = removeClient(clientId);
-      if (c?.room_id) {
-        broadcast(c.room_id, {
-          type: 'system',
-          room_id: c.room_id,
-          message: `${c.identity} left`,
-        });
-        broadcast(c.room_id, {
-          type: 'members',
-          room_id: c.room_id,
-          members: getMemberList(c.room_id),
-        });
-      }
-    });
-  });
-}
 
 // ── Public API ─────────────────────────────────────────────────────────────
 let server: http.Server | https.Server | null = null;
