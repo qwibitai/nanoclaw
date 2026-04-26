@@ -71,8 +71,23 @@ export class DiscordChannel implements Channel {
     ]);
     const allowedBotIdsRaw =
       process.env.DISCORD_ALLOWED_BOT_IDS ?? allowedBotIdsFile;
+    const discordIdPattern = /^\d{17,20}$/;
     const allowedBotIds = new Set(
-      allowedBotIdsRaw ? allowedBotIdsRaw.split(',').map((s) => s.trim()) : [],
+      allowedBotIdsRaw
+        ? allowedBotIdsRaw
+            .split(',')
+            .map((s) => s.trim())
+            .filter((id) => {
+              if (!discordIdPattern.test(id)) {
+                logger.warn(
+                  { id },
+                  'DISCORD_ALLOWED_BOT_IDS: invalid ID skipped',
+                );
+                return false;
+              }
+              return true;
+            })
+        : [],
     );
 
     this.client.on(Events.MessageCreate, async (message: Message) => {
@@ -240,13 +255,23 @@ export class DiscordChannel implements Channel {
     return new Promise<void>((resolve) => {
       this.client!.once(Events.ClientReady, (readyClient) => {
         logger.info(
-          { username: readyClient.user.tag, id: readyClient.user.id },
+          {
+            username: readyClient.user.tag,
+            id: readyClient.user.id,
+            allowedBotIds: [...allowedBotIds],
+          },
           'Discord bot connected',
         );
         console.log(`\n  Discord bot: ${readyClient.user.tag}`);
         console.log(
-          `  Use /chatid command or check channel IDs in Discord settings\n`,
+          `  Use /chatid command or check channel IDs in Discord settings`,
         );
+        if (allowedBotIds.size > 0) {
+          console.log(
+            `  Allowed bot IDs (bypass filter): ${[...allowedBotIds].join(', ')}`,
+          );
+        }
+        console.log();
         resolve();
       });
 
