@@ -1,0 +1,14 @@
+{
+  "name": "@paraclaw/web-server",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Paraclaw web UI server. Lists agent groups + manages vault attachments. Reuses NanoClaw's better-sqlite3 + Parachute attach helpers.",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "module": "src/server.ts",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit"
+  }
+}

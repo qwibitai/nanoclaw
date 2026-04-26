@@ -84,10 +84,7 @@ export function attachVaultToGroup(opts: AttachVaultOpts): void {
     tokenLabel: opts.tokenLabel,
     attachedAt: new Date().toISOString(),
   };
-  fs.writeFileSync(
-    parachuteJsonPath(opts.folder),
-    JSON.stringify({ vault: { [name]: attachment } }, null, 2) + '\n',
-  );
+  fs.writeFileSync(parachuteJsonPath(opts.folder), JSON.stringify({ vault: { [name]: attachment } }, null, 2) + '\n');
 }
 
 /**

@@ -19,6 +19,8 @@
     "chat": "tsx scripts/chat.ts",
     "auth": "tsx src/whatsapp-auth.ts",
     "parachute": "tsx scripts/parachute.ts",
+    "web": "tsx web/server/src/server.ts",
+    "web:build": "cd web/ui && pnpm install --ignore-workspace && pnpm build",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",

@@ -39,3 +39,6 @@ groups/*
 .nanoclaw/
 
 agents-sdk-docs
+
+# TypeScript incremental build info
+*.tsbuildinfo

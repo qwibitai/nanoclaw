@@ -32,10 +32,7 @@ import { GROUPS_DIR } from './config.js';
  * content to `.claude-fragments/mcp-<name>.md` at spawn and imports it
  * into the composed CLAUDE.md.
  */
-export type McpServerConfig =
-  | StdioMcpServerConfig
-  | HttpMcpServerConfig
-  | LegacyMcpServerConfig;
+export type McpServerConfig = StdioMcpServerConfig | HttpMcpServerConfig | LegacyMcpServerConfig;
 
 export interface StdioMcpServerConfig {
   type: 'stdio';
