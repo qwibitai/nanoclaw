@@ -361,10 +361,14 @@ export function handleFileServe(
   } catch {
     return json(res, 404, { error: 'File not found' });
   }
+  // Strip CR/LF/quote/backslash from the filename before inlining into a
+  // header to prevent header injection. Path-traversal is already blocked
+  // above (no `..`, `/`); this guards the response-side surface.
+  const safeName = filename.replace(/[\r\n"\\]/g, '_');
   res.writeHead(200, {
     'Content-Type': mime,
     'Content-Length': stat.size,
-    'Content-Disposition': `inline; filename="${filename}"`,
+    'Content-Disposition': `inline; filename="${safeName}"`,
     'Cache-Control': 'public, max-age=31536000, immutable',
     // Sandbox the response into an opaque origin so HTML/SVG uploads
     // cannot read the PWA's localStorage token. nosniff stops the

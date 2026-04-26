@@ -149,7 +149,22 @@ async function handleHttp(
   req: http.IncomingMessage,
   res: http.ServerResponse,
 ): Promise<void> {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // Same-origin-only CORS: echo Origin only when its host matches our Host.
+  // Wildcard `*` previously let any visited site read /api responses if the
+  // request also arrived from 127.0.0.1 (the localhost auth shortcut would
+  // accept it). Without Allow-Origin, browsers block cross-origin reads;
+  // preflighted writes (POST/PUT/DELETE with JSON or Authorization) also fail.
+  const origin = req.headers.origin;
+  if (origin && req.headers.host) {
+    try {
+      if (new URL(origin).host === req.headers.host) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+      }
+    } catch {
+      // malformed Origin — refuse to echo
+    }
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   const url = new URL(req.url ?? '/', `http://localhost`);

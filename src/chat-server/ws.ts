@@ -23,8 +23,16 @@ import {
   getOnNewMessage,
 } from './state.js';
 
+// Cap inbound WS messages — chat payloads are small (text, controls);
+// without this, the ws library default (100 MB) lets an authenticated
+// client OOM the server with one giant JSON.
+const WS_MAX_PAYLOAD = 1024 * 1024; // 1 MB
+
 export function setupWebSocket(server: http.Server): void {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: WS_MAX_PAYLOAD,
+  });
 
   // Ping/pong keepalive — detect stale connections
   const WS_PING_INTERVAL = 30_000;

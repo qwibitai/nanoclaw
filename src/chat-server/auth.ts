@@ -1,5 +1,6 @@
 import http from 'http';
 import { execFile } from 'child_process';
+import { timingSafeEqual } from 'crypto';
 
 import { logger } from '../logger.js';
 
@@ -78,6 +79,15 @@ function isTrustedProxyIp(ip: string): boolean {
 function isLocalhost(ip: string): boolean {
   const clean = ip.replace(/^::ffff:/, '');
   return clean === '127.0.0.1' || clean === '::1' || clean === 'localhost';
+}
+
+/** Constant-time token comparison. Falls back to false for length mismatch
+ *  so an attacker can't probe the token's length via timing. */
+function safeTokenEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
 }
 
 async function tailscaleWhois(ip: string): Promise<string | null> {
@@ -174,15 +184,26 @@ export async function authenticateRequest(
 
   const localUser = process.env.USER || process.env.USERNAME || 'user';
 
-  // 1. Bearer token from Authorization header or query param
+  // 1. Bearer token from Authorization header or WebSocket subprotocol.
+  //    The PWA passes the token as `Sec-WebSocket-Protocol: bearer.<token>`
+  //    when opening /ws — keeps the secret out of URLs (and therefore out of
+  //    proxy access logs and browser history).
   const authHeader = req.headers.authorization;
-  const url = new URL(req.url ?? '/', `http://localhost`);
-  const tokenParam = url.searchParams.get('token');
-  const providedToken = authHeader?.startsWith('Bearer ')
-    ? authHeader.slice(7)
-    : tokenParam;
+  let providedToken: string | undefined;
+  if (authHeader?.startsWith('Bearer ')) {
+    providedToken = authHeader.slice(7);
+  } else {
+    const wsProto = req.headers['sec-websocket-protocol'];
+    if (wsProto) {
+      const protos = (Array.isArray(wsProto) ? wsProto.join(',') : wsProto)
+        .split(',')
+        .map((s) => s.trim());
+      const bearer = protos.find((p) => p.startsWith('bearer.'));
+      if (bearer) providedToken = bearer.slice('bearer.'.length);
+    }
+  }
 
-  if (CHAT_SERVER_TOKEN && providedToken === CHAT_SERVER_TOKEN) {
+  if (CHAT_SERVER_TOKEN && providedToken && safeTokenEqual(providedToken, CHAT_SERVER_TOKEN)) {
     return { ok: true, identity: localUser };
   }
 

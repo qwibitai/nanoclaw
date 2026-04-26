@@ -78,8 +78,13 @@ let authToken = localStorage.getItem('nanoclaw-token') || '';
 
 function getWsUrl() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const base = `${proto}//${location.host}/ws`;
-  return authToken ? `${base}?token=${encodeURIComponent(authToken)}` : base;
+  return `${proto}//${location.host}/ws`;
+}
+
+// Bearer goes in the WebSocket subprotocol (Sec-WebSocket-Protocol) instead
+// of the URL — keeps it out of proxy logs and browser history.
+function getWsProtocols() {
+  return authToken ? [`bearer.${authToken}`] : [];
 }
 
 function authFetch(url, opts = {}) {
@@ -380,7 +385,7 @@ function connect() {
     intentionalClose = true;
     try { ws.close(); } catch {}
   }
-  ws = new WebSocket(getWsUrl());
+  ws = new WebSocket(getWsUrl(), getWsProtocols());
 
   ws.onopen = () => {
     $('#connection-banner').classList.remove('visible');
