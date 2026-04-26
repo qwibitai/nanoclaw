@@ -16,6 +16,7 @@ import { readEnvFile } from '../src/env.js';
 import { log } from '../src/log.js';
 import { pingCliAgent, type PingResult } from './lib/agent-ping.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
+import { checkCredentials } from './credentials.js';
 import {
   getPlatform,
   getServiceManager,
@@ -136,10 +137,34 @@ export async function run(_args: string[]): Promise<void> {
 
   // 3. Check credentials
   let credentials = 'missing';
+  let credentialHealth = 'not_checked';
+  let credentialError = '';
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|ONECLI_URL)=/m.test(envContent)) {
+    const hasLocalCredential =
+      /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|OPENROUTER_API_KEY)=/m.test(
+      envContent,
+      );
+    const hasOneCliUrl = /^ONECLI_URL=/m.test(envContent);
+
+    if (hasLocalCredential) {
+      const credentialCheck = await checkCredentials();
+      credentialError = credentialCheck.error;
+      if (credentialCheck.status === 'success') {
+        credentialHealth = 'valid';
+        credentials = 'configured_valid';
+      } else if (
+        credentialCheck.authProbe === 'missing' ||
+        credentialCheck.error === 'no_configured_credentials'
+      ) {
+        credentialHealth = 'not_checked';
+        credentials = 'missing';
+      } else {
+        credentialHealth = 'invalid';
+        credentials = 'configured_invalid';
+      }
+    } else if (hasOneCliUrl) {
       credentials = 'configured';
     }
   }
@@ -243,6 +268,8 @@ export async function run(_args: string[]): Promise<void> {
     SERVICE: service,
     CONTAINER_RUNTIME: containerRuntime,
     CREDENTIALS: credentials,
+    CREDENTIAL_HEALTH: credentialHealth,
+    CREDENTIAL_ERROR: credentialError,
     CONFIGURED_CHANNELS: configuredChannels.join(','),
     CHANNEL_AUTH: JSON.stringify(channelAuth),
     REGISTERED_GROUPS: registeredGroups,
@@ -264,9 +291,11 @@ export function determineVerifyStatus(input: {
 }): 'success' | 'failed' {
   const cliAgentResponds = input.agentPing === 'ok';
   const hasUsableChannel = input.anyChannelConfigured || cliAgentResponds;
+  const hasUsableCredentials =
+    input.credentials === 'configured' || input.credentials === 'configured_valid';
 
   return input.service === 'running' &&
-    input.credentials !== 'missing' &&
+    hasUsableCredentials &&
     hasUsableChannel &&
     input.registeredGroups > 0 &&
     (cliAgentResponds || input.agentPing === 'skipped')

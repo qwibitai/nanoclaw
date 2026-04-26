@@ -4,7 +4,7 @@ import { determineVerifyStatus } from './verify.js';
 
 const healthyBase = {
   service: 'running' as const,
-  credentials: 'configured',
+  credentials: 'configured_valid',
   anyChannelConfigured: false,
   registeredGroups: 1,
   agentPing: 'ok' as const,
@@ -49,6 +49,15 @@ describe('determineVerifyStatus', () => {
       determineVerifyStatus({
         ...healthyBase,
         registeredGroups: 0,
+      }),
+    ).toBe('failed');
+  });
+
+  it('fails when credentials are configured_invalid', () => {
+    expect(
+      determineVerifyStatus({
+        ...healthyBase,
+        credentials: 'configured_invalid',
       }),
     ).toBe('failed');
   });

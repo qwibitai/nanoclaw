@@ -12,6 +12,7 @@ const STEPS: Record<
   timezone: () => import('./timezone.js'),
   'set-env': () => import('./set-env.js'),
   environment: () => import('./environment.js'),
+  credentials: () => import('./credentials.js'),
   container: () => import('./container.js'),
   register: () => import('./register.js'),
   groups: () => import('./groups.js'),
