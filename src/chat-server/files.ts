@@ -7,10 +7,7 @@ import Busboy from 'busboy';
 
 import { getAllRegisteredGroups } from '../db.js';
 import { storeFileMessage } from '../chat-db.js';
-import {
-  isValidGroupFolder,
-  resolveGroupFolderPath,
-} from '../group-folder.js';
+import { isValidGroupFolder, resolveGroupFolderPath } from '../group-folder.js';
 import { broadcast, getOnNewMessage } from './state.js';
 
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1GB
@@ -75,11 +72,7 @@ function getUploadsDir(groupFolder: string): string {
   return path.join(resolveGroupFolderPath(groupFolder), 'uploads');
 }
 
-function json(
-  res: http.ServerResponse,
-  status: number,
-  data: unknown,
-): void {
+function json(res: http.ServerResponse, status: number, data: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
 }

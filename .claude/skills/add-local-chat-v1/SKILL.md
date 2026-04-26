@@ -39,7 +39,13 @@ git merge origin/skill/local-chat-v1 || {
 If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 This merges in:
-- `src/chat-server.ts` (HTTP + WebSocket server, disabled by default)
+- `src/chat-server.ts` (HTTP server boot + REST routes for rooms/bots/agents/tasks, disabled by default)
+- `src/chat-server/` directory:
+    - `auth.ts` (bearer token / Tailscale whois / trusted-proxy header authentication)
+    - `state.ts` (in-memory client registry, broadcast, presence, channel-adapter hooks)
+    - `ws.ts` (WebSocket setup + AUTH/JOIN/TYPING/MESSAGE/DELETE_MESSAGE handlers)
+    - `push.ts` (VAPID init + Web Push fan-out for offline devices)
+    - `files.ts` (multipart upload, chunked upload, file-serve routes)
 - `src/chat-db.ts` (SQLite persistence for rooms, messages, push subscriptions, agent tokens)
 - `src/redact.ts` (sensitive-data masking for chat-server logs)
 - `src/timezone.ts` (IANA timezone helpers)
