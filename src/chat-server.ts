@@ -54,11 +54,6 @@ import {
   storeChatMessage,
   storeFileMessage,
   getChatAgentToken,
-  getWorkflows,
-  getWorkflow,
-  createWorkflow,
-  updateWorkflow,
-  deleteWorkflow,
   createChatAgentToken,
   listChatAgentTokens,
   upsertPushSubscription,
@@ -1103,47 +1098,6 @@ async function handleHttp(
       json(400, { error: 'Invalid JSON' });
     }
     return;
-  }
-
-  // ── Workflows ──────────────────────────────────────────────────────────
-  if (url.pathname === '/api/workflows' && method === 'GET') {
-    return json(200, getWorkflows());
-  }
-
-  if (url.pathname === '/api/workflows' && method === 'POST') {
-    try {
-      const body = await readBody();
-      const { name, steps } = JSON.parse(body);
-      if (!name || !Array.isArray(steps))
-        return json(400, { error: 'name and steps required' });
-      json(200, createWorkflow(name, steps));
-    } catch {
-      json(400, { error: 'Invalid JSON' });
-    }
-    return;
-  }
-
-  const flowMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)$/);
-  if (flowMatch && method === 'GET') {
-    const flow = getWorkflow(flowMatch[1]);
-    return flow ? json(200, flow) : json(404, { error: 'Workflow not found' });
-  }
-
-  if (flowMatch && method === 'PUT') {
-    try {
-      const body = await readBody();
-      const updates = JSON.parse(body);
-      updateWorkflow(flowMatch[1], updates);
-      json(200, { ok: true });
-    } catch {
-      json(400, { error: 'Invalid JSON' });
-    }
-    return;
-  }
-
-  if (flowMatch && method === 'DELETE') {
-    deleteWorkflow(flowMatch[1]);
-    return json(200, { ok: true });
   }
 
   // ── File upload ─────────────────────────────────────────────────────────

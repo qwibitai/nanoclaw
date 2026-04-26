@@ -634,7 +634,9 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
 
 export function updateRegisteredGroup(
   jid: string,
-  updates: Partial<Pick<RegisteredGroup, 'name' | 'trigger' | 'requiresTrigger'>>,
+  updates: Partial<
+    Pick<RegisteredGroup, 'name' | 'trigger' | 'requiresTrigger'>
+  >,
 ): void {
   const fields: string[] = [];
   const values: unknown[] = [];
