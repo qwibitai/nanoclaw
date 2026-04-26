@@ -82,12 +82,6 @@ function getWsUrl() {
   return authToken ? `${base}?token=${encodeURIComponent(authToken)}` : base;
 }
 
-function getAuthHeaders() {
-  const headers = { 'Content-Type': 'application/json' };
-  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-  return headers;
-}
-
 function authFetch(url, opts = {}) {
   if (authToken) {
     opts.headers = { ...opts.headers };

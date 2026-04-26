@@ -40,7 +40,7 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 
 This merges in:
 - `src/chat-server.ts` (HTTP + WebSocket server, disabled by default)
-- `src/chat-db.ts` (SQLite persistence for rooms, messages, push subscriptions, agent tokens, workflows)
+- `src/chat-db.ts` (SQLite persistence for rooms, messages, push subscriptions, agent tokens)
 - `src/redact.ts` (sensitive-data masking for chat-server logs)
 - `src/timezone.ts` (IANA timezone helpers)
 - `src/channels/local-chat.ts` (channel adapter that registers the local-chat channel)
@@ -122,11 +122,11 @@ CHAT_SERVER_HOST=0.0.0.0
 
 No token is needed — the server authenticates via tailscale whois. Non-tailscale remote connections will be rejected.
 
-**Important:** Without `CHAT_SERVER_TOKEN` set and without tailscale, the server will log a warning and allow unauthenticated remote connections. Always configure at least one auth method when binding to 0.0.0.0.
+**Important:** The server requires authentication for any non-localhost request. With `CHAT_SERVER_HOST=0.0.0.0` and no token, no tailscale, and no trusted proxy configured, remote connections will receive `401 Unauthorized`. Always configure at least one auth method when binding to 0.0.0.0.
 
-##### Tailscale HTTPS (recommended)
+##### Tailscale HTTPS (recommended for remote access)
 
-Ask: **"Would you like to enable HTTPS via Tailscale? This is needed for browser features like voice dictation (microphone access) when accessing from another device."**
+Ask: **"Would you like to enable HTTPS via Tailscale? This is needed for browser features that require a secure context (microphone, geolocation, etc.) when accessing from another device — used by add-on skills like `/add-voice-dictation`."**
 
 If yes:
 
@@ -154,7 +154,7 @@ TLS_KEY=data/tls/tailscale.key
 
 4. Tell the user their access URL is now `https://<DNS_NAME>:3100` and that the certificate expires after 90 days. To renew, re-run the `tailscale cert` command above and restart the service.
 
-If no, skip — the server will use plain HTTP. Voice dictation will still work via `localhost`.
+If no, skip — the server will use plain HTTP. Secure-context browser features (mic, geolocation) will still work via `localhost`.
 
 #### Option 3: Both (recommended for 0.0.0.0)
 
@@ -167,7 +167,7 @@ CHAT_SERVER_TOKEN=<generated-token>
 
 Tailscale peers authenticate automatically. Other remote clients use the token.
 
-Then follow the **Tailscale HTTPS** instructions under Option 2 above to enable HTTPS (recommended for voice dictation and other secure-context browser features).
+Then follow the **Tailscale HTTPS** instructions under Option 2 above to enable HTTPS (required by secure-context browser features like microphone access used by add-on skills such as `/add-voice-dictation`).
 
 #### Option 4: Trusted Proxy (Cloudflare, Azure/Entra ID, Authelia, Caddy, nginx, AWS ALB, Google IAP)
 

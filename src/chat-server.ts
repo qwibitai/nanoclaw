@@ -41,7 +41,10 @@ import {
   deleteRegisteredGroup,
   getRegisteredGroup,
 } from './db.js';
-import { authenticateRequest, warnIfAutoProxyTrust } from './chat-server/auth.js';
+import {
+  authenticateRequest,
+  warnIfAutoProxyTrust,
+} from './chat-server/auth.js';
 import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
