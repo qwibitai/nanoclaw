@@ -159,7 +159,7 @@ function createMessage(overrides: {
 }) {
   const channelId = overrides.channelId ?? '1234567890123456';
   const authorId = overrides.authorId ?? '55512345';
-  const botId = '999888777';   // モッククライアントのユーザーIDと一致
+  const botId = '999888777'; // モッククライアントのユーザーIDと一致
   const isThreadChannel = overrides.isThread ?? false;
 
   const mentionsMap = new Map();
