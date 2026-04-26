@@ -203,7 +203,11 @@ export async function authenticateRequest(
     }
   }
 
-  if (CHAT_SERVER_TOKEN && providedToken && safeTokenEqual(providedToken, CHAT_SERVER_TOKEN)) {
+  if (
+    CHAT_SERVER_TOKEN &&
+    providedToken &&
+    safeTokenEqual(providedToken, CHAT_SERVER_TOKEN)
+  ) {
     return { ok: true, identity: localUser };
   }
 
