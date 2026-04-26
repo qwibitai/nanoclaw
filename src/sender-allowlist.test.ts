@@ -98,7 +98,7 @@ describe('loadSenderAllowlist', () => {
       chats: {},
     });
     const cfg = loadSenderAllowlist(p);
-    expect(cfg.default.allow).toBe('*'); // falls back to default
+    expect(cfg.default.allow).toBe('*'); // デフォルトにフォールバック
   });
 
   it('skips invalid per-chat entries', () => {
@@ -211,6 +211,6 @@ describe('isTriggerAllowed', () => {
       logDenied: true,
     };
     isTriggerAllowed('g1', 'eve', cfg);
-    // Logger.debug is called — we just verify no crash; logger is a real pino instance
+    // Logger.debug が呼ばれる — クラッシュしないことを確認するだけ; logger は実際の pino インスタンス
   });
 });

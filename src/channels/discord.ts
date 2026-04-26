@@ -101,7 +101,7 @@ export class DiscordChannel implements Channel {
       const sender = message.author.id;
       const msgId = message.id;
 
-      // Determine chat name
+      // チャット名を決定する
       let chatName: string;
       if (message.guild) {
         if (isThread && message.channel.isThread()) {
@@ -116,16 +116,16 @@ export class DiscordChannel implements Channel {
         chatName = senderName;
       }
 
-      // Resolve parent JID for thread messages
+      // スレッドメッセージの親JIDを解決する
       let parentJid: string | undefined;
       if (isThread && message.channel.isThread() && message.channel.parentId) {
         parentJid = `dc:${message.channel.parentId}`;
       }
 
-      // Translate Discord @bot mentions into TRIGGER_PATTERN format.
-      // Discord mentions look like <@botUserId> — these won't match
-      // TRIGGER_PATTERN (e.g., ^@Andy\b), so we prepend the trigger
-      // when the bot is @mentioned.
+      // Discord の @bot メンションを TRIGGER_PATTERN 形式に変換する。
+      // Discord のメンションは <@botUserId> のような形式で、
+      // TRIGGER_PATTERN（例: ^@Andy\b）には一致しないため、
+      // bot が @mentioned されたときにトリガーを先頭に付加する。
       if (this.client?.user) {
         const botId = this.client.user.id;
         const isBotMentioned =
@@ -134,18 +134,18 @@ export class DiscordChannel implements Channel {
           content.includes(`<@!${botId}>`);
 
         if (isBotMentioned) {
-          // Strip the <@botId> mention to avoid visual clutter
+          // 視覚的なノイズを避けるため <@botId> メンションを除去する
           content = content
             .replace(new RegExp(`<@!?${botId}>`, 'g'), '')
             .trim();
-          // Prepend trigger if not already present
+          // トリガーがまだ先頭にない場合は付加する
           if (!TRIGGER_PATTERN.test(content)) {
             content = `@${ASSISTANT_NAME} ${content}`;
           }
         }
       }
 
-      // Handle attachments — store placeholders so the agent knows something was sent
+      // 添付ファイルを処理 — プレースホルダーを保存してエージェントに送信内容を伝える
       if (message.attachments.size > 0) {
         const attachmentDescriptions = [...message.attachments.values()].map(
           (att) => {
@@ -168,7 +168,7 @@ export class DiscordChannel implements Channel {
         }
       }
 
-      // Handle reply context — include who the user is replying to
+      // リプライ文脈を処理 — 誰への返信かを含める
       if (message.reference?.messageId) {
         try {
           const repliedTo = await message.channel.messages.fetch(
@@ -180,11 +180,11 @@ export class DiscordChannel implements Channel {
             repliedTo.author.username;
           content = `[Reply to ${replyAuthor}] ${content}`;
         } catch {
-          // Referenced message may have been deleted
+          // 参照元メッセージが削除されている可能性がある
         }
       }
 
-      // Store chat metadata for discovery
+      // 発見用にチャットメタデータを保存する
       const isGroup = message.guild !== null;
       this.opts.onChatMetadata(
         chatJid,
@@ -194,15 +194,15 @@ export class DiscordChannel implements Channel {
         isGroup,
       );
 
-      // Only deliver full message for registered groups.
-      // Exception: thread messages from channels whose parent has thread_defaults
-      // are allowed through so index.ts can auto-register the thread group.
+      // 登録済みグループのみ完全なメッセージを配信する。
+      // 例外: thread_defaults を持つ親チャンネルのスレッドメッセージは、
+      // index.ts がスレッドグループを自動登録できるよう通過させる。
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) {
         if (parentJid) {
           const parentGroup = this.opts.registeredGroups()[parentJid];
           if (parentGroup?.thread_defaults) {
-            // Auto-registration candidate — fall through to deliver the message
+            // 自動登録候補 — メッセージ配信をそのまま続行する
           } else {
             logger.debug(
               { chatJid, chatName },
@@ -219,9 +219,9 @@ export class DiscordChannel implements Channel {
         }
       }
 
-      // Deliver message — startMessageLoop() will pick it up.
-      // InboundMessage extends NewMessage with Discord-specific metadata
-      // (place_type, actor_role, is_thread, parent_jid) that is callback-only and not persisted.
+      // メッセージを配信 — startMessageLoop() が取得する。
+      // InboundMessage は NewMessage を拡張し、Discord 固有のメタデータ
+      // (place_type, actor_role, is_thread, parent_jid) を含むが、これらはコールバック専用で永続化されない。
       const inbound: InboundMessage = {
         id: msgId,
         chat_jid: chatJid,
@@ -243,7 +243,7 @@ export class DiscordChannel implements Channel {
       );
     });
 
-    // Handle errors gracefully
+    // エラーを適切に処理する
     this.client.on(Events.Error, (err) => {
       logger.error({ err: err.message }, 'Discord client error');
     });
@@ -292,7 +292,7 @@ export class DiscordChannel implements Channel {
 
       const textChannel = channel as TextChannel;
 
-      // Discord has a 2000 character limit per message — split if needed
+      // Discord は1メッセージあたり2000文字の制限がある — 必要に応じて分割する
       const MAX_LENGTH = 2000;
       if (text.length <= MAX_LENGTH) {
         await textChannel.send(text);

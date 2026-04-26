@@ -33,7 +33,7 @@ beforeEach(() => {
   _initTestDatabase();
 });
 
-// Helper to store a message using the normalized NewMessage interface
+// 正規化された NewMessage インターフェースを使ってメッセージを保存するヘルパー
 function store(overrides: {
   id: string;
   chat_jid: string;
@@ -54,7 +54,7 @@ function store(overrides: {
   });
 }
 
-// --- storeMessage (NewMessage format) ---
+// --- storeMessage（NewMessage 形式）---
 
 describe('storeMessage', () => {
   it('stores a message and retrieves it', () => {
@@ -114,7 +114,7 @@ describe('storeMessage', () => {
       is_from_me: true,
     });
 
-    // Message is stored (we can retrieve it — is_from_me doesn't affect retrieval)
+    // メッセージは保存されている（取得可能 — is_from_me は取得に影響しない）
     const messages = getMessagesSince(
       'group@g.us',
       '2024-01-01T00:00:00.000Z',
@@ -201,7 +201,7 @@ describe('getMessagesSince', () => {
       '2024-01-01T00:00:02.000Z',
       'Andy',
     );
-    // Should exclude m1, m2 (before/at timestamp), m3 (bot message)
+    // m1、m2（タイムスタンプ以前）、m3（ボットメッセージ）を除外する必要がある
     expect(msgs).toHaveLength(1);
     expect(msgs[0].content).toBe('third');
   });
@@ -218,12 +218,12 @@ describe('getMessagesSince', () => {
 
   it('returns all non-bot messages when sinceTimestamp is empty', () => {
     const msgs = getMessagesSince('group@g.us', '', 'Andy');
-    // 3 user messages (bot message excluded)
+    // 3件のユーザーメッセージ（ボットメッセージは除外）
     expect(msgs).toHaveLength(3);
   });
 
   it('filters pre-migration bot messages via content prefix backstop', () => {
-    // Simulate a message written before migration: has prefix but is_bot_message = 0
+    // マイグレーション前に書かれたメッセージをシミュレート: プレフィックスがあるが is_bot_message = 0
     store({
       id: 'm5',
       chat_jid: 'group@g.us',
@@ -289,7 +289,7 @@ describe('getNewMessages', () => {
       '2024-01-01T00:00:00.000Z',
       'Andy',
     );
-    // Excludes bot message, returns 3 user messages
+    // ボットメッセージを除外し、3件のユーザーメッセージを返す
     expect(messages).toHaveLength(3);
     expect(newTimestamp).toBe('2024-01-01T00:00:04.000Z');
   });
@@ -300,7 +300,7 @@ describe('getNewMessages', () => {
       '2024-01-01T00:00:02.000Z',
       'Andy',
     );
-    // Only g1 msg2 (after ts, not bot)
+    // g1 msg2 のみ（ts 以降でボットではない）
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('g1 msg2');
   });
@@ -405,7 +405,7 @@ describe('task CRUD', () => {
   });
 });
 
-// --- LIMIT behavior ---
+// --- LIMIT の挙動 ---
 
 describe('message query LIMIT', () => {
   beforeEach(() => {
@@ -433,9 +433,9 @@ describe('message query LIMIT', () => {
     expect(messages).toHaveLength(3);
     expect(messages[0].content).toBe('message 8');
     expect(messages[2].content).toBe('message 10');
-    // Chronological order preserved
+    // 時系列順が保持されている
     expect(messages[1].timestamp > messages[0].timestamp).toBe(true);
-    // newTimestamp reflects latest returned row
+    // newTimestamp は返却された最新の行を反映する
     expect(newTimestamp).toBe('2024-01-01T00:00:10.000Z');
   });
 
@@ -463,7 +463,7 @@ describe('message query LIMIT', () => {
   });
 });
 
-// --- RegisteredGroup GroupType round-trip ---
+// --- RegisteredGroup GroupType の往復 ---
 
 describe('registered group type', () => {
   it('persists type=main through set/get round-trip', () => {
@@ -634,7 +634,7 @@ describe('registered group type', () => {
   });
 });
 
-// --- Session accessors (jid-keyed) ---
+// --- Session アクセサ（jid をキーとする）---
 
 describe('session accessors', () => {
   it('sets and retrieves session by jid', () => {

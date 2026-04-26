@@ -2,11 +2,11 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
-// Sentinel markers must match container-runner.ts
+// センチネルマーカーは container-runner.ts と一致させる必要があります
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
-// Mock config
+// config のモック
 vi.mock('./config.js', () => ({
   CONTAINER_IMAGE: 'nanoclaw-agent:latest',
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
@@ -18,7 +18,7 @@ vi.mock('./config.js', () => ({
   TIMEZONE: 'America/Los_Angeles',
 }));
 
-// Mock logger
+// logger のモック
 vi.mock('./logger.js', () => ({
   logger: {
     debug: vi.fn(),
@@ -28,7 +28,7 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
-// Mock fs
+// fs のモック
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
@@ -46,12 +46,12 @@ vi.mock('fs', async () => {
   };
 });
 
-// Mock mount-security
+// mount-security のモック
 vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts: vi.fn(() => []),
 }));
 
-// Mock provider selection
+// プロバイダー選択のモック
 const mockContainerProviderEnv: Record<string, string> = {
   NANOCLAW_PROVIDER_CONFIG_JSON: JSON.stringify({
     providers: {
@@ -88,7 +88,7 @@ vi.mock('./provider-config.js', () => ({
   buildContainerProviderEnv: vi.fn(() => ({ ...mockContainerProviderEnv })),
 }));
 
-// Create a controllable fake ChildProcess
+// 制御可能な偽 ChildProcess を作成
 function createFakeProcess() {
   const proc = new EventEmitter() as EventEmitter & {
     stdin: PassThrough;
@@ -107,7 +107,7 @@ function createFakeProcess() {
 
 let fakeProc: ReturnType<typeof createFakeProcess>;
 
-// Mock child_process.spawn
+// child_process.spawn のモック
 vi.mock('child_process', async () => {
   const actual =
     await vi.importActual<typeof import('child_process')>('child_process');
@@ -186,23 +186,23 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
-    // Emit output with a result
+    // 結果付きの出力を発行
     emitOutputMarker(fakeProc, {
       status: 'success',
       result: 'Here is my response',
       newSessionId: 'session-123',
     });
 
-    // Let output processing settle
+    // 出力処理が落ち着くまで待つ
     await vi.advanceTimersByTimeAsync(10);
 
-    // Fire the hard timeout (IDLE_TIMEOUT + 30s = 1830000ms)
+    // ハードタイムアウトを発火（IDLE_TIMEOUT + 30s = 1830000ms）
     await vi.advanceTimersByTimeAsync(1830000);
 
-    // Emit close event (as if container was stopped by the timeout)
+    // close イベントを発行（タイムアウトで停止された想定）
     fakeProc.emit('close', 137);
 
-    // Let the promise resolve
+    // Promise が解決されるまで待つ
     await vi.advanceTimersByTimeAsync(10);
 
     const result = await resultPromise;
@@ -222,10 +222,10 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
-    // No output emitted — fire the hard timeout
+    // 出力なし — ハードタイムアウトを発火
     await vi.advanceTimersByTimeAsync(1830000);
 
-    // Emit close event
+    // close イベントを発行
     fakeProc.emit('close', 137);
 
     await vi.advanceTimersByTimeAsync(10);
@@ -245,7 +245,7 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
-    // Emit output
+    // 出力を発行
     emitOutputMarker(fakeProc, {
       status: 'success',
       result: 'Done',
@@ -254,7 +254,7 @@ describe('container-runner timeout behavior', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    // Normal exit (no timeout)
+    // 通常終了（タイムアウトなし）
     fakeProc.emit('close', 0);
 
     await vi.advanceTimersByTimeAsync(10);

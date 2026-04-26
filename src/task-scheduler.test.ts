@@ -18,7 +18,7 @@ describe('task scheduler', () => {
     vi.useRealTimers();
   });
 
-  it('pauses due tasks with invalid group folders to prevent retry churn', async () => {
+  it('無効なグループフォルダを持つ期限タスクを一時停止し、リトライの繰り返しを防ぐ', async () => {
     createTask({
       id: 'task-invalid-folder',
       group_folder: '../../outside',
@@ -52,7 +52,7 @@ describe('task scheduler', () => {
     expect(task?.status).toBe('paused');
   });
 
-  it('computeNextRun anchors interval tasks to scheduled time to prevent drift', () => {
+  it('computeNextRun はインターバルタスクを予定時刻に固定し、ドリフトを防ぐ', () => {
     const scheduledTime = new Date(Date.now() - 2000).toISOString(); // 2s ago
     const task = {
       id: 'drift-test',
@@ -72,12 +72,12 @@ describe('task scheduler', () => {
     const nextRun = computeNextRun(task);
     expect(nextRun).not.toBeNull();
 
-    // Should be anchored to scheduledTime + 60s, NOT Date.now() + 60s
+    // scheduledTime + 60s に固定されるべきで、Date.now() + 60s ではない
     const expected = new Date(scheduledTime).getTime() + 60000;
     expect(new Date(nextRun!).getTime()).toBe(expected);
   });
 
-  it('computeNextRun returns null for once-tasks', () => {
+  it('computeNextRun は once タスクに対して null を返す', () => {
     const task = {
       id: 'once-test',
       group_folder: 'test',
@@ -96,8 +96,8 @@ describe('task scheduler', () => {
     expect(computeNextRun(task)).toBeNull();
   });
 
-  it('computeNextRun skips missed intervals without infinite loop', () => {
-    // Task was due 10 intervals ago (missed)
+  it('computeNextRun は逃したインターバルを無限ループなくスキップする', () => {
+    // タスクは 10 インターバル前に期限だった（逃した）
     const ms = 60000;
     const missedBy = ms * 10;
     const scheduledTime = new Date(Date.now() - missedBy).toISOString();
@@ -119,9 +119,9 @@ describe('task scheduler', () => {
 
     const nextRun = computeNextRun(task);
     expect(nextRun).not.toBeNull();
-    // Must be in the future
+    // 未来の時刻でなければならない
     expect(new Date(nextRun!).getTime()).toBeGreaterThan(Date.now());
-    // Must be aligned to the original schedule grid
+    // 元のスケジュールグリッドに揃っていなければならない
     const offset =
       (new Date(nextRun!).getTime() - new Date(scheduledTime).getTime()) % ms;
     expect(offset).toBe(0);
