@@ -272,6 +272,7 @@ async function processQuery(
     // host-generated welcome trigger with null thread vs a Discord DM reply).
     const newMessages = getPendingMessages().filter((m) => {
       if (m.kind === 'system') return false;
+      if (m.kind === 'task') return false; // tasks need applyPreTaskScripts — defer to main loop
       if ((m.kind === 'chat' || m.kind === 'chat-sdk') && isClearCommand(m)) return false;
       return true;
     });
