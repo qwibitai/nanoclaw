@@ -66,9 +66,15 @@ export class DiscordChannel implements Channel {
       ],
     });
 
+    const { DISCORD_ALLOWED_BOT_IDS: allowedBotIdsRaw } = readEnvFile([
+      'DISCORD_ALLOWED_BOT_IDS',
+    ]);
+    const allowedBotIds = new Set(
+      allowedBotIdsRaw ? allowedBotIdsRaw.split(',').map((s) => s.trim()) : [],
+    );
+
     this.client.on(Events.MessageCreate, async (message: Message) => {
-      // Ignore bot messages (including own)
-      if (message.author.bot) return;
+      if (message.author.bot && !allowedBotIds.has(message.author.id)) return;
 
       const isThread = message.channel.isThread();
       const channelId = message.channelId;
