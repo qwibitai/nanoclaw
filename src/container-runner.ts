@@ -497,7 +497,7 @@ export async function buildAgentGroupImage(agentGroupId: string): Promise<void> 
 
   let dockerfile = `FROM ${CONTAINER_IMAGE}\nUSER root\n`;
   if (aptPackages.length > 0) {
-    dockerfile += `RUN apt-get update && apt-get install -y ${aptPackages.join(' ')} && rm -rf /var/lib/apt/lists/*\n`;
+    dockerfile += `RUN DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ${aptPackages.join(' ')} && rm -rf /var/lib/apt/lists/*\n`;
   }
   if (npmPackages.length > 0) {
     // pnpm skips build scripts unless packages are allowlisted. Append each
