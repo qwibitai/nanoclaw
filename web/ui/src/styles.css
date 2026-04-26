@@ -203,3 +203,97 @@ form .actions { display: flex; gap: 0.6rem; align-items: center; }
 .kv code { word-break: break-all; }
 
 hr.sep { border: 0; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+
+/* Skeleton loaders */
+@keyframes skeleton-shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-soft) 0%,
+    #ece8df 50%,
+    var(--bg-soft) 100%
+  );
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.4s linear infinite;
+  border-radius: 6px;
+}
+.skeleton-list { list-style: none; padding: 0; margin: 0; }
+.skeleton-row { height: 4.5rem; margin-bottom: 0.75rem; }
+.skeleton-heading { height: 1.6rem; width: 40%; margin-bottom: 1rem; }
+.skeleton-line { height: 0.9rem; margin-bottom: 0.6rem; width: 100%; }
+
+/* Richer empty state */
+.empty-rich { text-align: left; padding: 2rem 1.75rem; background: white; border: 1px solid var(--border); }
+.empty-rich .empty-headline { font-size: 1.05rem; color: var(--fg); margin: 0 0 0.5rem; font-weight: 500; }
+.empty-paths {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+  display: grid;
+  gap: 0.6rem;
+}
+.empty-paths li {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  padding: 0.7rem 0.9rem;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  color: var(--fg-muted);
+}
+.empty-paths li strong { color: var(--fg); margin-right: 0.4rem; font-weight: 500; }
+
+/* Scope grants explainer */
+.scope-grants {
+  margin-top: 0.75rem;
+  padding: 0.85rem 1rem;
+  background: var(--bg-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+}
+.scope-grants-summary {
+  margin: 0 0 0.6rem;
+  font-size: 0.88rem;
+  color: var(--fg);
+}
+.scope-grants-tools {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+.scope-grants-tools > div:only-child { grid-column: 1 / -1; }
+.scope-grants-label {
+  display: block;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  margin-bottom: 0.25rem;
+  font-weight: 500;
+}
+.scope-grants-tools ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.scope-grants-tools li code {
+  font-size: 0.78rem;
+  background: white;
+  border: 1px solid var(--border);
+  padding: 0.15em 0.45em;
+}
+.scope-grants-tools li.dim code {
+  background: transparent;
+  color: var(--fg-dim);
+  text-decoration: line-through;
+}
+.scope-grants-warn {
+  margin: 0.75rem 0 0;
+  font-size: 0.82rem;
+  color: var(--warn);
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { listGroups, type AgentGroupView } from "../lib/api.ts";
 
@@ -8,6 +8,12 @@ export function GroupList() {
     | { kind: "ok"; groups: AgentGroupView[] }
     | { kind: "error"; message: string }
   >({ kind: "loading" });
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const reload = useCallback(() => {
+    setState({ kind: "loading" });
+    setReloadKey((k) => k + 1);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -24,25 +30,38 @@ export function GroupList() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   if (state.kind === "loading") {
-    return <div className="status-banner">Loading agent groups…</div>;
+    return (
+      <div>
+        <h2>Agent groups</h2>
+        <ul className="skeleton-list" aria-busy="true" aria-label="Loading agent groups">
+          <li className="skeleton skeleton-row" />
+          <li className="skeleton skeleton-row" />
+          <li className="skeleton skeleton-row" />
+        </ul>
+      </div>
+    );
   }
 
   if (state.kind === "error") {
     return (
       <div>
+        <h2>Agent groups</h2>
         <div className="error-banner">
           Couldn't load groups: <code>{state.message}</code>
         </div>
         <p className="muted">
           Make sure the web server is running:{" "}
-          <code>pnpm --filter @paraclaw/web-server dev</code>. It needs the
+          <code>cd web/server &amp;&amp; pnpm dev</code>. It needs the
           NanoClaw central DB at <code>data/v2.db</code> — that gets created
           the first time you run <code>pnpm setup</code> or{" "}
-          <code>pnpm dev</code>.
+          <code>pnpm dev</code> from the repo root.
         </p>
+        <div className="actions" style={{ marginTop: "1rem" }}>
+          <button onClick={reload}>Retry</button>
+        </div>
       </div>
     );
   }
@@ -51,13 +70,34 @@ export function GroupList() {
     return (
       <div>
         <h2>Agent groups</h2>
-        <div className="empty">
-          <p>No agent groups yet.</p>
-          <p className="dim">
-            NanoClaw spawns agent groups via channel skills (e.g.{" "}
-            <code>/init-first-agent</code>) or the setup flow. Once you have
-            one, refresh this page to manage its vault attachment here.
+        <div className="empty empty-rich">
+          <p className="empty-headline">No agent groups yet.</p>
+          <p className="muted">
+            Paraclaw will spin up agent groups from here soon
+            {" "}
+            (
+            <a
+              href="https://github.com/ParachuteComputer/paraclaw/issues/1"
+              target="_blank"
+              rel="noreferrer"
+            >
+              #1: new-agent wizard
+            </a>
+            ). Until then, bootstrap your first group via:
           </p>
+          <ul className="empty-paths">
+            <li>
+              <strong>Claude Code skill</strong> —
+              run <code>/init-first-agent</code> to walk through channel pick + identity + welcome DM.
+            </li>
+            <li>
+              <strong>CLI setup</strong> —
+              run <code>pnpm setup</code> from the repo root.
+            </li>
+          </ul>
+          <div className="actions" style={{ justifyContent: "center", marginTop: "1rem" }}>
+            <button className="secondary" onClick={reload}>Refresh</button>
+          </div>
         </div>
       </div>
     );
