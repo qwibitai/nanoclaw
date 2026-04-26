@@ -23,20 +23,17 @@ function makeRequest(
   headers: http.IncomingHttpHeaders;
 }> {
   return new Promise((resolve, reject) => {
-    const req = http.request(
-      { ...options, hostname: '127.0.0.1', port },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => {
-          resolve({
-            statusCode: res.statusCode!,
-            body: Buffer.concat(chunks).toString(),
-            headers: res.headers,
-          });
+    const req = http.request({ ...options, hostname: '127.0.0.1', port }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        resolve({
+          statusCode: res.statusCode!,
+          body: Buffer.concat(chunks).toString(),
+          headers: res.headers,
         });
-      },
-    );
+      });
+    });
     req.on('error', reject);
     req.write(body);
     req.end();
@@ -66,9 +63,7 @@ describe('credential-proxy', () => {
         res.end(JSON.stringify({ ok: true }));
       });
     });
-    await new Promise<void>((resolve) =>
-      upstreamServer.listen(0, '127.0.0.1', resolve),
-    );
+    await new Promise<void>((resolve) => upstreamServer.listen(0, '127.0.0.1', resolve));
     upstreamPort = (upstreamServer.address() as AddressInfo).port;
   });
 
@@ -123,9 +118,7 @@ describe('credential-proxy', () => {
       '{}',
     );
 
-    expect(lastUpstreamHeaders['authorization']).toBe(
-      'Bearer real-oauth-token',
-    );
+    expect(lastUpstreamHeaders['authorization']).toBe('Bearer real-oauth-token');
   });
 
   it('OAuth mode does not inject Authorization when container omits it', async () => {
@@ -250,9 +243,7 @@ describe('credential-proxy', () => {
         );
       });
     });
-    await new Promise<void>((resolve) =>
-      upstreamServer.listen(upstreamPort, '127.0.0.1', resolve),
-    );
+    await new Promise<void>((resolve) => upstreamServer.listen(upstreamPort, '127.0.0.1', resolve));
 
     proxyServer = await startCredentialProxy(0);
     proxyPort = (proxyServer.address() as AddressInfo).port;
@@ -333,9 +324,7 @@ describe('credential-proxy', () => {
         );
       });
     });
-    await new Promise<void>((resolve) =>
-      upstreamServer.listen(upstreamPort, '127.0.0.1', resolve),
-    );
+    await new Promise<void>((resolve) => upstreamServer.listen(upstreamPort, '127.0.0.1', resolve));
 
     proxyServer = await startCredentialProxy(0);
     proxyPort = (proxyServer.address() as AddressInfo).port;

@@ -23,13 +23,7 @@ export interface ProxyConfig {
   authMode: AuthMode;
 }
 
-type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 type JsonObject = { [key: string]: JsonValue };
 
@@ -41,26 +35,18 @@ function isLocalHost(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
 
-function isOpenRouterAuthTarget(
-  upstreamUrl: URL,
-): boolean {
+function isOpenRouterAuthTarget(upstreamUrl: URL): boolean {
   return isOpenRouterHostname(upstreamUrl.hostname);
 }
 
-function isOpenRouterTranslationTarget(
-  upstreamUrl: URL,
-  secrets: Record<string, string>,
-): boolean {
+function isOpenRouterTranslationTarget(upstreamUrl: URL, secrets: Record<string, string>): boolean {
   if (isOpenRouterAuthTarget(upstreamUrl)) return true;
   // Allow local test/proxy setups that emulate OpenRouter while still requiring
   // explicit OpenRouter credentials to avoid false positives on Anthropic.
   return isLocalHost(upstreamUrl.hostname) && Boolean(secrets.OPENROUTER_API_KEY);
 }
 
-function resolveAuthMode(
-  upstreamUrl: URL,
-  secrets: Record<string, string>,
-): AuthMode {
+function resolveAuthMode(upstreamUrl: URL, secrets: Record<string, string>): AuthMode {
   const hasAnthropicKey = Boolean(secrets.ANTHROPIC_API_KEY);
   const hasOpenRouterKey = Boolean(secrets.OPENROUTER_API_KEY);
   if (hasAnthropicKey) return 'api-key';
@@ -103,8 +89,7 @@ function buildForwardHeaders(
       headers['x-api-key'] = apiKey;
     }
   } else if (headers['authorization']) {
-    const oauthToken =
-      secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
+    const oauthToken = secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
     delete headers['authorization'];
     if (oauthToken) {
       headers['authorization'] = `Bearer ${oauthToken}`;
@@ -122,10 +107,7 @@ function safeJsonParse(body: Buffer): JsonObject | null {
   }
 }
 
-function isOpenRouterUpstream(
-  upstreamUrl: URL,
-  secrets: Record<string, string>,
-): boolean {
+function isOpenRouterUpstream(upstreamUrl: URL, secrets: Record<string, string>): boolean {
   return isOpenRouterTranslationTarget(upstreamUrl, secrets);
 }
 
@@ -214,9 +196,7 @@ function convertAnthropicMessagesToOpenRouter(body: JsonObject): JsonObject[] {
             type: 'function',
             function: {
               name: block.name,
-              arguments: JSON.stringify(
-                block.input && typeof block.input === 'object' ? block.input : {},
-              ),
+              arguments: JSON.stringify(block.input && typeof block.input === 'object' ? block.input : {}),
             },
           });
         }
@@ -266,9 +246,7 @@ function convertAnthropicMessagesToOpenRouter(body: JsonObject): JsonObject[] {
   return messages;
 }
 
-function convertAnthropicToolChoice(
-  toolChoice: JsonValue | undefined,
-): JsonValue | undefined {
+function convertAnthropicToolChoice(toolChoice: JsonValue | undefined): JsonValue | undefined {
   if (!toolChoice || typeof toolChoice !== 'object' || Array.isArray(toolChoice)) {
     return toolChoice;
   }
@@ -286,9 +264,7 @@ function convertAnthropicToolChoice(
 }
 
 function compactObject(object: Record<string, JsonValue | undefined>): JsonObject {
-  return Object.fromEntries(
-    Object.entries(object).filter(([, value]) => value !== undefined),
-  ) as JsonObject;
+  return Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined)) as JsonObject;
 }
 
 function buildOpenRouterChatBody(body: JsonObject): JsonObject {
@@ -353,9 +329,10 @@ function mapFinishReason(reason: unknown): string | null {
 }
 
 function convertOpenRouterResponseToAnthropic(body: JsonObject): JsonObject {
-  const choice = Array.isArray(body.choices) && body.choices[0] && typeof body.choices[0] === 'object'
-    ? (body.choices[0] as JsonObject)
-    : {};
+  const choice =
+    Array.isArray(body.choices) && body.choices[0] && typeof body.choices[0] === 'object'
+      ? (body.choices[0] as JsonObject)
+      : {};
   const message =
     choice.message && typeof choice.message === 'object' && !Array.isArray(choice.message)
       ? (choice.message as JsonObject)
@@ -384,9 +361,7 @@ function convertOpenRouterResponseToAnthropic(body: JsonObject): JsonObject {
   }
 
   const usage =
-    body.usage && typeof body.usage === 'object' && !Array.isArray(body.usage)
-      ? (body.usage as JsonObject)
-      : {};
+    body.usage && typeof body.usage === 'object' && !Array.isArray(body.usage) ? (body.usage as JsonObject) : {};
 
   return {
     id: typeof body.id === 'string' ? body.id : `msg_${Date.now()}`,
@@ -397,30 +372,21 @@ function convertOpenRouterResponseToAnthropic(body: JsonObject): JsonObject {
     stop_reason: mapFinishReason(choice.finish_reason),
     stop_sequence: null,
     usage: {
-      input_tokens:
-        typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens : 0,
-      output_tokens:
-        typeof usage.completion_tokens === 'number' ? usage.completion_tokens : 0,
+      input_tokens: typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens : 0,
+      output_tokens: typeof usage.completion_tokens === 'number' ? usage.completion_tokens : 0,
     },
   };
 }
 
-function writeSseEvent(
-  res: ServerResponse,
-  event: string,
-  payload: JsonObject,
-): void {
+function writeSseEvent(res: ServerResponse, event: string, payload: JsonObject): void {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-function writeAnthropicStreamingResponse(
-  res: ServerResponse,
-  anthropicMessage: JsonObject,
-): void {
+function writeAnthropicStreamingResponse(res: ServerResponse, anthropicMessage: JsonObject): void {
   const content = Array.isArray(anthropicMessage.content)
-    ? anthropicMessage.content.filter(
-        (block): block is JsonObject => Boolean(block && typeof block === 'object' && !Array.isArray(block)),
+    ? anthropicMessage.content.filter((block): block is JsonObject =>
+        Boolean(block && typeof block === 'object' && !Array.isArray(block)),
       )
     : [];
   const usage =
@@ -440,8 +406,7 @@ function writeAnthropicStreamingResponse(
       ...anthropicMessage,
       content: [],
       usage: {
-        input_tokens:
-          typeof usage.input_tokens === 'number' ? usage.input_tokens : 0,
+        input_tokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : 0,
         output_tokens: 0,
       },
     },
@@ -484,9 +449,7 @@ function writeAnthropicStreamingResponse(
         index,
         delta: {
           type: 'input_json_delta',
-          partial_json: JSON.stringify(
-            block.input && typeof block.input === 'object' ? block.input : {},
-          ),
+          partial_json: JSON.stringify(block.input && typeof block.input === 'object' ? block.input : {}),
         },
       });
       writeSseEvent(res, 'content_block_stop', {
@@ -503,8 +466,7 @@ function writeAnthropicStreamingResponse(
       stop_sequence: null,
     },
     usage: {
-      output_tokens:
-        typeof usage.output_tokens === 'number' ? usage.output_tokens : 0,
+      output_tokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : 0,
     },
   });
   writeSseEvent(res, 'message_stop', { type: 'message_stop' });
@@ -544,17 +506,8 @@ async function handleTranslatedOpenRouterRequest(
   secrets: Record<string, string>,
   bodyJson: JsonObject,
 ): Promise<void> {
-  const translatedBody = Buffer.from(
-    JSON.stringify(buildOpenRouterChatBody(bodyJson)),
-    'utf-8',
-  );
-  const headers = buildForwardHeaders(
-    req.headers,
-    upstreamUrl,
-    translatedBody.length,
-    authMode,
-    secrets,
-  );
+  const translatedBody = Buffer.from(JSON.stringify(buildOpenRouterChatBody(bodyJson)), 'utf-8');
+  const headers = buildForwardHeaders(req.headers, upstreamUrl, translatedBody.length, authMode, secrets);
   delete headers['anthropic-version'];
   delete headers['anthropic-beta'];
   // Ensure upstream returns plain JSON so translation can parse safely.
@@ -592,10 +545,7 @@ async function handleTranslatedOpenRouterRequest(
   res.end(JSON.stringify(translatedResponse));
 }
 
-export function startCredentialProxy(
-  port: number,
-  host = '127.0.0.1',
-): Promise<Server> {
+export function startCredentialProxy(port: number, host = '127.0.0.1'): Promise<Server> {
   const secrets = readEnvFile([
     'ANTHROPIC_API_KEY',
     'OPENROUTER_API_KEY',
@@ -604,9 +554,7 @@ export function startCredentialProxy(
     'ANTHROPIC_BASE_URL',
   ]);
 
-  const upstreamUrl = new URL(
-    secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
-  );
+  const upstreamUrl = new URL(secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com');
   const authMode = resolveAuthMode(upstreamUrl, secrets);
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
@@ -620,31 +568,19 @@ export function startCredentialProxy(
         const bodyJson = safeJsonParse(body);
 
         if (shouldTranslateToOpenRouterChat(req, bodyJson, upstreamUrl, secrets)) {
-          handleTranslatedOpenRouterRequest(
-            req,
-            res,
-            makeRequest,
-            upstreamUrl,
-            authMode,
-            secrets,
-            bodyJson,
-          ).catch((err) => {
-            log.error('Credential proxy translation error', { err, url: req.url });
-            if (!res.headersSent) {
-              res.writeHead(502);
-              res.end('Bad Gateway');
-            }
-          });
+          handleTranslatedOpenRouterRequest(req, res, makeRequest, upstreamUrl, authMode, secrets, bodyJson).catch(
+            (err) => {
+              log.error('Credential proxy translation error', { err, url: req.url });
+              if (!res.headersSent) {
+                res.writeHead(502);
+                res.end('Bad Gateway');
+              }
+            },
+          );
           return;
         }
 
-        const headers = buildForwardHeaders(
-          req.headers,
-          upstreamUrl,
-          body.length,
-          authMode,
-          secrets,
-        );
+        const headers = buildForwardHeaders(req.headers, upstreamUrl, body.length, authMode, secrets);
 
         const upstream = makeRequest(
           {
@@ -684,13 +620,7 @@ export function startCredentialProxy(
 
 /** Detect which auth mode the host is configured for. */
 export function detectAuthMode(): AuthMode {
-  const secrets = readEnvFile([
-    'ANTHROPIC_API_KEY',
-    'OPENROUTER_API_KEY',
-    'ANTHROPIC_BASE_URL',
-  ]);
-  const upstreamUrl = new URL(
-    secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
-  );
+  const secrets = readEnvFile(['ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY', 'ANTHROPIC_BASE_URL']);
+  const upstreamUrl = new URL(secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com');
   return resolveAuthMode(upstreamUrl, secrets);
 }

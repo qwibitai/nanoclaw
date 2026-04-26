@@ -457,9 +457,7 @@ async function buildContainerArgs(
   // Non-secret model configuration can be passed through safely.
   // This prevents SDK fallback to a default model when ANTHROPIC_MODEL is set on host.
   const envModel = process.env.ANTHROPIC_MODEL;
-  const fileModel = envModel
-    ? undefined
-    : readEnvFile(['ANTHROPIC_MODEL']).ANTHROPIC_MODEL;
+  const fileModel = envModel ? undefined : readEnvFile(['ANTHROPIC_MODEL']).ANTHROPIC_MODEL;
   const selectedModel = envModel ?? fileModel;
   if (selectedModel) {
     args.push('-e', `ANTHROPIC_MODEL=${selectedModel}`);
