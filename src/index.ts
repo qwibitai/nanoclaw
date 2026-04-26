@@ -10,6 +10,8 @@ import { DATA_DIR } from './config.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
 import { initDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
+import { getActiveSessions } from './db/sessions.js';
+import { openInboundDb } from './session-manager.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
@@ -66,6 +68,24 @@ async function main(): Promise<void> {
 
   // 1b. One-time filesystem cutover — idempotent, no-op after first run.
   migrateGroupsToClaudeLocal();
+
+  // 1c. Eager-migrate every existing session's inbound.db before any container
+  // can spawn. openInboundDb runs migrateMessagesInTable, which adds any
+  // missing columns (e.g. origin_session_id from the routing fix). Without
+  // this sweep the migration would happen lazily — but containers may open
+  // inbound.db read-only first to look up an in_reply_to row, racing ahead
+  // of the host migration and hitting "no such column".
+  const activeSessions = getActiveSessions();
+  let migratedCount = 0;
+  for (const s of activeSessions) {
+    try {
+      openInboundDb(s.agent_group_id, s.id).close();
+      migratedCount++;
+    } catch (err) {
+      log.warn('Startup inbound migration skipped for session', { sessionId: s.id, err });
+    }
+  }
+  log.info('Startup inbound migrations complete', { migrated: migratedCount, total: activeSessions.length });
 
   // 2. Container runtime
   ensureContainerRuntimeRunning();

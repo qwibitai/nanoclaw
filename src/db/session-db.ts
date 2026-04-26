@@ -100,14 +100,17 @@ export function insertMessage(
      * Host countDueMessages gates on this; container reads everything.
      */
     trigger?: 0 | 1;
+    /** Session ID that sent this A2A message; null for non-A2A messages. */
+    originSessionId?: string | null;
   },
 ): void {
   db.prepare(
-    `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger)
-     VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger)`,
+    `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, origin_session_id)
+     VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger, @originSessionId)`,
   ).run({
     ...message,
     trigger: message.trigger ?? 1,
+    originSessionId: message.originSessionId ?? null,
     seq: nextEvenSeq(db),
   });
 }
@@ -218,6 +221,7 @@ export interface OutboundMessage {
   channel_type: string | null;
   thread_id: string | null;
   content: string;
+  origin_session_id: string | null;
 }
 
 export function getDueOutboundMessages(db: Database.Database): OutboundMessage[] {
@@ -284,4 +288,22 @@ export function migrateMessagesInTable(db: Database.Database): void {
     // the agent" semantics, so backfill 1 and default 1 for new inserts.
     db.prepare('ALTER TABLE messages_in ADD COLUMN trigger INTEGER NOT NULL DEFAULT 1').run();
   }
+  if (!cols.has('origin_session_id')) {
+    db.prepare('ALTER TABLE messages_in ADD COLUMN origin_session_id TEXT').run();
+  }
+}
+
+/**
+ * Adds columns added to messages_out after the initial v2 schema.
+ * Called by the host delivery path when opening a read-only outbound.db
+ * for polling — the outbound.db may predate this column.
+ *
+ * Note: The host opens outbound.db read-only, so we cannot run ALTER TABLE
+ * here. This function is intentionally a no-op on the host side; the
+ * column is added by the container in connection.ts:getOutboundDb().
+ * The interface allows null for backward compat with older session DBs.
+ */
+export function migrateMessagesOutTable(_db: Database.Database): void {
+  // Intentional no-op: outbound.db is container-owned (read-only on host).
+  // Migration happens in container/agent-runner/src/db/connection.ts.
 }

@@ -25,6 +25,8 @@ export interface MessageInRow {
   channel_type: string | null;
   thread_id: string | null;
   content: string;
+  /** Session that sent this A2A message; null for non-A2A. */
+  origin_session_id: string | null;
 }
 
 // Cap on how many messages reach the agent in one prompt. Read from
@@ -65,11 +67,19 @@ export function getPendingMessages(): MessageInRow[] {
 
   if (pending.length === 0) return [];
 
-  // Filter out messages already acknowledged in outbound.db
+  // Filter out messages already acknowledged in outbound.db.
+  // 'processing' acks older than 5 minutes are treated as stale (container
+  // picked up the message but crashed or hung before marking it completed).
   const ackedIds = new Set(
-    (outbound.prepare('SELECT message_id FROM processing_ack').all() as Array<{ message_id: string }>).map(
-      (r) => r.message_id,
-    ),
+    (
+      outbound
+        .prepare(
+          `SELECT message_id FROM processing_ack
+           WHERE status = 'completed'
+              OR (status = 'processing' AND status_changed > datetime('now', '-5 minutes'))`,
+        )
+        .all() as Array<{ message_id: string }>
+    ).map((r) => r.message_id),
   );
 
   // Reverse: we fetched DESC to take the most recent N, but the agent
