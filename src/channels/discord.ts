@@ -50,9 +50,15 @@ export class DiscordChannel implements Channel {
   private client: Client | null = null;
   private opts: DiscordChannelOpts;
   private botToken: string;
+  private allowedBotIds: Set<string>;
 
-  constructor(botToken: string, opts: DiscordChannelOpts) {
+  constructor(
+    botToken: string,
+    allowedBotIds: Set<string>,
+    opts: DiscordChannelOpts,
+  ) {
     this.botToken = botToken;
+    this.allowedBotIds = allowedBotIds;
     this.opts = opts;
   }
 
@@ -67,12 +73,25 @@ export class DiscordChannel implements Channel {
     });
 
     this.client.on(Events.MessageCreate, async (message: Message) => {
-      // Ignore bot messages (including own)
-      if (message.author.bot) return;
+      if (message.author.bot && !this.allowedBotIds.has(message.author.id))
+        return;
+      const isPermittedBot = message.author.bot; // 早期returnを通過した bot は許可済み
 
       const isThread = message.channel.isThread();
       const channelId = message.channelId;
       const chatJid = `dc:${channelId}`;
+
+      // 許可Botは thread_per_message チャンネルのみで処理する
+      if (isPermittedBot) {
+        const group = this.opts.registeredGroups()[chatJid];
+        if (group?.channel_mode !== 'thread_per_message') {
+          logger.debug(
+            { botId: message.author.id, chatJid },
+            'allowed bot message dropped: not thread_per_message channel',
+          );
+          return;
+        }
+      }
       let content = message.content;
       const timestamp = message.createdAt.toISOString();
       const senderName =
@@ -232,13 +251,23 @@ export class DiscordChannel implements Channel {
     return new Promise<void>((resolve) => {
       this.client!.once(Events.ClientReady, (readyClient) => {
         logger.info(
-          { username: readyClient.user.tag, id: readyClient.user.id },
+          {
+            username: readyClient.user.tag,
+            id: readyClient.user.id,
+            allowedBotIds: [...this.allowedBotIds],
+          },
           'Discord bot connected',
         );
         console.log(`\n  Discord bot: ${readyClient.user.tag}`);
         console.log(
-          `  Use /chatid command or check channel IDs in Discord settings\n`,
+          `  Use /chatid command or check channel IDs in Discord settings`,
         );
+        if (this.allowedBotIds.size > 0) {
+          console.log(
+            `  Allowed bot IDs (bypass filter): ${[...this.allowedBotIds].join(', ')}`,
+          );
+        }
+        console.log();
         resolve();
       });
 
@@ -354,12 +383,32 @@ export class DiscordChannel implements Channel {
 }
 
 registerChannel('discord', (opts: ChannelOpts) => {
-  const envVars = readEnvFile(['DISCORD_BOT_TOKEN']);
+  const envVars = readEnvFile(['DISCORD_BOT_TOKEN', 'DISCORD_ALLOWED_BOT_IDS']);
   const token =
     process.env.DISCORD_BOT_TOKEN || envVars.DISCORD_BOT_TOKEN || '';
   if (!token) {
     logger.warn('Discord: DISCORD_BOT_TOKEN not set');
     return null;
   }
-  return new DiscordChannel(token, opts);
+  const allowedBotIdsRaw =
+    process.env.DISCORD_ALLOWED_BOT_IDS ?? envVars.DISCORD_ALLOWED_BOT_IDS;
+  const discordIdPattern = /^\d{17,20}$/;
+  const allowedBotIds = new Set(
+    allowedBotIdsRaw
+      ? allowedBotIdsRaw
+          .split(',')
+          .map((s) => s.trim())
+          .filter((id) => {
+            if (!discordIdPattern.test(id)) {
+              logger.warn(
+                { id },
+                'DISCORD_ALLOWED_BOT_IDS: invalid ID skipped',
+              );
+              return false;
+            }
+            return true;
+          })
+      : [],
+  );
+  return new DiscordChannel(token, allowedBotIds, opts);
 });
