@@ -249,15 +249,21 @@ function extractAttachmentFiles(
   const attachments = parsed.attachments as Array<Record<string, unknown>> | undefined;
   if (!Array.isArray(attachments)) return contentStr;
 
+  // Windows forbids `< > : " | ? *` and 0x00-0x1F in path components.
+  // Telegram (and other adapters) use ':' as a separator in message IDs,
+  // so we must sanitize before mkdir. Both the on-disk dir and the
+  // localPath written to inbound.db use the same sanitized form.
+  const safeMessageId = messageId.replace(/[<>:"|?*\x00-\x1f]/g, '_');
+
   let changed = false;
   for (const att of attachments) {
     if (typeof att.data === 'string') {
-      const inboxDir = path.join(sessionDir(agentGroupId, sessionId), 'inbox', messageId);
+      const inboxDir = path.join(sessionDir(agentGroupId, sessionId), 'inbox', safeMessageId);
       fs.mkdirSync(inboxDir, { recursive: true });
       const filename = (att.name as string) || `attachment-${Date.now()}`;
       const filePath = path.join(inboxDir, filename);
       fs.writeFileSync(filePath, Buffer.from(att.data as string, 'base64'));
-      att.localPath = `inbox/${messageId}/${filename}`;
+      att.localPath = `inbox/${safeMessageId}/${filename}`;
       delete att.data;
       changed = true;
       log.debug('Saved attachment to inbox', { messageId, filename, size: att.size });

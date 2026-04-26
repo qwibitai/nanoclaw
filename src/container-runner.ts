@@ -15,6 +15,7 @@ import {
   CONTAINER_INSTALL_LABEL,
   DATA_DIR,
   GROUPS_DIR,
+  MAX_CONCURRENT_CONTAINERS,
   ONECLI_API_KEY,
   ONECLI_URL,
   TIMEZONE,
@@ -83,6 +84,20 @@ export function wakeContainer(session: Session): Promise<void> {
   if (existing) {
     log.debug('Container wake already in-flight — joining existing promise', { sessionId: session.id });
     return existing;
+  }
+  // Concurrency cap: refuse to spawn beyond MAX_CONCURRENT_CONTAINERS. The
+  // host sweep (60s) re-checks countDueMessages and re-wakes once capacity
+  // frees up, so messages are never lost — just deferred. v1 did this via a
+  // GroupQueue with explicit waiting list; v2 leans on the sweep loop and
+  // keeps the runner branchless.
+  if (activeContainers.size + wakePromises.size >= MAX_CONCURRENT_CONTAINERS) {
+    log.warn('Container wake deferred — at concurrency limit', {
+      sessionId: session.id,
+      active: activeContainers.size,
+      inFlight: wakePromises.size,
+      limit: MAX_CONCURRENT_CONTAINERS,
+    });
+    return Promise.resolve();
   }
   const promise = spawnContainer(session).finally(() => {
     wakePromises.delete(session.id);
@@ -465,19 +480,23 @@ async function buildContainerArgs(
 
   // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls
   // are routed through the agent vault for credential injection.
-  try {
-    if (agentIdentifier) {
-      await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
-    }
-    const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
-    if (onecliApplied) {
-      log.info('OneCLI gateway applied', { containerName });
-    } else {
-      log.warn('OneCLI gateway not applied — container will have no credentials', { containerName });
-    }
-  } catch (err) {
-    log.warn('OneCLI gateway error — container will have no credentials', { containerName, err });
+  // FAIL CLOSED: if the gateway is unreachable or returns an error, refuse to
+  // spawn rather than silently falling back to .env passthrough. The user
+  // explicitly forbade external fallback (Apr 2026) — a container without
+  // proxy + CA cert would either leak raw .env keys or hit ConnectionRefused
+  // for every API call. Better to log the spawn failure and let the human
+  // see it than to flood Telegram with API errors.
+  if (agentIdentifier) {
+    await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
   }
+  const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
+  if (!onecliApplied) {
+    throw new Error(
+      `OneCLI gateway unreachable at ${ONECLI_URL} — refusing to spawn container without credentials. ` +
+        `Check that the local gateway is running (docker compose -p onecli ps) and that the host can reach ${ONECLI_URL}/api/health.`,
+    );
+  }
+  log.info('OneCLI gateway applied', { containerName });
 
   // Host gateway
   args.push(...hostGatewayArgs());

@@ -227,6 +227,15 @@ function formatAttachments(attachments: any[] | undefined): string {
     const type = a.type || 'file';
     const localPath = a.localPath ? `/workspace/${a.localPath}` : '';
     const url = a.url || '';
+    // Audio attachments carry an ASR-produced `transcript` set by the host
+    // bridge (src/channels/chat-sdk-bridge.ts). Surface it inline and tell the
+    // agent the transcription is already done — otherwise it sees a bare
+    // `[audio: …]` marker, runs `file` on the path, and concludes it lacks an
+    // ASR tool, even though the transcript is right there in the inbound.
+    if (type === 'audio' && typeof a.transcript === 'string' && a.transcript.length > 0) {
+      const tail = localPath ? ` — file at ${escapeXml(localPath)}` : '';
+      return `[audio transcript (already done host-side, no further transcription needed): "${escapeXml(a.transcript)}"${tail}]`;
+    }
     if (localPath) {
       return `[${type}: ${escapeXml(name)} — saved to ${escapeXml(localPath)}]`;
     }

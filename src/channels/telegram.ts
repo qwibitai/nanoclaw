@@ -110,6 +110,22 @@ async function sendPairingConfirmation(token: string, platformId: string): Promi
   }
 }
 
+/** Echo an ASR transcript back to the chat so the user can verify
+ *  transcription quality before the agent reacts. */
+async function sendTranscriptEcho(token: string, platformId: string, transcript: string): Promise<void> {
+  const chatId = platformId.split(':').slice(1).join(':');
+  if (!chatId) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: `🎤 ${transcript}` }),
+    });
+  } catch (err) {
+    log.warn('Telegram transcript echo failed', { err });
+  }
+}
+
 function createPairingInterceptor(
   botUsernamePromise: Promise<string | null>,
   hostOnInbound: ChannelSetup['onInbound'],
@@ -210,6 +226,9 @@ registerChannelAdapter('telegram', {
       extractReplyContext,
       supportsThreads: false,
       transformOutboundText: sanitizeTelegramLegacyMarkdown,
+      onTranscribed: async (platformId, _threadId, transcript) => {
+        await sendTranscriptEcho(token, platformId, transcript);
+      },
     });
 
     const botUsernamePromise = fetchBotUsername(token);

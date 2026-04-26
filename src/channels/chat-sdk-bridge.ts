@@ -20,6 +20,7 @@ import { log } from '../log.js';
 import { SqliteStateAdapter } from '../state-sqlite.js';
 import { registerWebhookAdapter } from '../webhook-server.js';
 import { getAskQuestionRender } from '../db/sessions.js';
+import { isTranscriptionEnabled, transcribeAudioBuffer } from '../transcription.js';
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
 import type { ChannelAdapter, ChannelSetup, InboundMessage } from './adapter.js';
 
@@ -72,6 +73,13 @@ export interface ChatSdkBridgeConfig {
    * and reactions still target the head of the reply.
    */
   maxTextLength?: number;
+  /**
+   * Called after an audio attachment is transcribed by ASR. Lets the platform
+   * adapter echo the transcript back to the chat for user verification of
+   * transcription quality before the agent reacts. Best-effort — errors are
+   * swallowed by the caller.
+   */
+  onTranscribed?: (platformId: string, threadId: string | null, transcript: string) => Promise<void>;
 }
 
 /**
@@ -129,9 +137,10 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     message: ChatMessage,
     isMention: boolean,
     isGroup?: boolean,
-  ): Promise<InboundMessage> {
+  ): Promise<{ inbound: InboundMessage; transcripts: string[] }> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const serialized = message.toJSON() as Record<string, any>;
+    const transcripts: string[] = [];
 
     // Download attachment data before serialization loses fetchData()
     if (message.attachments && message.attachments.length > 0) {
@@ -150,6 +159,21 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           try {
             const buffer = await att.fetchData();
             entry.data = buffer.toString('base64');
+
+            // Transcribe audio attachments so text-only agents (no multimodal)
+            // can read voice messages. Transcript is appended to the message
+            // text AND emitted via onTranscribed so the platform can echo it
+            // back for user verification.
+            if (att.type === 'audio' && isTranscriptionEnabled()) {
+              const transcript = await transcribeAudioBuffer(buffer, att.name ?? 'voice', att.mimeType);
+              if (transcript) {
+                entry.transcript = transcript;
+                transcripts.push(transcript);
+                const existingText = typeof serialized.text === 'string' ? serialized.text : '';
+                const voiceTag = `[Voice: ${transcript}]`;
+                serialized.text = existingText ? `${existingText}\n${voiceTag}` : voiceTag;
+              }
+            }
           } catch (err) {
             log.warn('Failed to download attachment', { type: att.type, err });
           }
@@ -181,13 +205,27 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     serialized.raw = undefined;
 
     return {
-      id: message.id,
-      kind: 'chat-sdk',
-      content: serialized,
-      timestamp: message.metadata.dateSent.toISOString(),
-      isMention,
-      isGroup,
+      inbound: {
+        id: message.id,
+        kind: 'chat-sdk',
+        content: serialized,
+        timestamp: message.metadata.dateSent.toISOString(),
+        isMention,
+        isGroup,
+      },
+      transcripts,
     };
+  }
+
+  async function notifyTranscripts(platformId: string, threadId: string | null, transcripts: string[]): Promise<void> {
+    if (!config.onTranscribed || transcripts.length === 0) return;
+    for (const t of transcripts) {
+      try {
+        await config.onTranscribed(platformId, threadId, t);
+      } catch (err) {
+        log.warn('onTranscribed echo failed', { err });
+      }
+    }
   }
 
   const bridge: ChannelAdapter = {
@@ -220,17 +258,17 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // wirings still fire on in-thread mentions.
       chat.onSubscribedMessage(async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
-        await setupConfig.onInbound(
-          channelId,
-          thread.id,
-          await messageToInbound(message, message.isMention === true, true),
-        );
+        const { inbound, transcripts } = await messageToInbound(message, message.isMention === true, true);
+        await setupConfig.onInbound(channelId, thread.id, inbound);
+        await notifyTranscripts(channelId, thread.id, transcripts);
       });
 
       // @mention in an unsubscribed thread — SDK-confirmed bot mention.
       chat.onNewMention(async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
-        await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, true, true));
+        const { inbound, transcripts } = await messageToInbound(message, true, true);
+        await setupConfig.onInbound(channelId, thread.id, inbound);
+        await notifyTranscripts(channelId, thread.id, transcripts);
       });
 
       // DMs — by definition addressed to the bot. Thread id flows through
@@ -245,7 +283,9 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           sender: (message.author as any)?.fullName ?? (message.author as any)?.userId ?? 'unknown',
           threadId: thread.id,
         });
-        await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, true, false));
+        const { inbound, transcripts } = await messageToInbound(message, true, false);
+        await setupConfig.onInbound(channelId, thread.id, inbound);
+        await notifyTranscripts(channelId, thread.id, transcripts);
       });
 
       // Plain messages in unsubscribed threads.
@@ -253,14 +293,19 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // Chat SDK dispatch (handling-events.mdx §"Handler dispatch order") is
       // exclusive: subscribed → onSubscribedMessage; unsubscribed+mention →
       // onNewMention; unsubscribed+pattern-match → onNewMessage. Registering
-      // with `/./` lets the router see every plain message on every
-      // unsubscribed thread the bot can see. The router short-circuits via
-      // getMessagingGroupWithAgentCount (~1 DB read) for unwired channels,
-      // so forwarding every one is cheap enough to not need a bridge-side
-      // flood gate.
-      chat.onNewMessage(/./, async (thread, message) => {
+      // with `/.*/` lets the router see every plain message — including
+      // attachment-only messages with empty text (voice notes, stickers,
+      // photos without caption) — on every unsubscribed thread the bot can
+      // see. (`/./` would skip empty text since `.` requires at least one
+      // character, breaking voice-message ASR.) The router short-circuits
+      // via getMessagingGroupWithAgentCount (~1 DB read) for unwired
+      // channels, so forwarding every one is cheap enough to not need a
+      // bridge-side flood gate.
+      chat.onNewMessage(/.*/, async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
-        await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, false, true));
+        const { inbound, transcripts } = await messageToInbound(message, false, true);
+        await setupConfig.onInbound(channelId, thread.id, inbound);
+        await notifyTranscripts(channelId, thread.id, transcripts);
       });
 
       // Handle button clicks (ask_user_question)

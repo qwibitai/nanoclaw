@@ -6,13 +6,14 @@
  */
 import path from 'path';
 
-import { DATA_DIR } from './config.js';
+import { DATA_DIR, assertLocalOnecli } from './config.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
 import { initDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
+import { startIpcWatcher, stopIpcWatcher } from './ipc-watcher.js';
 import { routeInbound } from './router.js';
 import { log } from './log.js';
 
@@ -57,6 +58,11 @@ import { initChannelAdapters, teardownChannelAdapters, getChannelAdapter } from 
 
 async function main(): Promise<void> {
   log.info('NanoClaw starting');
+
+  // 0. Refuse to run if ONECLI_URL points at the cloud (or is unset). This is
+  //    a runtime check rather than a module-load assertion so tests and tools
+  //    can import ./config freely without an env var.
+  assertLocalOnecli();
 
   // 1. Init central DB
   const dbPath = path.join(DATA_DIR, 'v2.db');
@@ -159,6 +165,10 @@ async function main(): Promise<void> {
   startHostSweep();
   log.info('Host sweep started');
 
+  // 7. Start IPC watcher (consumes data/ipc/<folder>/messages/*.json from
+  //    out-of-process producers like roosync-inbox-standalone).
+  startIpcWatcher();
+
   log.info('NanoClaw running');
 }
 
@@ -174,6 +184,7 @@ async function shutdown(signal: string): Promise<void> {
   }
   stopDeliveryPolls();
   stopHostSweep();
+  stopIpcWatcher();
   await teardownChannelAdapters();
   process.exit(0);
 }
