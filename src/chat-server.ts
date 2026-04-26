@@ -475,7 +475,6 @@ async function handleHttp(
       isMain: g.isMain || false,
       requiresTrigger: g.requiresTrigger !== false,
       added_at: g.added_at,
-      tags: [],
     }));
     return json(200, bots);
   }
