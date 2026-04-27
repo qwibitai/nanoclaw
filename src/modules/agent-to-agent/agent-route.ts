@@ -120,6 +120,57 @@ export interface RoutableAgentMessage {
   content: string;
 }
 
+/**
+ * Rate-limit backstop for agent-to-agent routing.
+ *
+ * Without this, two failure modes are reachable from normal LLM behavior:
+ *   - **Self-loop.** Self-targets are intentionally allowed (line ~131) for
+ *     post-approval system notes. An agent that emits a self-targeted
+ *     message wakes its own container, which can emit another self-message,
+ *     and so on. Observed in production: ten self-messages in 40 s,
+ *     no useful output, agent broke the loop only by pattern-matching
+ *     "(silently waiting)" / "(no response)" responses.
+ *   - **Politeness loop.** Two bidirectionally wired agents reciprocate
+ *     each other's acknowledgements (reactions, "Ready", "Acknowledged"),
+ *     each acknowledgement waking the peer's container. Observed in
+ *     production: ~30 messages in 2 min, zero substantive content, the
+ *     user's actual question never answered.
+ *
+ * Self ceiling is tighter than peer ceiling because legitimate self-routes
+ * (post-approval system notes) are rare. Peer ceiling is loose enough for
+ * normal back-and-forth coordination but bounded.
+ *
+ * In-memory sliding window. Resets on host restart by design — this is a
+ * backstop against a transient bug, not durable policy.
+ */
+const A2A_RATE_LIMIT_WINDOW_MS = 60_000;
+const A2A_SELF_ROUTE_MAX = 3;
+const A2A_PEER_ROUTE_MAX = 10;
+const a2aRecentRoutes = new Map<string, number[]>();
+
+export function checkAgentRouteRateLimit(
+  fromId: string,
+  toId: string,
+  now: number = Date.now(),
+): { ok: true } | { ok: false; recent: number; limit: number } {
+  const key = `${fromId}->${toId}`;
+  const limit = fromId === toId ? A2A_SELF_ROUTE_MAX : A2A_PEER_ROUTE_MAX;
+  const cutoff = now - A2A_RATE_LIMIT_WINDOW_MS;
+  const recent = (a2aRecentRoutes.get(key) ?? []).filter((t) => t > cutoff);
+  if (recent.length >= limit) {
+    a2aRecentRoutes.set(key, recent);
+    return { ok: false, recent: recent.length, limit };
+  }
+  recent.push(now);
+  a2aRecentRoutes.set(key, recent);
+  return { ok: true };
+}
+
+/** Test-only — reset rate-limit state between cases. */
+export function resetAgentRouteRateLimit(): void {
+  a2aRecentRoutes.clear();
+}
+
 export async function routeAgentMessage(msg: RoutableAgentMessage, session: Session): Promise<void> {
   const targetAgentGroupId = msg.platform_id;
   if (!targetAgentGroupId) {
@@ -135,6 +186,18 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
   }
   if (!getAgentGroup(targetAgentGroupId)) {
     throw new Error(`target agent group ${targetAgentGroupId} not found for message ${msg.id}`);
+  }
+  const rl = checkAgentRouteRateLimit(session.agent_group_id, targetAgentGroupId);
+  if (!rl.ok) {
+    log.warn('agent-to-agent: rate limit exceeded, dropping', {
+      from: session.agent_group_id,
+      to: targetAgentGroupId,
+      msgId: msg.id,
+      recent: rl.recent,
+      limit: rl.limit,
+      selfRoute: session.agent_group_id === targetAgentGroupId,
+    });
+    return;
   }
   const { session: targetSession } = resolveSession(targetAgentGroupId, null, null, 'agent-shared');
   const a2aMsgId = `a2a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
