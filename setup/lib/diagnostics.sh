@@ -33,8 +33,18 @@ ph_install_id() {
 # Emit a PostHog event. First arg is the event name; remaining args are
 # `key=value` pairs merged into properties. Values are JSON-escaped for
 # quotes and backslashes; keep them short and alphanumeric-ish.
+#
+# Honors three opt-out signals, in priority order:
+#   - NANOCLAW_NO_DIAGNOSTICS=1 (project-specific)
+#   - DO_NOT_TRACK=1           (widely-used cross-project convention
+#                               from consoledonottrack.com)
+# Also returns quietly if curl isn't on PATH so minimal systems without
+# curl don't spill "command not found" before the background ampersand
+# takes effect in some shells.
 ph_event() {
   [ "${NANOCLAW_NO_DIAGNOSTICS:-}" = "1" ] && return 0
+  [ "${DO_NOT_TRACK:-}" = "1" ] && return 0
+  command -v curl >/dev/null 2>&1 || return 0
   local event=$1
   shift
   local id
