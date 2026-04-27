@@ -162,6 +162,128 @@ describe('session manager', () => {
     expect(fs.existsSync(msgOutbox)).toBe(false);
   });
 
+  it('should reject inbound attachment names that escape the inbox dir', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+
+    writeSessionMessage('ag-1', session.id, {
+      id: 'msg-traversal',
+      kind: 'chat',
+      timestamp: now(),
+      content: JSON.stringify({
+        text: 'pwn',
+        attachments: [
+          { name: '../../pwned.txt', data: Buffer.from('OWNED').toString('base64'), size: 5 },
+        ],
+      }),
+    });
+
+    // The traversal target two levels up from inbox/<msgId>/ resolves into
+    // the session dir; nothing should land there.
+    const targeted = path.join(sessionDir('ag-1', session.id), 'pwned.txt');
+    expect(fs.existsSync(targeted)).toBe(false);
+  });
+
+  it('should reject inbound attachment writes through a pre-placed symlinked inbox dir', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+
+    // The container has /workspace write access, so it can pre-create
+    // inbox/<msgId> as a symlink to escape.
+    const inboxRoot = path.join(sessionDir('ag-1', session.id), 'inbox');
+    fs.mkdirSync(inboxRoot, { recursive: true });
+    const evilTarget = path.join(TEST_DIR, 'evil-target');
+    fs.mkdirSync(evilTarget, { recursive: true });
+    fs.symlinkSync(evilTarget, path.join(inboxRoot, 'msg-evil'));
+
+    writeSessionMessage('ag-1', session.id, {
+      id: 'msg-evil',
+      kind: 'chat',
+      timestamp: now(),
+      content: JSON.stringify({
+        text: 'evil',
+        attachments: [
+          { name: 'photo.png', data: Buffer.from('PNGBYTES').toString('base64'), size: 8 },
+        ],
+      }),
+    });
+
+    // The symlink target was not written through.
+    expect(fs.existsSync(path.join(evilTarget, 'photo.png'))).toBe(false);
+  });
+
+  it('should refuse to follow a pre-existing symlink at the inbound attachment path', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+
+    // The container pre-creates inbox/<msgId>/photo.png as a symlink to a
+    // host file. Without the wx flag, writeFileSync would follow it.
+    const inboxDir = path.join(sessionDir('ag-1', session.id), 'inbox', 'msg-sym');
+    fs.mkdirSync(inboxDir, { recursive: true });
+    const outside = path.join(TEST_DIR, 'outside.txt');
+    fs.writeFileSync(outside, 'ORIGINAL');
+    fs.symlinkSync(outside, path.join(inboxDir, 'photo.png'));
+
+    writeSessionMessage('ag-1', session.id, {
+      id: 'msg-sym',
+      kind: 'chat',
+      timestamp: now(),
+      content: JSON.stringify({
+        text: 'sym',
+        attachments: [
+          { name: 'photo.png', data: Buffer.from('PNGBYTES').toString('base64'), size: 8 },
+        ],
+      }),
+    });
+
+    // The host file behind the symlink must remain untouched.
+    expect(fs.readFileSync(outside, 'utf-8')).toBe('ORIGINAL');
+  });
+
+  it('should reject inbound attachments when messageId is unsafe', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+
+    writeSessionMessage('ag-1', session.id, {
+      id: '../../escape',
+      kind: 'chat',
+      timestamp: now(),
+      content: JSON.stringify({
+        text: 'msgid',
+        attachments: [
+          { name: 'photo.png', data: Buffer.from('PNGBYTES').toString('base64'), size: 8 },
+        ],
+      }),
+    });
+
+    // No inbox subtree should be materialised for the rejected id.
+    const inboxRoot = path.join(sessionDir('ag-1', session.id), 'inbox');
+    if (fs.existsSync(inboxRoot)) {
+      expect(fs.readdirSync(inboxRoot)).toEqual([]);
+    }
+  });
+
+  it('should still save inbound attachments with safe basenames', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+
+    writeSessionMessage('ag-1', session.id, {
+      id: 'msg-ok',
+      kind: 'chat',
+      timestamp: now(),
+      content: JSON.stringify({
+        text: 'ok',
+        attachments: [
+          { name: 'photo.png', data: Buffer.from('PNGBYTES').toString('base64'), size: 8 },
+        ],
+      }),
+    });
+
+    const expected = path.join(sessionDir('ag-1', session.id), 'inbox', 'msg-ok', 'photo.png');
+    expect(fs.existsSync(expected)).toBe(true);
+    expect(fs.readFileSync(expected, 'utf-8')).toBe('PNGBYTES');
+  });
+
   it('should resolve to existing session (shared mode)', () => {
     const { session: s1, created: c1 } = resolveSession('ag-1', 'mg-1', null, 'shared');
     expect(c1).toBe(true);
