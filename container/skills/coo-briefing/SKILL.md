@@ -408,7 +408,10 @@ This section gives a fast single-scroll view of every property's key signals wit
 
 Steps to generate and attach:
 1. Write the complete HTML report to `/workspace/group/coo_brief_[YYYYMMDD].html`
-2. Send the email with that file as an attachment (filename: `COO_Briefing_[MonthDay Year].html`). The email body should be a brief plain-text note: "COO Briefing for [Day], [Month Date Year] attached."
+2. Send the email with that file as an attachment (filename: `COO_Briefing_[MonthDay Year].html`). The email body (HTML) should contain:
+   - The Top 5 Portfolio Takeaways (bullets)
+   - The All Properties Takeaways section (every property's 5 bullets in portfolio order)
+   - A line at the bottom: "Full report attached."
 
 Subject: "COO Briefing -- [Month Day, Year]".
 
