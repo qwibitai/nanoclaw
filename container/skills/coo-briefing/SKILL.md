@@ -148,7 +148,7 @@ Three periods required: **CurrWk**, **R28**, **YTD**. Three segments: **Total**,
 **CurrWk and R28 -- computed from str_daily.json:**
 
 STR publishes with ~7 day lag. Find the max DATE in str_daily.json -- that is the latest published date. Then:
-- **CurrWk**: rows where DATE >= (max_date - 6). Average OCC_INDEX, ADR_INDEX, REVPAR_INDEX across those 7 days per hotel per segment.
+- **CurrWk**: anchor to the Sunday of the week containing max_date. `week_start = max_date - timedelta(days=(max_date.weekday() + 1) % 7)`. Use rows where DATE >= week_start. Average OCC_INDEX, ADR_INDEX, REVPAR_INDEX across those days per hotel per segment. This ensures CurrWk is always a clean Sun-Sat calendar week, not a floating 7-day window.
 - **R28**: rows where DATE >= (max_date - 27). Average OCC_INDEX, ADR_INDEX, REVPAR_INDEX across up to 28 days per hotel per segment. If fewer than 20 days of data are available for a hotel, append "(partial N days)" to the R28 row.
 
 **YTD -- from str_monthly.json:**
@@ -173,13 +173,14 @@ Three windows:
 - Prior 7d: reviews where DATE_REVIEW >= today-14 AND < today-7
 
 Per window compute:
-- NPS: average of NPS column (NPS is only populated for Survey source, not Google/Booking)
-- Rating: average of RAW_JSON:rating (1-5 scale, populated for all external reviews)
-- Review count
+- **Recommend Score (0-10)**: average of NPS column. This column is likelihood-to-recommend (0-10 scale), not true Net Promoter Score. Only populated for Survey source reviews -- show "--" if no Survey reviews in window.
+- **True NPS**: computed from Survey reviews only. Promoters = score >= 9, Detractors = score <= 6. NPS = (count Promoters - count Detractors) / total Survey reviews * 100. Show as integer, e.g. "+42" or "-15". If fewer than 5 Survey reviews in window, show "--".
+- **Rating (1-5)**: average of RAW_JSON:rating (1-5 scale, populated for all external reviews including Google/Booking/TripAdvisor).
+- **Review count**: total reviews in window (all sources).
 
-WoW NPS delta = Last 7d NPS - Prior 7d NPS (show with sign, e.g. "+0.8" or "-1.2").
+WoW Recommend Score delta = Last 7d avg - Prior 7d avg (show with sign, e.g. "+0.8" or "-1.2").
 
-If L30d review count < 5, show NPS as "--" (not statistically meaningful).
+If L30d review count < 5, show Recommend Score and NPS as "--" (not statistically meaningful).
 
 ### Operations -- ALICE (Glitch Tickets, Last 7d)
 
@@ -287,12 +288,12 @@ Show hotels sorted by absolute variance %, largest first. Show top 6. Variance =
 
 Show all hotels where Total/YTD RevPAR Index < 90. Include R28 for trend direction and latest-day rank. If none, omit this table.
 
-**Table 6 -- Guest Experience WoW NPS Drops (Last 7d vs Prior 7d)**
+**Table 6 -- Guest Experience WoW Recommend Score Drops (Last 7d vs Prior 7d)**
 
-| Hotel | Last 7d NPS | Prior 7d NPS | Delta |
+| Hotel | Last 7d Score | Prior 7d Score | Delta |
 |---|---|---|---|
 
-Show hotels where WoW NPS delta < -0.5. Sort by delta ascending (largest drop first). Omit table if no drops.
+Show hotels where WoW Recommend Score delta < -0.5. Sort by delta ascending (largest drop first). Omit table if no drops.
 
 **Table 7 -- Operations: ALICE Ticket Volume (last 7d)**
 
@@ -368,12 +369,14 @@ If any RevPAR Index < 90, add "(watchlist)" in red. Do NOT revert to the old sin
 
 | Metric | L30d | Last 7d | Prior 7d | WoW Delta |
 |---|---|---|---|---|
-| NPS | | | | |
-| Rating (0-5) | | | | |
+| Recommend Score (0-10) | | | | |
+| NPS (Promoters - Detractors) | | | | |
+| Rating (1-5) | | | | |
 | Reviews | | | | |
 
-NPS WoW delta in red if < -0.5, green if > +0.5.
-If L30d NPS < 7.5, note in amber "(below threshold)".
+Recommend Score WoW delta in red if < -0.5, green if > +0.5.
+If L30d Recommend Score < 7.5, note in amber "(below threshold)".
+NPS: show as signed integer (e.g. "+42"). No WoW delta required for NPS.
 
 #### 3f. Operations -- ALICE (last 7d)
 
