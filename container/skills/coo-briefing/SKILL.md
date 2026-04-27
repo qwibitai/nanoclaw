@@ -488,12 +488,20 @@ The `send-email` tool does NOT support file attachments. Send the complete HTML 
 
 Steps:
 1. Build the full HTML report string in memory (complete document with all sections).
-2. Also write it to `/workspace/group/coo_brief_[YYYYMMDD].html` for local reference.
-3. Call `mcp__outlook__send-email` with:
+2. Write it to `/workspace/group/coo_brief_[YYYYMMDD].html`.
+3. Try `mcp__outlook__send-email` first:
    - `to`: "Gabriel.Ratner@properhotel.com"
    - `subject`: "COO Briefing -- [Month Day, Year]"
-   - `body`: the complete HTML report string (full document, all 12 properties)
+   - `body`: the complete HTML report string
    - No `cc`, no `bcc`
+4. If `mcp__outlook__send-email` fails or returns an error, fall back to the Graph API script:
+   ```bash
+   python3 /workspace/project/scripts/email/send_email.py \
+     --to Gabriel.Ratner@properhotel.com \
+     --subject "COO Briefing -- [Month Day, Year]" \
+     --body-file /workspace/group/coo_brief_[YYYYMMDD].html
+   ```
+   The script reads `~/.outlook-mcp-tokens.json` directly and calls the Graph API. Report success or failure via send_message.
 
 Subject: "COO Briefing -- [Month Day, Year]".
 

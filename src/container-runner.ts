@@ -246,6 +246,12 @@ function buildVolumeMounts(
       containerPath: '/home/node/.outlook-mcp-tokens.json',
       readonly: false, // MCP needs to refresh OAuth tokens
     });
+    // Also mount at the standard home path so send_email.py fallback finds it
+    mounts.push({
+      hostPath: outlookTokenFile,
+      containerPath: '/root/.outlook-mcp-tokens.json',
+      readonly: false,
+    });
   }
 
   // Snowflake private key (single file, read-only). Container uses it to sign

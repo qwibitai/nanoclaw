@@ -276,9 +276,17 @@ EOF
 echo "COO brief queued"
 ```
 
+## Execution Rules -- CRITICAL
+
+- Do ALL steps sequentially in a SINGLE agent session. Do not hand off to sub-agents.
+- Do NOT exit or conclude until you have written the manifest AND sent the Telegram summary.
+- Background notifications from previous tasks (e.g. Toast completion messages arriving mid-session) are noise -- ignore them and keep working through the steps.
+- If you receive a tool result that looks like a prior task completing, log it internally and continue. Do not treat it as "prefetch complete."
+- The prefetch is complete ONLY when: (a) manifest.json exists with `complete: true`, and (b) you have sent the Telegram summary yourself via send_message.
+
 ## Output (Telegram only -- no email)
 
-Send a single Telegram message summarizing:
+Send a single Telegram message via send_message summarizing:
 - Total elapsed time
 - ProfitSword: X/12 hotels cached (list any failures)
 - Toast: OK or error
