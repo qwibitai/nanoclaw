@@ -173,7 +173,11 @@ async function runTask(
   try {
     // Simple monitoring tasks run on Haiku to cut cost; complex briefing/
     // digest tasks need Sonnet quality and stay on the SDK default.
-    const HAIKU_TASK_PREFIXES = ['slack-monitor', 'system-monitor', 'imessage-summary'];
+    const HAIKU_TASK_PREFIXES = [
+      'slack-monitor',
+      'system-monitor',
+      'imessage-summary',
+    ];
     const useHaiku = HAIKU_TASK_PREFIXES.some((p) => task.id.startsWith(p));
     const modelOverride = useHaiku ? 'claude-haiku-4-5-20251001' : undefined;
 

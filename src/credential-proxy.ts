@@ -98,13 +98,21 @@ export function startCredentialProxy(
           try {
             const parsed = JSON.parse(body.toString('utf-8'));
             if (parsed.system) {
-              if (typeof parsed.system === 'string' && parsed.system.length > 0) {
-                parsed.system = [{
-                  type: 'text',
-                  text: parsed.system,
-                  cache_control: { type: 'ephemeral' },
-                }];
-              } else if (Array.isArray(parsed.system) && parsed.system.length > 0) {
+              if (
+                typeof parsed.system === 'string' &&
+                parsed.system.length > 0
+              ) {
+                parsed.system = [
+                  {
+                    type: 'text',
+                    text: parsed.system,
+                    cache_control: { type: 'ephemeral' },
+                  },
+                ];
+              } else if (
+                Array.isArray(parsed.system) &&
+                parsed.system.length > 0
+              ) {
                 const last = parsed.system[parsed.system.length - 1];
                 if (last && !last.cache_control) {
                   last.cache_control = { type: 'ephemeral' };
