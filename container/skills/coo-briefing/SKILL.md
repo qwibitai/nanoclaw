@@ -33,6 +33,14 @@ ls $CACHE_DIR/brief_sent.flag 2>/dev/null && echo "ALREADY SENT -- exiting" && e
 ```
 If flag exists, stop immediately.
 
+## Step 0b: Cache Presence Check
+
+```bash
+ls $CACHE_DIR/manifest.json 2>/dev/null || echo "NO MANIFEST"
+```
+
+If manifest.json does NOT exist, stop immediately and send_message: "COO Brief aborted -- no prefetch cache for $TODAY. Run /coo-prefetch first, then retry." Do NOT attempt live fetching. The brief cannot complete reliably without the cache (it will time out).
+
 ## Step 1: Cache Check
 
 ```bash
@@ -474,14 +482,18 @@ Only generate actions where data shows a meaningful signal -- do not fabricate a
 
 ## Output
 
-**HTML file attachment** to Gabriel.Ratner@properhotel.com ONLY via `mcp__outlook__send-email`.
+**Email** to Gabriel.Ratner@properhotel.com ONLY via `mcp__outlook__send-email`.
 
-Steps to generate and attach:
-1. Write the complete HTML report to `/workspace/group/coo_brief_[YYYYMMDD].html`
-2. Send the email with that file as an attachment (filename: `COO_Briefing_[MonthDay Year].html`). The email body (HTML) should contain:
-   - The Top 5 Portfolio Takeaways (bullets)
-   - The All Properties Takeaways section: every property's 5 bullets in portfolio order, each followed by its action items (from Action Routing section)
-   - A line at the bottom: "Full report attached."
+The `send-email` tool does NOT support file attachments. Send the complete HTML report as the email body directly.
+
+Steps:
+1. Build the full HTML report string in memory (complete document with all sections).
+2. Also write it to `/workspace/group/coo_brief_[YYYYMMDD].html` for local reference.
+3. Call `mcp__outlook__send-email` with:
+   - `to`: "Gabriel.Ratner@properhotel.com"
+   - `subject`: "COO Briefing -- [Month Day, Year]"
+   - `body`: the complete HTML report string (full document, all 12 properties)
+   - No `cc`, no `bcc`
 
 Subject: "COO Briefing -- [Month Day, Year]".
 
