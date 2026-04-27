@@ -311,7 +311,7 @@ For each hotel in portfolio order (SMP, DTLA, HJL, HJM, ATX, SFP, SHEL, MYC, TCH
 
 **Hotel header:** Full name (from property_mapping.json) + room count. Example: "Austin Proper (Rooms: 238)".
 
-#### 3a. Top 5 Takeaways
+#### 3a. Top 5 Takeaways + Actions
 
 Auto-generate 5 hotel-specific bullets from its computed data. Examples of what to look for:
 - 0-30d pace vs STLY with pickup direction
@@ -323,6 +323,8 @@ Auto-generate 5 hotel-specific bullets from its computed data. Examples of what 
 - Upcoming demand events
 
 Format: one sentence per bullet, specific numbers, no filler.
+
+After the 5 bullets, generate action items for this hotel using the Action Routing rules. One action line per distinct issue. Omit if no actionable signals.
 
 #### 3b. Pickup & Pace
 
@@ -397,8 +399,68 @@ At the very bottom of the report, after all property detail sections, compile ev
 For each hotel in portfolio order, show:
 - **Hotel full name** (bold)
 - The same 5 bullets generated in section 3a for that hotel (no re-computation, copy from above)
+- Immediately below each hotel's bullets: the action items generated for that hotel (see Action Routing below)
 
-This section gives a fast single-scroll view of every property's key signals without navigating through the full detail.
+This section gives a fast single-scroll view of every property's key signals and the action they require.
+
+---
+
+### Action Routing
+
+For every property takeaway that signals a problem or opportunity, generate a specific action line naming the right person(s) to engage. Actions appear:
+1. In the per-property detail section (section 3a), after the 5 takeaway bullets
+2. In the All Properties Takeaways section (section 4), after each hotel's bullets
+3. In the email body, after the All Properties Takeaways
+
+**Routing rules -- match the signal type to the owner:**
+
+| Signal type | Who to action |
+|---|---|
+| Sales pace gap vs STLY (0-30d or 31-60d) | Rowan Hand (SVP Sales) + property GM/MD |
+| Revenue pickup weak or DoD shed | Rowan Hand (SVP Sales) + Tracie Heisterkamp (SVP Revenue Management) + property GM/MD |
+| OTB vs Budget shortfall (MTD forecast miss) | Tracie Heisterkamp (SVP Revenue Management) + property GM/MD |
+| STR RGI or RevPAR Index on watchlist (< 90) | Tracie Heisterkamp (SVP Revenue Management) + property GM/MD |
+| NPS drop or below threshold | property GM/MD + Leah Edwards (Corporate Director of Operations) |
+| ALICE ticket volume high or est. compensation elevated | property GM/MD + Leah Edwards (Corporate Director of Operations) |
+| F&B signal (if F&B data is surfaced) | Luis Villaneda (SVP Food and Beverage) + property GM/MD |
+| Strong performer / outperforming | Acknowledge -- no corrective action needed, note for recognition |
+
+**Property GM/MD roster:**
+
+| Property | Name | Email |
+|---|---|---|
+| Santa Monica Proper | Armando Campos | Armando.Campos@properhotel.com |
+| DTLA Proper | Bruno Vergeynst | bruno.vergeynst@properhotel.com |
+| Hotel June West LA | Michael Gregory | michael.gregory@thehoteljune.com |
+| Hotel June Malibu | Leah Edwards | leah.edwards@properhotel.com |
+| Austin Proper | Anis Khoury | anis.khoury@properhotel.com |
+| San Francisco Proper | Adam Sydenham | adam.sydenham@properhotel.com |
+| The Shelborne By Proper | Guy Chetwynd | Guy.Chetwynd@shelborne.com |
+| Montauk Yacht Club | Omar Abreu | omar.abreu@montaukyachtclub.com |
+| The Culver Hotel | Danielle Goller | danielle.goller@theculverhotel.com |
+| Ingleside Estate | Robert Barnes | Robert.Barnes@avalonpalmsprings.com |
+| Avalon Hotel and Bungalows Beverly Hills | Martin Weiss | martin.weiss@avalonbeverlyhills.com |
+| Avalon Hotel and Bungalows Palm Springs | Robert Barnes | Robert.Barnes@avalonpalmsprings.com |
+
+**Corporate contacts:**
+
+| Name | Email | Role |
+|---|---|---|
+| Rowan Hand | rowan.hand@properhotel.com | SVP Sales |
+| Tracie Heisterkamp | tracie.heisterkamp@properhotel.com | SVP Revenue Management |
+| Leah Edwards | leah.edwards@properhotel.com | Corporate Director of Operations |
+| Luis Villaneda | luis.villaneda@properhotel.com | SVP Food and Beverage |
+
+**Action format** -- one line per action, specific and direct:
+
+"ACTION: Connect with [Name] ([Title]) and [Name] ([Title]) re [specific issue with number]. Discuss [concrete ask]."
+
+Examples:
+- "ACTION: Connect with Rowan Hand (SVP Sales) and Anis Khoury (Managing Director) re Austin Proper pacing -18% vs STLY in the 0-30d window. Discuss group/transient mix strategy to close gap before month-end."
+- "ACTION: Connect with Tracie Heisterkamp (SVP Revenue Management) and Armando Campos (Managing Director) re Santa Monica Proper RevPAR Index at 84 (YTD watchlist). Discuss rate positioning vs comp set."
+- "ACTION: Connect with Leah Edwards (Corporate Director of Operations) and Guy Chetwynd (Managing Director) re Shelborne NPS drop -1.2 WoW (7.8 vs prior 9.0). Review recent guest feedback and escalation log."
+
+Only generate actions where data shows a meaningful signal -- do not fabricate actions for hotels with clean metrics. If a hotel has no actionable signals, omit the action block for that hotel.
 
 ---
 
@@ -410,7 +472,7 @@ Steps to generate and attach:
 1. Write the complete HTML report to `/workspace/group/coo_brief_[YYYYMMDD].html`
 2. Send the email with that file as an attachment (filename: `COO_Briefing_[MonthDay Year].html`). The email body (HTML) should contain:
    - The Top 5 Portfolio Takeaways (bullets)
-   - The All Properties Takeaways section (every property's 5 bullets in portfolio order)
+   - The All Properties Takeaways section: every property's 5 bullets in portfolio order, each followed by its action items (from Action Routing section)
    - A line at the bottom: "Full report attached."
 
 Subject: "COO Briefing -- [Month Day, Year]".
