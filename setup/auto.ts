@@ -23,6 +23,7 @@
  */
 import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
+import * as os from 'os';
 import path from 'path';
 
 import * as p from '@clack/prompts';
@@ -61,6 +62,13 @@ const RUN_START = Date.now();
 type ChannelChoice = 'telegram' | 'discord' | 'whatsapp' | 'signal' | 'teams' | 'slack' | 'imessage' | 'skip';
 
 async function main(): Promise<void> {
+  // Make sure ~/.local/bin is on PATH for every child process we spawn.
+  // Installers we run mid-setup (OneCLI, claude) drop binaries there and
+  // append a PATH line to the user's shell rc, but rc updates don't reach
+  // an already-running Node process — so without this patch a freshly
+  // installed `onecli` is invisible to a subsequent `runInheritScript`.
+  ensureLocalBinOnPath();
+
   // Parse CLI flags first — `--help` short-circuits before we render anything,
   // and flag values get folded into process.env so existing step code reading
   // NANOCLAW_* sees them unchanged.
@@ -1012,6 +1020,14 @@ async function askChannelChoice(): Promise<ChannelChoice> {
 }
 
 // ─── interactive / env helpers ─────────────────────────────────────────
+
+function ensureLocalBinOnPath(): void {
+  const localBin = path.join(os.homedir(), '.local', 'bin');
+  const current = process.env.PATH ?? '';
+  const segments = current.split(path.delimiter).filter(Boolean);
+  if (segments.includes(localBin)) return;
+  process.env.PATH = current ? `${localBin}${path.delimiter}${current}` : localBin;
+}
 
 function anthropicSecretExists(): boolean {
   try {
