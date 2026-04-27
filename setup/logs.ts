@@ -132,6 +132,48 @@ export function stepRawLog(name: string): string {
   return path.join(STEPS_DIR, `${num}-${safeName}.log`);
 }
 
+/**
+ * Read the most recent step block matching `name` from the progression log
+ * and return its parsed `key: value` fields (lowercased keys, as `step()`
+ * writes them). Returns null if no matching block exists yet.
+ *
+ * Used by the failure-hint and the centralised restart helper to figure out
+ * which service mode this install ended up with — the source of truth is the
+ * log we just wrote, no separate state file needed.
+ */
+export function lastStepFields(name: string): Record<string, string> | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(PROGRESS_LOG, 'utf-8');
+  } catch {
+    return null;
+  }
+  const lines = raw.split('\n');
+  // Find the LAST `=== [...] <name> [...] → ... ===` header line.
+  const headerRe = new RegExp(`^=== \\[[^\\]]+\\] ${escapeRegex(name)} \\[[^\\]]+\\] → `);
+  let headerIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (headerRe.test(lines[i])) {
+      headerIdx = i;
+      break;
+    }
+  }
+  if (headerIdx === -1) return null;
+  const fields: Record<string, string> = {};
+  // Indented `  key: value` lines follow the header until a blank line or next `=== ` block.
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('=== ') || line.startsWith('## ') || line === '') break;
+    const m = /^ {2}([a-z0-9_-]+):\s*(.*)$/i.exec(line);
+    if (m) fields[m[1].toLowerCase()] = m[2];
+  }
+  return fields;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   return `${(ms / 1000).toFixed(1)}s`;

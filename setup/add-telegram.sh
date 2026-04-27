@@ -144,21 +144,8 @@ cp .env data/env/env
 # non-interactive install.
 
 log "Restarting service so the new adapter picks up the token…"
-# shellcheck source=setup/lib/install-slug.sh
-source "$PROJECT_ROOT/setup/lib/install-slug.sh"
-case "$(uname -s)" in
-  Darwin)
-    launchctl kickstart -k "gui/$(id -u)/$(launchd_label)" >&2 2>/dev/null || true
-    ;;
-  Linux)
-    systemctl --user restart "$(systemd_unit)" >&2 2>/dev/null \
-      || sudo systemctl restart "$(systemd_unit)" >&2 2>/dev/null \
-      || true
-    ;;
-esac
-
-# Give the Telegram adapter a moment to finish starting before pair-telegram
-# begins polling for the user's code message.
-sleep 5
+# shellcheck source=setup/lib/restart.sh
+source "$PROJECT_ROOT/setup/lib/restart.sh"
+restart_service || { emit_status failed "service restart failed — see logs/nanoclaw.error.log"; exit 1; }
 
 emit_status success

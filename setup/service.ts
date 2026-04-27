@@ -11,6 +11,7 @@ import path from 'path';
 
 import { log } from '../src/log.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
+import { waitForSocket } from './lib/agent-ping.js';
 import { ensureSudoCached } from './lib/sudo.js';
 import { cleanupUnhealthyPeers } from './peer-cleanup.js';
 import {
@@ -23,6 +24,19 @@ import {
   isWSL,
 } from './platform.js';
 import { emitStatus } from './status.js';
+
+/**
+ * Reason linger was not enabled, surfaced into the SETUP_SERVICE status block
+ * so the setup driver can render an accurate "to upgrade to systemd…" hint
+ * when we fall back to the nohup wrapper.
+ */
+type LingerReason = 'no_sudo_for_loginctl' | 'loginctl_failed' | 'wsl';
+
+const SOCKET_WAIT_MS = 10_000;
+
+function socketPathFor(projectRoot: string): string {
+  return path.join(projectRoot, 'data', 'cli.sock');
+}
 
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
@@ -69,9 +83,9 @@ export async function run(_args: string[]): Promise<void> {
   }
 
   if (platform === 'macos') {
-    setupLaunchd(projectRoot, nodePath, homeDir);
+    await setupLaunchd(projectRoot, nodePath, homeDir);
   } else if (platform === 'linux') {
-    setupLinux(projectRoot, nodePath, homeDir);
+    await setupLinux(projectRoot, nodePath, homeDir);
   } else {
     emitStatus('SETUP_SERVICE', {
       SERVICE_TYPE: 'unknown',
@@ -85,11 +99,11 @@ export async function run(_args: string[]): Promise<void> {
   }
 }
 
-function setupLaunchd(
+async function setupLaunchd(
   projectRoot: string,
   nodePath: string,
   homeDir: string,
-): void {
+): Promise<void> {
   // Per-checkout service label so multiple NanoClaw installs can coexist
   // without clobbering each other's plist.
   const label = getLaunchdLabel(projectRoot);
@@ -162,13 +176,20 @@ function setupLaunchd(
   }
 
   // Verify
-  let serviceLoaded = false;
+  let listLoaded = false;
   try {
     const output = execSync('launchctl list', { encoding: 'utf-8' });
-    serviceLoaded = output.includes(label);
+    listLoaded = output.includes(label);
   } catch {
     // launchctl list failed
   }
+
+  // Self-ping: the service is "loaded" per launchctl as soon as the plist is
+  // accepted, but that doesn't tell us the host actually bound its socket.
+  // Wait for data/cli.sock so a crash-looping process surfaces here, not
+  // three steps later at first-chat.
+  const socketUp = await waitForSocket(socketPathFor(projectRoot), SOCKET_WAIT_MS);
+  const status = listLoaded && socketUp ? 'success' : listLoaded ? 'degraded' : 'failed';
 
   emitStatus('SETUP_SERVICE', {
     SERVICE_TYPE: 'launchd',
@@ -176,24 +197,24 @@ function setupLaunchd(
     NODE_PATH: nodePath,
     PROJECT_PATH: projectRoot,
     PLIST_PATH: plistPath,
-    SERVICE_LOADED: serviceLoaded,
-    STATUS: 'success',
+    SERVICE_LOADED: socketUp,
+    STATUS: status,
     LOG: 'logs/setup.log',
   });
 }
 
-function setupLinux(
+async function setupLinux(
   projectRoot: string,
   nodePath: string,
   homeDir: string,
-): void {
+): Promise<void> {
   const serviceManager = getServiceManager();
 
   if (serviceManager === 'systemd') {
-    setupSystemd(projectRoot, nodePath, homeDir);
+    await setupSystemd(projectRoot, nodePath, homeDir);
   } else {
     // WSL without systemd or other Linux without systemd
-    setupNohupFallback(projectRoot, nodePath, homeDir);
+    await setupNohupFallback(projectRoot, nodePath, homeDir, 'wsl');
   }
 }
 
@@ -239,11 +260,49 @@ function checkDockerGroupStale(): boolean {
   }
 }
 
-function setupSystemd(
+/**
+ * Attempt to spawn the user-level systemd manager via `loginctl enable-linger`,
+ * so the subsequent `systemctl --user daemon-reload` probe has something to
+ * talk to. Without this, sessions that didn't go through PAM (`su -`, certain
+ * LXC login paths) have no `systemd --user` running and the probe fails — at
+ * which point we'd fall back to the nohup wrapper unnecessarily.
+ *
+ * Returns the actual outcome so the caller can stash it in the status block
+ * if we still end up falling back.
+ */
+function tryEnableLinger(): { ok: true } | { ok: false; reason: LingerReason } {
+  if (isWSL()) return { ok: false, reason: 'wsl' };
+  const sudoState = ensureSudoCached();
+  const user = execSync('whoami', { encoding: 'utf-8' }).trim();
+  // Prefer sudo to avoid polkit's pkttyagent (often missing on minimal
+  // boxes) which produces noise on the spinner. If no sudo cache, fall
+  // through to direct loginctl — polkit may still grant the action.
+  const cmd = sudoState === 'cached'
+    ? `sudo -n loginctl enable-linger ${user}`
+    : 'loginctl enable-linger';
+  try {
+    execSync(cmd, { stdio: 'ignore' });
+    log.info('Enabled loginctl linger for current user', {
+      via: sudoState === 'cached' ? 'sudo' : 'polkit',
+    });
+    return { ok: true };
+  } catch (err) {
+    const reason: LingerReason = sudoState === 'cached'
+      ? 'loginctl_failed'
+      : 'no_sudo_for_loginctl';
+    log.warn('loginctl enable-linger failed — service may stop on SSH logout', {
+      err,
+      reason,
+    });
+    return { ok: false, reason };
+  }
+}
+
+async function setupSystemd(
   projectRoot: string,
   nodePath: string,
   homeDir: string,
-): void {
+): Promise<void> {
   const runningAsRoot = isRoot();
   const unitName = getSystemdUnit(projectRoot);
   const unitFileName = `${unitName}.service`;
@@ -251,20 +310,33 @@ function setupSystemd(
   // Root uses system-level service, non-root uses user-level
   let unitPath: string;
   let systemctlPrefix: string;
+  let lingerOutcome: { ok: true } | { ok: false; reason: LingerReason } | null = null;
 
   if (runningAsRoot) {
     unitPath = `/etc/systemd/system/${unitFileName}`;
     systemctlPrefix = 'systemctl';
     log.info('Running as root — installing system-level systemd unit');
   } else {
-    // Check if user-level systemd session is available
+    // Enable linger BEFORE probing systemctl --user. enable-linger talks to
+    // the system-level systemd (PID 1) and spawns the user manager as a
+    // side effect — so the subsequent probe succeeds even when the current
+    // shell didn't go through a PAM session that would have started one
+    // (`su -`, raw LXC console, some headless paths). Idempotent on
+    // already-lingered users.
+    lingerOutcome = tryEnableLinger();
+
+    // Probe whether `systemctl --user` actually has a user manager to talk to.
     try {
       execSync('systemctl --user daemon-reload', { stdio: 'pipe' });
     } catch {
+      const fallbackReason: LingerReason | undefined = lingerOutcome.ok
+        ? undefined
+        : lingerOutcome.reason;
       log.warn(
         'systemd user session not available — falling back to nohup wrapper',
+        { lingerReason: fallbackReason },
       );
-      setupNohupFallback(projectRoot, nodePath, homeDir);
+      await setupNohupFallback(projectRoot, nodePath, homeDir, fallbackReason);
       return;
     }
     const unitDir = path.join(homeDir, '.config', 'systemd', 'user');
@@ -337,34 +409,6 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
   // Kill orphaned nanoclaw processes to avoid channel connection conflicts
   killOrphanedProcesses(projectRoot);
 
-  // Enable lingering so the user service survives SSH logout.
-  // Without linger, systemd terminates all user processes when the last session closes.
-  //
-  // `loginctl enable-linger` (no arg) authorises via polkit — which on
-  // minimal/headless boxes spawns `pkttyagent` to prompt the user, and
-  // pkttyagent isn't installed, producing a noisy "Failed to execute
-  // /usr/bin/pkttyagent" line in the spinner. Going through sudo bypasses
-  // polkit entirely (sudo→root has the privilege directly). `sudo -n`
-  // because the spinner captures stdio and an interactive prompt would
-  // hang on /dev/null; if the cache expired we fall through to the
-  // existing warn-and-continue path.
-  if (!runningAsRoot) {
-    const user = execSync('whoami', { encoding: 'utf-8' }).trim();
-    const sudoState = ensureSudoCached();
-    const cmd = sudoState === 'cached'
-      ? `sudo -n loginctl enable-linger ${user}`
-      : 'loginctl enable-linger';
-    try {
-      execSync(cmd, { stdio: 'ignore' });
-      log.info('Enabled loginctl linger for current user', { via: sudoState === 'cached' ? 'sudo' : 'polkit' });
-    } catch (err) {
-      log.warn(
-        'loginctl enable-linger failed — service may stop on SSH logout',
-        { err },
-      );
-    }
-  }
-
   // Enable and start
   try {
     execSync(`${systemctlPrefix} daemon-reload`, { stdio: 'ignore' });
@@ -389,14 +433,19 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
     log.error('systemctl restart failed', { err });
   }
 
-  // Verify
-  let serviceLoaded = false;
+  // Verify: is-active confirms systemd thinks the unit is up; the socket
+  // wait confirms the host actually bound. Both must hold for "success".
+  let isActive = false;
   try {
     execSync(`${systemctlPrefix} is-active ${unitName}`, { stdio: 'ignore' });
-    serviceLoaded = true;
+    isActive = true;
   } catch {
     // Not active
   }
+  const socketUp = await waitForSocket(socketPathFor(projectRoot), SOCKET_WAIT_MS);
+  const status = isActive && socketUp ? 'success' : isActive ? 'degraded' : 'failed';
+
+  const lingerEnabled = runningAsRoot ? false : lingerOutcome?.ok === true;
 
   emitStatus('SETUP_SERVICE', {
     SERVICE_TYPE: runningAsRoot ? 'systemd-system' : 'systemd-user',
@@ -404,19 +453,20 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
     NODE_PATH: nodePath,
     PROJECT_PATH: projectRoot,
     UNIT_PATH: unitPath,
-    SERVICE_LOADED: serviceLoaded,
+    SERVICE_LOADED: socketUp,
     ...(dockerGroupStale ? { DOCKER_GROUP_STALE: true } : {}),
-    LINGER_ENABLED: !runningAsRoot,
-    STATUS: 'success',
+    LINGER_ENABLED: lingerEnabled,
+    STATUS: status,
     LOG: 'logs/setup.log',
   });
 }
 
-function setupNohupFallback(
+async function setupNohupFallback(
   projectRoot: string,
   nodePath: string,
   homeDir: string,
-): void {
+  lingerReason?: LingerReason,
+): Promise<void> {
   log.warn('No systemd detected — generating nohup wrapper script');
 
   const wrapperPath = path.join(projectRoot, 'start-nanoclaw.sh');
@@ -455,14 +505,51 @@ function setupNohupFallback(
   fs.writeFileSync(wrapperPath, wrapper, { mode: 0o755 });
   log.info('Wrote nohup wrapper script', { wrapperPath });
 
+  // Don't leave a previous nohup-installed host running with stale code —
+  // its pid lives in nanoclaw.pid and the wrapper handles the kill, but
+  // pkill picks up debugger-spawned processes too.
+  killOrphanedProcesses(projectRoot);
+
+  // Actually run the wrapper. Earlier revisions wrote the script and exited
+  // success without ever starting the host — so the next setup step (first
+  // chat) failed against a service that had never started. The wrapper
+  // backgrounds via `nohup &` so this exec returns in ~1s; the detached node
+  // child outlives this tsx process via the SIGHUP-immune nohup invocation.
+  let wrapperExecOk = false;
+  try {
+    execSync(`bash ${JSON.stringify(wrapperPath)}`, {
+      cwd: projectRoot,
+      stdio: 'pipe',
+      timeout: 15_000,
+    });
+    wrapperExecOk = true;
+    log.info('Started NanoClaw via nohup wrapper');
+  } catch (err) {
+    log.error('Failed to execute start-nanoclaw.sh', { err });
+  }
+
+  const socketUp = wrapperExecOk
+    ? await waitForSocket(socketPathFor(projectRoot), SOCKET_WAIT_MS)
+    : false;
+  const status = !wrapperExecOk
+    ? 'failed'
+    : socketUp
+      ? 'success'
+      : 'degraded';
+
   emitStatus('SETUP_SERVICE', {
     SERVICE_TYPE: 'nohup',
     NODE_PATH: nodePath,
     PROJECT_PATH: projectRoot,
     WRAPPER_PATH: wrapperPath,
-    SERVICE_LOADED: false,
+    SERVICE_LOADED: socketUp,
     FALLBACK: 'wsl_no_systemd',
-    STATUS: 'success',
+    ...(lingerReason ? { LINGER_REASON: lingerReason } : {}),
+    STATUS: status,
     LOG: 'logs/setup.log',
   });
+
+  if (status === 'failed') {
+    process.exit(1);
+  }
 }

@@ -584,14 +584,53 @@ function renderPingFailureNote(result: PingResult): void {
             6,
           ),
           '',
-          `  macOS:  launchctl kickstart -k gui/$(id -u)/${getLaunchdLabel()}`,
-          `  Linux:  systemctl --user restart ${getSystemdUnit()}`,
+          ...restartHintForInstalledMode(),
         ].join('\n')
       : wrapForGutter(
           'No reply from your assistant within 30 seconds. Check `logs/nanoclaw.log` for clues, then try `pnpm run chat hi`.',
           6,
         );
   p.note(body, 'Skipping the first chat');
+}
+
+/**
+ * Build the per-line restart hint shown after a socket_error ping. Reads the
+ * most recent service step from logs/setup.log so we tell the user the
+ * command that actually matches their install — a hardcoded `systemctl`
+ * suggestion was misleading on nohup installs (the unit doesn't exist) and
+ * pointed root installs at the wrong scope. If the service step hasn't run
+ * yet (e.g. setup invoked with --skip=service) we fall back to the
+ * platform-pair hint as a last resort.
+ */
+function restartHintForInstalledMode(): string[] {
+  const fields = setupLog.lastStepFields('service');
+  const mode = fields?.service_type;
+  switch (mode) {
+    case 'launchd':
+      return [`  launchctl kickstart -k gui/$(id -u)/${getLaunchdLabel()}`];
+    case 'systemd-user':
+      return [`  systemctl --user restart ${getSystemdUnit()}`];
+    case 'systemd-system':
+      return [`  sudo systemctl restart ${getSystemdUnit()}`];
+    case 'nohup': {
+      const lines = ['  bash start-nanoclaw.sh'];
+      if (fields?.linger_reason) {
+        lines.push(
+          '',
+          wrapForGutter(
+            'To upgrade this install to a proper systemd service that auto-starts on boot, run `sudo loginctl enable-linger $USER` and re-run setup.',
+            6,
+          ),
+        );
+      }
+      return lines;
+    }
+    default:
+      return [
+        `  macOS:  launchctl kickstart -k gui/$(id -u)/${getLaunchdLabel()}`,
+        `  Linux:  systemctl --user restart ${getSystemdUnit()}`,
+      ];
+  }
 }
 
 /**

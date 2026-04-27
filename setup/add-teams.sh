@@ -119,21 +119,8 @@ mkdir -p data/env
 cp .env data/env/env
 
 log "Restarting service so the new adapter picks up the credentials…"
-# shellcheck source=setup/lib/install-slug.sh
-source "$PROJECT_ROOT/setup/lib/install-slug.sh"
-case "$(uname -s)" in
-  Darwin)
-    launchctl kickstart -k "gui/$(id -u)/$(launchd_label)" >&2 2>/dev/null || true
-    ;;
-  Linux)
-    systemctl --user restart "$(systemd_unit)" >&2 2>/dev/null \
-      || sudo systemctl restart "$(systemd_unit)" >&2 2>/dev/null \
-      || true
-    ;;
-esac
-
-# Give the Teams adapter a moment to register its webhook before the driver
-# continues.
-sleep 5
+# shellcheck source=setup/lib/restart.sh
+source "$PROJECT_ROOT/setup/lib/restart.sh"
+restart_service || { emit_status failed "service restart failed — see logs/nanoclaw.error.log"; exit 1; }
 
 emit_status success
