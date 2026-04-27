@@ -149,7 +149,8 @@ Output: `$PREFETCH_DIR/snowflake/revinate.json`
 ```sql
 SELECT HOTEL_NAME, DATE_REVIEW, REVIEW_SOURCE, NPS,
   PARSE_JSON(RAW_JSON):rating::FLOAT AS rating,
-  PARSE_JSON(RAW_JSON):subratings AS subratings
+  PARSE_JSON(RAW_JSON):subratings AS subratings,
+  PARSE_JSON(RAW_JSON):surveyTopics AS survey_topics
 FROM CORE_REVINATE.RAW_API.RAW_REVIEWS
 WHERE DATE_REVIEW >= '2026-01-01'
 ORDER BY HOTEL_NAME, DATE_REVIEW

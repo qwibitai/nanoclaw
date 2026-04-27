@@ -177,7 +177,8 @@ Three windows:
 Per window compute:
 - **Recommend Score (0-10)**: average of NPS column. This column is likelihood-to-recommend (0-10 scale), not true Net Promoter Score. Only populated for Survey source reviews -- show "--" if no Survey reviews in window.
 - **True NPS**: computed from Survey reviews only. Promoters = score >= 9, Detractors = score <= 6. NPS = (count Promoters - count Detractors) / total Survey reviews * 100. Show as integer, e.g. "+42" or "-15". If fewer than 5 Survey reviews in window, show "--".
-- **Rating (1-5)**: average of RAW_JSON:rating (1-5 scale, populated for all external reviews including Google/Booking/TripAdvisor).
+- **Survey Overall Experience (1-5)**: from Survey source reviews only. Parse `survey_topics` field (JSON array). Find the topic whose name contains "Overall Experience" (e.g. "Your Overall Experience"). Within that topic, find the question whose name contains "Overall Experience" and read its `ratingAnswer`. Average those values across all Survey reviews in the window. If the field is missing or null for a review, skip it. Show "--" if fewer than 3 valid values.
+- **Platform Rating (1-5)**: average of `rating` field (1-5 scale, populated for external platform reviews: Google, Booking.com, TripAdvisor, Expedia). Different from the survey score above.
 - **Review count**: total reviews in window (all sources).
 
 WoW Recommend Score delta = Last 7d avg - Prior 7d avg (show with sign, e.g. "+0.8" or "-1.2").
@@ -373,12 +374,14 @@ If any RevPAR Index < 90, add "(watchlist)" in red. Do NOT revert to the old sin
 |---|---|---|---|---|
 | Recommend Score (0-10) | | | | |
 | NPS (Promoters - Detractors) | | | | |
-| Rating (1-5) | | | | |
+| Survey Overall Exp (1-5) | | | | |
+| Platform Rating (1-5) | | | | |
 | Reviews | | | | |
 
 Recommend Score WoW delta in red if < -0.5, green if > +0.5.
 If L30d Recommend Score < 7.5, note in amber "(below threshold)".
 NPS: show as signed integer (e.g. "+42"). No WoW delta required for NPS.
+Survey Overall Exp: survey-sourced 1-5 score. Platform Rating: public review star average (Google/Booking/TripAdvisor).
 
 #### 3f. Operations -- ALICE (last 7d)
 
