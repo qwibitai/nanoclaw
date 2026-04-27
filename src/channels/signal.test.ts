@@ -548,6 +548,141 @@ describe('SignalAdapter', () => {
     });
   });
 
+  // --- Outbound attachments ---
+
+  describe('deliver — attachments', () => {
+    // Real fs writes happen in tmpdir(); confirm the bytes round-trip and
+    // are cleaned up after deliver returns.
+    it('sends a single attachment via attachments[] param', async () => {
+      const fs = await import('node:fs');
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('+15555550123', null, {
+        kind: 'file',
+        content: {},
+        files: [{ filename: 'report.md', data: Buffer.from('# Report\n\nbody') }],
+      });
+
+      const sendCalls = getRpcCallsForMethod('send');
+      expect(sendCalls.length).toBe(1);
+      const params = sendCalls[0].params as Record<string, unknown>;
+      expect(params.recipient).toEqual(['+15555550123']);
+      expect(params.account).toBe('+15551234567');
+      expect(params.message).toBeUndefined();
+      const paths = params.attachments as string[];
+      expect(paths).toHaveLength(1);
+      expect(paths[0]).toMatch(/signal-out-\d+-[a-z0-9]+-report\.md$/);
+      // Temp file should no longer exist — finally{} cleanup ran
+      expect(fs.existsSync(paths[0])).toBe(false);
+
+      await adapter.teardown();
+    });
+
+    it('sends text first, then attachment, when both are present', async () => {
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('+15555550123', null, {
+        kind: 'file',
+        content: { text: 'Here is the digest' },
+        files: [{ filename: 'digest.md', data: Buffer.from('content') }],
+      });
+
+      const sendCalls = getRpcCallsForMethod('send');
+      expect(sendCalls).toHaveLength(2);
+      // First call: text message
+      expect(sendCalls[0].params).toEqual(
+        expect.objectContaining({ message: 'Here is the digest', recipient: ['+15555550123'] }),
+      );
+      expect((sendCalls[0].params as Record<string, unknown>).attachments).toBeUndefined();
+      // Second call: attachment, no message
+      expect(sendCalls[1].params).toEqual(
+        expect.objectContaining({ recipient: ['+15555550123'] }),
+      );
+      const attachments = (sendCalls[1].params as Record<string, unknown>).attachments as string[];
+      expect(attachments).toHaveLength(1);
+
+      await adapter.teardown();
+    });
+
+    it('sends multiple attachments in a single send call', async () => {
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('+15555550123', null, {
+        kind: 'file',
+        content: {},
+        files: [
+          { filename: 'a.txt', data: Buffer.from('a') },
+          { filename: 'b.png', data: Buffer.from([0x89, 0x50, 0x4e, 0x47]) },
+        ],
+      });
+
+      const sendCalls = getRpcCallsForMethod('send');
+      expect(sendCalls).toHaveLength(1);
+      const attachments = (sendCalls[0].params as Record<string, unknown>).attachments as string[];
+      expect(attachments).toHaveLength(2);
+      expect(attachments[0]).toMatch(/-a\.txt$/);
+      expect(attachments[1]).toMatch(/-b\.png$/);
+
+      await adapter.teardown();
+    });
+
+    it('uses groupId for group destinations', async () => {
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('group:abc123', null, {
+        kind: 'file',
+        content: {},
+        files: [{ filename: 'pic.jpg', data: Buffer.from('jpg') }],
+      });
+
+      const sendCalls = getRpcCallsForMethod('send');
+      expect(sendCalls).toHaveLength(1);
+      const params = sendCalls[0].params as Record<string, unknown>;
+      expect(params.groupId).toBe('abc123');
+      expect(params.recipient).toBeUndefined();
+
+      await adapter.teardown();
+    });
+
+    /**
+     * Defensive test: `OutboundFile.filename` is operator-supplied data, so
+     * the implementation must not let a filename containing path separators
+     * escape the temp directory. We feed an attempt-to-traverse filename and
+     * assert the resolved path stays strictly inside `tmpdir()`.
+     */
+    it('keeps temp paths inside tmpdir even when filename contains path separators', async () => {
+      const path = await import('node:path');
+      const os = await import('node:os');
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('+15555550123', null, {
+        kind: 'file',
+        content: {},
+        files: [{ filename: '../sneaky.txt', data: Buffer.from('x') }],
+      });
+
+      const sendCalls = getRpcCallsForMethod('send');
+      const paths = (sendCalls[0].params as Record<string, unknown>).attachments as string[];
+      const resolvedTmp = path.resolve(os.tmpdir());
+      const resolvedResult = path.resolve(paths[0]);
+      // path.resolve normalizes away any "../"; if sanitization failed, the
+      // result would resolve to tmpdir's parent.
+      expect(resolvedResult.startsWith(resolvedTmp + path.sep)).toBe(true);
+
+      await adapter.teardown();
+    });
+  });
+
   // --- Text styles ---
 
   describe('text styles', () => {
@@ -779,34 +914,6 @@ describe('SignalAdapter', () => {
       await new Promise((r) => setTimeout(r, 20));
 
       expect(adapter.isConnected()).toBe(false);
-
-      await adapter.teardown();
-    });
-  });
-
-  // --- Outbound files ---
-
-  describe('outbound files', () => {
-    it('logs a warning and drops unsupported file attachments', async () => {
-      const { log } = await import('../log.js');
-      const warnMock = log.warn as unknown as ReturnType<typeof vi.fn>;
-
-      const adapter = createAdapter();
-      await adapter.setup(createMockSetup());
-      warnMock.mockClear();
-
-      await adapter.deliver('+15555550123', null, {
-        kind: 'text',
-        content: { text: 'with an attachment' },
-        files: [{ filename: 'hi.txt', data: Buffer.from('hi') }],
-      });
-
-      const sendCalls = getRpcCallsForMethod('send');
-      expect(sendCalls.length).toBeGreaterThan(0);
-      expect(warnMock).toHaveBeenCalledWith(
-        'Signal: outbound files not supported, dropping',
-        expect.objectContaining({ platformId: '+15555550123', count: 1 }),
-      );
 
       await adapter.teardown();
     });

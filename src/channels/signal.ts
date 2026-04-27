@@ -8,9 +8,9 @@
  * Ported from v1 — see v1 source for commit history.
  */
 import { execFileSync, execSync, spawn } from 'node:child_process';
-import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { ChannelAdapter, ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
@@ -744,6 +744,51 @@ export function createSignalAdapter(config: {
     log.info('Signal message sent', { platformId, length: text.length });
   }
 
+  /**
+   * Send one or more file attachments via signal-cli's `send` JSON-RPC, which
+   * accepts an `attachments` array of host filesystem paths. The OutboundFile
+   * Buffer is materialized to an OS temp file so signal-cli can read it, then
+   * removed in the finally block.
+   *
+   * Caption text, if any, is sent first via `sendText` (which handles chunking
+   * + textStyles) — keeps this function single-purpose and avoids a long
+   * caption colliding with signal-cli's per-message size limits.
+   */
+  async function sendAttachments(platformId: string, files: { filename: string; data: Buffer }[]): Promise<void> {
+    if (!connected || !tcp) return;
+    if (files.length === 0) return;
+
+    const tempPaths: string[] = [];
+    for (const file of files) {
+      const safeName = file.filename.replace(/[/\\\0]/g, '_');
+      const tempPath = join(tmpdir(), `signal-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`);
+      writeFileSync(tempPath, file.data);
+      tempPaths.push(tempPath);
+    }
+
+    try {
+      const params: Record<string, unknown> = { attachments: tempPaths };
+      if (config.account) params.account = config.account;
+      if (platformId.startsWith('group:')) {
+        params.groupId = platformId.slice('group:'.length);
+      } else {
+        params.recipient = [platformId];
+      }
+      await tcp.rpc('send', params);
+      log.info('Signal attachments sent', { platformId, count: files.length, filenames: files.map((f) => f.filename) });
+    } catch (err) {
+      log.error('Signal: attachment send failed', { platformId, count: files.length, err });
+    } finally {
+      for (const p of tempPaths) {
+        try {
+          unlinkSync(p);
+        } catch {
+          /* best-effort cleanup */
+        }
+      }
+    }
+  }
+
   async function waitForDaemon(): Promise<boolean> {
     const maxWait = 30_000;
     const pollInterval = 1000;
@@ -847,17 +892,6 @@ export function createSignalAdapter(config: {
     },
 
     async deliver(platformId: string, _threadId: string | null, message: OutboundMessage): Promise<string | undefined> {
-      if (message.files && message.files.length > 0) {
-        // Native adapter doesn't yet forward file uploads to signal-cli's
-        // `send --attachment`. Don't silently swallow — operators need to see
-        // that an attachment was requested but not sent.
-        log.warn('Signal: outbound files not supported, dropping', {
-          platformId,
-          count: message.files.length,
-          filenames: message.files.map((f) => f.filename),
-        });
-      }
-
       const content = message.content as Record<string, unknown> | string | undefined;
       let text: string | null = null;
       if (typeof content === 'string') {
@@ -865,9 +899,14 @@ export function createSignalAdapter(config: {
       } else if (content && typeof content === 'object' && typeof content.text === 'string') {
         text = content.text;
       }
-      if (!text) return undefined;
 
-      await sendText(platformId, text);
+      const files = message.files ?? [];
+
+      // Send accompanying text first so it lands above the attachment(s) in
+      // the recipient's chat. Both branches no-op cleanly if their input is
+      // empty, so any combination of (text, files) works.
+      if (text) await sendText(platformId, text);
+      if (files.length > 0) await sendAttachments(platformId, files);
       return undefined;
     },
 
