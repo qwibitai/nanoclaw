@@ -197,10 +197,8 @@ for r in alice_raw:
 
 Filter to last 7 days by parsed date. Per hotel:
 - Tickets: total count
-- Resolved: count where STATUS in ('Resolved', 'Closed', 'Completed') -- check actual values first
-
 - Est. Comp: sum of TRY_TO_NUMBER(REPLACE(REPLACE(COMPENSATION,'$',''),',',''))
-- Top Issue: most frequent GLITCH_ISSUE with count
+- Top 3 Issues: three most frequent GLITCH_ISSUE values with counts, e.g. "Room cleanliness (4), Noise (3), AC (2)"
 
 If no ALICE data for hotel, show "--" in all columns.
 
@@ -298,7 +296,7 @@ Show hotels where WoW NPS delta < -0.5. Sort by delta ascending (largest drop fi
 
 **Table 7 -- Operations: ALICE Ticket Volume (last 7d)**
 
-| Hotel | Tickets | Est. Comp | Top Issue |
+| Hotel | Tickets | Est. Comp | Top 3 Issues |
 |---|---|---|---|
 
 Show all hotels that had any ALICE tickets in last 7d, sorted by ticket count descending.
@@ -308,6 +306,8 @@ Show all hotels that had any ALICE tickets in last 7d, sorted by ticket count de
 ### 3. Property Detail
 
 For each hotel in portfolio order (SMP, DTLA, HJL, HJM, ATX, SFP, SHEL, MYC, TCH, ING, AVBH, AVPS):
+
+
 
 **Hotel header:** Full name (from property_mapping.json) + room count. Example: "Austin Proper (Rooms: 238)".
 
@@ -375,11 +375,11 @@ If L30d NPS < 7.5, note in amber "(below threshold)".
 
 #### 3f. Operations -- ALICE (last 7d)
 
-| Tickets | Resolved | Est. Comp | Top Issue |
-|---|---|---|---|
-| | | | |
+| Tickets | Est. Comp | Top 3 Issues |
+|---|---|---|
+| | | |
 
-If no ALICE data, show one row: "-- | -- | -- | No ALICE data"
+If no ALICE data, show one row: "-- | -- | No ALICE data"
 
 #### 3g. Events (next 7 days)
 
@@ -390,9 +390,26 @@ From Lighthouse. If no events, show "None listed."
 
 ---
 
+### 4. All Properties Takeaways
+
+At the very bottom of the report, after all property detail sections, compile every property's takeaways into one consolidated section. Header: "All Properties -- Takeaways".
+
+For each hotel in portfolio order, show:
+- **Hotel full name** (bold)
+- The same 5 bullets generated in section 3a for that hotel (no re-computation, copy from above)
+
+This section gives a fast single-scroll view of every property's key signals without navigating through the full detail.
+
+---
+
 ## Output
 
-**HTML email** to Gabriel.Ratner@properhotel.com ONLY via `mcp__outlook__send-email`.
+**HTML file attachment** to Gabriel.Ratner@properhotel.com ONLY via `mcp__outlook__send-email`.
+
+Steps to generate and attach:
+1. Write the complete HTML report to `/workspace/group/coo_brief_[YYYYMMDD].html`
+2. Send the email with that file as an attachment (filename: `COO_Briefing_[MonthDay Year].html`). The email body should be a brief plain-text note: "COO Briefing for [Day], [Month Date Year] attached."
+
 Subject: "COO Briefing -- [Month Day, Year]".
 
 **ABSOLUTE RULE: NO CC, NO BCC, ever.** One recipient: Gabriel.Ratner@properhotel.com. No exceptions.
