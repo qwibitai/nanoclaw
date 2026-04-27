@@ -38,6 +38,7 @@ import { runWhatsAppChannel } from './channels/whatsapp.js';
 import { pingCliAgent, type PingResult } from './lib/agent-ping.js';
 import { brightSelect } from './lib/bright-select.js';
 import { offerClaudeAssist } from './lib/claude-assist.js';
+import { detectLxc } from './lib/lxc.js';
 import {
   applyToEnv,
   parseFlags,
@@ -140,7 +141,9 @@ async function main(): Promise<void> {
         await fail(
           'container',
           "Docker isn't available.",
-          'Install Docker Desktop (or start it if already installed), then retry.',
+          appendLxcHint(
+            'Install Docker Desktop (or start it if already installed), then retry.',
+          ),
         );
       }
       if (err === 'docker_group_not_active') {
@@ -153,7 +156,9 @@ async function main(): Promise<void> {
       await fail(
         'container',
         "Couldn't build the sandbox.",
-        'If Docker has a stale cache, try: `docker builder prune -f`, then retry.',
+        appendLxcHint(
+          'If Docker has a stale cache, try: `docker builder prune -f`, then retry.',
+        ),
       );
     }
     maybeReexecUnderSg();
@@ -287,10 +292,26 @@ async function main(): Promise<void> {
       await fail('service', "Couldn't start NanoClaw.", 'See logs/nanoclaw.error.log for details.');
     }
     if (res.terminal?.fields.DOCKER_GROUP_STALE === 'true') {
+      const stalehint =
+        'Pick one — either is fine:\n\n' +
+        '  A. Log out + back in, then re-run setup. Your docker group will activate\n' +
+        '     and no sudo workaround is needed.\n\n' +
+        '  B. Apply the temporary ACL yourself, then restart the service:\n' +
+        '       sudo setfacl -m u:$(whoami):rw /var/run/docker.sock\n' +
+        `       systemctl --user restart ${getSystemdUnit()}`;
       p.log.warn("NanoClaw's permissions need a tweak before it can reach Docker.");
-      p.log.message(
-        '  sudo setfacl -m u:$(whoami):rw /var/run/docker.sock\n' + `  systemctl --user restart ${getSystemdUnit()}`,
-      );
+      p.log.message(k.dim(stalehint));
+      // This is a soft-warn (the unit installed and started; just degraded
+      // until docker access is restored), so we don't fail() — but we still
+      // offer Claude-assisted recovery for users who'd rather have it just
+      // handled. Result is best-effort: if Claude runs the setfacl, great;
+      // if not, the manual hint above stands.
+      await offerClaudeAssist({
+        stepName: 'service',
+        msg: "NanoClaw's systemd service can't reach the Docker socket.",
+        hint: stalehint,
+        rawLogPath: 'logs/setup-steps/06-service.log',
+      });
     }
   }
 
@@ -563,14 +584,53 @@ function renderPingFailureNote(result: PingResult): void {
             6,
           ),
           '',
-          `  macOS:  launchctl kickstart -k gui/$(id -u)/${getLaunchdLabel()}`,
-          `  Linux:  systemctl --user restart ${getSystemdUnit()}`,
+          ...restartHintForInstalledMode(),
         ].join('\n')
       : wrapForGutter(
           'No reply from your assistant within 30 seconds. Check `logs/nanoclaw.log` for clues, then try `pnpm run chat hi`.',
           6,
         );
   p.note(body, 'Skipping the first chat');
+}
+
+/**
+ * Build the per-line restart hint shown after a socket_error ping. Reads the
+ * most recent service step from logs/setup.log so we tell the user the
+ * command that actually matches their install — a hardcoded `systemctl`
+ * suggestion was misleading on nohup installs (the unit doesn't exist) and
+ * pointed root installs at the wrong scope. If the service step hasn't run
+ * yet (e.g. setup invoked with --skip=service) we fall back to the
+ * platform-pair hint as a last resort.
+ */
+function restartHintForInstalledMode(): string[] {
+  const fields = setupLog.lastStepFields('service');
+  const mode = fields?.service_type;
+  switch (mode) {
+    case 'launchd':
+      return [`  launchctl kickstart -k gui/$(id -u)/${getLaunchdLabel()}`];
+    case 'systemd-user':
+      return [`  systemctl --user restart ${getSystemdUnit()}`];
+    case 'systemd-system':
+      return [`  sudo systemctl restart ${getSystemdUnit()}`];
+    case 'nohup': {
+      const lines = ['  bash start-nanoclaw.sh'];
+      if (fields?.linger_reason) {
+        lines.push(
+          '',
+          wrapForGutter(
+            'To upgrade this install to a proper systemd service that auto-starts on boot, run `sudo loginctl enable-linger $USER` and re-run setup.',
+            6,
+          ),
+        );
+      }
+      return lines;
+    }
+    default:
+      return [
+        `  macOS:  launchctl kickstart -k gui/$(id -u)/${getLaunchdLabel()}`,
+        `  Linux:  systemctl --user restart ${getSystemdUnit()}`,
+      ];
+  }
 }
 
 /**
@@ -1071,6 +1131,31 @@ function runInheritScript(cmd: string, args: string[]): Promise<number> {
     const child = spawn(cmd, args, { stdio: 'inherit' });
     child.on('close', (code) => resolve(code ?? 1));
   });
+}
+
+/**
+ * If we're inside an LXC, append the Proxmox-host snippet to a Docker-failure
+ * hint. Docker-in-LXC needs `nesting=1,keyctl=1` features set on the CT —
+ * a setting only the PVE host operator can change (`pct set <CTID>`); a
+ * process inside the CT can't edit its own LXC config. We detect from inside
+ * and surface the snippet so the user knows what to ask their host operator
+ * for, or to run themselves if they have host shell access.
+ */
+function appendLxcHint(baseHint: string): string {
+  const lxc = detectLxc();
+  if (!lxc.inLxc) return baseHint;
+  const privNote =
+    lxc.privileged === false ? ' (your CT is unprivileged)'
+    : lxc.privileged === true ? ' (your CT is privileged)'
+    : '';
+  return (
+    baseHint +
+    `\n\nLooks like you're inside an LXC${privNote}. Docker-in-LXC needs these\n` +
+    'features turned on by your Proxmox host operator (run on the PVE host,\n' +
+    'NOT inside this CT — a process here can\'t change its own config):\n\n' +
+    '    pct set <CTID> -features nesting=1,keyctl=1\n' +
+    '    pct restart <CTID>'
+  );
 }
 
 /**
