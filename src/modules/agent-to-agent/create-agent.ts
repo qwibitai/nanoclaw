@@ -38,6 +38,11 @@ export async function handleCreateAgent(content: Record<string, unknown>, sessio
   const requestId = content.requestId as string;
   const name = content.name as string;
   const instructions = content.instructions as string | null;
+  const rawProvider = content.agent_provider as string | null | undefined;
+  const agentProvider = typeof rawProvider === 'string' && rawProvider.trim() ? rawProvider.trim().toLowerCase() : null;
+  const rawModel = content.model as string | null | undefined;
+  // Case preserved — SDKs use `[1m]` / version suffixes that must round-trip.
+  const model = typeof rawModel === 'string' && rawModel.trim() ? rawModel.trim() : null;
 
   const sourceGroup = getAgentGroup(session.agent_group_id);
   if (!sourceGroup) {
@@ -78,7 +83,8 @@ export async function handleCreateAgent(content: Record<string, unknown>, sessio
     id: agentGroupId,
     name,
     folder,
-    agent_provider: null,
+    agent_provider: agentProvider,
+    model,
     created_at: now,
   };
   createAgentGroup(newGroup);
@@ -116,11 +122,23 @@ export async function handleCreateAgent(content: Record<string, unknown>, sessio
   writeDestinations(session.agent_group_id, session.id);
 
   // Fire-and-forget notification back to the creator
+  const notifyParts: string[] = [];
+  if (agentProvider) notifyParts.push(`provider=${agentProvider}`);
+  if (model) notifyParts.push(`model=${model}`);
+  const configSuffix = notifyParts.length ? ` (${notifyParts.join(', ')})` : '';
   notifyAgent(
     session,
-    `Agent "${localName}" created. You can now message it with <message to="${localName}">...</message>.`,
+    `Agent "${localName}" created${configSuffix}. You can now message it with <message to="${localName}">...</message>.`,
   );
-  log.info('Agent group created', { agentGroupId, name, localName, folder, parent: sourceGroup.id });
+  log.info('Agent group created', {
+    agentGroupId,
+    name,
+    localName,
+    folder,
+    parent: sourceGroup.id,
+    agent_provider: agentProvider,
+    model,
+  });
   // Note: requestId is unused — this is fire-and-forget, not request/response.
   void requestId;
 }

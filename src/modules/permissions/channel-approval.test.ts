@@ -72,7 +72,7 @@ beforeEach(async () => {
   await import('./index.js'); // register hooks
 
   // Base fixtures: one agent group + owner with a DM on 'telegram'.
-  createAgentGroup({ id: 'ag-1', name: 'Andy', folder: 'andy', agent_provider: null, created_at: now() });
+  createAgentGroup({ id: 'ag-1', name: 'Andy', folder: 'andy', agent_provider: null, model: null, created_at: now() });
 
   upsertUser({ id: 'telegram:owner', kind: 'telegram', display_name: 'Owner', created_at: now() });
   grantRole({

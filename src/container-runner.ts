@@ -119,6 +119,7 @@ async function spawnContainer(session: Session): Promise<void> {
   // (extra mounts, env passthrough). Computed once and threaded through both
   // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
   const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
+  const model = resolveModelName(session.model, agentGroup.model, containerConfig.model);
 
   const mounts = buildMounts(agentGroup, session, containerConfig, contribution);
   const containerName = `nanoclaw-v2-${agentGroup.folder}-${Date.now()}`;
@@ -131,6 +132,7 @@ async function spawnContainer(session: Session): Promise<void> {
     agentGroup,
     containerConfig,
     provider,
+    model,
     contribution,
     agentIdentifier,
   );
@@ -208,6 +210,31 @@ export function resolveProviderName(
   containerConfigProvider: string | null | undefined,
 ): string {
   return (sessionProvider || agentGroupProvider || containerConfigProvider || 'claude').toLowerCase();
+}
+
+/**
+ * Resolve the model name for a session with the same precedence ladder as
+ * the provider, falling through to `undefined` (= let the provider pick its
+ * default). Mirrors `resolveProviderName`; pure and side-effect-free.
+ *
+ *   sessions.model
+ *     → agent_groups.model
+ *     → container.json `model`
+ *     → undefined (provider default)
+ *
+ * Empty / whitespace-only strings fall through. The return value is
+ * trimmed but not lowercased — model names like `sonnet[1m]` keep their
+ * exact case because downstream SDKs may be case-sensitive.
+ */
+export function resolveModelName(
+  sessionModel: string | null | undefined,
+  agentGroupModel: string | null | undefined,
+  containerConfigModel: string | null | undefined,
+): string | undefined {
+  for (const candidate of [sessionModel, agentGroupModel, containerConfigModel]) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return undefined;
 }
 
 function resolveProviderContribution(
@@ -418,6 +445,7 @@ async function buildContainerArgs(
   agentGroup: AgentGroup,
   containerConfig: import('./container-config.js').ContainerConfig,
   provider: string,
+  model: string | undefined,
   providerContribution: ProviderContainerContribution,
   agentIdentifier?: string,
 ): Promise<string[]> {
@@ -426,6 +454,17 @@ async function buildContainerArgs(
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Resolved provider from sessions/agent_groups/container.json precedence —
+  // runner prefers this env over container.json so per-session overrides work
+  // without mutating the shared per-agent-group container.json.
+  args.push('-e', `AGENT_PROVIDER=${provider}`);
+
+  // Resolved model override (same precedence ladder). Omitted when no layer
+  // specified one — each provider's SDK then picks its own default.
+  if (model) {
+    args.push('-e', `AGENT_MODEL=${model}`);
+  }
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {

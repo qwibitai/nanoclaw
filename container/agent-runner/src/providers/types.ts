@@ -22,6 +22,13 @@ export interface AgentProvider {
  */
 export interface ProviderOptions {
   assistantName?: string;
+  /**
+   * Optional model override. Opaque string passed through to the
+   * provider's SDK — format is SDK-specific (e.g. `sonnet[1m]` for Claude,
+   * `gpt-5.4-mini` for Codex). Undefined means the provider picks its own
+   * default.
+   */
+  model?: string;
   mcpServers?: Record<string, McpServerConfig>;
   env?: Record<string, string | undefined>;
   additionalDirectories?: string[];

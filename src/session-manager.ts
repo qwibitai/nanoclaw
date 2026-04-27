@@ -112,6 +112,7 @@ export function resolveSession(
     messaging_group_id: messagingGroupId,
     thread_id: lookupThreadId,
     agent_provider: null,
+    model: null,
     status: 'active',
     container_status: 'stopped',
     last_active: null,

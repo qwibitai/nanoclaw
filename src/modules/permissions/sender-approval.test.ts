@@ -76,7 +76,14 @@ beforeEach(async () => {
 
   // Fixtures: agent group, messaging group with request_approval, wiring,
   // owner + DM messaging group for approver delivery.
-  createAgentGroup({ id: 'ag-1', name: 'Agent', folder: 'agent', agent_provider: null, created_at: now() });
+  createAgentGroup({
+    id: 'ag-1',
+    name: 'Agent',
+    folder: 'agent',
+    agent_provider: null,
+    model: null,
+    created_at: now(),
+  });
 
   createMessagingGroup({
     id: 'mg-chat',
