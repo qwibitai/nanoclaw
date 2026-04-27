@@ -4,6 +4,8 @@
  * Thin orchestrator: init DB, run migrations, start channel adapters,
  * start delivery polls, start sweep, handle shutdown.
  */
+import './net-init.js';
+
 import path from 'path';
 
 import { DATA_DIR } from './config.js';
