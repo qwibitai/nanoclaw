@@ -11,6 +11,7 @@ import path from 'path';
 
 import { log } from '../src/log.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
+import { ensureSudoCached } from './lib/sudo.js';
 import { cleanupUnhealthyPeers } from './peer-cleanup.js';
 import {
   commandExists,
@@ -308,16 +309,25 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
     );
     if (commandExists('setfacl')) {
       const user = execSync('whoami', { encoding: 'utf-8' }).trim();
-      try {
-        execSync(`sudo setfacl -m u:${user}:rw /var/run/docker.sock`, {
-          stdio: 'inherit',
-        });
-        log.info(
-          'Applied temporary ACL to /var/run/docker.sock (resets on docker restart or reboot)',
-        );
-        dockerGroupStale = false;
-      } catch (err) {
-        log.warn('Failed to apply setfacl workaround', { err });
+      // `sudo -n` (non-interactive) — child stdio is piped to the parent
+      // spinner, so an interactive prompt would be invisible AND read from
+      // /dev/null forever. Fail fast if the cache expired and let auto.ts
+      // surface the manual workaround via DOCKER_GROUP_STALE.
+      const sudoState = ensureSudoCached();
+      if (sudoState === 'cached') {
+        try {
+          execSync(`sudo -n setfacl -m u:${user}:rw /var/run/docker.sock`, {
+            stdio: 'pipe',
+          });
+          log.info(
+            'Applied temporary ACL to /var/run/docker.sock (resets on docker restart or reboot)',
+          );
+          dockerGroupStale = false;
+        } catch (err) {
+          log.warn('Failed to apply setfacl workaround', { err });
+        }
+      } else {
+        log.warn('Sudo cache not available for setfacl workaround', { sudoState });
       }
     } else {
       log.warn('setfacl not installed — cannot apply automatic workaround');
@@ -329,10 +339,24 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
 
   // Enable lingering so the user service survives SSH logout.
   // Without linger, systemd terminates all user processes when the last session closes.
+  //
+  // `loginctl enable-linger` (no arg) authorises via polkit — which on
+  // minimal/headless boxes spawns `pkttyagent` to prompt the user, and
+  // pkttyagent isn't installed, producing a noisy "Failed to execute
+  // /usr/bin/pkttyagent" line in the spinner. Going through sudo bypasses
+  // polkit entirely (sudo→root has the privilege directly). `sudo -n`
+  // because the spinner captures stdio and an interactive prompt would
+  // hang on /dev/null; if the cache expired we fall through to the
+  // existing warn-and-continue path.
   if (!runningAsRoot) {
+    const user = execSync('whoami', { encoding: 'utf-8' }).trim();
+    const sudoState = ensureSudoCached();
+    const cmd = sudoState === 'cached'
+      ? `sudo -n loginctl enable-linger ${user}`
+      : 'loginctl enable-linger';
     try {
-      execSync('loginctl enable-linger', { stdio: 'ignore' });
-      log.info('Enabled loginctl linger for current user');
+      execSync(cmd, { stdio: 'ignore' });
+      log.info('Enabled loginctl linger for current user', { via: sudoState === 'cached' ? 'sudo' : 'polkit' });
     } catch (err) {
       log.warn(
         'loginctl enable-linger failed — service may stop on SSH logout',
