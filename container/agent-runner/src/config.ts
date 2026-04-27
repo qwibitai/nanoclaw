@@ -16,6 +16,8 @@ export interface RunnerConfig {
   agentGroupId: string;
   maxMessagesPerPrompt: number;
   mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
+  /** Auto-compact context window in tokens. Overrides the provider default when set. */
+  autoCompactWindow?: number;
 }
 
 const DEFAULT_MAX_MESSAGES = 10;
@@ -43,6 +45,7 @@ export function loadConfig(): RunnerConfig {
     agentGroupId: (raw.agentGroupId as string) || '',
     maxMessagesPerPrompt: (raw.maxMessagesPerPrompt as number) || DEFAULT_MAX_MESSAGES,
     mcpServers: (raw.mcpServers as RunnerConfig['mcpServers']) || {},
+    autoCompactWindow: typeof raw.autoCompactWindow === 'number' ? raw.autoCompactWindow : undefined,
   };
 
   return _config;

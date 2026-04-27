@@ -25,6 +25,8 @@ export interface ProviderOptions {
   mcpServers?: Record<string, McpServerConfig>;
   env?: Record<string, string | undefined>;
   additionalDirectories?: string[];
+  /** Override the provider's default auto-compact context window (tokens). */
+  autoCompactWindow?: number;
 }
 
 export interface QueryInput {

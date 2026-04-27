@@ -51,6 +51,8 @@ export interface ContainerConfig {
   env?: Record<string, string>;
   /** Hosts resolved to 0.0.0.0 inside the container, making them unreachable. */
   blockedHosts?: string[];
+  /** Auto-compact context window in tokens. Passed through to the agent runner. */
+  autoCompactWindow?: number;
 }
 
 function emptyConfig(): ContainerConfig {
@@ -93,6 +95,7 @@ export function readContainerConfig(folder: string): ContainerConfig {
       maxMessagesPerPrompt: raw.maxMessagesPerPrompt,
       env: raw.env,
       blockedHosts: raw.blockedHosts,
+      autoCompactWindow: raw.autoCompactWindow,
     };
   } catch (err) {
     console.error(`[container-config] failed to parse ${p}: ${String(err)}`);

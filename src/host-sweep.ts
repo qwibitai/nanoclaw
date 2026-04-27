@@ -122,9 +122,7 @@ async function sweep(): Promise<void> {
 
   try {
     const sessions = getActiveSessions();
-    for (const session of sessions) {
-      await sweepSession(session);
-    }
+    await Promise.allSettled(sessions.map((session) => sweepSession(session)));
   } catch (err) {
     log.error('Host sweep error', { err });
   }
@@ -168,7 +166,7 @@ async function sweepSession(session: Session): Promise<void> {
     const dueCount = countDueMessages(inDb);
     if (dueCount > 0 && !isContainerRunning(session.id)) {
       log.info('Waking container for due messages', { sessionId: session.id, count: dueCount });
-      await wakeContainer(session);
+      wakeContainer(session).catch((err) => log.error('Wake failed', { sessionId: session.id, err }));
     }
 
     const alive = isContainerRunning(session.id);
