@@ -54,12 +54,22 @@ remove() {
 
 # --- Collect active session IDs from the database ---
 
+if ! command -v sqlite3 >/dev/null 2>&1; then
+  log "ERROR: sqlite3 CLI not found — refusing to run so we don't wipe the active session."
+  log "       Install sqlite3 (e.g. 'apt install sqlite3' or 'brew install sqlite') and re-run."
+  exit 1
+fi
+
 if [ ! -f "$STORE_DB" ]; then
   log "ERROR: database not found at $STORE_DB"
   exit 1
 fi
 
-ACTIVE_IDS=$(sqlite3 "$STORE_DB" "SELECT session_id FROM sessions;" 2>/dev/null || true)
+if ! ACTIVE_IDS=$(sqlite3 "$STORE_DB" "SELECT session_id FROM sessions;" 2>&1); then
+  log "ERROR: sqlite3 query failed: $ACTIVE_IDS"
+  log "       Refusing to run so we don't wipe the active session."
+  exit 1
+fi
 
 is_active() {
   echo "$ACTIVE_IDS" | grep -qF "$1"
