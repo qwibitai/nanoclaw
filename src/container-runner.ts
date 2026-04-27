@@ -44,6 +44,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  modelOverride?: string;
 }
 
 export interface ContainerOutput {
@@ -107,6 +108,16 @@ function buildVolumeMounts(
     mounts.push({
       hostPath: cooPrefetchDir,
       containerPath: '/workspace/project/data/coo-prefetch',
+      readonly: false,
+    });
+
+    // Slack monitor dedup log — writable so the skill can persist alerted message timestamps
+    const slackMonitorDir = path.join(projectRoot, 'data', 'slack-monitor');
+    if (!fs.existsSync(slackMonitorDir))
+      fs.mkdirSync(slackMonitorDir, { recursive: true });
+    mounts.push({
+      hostPath: slackMonitorDir,
+      containerPath: '/workspace/project/data/slack-monitor',
       readonly: false,
     });
 
@@ -313,6 +324,7 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  modelOverride?: string,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -340,6 +352,12 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Optional model override — inject ANTHROPIC_MODEL so the Claude Code SDK
+  // inside the container uses the specified model instead of the SDK default.
+  if (modelOverride) {
+    args.push('-e', `ANTHROPIC_MODEL=${modelOverride}`);
   }
 
   // Outlook MCP credentials (client ID / secret for Microsoft Graph API)
@@ -401,6 +419,20 @@ function buildContainerArgs(
       '-e',
       `TOAST_CLIENT_SECRET=${toastEnv.TOAST_CLIENT_SECRET || ''}`,
     );
+  }
+
+  // Slack Bot Token (for EOD Slack briefing and Slack monitor direct API calls from container)
+  const slackEnv = readEnvFile(['SLACK_BOT_TOKEN']);
+  if (slackEnv.SLACK_BOT_TOKEN) {
+    args.push('-e', `SLACK_BOT_TOKEN=${slackEnv.SLACK_BOT_TOKEN}`);
+  }
+
+  // Telegram main bot token + Gabe's chat ID — lets container skills send urgent alerts directly
+  // to main chat without going through NanoClaw's output router (used by slack-monitor escalation)
+  const tgEnv = readEnvFile(['TELEGRAM_BOT_TOKEN']);
+  if (tgEnv.TELEGRAM_BOT_TOKEN) {
+    args.push('-e', `TELEGRAM_BOT_TOKEN=${tgEnv.TELEGRAM_BOT_TOKEN}`);
+    args.push('-e', 'TELEGRAM_MAIN_CHAT_ID=6451555289');
   }
 
   // Snowflake MCP: pass connection params via env, mount private key file read-only.
@@ -469,7 +501,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, input.modelOverride);
 
   logger.debug(
     {

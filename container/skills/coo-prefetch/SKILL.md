@@ -38,6 +38,7 @@ run_hotel() {
   python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id 1  --year $YEAR  --begmonth $CM --endmonth $NM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_fcst.csv 2>&1 | tail -1
   python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id 2  --year $YEAR  --begmonth $CM --endmonth $NM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_bud.csv  2>&1 | tail -1
   python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id -3 --year $PY    --begmonth $CM --endmonth $NM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_ly.csv   2>&1 | tail -1
+  python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id -3 --year $YEAR  --begmonth $CM --endmonth $CM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_act.csv  2>&1 | tail -1
   echo "PS done: $CODE"
 }
 
@@ -63,11 +64,13 @@ for CODE in SMP DTLA HJL HJM ATX SFP SHEL MYC TCH ING AVBH AVPS; do
   [ ! -f $PREFETCH_DIR/profitsword/${CODE}_fcst.csv ] && echo "RETRY: $CODE fcst" && python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id 1  --year $YEAR --begmonth $CM --endmonth $NM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_fcst.csv 2>&1 | tail -1
   [ ! -f $PREFETCH_DIR/profitsword/${CODE}_bud.csv  ] && echo "RETRY: $CODE bud"  && python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id 2  --year $YEAR --begmonth $CM --endmonth $NM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_bud.csv  2>&1 | tail -1
   [ ! -f $PREFETCH_DIR/profitsword/${CODE}_ly.csv   ] && echo "RETRY: $CODE ly"   && python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id -3 --year $PY  --begmonth $CM --endmonth $NM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_ly.csv   2>&1 | tail -1
+  [ ! -f $PREFETCH_DIR/profitsword/${CODE}_act.csv  ] && echo "RETRY: $CODE act"  && python3 $SCRIPT --endpoint monthly_extended --site-tag $TAG --dataset-id -3 --year $YEAR --begmonth $CM --endmonth $CM --include-totals Y --output $PREFETCH_DIR/profitsword/${CODE}_act.csv  2>&1 | tail -1
 done
 echo "ProfitSword: all 12 hotels complete ($(ls $PREFETCH_DIR/profitsword/ | wc -l) files)"
 ```
 
 LY calls for next month may return 0 rows for some hotels -- expected, not an error.
+Actuals calls (dataset -3, current year) fetch current month only (endmonth $CM, not $NM) -- MTD actuals for Forecast Accuracy section.
 
 ## Step 2: Toast POS
 
@@ -104,15 +107,19 @@ print(f'Saved {len(data)} rows to OUTPUT_PATH')
 
 ### 3a. STR Daily -- every day
 Output: `$PREFETCH_DIR/snowflake/str_daily.json`
+
+Fetch 35 days back so R28 (rolling 28-day average) can always be fully computed even with STR's ~7 day publication lag. RANK is a SQL reserved word -- must be double-quoted.
 ```sql
-SELECT HOTEL, DATE, SEGMENT, OCC_INDEX, ADR_INDEX, REVPAR_INDEX, RANK
+SELECT HOTEL, DATE, SEGMENT, OCC_INDEX, ADR_INDEX, REVPAR_INDEX, "RANK"
 FROM DUETTO_UPLOAD.RAW.STR_DAILY
-WHERE DATE >= DATEADD(day, -14, CURRENT_DATE)
+WHERE DATE >= DATEADD(day, -35, CURRENT_DATE)
 ORDER BY HOTEL, DATE, SEGMENT
 ```
 
 ### 3b. STR Monthly -- every day
 Output: `$PREFETCH_DIR/snowflake/str_monthly.json`
+
+PERIOD_TYPE values in this table are year-labelled YTDs (e.g. "2026 YTD", "2025 YTD"). CurrWk and R28 are computed from the daily table in the briefing, not from monthly.
 ```sql
 SELECT HOTEL, PERIOD_TYPE, SEGMENT, OCC_INDEX, ADR_INDEX, REVPAR_INDEX
 FROM DUETTO_UPLOAD.RAW.STR_MONTHLY
@@ -122,11 +129,18 @@ ORDER BY HOTEL, PERIOD_TYPE, SEGMENT
 
 ### 3c. ALICE Glitches -- YTD all hotels
 Output: `$PREFETCH_DIR/snowflake/alice.json`
+
+IMPORTANT: GLITCH_REPORTS_RAW has a pipeline bug that loads each day's data ~20x, inflating raw counts by 20-35x per hotel. Always deduplicate using QUALIFY ROW_NUMBER() before counting. The dedup key is PROPERTY + parsed_date + TYPE + GLITCH_ISSUE.
+
 ```sql
 SELECT PROPERTY, DATE, TYPE, GLITCH_ISSUE, COMPENSATION,
   TRY_TO_DATE(DATE, 'MMMM DD, YYYY') AS parsed_date
 FROM DUETTO_UPLOAD.RAW.GLITCH_REPORTS_RAW
 WHERE TRY_TO_DATE(DATE, 'MMMM DD, YYYY') >= '2026-01-01'
+QUALIFY ROW_NUMBER() OVER (
+  PARTITION BY PROPERTY, TRY_TO_DATE(DATE, 'MMMM DD, YYYY'), TYPE, GLITCH_ISSUE
+  ORDER BY CASE WHEN TRY_TO_NUMBER(REPLACE(REPLACE(COALESCE(COMPENSATION,'0'),'$',''),',','')) > 0 THEN 0 ELSE 1 END
+) = 1
 ORDER BY parsed_date DESC
 ```
 
@@ -270,4 +284,4 @@ Send a single Telegram message summarizing:
 - Snowflake: X/7 queries cached (list any failures)
 - Manifest written + brief queued
 
-Example: "COO pre-fetch complete (4m 12s) -- PS: 12/12, Toast: OK, Snowflake: 7/7. Manifest written, brief queued."
+Example: "COO pre-fetch complete (4m 12s) -- PS: 12/12 (48 files: fcst/bud/ly/act), Toast: OK, Snowflake: 7/7. Manifest written, brief queued."

@@ -88,6 +88,36 @@ export function startCredentialProxy(
           }
         }
 
+        // Inject prompt caching on /v1/messages POST requests.
+        // Adding cache_control: {type: "ephemeral"} to the last system block
+        // tells Anthropic to cache the system prompt prefix, saving ~90% of
+        // system prompt token costs on cache hits (billed at 10% of normal).
+        // The cache TTL is 5 minutes; within a session this covers all turns.
+        let outBody = body;
+        if (req.method === 'POST' && req.url?.includes('/messages')) {
+          try {
+            const parsed = JSON.parse(body.toString('utf-8'));
+            if (parsed.system) {
+              if (typeof parsed.system === 'string' && parsed.system.length > 0) {
+                parsed.system = [{
+                  type: 'text',
+                  text: parsed.system,
+                  cache_control: { type: 'ephemeral' },
+                }];
+              } else if (Array.isArray(parsed.system) && parsed.system.length > 0) {
+                const last = parsed.system[parsed.system.length - 1];
+                if (last && !last.cache_control) {
+                  last.cache_control = { type: 'ephemeral' };
+                }
+              }
+              outBody = Buffer.from(JSON.stringify(parsed), 'utf-8');
+              headers['content-length'] = outBody.length;
+            }
+          } catch {
+            // Non-JSON or parse error -- forward body unchanged
+          }
+        }
+
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
@@ -113,7 +143,7 @@ export function startCredentialProxy(
           }
         });
 
-        upstream.write(body);
+        upstream.write(outBody);
         upstream.end();
       });
     });

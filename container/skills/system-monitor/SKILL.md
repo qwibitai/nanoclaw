@@ -95,7 +95,25 @@ PASS: file exists and date stamp is today or yesterday.
 FAIL: file missing or date is > 2 days old.
 Note: marker is written by the host backup script (`~/nanoclaw-backups/backup-nanoclaw.sh`) after each successful backup. The actual .db.gz files are at `~/nanoclaw-backups/` on the host (not accessible from container).
 
-### 10. Container Image Age
+### 10. Outlook Token Freshness
+Check the Outlook token expiry on the host:
+```bash
+python3 -c "
+import json, time
+with open('/Users/gabrielratner/.outlook-mcp-tokens.json') as f:
+    t = json.load(f)
+exp = t.get('expires_at', 0)
+remaining = (exp/1000 - time.time()) / 60
+print(f'{remaining:.0f}')
+" 2>/dev/null || echo "ERROR"
+```
+PASS: remaining > 30 min.
+ALERT: remaining < 5 min or negative — token is expired, Outlook calls will fail until next 45-min refresh cycle. Tell Gabe to run `bash ~/.outlook-mcp/refresh-token.sh` manually if it won't self-heal.
+WARN: remaining between 5 and 30 min — refresh is imminent but not urgent.
+
+Known failure signature: `expires_at` showing negative thousands of minutes — this was the field-name bug (fixed 2026-04-26). If it recurs, re-run the refresh script manually. The refresh LaunchAgent is `com.outlook.token-refresh` (every 45 min).
+
+### 11. Container Image Age
 ```bash
 docker images nanoclaw-agent:latest --format '{{.CreatedSince}}' 2>/dev/null
 ```
