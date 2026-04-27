@@ -119,9 +119,9 @@ ORDER BY HOTEL, DATE, SEGMENT
 ### 3b. STR Monthly -- every day
 Output: `$PREFETCH_DIR/snowflake/str_monthly.json`
 
-PERIOD_TYPE values in this table are year-labelled YTDs (e.g. "2026 YTD", "2025 YTD"). CurrWk and R28 are computed from the daily table in the briefing, not from monthly.
+PERIOD_TYPE values in this table are year-labelled YTDs (e.g. "2026 YTD", "2025 YTD"). CurrWk and R28 are computed from the daily table in the briefing, not from monthly. RANK is a SQL reserved word -- must be double-quoted.
 ```sql
-SELECT HOTEL, PERIOD_TYPE, SEGMENT, OCC_INDEX, ADR_INDEX, REVPAR_INDEX
+SELECT HOTEL, PERIOD_TYPE, SEGMENT, OCC_INDEX, ADR_INDEX, REVPAR_INDEX, "RANK"
 FROM DUETTO_UPLOAD.RAW.STR_MONTHLY
 WHERE PERIOD_TYPE LIKE '%YTD%'
 ORDER BY HOTEL, PERIOD_TYPE, SEGMENT

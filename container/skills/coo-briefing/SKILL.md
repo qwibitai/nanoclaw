@@ -155,7 +155,9 @@ STR publishes with ~7 day lag. Find the max DATE in str_daily.json -- that is th
 
 PERIOD_TYPE in this table is year-labelled (e.g. "2026 YTD"). Use the row where PERIOD_TYPE contains the current year and "YTD" -- e.g. `PERIOD_TYPE == '2026 YTD'`. Per hotel per segment, read OCC_INDEX, ADR_INDEX, REVPAR_INDEX directly.
 
-**RANK:** Present in STR_DAILY as `"RANK"` (double-quoted -- it is a SQL reserved word). Do NOT average rank. Take the value from the single most recent DATE row per hotel per segment. If the cached str_daily.json was fetched without the RANK column (legacy cache), show "--" for rank cells.
+**RANK:**
+- CurrWk and R28 rows: take the single most recent DATE row per hotel per segment from str_daily.json. Do NOT average. `"RANK"` is double-quoted (SQL reserved word). If the cached str_daily.json was fetched without the RANK column (legacy cache), show "--".
+- YTD row: read directly from str_monthly.json, same row used for YTD indices (`PERIOD_TYPE == '2026 YTD'`). `"RANK"` column is also double-quoted there. If missing from cache, show "--".
 
 **Data freshness:** Show "(as of [max_date])" in the STR section header. If max_date < today - 14, add "(stale -- no recent STR data)".
 
