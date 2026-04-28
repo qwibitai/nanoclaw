@@ -66,6 +66,7 @@ import {
 } from './sender-allowlist.js';
 import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { syncEnvFromProcess } from './env.js';
 import { startPaperclipWebhookServer } from './paperclip-webhook.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -652,6 +653,7 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
+  syncEnvFromProcess();
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
