@@ -40,14 +40,12 @@ const envConfig = readEnvFile([
 ]);
 
 const GITHUB_WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || envConfig.GITHUB_WEBHOOK_SECRET || '';
-const GITHUB_WEBHOOK_PORT = parseInt(
-  process.env.GITHUB_WEBHOOK_PORT || envConfig.GITHUB_WEBHOOK_PORT || '3800',
-  10,
-);
+const GITHUB_WEBHOOK_PORT = parseInt(process.env.GITHUB_WEBHOOK_PORT || envConfig.GITHUB_WEBHOOK_PORT || '3800', 10);
 const PR_FACTORY_CHANNEL_ID = process.env.PR_FACTORY_CHANNEL_ID || envConfig.PR_FACTORY_CHANNEL_ID || '';
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || envConfig.DISCORD_BOT_TOKEN || '';
 const SUPERVISOR_BOT_TOKEN = process.env.DISCORD_SUPERVISOR_BOT_TOKEN || envConfig.DISCORD_SUPERVISOR_BOT_TOKEN || '';
-const SUPERVISOR_CHANNEL_ID = process.env.PR_FACTORY_SUPERVISOR_CHANNEL_ID || envConfig.PR_FACTORY_SUPERVISOR_CHANNEL_ID || '';
+const SUPERVISOR_CHANNEL_ID =
+  process.env.PR_FACTORY_SUPERVISOR_CHANNEL_ID || envConfig.PR_FACTORY_SUPERVISOR_CHANNEL_ID || '';
 
 if (!GITHUB_WEBHOOK_SECRET) {
   log.debug('PR factory: GITHUB_WEBHOOK_SECRET not set, module disabled');

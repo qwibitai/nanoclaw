@@ -1,38 +1,41 @@
 /**
  * Additional Discord bot identities for the PR factory.
  *
- * v1 registered three Discord bots: 'discord' (worker), 'discord-supervisor',
- * and 'discord-tester'. Each has its own bot token and appears as a separate
- * user in Discord, so test results and supervisor feedback post under distinct
- * identities in PR threads.
- *
- * This module registers the supervisor and tester bots as separate channel
- * adapters. They follow the same Chat SDK bridge pattern as the primary
- * 'discord' adapter. If their tokens aren't set, they silently skip
- * (the primary Discord bot handles all traffic).
+ * Registers the supervisor and tester bots as separate channel adapters
+ * under the real 'discord' channel type, distinguished by bot_id.
+ * If their tokens aren't set, they silently skip.
  */
 import { createDiscordAdapter } from '@chat-adapter/discord';
 
 import { readEnvFile } from '../../env.js';
+import { botIdFromToken } from '../../utils/discord-bot-id.js';
 import { createChatSdkBridge } from '../../channels/chat-sdk-bridge.js';
 import { registerChannelAdapter } from '../../channels/channel-registry.js';
 import { log } from '../../log.js';
 
+const botIds: Record<string, string> = {};
+
+export function getBotId(role: 'worker' | 'supervisor' | 'tester'): string | undefined {
+  return botIds[role];
+}
+
 function registerExtraDiscordBot(
-  channelName: string,
+  role: string,
   tokenEnvVar: string,
   publicKeyEnvVar: string,
   appIdEnvVar: string,
 ): void {
-  registerChannelAdapter(channelName, {
+  registerChannelAdapter(`discord-${role}`, {
     factory: () => {
       const env = readEnvFile([tokenEnvVar, publicKeyEnvVar, appIdEnvVar]);
       const token = env[tokenEnvVar];
       const publicKey = env[publicKeyEnvVar];
       if (!token || !publicKey) {
-        log.debug(`PR factory: ${tokenEnvVar} or ${publicKeyEnvVar} not set, ${channelName} bot disabled`);
+        log.debug(`PR factory: ${tokenEnvVar} or ${publicKeyEnvVar} not set, ${role} bot disabled`);
         return null;
       }
+      const id = botIdFromToken(token);
+      botIds[role] = id;
       const adapter = createDiscordAdapter({
         botToken: token,
         publicKey,
@@ -40,7 +43,7 @@ function registerExtraDiscordBot(
       });
       return createChatSdkBridge({
         adapter,
-        channelName: channelName,
+        botId: id,
         concurrency: 'concurrent',
         botToken: token,
         supportsThreads: true,
@@ -49,14 +52,20 @@ function registerExtraDiscordBot(
   });
 }
 
+// Also extract and export the worker bot ID at startup
+const workerEnv = readEnvFile(['DISCORD_BOT_TOKEN']);
+if (workerEnv.DISCORD_BOT_TOKEN) {
+  botIds['worker'] = botIdFromToken(workerEnv.DISCORD_BOT_TOKEN);
+}
+
 registerExtraDiscordBot(
-  'discord-supervisor',
+  'supervisor',
   'DISCORD_SUPERVISOR_BOT_TOKEN',
   'DISCORD_SUPERVISOR_PUBLIC_KEY',
   'DISCORD_SUPERVISOR_APPLICATION_ID',
 );
 registerExtraDiscordBot(
-  'discord-tester',
+  'tester',
   'DISCORD_TESTER_BOT_TOKEN',
   'DISCORD_TESTER_PUBLIC_KEY',
   'DISCORD_TESTER_APPLICATION_ID',

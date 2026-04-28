@@ -2,7 +2,7 @@
  * PR Factory Supervisor — a dedicated agent group that reviews and
  * improves PR worker output based on human feedback.
  *
- * The supervisor gets its own Discord bot identity (discord-supervisor)
+ * The supervisor gets its own Discord bot identity (bot_id-keyed)
  * and can:
  *   - Receive cross-thread @Supervisor mentions routed to its admin channel
  *   - Clear worker sessions and retrigger triage
@@ -17,13 +17,10 @@ import path from 'path';
 
 import { GROUPS_DIR } from '../../config.js';
 import { createAgentGroup, getAgentGroupByFolder } from '../../db/agent-groups.js';
-import {
-  createMessagingGroup,
-  createMessagingGroupAgent,
-  getMessagingGroupByPlatform,
-} from '../../db/messaging-groups.js';
+import { createMessagingGroup, createMessagingGroupAgent } from '../../db/messaging-groups.js';
 import { initGroupFilesystem } from '../../group-init.js';
 import { log } from '../../log.js';
+import { getBotId } from './discord-bots.js';
 
 const SUPERVISOR_FOLDER = 'pr-factory-supervisor';
 
@@ -189,8 +186,9 @@ export function ensureSupervisorGroup(supervisorChannelPlatformId: string): stri
   const mgId = generateId('mg-supervisor');
   createMessagingGroup({
     id: mgId,
-    channel_type: 'discord-supervisor',
+    channel_type: 'discord',
     platform_id: supervisorChannelPlatformId,
+    bot_id: getBotId('supervisor') ?? null,
     name: 'PR Factory Supervisor',
     is_group: 1,
     unknown_sender_policy: 'public' as const,

@@ -11,11 +11,7 @@ import path from 'path';
 import { GROUPS_DIR } from '../../config.js';
 import { getAgentGroupByFolder } from '../../db/agent-groups.js';
 import { getMessagingGroupsByAgentGroup } from '../../db/messaging-groups.js';
-import {
-  findSessionForAgent,
-  deleteSession,
-  getSessionsByAgentGroup,
-} from '../../db/sessions.js';
+import { findSessionForAgent, deleteSession, getSessionsByAgentGroup } from '../../db/sessions.js';
 import { killContainer } from '../../container-runner.js';
 import { resolveSession, writeSessionMessage } from '../../session-manager.js';
 import { wakeContainer } from '../../container-runner.js';
@@ -51,10 +47,7 @@ export function clearWorkerSession(folder: string): boolean {
  * Re-trigger triage on a PR worker by re-queuing the saved original prompt.
  * If no original prompt exists, falls back to the provided prompt text.
  */
-export async function retriggerWorker(
-  folder: string,
-  fallbackPrompt?: string,
-): Promise<boolean> {
+export async function retriggerWorker(folder: string, fallbackPrompt?: string): Promise<boolean> {
   const agentGroup = getAgentGroupByFolder(folder);
   if (!agentGroup) {
     log.warn('retriggerWorker: agent group not found', { folder });

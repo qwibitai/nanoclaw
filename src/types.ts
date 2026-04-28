@@ -14,6 +14,7 @@ export interface MessagingGroup {
   id: string;
   channel_type: string;
   platform_id: string;
+  bot_id?: string | null;
   name: string | null;
   is_group: number; // 0 | 1
   unknown_sender_policy: UnknownSenderPolicy;

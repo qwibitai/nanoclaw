@@ -21,19 +21,29 @@ import { getDb, hasTable } from './connection.js';
 export function createMessagingGroup(group: MessagingGroup): void {
   getDb()
     .prepare(
-      `INSERT INTO messaging_groups (id, channel_type, platform_id, name, is_group, unknown_sender_policy, created_at)
-       VALUES (@id, @channel_type, @platform_id, @name, @is_group, @unknown_sender_policy, @created_at)`,
+      `INSERT INTO messaging_groups (id, channel_type, platform_id, bot_id, name, is_group, unknown_sender_policy, created_at)
+       VALUES (@id, @channel_type, @platform_id, @bot_id, @name, @is_group, @unknown_sender_policy, @created_at)`,
     )
-    .run(group);
+    .run({ bot_id: null, ...group });
 }
 
 export function getMessagingGroup(id: string): MessagingGroup | undefined {
   return getDb().prepare('SELECT * FROM messaging_groups WHERE id = ?').get(id) as MessagingGroup | undefined;
 }
 
-export function getMessagingGroupByPlatform(channelType: string, platformId: string): MessagingGroup | undefined {
+export function getMessagingGroupByPlatform(
+  channelType: string,
+  platformId: string,
+  botId?: string | null,
+): MessagingGroup | undefined {
+  if (botId) {
+    const row = getDb()
+      .prepare('SELECT * FROM messaging_groups WHERE channel_type = ? AND platform_id = ? AND bot_id = ?')
+      .get(channelType, platformId, botId) as MessagingGroup | undefined;
+    if (row) return row;
+  }
   return getDb()
-    .prepare('SELECT * FROM messaging_groups WHERE channel_type = ? AND platform_id = ?')
+    .prepare('SELECT * FROM messaging_groups WHERE channel_type = ? AND platform_id = ? AND bot_id IS NULL')
     .get(channelType, platformId) as MessagingGroup | undefined;
 }
 
@@ -53,16 +63,22 @@ export function getMessagingGroupByPlatform(channelType: string, platformId: str
 export function getMessagingGroupWithAgentCount(
   channelType: string,
   platformId: string,
+  botId?: string | null,
 ): { mg: MessagingGroup; agentCount: number } | null {
-  const row = getDb()
-    .prepare(
-      `SELECT mg.*, COUNT(mga.id) AS agent_count
+  const query = botId
+    ? `SELECT mg.*, COUNT(mga.id) AS agent_count
          FROM messaging_groups mg
     LEFT JOIN messaging_group_agents mga ON mga.messaging_group_id = mg.id
-        WHERE mg.channel_type = ? AND mg.platform_id = ?
-     GROUP BY mg.id`,
-    )
-    .get(channelType, platformId) as (MessagingGroup & { agent_count: number }) | undefined;
+        WHERE mg.channel_type = ? AND mg.platform_id = ? AND mg.bot_id = ?
+     GROUP BY mg.id`
+    : `SELECT mg.*, COUNT(mga.id) AS agent_count
+         FROM messaging_groups mg
+    LEFT JOIN messaging_group_agents mga ON mga.messaging_group_id = mg.id
+        WHERE mg.channel_type = ? AND mg.platform_id = ? AND mg.bot_id IS NULL
+     GROUP BY mg.id`;
+  const row = (
+    botId ? getDb().prepare(query).get(channelType, platformId, botId) : getDb().prepare(query).get(channelType, platformId)
+  ) as (MessagingGroup & { agent_count: number }) | undefined;
   if (!row) return null;
   const { agent_count, ...mg } = row;
   return { mg: mg as MessagingGroup, agentCount: agent_count };

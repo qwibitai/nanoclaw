@@ -5,6 +5,7 @@
 import { createDiscordAdapter } from '@chat-adapter/discord';
 
 import { readEnvFile } from '../env.js';
+import { botIdFromToken } from '../utils/discord-bot-id.js';
 import { createChatSdkBridge, type ReplyContext } from './chat-sdk-bridge.js';
 import { registerChannelAdapter } from './channel-registry.js';
 
@@ -29,6 +30,7 @@ registerChannelAdapter('discord', {
     });
     return createChatSdkBridge({
       adapter: discordAdapter,
+      botId: botIdFromToken(env.DISCORD_BOT_TOKEN),
       concurrency: 'concurrent',
       botToken: env.DISCORD_BOT_TOKEN,
       extractReplyContext,

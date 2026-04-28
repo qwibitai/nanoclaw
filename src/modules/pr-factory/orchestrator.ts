@@ -147,7 +147,9 @@ async function pollTestResults(): Promise<void> {
 
       try {
         const archiveName = `PR-${prNumber}-Test-Results.md`;
-        await ssh([`mv ~/outbox/${file} "$HOME/NanoClaw-vault/02-R&D/dev tasks/test-factory/(Prod) PR Factory Testing Output/${archiveName}"`]);
+        await ssh([
+          `mv ~/outbox/${file} "$HOME/NanoClaw-vault/02-R&D/dev tasks/test-factory/(Prod) PR Factory Testing Output/${archiveName}"`,
+        ]);
       } catch (mvErr) {
         log.warn('Failed to archive result to nanoclaw-vault', { file, mvErr });
       }

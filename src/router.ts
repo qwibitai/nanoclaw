@@ -155,7 +155,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   //    single query. Cheap short-circuit for the common "unwired channel"
   //    case — one DB read and we're out, no auto-create, no sender
   //    resolution, no log spam.
-  const found = getMessagingGroupWithAgentCount(event.channelType, event.platformId);
+  const found = getMessagingGroupWithAgentCount(event.channelType, event.platformId, event.botId);
 
   let mg: MessagingGroup;
   let agentCount: number;
@@ -169,6 +169,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
       id: mgId,
       channel_type: event.channelType,
       platform_id: event.platformId,
+      bot_id: event.botId ?? null,
       name: null,
       is_group: event.message.isGroup ? 1 : 0,
       unknown_sender_policy: 'request_approval',

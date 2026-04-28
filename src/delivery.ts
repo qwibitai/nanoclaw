@@ -12,7 +12,7 @@ import type Database from 'better-sqlite3';
 import { getRunningSessions, getActiveSessions, createPendingQuestion } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
-import { getMessagingGroupByPlatform } from './db/messaging-groups.js';
+import { getMessagingGroup, getMessagingGroupByPlatform } from './db/messaging-groups.js';
 import {
   getDueOutboundMessages,
   getDeliveredIds,
@@ -57,6 +57,7 @@ export interface ChannelDeliveryAdapter {
     kind: string,
     content: string,
     files?: OutboundFile[],
+    botId?: string,
   ): Promise<string | undefined>;
   setTyping?(channelType: string, platformId: string, threadId: string | null): Promise<void>;
 }
@@ -248,6 +249,10 @@ async function deliverMessage(
     return;
   }
 
+  // Resolve bot_id from the session's messaging group for multi-bot adapter lookup
+  const sessionMg = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : null;
+  const botId = sessionMg?.bot_id ?? undefined;
+
   const content = JSON.parse(msg.content);
 
   // System actions — handle internally (schedule_task, cancel_task, etc.)
@@ -286,7 +291,7 @@ async function deliverMessage(
   // (instead of marking it delivered when nothing was actually delivered,
   // which was the pre-refactor bug).
   if (msg.channel_type && msg.platform_id) {
-    const mg = getMessagingGroupByPlatform(msg.channel_type, msg.platform_id);
+    const mg = getMessagingGroupByPlatform(msg.channel_type, msg.platform_id, botId);
     if (!mg) {
       throw new Error(`unknown messaging group for ${msg.channel_type}/${msg.platform_id} (message ${msg.id})`);
     }
@@ -359,6 +364,7 @@ async function deliverMessage(
     msg.kind,
     msg.content,
     files,
+    botId,
   );
   log.info('Message delivered', {
     id: msg.id,

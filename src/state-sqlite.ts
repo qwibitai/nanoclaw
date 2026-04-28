@@ -90,7 +90,9 @@ export class SqliteStateAdapter implements StateAdapter {
   }
 
   async isSubscribed(threadId: string): Promise<boolean> {
-    const row = this.db.prepare('SELECT 1 FROM chat_sdk_subscriptions WHERE thread_id = ? LIMIT 1').get(this.k(threadId));
+    const row = this.db
+      .prepare('SELECT 1 FROM chat_sdk_subscriptions WHERE thread_id = ? LIMIT 1')
+      .get(this.k(threadId));
     return !!row;
   }
 

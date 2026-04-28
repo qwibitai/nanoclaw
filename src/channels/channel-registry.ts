@@ -26,8 +26,16 @@ export function registerChannelAdapter(name: string, registration: ChannelRegist
   registry.set(name, registration);
 }
 
-/** Get a live adapter by channel type. */
-export function getChannelAdapter(channelType: string): ChannelAdapter | undefined {
+function adapterKey(channelType: string, botId?: string): string {
+  return botId ? `${channelType}:${botId}` : channelType;
+}
+
+/** Get a live adapter by channel type and optional bot ID. */
+export function getChannelAdapter(channelType: string, botId?: string): ChannelAdapter | undefined {
+  if (botId) {
+    const exact = activeAdapters.get(adapterKey(channelType, botId));
+    if (exact) return exact;
+  }
   return activeAdapters.get(channelType);
 }
 
@@ -85,8 +93,8 @@ export async function initChannelAdapters(setupFn: (adapter: ChannelAdapter) => 
           throw err;
         }
       }
-      activeAdapters.set(adapter.channelType, adapter);
-      log.info('Channel adapter started', { channel: name, type: adapter.channelType });
+      activeAdapters.set(adapterKey(adapter.channelType, adapter.botId), adapter);
+      log.info('Channel adapter started', { channel: name, type: adapter.channelType, botId: adapter.botId });
     } catch (err) {
       log.error('Failed to start channel adapter', { channel: name, err });
     }

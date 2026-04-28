@@ -3,11 +3,7 @@ import path from 'path';
 
 import { GROUPS_DIR, ONECLI_URL } from '../../config.js';
 import { createAgentGroup, getAgentGroupByFolder } from '../../db/agent-groups.js';
-import {
-  createMessagingGroup,
-  createMessagingGroupAgent,
-  getMessagingGroupByPlatform,
-} from '../../db/messaging-groups.js';
+import { createMessagingGroup, createMessagingGroupAgent } from '../../db/messaging-groups.js';
 import { initGroupFilesystem } from '../../group-init.js';
 import { resolveSession, writeSessionMessage } from '../../session-manager.js';
 import { wakeContainer } from '../../container-runner.js';
@@ -15,6 +11,7 @@ import { getSession } from '../../db/sessions.js';
 import { log } from '../../log.js';
 import type { PREvent } from './webhook.js';
 import { SUPERVISOR_FOLDER } from './supervisor.js';
+import { getBotId } from './discord-bots.js';
 
 const MAX_DIFF_LENGTH = 50_000;
 
@@ -75,11 +72,7 @@ async function createDiscordThread(
   return { threadId: thread.id, guildId: thread.guild_id };
 }
 
-export async function handlePullRequest(
-  pr: PREvent,
-  botToken: string,
-  channelId: string,
-): Promise<void> {
+export async function handlePullRequest(pr: PREvent, botToken: string, channelId: string): Promise<void> {
   const folder = sanitizeFolder(pr.repoFullName, pr.number);
 
   // Dedup: skip if agent group already exists for this PR
@@ -118,6 +111,7 @@ export async function handlePullRequest(
     id: mgId,
     channel_type: 'discord',
     platform_id: platformId,
+    bot_id: getBotId('worker') ?? null,
     name: `PR #${pr.number}: ${pr.title}`,
     is_group: 1,
     unknown_sender_policy: 'public' as const,
@@ -148,8 +142,9 @@ export async function handlePullRequest(
     const svMgId = generateId('mg-pr-sv');
     createMessagingGroup({
       id: svMgId,
-      channel_type: 'discord-supervisor',
+      channel_type: 'discord',
       platform_id: platformId,
+      bot_id: getBotId('supervisor') ?? null,
       name: `PR #${pr.number} (supervisor)`,
       is_group: 1,
       unknown_sender_policy: 'public' as const,

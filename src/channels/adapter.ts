@@ -46,6 +46,7 @@ export interface InboundEvent {
   channelType: string;
   platformId: string;
   threadId: string | null;
+  botId?: string;
   message: {
     id: string;
     kind: 'chat' | 'chat-sdk';
@@ -111,6 +112,7 @@ export interface ConversationInfo {
 export interface ChannelAdapter {
   name: string;
   channelType: string;
+  botId?: string;
 
   /**
    * Whether this adapter models conversations as threads.

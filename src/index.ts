@@ -79,6 +79,7 @@ async function main(): Promise<void> {
           channelType: adapter.channelType,
           platformId,
           threadId,
+          botId: adapter.botId,
           message: {
             id: message.id,
             kind: message.kind,
@@ -135,10 +136,11 @@ async function main(): Promise<void> {
       kind: string,
       content: string,
       files?: import('./channels/adapter.js').OutboundFile[],
+      botId?: string,
     ): Promise<string | undefined> {
-      const adapter = getChannelAdapter(channelType);
+      const adapter = getChannelAdapter(channelType, botId);
       if (!adapter) {
-        log.warn('No adapter for channel type', { channelType });
+        log.warn('No adapter for channel type', { channelType, botId });
         return;
       }
       return adapter.deliver(platformId, threadId, { kind, content: JSON.parse(content), files });
