@@ -151,6 +151,8 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
 
   const isMention = event.message.isMention === true;
 
+  log.info('routeInbound entry', { channelType: event.channelType, platformId: event.platformId, botId: event.botId, isMention, threadId: event.threadId });
+
   // 1. Combined lookup: messaging_group row + count of wired agents in a
   //    single query. Cheap short-circuit for the common "unwired channel"
   //    case — one DB read and we're out, no auto-create, no sender

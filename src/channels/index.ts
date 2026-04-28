@@ -7,4 +7,5 @@
 // self-registration import below.
 
 import './cli.js';
-import './discord.js';
+// discord.js imported from modules/pr-factory/discord-bots.ts to control
+// gateway connection order (supervisor connects first).

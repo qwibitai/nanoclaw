@@ -59,6 +59,8 @@ export function getChannelContainerConfig(name: string): ChannelRegistration['co
  * Skips adapters that return null (missing credentials).
  */
 export async function initChannelAdapters(setupFn: (adapter: ChannelAdapter) => ChannelSetup): Promise<void> {
+  const seenGatewayTypes = new Set<string>();
+
   for (const [name, registration] of registry) {
     try {
       const adapter = await registration.factory();
@@ -66,6 +68,15 @@ export async function initChannelAdapters(setupFn: (adapter: ChannelAdapter) => 
         log.warn('Channel credentials missing, skipping', { channel: name });
         continue;
       }
+
+      // Stagger adapters sharing a gateway type (e.g. multiple Discord bots) to
+      // avoid per-IP identify rate limits on the same WebSocket endpoint.
+      if (seenGatewayTypes.has(adapter.channelType)) {
+        const staggerMs = 10000;
+        log.info('Staggering gateway connection', { channel: name, type: adapter.channelType, staggerMs });
+        await sleep(staggerMs);
+      }
+      seenGatewayTypes.add(adapter.channelType);
 
       const setup = setupFn(adapter);
       // Transient network failures during adapter init (e.g. Telegram deleteWebhook

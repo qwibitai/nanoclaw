@@ -64,6 +64,10 @@ registerExtraDiscordBot(
   'DISCORD_SUPERVISOR_PUBLIC_KEY',
   'DISCORD_SUPERVISOR_APPLICATION_ID',
 );
+
+// Dynamic import so it registers after supervisor (static imports are hoisted).
+await import('../../channels/discord.js');
+
 registerExtraDiscordBot(
   'tester',
   'DISCORD_TESTER_BOT_TOKEN',

@@ -77,7 +77,9 @@ export function getMessagingGroupWithAgentCount(
         WHERE mg.channel_type = ? AND mg.platform_id = ? AND mg.bot_id IS NULL
      GROUP BY mg.id`;
   const row = (
-    botId ? getDb().prepare(query).get(channelType, platformId, botId) : getDb().prepare(query).get(channelType, platformId)
+    botId
+      ? getDb().prepare(query).get(channelType, platformId, botId)
+      : getDb().prepare(query).get(channelType, platformId)
   ) as (MessagingGroup & { agent_count: number }) | undefined;
   if (!row) return null;
   const { agent_count, ...mg } = row;
