@@ -54,7 +54,7 @@ describe('normalizeStringArray', () => {
     expect(normalizeStringArray({ args: ['a', 'b'] })).toEqual([]);
   });
 
-  it('returns [] for a JSON-encoded object string (not an array)', () => {
+  it('treats a JSON-encoded object string (not an array) as a single-element array', () => {
     expect(normalizeStringArray('{"a": 1}')).toEqual(['{"a": 1}']);
   });
 });
