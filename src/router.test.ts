@@ -152,16 +152,16 @@ describe('routeOutbound', () => {
     expect(ch.sendMessage).toHaveBeenCalledWith('fs:oc_123', 'hello');
   });
 
-  it('无匹配 channel → 抛出 Error', () => {
+  it('无匹配 channel → 抛出 Error', async () => {
     const ch = mockChannel('wa:', true);
-    expect(() => routeOutbound([ch], 'fs:oc_123', 'hello')).toThrow(
+    await expect(routeOutbound([ch], 'fs:oc_123', 'hello')).rejects.toThrow(
       'No channel for JID',
     );
   });
 
-  it('channel 未连接 → 跳过', () => {
+  it('channel 未连接 → 跳过', async () => {
     const ch = mockChannel('fs:', false);
-    expect(() => routeOutbound([ch], 'fs:oc_123', 'hello')).toThrow(
+    await expect(routeOutbound([ch], 'fs:oc_123', 'hello')).rejects.toThrow(
       'No channel for JID',
     );
   });

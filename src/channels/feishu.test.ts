@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ---- mock 飞书 SDK ----
 
@@ -60,6 +60,12 @@ vi.mock('../group-folder.js', () => ({
   resolveGroupFolderPath: (folder: string) => `/tmp/groups/${folder}`,
 }));
 
+const mockGetMessageById = vi.fn().mockReturnValue(undefined);
+vi.mock('../db.js', () => ({
+  getMessageById: (...args: unknown[]) => mockGetMessageById(...args),
+}));
+
+import { ASSISTANT_NAME } from '../config.js';
 import { FeishuChannel } from './feishu.js';
 import type { ChannelOpts } from './registry.js';
 
@@ -442,6 +448,193 @@ describe('FeishuChannel', () => {
 
       expect(mockPatch).not.toHaveBeenCalled();
       expect(mockMessageDelete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sendMessage 返回飞书 message_id', () => {
+    it('正式回复返回飞书 message_id', async () => {
+      mockCreate.mockResolvedValueOnce({ data: { message_id: 'om_reply_001' } });
+      const msgId = await channel.sendMessage('fs:oc_123', '正式回复');
+      expect(msgId).toBe('om_reply_001');
+    });
+
+    it('进度消息返回 undefined', async () => {
+      const msgId = await channel.sendMessage('fs:oc_123', '🔧 Bash: ls -la');
+      expect(msgId).toBeUndefined();
+    });
+
+    it('💭 思考消息返回 undefined', async () => {
+      const msgId = await channel.sendMessage('fs:oc_123', '💭 正在分析代码结构...');
+      expect(msgId).toBeUndefined();
+    });
+
+    it('命令回复返回 undefined（有意丢弃）', async () => {
+      mockCreate.mockResolvedValueOnce({ data: { message_id: 'om_cmd_001' } });
+      const msgId = await channel.sendMessage('fs:oc_123', '命令结果', {
+        isCommandReply: true,
+      });
+      expect(msgId).toBeUndefined();
+    });
+
+    it('API 返回无 message_id 时返回 undefined', async () => {
+      mockCreate.mockResolvedValueOnce({ data: {} });
+      const msgId = await channel.sendMessage('fs:oc_123', '测试');
+      expect(msgId).toBeUndefined();
+    });
+  });
+
+  describe('sendPlainOrCard 返回 message_id', () => {
+    it('纯文本发送返回 message_id', async () => {
+      mockCreate.mockResolvedValueOnce({ data: { message_id: 'om_text_001' } });
+      const msgId = await channel.sendMessage('fs:oc_123', 'short');
+      expect(msgId).toBe('om_text_001');
+    });
+
+    it('卡片发送返回 message_id', async () => {
+      mockCreate.mockResolvedValueOnce({ data: { message_id: 'om_card_001' } });
+      const longText = 'a'.repeat(501);
+      const msgId = await channel.sendMessage('fs:oc_123', longText);
+      expect(msgId).toBe('om_card_001');
+    });
+
+    it('卡片失败降级纯文本，返回降级后的 message_id', async () => {
+      mockCreate
+        .mockRejectedValueOnce(new Error('card error'))
+        .mockResolvedValueOnce({ data: { message_id: 'om_fallback_001' } });
+      const longText = 'a'.repeat(501);
+      const msgId = await channel.sendMessage('fs:oc_123', longText);
+      expect(msgId).toBe('om_fallback_001');
+    });
+  });
+
+  describe('fetchReplyContext DB 优先查询', () => {
+    let originalFetch: typeof globalThis.fetch;
+
+    beforeEach(() => {
+      mockGetMessageById.mockReset();
+      originalFetch = globalThis.fetch;
+      (channel as any).getTenantAccessToken = vi.fn().mockResolvedValue('mock_token');
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
+    // 辅助：mock 飞书 API 返回
+    function mockFeishuApi(item: Record<string, unknown>) {
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        json: async () => ({
+          code: 0,
+          data: { items: [item] },
+        }),
+      }) as any;
+    }
+
+    it('DB 命中 → 直接返回内容，不调飞书 API', async () => {
+      mockGetMessageById.mockReturnValueOnce({
+        sender_name: '大狗',
+        content: '这是 bot 的回复内容',
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_test_001');
+      expect(result).toEqual({
+        content: '这是 bot 的回复内容',
+        senderName: '大狗',
+      });
+      expect(mockGetMessageById).toHaveBeenCalledWith('om_test_001');
+    });
+
+    it('DB 命中但内容超长 → 精确截断到 200 字 + ...', async () => {
+      mockGetMessageById.mockReturnValueOnce({
+        sender_name: 'Andy',
+        content: '长'.repeat(300),
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_test_002');
+      expect(result!.content).toBe('长'.repeat(200) + '...');
+    });
+
+    it('DB 命中但无 sender_name → 使用 ASSISTANT_NAME', async () => {
+      mockGetMessageById.mockReturnValueOnce({
+        sender_name: '',
+        content: '内容',
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_test_003');
+      expect(result!.senderName).toBe(ASSISTANT_NAME);
+    });
+
+    it('DB 未命中 → fallback 到飞书 API', async () => {
+      mockGetMessageById.mockReturnValueOnce(undefined);
+      mockFeishuApi({
+        msg_type: 'text',
+        sender: { id: 'ou_user1', sender_type: 'user' },
+        body: { content: JSON.stringify({ text: '用户消息' }) },
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_user_msg');
+      expect(mockGetMessageById).toHaveBeenCalledWith('om_user_msg');
+      expect(result).toEqual({
+        content: '用户消息',
+        senderName: 'ou_user1',
+      });
+    });
+
+    it('DB 查询异常 → 静默 fallback 到飞书 API', async () => {
+      mockGetMessageById.mockImplementationOnce(() => {
+        throw new Error('DB corrupted');
+      });
+      mockFeishuApi({
+        msg_type: 'text',
+        sender: { id: 'ou_user1', sender_type: 'user' },
+        body: { content: JSON.stringify({ text: 'fallback 消息' }) },
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_err_msg');
+      expect(mockGetMessageById).toHaveBeenCalledWith('om_err_msg');
+      expect(result!.content).toBe('fallback 消息');
+    });
+
+    it('DB 命中内容为空 → fallback 到 API', async () => {
+      mockGetMessageById.mockReturnValueOnce({
+        sender_name: 'Andy',
+        content: '',
+      });
+      mockFeishuApi({
+        msg_type: 'text',
+        sender: { id: 'ou_u1', sender_type: 'user' },
+        body: { content: JSON.stringify({ text: 'API 内容' }) },
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_empty');
+      expect(result!.content).toBe('API 内容');
+    });
+
+    it('API fallback — interactive 类型提取卡片标题', async () => {
+      mockGetMessageById.mockReturnValueOnce(undefined);
+      mockFeishuApi({
+        msg_type: 'interactive',
+        sender: { id: 'cli_bot1', sender_type: 'app' },
+        body: {
+          content: JSON.stringify({
+            header: { title: { content: '任务完成报告' } },
+          }),
+        },
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_card_msg');
+      expect(result).toEqual({
+        content: '[卡片: 任务完成报告]',
+        senderName: ASSISTANT_NAME,
+      });
+    });
+
+    it('DB 未命中且 token 获取失败 → 返回 null', async () => {
+      mockGetMessageById.mockReturnValueOnce(undefined);
+      (channel as any).getTenantAccessToken = vi.fn().mockResolvedValue(null);
+
+      const result = await (channel as any).fetchReplyContext('om_no_token');
+      expect(result).toBeNull();
     });
   });
 });

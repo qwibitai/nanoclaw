@@ -418,6 +418,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // R8.1: 收集 Agent 回复文本（用于记忆更新）
   const agentReplies: string[] = [];
   let memoryEnqueued = false; // 标记是否已在 onOutput 中入队记忆
+  let lastFeishuMsgId: string | undefined; // 最后一条正式回复的飞书 message_id
 
   // 取最近消息用于记忆召回（用户+agent 各最多 2 条，拼接提升语义丰富度）
   const recentMsgs = [...missedMessages].reverse();
@@ -511,7 +512,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
         if (text) {
           await channel.setTyping?.(chatJid, false);
-          await channel.sendMessage(chatJid, text);
+          const feishuMsgId = await channel.sendMessage(chatJid, text);
+          if (feishuMsgId) lastFeishuMsgId = feishuMsgId;
           outputSentToUser = true;
           agentReplies.push(text);
 
@@ -620,7 +622,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
               .replace(/<internal>[\s\S]*?<\/internal>/g, '')
               .trim();
             if (text) {
-              await channel.sendMessage(chatJid, text);
+              const retryFmid = await channel.sendMessage(chatJid, text);
+              if (retryFmid) lastFeishuMsgId = retryFmid;
               outputSentToUser = true;
               agentReplies.push(text);
             }
@@ -697,9 +700,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
-  // Bot 回复入库
+  // Bot 回复入库（优先用飞书 message_id，引用时可直接命中 DB）
   const botReplyText = agentReplies.join('\n');
-  const botMsgId = `bot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const botMsgId = lastFeishuMsgId ?? `bot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   if (agentReplies.length > 0) {
     try {
       storeMessage({
@@ -1414,23 +1417,25 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) {
         logger.warn({ jid }, 'No channel owns JID, cannot send message');
-        return;
+        return undefined;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (text) return channel.sendMessage(jid, text);
+      return undefined;
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: async (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       // 优先用 sendDirectMessage（跳过进度卡片清理），fallback 到 sendMessage
       if ('sendDirectMessage' in channel) {
-        return (
+        await (
           channel as {
             sendDirectMessage: (jid: string, text: string) => Promise<void>;
           }
         ).sendDirectMessage(jid, text);
+        return undefined;
       }
       return channel.sendMessage(jid, text);
     },

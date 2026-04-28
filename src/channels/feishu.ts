@@ -7,6 +7,7 @@ import * as lark from '@larksuiteoapi/node-sdk';
 
 import { ASSISTANT_NAME } from '../config.js';
 import type { ContainerOutput } from '../container-runner.js';
+import { getMessageById } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
@@ -474,11 +475,12 @@ export class FeishuChannel implements Channel {
     return jid.startsWith(JID_PREFIX);
   }
 
+  /** 发送消息，正式回复返回飞书 message_id（进度/命令回复返回 undefined） */
   async sendMessage(
     jid: string,
     text: string,
     options?: SendMessageOptions,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const chatId = chatIdFromJid(jid);
 
     // 命令回复：直接发消息，跳过进度卡片逻辑，避免打断正在运行的 agent
@@ -617,7 +619,7 @@ export class FeishuChannel implements Channel {
       .trim();
     notifyVoice(groupFolder, textForSpeech);
 
-    await this.extractAndSendMedia(chatId, text, groupFolder, usage, thinking);
+    return this.extractAndSendMedia(chatId, text, groupFolder, usage, thinking);
   }
 
   /** 统一路径解析：容器路径 /workspace/group/xxx → 宿主机路径，绝对路径直接用 */
@@ -630,14 +632,14 @@ export class FeishuChannel implements Channel {
     return inputPath;
   }
 
-  /** 统一媒体标记提取与发送：从文本中提取 [图片:] [文件:] 标记，上传并发送，文本/媒体互不阻塞 */
+  /** 统一媒体标记提取与发送，返回文本消息的飞书 message_id */
   private async extractAndSendMedia(
     chatId: string,
     text: string,
     groupFolder: string | null,
     usage?: ContainerOutput['usage'],
     thinking?: 'adaptive' | 'disabled',
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     // 用 matchAll + new RegExp 副本避免全局正则 lastIndex 状态污染
     const imageMatches = [
       ...text.matchAll(new RegExp(IMAGE_SEND_PATTERN.source, 'gi')),
@@ -650,15 +652,13 @@ export class FeishuChannel implements Channel {
 
     // 无标记 → 直接发文本
     if (!hasMedia) {
-      await this.sendPlainOrCard(chatId, text, usage, thinking);
-      return;
+      return this.sendPlainOrCard(chatId, text, usage, thinking);
     }
 
     // groupFolder 为 null → 无法上传媒体，原文本直接发
     if (!groupFolder) {
       logger.warn('群未注册 groupFolder，跳过媒体提取，原文本直接发送');
-      await this.sendPlainOrCard(chatId, text, usage, thinking);
-      return;
+      return this.sendPlainOrCard(chatId, text, usage, thinking);
     }
 
     // strip 标记，合并连续空白，发送剩余文本
@@ -669,9 +669,10 @@ export class FeishuChannel implements Channel {
       .trim();
 
     let textSent = !remainingText; // 无文本需要发则视为成功
+    let textMsgId: string | undefined;
     if (remainingText) {
       try {
-        await this.sendPlainOrCard(chatId, remainingText, usage, thinking);
+        textMsgId = await this.sendPlainOrCard(chatId, remainingText, usage, thinking);
         textSent = true;
       } catch (err) {
         logger.warn({ err }, '飞书文本卡片发送失败，媒体发送继续');
@@ -726,6 +727,7 @@ export class FeishuChannel implements Channel {
         `飞书消息发送全部失败 (${errors.length} 个媒体): ${errors[0]?.message}`,
       );
     }
+    return textMsgId;
   }
 
   /** IPC send_message 专用：直接发消息，不触发进度卡片清理逻辑 */
@@ -822,20 +824,20 @@ export class FeishuChannel implements Channel {
     }
   }
 
-  /** 发送纯文本或卡片消息（内部方法）。有 usage 时强制走卡片并追加脚注，卡片失败自动降级纯文本 */
+  /** 发送纯文本或卡片消息，返回飞书 message_id（用于 DB 关联） */
   private async sendPlainOrCard(
     chatId: string,
     text: string,
     usage?: ContainerOutput['usage'],
     thinking?: 'adaptive' | 'disabled',
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     if (usage || shouldUseCard(text)) {
       const elements: unknown[] = [
         { tag: 'markdown', content: text, text_size: 'normal' },
       ];
       if (usage) appendUsageFooter(elements, usage, thinking);
       try {
-        await this.client.im.message.create({
+        const resp = await this.client.im.message.create({
           data: {
             receive_id: chatId,
             msg_type: 'interactive',
@@ -846,10 +848,11 @@ export class FeishuChannel implements Channel {
           },
           params: { receive_id_type: 'chat_id' },
         });
+        return resp?.data?.message_id;
       } catch (cardErr) {
         // 卡片发送失败（如 invalid image keys），降级为纯文本
         logger.warn({ err: cardErr }, '飞书卡片发送失败，降级为纯文本');
-        await this.client.im.message.create({
+        const resp = await this.client.im.message.create({
           data: {
             receive_id: chatId,
             msg_type: 'text',
@@ -857,9 +860,10 @@ export class FeishuChannel implements Channel {
           },
           params: { receive_id_type: 'chat_id' },
         });
+        return resp?.data?.message_id;
       }
     } else {
-      await this.client.im.message.create({
+      const resp = await this.client.im.message.create({
         data: {
           receive_id: chatId,
           msg_type: 'text',
@@ -867,6 +871,7 @@ export class FeishuChannel implements Channel {
         },
         params: { receive_id_type: 'chat_id' },
       });
+      return resp?.data?.message_id;
     }
   }
 
@@ -1752,10 +1757,27 @@ export class FeishuChannel implements Channel {
     });
   }
 
-  /** 获取被回复消息的内容和发送者名称 */
+  /** 获取被回复消息的内容和发送者名称（DB 优先，miss 时 fallback 飞书 API） */
   private async fetchReplyContext(
     parentId: string,
   ): Promise<{ content: string; senderName: string } | null> {
+    // 1. DB 优先查询 — bot 发的消息以飞书 message_id 为主键存储，直接命中
+    try {
+      const row = getMessageById(parentId);
+      if (row?.content) {
+        let content = row.content;
+        if (content.length > 200) content = content.slice(0, 200) + '...';
+        logger.debug({ parentId }, '[reply-ctx] DB 命中引用消息');
+        return {
+          content,
+          senderName: row.sender_name || ASSISTANT_NAME,
+        };
+      }
+    } catch (err) {
+      logger.debug({ err, parentId }, '[reply-ctx] DB 查询引用消息失败，fallback API');
+    }
+
+    // 2. DB miss → 调飞书 API
     const token = await this.getTenantAccessToken();
     if (!token) return null;
 
@@ -1816,11 +1838,10 @@ export class FeishuChannel implements Channel {
       const senderType = item.sender?.sender_type ?? '';
       if (senderType === 'app') {
         // bot 自己发的消息
-        senderName = 'Andy';
+        senderName = ASSISTANT_NAME;
       } else {
         // 尝试从 DB 获取发送者名称（比 open_id 更友好）
         try {
-          const { getMessageById } = await import('../db.js');
           const row = getMessageById(parentId);
           if (row?.sender_name) {
             senderName = row.sender_name;
