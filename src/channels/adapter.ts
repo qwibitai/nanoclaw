@@ -62,7 +62,25 @@ export interface InboundEvent {
   replyTo?: DeliveryAddress;
 }
 
-/** Inbound message from adapter to host. */
+/** Inbound message from adapter to host.
+ *
+ * `content` is an opaque JS object that the host JSON.stringifies and writes
+ * into `messages_in.content`. By convention it carries `text`, optional
+ * `sender*` fields, and an optional `attachments[]` array. Each attachment
+ * entry is one of three shapes — the host-side `extractAttachmentFiles()` in
+ * `session-manager.ts` materializes the first two into the session inbox:
+ *
+ *   { data: string (base64); name?, contentType?, size? }      — inline bytes
+ *   { path: string (host abs path); name?, contentType?, size? } — host file
+ *   { url: string; name?, ... }                                 — pass-through
+ *
+ * After extraction the entry is rewritten in-place to:
+ *   { localPath: 'inbox/<messageId>/<file>', name?, contentType?, size? }
+ *
+ * The container-side formatter renders `localPath` as `/workspace/<localPath>`
+ * so the agent can `Read` the file. Bad attachments (oversize, missing source)
+ * are dropped and a `[Attachment …]` marker is appended to `text` instead.
+ */
 export interface InboundMessage {
   id: string;
   kind: 'chat' | 'chat-sdk';

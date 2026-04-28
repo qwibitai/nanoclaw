@@ -229,9 +229,79 @@ export function writeSessionMessage(
   updateSession(sessionId, { last_active: new Date().toISOString() });
 }
 
+/** 25 MB cap on a single attachment we'll materialize into the session inbox. */
+const INBOX_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+
+/** Minimal MIME → extension map for filling in extensions when a name lacks one. */
+const MIME_EXTENSION: Record<string, string> = {
+  'application/pdf': 'pdf',
+  'application/zip': 'zip',
+  'application/json': 'json',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/heic': 'heic',
+  'text/plain': 'txt',
+  'text/markdown': 'md',
+  'text/csv': 'csv',
+  'audio/mpeg': 'mp3',
+  'audio/ogg': 'ogg',
+  'audio/wav': 'wav',
+  'audio/aac': 'aac',
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+};
+
 /**
- * If message content has attachments with base64 `data`, save them to
- * the session's inbox directory and replace with `localPath`.
+ * Reduce a candidate filename to a safe basename inside the inbox directory.
+ * Strips path separators and traversal segments; falls back to a timestamp.
+ */
+function sanitizeAttachmentName(raw: unknown): string {
+  if (typeof raw !== 'string' || raw.length === 0) return `attachment-${Date.now()}`;
+  // Take only the basename — defeats `../foo` and `subdir/foo`.
+  let name = path.basename(raw.replace(/\\/g, '/'));
+  // Strip control characters and pure-dot names.
+  // eslint-disable-next-line no-control-regex
+  name = name.replace(/[\x00-\x1f]/g, '');
+  if (name === '' || name === '.' || name === '..') return `attachment-${Date.now()}`;
+  return name;
+}
+
+/**
+ * Append `.ext` derived from `contentType` if `name` has no extension and the
+ * type is in our allowlist. No-op otherwise.
+ */
+function applyMimeExtension(name: string, contentType: unknown): string {
+  if (path.extname(name)) return name;
+  if (typeof contentType !== 'string') return name;
+  const ext = MIME_EXTENSION[contentType.toLowerCase()];
+  return ext ? `${name}.${ext}` : name;
+}
+
+/** Append a marker line to the message text (created if absent). */
+function appendTextMarker(parsed: Record<string, unknown>, marker: string): void {
+  const current = typeof parsed.text === 'string' ? parsed.text : '';
+  parsed.text = current ? `${current}\n${marker}` : marker;
+}
+
+/**
+ * If message content has attachments with base64 `data` or a host-side `path`,
+ * save them to the session's inbox directory and replace with `localPath`.
+ *
+ * Recognized inbound shapes (one of):
+ *   { data: string (base64); name?, contentType?, size? }   — inline bytes
+ *   { path: string (host abs path); name?, contentType?, size? } — host file
+ * Either is rewritten in-place to:
+ *   { localPath: 'inbox/<messageId>/<file>', name?, contentType?, size? }
+ *
+ * Bad attachments (oversize, missing source) are dropped from the array and a
+ * `[Attachment …]` marker is appended to `parsed.text` so the agent isn't left
+ * silently confused. Unrecognized shapes (e.g. `{ url }`) pass through untouched.
  */
 function extractAttachmentFiles(
   agentGroupId: string,
@@ -250,21 +320,69 @@ function extractAttachmentFiles(
   if (!Array.isArray(attachments)) return contentStr;
 
   let changed = false;
+  const kept: Array<Record<string, unknown>> = [];
+
   for (const att of attachments) {
+    const inboxDir = path.join(sessionDir(agentGroupId, sessionId), 'inbox', messageId);
+    const baseName = applyMimeExtension(sanitizeAttachmentName(att.name), att.contentType);
+
     if (typeof att.data === 'string') {
-      const inboxDir = path.join(sessionDir(agentGroupId, sessionId), 'inbox', messageId);
       fs.mkdirSync(inboxDir, { recursive: true });
-      const filename = (att.name as string) || `attachment-${Date.now()}`;
-      const filePath = path.join(inboxDir, filename);
-      fs.writeFileSync(filePath, Buffer.from(att.data as string, 'base64'));
-      att.localPath = `inbox/${messageId}/${filename}`;
+      const filePath = path.join(inboxDir, baseName);
+      fs.writeFileSync(filePath, Buffer.from(att.data, 'base64'));
+      att.localPath = `inbox/${messageId}/${baseName}`;
       delete att.data;
       changed = true;
-      log.debug('Saved attachment to inbox', { messageId, filename, size: att.size });
+      log.debug('Saved attachment to inbox (base64)', { messageId, name: baseName, size: att.size });
+      kept.push(att);
+      continue;
     }
+
+    if (typeof att.path === 'string') {
+      const sourceLabel = (att.name as string) || baseName;
+      try {
+        const stat = fs.statSync(att.path);
+        if (stat.size > INBOX_ATTACHMENT_MAX_BYTES) {
+          log.warn('Attachment too large for inbox; dropping', {
+            messageId,
+            name: sourceLabel,
+            size: stat.size,
+            cap: INBOX_ATTACHMENT_MAX_BYTES,
+          });
+          appendTextMarker(parsed, `[Attachment too large to include: ${sourceLabel} (${stat.size} bytes)]`);
+          changed = true;
+          continue;
+        }
+        fs.mkdirSync(inboxDir, { recursive: true });
+        const filePath = path.join(inboxDir, baseName);
+        fs.copyFileSync(att.path, filePath);
+        att.localPath = `inbox/${messageId}/${baseName}`;
+        delete att.path;
+        changed = true;
+        log.debug('Saved attachment to inbox (path)', { messageId, name: baseName, size: stat.size });
+        kept.push(att);
+      } catch (err) {
+        log.error('Attachment copy failed; dropping', {
+          messageId,
+          name: sourceLabel,
+          path: att.path,
+          err: err instanceof Error ? err.message : String(err),
+        });
+        appendTextMarker(parsed, `[Attachment failed: ${sourceLabel}]`);
+        changed = true;
+      }
+      continue;
+    }
+
+    // Unknown shape — leave untouched.
+    kept.push(att);
   }
 
-  return changed ? JSON.stringify(parsed) : contentStr;
+  if (changed) {
+    parsed.attachments = kept;
+    return JSON.stringify(parsed);
+  }
+  return contentStr;
 }
 
 /** Open the inbound DB for a session (host reads/writes). */
