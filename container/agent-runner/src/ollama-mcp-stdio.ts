@@ -11,6 +11,8 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 
+import { buildGenerateBody } from './ollama-helpers.js';
+
 const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://host.docker.internal:11434';
 const OLLAMA_ADMIN_TOOLS = process.env.OLLAMA_ADMIN_TOOLS === 'true';
 const OLLAMA_STATUS_FILE = '/workspace/ipc/ollama_status.json';
@@ -88,24 +90,24 @@ server.tool(
 
 server.tool(
   'ollama_generate',
-  'Send a prompt to a local Ollama model and get a response. Good for cheaper/faster tasks like summarization, translation, or general queries. Use ollama_list_models first to see available models.',
+  'Send a prompt to a local Ollama model and get a response. Good for cheaper/faster tasks like summarization, translation, or general queries. Pass image files via the `images` field for multimodal models like gemma3 or llava. Use ollama_list_models first to see available models.',
   {
-    model: z.string().describe('The model name (e.g., "llama3.2", "mistral", "gemma2")'),
+    model: z.string().describe('The model name (e.g., "llama3.2", "mistral", "gemma3:4b")'),
     prompt: z.string().describe('The prompt to send to the model'),
     system: z.string().optional().describe('Optional system prompt to set model behavior'),
+    images: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Workspace-relative paths to image files for multimodal models (e.g. ["inbox/<msgid>/photo.jpg"]). Each path must resolve under /workspace; the wrapper reads the file and base64-encodes it before sending to Ollama.',
+      ),
   },
   async (args) => {
-    log(`>>> Generating with ${args.model} (${args.prompt.length} chars)...`);
+    const imageCount = args.images?.length ?? 0;
+    log(`>>> Generating with ${args.model} (${args.prompt.length} chars${imageCount > 0 ? `, ${imageCount} image${imageCount === 1 ? '' : 's'}` : ''})...`);
     writeStatus('generating', `Generating with ${args.model}`);
     try {
-      const body: Record<string, unknown> = {
-        model: args.model,
-        prompt: args.prompt,
-        stream: false,
-      };
-      if (args.system) {
-        body.system = args.system;
-      }
+      const body = buildGenerateBody(args);
 
       const res = await ollamaFetch('/api/generate', {
         method: 'POST',
