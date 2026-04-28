@@ -17,6 +17,7 @@ import { getAgentGroup } from '../../db/agent-groups.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import type { ApprovalHandler } from '../approvals/index.js';
+import { normalizeStringArray } from './normalize.js';
 
 export const applyInstallPackages: ApprovalHandler = async ({ session, payload, userId, notify }) => {
   const agentGroup = getAgentGroup(session.agent_group_id);
@@ -74,7 +75,7 @@ export const applyAddMcpServer: ApprovalHandler = async ({ session, payload, use
   updateContainerConfig(agentGroup.folder, (cfg) => {
     cfg.mcpServers[payload.name as string] = {
       command: payload.command as string,
-      args: (payload.args as string[]) || [],
+      args: normalizeStringArray(payload.args),
       env: (payload.env as Record<string, string>) || {},
     };
   });

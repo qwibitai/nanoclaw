@@ -16,6 +16,7 @@ import { getAgentGroup } from '../../db/agent-groups.js';
 import { log } from '../../log.js';
 import type { Session } from '../../types.js';
 import { notifyAgent, requestApproval } from '../approvals/index.js';
+import { normalizeStringArray } from './normalize.js';
 
 export async function handleInstallPackages(content: Record<string, unknown>, session: Session): Promise<void> {
   const agentGroup = getAgentGroup(session.agent_group_id);
@@ -82,7 +83,7 @@ export async function handleAddMcpServer(content: Record<string, unknown>, sessi
     payload: {
       name: serverName,
       command,
-      args: (content.args as string[]) || [],
+      args: normalizeStringArray(content.args),
       env: (content.env as Record<string, string>) || {},
     },
     title: 'Add MCP Request',
