@@ -461,6 +461,18 @@ async function buildContainerArgs(
   if (process.env.PAPERCLIP_COMPANY_ID) {
     args.push('-e', `PAPERCLIP_COMPANY_ID=${process.env.PAPERCLIP_COMPANY_ID}`);
   }
+  if (process.env.ACURAST_ADDR) {
+    args.push('-e', `ACURAST_ADDR=${process.env.ACURAST_ADDR}`);
+  }
+  if (process.env.ACURAST_COMMITMENT_ID) {
+    args.push('-e', `ACURAST_COMMITMENT_ID=${process.env.ACURAST_COMMITMENT_ID}`);
+  }
+  if (process.env.ACURAST_WSS_URL) {
+    args.push('-e', `ACURAST_WSS_URL=${process.env.ACURAST_WSS_URL}`);
+  }
+  if (process.env.ACURAST_EPOCH_LAG_ALERT) {
+    args.push('-e', `ACURAST_EPOCH_LAG_ALERT=${process.env.ACURAST_EPOCH_LAG_ALERT}`);
+  }
 
   // Attach to a custom Docker network when configured (e.g. shared
   // network with Ollama, Home Assistant, etc.). Falls back to Docker's
