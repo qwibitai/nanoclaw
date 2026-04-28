@@ -15,7 +15,9 @@
  * core throws with a "module not installed" message so retry → mark failed.
  */
 import { getAgentGroup } from '../../db/agent-groups.js';
+import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { getSession } from '../../db/sessions.js';
+import { getDeliveryAdapter } from '../../delivery.js';
 import { wakeContainer } from '../../container-runner.js';
 import { log } from '../../log.js';
 import { resolveSession, writeSessionMessage } from '../../session-manager.js';
@@ -41,9 +43,11 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
       `unauthorized agent-to-agent: ${session.agent_group_id} has no destination for ${targetAgentGroupId}`,
     );
   }
-  if (!getAgentGroup(targetAgentGroupId)) {
+  const targetAgent = getAgentGroup(targetAgentGroupId);
+  if (!targetAgent) {
     throw new Error(`target agent group ${targetAgentGroupId} not found for message ${msg.id}`);
   }
+  const sourceAgent = getAgentGroup(session.agent_group_id);
   const { session: targetSession } = resolveSession(targetAgentGroupId, null, null, 'agent-shared');
   writeSessionMessage(targetAgentGroupId, targetSession.id, {
     id: `a2a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -59,6 +63,27 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
     to: targetAgentGroupId,
     targetSession: targetSession.id,
   });
+
+  // Relay a copy to the source agent's origin channel so the user can see it.
+  relayToOriginChannel(session, sourceAgent?.name ?? session.agent_group_id, targetAgent?.name ?? targetAgentGroupId, msg.content).catch((err) =>
+    log.warn('Failed to relay agent-to-agent message to channel', { err }),
+  );
+
   const fresh = getSession(targetSession.id);
   if (fresh) await wakeContainer(fresh);
+}
+
+async function relayToOriginChannel(
+  session: Session,
+  sourceName: string,
+  targetName: string,
+  content: string,
+): Promise<void> {
+  if (!session.messaging_group_id) return;
+  const mg = getMessagingGroup(session.messaging_group_id);
+  if (!mg) return;
+  const adapter = getDeliveryAdapter();
+  if (!adapter) return;
+  const text = `💬 **${sourceName}** → **${targetName}**:\n${content}`;
+  await adapter.deliver(mg.channel_type, mg.platform_id, null, 'chat', text);
 }

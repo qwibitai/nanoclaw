@@ -7,3 +7,6 @@
 // self-registration import below.
 
 import './cli.js';
+import './whatsapp.js';
+import './telegram.js';
+import './discord.js';

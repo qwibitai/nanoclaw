@@ -94,7 +94,9 @@ export function decideStuckAction(args: {
 
   const tolerance = Math.max(CLAIM_STUCK_MS, declaredBashMs ?? 0);
   for (const claim of claims) {
-    const claimedAt = Date.parse(claim.status_changed);
+    // status_changed is written by the container (UTC) without timezone suffix.
+    // Appending 'Z' ensures Date.parse treats it as UTC regardless of host TZ.
+    const claimedAt = Date.parse(claim.status_changed.replace(' ', 'T') + 'Z');
     if (Number.isNaN(claimedAt)) continue;
     const claimAge = now - claimedAt;
     if (claimAge <= tolerance) continue;

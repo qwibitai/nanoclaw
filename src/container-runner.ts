@@ -10,6 +10,7 @@ import path from 'path';
 import { OneCLI } from '@onecli-sh/sdk';
 
 import { CONTAINER_IMAGE, DATA_DIR, GROUPS_DIR, ONECLI_API_KEY, ONECLI_URL, TIMEZONE } from './config.js';
+import { readEnvFile } from './env.js';
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
@@ -109,7 +110,8 @@ async function spawnContainer(session: Session): Promise<void> {
   const containerName = `nanoclaw-v2-${agentGroup.folder}-${Date.now()}`;
   // OneCLI agent identifier is always the agent group id — stable across
   // sessions and reversible via getAgentGroup() for approval routing.
-  const agentIdentifier = agentGroup.id;
+  // OneCLI identifiers allow only lowercase letters, numbers, and hyphens.
+  const agentIdentifier = agentGroup.id.replace(/_/g, '-');
   const args = await buildContainerArgs(
     mounts,
     containerName,
@@ -400,7 +402,16 @@ async function buildContainerArgs(
     if (agentIdentifier) {
       await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
     }
-    const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
+    // applyContainerConfig silently catches all errors and returns false.
+    // Re-run getContainerConfig first so we surface any error before spawning.
+    const containerConfig = await onecli.getContainerConfig(agentIdentifier).catch((err) => {
+      log.warn('OneCLI getContainerConfig failed', { containerName, err });
+      return null;
+    });
+    let onecliApplied = false;
+    if (containerConfig) {
+      onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
+    }
     if (onecliApplied) {
       log.info('OneCLI gateway applied', { containerName });
     } else {
@@ -410,15 +421,28 @@ async function buildContainerArgs(
     log.warn('OneCLI gateway error — container will have no credentials', { containerName, err });
   }
 
+  // Override OneCLI's placeholder OAuth token with the real one from .env.
+  // OneCLI injects CLAUDE_CODE_OAUTH_TOKEN=placeholder; Docker uses the last
+  // -e value for duplicate keys, so appending here wins.
+  const { CLAUDE_CODE_OAUTH_TOKEN } = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN']);
+  if (CLAUDE_CODE_OAUTH_TOKEN) {
+    args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}`);
+  }
+
   // Host gateway
   args.push(...hostGatewayArgs());
 
-  // User mapping
-  const hostUid = process.getuid?.();
-  const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
-    args.push('--user', `${hostUid}:${hostGid}`);
-    args.push('-e', 'HOME=/home/node');
+  // User mapping — Linux only. On macOS, Docker Desktop's VM handles
+  // file ownership mapping transparently; using --user with a non-1000
+  // UID breaks write access to /home/node (owned by UID 1000 in the image)
+  // which prevents Claude Code from creating its state directories.
+  if (process.platform === 'linux') {
+    const hostUid = process.getuid?.();
+    const hostGid = process.getgid?.();
+    if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+      args.push('--user', `${hostUid}:${hostGid}`);
+      args.push('-e', 'HOME=/home/node');
+    }
   }
 
   // Volume mounts
