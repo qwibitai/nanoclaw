@@ -589,10 +589,13 @@ export function createSignalAdapter(config: {
     const text = rawText ? resolveMentions(rawText, dataMessage.mentions) : '';
 
     const audioAttachment = dataMessage.attachments?.find((a) => a.contentType?.startsWith('audio/') && a.id);
-    const imageAttachments = dataMessage.attachments?.filter((a) => a.contentType?.startsWith('image/') && a.id) ?? [];
+    // Every non-audio attachment with an id rides through to the host's inbox extractor,
+    // which copies the source file into <sessionDir>/inbox/<msgId>/ and rewrites the path
+    // to a container-readable `localPath`. Audio is consumed locally for transcription.
+    const fileAttachments = dataMessage.attachments?.filter((a) => !a.contentType?.startsWith('audio/') && a.id) ?? [];
     const hasVoice = !text && !!audioAttachment;
 
-    if (!text && !hasVoice && imageAttachments.length === 0) return;
+    if (!text && !hasVoice && fileAttachments.length === 0) return;
 
     const sender = (envelope.sourceNumber ?? envelope.sourceUuid ?? envelope.source ?? '').trim();
     if (!sender) return;
@@ -647,16 +650,19 @@ export function createSignalAdapter(config: {
       }
     }
 
-    // Image attachments — emit `[Image: <path>]` lines so the agent's Read
-    // tool can pick them up, and surface the structured `attachments` array
-    // for consumers that prefer that shape. Without this, vision-capable
-    // models never see images sent over Signal.
-    const attachmentRefs: Array<{ path: string; contentType: string }> = [];
-    for (const img of imageAttachments) {
-      const imagePath = join(config.signalDataDir, 'attachments', img.id!);
-      const imageLine = `[Image: ${imagePath}]`;
-      content = content ? `${content}\n${imageLine}` : imageLine;
-      attachmentRefs.push({ path: imagePath, contentType: img.contentType || 'image/jpeg' });
+    // Pass every non-audio attachment as a structured `{path, contentType, name}` entry.
+    // The host's extractAttachmentFiles() will copy the file into the session inbox and
+    // rewrite the path to a container-readable `localPath`; the container-side formatter
+    // then renders it as `[type: name — saved to /workspace/inbox/...]` for the agent.
+    const attachmentRefs: Array<{ path: string; contentType: string; name: string }> = [];
+    for (const att of fileAttachments) {
+      const filePath = join(config.signalDataDir, 'attachments', att.id!);
+      const name = att.filename ?? att.id!;
+      attachmentRefs.push({
+        path: filePath,
+        contentType: att.contentType || 'application/octet-stream',
+        name,
+      });
     }
 
     const msg: InboundMessage = {

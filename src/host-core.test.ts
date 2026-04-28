@@ -173,6 +173,208 @@ describe('session manager', () => {
 
     expect(getSession(session.id)!.last_active).not.toBeNull();
   });
+
+  describe('inbound attachments', () => {
+    // Helper: read inbound.db for the session and return parsed content of msg-1.
+    function readInbound(agentGroupId: string, sessionId: string, messageId: string) {
+      const dbPath = inboundDbPath(agentGroupId, sessionId);
+      const db = new Database(dbPath);
+      const row = db.prepare('SELECT content FROM messages_in WHERE id = ?').get(messageId) as
+        | { content: string }
+        | undefined;
+      db.close();
+      if (!row) throw new Error(`message ${messageId} not found`);
+      return JSON.parse(row.content);
+    }
+
+    it('saves base64 (data) attachments to inbox/<msgId>/<name> and rewrites to localPath', () => {
+      const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+      const bytes = Buffer.from('hello base64', 'utf8');
+      writeSessionMessage('ag-1', session.id, {
+        id: 'msg-b64',
+        kind: 'chat',
+        timestamp: now(),
+        content: JSON.stringify({
+          text: 'see attached',
+          attachments: [{ data: bytes.toString('base64'), name: 'note.txt', contentType: 'text/plain' }],
+        }),
+      });
+
+      const dest = path.join(sessionDir('ag-1', session.id), 'inbox', 'msg-b64', 'note.txt');
+      expect(fs.existsSync(dest)).toBe(true);
+      expect(fs.readFileSync(dest)).toEqual(bytes);
+
+      const content = readInbound('ag-1', session.id, 'msg-b64');
+      expect(content.attachments[0].localPath).toBe('inbox/msg-b64/note.txt');
+      expect(content.attachments[0].data).toBeUndefined();
+    });
+
+    it('saves host-path attachments by copying the source file into inbox/<msgId>/', () => {
+      const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+      const src = path.join(TEST_DIR, 'src-doc.pdf');
+      const bytes = Buffer.from('%PDF-1.4 fake pdf bytes', 'utf8');
+      fs.writeFileSync(src, bytes);
+
+      writeSessionMessage('ag-1', session.id, {
+        id: 'msg-path',
+        kind: 'chat',
+        timestamp: now(),
+        content: JSON.stringify({
+          text: 'check this PDF',
+          attachments: [{ path: src, name: 'doc.pdf', contentType: 'application/pdf' }],
+        }),
+      });
+
+      const dest = path.join(sessionDir('ag-1', session.id), 'inbox', 'msg-path', 'doc.pdf');
+      expect(fs.existsSync(dest)).toBe(true);
+      expect(fs.readFileSync(dest)).toEqual(bytes);
+
+      const content = readInbound('ag-1', session.id, 'msg-path');
+      expect(content.attachments[0].localPath).toBe('inbox/msg-path/doc.pdf');
+      expect(content.attachments[0].path).toBeUndefined();
+      expect(content.text).toBe('check this PDF'); // text untouched on success
+    });
+
+    it('sanitizes filenames containing path traversal segments', () => {
+      const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+      const src = path.join(TEST_DIR, 'src-traversal.bin');
+      fs.writeFileSync(src, 'x');
+
+      writeSessionMessage('ag-1', session.id, {
+        id: 'msg-trav',
+        kind: 'chat',
+        timestamp: now(),
+        content: JSON.stringify({
+          text: '',
+          attachments: [{ path: src, name: '../../etc/passwd' }],
+        }),
+      });
+
+      const inboxDir = path.join(sessionDir('ag-1', session.id), 'inbox', 'msg-trav');
+      expect(fs.existsSync(inboxDir)).toBe(true);
+      // Nothing escapes the inbox dir
+      const sessionRoot = sessionDir('ag-1', session.id);
+      const escaped = path.resolve(sessionRoot, '..', '..', 'etc', 'passwd');
+      expect(fs.existsSync(escaped)).toBe(false);
+      // The destination basename is the sanitized basename (`passwd`), inside the inbox dir
+      expect(fs.existsSync(path.join(inboxDir, 'passwd'))).toBe(true);
+
+      const content = readInbound('ag-1', session.id, 'msg-trav');
+      expect(content.attachments[0].localPath).toBe('inbox/msg-trav/passwd');
+    });
+
+    it('appends a MIME-derived extension when name has none and contentType is recognized', () => {
+      const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+      const src = path.join(TEST_DIR, 'src-noext.bin');
+      fs.writeFileSync(src, '%PDF-1.4');
+
+      writeSessionMessage('ag-1', session.id, {
+        id: 'msg-mime',
+        kind: 'chat',
+        timestamp: now(),
+        content: JSON.stringify({
+          text: '',
+          attachments: [{ path: src, name: 'doc', contentType: 'application/pdf' }],
+        }),
+      });
+
+      const dest = path.join(sessionDir('ag-1', session.id), 'inbox', 'msg-mime', 'doc.pdf');
+      expect(fs.existsSync(dest)).toBe(true);
+      const content = readInbound('ag-1', session.id, 'msg-mime');
+      expect(content.attachments[0].localPath).toBe('inbox/msg-mime/doc.pdf');
+    });
+
+    it('drops oversized attachments and injects a marker into text', () => {
+      const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+      const big = path.join(TEST_DIR, 'src-big.bin');
+      // 26 MB sparse — over the 25 MB cap. truncate doesn't allocate disk for the body.
+      const fd = fs.openSync(big, 'w');
+      try {
+        fs.ftruncateSync(fd, 26 * 1024 * 1024);
+      } finally {
+        fs.closeSync(fd);
+      }
+
+      writeSessionMessage('ag-1', session.id, {
+        id: 'msg-big',
+        kind: 'chat',
+        timestamp: now(),
+        content: JSON.stringify({
+          text: 'huge file',
+          attachments: [{ path: big, name: 'big.bin', contentType: 'application/octet-stream' }],
+        }),
+      });
+
+      // Source not copied
+      const dest = path.join(sessionDir('ag-1', session.id), 'inbox', 'msg-big', 'big.bin');
+      expect(fs.existsSync(dest)).toBe(false);
+
+      const content = readInbound('ag-1', session.id, 'msg-big');
+      expect(content.attachments).toHaveLength(0);
+      expect(content.text).toMatch(/Attachment too large.*big\.bin/);
+    });
+
+    it('drops attachments whose source path is missing and injects a failure marker; siblings still process', () => {
+      const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+      const goodSrc = path.join(TEST_DIR, 'src-good.txt');
+      fs.writeFileSync(goodSrc, 'good bytes');
+
+      writeSessionMessage('ag-1', session.id, {
+        id: 'msg-mix',
+        kind: 'chat',
+        timestamp: now(),
+        content: JSON.stringify({
+          text: 'mixed',
+          attachments: [
+            { path: '/nonexistent/missing.bin', name: 'missing.bin', contentType: 'application/octet-stream' },
+            { path: goodSrc, name: 'good.txt', contentType: 'text/plain' },
+          ],
+        }),
+      });
+
+      const content = readInbound('ag-1', session.id, 'msg-mix');
+      // Failed attachment dropped, good one kept
+      expect(content.attachments).toHaveLength(1);
+      expect(content.attachments[0].localPath).toBe('inbox/msg-mix/good.txt');
+      expect(content.text).toMatch(/Attachment failed.*missing\.bin/);
+
+      const goodDest = path.join(sessionDir('ag-1', session.id), 'inbox', 'msg-mix', 'good.txt');
+      expect(fs.existsSync(goodDest)).toBe(true);
+      expect(fs.readFileSync(goodDest, 'utf8')).toBe('good bytes');
+    });
+
+    it('handles a mix of base64 + path + untouched attachments in one message', () => {
+      const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+      const src = path.join(TEST_DIR, 'src-mix.txt');
+      fs.writeFileSync(src, 'from path');
+
+      writeSessionMessage('ag-1', session.id, {
+        id: 'msg-multi',
+        kind: 'chat',
+        timestamp: now(),
+        content: JSON.stringify({
+          text: 'three kinds',
+          attachments: [
+            { data: Buffer.from('from base64', 'utf8').toString('base64'), name: 'a.txt' },
+            { path: src, name: 'b.txt' },
+            { url: 'https://example.com/c', name: 'c.txt' },
+          ],
+        }),
+      });
+
+      const content = readInbound('ag-1', session.id, 'msg-multi');
+      const inboxDir = path.join(sessionDir('ag-1', session.id), 'inbox', 'msg-multi');
+      expect(fs.readFileSync(path.join(inboxDir, 'a.txt'), 'utf8')).toBe('from base64');
+      expect(fs.readFileSync(path.join(inboxDir, 'b.txt'), 'utf8')).toBe('from path');
+      expect(content.attachments[0].localPath).toBe('inbox/msg-multi/a.txt');
+      expect(content.attachments[0].data).toBeUndefined();
+      expect(content.attachments[1].localPath).toBe('inbox/msg-multi/b.txt');
+      expect(content.attachments[1].path).toBeUndefined();
+      // untouched: third attachment retains its original shape
+      expect(content.attachments[2].url).toBe('https://example.com/c');
+      expect(content.attachments[2].localPath).toBeUndefined();
+    });
+  });
 });
 
 describe('router', () => {
