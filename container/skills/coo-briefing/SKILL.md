@@ -141,9 +141,11 @@ Extract:
 - Rooms Actual = RF0001 Stat from actuals CSV (current month, current year)
 - Rooms Forecast = RF0001 Stat from fcst CSV
 - Rooms Budget = RF0001 Stat from bud CSV
-- Revenue Actual = TOTOPRV Amt from actuals CSV
-- Revenue Forecast = TOTOPRV Amt from fcst CSV
-- Revenue Budget = TOTOPRV Amt from bud CSV
+- Revenue Actual = RF0003 Amt from actuals CSV (Rooms Revenue only -- NOT TOTOPRV)
+- Revenue Forecast = RF0003 Amt from fcst CSV (Primary Forecast = dataset 1)
+- Revenue Budget = RF0003 Amt from bud CSV (Budget = dataset 2)
+
+Use RF0003 Amt (Rooms Revenue) throughout. Never use TOTOPRV -- that is total operating revenue including F&B and spa, which overstates the gap vs Duetto (rooms-only OTB).
 
 vs Fcst % = (Actual - Forecast) / Forecast. vs Budget % = (Actual - Budget) / Budget.
 
@@ -449,6 +451,8 @@ For every property takeaway that signals a problem or opportunity, generate a sp
 | DTLA Proper | Bruno Vergeynst | bruno.vergeynst@properhotel.com |
 | Hotel June West LA | Michael Gregory | michael.gregory@thehoteljune.com |
 | Hotel June Malibu | Leah Edwards | leah.edwards@properhotel.com |
+
+NOTE -- Hotel June Malibu: Leah Edwards holds two roles simultaneously: GM Hotel June Malibu AND Corporate Director of Operations. For property-level actions at HJM, use title "GM Hotel June Malibu". For cross-portfolio ops actions, use "Corporate Director of Operations". Never use "Managing Director" for Leah -- that is not her title.
 | Austin Proper | Anis Khoury | anis.khoury@properhotel.com |
 | San Francisco Proper | Adam Sydenham | adam.sydenham@properhotel.com |
 | The Shelborne By Proper | Guy Chetwynd | Guy.Chetwynd@shelborne.com |
