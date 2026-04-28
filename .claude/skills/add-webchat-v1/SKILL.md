@@ -1,13 +1,13 @@
 ---
-name: add-local-chat-v1
-description: Add embedded HTTP + WebSocket chat server with PWA to NanoClaw v1.x.x. Enables a local web chat interface on port 3100. Targets v1 only — for v2, use add-local-chat-v2.
+name: add-webchat-v1
+description: Add embedded HTTP + WebSocket chat server with PWA to NanoClaw v1.x.x. Enables a webchat interface on port 3100. Targets v1 only — for v2, use add-webchat-v2.
 ---
 
-# Add Local Chat Server (NanoClaw v1)
+# Add Webchat Server (NanoClaw v1)
 
 This skill adds an in-process chat server to NanoClaw with a lightweight PWA frontend, then walks through setup.
 
-**Target version:** NanoClaw **v1.x.x** (single-file `src/db.ts`, flat DB schema). For v2 installs (with `src/db/` directory and central-DB schema), use `add-local-chat-v2` instead — they are not interchangeable.
+**Target version:** NanoClaw **v1.x.x** (single-file `src/db.ts`, flat DB schema). For v2 installs (with `src/db/` directory and central-DB schema), use `add-webchat-v2` instead — they are not interchangeable.
 
 ## Phase 1: Pre-flight
 
@@ -17,7 +17,7 @@ This skill adds an in-process chat server to NanoClaw with a lightweight PWA fro
 node -e "console.log(require('./package.json').version)"
 ```
 
-If the major version is **2** or higher, **stop**. This skill targets v1 only. Tell the user to use `add-local-chat-v2` instead.
+If the major version is **2** or higher, **stop**. This skill targets v1 only. Tell the user to use `add-webchat-v2` instead.
 
 ### Check if already applied
 
@@ -28,8 +28,8 @@ Check if `src/chat-server.ts` exists. If it does, skip to Phase 3 (Setup). The c
 ### Fetch and merge the skill branch
 
 ```bash
-git fetch origin skill/local-chat-v1
-git merge origin/skill/local-chat-v1 || {
+git fetch origin skill/webchat-v1
+git merge origin/skill/webchat-v1 || {
   git checkout --theirs package-lock.json
   git add package-lock.json
   git merge --continue
@@ -49,9 +49,9 @@ This merges in:
 - `src/chat-db.ts` (SQLite persistence for rooms, messages, push subscriptions, agent tokens)
 - `src/redact.ts` (sensitive-data masking for chat-server logs)
 - `src/timezone.ts` (IANA timezone helpers)
-- `src/channels/local-chat.ts` (channel adapter that registers the local-chat channel)
+- `src/channels/webchat.ts` (channel adapter that registers the webchat channel)
 - `chat-pwa/` directory (PWA frontend: HTML, JS, CSS, service worker, manifest)
-- `import './local-chat.js'` added to `src/channels/index.ts`
+- `import './webchat.js'` added to `src/channels/index.ts`
 - `import { startChatServer, stopChatServer, setOnGroupUpdated }` and corresponding lifecycle calls added to `src/index.ts`
 - Four db functions (`updateRegisteredGroup`, `deleteRegisteredGroup`, `logMessageRoute`, `getMessageRoutes`) and a `message_routes` table added to `src/db.ts`
 - npm dependencies: `ws`, `busboy`, `web-push` (plus their `@types/*`) in `package.json`
@@ -251,7 +251,7 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 
 ## Phase 4: Register Main Group
 
-The local chat server needs a room registered as the **main NanoClaw group** so the primary bot instance (not a sub-agent) is connected. This gives it elevated privileges: no trigger word required, ability to manage other groups, and full IPC access.
+The webchat server needs a room registered as the **main NanoClaw group** so the primary bot instance (not a sub-agent) is connected. This gives it elevated privileges: no trigger word required, ability to manage other groups, and full IPC access.
 
 ### Check for existing main group
 
@@ -268,8 +268,8 @@ else console.log('NO_MAIN');
 ```
 
 If a main group already exists on another channel (e.g. `whatsapp_main`), ask the user whether they want to:
-1. **Keep the existing main** and register the local-chat room as a regular (sub-agent) group
-2. **Move the main to local-chat** (the old main becomes a regular group)
+1. **Keep the existing main** and register the webchat room as a regular (sub-agent) group
+2. **Move the main to webchat** (the old main becomes a regular group)
 
 ### Ask the user to choose a room name
 
@@ -294,7 +294,7 @@ npx tsx setup/index.ts --step register \
   --name "<room_name>" \
   --trigger "$TRIGGER" \
   --folder "chat_<room_id>" \
-  --channel local-chat \
+  --channel webchat \
   --assistant-name "$ASSISTANT_NAME" \
   --is-main \
   --no-trigger-required

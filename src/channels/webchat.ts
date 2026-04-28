@@ -10,8 +10,8 @@ import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Channel } from '../types.js';
 
-export class LocalChatChannel implements Channel {
-  name = 'local-chat';
+export class WebchatChannel implements Channel {
+  name = 'webchat';
 
   private connected = false;
   private opts: ChannelOpts;
@@ -32,7 +32,7 @@ export class LocalChatChannel implements Channel {
         chatJid,
         timestamp,
         roomName,
-        'local-chat',
+        'webchat',
         true,
       );
 
@@ -71,19 +71,19 @@ export class LocalChatChannel implements Channel {
 
       logger.info(
         { chatJid, roomName, sender: message.sender },
-        'Local chat message stored',
+        'Webchat message stored',
       );
     });
 
     this.connected = true;
-    logger.info('Local chat channel connected');
+    logger.info('Webchat channel connected');
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
     const roomId = jid.replace(/^chat:/, '');
     const stored = storeChatMessage(roomId, ASSISTANT_NAME, 'agent', text);
     broadcast(roomId, { type: 'message', ...stored });
-    logger.info({ jid, length: text.length }, 'Local chat message sent');
+    logger.info({ jid, length: text.length }, 'Webchat message sent');
   }
 
   isConnected(): boolean {
@@ -97,7 +97,7 @@ export class LocalChatChannel implements Channel {
   async disconnect(): Promise<void> {
     clearOnNewMessage();
     this.connected = false;
-    logger.info('Local chat channel disconnected');
+    logger.info('Webchat channel disconnected');
   }
 
   sendStatus(jid: string, event: string, detail?: string): void {
@@ -123,7 +123,7 @@ export class LocalChatChannel implements Channel {
   }
 }
 
-registerChannel('local-chat', (opts: ChannelOpts) => {
+registerChannel('webchat', (opts: ChannelOpts) => {
   if (process.env.CHAT_SERVER_ENABLED !== 'true') return null;
-  return new LocalChatChannel(opts);
+  return new WebchatChannel(opts);
 });

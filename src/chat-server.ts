@@ -61,7 +61,7 @@ import {
 } from './chat-db.js';
 
 // Re-export the externally-consumed chat-server API so existing import paths
-// from channels/local-chat.ts and src/index.ts keep working.
+// from channels/webchat.ts and src/index.ts keep working.
 export {
   broadcast,
   setAgentPresence,
@@ -222,7 +222,7 @@ async function handleHttp(
         : jid.startsWith('dc:')
           ? 'discord'
           : jid.startsWith('chat:')
-            ? 'local-chat'
+            ? 'webchat'
             : jid.endsWith('@g.us') || jid.endsWith('@s.whatsapp.net')
               ? 'whatsapp'
               : g.folder.split('_')[0] || 'unknown';
@@ -288,8 +288,8 @@ async function handleHttp(
         messages24h += recent;
         if (recent > 0) {
           roomMessages.push({ id: room.id, name: room.name, count: recent });
-          messagesByChannel['local-chat'] =
-            (messagesByChannel['local-chat'] || 0) + recent;
+          messagesByChannel['webchat'] =
+            (messagesByChannel['webchat'] || 0) + recent;
         }
       }
     } catch {
@@ -510,7 +510,7 @@ async function handleHttp(
         added_at: new Date().toISOString(),
         requiresTrigger: requiresTrigger !== false,
       });
-      // Auto-create chat room for local-chat bots
+      // Auto-create chat room for webchat bots
       if (jid.startsWith('chat:')) {
         const roomId = jid.replace(/^chat:/, '');
         createChatRoom(roomId, name);
@@ -586,7 +586,7 @@ async function handleHttp(
       }
 
       // Post the bot creation request as a message to the main room
-      const prompt = `Create a new bot for the local chat channel based on this description:\n\n"${description}"\n\nUse mcp__nanoclaw__register_group to register it with a "chat:" JID and "local_" folder prefix (e.g. jid="chat:my-bot", folder="local_my-bot"). Then write a CLAUDE.md file to /workspace/group/../<folder>/CLAUDE.md with the bot's instructions. The CLAUDE.md should define the bot's personality, capabilities, and formatting preferences for a markdown-capable web chat. Confirm when done with the bot name and trigger word.`;
+      const prompt = `Create a new bot for the webchat channel based on this description:\n\n"${description}"\n\nUse mcp__nanoclaw__register_group to register it with a "chat:" JID and "local_" folder prefix (e.g. jid="chat:my-bot", folder="local_my-bot"). Then write a CLAUDE.md file to /workspace/group/../<folder>/CLAUDE.md with the bot's instructions. The CLAUDE.md should define the bot's personality, capabilities, and formatting preferences for a markdown-capable web chat. Confirm when done with the bot name and trigger word.`;
 
       const stored = storeChatMessage(mainRoomId, 'system', 'user', prompt);
       broadcast(mainRoomId, { type: 'message', ...stored });
