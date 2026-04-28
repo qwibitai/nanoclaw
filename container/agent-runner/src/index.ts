@@ -447,6 +447,7 @@ async function runQuery(
   tailscaleMcpServerPath: string,
   homeassistantMcpServerPath: string,
   ollamaMcpServerPath: string,
+  acurastStakingMcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
@@ -550,6 +551,7 @@ async function runQuery(
         'mcp__tailscale__*',
         'mcp__homeassistant__*',
         'mcp__ollama__*',
+        'mcp__acurast-staking__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -597,6 +599,16 @@ async function runQuery(
           args: [ollamaMcpServerPath],
           env: {
             OLLAMA_URL: sdkEnv.OLLAMA_URL ?? '',
+          },
+        },
+        'acurast-staking': {
+          command: 'node',
+          args: [acurastStakingMcpServerPath],
+          env: {
+            ACURAST_ADDR: sdkEnv.ACURAST_ADDR ?? '',
+            ACURAST_COMMITMENT_ID: sdkEnv.ACURAST_COMMITMENT_ID ?? '',
+            ACURAST_WSS_URL: sdkEnv.ACURAST_WSS_URL ?? 'wss://public-rpc.mainnet.acurast.com',
+            ACURAST_EPOCH_LAG_ALERT: sdkEnv.ACURAST_EPOCH_LAG_ALERT ?? '2',
           },
         },
       },
@@ -749,6 +761,7 @@ async function main(): Promise<void> {
   const tailscaleMcpServerPath = path.join(__dirname, 'tailscale-mcp-stdio.js');
   const homeassistantMcpServerPath = path.join(__dirname, 'homeassistant-mcp-stdio.js');
   const ollamaMcpServerPath = path.join(__dirname, 'ollama-mcp-stdio.js');
+  const acurastStakingMcpServerPath = path.join(__dirname, 'acurast-staking.js');
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -809,6 +822,7 @@ async function main(): Promise<void> {
         tailscaleMcpServerPath,
         homeassistantMcpServerPath,
         ollamaMcpServerPath,
+        acurastStakingMcpServerPath,
         containerInput,
         sdkEnv,
         resumeAt,
