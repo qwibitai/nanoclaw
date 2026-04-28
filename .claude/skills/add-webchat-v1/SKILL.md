@@ -55,7 +55,8 @@ This merges in:
 - `import { startChatServer, stopChatServer, setOnGroupUpdated }` and corresponding lifecycle calls added to `src/index.ts`
 - Four db functions (`updateRegisteredGroup`, `deleteRegisteredGroup`, `logMessageRoute`, `getMessageRoutes`) and a `message_routes` table added to `src/db.ts`
 - npm dependencies: `ws`, `busboy`, `web-push` (plus their `@types/*`) in `package.json`
-- `CHAT_SERVER_*` and `TLS_*` keys in `.env.example`
+- `@onecli-sh/sdk` as an **optional** dependency (only loaded at runtime if `ONECLI_URL` is set — see Phase 3 → "Optional: OneCLI credential proxy")
+- `CHAT_SERVER_*`, `TLS_*`, and `ONECLI_*` keys in `.env.example`
 
 ### Validate code changes
 
@@ -67,6 +68,21 @@ npm run build
 Build must be clean before proceeding.
 
 ## Phase 3: Setup
+
+### Optional: OneCLI credential proxy
+
+By default, agents inside containers authenticate to Anthropic via `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` read from `.env` and piped via stdin. That works for most installs.
+
+If you'd rather route auth through a [OneCLI](https://onecli.sh) gateway (for credential vaulting, per-agent identities, or central audit), set:
+
+```bash
+ONECLI_URL=http://172.17.0.1:10254
+# ONECLI_API_KEY=<gateway-api-key>   # only if your gateway requires auth
+```
+
+The `@onecli-sh/sdk` package ships as an optional dependency — `npm install` picks it up automatically. The integration is lazy-loaded: if `ONECLI_URL` is unset, the SDK is never imported and behavior is identical to upstream NanoClaw v1.2.0. If the gateway is unreachable at runtime, the container falls back to env-var auth.
+
+Setting up the OneCLI gateway service itself is out of scope for this skill. See [onecli.sh](https://onecli.sh) for installation; if you have it set up via the prod fork's `/init-onecli` skill, that gateway works as-is.
 
 ### Configure environment
 

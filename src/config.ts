@@ -61,3 +61,11 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Optional: OneCLI credential proxy. When ONECLI_URL is set, the agent
+// container's HTTPS traffic is proxied through OneCLI which injects
+// credentials at the gateway. Containers never see raw API keys.
+// Requires `@onecli-sh/sdk` (optional dependency) to be installed.
+// Leave unset to use direct env-var auth via .env (default).
+export const ONECLI_URL = process.env.ONECLI_URL;
+export const ONECLI_API_KEY = process.env.ONECLI_API_KEY;

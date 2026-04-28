@@ -28,13 +28,7 @@ export class WebchatChannel implements Channel {
       const room = getChatRoom(roomId);
       const roomName = room?.name ?? roomId;
 
-      this.opts.onChatMetadata(
-        chatJid,
-        timestamp,
-        roomName,
-        'webchat',
-        true,
-      );
+      this.opts.onChatMetadata(chatJid, timestamp, roomName, 'webchat', true);
 
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) {

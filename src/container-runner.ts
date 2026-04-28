@@ -13,6 +13,8 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  ONECLI_API_KEY,
+  ONECLI_URL,
   TIMEZONE,
 } from './config.js';
 import { readEnvFile } from './env.js';
@@ -223,14 +225,73 @@ function readSecrets(): Record<string, string> {
   ]);
 }
 
-function buildContainerArgs(
+// OneCLI integration is optional and lazy-loaded. When ONECLI_URL is set
+// and `@onecli-sh/sdk` is installed (it ships as an optional dep), each
+// container's HTTPS traffic is proxied through OneCLI which injects
+// credentials at the gateway. When unset, falls through to env-var auth
+// from .env (the upstream-clean default path).
+let onecliPromise: Promise<{
+  applyContainerConfig: (
+    args: string[],
+    opts: { addHostMapping?: boolean },
+  ) => Promise<boolean>;
+} | null> | null = null;
+
+async function getOnecli(): Promise<{
+  applyContainerConfig: (
+    args: string[],
+    opts: { addHostMapping?: boolean },
+  ) => Promise<boolean>;
+} | null> {
+  if (!ONECLI_URL) return null;
+  if (!onecliPromise) {
+    onecliPromise = (async () => {
+      try {
+        const mod = (await import('@onecli-sh/sdk')) as {
+          OneCLI: new (opts: { url: string; apiKey?: string }) => {
+            applyContainerConfig: (
+              args: string[],
+              opts: { addHostMapping?: boolean },
+            ) => Promise<boolean>;
+          };
+        };
+        return new mod.OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'ONECLI_URL set but @onecli-sh/sdk not installed — falling back to env-var auth. Run `npm install` to pick up the optional dependency.',
+        );
+        return null;
+      }
+    })();
+  }
+  return onecliPromise;
+}
+
+async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
-): string[] {
+): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // OneCLI gateway (optional). Adds HTTPS proxy env vars + CA mounts so
+  // the container's outbound calls are intercepted and authenticated by
+  // the gateway. No-op when ONECLI_URL is unset.
+  const onecli = await getOnecli();
+  if (onecli) {
+    const applied = await onecli.applyContainerConfig(args, {
+      addHostMapping: false,
+    });
+    logger.info(
+      { containerName, applied },
+      applied
+        ? 'OneCLI gateway config applied'
+        : 'OneCLI gateway not reachable — container will use env-var auth',
+    );
+  }
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -269,7 +330,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = await buildContainerArgs(mounts, containerName);
 
   logger.debug(
     {
