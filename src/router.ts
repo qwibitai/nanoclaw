@@ -292,7 +292,14 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
           log.warn('adapter.subscribe failed', { channelType: event.channelType, threadId: event.threadId, err });
         });
       }
-    } else if (agent.ignored_message_policy === 'accumulate') {
+    } else if (agent.ignored_message_policy === 'accumulate' && !(engages && (!accessOk || !scopeOk))) {
+      // Accumulate stores the message as silent context. We allow it when
+      // engagement simply didn't fire, but NOT when engagement fired and
+      // the access/scope gate refused — those refusals are security
+      // decisions about an untrusted sender, and silently storing their
+      // message (which also stages their attachments to disk via
+      // writeSessionMessage → extractAttachmentFiles) is exactly what the
+      // gate is meant to prevent.
       await deliverToAgent(agent, agentGroup, mg, event, userId, adapter?.supportsThreads === true, false);
       accumulatedCount++;
     } else {

@@ -60,7 +60,7 @@ pnpm run build
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App** > **From scratch**
 2. Name it (e.g., "NanoClaw") and select your workspace
 3. Go to **OAuth & Permissions** and add Bot Token Scopes:
-   - `chat:write`, `channels:history`, `groups:history`, `im:history`, `channels:read`, `groups:read`, `users:read`, `reactions:write`
+   - `chat:write`, `im:write`, `channels:history`, `groups:history`, `im:history`, `channels:read`, `groups:read`, `users:read`, `reactions:write`
 4. Click **Install to Workspace** and copy the **Bot User OAuth Token** (`xoxb-...`)
 5. Go to **Basic Information** and copy the **Signing Secret**
 
@@ -76,7 +76,13 @@ pnpm run build
 10. Under **Subscribe to bot events**, add:
     - `message.channels`, `message.groups`, `message.im`, `app_mention`
 11. Click **Save Changes**
-12. Slack will show a banner asking you to **reinstall the app** — click it to apply the new event subscriptions
+
+### Interactivity
+
+12. Go to **Interactivity & Shortcuts** and toggle **Interactivity** on
+13. Set the **Request URL** to the same `https://your-domain/webhook/slack`
+14. Click **Save Changes**
+15. Slack will show a banner asking you to **reinstall the app** — click it to apply the new settings
 
 ### Configure environment
 
