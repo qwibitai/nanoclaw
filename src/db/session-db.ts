@@ -32,6 +32,14 @@ export function openOutboundDb(dbPath: string): Database.Database {
   return db;
 }
 
+/** Open the outbound DB in read-write mode for host-side direct writes (e.g. orchestrator results). */
+export function openOutboundDbWritable(dbPath: string): Database.Database {
+  const db = new Database(dbPath);
+  db.pragma('journal_mode = DELETE');
+  db.pragma('busy_timeout = 5000');
+  return db;
+}
+
 export function upsertSessionRouting(
   db: Database.Database,
   routing: { channel_type: string | null; platform_id: string | null; thread_id: string | null },

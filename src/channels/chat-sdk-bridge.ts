@@ -45,6 +45,8 @@ export type ReplyContextExtractor = (raw: Record<string, any>) => ReplyContext |
 
 export interface ChatSdkBridgeConfig {
   adapter: Adapter;
+  /** Override channelType used for routing. Defaults to adapter.name. */
+  channelName?: string;
   concurrency?: ConcurrencyStrategy;
   /** Bot token for authenticating forwarded Gateway events (required for interaction handling). */
   botToken?: string;
@@ -190,15 +192,16 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     };
   }
 
+  const channelType = config.channelName ?? adapter.name;
   const bridge: ChannelAdapter = {
-    name: adapter.name,
-    channelType: adapter.name,
+    name: channelType,
+    channelType,
     supportsThreads: config.supportsThreads,
 
     async setup(hostConfig: ChannelSetup) {
       setupConfig = hostConfig;
 
-      state = new SqliteStateAdapter();
+      state = new SqliteStateAdapter(channelType);
 
       chat = new Chat({
         adapters: { [adapter.name]: adapter },

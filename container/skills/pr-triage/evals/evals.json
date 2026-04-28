@@ -1,0 +1,41 @@
+{
+  "skill_name": "pr-triage",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Use the /pr-triage skill to triage this pull request.\n\n## Pull Request #1538: Update README.md\n**Author:** gavrielc\n**Repository:** qwibitai/nanoclaw\n**URL:** https://github.com/qwibitai/nanoclaw/pull/1538\n\n### Description\n(empty — no type checkbox checked, no description filled in)\n\n### Diff\n```diff\n(README.md: minor text change)\n```",
+      "expected_output": "Should classify as Documentation type, note empty description as low quality, recommend merge if trivial or flag for review if unclear",
+      "expectations": [
+        "Output contains a structured triage report with Summary, Author, Type, and Decision sections",
+        "PR is classified as Documentation type",
+        "The author assessment checks the GitHub profile or contributor status",
+        "Decision is either MERGE (trivial docs) or REVIEW (empty description is a concern)",
+        "The report notes that no PR type checkbox was checked and no description was provided"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Use the /pr-triage skill to triage this pull request.\n\n## Pull Request #1546: fix: auto-recover from stale Claude Code session on exit code 1\n**Author:** bitcryptic-gw\n**Repository:** qwibitai/nanoclaw\n**URL:** https://github.com/qwibitai/nanoclaw/pull/1546\n\n### Description\n## Problem\nWhen a stored Claude Code session ID becomes stale or corrupt (e.g. after a container restart or settings change), resuming it causes Claude Code to exit with code 1. NanoClaw's retry logic then retries indefinitely with the same broken session ID, requiring manual intervention.\n\n## Fix\nIn runAgent(), when the container returns status: 'error' and a session ID was being used:\n1. Clear the stale session from both the in-memory sessions map and SQLite (deleteSession())\n2. Retry once with sessionId: undefined (fresh session)\n3. Persist the new session ID if the retry succeeds\n\n## Changes\n- db.ts — added deleteSession(groupFolder) function\n- index.ts — imported deleteSession, added stale session detection and recovery logic in runAgent()\n\n### Diff\n```diff\n(changes to src/db.ts and src/index.ts — adds deleteSession function and recovery logic)\n```",
+      "expected_output": "Should classify as Fix type, note it's a well-described bug fix, pass to in-depth review",
+      "expectations": [
+        "Output contains a structured triage report with Summary, Author, Type, and Decision sections",
+        "PR is classified as Fix type",
+        "The author assessment checks the GitHub profile or contributor status",
+        "Decision is REVIEW (legitimate fix that needs careful examination)",
+        "Summary accurately describes this as a session recovery fix"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Use the /pr-triage skill to triage this pull request.\n\n## Pull Request #1549: Add Local LLM integration with hybrid routing\n**Author:** mchavarria\n**Repository:** qwibitai/nanoclaw\n**URL:** https://github.com/qwibitai/nanoclaw/pull/1549\n\n### Description\n(empty — no type checkbox checked, no description filled in)\n\n### Diff\n```diff\n(changes to 15 files including src/config.ts, src/container-runner.ts, src/db.ts, src/index.ts, src/ipc.ts, src/task-scheduler.ts, src/types.ts, container/agent-runner/src/index.ts, plus new files: llm-router.ts, llm-session.ts, openai-client.ts, LOCAL_LLM_GUIDE.md, .claude/skills/add-local-llm/SKILL.md)\n```",
+      "expected_output": "Should identify this as misaligned — adds a feature via direct source code changes to many core files instead of as a skill branch. Should recommend CLOSE with explanation pointing to CONTRIBUTING.md",
+      "expectations": [
+        "Output contains a structured triage report with Summary, Author, Type, and Decision sections",
+        "Identifies that this PR modifies core source files (config.ts, index.ts, db.ts, etc.) to add a new feature",
+        "Notes the misalignment: features should be skills maintained as branches, not direct source code changes",
+        "Decision is CLOSE with a cordial explanation",
+        "The closing explanation points the author to CONTRIBUTING.md or explains the skill-based contribution model"
+      ]
+    }
+  ]
+}
