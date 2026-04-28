@@ -337,7 +337,7 @@ describe('SignalAdapter', () => {
       await adapter.teardown();
     });
 
-    it('forwards image attachments as [Image: <path>] plus structured attachments array', async () => {
+    it('forwards image attachments as structured {path, contentType, name} entries — no [Image:] text injection', async () => {
       const adapter = createAdapter();
       const cfg = createMockSetup();
       await adapter.setup(cfg);
@@ -347,21 +347,131 @@ describe('SignalAdapter', () => {
         sourceName: 'Alice',
         dataMessage: {
           timestamp: 1700000000000,
+          message: 'see this',
           attachments: [{ id: 'att123abc', contentType: 'image/jpeg', size: 50000 }],
         },
       });
 
       await new Promise((r) => setTimeout(r, 50));
-      expect(cfg.onInbound).toHaveBeenCalledWith(
-        '+15555550123',
-        null,
-        expect.objectContaining({
-          content: expect.objectContaining({
-            text: expect.stringMatching(/^\[Image: .+att123abc\]$/),
-            attachments: [expect.objectContaining({ contentType: 'image/jpeg' })],
-          }),
-        }),
-      );
+      const call = (cfg.onInbound as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call).toBeDefined();
+      const msg = call[2];
+      // Text is the original message — no [Image: ...] injection. The host's
+      // extractAttachmentFiles + container formatter handle path → localPath rendering.
+      expect(msg.content.text).toBe('see this');
+      expect(msg.content.text).not.toMatch(/\[Image:/);
+      // Attachment carries a host path the host can copy from.
+      expect(msg.content.attachments).toHaveLength(1);
+      const att = msg.content.attachments[0];
+      expect(att.path).toMatch(/att123abc$/);
+      expect(att.contentType).toBe('image/jpeg');
+      expect(typeof att.name).toBe('string');
+
+      await adapter.teardown();
+    });
+
+    it('forwards non-image, non-audio attachments (e.g. PDFs) as structured entries', async () => {
+      const adapter = createAdapter();
+      const cfg = createMockSetup();
+      await adapter.setup(cfg);
+
+      pushEvent({
+        sourceNumber: '+15555550123',
+        sourceName: 'Alice',
+        dataMessage: {
+          timestamp: 1700000000000,
+          message: 'check this PDF',
+          attachments: [
+            { id: 'att-pdf-001', contentType: 'application/pdf', filename: 'report.pdf', size: 12345 },
+          ],
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      const call = (cfg.onInbound as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call).toBeDefined();
+      const msg = call[2];
+      expect(msg.content.text).toBe('check this PDF');
+      expect(msg.content.attachments).toHaveLength(1);
+      const att = msg.content.attachments[0];
+      expect(att.contentType).toBe('application/pdf');
+      expect(att.name).toBe('report.pdf');
+      expect(att.path).toMatch(/att-pdf-001$/);
+
+      await adapter.teardown();
+    });
+
+    it('forwards attachment-only messages (no text, no voice) instead of dropping them', async () => {
+      const adapter = createAdapter();
+      const cfg = createMockSetup();
+      await adapter.setup(cfg);
+
+      pushEvent({
+        sourceNumber: '+15555550123',
+        sourceName: 'Alice',
+        dataMessage: {
+          timestamp: 1700000000000,
+          // no `message` field — attachment-only
+          attachments: [
+            { id: 'att-doc-001', contentType: 'application/pdf', filename: 'silent.pdf', size: 999 },
+          ],
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      // The whole point of this test: previously this returned early at signal.ts:595.
+      expect(cfg.onInbound).toHaveBeenCalledTimes(1);
+      const call = (cfg.onInbound as ReturnType<typeof vi.fn>).mock.calls[0];
+      const msg = call[2];
+      expect(msg.content.attachments).toHaveLength(1);
+      expect(msg.content.attachments[0].name).toBe('silent.pdf');
+
+      await adapter.teardown();
+    });
+
+    it('forwards multiple mixed attachments in one message', async () => {
+      const adapter = createAdapter();
+      const cfg = createMockSetup();
+      await adapter.setup(cfg);
+
+      pushEvent({
+        sourceNumber: '+15555550123',
+        sourceName: 'Alice',
+        dataMessage: {
+          timestamp: 1700000000000,
+          message: 'three files',
+          attachments: [
+            { id: 'a-img', contentType: 'image/png', filename: 'pic.png', size: 100 },
+            { id: 'a-pdf', contentType: 'application/pdf', filename: 'doc.pdf', size: 200 },
+            { id: 'a-zip', contentType: 'application/zip', filename: 'bundle.zip', size: 300 },
+          ],
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      const call = (cfg.onInbound as ReturnType<typeof vi.fn>).mock.calls[0];
+      const msg = call[2];
+      expect(msg.content.text).toBe('three files');
+      expect(msg.content.attachments).toHaveLength(3);
+      const names = msg.content.attachments.map((a: { name: string }) => a.name);
+      expect(names).toEqual(['pic.png', 'doc.pdf', 'bundle.zip']);
+    });
+
+    it('still drops messages that have neither text, voice, nor any attachment', async () => {
+      const adapter = createAdapter();
+      const cfg = createMockSetup();
+      await adapter.setup(cfg);
+
+      pushEvent({
+        sourceNumber: '+15555550123',
+        dataMessage: {
+          timestamp: 1700000000000,
+          // no message, no attachments — pure no-op
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(cfg.onInbound).not.toHaveBeenCalled();
 
       await adapter.teardown();
     });
