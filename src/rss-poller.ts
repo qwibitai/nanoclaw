@@ -9,12 +9,14 @@ const DEFAULT_RSS_POLL_INTERVAL = 15 * 60 * 1000;
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
+  processEntities: false,
 });
 
 interface RssItem {
   title?: string;
   link?: string;
   guid?: string | { '#text'?: string; '@_isPermaLink'?: string };
+  id?: string;
   pubDate?: string;
   description?: string;
 }
@@ -25,6 +27,9 @@ function extractGuid(item: RssItem, feedUrl: string, index: number): string {
       return String(item.guid['#text']);
     }
     return String(item.guid);
+  }
+  if (item.id) {
+    return item.id;
   }
   if (item.link) {
     return item.link;
@@ -37,8 +42,8 @@ function sortByPubDate(
   items: Array<{ item: RssItem; guid: string }>,
 ): Array<{ item: RssItem; guid: string }> {
   return [...items].sort((a, b) => {
-    const dateA = a.item.pubDate ? new Date(a.item.pubDate).getTime() : 0;
-    const dateB = b.item.pubDate ? new Date(b.item.pubDate).getTime() : 0;
+    const dateA = (a.item.pubDate ? new Date(a.item.pubDate).getTime() : 0) || 0;
+    const dateB = (b.item.pubDate ? new Date(b.item.pubDate).getTime() : 0) || 0;
     return dateA - dateB;
   });
 }
@@ -135,8 +140,15 @@ export async function pollOnce(deps: RssPollerDeps): Promise<void> {
           ? `📰 **${label}**: ${title}\n${link}`
           : `📰 **${label}**: ${title}`;
 
-        await deps.sendMessage(channelConfig.jid, text);
-        markItemSeen(feed.url, entry.guid);
+        try {
+          await deps.sendMessage(channelConfig.jid, text);
+          markItemSeen(feed.url, entry.guid);
+        } catch (err) {
+          logger.error(
+            { err, jid: channelConfig.jid, guid: entry.guid },
+            'Failed to send RSS message',
+          );
+        }
       }
     }
   }

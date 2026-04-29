@@ -21,7 +21,7 @@ If the file doesn't exist, create it with just the `rss` section. If it already 
 
 Use `AskUserQuestion` to ask:
 
-1. **Which channel JID(s)** should receive RSS updates? (e.g., `dc:1234567890` for Discord, `1234567890@g.us` for WhatsApp group)
+1. **Which channel ID(s)** should receive RSS updates? (e.g., `dc:1234567890`)
 2. **Which feed URLs?** — one or more RSS/Atom feed URLs to monitor.
 
 ## 3. Add RSS Section to nanoclaw.yaml
@@ -36,10 +36,6 @@ rss:
         - url: "https://example.com/feed.xml"
           name: "Example Blog"
         - url: "https://another.example/rss"
-    - jid: "1234567890@g.us"
-      feeds:
-        - url: "https://hackernews.com/rss"
-          name: "Hacker News"
 ```
 
 - `jid`: The channel JID (must match a registered group in NanoClaw)

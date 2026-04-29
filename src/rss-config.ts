@@ -40,10 +40,21 @@ export function readRssConfig(configPath?: string): RssChannelConfig[] {
     return cachedRssYaml;
   }
 
-  const parsed = YAML.parse(fs.readFileSync(resolvedPath, 'utf-8')) as
-    | Record<string, unknown>
-    | null
-    | undefined;
+  let raw: string;
+  try {
+    raw = fs.readFileSync(resolvedPath, 'utf-8');
+  } catch (err) {
+    logger.warn({ err, path: resolvedPath }, 'Failed to read RSS config');
+    return [];
+  }
+
+  let parsed: Record<string, unknown> | null | undefined;
+  try {
+    parsed = YAML.parse(raw) as Record<string, unknown> | null | undefined;
+  } catch (err) {
+    logger.warn({ err, path: resolvedPath }, 'Failed to parse RSS config');
+    return [];
+  }
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return [];
