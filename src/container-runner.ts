@@ -479,6 +479,12 @@ async function buildContainerArgs(
       `ACURAST_EPOCH_LAG_ALERT=${process.env.ACURAST_EPOCH_LAG_ALERT}`,
     );
   }
+  if (process.env.ACURAST_SIGNER_URL) {
+    args.push('-e', `ACURAST_SIGNER_URL=${process.env.ACURAST_SIGNER_URL}`);
+  }
+  if (process.env.ACURAST_SIGNER_TOKEN) {
+    args.push('-e', `ACURAST_SIGNER_TOKEN=${process.env.ACURAST_SIGNER_TOKEN}`);
+  }
 
   // Attach to a custom Docker network when configured (e.g. shared
   // network with Ollama, Home Assistant, etc.). Falls back to Docker's

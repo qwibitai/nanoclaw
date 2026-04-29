@@ -82,6 +82,7 @@ interface StakingReport {
   commitment: {
     stakedAmount: string;
     accruedReward: string;
+    accruedRewardRaw: bigint;
     totalPaid: string;
     autoCompound: boolean;
     cooldownStarted: string | null;
@@ -123,7 +124,8 @@ async function fetchStakingReport(): Promise<StakingReport> {
     const c = (commitmentRaw as any).toHuman() as any;
     const stake = c.stake;
 
-    const accruedReward = formatACU(parsePico(stake.accruedReward));
+    const accruedRewardRaw = parsePico(stake.accruedReward);
+    const accruedReward = formatACU(accruedRewardRaw);
     const stakedAmount = formatACU(parsePico(stake.amount));
     const totalPaid = formatACU(parsePico(stake.paid));
     const autoCompound: boolean = stake.allowAutoCompound === true || stake.allowAutoCompound === "true";
@@ -181,6 +183,7 @@ async function fetchStakingReport(): Promise<StakingReport> {
       commitment: {
         stakedAmount,
         accruedReward,
+        accruedRewardRaw,
         totalPaid,
         autoCompound,
         cooldownStarted,
@@ -274,6 +277,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: [],
       },
     },
+    {
+      name: "acurast_claim_rewards",
+      description:
+        "Compound Gary's accrued Acurast staking rewards by submitting a compoundStake extrinsic via the acurast-signer sidecar. Checks the accrued reward threshold (min 1.0 ACU) before submitting. Supports dryRun mode to encode without broadcasting.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          dryRun: {
+            type: "boolean",
+            description: "If true, encode the extrinsic without submitting it. Skips the 1.0 ACU threshold check.",
+          },
+        },
+        required: [],
+      },
+    },
   ],
 }));
 
@@ -318,6 +336,98 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           {
             type: "text",
             text: `Error fetching Acurast summary: ${err.message ?? String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  if (name === "acurast_claim_rewards") {
+    const dryRun: boolean = (request.params.arguments as any)?.dryRun === true;
+
+    const signerUrl = process.env.ACURAST_SIGNER_URL;
+    const signerToken = process.env.ACURAST_SIGNER_TOKEN;
+    if (!signerUrl || !signerToken) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Acurast signer not configured — ACURAST_SIGNER_URL and ACURAST_SIGNER_TOKEN required",
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    try {
+      const report = await fetchStakingReport();
+      const accruedAcu = Number(report.commitment.accruedRewardRaw) / 1e12;
+
+      if (!dryRun && accruedAcu < 1.0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Threshold not met — accrued reward is ${accruedAcu.toFixed(4)} ACU (minimum 1.0 ACU to claim)`,
+            },
+          ],
+        };
+      }
+
+      const body = JSON.stringify({
+        extrinsic: "compoundStake",
+        commitmentId: COMMITMENT_ID,
+        dryRun,
+      });
+
+      let res: Response;
+      try {
+        res = await fetch(`${signerUrl}/submit`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-hmac-token": signerToken,
+          },
+          body,
+        });
+      } catch (err: any) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `❌ Signer error: ${err.message ?? String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const json = await res.json() as any;
+
+      if (!json.ok) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `❌ Signer error: ${json.error ?? "unknown error"}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const text = dryRun
+        ? `🔍 Dry run — extrinsic encoded but not submitted\nSigner: ${json.signerAddress}\nEncoded: ${json.encodedTx}`
+        : `✅ compoundStake submitted\nTx hash: ${json.txHash}\nBlock: ${json.blockHash}`;
+
+      return { content: [{ type: "text", text }] };
+    } catch (err: any) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `❌ Signer error: ${err.message ?? String(err)}`,
           },
         ],
         isError: true,
