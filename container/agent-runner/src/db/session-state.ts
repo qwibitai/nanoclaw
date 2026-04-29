@@ -77,3 +77,24 @@ export function setContinuation(providerName: string, id: string): void {
 export function clearContinuation(providerName: string): void {
   deleteValue(continuationKey(providerName));
 }
+
+const TURN_SEND_INVOKED_KEY = 'turn_send_invoked';
+
+/**
+ * Mark that a user-facing send tool (send_message, send_file) fired during
+ * the current turn. The poll-loop reads this at result time to suppress the
+ * SDK's closing text echo — otherwise the user sees two messages.
+ * Cleared by the poll-loop at the start of each new turn.
+ * NOT set by add_reaction: reaction + closing summary is a valid reply path.
+ */
+export function setTurnSendInvoked(): void {
+  setValue(TURN_SEND_INVOKED_KEY, '1');
+}
+
+export function getTurnSendInvoked(): boolean {
+  return getValue(TURN_SEND_INVOKED_KEY) === '1';
+}
+
+export function clearTurnSendInvoked(): void {
+  deleteValue(TURN_SEND_INVOKED_KEY);
+}
