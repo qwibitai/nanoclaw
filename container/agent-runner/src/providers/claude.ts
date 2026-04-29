@@ -284,6 +284,10 @@ export class ClaudeProvider implements AgentProvider {
         allowDangerouslySkipPermissions: true,
         settingSources: ['project', 'user'],
         mcpServers: this.mcpServers,
+        // Opus 4.7 flipped the thinking display default to 'omitted', silencing
+        // thinking blocks in the transcript and observer output. Pin to
+        // 'summarized' so thinking is always visible when the model uses it.
+        thinking: { type: 'adaptive', display: 'summarized' },
         hooks: {
           PreToolUse: [{ hooks: [preToolUseHook] }],
           PostToolUse: [{ hooks: [postToolUseHook] }],
