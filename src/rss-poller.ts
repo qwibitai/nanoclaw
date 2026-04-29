@@ -87,11 +87,10 @@ async function fetchFeed(
       items = [items];
     }
 
-    return items
-      .map((item: RssItem, index: number) => ({
-        item,
-        guid: extractGuid(item, feedUrl, index),
-      }))
+    return items.map((item: RssItem, index: number) => ({
+      item,
+      guid: extractGuid(item, feedUrl, index),
+    }));
   } catch (err) {
     logger.warn({ feedUrl, err }, `RSS feed "${label}" fetch failed`);
     return [];
