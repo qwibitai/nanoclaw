@@ -1,14 +1,23 @@
 /**
- * Windowed step runner: shows a fixed-height rolling tail of a long step's
- * output so the user can see it's making progress, plus a stall detector
- * that interrupts with a "keep waiting or ask for help?" prompt when the
+ * Windowed step runner: parses Docker BuildKit step transitions out of the
+ * child's output and reflects them on a single live header line — the
+ * running label (default color) followed by the cleaned current step text
+ * (cyan) and an `N/total` counter (cyan). Plus a stall detector that
+ * interrupts with a "keep waiting or ask for help?" prompt when the
  * output stream goes silent for too long.
  *
  * Used for the container build (3–10 minutes on a fresh machine, no user
- * feedback with a plain spinner). Models the UI on claude-assist.ts's
- * 3-line action window — a single-line spinner header sitting above three
- * gutter-prefixed lines of the most recent output, redrawn in place via
- * ANSI cursor controls.
+ * feedback with a plain spinner). Replaces the previous 3-line rolling
+ * tail of raw build output, which mostly surfaced incidental noise
+ * (`Reading package lists…`, `npm warn deprecated …`) instead of the
+ * actual step transitions buried among them.
+ *
+ * Step parsing: BuildKit emits one line per step in the form
+ *   `#N [stage-X  Y/Z] CMD args...`
+ * We grab `Y`, `Z`, and `CMD args...`, strip a leading `RUN ` so apt /
+ * pnpm commands read directly, and surface the result. Lines that don't
+ * match are written to the raw log for post-mortem but not displayed —
+ * which is the whole point.
  *
  * Stall detection: a silence timer resets on every new line. When it hits
  * STALL_THRESHOLD_MS we pause the render, show `offerClaudeAssist` with
@@ -23,18 +32,33 @@ import { emit as phEmit } from './diagnostics.js';
 import type { StepResult, SpinnerLabels } from './runner.js';
 import { dumpTranscriptOnFailure, spawnStep, writeStepEntry } from './runner.js';
 import * as setupLog from '../logs.js';
-import { brandBody, fitToWidth } from './theme.js';
+import { brand, brandBody, fitToWidth } from './theme.js';
 
-const WINDOW_SIZE = 3;
 const SPINNER_FRAMES = ['◒', '◐', '◓', '◑'];
 const HIDE_CURSOR = '\x1b[?25l';
 const SHOW_CURSOR = '\x1b[?25h';
 const STALL_THRESHOLD_MS = 60_000;
 
 /**
- * Run a step with a 3-line rolling tail + stall detector. Same signature
- * shape as `runQuietStep` (so auto.ts can swap them), but tails the
- * child's stdout/stderr into a fixed-height window.
+ * BuildKit step-transition line. Captures `Y` (step number), `Z` (total
+ * within the stage), and the rest of the line (the Dockerfile command
+ * verb + args). Tolerates the variable whitespace BuildKit emits between
+ * the stage name and the X/Y counter.
+ */
+const BUILDKIT_STEP_RE = /^#\d+\s+\[\S+\s+(\d+)\/(\d+)\]\s+(.+)$/;
+
+function cleanStepText(raw: string): string {
+  // Strip `RUN ` so the underlying command (apt-get, pnpm, etc.) reads
+  // first. Other verbs (FROM, COPY, WORKDIR, ARG, ENV) carry meaning on
+  // their own — e.g. "FROM node:20-bookworm-slim" is more useful than
+  // "node:20-bookworm-slim" alone — so we leave those intact.
+  return raw.startsWith('RUN ') ? raw.slice(4) : raw;
+}
+
+/**
+ * Run a step with the live BuildKit-step header + stall detector. Same
+ * signature shape as `runQuietStep` (so auto.ts can swap them), but
+ * reflects the child's docker-build progress on a single live line.
  */
 export async function runWindowedStep(
   stepName: string,
@@ -75,45 +99,48 @@ async function runUnderWindow(
   rawLog: string,
 ): Promise<StepResult> {
   const out = process.stdout;
-  const start = Date.now();
-  const actions: string[] = [];
   let frameIdx = 0;
   let lastLineAt = Date.now();
   let stallPromptActive = false;
   let handledStall = false;
+  let currentStepText = '';
+  let currentStepNum = 0;
+  let currentStepTotal = 0;
+
+  const renderHeader = (): string => {
+    const icon = SPINNER_FRAMES[frameIdx % SPINNER_FRAMES.length];
+    // Before any BuildKit step transition lands (very early in the build,
+    // and during the `[internal] load …` phases that don't carry an X/Y
+    // counter), just show the running label as the spinner copy. Once
+    // we've seen a transition, swap the trailing ellipsis for the
+    // step text + counter.
+    if (currentStepTotal === 0) {
+      return `${k.cyan(icon)}  ${labels.running}`;
+    }
+    const labelStem = labels.running.replace(/…$/, '');
+    const stepText = brand(currentStepText);
+    const counter = brand(`${currentStepNum}/${currentStepTotal}`);
+    const sep = k.dim('·');
+    return fitToWidth(
+      `${k.cyan(icon)}  ${labelStem}: ${stepText} ${sep} ${counter}`,
+      '',
+    );
+  };
 
   const redraw = (): void => {
     if (stallPromptActive) return;
-    out.write(`\x1b[${WINDOW_SIZE + 1}A`);
-    const elapsed = Math.round((Date.now() - start) / 1000);
-    const icon = SPINNER_FRAMES[frameIdx % SPINNER_FRAMES.length];
-    const suffix = ` (${elapsed}s)`;
-    const header = fitToWidth(labels.running, suffix);
-    out.write(`\x1b[2K${k.cyan(icon)}  ${header}${k.dim(suffix)}\n`);
-
-    for (let i = 0; i < WINDOW_SIZE; i++) {
-      const idx = actions.length - WINDOW_SIZE + i;
-      const action = idx >= 0 ? actions[idx] : '';
-      out.write('\x1b[2K');
-      if (action) {
-        out.write(`${k.gray('│')}  ${k.dim(fitToWidth(action, ''))}`);
-      } else {
-        out.write(k.gray('│'));
-      }
-      out.write('\n');
-    }
+    out.write('\x1b[1A');
+    out.write(`\x1b[2K${renderHeader()}\n`);
   };
 
   const clearBlock = (): void => {
-    out.write(`\x1b[${WINDOW_SIZE + 1}A`);
-    for (let i = 0; i < WINDOW_SIZE + 1; i++) {
-      out.write('\x1b[2K\n');
-    }
-    out.write(`\x1b[${WINDOW_SIZE + 1}A`);
+    out.write('\x1b[1A');
+    out.write('\x1b[2K\n');
+    out.write('\x1b[1A');
   };
 
   out.write(HIDE_CURSOR);
-  for (let i = 0; i < WINDOW_SIZE + 1; i++) out.write('\n');
+  out.write('\n');
   redraw();
 
   const restoreCursorOnExit = (): void => {
@@ -138,7 +165,7 @@ async function runUnderWindow(
       },
       resumeRender: () => {
         out.write(HIDE_CURSOR);
-        for (let i = 0; i < WINDOW_SIZE + 1; i++) out.write('\n');
+        out.write('\n');
         stallPromptActive = false;
         lastLineAt = Date.now();
         redraw();
@@ -148,11 +175,17 @@ async function runUnderWindow(
 
   const onLine = (line: string): void => {
     lastLineAt = Date.now();
-    // Strip ANSI escape sequences — Docker Buildx writes color codes that
-    // mangle the rolling window layout when replayed in a narrow cell.
+    // Strip ANSI escape sequences — BuildKit writes colored progress
+    // codes that would otherwise leak into our regex match and the
+    // rendered header.
     // eslint-disable-next-line no-control-regex
     const clean = line.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').trim();
-    if (clean) actions.push(clean);
+    const m = clean ? BUILDKIT_STEP_RE.exec(clean) : null;
+    if (m) {
+      currentStepNum = parseInt(m[1], 10);
+      currentStepTotal = parseInt(m[2], 10);
+      currentStepText = cleanStepText(m[3]);
+    }
     redraw();
   };
 
@@ -164,15 +197,13 @@ async function runUnderWindow(
   out.write(SHOW_CURSOR);
   process.off('exit', restoreCursorOnExit);
 
-  const elapsed = Math.round((Date.now() - start) / 1000);
-  const suffix = ` (${elapsed}s)`;
   if (result.ok) {
     const isSkipped = result.terminal?.fields.STATUS === 'skipped';
     const msg = isSkipped && labels.skipped ? labels.skipped : labels.done;
-    p.log.success(`${brandBody(fitToWidth(msg, suffix))}${k.dim(suffix)}`);
+    p.log.success(brand(fitToWidth(msg, '')));
   } else {
     const failMsg = labels.failed ?? labels.running.replace(/…$/, ' failed');
-    p.log.error(`${fitToWidth(failMsg, suffix)}${k.dim(suffix)}`);
+    p.log.error(fitToWidth(failMsg, ''));
     dumpTranscriptOnFailure(result.transcript);
   }
   return result;
