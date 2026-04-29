@@ -58,6 +58,10 @@ npm run build        # Compile TypeScript
 ./container/build.sh # Rebuild agent container
 ```
 
+**Agent image build:** The agent Dockerfile runs `npm run build` (tsc) at image build time.
+`dist/` is gitignored at the repo root — do NOT commit it. TypeScript source in
+`container/agent-runner/src/` is the source of truth.
+
 Service management:
 ```bash
 # macOS (launchd)
