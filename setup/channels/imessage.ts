@@ -36,7 +36,7 @@ import * as setupLog from '../logs.js';
 import { brightSelect } from '../lib/bright-select.js';
 import { askOperatorRole } from '../lib/role-prompt.js';
 import { ensureAnswer, fail, runQuietChild } from '../lib/runner.js';
-import { wrapForGutter } from '../lib/theme.js';
+import { accentGreen, note, wrapForGutter } from '../lib/theme.js';
 
 const DEFAULT_AGENT_NAME = 'Nano';
 
@@ -189,7 +189,7 @@ async function walkThroughFullDiskAccess(): Promise<void> {
   }
   const nodeDir = path.dirname(nodePath);
 
-  p.note(
+  note(
     wrapForGutter(
       [
         `iMessage needs Full Disk Access granted to the Node binary:`,
@@ -222,7 +222,20 @@ async function walkThroughFullDiskAccess(): Promise<void> {
 }
 
 async function collectRemoteCreds(): Promise<RemoteCreds> {
-  p.note(
+  const existingUrl = process.env.IMESSAGE_SERVER_URL?.trim();
+  const existingKey = process.env.IMESSAGE_API_KEY?.trim();
+  if (existingUrl && existingKey && /^https?:\/\//i.test(existingUrl)) {
+    const reuse = ensureAnswer(await p.confirm({
+      message: `Found existing Photon credentials (${existingUrl}). Use them?`,
+      initialValue: true,
+    }));
+    if (reuse) {
+      setupLog.userInput('imessage_remote_creds', 'reused-existing');
+      return { serverUrl: existingUrl, apiKey: existingKey };
+    }
+  }
+
+  note(
     [
       "Photon is a separate service that owns an iMessage account and",
       "exposes it over HTTP. NanoClaw will talk to it via its API.",
@@ -250,6 +263,7 @@ async function collectRemoteCreds(): Promise<RemoteCreds> {
   const keyAnswer = ensureAnswer(
     await p.password({
       message: 'Photon API key',
+      clearOnError: true,
       validate: (v) => ((v ?? '').trim() ? undefined : 'API key is required'),
     }),
   );
@@ -264,7 +278,7 @@ async function collectRemoteCreds(): Promise<RemoteCreds> {
 }
 
 async function askOperatorHandle(): Promise<string> {
-  p.note(
+  note(
     [
       "What phone number or email do you iMessage with?",
       "That's where your assistant will send its welcome message.",
@@ -303,7 +317,7 @@ async function resolveAgentName(): Promise<string> {
   }
   const answer = ensureAnswer(
     await p.text({
-      message: 'What should your assistant be called?',
+      message: `What should your ${accentGreen('assistant')} be called?`,
       placeholder: DEFAULT_AGENT_NAME,
       defaultValue: DEFAULT_AGENT_NAME,
     }),

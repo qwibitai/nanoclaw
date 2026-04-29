@@ -44,6 +44,7 @@ import {
   writeStepEntry,
 } from '../lib/runner.js';
 import { askOperatorRole } from '../lib/role-prompt.js';
+import { accentGreen, note } from '../lib/theme.js';
 
 const DEFAULT_AGENT_NAME = 'Nano';
 
@@ -139,7 +140,7 @@ async function ensureSignalCli(): Promise<void> {
   if (!probe.error && probe.status === 0) return;
 
   if (process.platform === 'darwin') {
-    p.note(
+    note(
       [
         "NanoClaw talks to Signal through signal-cli, which isn't installed yet.",
         '',
@@ -152,7 +153,7 @@ async function ensureSignalCli(): Promise<void> {
       'signal-cli not found',
     );
   } else {
-    p.note(
+    note(
       [
         "NanoClaw talks to Signal through signal-cli, which isn't installed yet.",
         '',
@@ -346,7 +347,7 @@ async function resolveAgentName(): Promise<string> {
   }
   const answer = ensureAnswer(
     await p.text({
-      message: 'What should your assistant be called?',
+      message: `What should your ${accentGreen('assistant')} be called?`,
       placeholder: DEFAULT_AGENT_NAME,
       defaultValue: DEFAULT_AGENT_NAME,
     }),

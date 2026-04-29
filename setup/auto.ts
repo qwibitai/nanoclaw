@@ -46,13 +46,14 @@ import {
 } from './lib/setup-config-parse.js';
 import { runAdvancedScreen } from './lib/setup-config-screen.js';
 import { runWindowedStep } from './lib/windowed-runner.js';
+import { detectRegisteredGroups, detectExistingDisplayName } from './environment.js';
 import { pollHealth } from './onecli.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
 import { claudeCliAvailable, resolveTimezoneViaClaude } from './lib/tz-from-claude.js';
 import * as setupLog from './logs.js';
 import { ensureAnswer, fail, runQuietChild, runQuietStep } from './lib/runner.js';
 import { emit as phEmit } from './lib/diagnostics.js';
-import { brandBold, brandChip, dimWrap, fitToWidth, wrapForGutter } from './lib/theme.js';
+import { accentGreen, brandBody, brandBold, brandChip, dimWrap, fitToWidth, note, wrapForGutter } from './lib/theme.js';
 import { isValidTimezone } from '../src/timezone.js';
 
 const CLI_AGENT_NAME = 'Terminal Agent';
@@ -121,12 +122,47 @@ async function main(): Promise<void> {
     }
   }
 
+  // Detect existing .env and offer to reuse it so the user doesn't have to
+  // paste credentials again on a re-run.
+  const existingEnv = detectExistingEnv();
+  if (existingEnv) {
+    const lines = Object.values(existingEnv.groups).map(
+      (g) => `  ${k.green('✓')} ${g.label}`,
+    );
+    note(lines.join('\n'), 'Found existing configuration');
+
+    const reuseChoice = ensureAnswer(
+      await brightSelect({
+        message: 'Use this existing environment?',
+        options: [
+          { value: 'reuse', label: 'Yes, use what I already have', hint: 'recommended' },
+          { value: 'fresh', label: 'No, start fresh' },
+        ],
+        initialValue: 'reuse',
+      }),
+    ) as 'reuse' | 'fresh';
+    setupLog.userInput('existing_env_choice', reuseChoice);
+
+    if (reuseChoice === 'reuse') {
+      for (const [key, value] of Object.entries(existingEnv.raw)) {
+        if (!process.env[key]) process.env[key] = value;
+      }
+      if (existingEnv.groups.onecli) skip.add('onecli');
+      if (detectRegisteredGroups(process.cwd())) {
+        skip.add('cli-agent');
+        skip.add('first-chat');
+      }
+    }
+  }
+
   if (!skip.has('container')) {
-    p.log.message(dimWrap('Your assistant lives in its own sandbox. It can only see what you explicitly share.', 4));
+    p.log.message(brandBody(dimWrap('Your assistant lives in its own sandbox. It can only see what you explicitly share.', 4)));
     p.log.message(
-      dimWrap(
-        'The first build pulls a base image and installs a few tools. On a fresh machine this usually takes 3–10 minutes.',
-        4,
+      brandBody(
+        dimWrap(
+          'The first build pulls a base image and installs a few tools. On a fresh machine this usually takes 3–10 minutes.',
+          4,
+        ),
       ),
     );
     const res = await runWindowedStep('container', {
@@ -161,9 +197,11 @@ async function main(): Promise<void> {
 
   if (!skip.has('onecli')) {
     p.log.message(
-      dimWrap(
-        'Your assistant never gets your API keys directly. The vault adds them to approved requests as they leave the sandbox.',
-        4,
+      brandBody(
+        dimWrap(
+          'Your assistant never gets your API keys directly. The vault adds them to approved requests as they leave the sandbox.',
+          4,
+        ),
       ),
     );
 
@@ -287,22 +325,27 @@ async function main(): Promise<void> {
       await fail('service', "Couldn't start NanoClaw.", 'See logs/nanoclaw.error.log for details.');
     }
     if (res.terminal?.fields.DOCKER_GROUP_STALE === 'true') {
-      p.log.warn("NanoClaw's permissions need a tweak before it can reach Docker.");
+      p.log.warn(brandBody("NanoClaw's permissions need a tweak before it can reach Docker."));
       p.log.message(
-        '  sudo setfacl -m u:$(whoami):rw /var/run/docker.sock\n' + `  systemctl --user restart ${getSystemdUnit()}`,
+        brandBody(
+          '  sudo setfacl -m u:$(whoami):rw /var/run/docker.sock\n' + `  systemctl --user restart ${getSystemdUnit()}`,
+        ),
       );
     }
   }
 
   let displayName: string | undefined;
-  const needsDisplayName = !skip.has('cli-agent') || !skip.has('channel');
-  if (needsDisplayName) {
-    const fallback = process.env.USER?.trim() || 'Operator';
+  async function resolveDisplayName(): Promise<string> {
+    if (displayName) return displayName;
     const preset = process.env.NANOCLAW_DISPLAY_NAME?.trim();
-    displayName = preset || (await askDisplayName(fallback));
+    const existing = detectExistingDisplayName(process.cwd());
+    const fallback = process.env.USER?.trim() || 'Operator';
+    displayName = preset || existing || (await askDisplayName(fallback));
+    return displayName;
   }
 
   if (!skip.has('cli-agent')) {
+    await resolveDisplayName();
     const res = await runQuietStep(
       'cli-agent',
       {
@@ -320,16 +363,18 @@ async function main(): Promise<void> {
     }
     if (!skip.has('first-chat')) {
       p.log.message(
-        dimWrap(
-          "Your assistant runs in an isolated sandbox. I'm going to send it a quick test message (ping) and wait for a reply (pong) to confirm it's responding. First startup typically takes 30–60 seconds while the sandbox warms up.",
-          4,
+        brandBody(
+          dimWrap(
+            "Your assistant runs in an isolated sandbox. I'm going to send it a quick test message (ping) and wait for a reply (pong) to confirm it's responding. First startup typically takes 30–60 seconds while the sandbox warms up.",
+            4,
+          ),
         ),
       );
       const ping = await confirmAssistantResponds();
       if (ping === 'ok') {
         phEmit('first_chat_ready');
         const next = ensureAnswer(
-          await p.select({
+          await brightSelect<'continue' | 'chat'>({
             message: 'What next?',
             options: [
               {
@@ -371,6 +416,9 @@ async function main(): Promise<void> {
   let channelChoice: ChannelChoice = 'skip';
   if (!skip.has('channel')) {
     channelChoice = await askChannelChoice();
+    if (channelChoice !== 'skip') {
+      await resolveDisplayName();
+    }
     if (channelChoice === 'telegram') {
       await runTelegramChannel(displayName!);
     } else if (channelChoice === 'discord') {
@@ -387,9 +435,11 @@ async function main(): Promise<void> {
       await runIMessageChannel(displayName!);
     } else {
       p.log.info(
-        wrapForGutter(
-          'No messaging app for now. You can add one later (like Telegram, Discord, WhatsApp, Teams, Slack, or iMessage).',
-          4,
+        brandBody(
+          wrapForGutter(
+            'No messaging app for now. You can add one later (like Telegram, Discord, WhatsApp, Teams, Slack, or iMessage).',
+            4,
+          ),
         ),
       );
     }
@@ -435,7 +485,7 @@ async function main(): Promise<void> {
         );
       }
       if (notes.length > 0) {
-        p.note(notes.join('\n'), "What's left");
+        note(notes.join('\n'), "What's left");
       }
       // "What's left" is a soft failure — we don't abort like fail(), but the
       // user is still stuck and a fix is exactly what claude-assist is for.
@@ -467,11 +517,11 @@ async function main(): Promise<void> {
   ];
   const labelWidth = Math.max(...rows.map(([l]) => l.length));
   const nextSteps = rows.map(([l, c]) => `${k.cyan(l.padEnd(labelWidth))}  ${c}`).join('\n');
-  p.note(nextSteps, 'Try these');
+  note(nextSteps, 'Try these');
 
   // Always-on warning goes before the "check your DMs" directive so the
   // caveat doesn't land after the user's already looked away at their phone.
-  p.note(
+  note(
     wrapForGutter(
       "NanoClaw runs on this machine. It's only reachable while this computer is on and connected to the internet. For always-on availability, run it on a cloud VM — or keep this machine awake.",
       6,
@@ -488,7 +538,7 @@ async function main(): Promise<void> {
     // that the welcome-message signal was too easy to miss. Use p.note so it
     // renders with a visible box, cyan-bold the directive line, and put it
     // as the last thing before outro.
-    p.note(`${brandBold('→')} ${k.bold(`Check your ${dmTarget} — your assistant is saying hi.`)}`, 'Go say hi');
+    note(`${brandBold('→')} ${k.bold(`Check your ${dmTarget} — your assistant is saying hi.`)}`, 'Go say hi');
     p.outro(k.green("You're set."));
   } else {
     p.outro(k.green("You're ready! Chat with `pnpm run chat hi`."));
@@ -567,7 +617,7 @@ function renderPingFailureNote(result: PingResult): void {
           'No reply from your assistant within 30 seconds. Check `logs/nanoclaw.log` for clues, then try `pnpm run chat hi`.',
           6,
         );
-  p.note(body, 'Skipping the first chat');
+  note(body, 'Skipping the first chat');
 }
 
 /**
@@ -582,7 +632,7 @@ function renderPingFailureNote(result: PingResult): void {
  * clearly optional.
  */
 async function runFirstChat(): Promise<void> {
-  p.note(
+  note(
     wrapForGutter(
       [
         'Your assistant runs in a sandbox on this machine.',
@@ -629,7 +679,7 @@ function sendChatMessage(message: string): Promise<void> {
 
 async function runAuthStep(): Promise<void> {
   if (anthropicSecretExists()) {
-    p.log.success('Your Claude account is already connected.');
+    p.log.success(brandBody('Your Claude account is already connected.'));
     setupLog.step('auth', 'skipped', 0, { REASON: 'secret-already-present' });
     return;
   }
@@ -677,7 +727,7 @@ async function runAuthStep(): Promise<void> {
 }
 
 async function runSubscriptionAuth(): Promise<void> {
-  p.log.step('Opening the Claude sign-in flow…');
+  p.log.step(brandBody('Opening the Claude sign-in flow…'));
   console.log(k.dim('   (a browser will open for sign-in; this part is interactive)'));
   console.log();
   const start = Date.now();
@@ -696,7 +746,7 @@ async function runSubscriptionAuth(): Promise<void> {
     );
   }
   setupLog.step('auth', 'interactive', durationMs, { METHOD: 'subscription' });
-  p.log.success('Claude account connected.');
+  p.log.success(brandBody('Claude account connected.'));
 }
 
 async function runPasteAuth(method: 'oauth' | 'api'): Promise<void> {
@@ -706,6 +756,7 @@ async function runPasteAuth(method: 'oauth' | 'api'): Promise<void> {
   const answer = ensureAnswer(
     await p.password({
       message: `Paste your ${label}`,
+      clearOnError: true,
       validate: (v) => {
         if (!v || !v.trim()) return 'Required';
         if (!v.trim().startsWith(prefix)) {
@@ -919,9 +970,11 @@ async function runTimezoneStep(): Promise<void> {
       tz = await resolveTimezoneViaClaude(raw);
     } else {
       p.log.warn(
-        wrapForGutter(
-          "That's not a standard IANA zone and I can't call Claude to interpret it here — try again with a zone like `America/New_York` or `Europe/London`.",
-          4,
+        brandBody(
+          wrapForGutter(
+            "That's not a standard IANA zone and I can't call Claude to interpret it here — try again with a zone like `America/New_York` or `Europe/London`.",
+            4,
+          ),
         ),
       );
     }
@@ -964,7 +1017,7 @@ async function runTimezoneStep(): Promise<void> {
 async function askDisplayName(fallback: string): Promise<string> {
   const answer = ensureAnswer(
     await p.text({
-      message: 'What should your assistant call you?',
+      message: `What should your assistant call ${accentGreen('you')}?`,
       placeholder: fallback,
       defaultValue: fallback,
     }),
@@ -1009,6 +1062,56 @@ async function askChannelChoice(): Promise<ChannelChoice> {
 }
 
 // ─── interactive / env helpers ─────────────────────────────────────────
+
+interface ExistingEnvGroup {
+  label: string;
+  keys: string[];
+}
+
+const ENV_KEY_GROUPS: Record<string, { label: string; keys: string[] }> = {
+  onecli: { label: 'OneCLI', keys: ['ONECLI_URL'] },
+  telegram: { label: 'Telegram', keys: ['TELEGRAM_BOT_TOKEN'] },
+  discord: { label: 'Discord', keys: ['DISCORD_BOT_TOKEN', 'DISCORD_APPLICATION_ID', 'DISCORD_PUBLIC_KEY'] },
+  slack: { label: 'Slack', keys: ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET'] },
+  signal: { label: 'Signal', keys: ['SIGNAL_ACCOUNT'] },
+  teams: { label: 'Teams', keys: ['TEAMS_APP_ID', 'TEAMS_APP_PASSWORD', 'TEAMS_APP_TENANT_ID', 'TEAMS_APP_TYPE'] },
+  whatsapp: { label: 'WhatsApp', keys: ['ASSISTANT_HAS_OWN_NUMBER'] },
+  imessage: { label: 'iMessage', keys: ['IMESSAGE_LOCAL', 'IMESSAGE_ENABLED', 'IMESSAGE_SERVER_URL', 'IMESSAGE_API_KEY'] },
+};
+
+function detectExistingEnv(): { groups: Record<string, ExistingEnvGroup>; raw: Record<string, string> } | null {
+  const envPath = path.join(process.cwd(), '.env');
+  if (!fs.existsSync(envPath)) return null;
+
+  let content: string;
+  try {
+    content = fs.readFileSync(envPath, 'utf-8');
+  } catch {
+    return null;
+  }
+
+  const raw: Record<string, string> = {};
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq < 1) continue;
+    raw[trimmed.slice(0, eq)] = trimmed.slice(eq + 1);
+  }
+
+  if (Object.keys(raw).length === 0) return null;
+
+  const groups: Record<string, ExistingEnvGroup> = {};
+  for (const [id, def] of Object.entries(ENV_KEY_GROUPS)) {
+    const found = def.keys.filter((key) => raw[key] !== undefined);
+    if (found.length > 0) {
+      groups[id] = { label: def.label, keys: found };
+    }
+  }
+
+  if (Object.keys(groups).length === 0) return null;
+  return { groups, raw };
+}
 
 function anthropicSecretExists(): boolean {
   try {
@@ -1086,7 +1189,7 @@ function maybeReexecUnderSg(): void {
   if (!/permission denied/i.test(err)) return;
   if (spawnSync('which', ['sg'], { stdio: 'ignore' }).status !== 0) return;
 
-  p.log.warn('Docker socket not accessible in current group. Re-executing under `sg docker`.');
+  p.log.warn(brandBody('Docker socket not accessible in current group. Re-executing under `sg docker`.'));
   const res = spawnSync('sg', ['docker', '-c', 'pnpm run setup:auto'], {
     stdio: 'inherit',
     env: { ...process.env, NANOCLAW_REEXEC_SG: '1' },

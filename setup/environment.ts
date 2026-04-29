@@ -11,6 +11,24 @@ import { log } from '../src/log.js';
 import { commandExists, getPlatform, isHeadless, isWSL } from './platform.js';
 import { emitStatus } from './status.js';
 
+export function detectExistingDisplayName(projectRoot: string): string | null {
+  const dbPath = path.join(projectRoot, 'data', 'v2.db');
+  if (!fs.existsSync(dbPath)) return null;
+
+  let db: Database.Database | null = null;
+  try {
+    db = new Database(dbPath, { readonly: true });
+    const row = db
+      .prepare(`SELECT display_name FROM users WHERE id = 'cli:local'`)
+      .get() as { display_name: string } | undefined;
+    return row?.display_name?.trim() || null;
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
+}
+
 export function detectRegisteredGroups(projectRoot: string): boolean {
   if (fs.existsSync(path.join(projectRoot, 'data', 'registered_groups.json'))) {
     return true;

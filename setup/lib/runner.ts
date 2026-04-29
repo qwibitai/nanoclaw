@@ -20,7 +20,7 @@ import k from 'kleur';
 import * as setupLog from '../logs.js';
 import { offerClaudeAssist } from './claude-assist.js';
 import { emit as phEmit } from './diagnostics.js';
-import { fitToWidth } from './theme.js';
+import { brandBody, fitToWidth } from './theme.js';
 
 export type Fields = Record<string, string>;
 export type Block = { type: string; fields: Fields };
@@ -390,7 +390,7 @@ export async function fail(
       const skipList = [
         ...new Set([...existingSkip, ...setupLog.completedStepNames()]),
       ].join(',');
-      p.log.step(`Retrying from ${stepName}…`);
+      p.log.step(brandBody(`Retrying from ${stepName}…`));
       const result = spawnSync('pnpm', ['--silent', 'run', 'setup:auto'], {
         stdio: 'inherit',
         env: { ...process.env, NANOCLAW_SKIP: skipList },
