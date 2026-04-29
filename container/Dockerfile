@@ -103,6 +103,9 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "agent-browser@${AGENT_BROWSER_VERSION}"
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
+    pnpm install -g "@google/gemini-cli@${GEMINI_CLI_VERSION}"
+
+RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "@openai/codex@${CODEX_VERSION}"
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
