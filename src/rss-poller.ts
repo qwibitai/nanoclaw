@@ -22,7 +22,7 @@ interface RssItem {
   description?: string;
 }
 
-function extractGuid(item: RssItem, feedUrl: string, index: number): string {
+function extractGuid(item: RssItem, feedUrl: string): string {
   if (item.guid) {
     if (typeof item.guid === 'object' && item.guid['#text']) {
       return String(item.guid['#text']);
@@ -35,8 +35,8 @@ function extractGuid(item: RssItem, feedUrl: string, index: number): string {
   if (item.link) {
     return item.link;
   }
-  // guid も link もない場合は title + index でユニーク化
-  return `${feedUrl}#${index}-${item.title || 'untitled'}`;
+  // guid も link もない場合は title でフォールバック
+  return `${feedUrl}#${item.title || 'untitled'}`;
 }
 
 function sortByPubDate(
@@ -87,9 +87,9 @@ async function fetchFeed(
       items = [items];
     }
 
-    return items.map((item: RssItem, index: number) => ({
+    return items.map((item: RssItem) => ({
       item,
-      guid: extractGuid(item, feedUrl, index),
+      guid: extractGuid(item, feedUrl),
     }));
   } catch (err) {
     logger.warn({ feedUrl, err }, `RSS feed "${label}" fetch failed`);
