@@ -5,6 +5,7 @@ import { logger } from './logger.js';
 import { readRssConfig, type RssChannelConfig } from './rss-config.js';
 
 const DEFAULT_RSS_POLL_INTERVAL = 15 * 60 * 1000;
+const RSS_BURST_SEND_DELAY_MS = 1000;
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -154,7 +155,9 @@ export async function pollOnce(deps: RssPollerDeps): Promise<void> {
 
         // Avoid Discord rate limits on burst sends during first startup
         if (i < sorted.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await new Promise((resolve) =>
+            setTimeout(resolve, RSS_BURST_SEND_DELAY_MS),
+          );
         }
       }
     }
