@@ -115,7 +115,7 @@ async function promptOne(e: Entry, values: ConfigValues): Promise<void> {
   };
   const ans = ensureAnswer(
     e.secret
-      ? await p.password({ message: e.label, validate })
+      ? await p.password({ message: e.label, clearOnError: true, validate })
       : await p.text({
           message: e.label,
           placeholder: e.placeholder ?? e.default,

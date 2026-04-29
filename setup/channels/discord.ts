@@ -31,6 +31,7 @@ import { brightSelect } from '../lib/bright-select.js';
 import { confirmThenOpen } from '../lib/browser.js';
 import { askOperatorRole } from '../lib/role-prompt.js';
 import { ensureAnswer, fail, runQuietChild } from '../lib/runner.js';
+import { accentGreen, brandBody, note } from '../lib/theme.js';
 
 const DEFAULT_AGENT_NAME = 'Nano';
 const DISCORD_API = 'https://discord.com/api/v10';
@@ -155,7 +156,7 @@ async function askHasBotToken(): Promise<boolean> {
 
 async function walkThroughBotCreation(): Promise<void> {
   const url = 'https://discord.com/developers/applications';
-  p.note(
+  note(
     [
       "You'll create a Discord bot in the Developer Portal. It's free and takes about a minute.",
       '',
@@ -184,7 +185,7 @@ function showTokenLocationReminder(hasExistingBot: boolean): void {
   // to find it — tokens in the Dev Portal aren't visible after first reveal,
   // and "Reset Token" issues a new one.
   if (hasExistingBot) {
-    p.note(
+    note(
       [
         "Where to find your bot token:",
         '',
@@ -216,7 +217,7 @@ async function walkThroughServerCreation(): Promise<void> {
   // the web client and rely on the + button being visible. The steps below
   // are the same whether they're in the desktop app or the browser.
   const url = 'https://discord.com/channels/@me';
-  p.note(
+  note(
     [
       "A Discord server is just a private space for you and the bot. Free and takes 30 seconds.",
       '',
@@ -239,9 +240,22 @@ async function walkThroughServerCreation(): Promise<void> {
 }
 
 async function collectDiscordToken(): Promise<string> {
+  const existing = process.env.DISCORD_BOT_TOKEN?.trim();
+  if (existing && /^[A-Za-z0-9._-]{50,}$/.test(existing)) {
+    const reuse = ensureAnswer(await p.confirm({
+      message: `Found an existing Discord bot token (${existing.slice(0, 10)}…). Use it?`,
+      initialValue: true,
+    }));
+    if (reuse) {
+      setupLog.userInput('discord_token', 'reused-existing');
+      return existing;
+    }
+  }
+
   const answer = ensureAnswer(
     await p.password({
       message: 'Paste your bot token',
+      clearOnError: true,
       validate: (v) => {
         const t = (v ?? '').trim();
         if (!t) return 'Token is required';
@@ -385,14 +399,14 @@ async function resolveOwnerUserId(
     }
   } else {
     p.log.info(
-      "Your bot is owned by a Developer Team, so we need your Discord user ID directly.",
+      brandBody("Your bot is owned by a Developer Team, so we need your Discord user ID directly."),
     );
   }
   return await promptForUserIdWithDevMode();
 }
 
 async function promptForUserIdWithDevMode(): Promise<string> {
-  p.note(
+  note(
     [
       "To get your Discord user ID:",
       '',
@@ -430,7 +444,7 @@ async function promptInviteBot(
     `&scope=bot` +
     `&permissions=${INVITE_PERMISSIONS}`;
 
-  p.note(
+  note(
     [
       `@${botUsername} needs to share a server with you before it can DM you.`,
       '',
@@ -506,7 +520,7 @@ async function resolveAgentName(): Promise<string> {
   }
   const answer = ensureAnswer(
     await p.text({
-      message: 'What should your assistant be called?',
+      message: `What should your ${accentGreen('assistant')} be called?`,
       placeholder: DEFAULT_AGENT_NAME,
       defaultValue: DEFAULT_AGENT_NAME,
     }),

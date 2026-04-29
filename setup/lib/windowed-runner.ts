@@ -23,7 +23,7 @@ import { emit as phEmit } from './diagnostics.js';
 import type { StepResult, SpinnerLabels } from './runner.js';
 import { dumpTranscriptOnFailure, spawnStep, writeStepEntry } from './runner.js';
 import * as setupLog from '../logs.js';
-import { fitToWidth } from './theme.js';
+import { brandBody, fitToWidth } from './theme.js';
 
 const WINDOW_SIZE = 3;
 const SPINNER_FRAMES = ['◒', '◐', '◓', '◑'];
@@ -169,7 +169,7 @@ async function runUnderWindow(
   if (result.ok) {
     const isSkipped = result.terminal?.fields.STATUS === 'skipped';
     const msg = isSkipped && labels.skipped ? labels.skipped : labels.done;
-    p.log.success(`${fitToWidth(msg, suffix)}${k.dim(suffix)}`);
+    p.log.success(`${brandBody(fitToWidth(msg, suffix))}${k.dim(suffix)}`);
   } else {
     const failMsg = labels.failed ?? labels.running.replace(/…$/, ' failed');
     p.log.error(`${fitToWidth(failMsg, suffix)}${k.dim(suffix)}`);
@@ -185,7 +185,7 @@ async function handleStall(
 ): Promise<void> {
   render.pauseRender();
   p.log.warn(
-    `This looks stuck — no output from the ${stepName} step for the last 60 seconds.`,
+    brandBody(`This looks stuck — no output from the ${stepName} step for the last 60 seconds.`),
   );
   phEmit('step_stalled', { step: stepName });
 
