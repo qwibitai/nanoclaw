@@ -42,8 +42,10 @@ function sortByPubDate(
   items: Array<{ item: RssItem; guid: string }>,
 ): Array<{ item: RssItem; guid: string }> {
   return [...items].sort((a, b) => {
-    const dateA = (a.item.pubDate ? new Date(a.item.pubDate).getTime() : 0) || 0;
-    const dateB = (b.item.pubDate ? new Date(b.item.pubDate).getTime() : 0) || 0;
+    const dateA =
+      (a.item.pubDate ? new Date(a.item.pubDate).getTime() : 0) || 0;
+    const dateB =
+      (b.item.pubDate ? new Date(b.item.pubDate).getTime() : 0) || 0;
     return dateA - dateB;
   });
 }
