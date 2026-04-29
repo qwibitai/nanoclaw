@@ -72,7 +72,7 @@ Talk to your assistant with the trigger word (default: `@Andy`):
 From a channel you own or administer, you can manage groups and tasks:
 ```
 @Andy list all scheduled tasks across groups
-@Andy pause the Monday briefing task
+@Andy pause the Tuesday briefing task
 @Andy join the Family Chat group
 ```
 
