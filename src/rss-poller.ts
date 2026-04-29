@@ -134,7 +134,8 @@ export async function pollOnce(deps: RssPollerDeps): Promise<void> {
       );
       const sorted = sortByPubDate(newItems);
 
-      for (const entry of sorted) {
+      for (let i = 0; i < sorted.length; i++) {
+        const entry = sorted[i];
         const label = feed.name || feed.url;
         const title = entry.item.title?.trim() || '(no title)';
         const link = entry.item.link?.trim() || '';
@@ -150,6 +151,11 @@ export async function pollOnce(deps: RssPollerDeps): Promise<void> {
             { err, jid: channelConfig.jid, guid: entry.guid },
             'Failed to send RSS message',
           );
+        }
+
+        // Avoid Discord rate limits on burst sends during first startup
+        if (i < sorted.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       }
     }
