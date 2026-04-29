@@ -182,6 +182,31 @@ if [ "$(uname -s)" = "Darwin" ] && ! command -v brew >/dev/null 2>&1; then
   esac
 fi
 
+# ─── pre-flight: prime sudo before any spinner ────────────────────────
+# Linux setup needs sudo for nodesource/apt (install-node.sh) and a
+# setfacl on /var/run/docker.sock (service step) when the user was added
+# to the docker group mid-session. Both run inside spinners that capture
+# child stdio, so an interactive sudo password prompt would be invisible
+# and the call would block on /dev/null stdin forever (issue #2025, #2014,
+# #2006). Prime the sudo cache here, before any spinner is drawn, so the
+# prompt lands on a clean TTY. NOPASSWD users get past `sudo -n true`
+# silently with no UI change.
+if [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+  if ! sudo -n true 2>/dev/null; then
+    printf '  %s\n' \
+      "$(dim "Setup will need sudo a few times (install Node, fix docker socket perms).")"
+    printf '  %s\n\n' \
+      "$(dim "Authenticating once now so we don't prompt mid-spinner.")"
+    if ! sudo -v </dev/tty; then
+      printf '\n  %s %s\n' "$(red '✗')" "Couldn't validate sudo."
+      printf '  %s\n\n' \
+        "$(dim 'Either configure passwordless sudo for your user, or re-run and enter your password when prompted.')"
+      exit 1
+    fi
+    printf '\n'
+  fi
+fi
+
 # ─── first step: install the basics (Node + pnpm + native modules) ─────
 
 BOOTSTRAP_RAW="${STEPS_DIR}/01-bootstrap.log"

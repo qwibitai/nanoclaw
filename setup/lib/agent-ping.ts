@@ -12,8 +12,29 @@
  * This wrapper also guards with its own timeout in case chat.ts hangs.
  */
 import { spawn } from 'child_process';
+import fs from 'fs';
 
 export type PingResult = 'ok' | 'no_reply' | 'socket_error' | 'auth_error';
+
+/**
+ * Wait for the host's CLI socket to appear on disk. Cheaper than `pingCliAgent`
+ * (no subprocess), used by the service step to confirm the host actually
+ * bound its socket before declaring success, and by the centralised restart
+ * helper after kicking the service.
+ *
+ * Polls every 200ms until the socket exists or `timeoutMs` elapses.
+ */
+export async function waitForSocket(
+  socketPath: string,
+  timeoutMs = 10_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(socketPath)) return true;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return fs.existsSync(socketPath);
+}
 
 export function classifyPingResult(exitCode: number | null, stdout: string, stderr = ''): PingResult {
   const output = `${stdout}\n${stderr}`;

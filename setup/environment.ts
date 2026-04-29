@@ -8,6 +8,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 
 import { log } from '../src/log.js';
+import { detectLxc } from './lib/lxc.js';
 import { commandExists, getPlatform, isHeadless, isWSL } from './platform.js';
 import { emitStatus } from './status.js';
 
@@ -44,6 +45,7 @@ export async function run(_args: string[]): Promise<void> {
   const platform = getPlatform();
   const wsl = isWSL();
   const headless = isHeadless();
+  const lxc = detectLxc();
 
   // Check Docker
   let docker: 'running' | 'installed_not_running' | 'not_found' = 'not_found';
@@ -89,6 +91,8 @@ export async function run(_args: string[]): Promise<void> {
     PLATFORM: platform,
     IS_WSL: wsl,
     IS_HEADLESS: headless,
+    IS_LXC: lxc.inLxc,
+    LXC_PRIVILEGED: lxc.privileged,
     DOCKER: docker,
     HAS_ENV: hasEnv,
     HAS_AUTH: hasAuth,

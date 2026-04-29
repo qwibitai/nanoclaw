@@ -102,6 +102,73 @@ function writeEnvOnecliUrl(url: string): void {
   writeEnvVar('ONECLI_URL', url);
 }
 
+function isCliAuthenticated(): boolean {
+  try {
+    execFileSync('onecli', ['auth', 'status'], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+      env: childEnv(),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Bootstrap an `oc_…` API key from a freshly installed local OneCLI gateway.
+ *
+ * In local auth mode the gateway auto-creates a `local-admin` user + account +
+ * API key on the first authenticated API call from "localhost" — where
+ * "localhost" is determined by the `x-forwarded-for` header (the gateway
+ * doesn't validate the TCP source IP). The Linux installer binds the gateway
+ * to the docker0 bridge IP so containers can reach it, which means a request
+ * from the host arrives without the loopback XFF the gateway expects. Setting
+ * `x-forwarded-for: 127.0.0.1` ourselves opts back in to that bootstrap path.
+ *
+ * Returns the bootstrapped key or null on failure (e.g. cloud auth mode).
+ */
+async function bootstrapLocalAdminApiKey(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${url}/api/user/api-key`, {
+      headers: { 'x-forwarded-for': '127.0.0.1' },
+    });
+    if (!res.ok) {
+      log.warn('Local-admin bootstrap fetch returned non-ok', { status: res.status });
+      return null;
+    }
+    const body = (await res.json()) as { apiKey?: unknown };
+    if (typeof body.apiKey === 'string' && body.apiKey.startsWith('oc_')) {
+      return body.apiKey;
+    }
+    log.warn('Local-admin bootstrap response missing apiKey');
+    return null;
+  } catch (err) {
+    log.warn('Local-admin bootstrap fetch failed', { err });
+    return null;
+  }
+}
+
+/**
+ * Persist a freshly issued OneCLI API key to both auth surfaces:
+ *  - `onecli auth login --api-key`    → CLI's persistent store, used by
+ *                                       setup-time calls (`secrets list`,
+ *                                       `secrets create` in the auth step).
+ *  - ONECLI_API_KEY in .env           → runtime SDK reads this at request time.
+ * Mirrors the remote-mode flow added in f048447.
+ */
+function persistApiKey(apiKey: string): void {
+  try {
+    execFileSync('onecli', ['auth', 'login', '--api-key', apiKey], {
+      stdio: 'ignore',
+      env: childEnv(),
+    });
+  } catch (err) {
+    log.warn('onecli auth login failed', { err });
+  }
+  writeEnvVar('ONECLI_API_KEY', apiKey);
+  log.info('Wrote ONECLI_API_KEY to .env');
+}
+
 // Last-known-good CLI release. Used only if BOTH the upstream installer
 // and the redirect-based version probe fail. Bump deliberately when a
 // new CLI release ships.
@@ -343,11 +410,20 @@ export async function run(args: string[]): Promise<void> {
     writeEnvOnecliUrl(url);
     log.info('Reusing existing OneCLI', { url });
     const healthy = await pollHealth(url, 5000);
+    let bootstrapped = false;
+    if (healthy && !isCliAuthenticated()) {
+      const apiKey = await bootstrapLocalAdminApiKey(url);
+      if (apiKey) {
+        persistApiKey(apiKey);
+        bootstrapped = true;
+      }
+    }
     emitStatus('ONECLI', {
       INSTALLED: true,
       REUSED: true,
       ONECLI_URL: url,
       HEALTHY: healthy,
+      ...(bootstrapped ? { BOOTSTRAPPED_LOCAL_ADMIN: true } : {}),
       STATUS: 'success',
       LOG: 'logs/setup.log',
     });
@@ -402,10 +478,20 @@ export async function run(args: string[]): Promise<void> {
 
   const healthy = await pollHealth(url, 15000);
 
+  let bootstrapped = false;
+  if (healthy && !isCliAuthenticated()) {
+    const apiKey = await bootstrapLocalAdminApiKey(url);
+    if (apiKey) {
+      persistApiKey(apiKey);
+      bootstrapped = true;
+    }
+  }
+
   emitStatus('ONECLI', {
     INSTALLED: true,
     ONECLI_URL: url,
     HEALTHY: healthy,
+    ...(bootstrapped ? { BOOTSTRAPPED_LOCAL_ADMIN: true } : {}),
     // Install succeeded regardless — a failed health poll often just means
     // the endpoint is auth-gated or the gateway hasn't finished warming up.
     // The next step (auth) will surface a genuinely broken gateway via
