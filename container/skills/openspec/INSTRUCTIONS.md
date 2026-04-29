@@ -80,7 +80,22 @@ openspec archive <change-name>
 4. 等用户确认 proposal
 5. `openspec instructions --change <name> specs` → 按指引写 specs/
 6. `openspec instructions --change <name> design` → 按指引写 design.md
-7. `openspec instructions --change <name> tasks` → 按指引写 tasks.md
+7. **在 design.md 末尾追加 `## 测试计划`**（见下方"可测试性要求"）
+8. `openspec instructions --change <name> tasks` → 按指引写 tasks.md
+
+### 可测试性要求
+
+写 design.md 时，**必须**在末尾包含 `## 测试计划` 章节：
+
+1. **测试分层**：哪些函数/模块适合纯逻辑单测（零 mock），哪些需要 mock 外部依赖
+2. **优先级**：按 P0（核心逻辑必测）、P1（重要路径）、P2（锦上添花）分级
+3. **预估范围**：大约多少个测试用例，覆盖哪些文件
+
+原则：
+- 设计阶段就考虑可测试性 — 复杂逻辑拆成纯函数，不要全部耦合在 I/O 层
+- 每个新增/修改的模块都必须有对应的单元测试
+- 纯函数优先（零 mock、跑得快、不 flaky）
+- 测试是编码完成的必要条件，不是可选项
 
 ### 实现阶段
 

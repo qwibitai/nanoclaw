@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ---- mock 飞书 SDK ----
 
@@ -6,6 +6,7 @@ const mockCreate = vi
   .fn()
   .mockResolvedValue({ data: { message_id: 'msg_mock' } });
 const mockPatch = vi.fn().mockResolvedValue({});
+const mockMessageDelete = vi.fn().mockResolvedValue({});
 const mockReactionCreate = vi
   .fn()
   .mockResolvedValue({ data: { reaction_id: 'react_1' } });
@@ -24,12 +25,17 @@ const mockChatList = vi.fn().mockResolvedValue({
 vi.mock('@larksuiteoapi/node-sdk', () => {
   class MockClient {
     im = {
-      message: { create: mockCreate, patch: mockPatch },
+      message: { create: mockCreate, patch: mockPatch, delete: mockMessageDelete },
       messageReaction: {
         create: mockReactionCreate,
         delete: mockReactionDelete,
       },
       chat: { list: mockChatList },
+      chatMembers: {
+        get: vi.fn().mockResolvedValue({
+          data: { items: [{ member_id: 'ou_test_user', name: '测试用户' }] },
+        }),
+      },
     };
   }
   class MockWSClient {
@@ -54,6 +60,12 @@ vi.mock('../group-folder.js', () => ({
   resolveGroupFolderPath: (folder: string) => `/tmp/groups/${folder}`,
 }));
 
+const mockGetMessageById = vi.fn().mockReturnValue(undefined);
+vi.mock('../db.js', () => ({
+  getMessageById: (...args: unknown[]) => mockGetMessageById(...args),
+}));
+
+import { ASSISTANT_NAME } from '../config.js';
 import { FeishuChannel } from './feishu.js';
 import type { ChannelOpts } from './registry.js';
 
@@ -262,6 +274,367 @@ describe('FeishuChannel', () => {
       // 恢复
       if (origId) process.env.FEISHU_APP_ID = origId;
       if (origSecret) process.env.FEISHU_APP_SECRET = origSecret;
+    });
+  });
+
+  describe('sendPlainOrCard 降级', () => {
+    it('卡片发送失败 → 自动降级纯文本', async () => {
+      // 第一次 create（卡片）失败，第二次 create（纯文本）成功
+      mockCreate
+        .mockRejectedValueOnce(new Error('invalid image keys'))
+        .mockResolvedValueOnce({ data: { message_id: 'msg_fallback' } });
+
+      // 长文本 → shouldUseCard → interactive 卡片路径
+      const longText = 'a'.repeat(501);
+      await channel.sendMessage('fs:oc_123', longText);
+
+      // create 被调用两次（卡片 + 降级纯文本）
+      expect(mockCreate).toHaveBeenCalledTimes(2);
+      // 第一次是 interactive
+      expect(mockCreate.mock.calls[0][0].data.msg_type).toBe('interactive');
+      // 第二次降级为 text
+      expect(mockCreate.mock.calls[1][0].data.msg_type).toBe('text');
+    });
+
+    it('降级后纯文本也失败 → promise rejects', async () => {
+      mockCreate
+        .mockRejectedValueOnce(new Error('card failed'))
+        .mockRejectedValueOnce(new Error('text also failed'));
+
+      const longText = 'b'.repeat(501);
+      await expect(
+        channel.sendMessage('fs:oc_123', longText),
+      ).rejects.toThrow('text also failed');
+    });
+  });
+
+  describe('typing indicator', () => {
+    it('setTyping(true) 添加 emoji reaction', async () => {
+      // 设置最新 messageId（通过 private Map）
+      (channel as any).lastMessageIds.set('fs:oc_typing', 'msg_user_1');
+
+      await channel.setTyping!('fs:oc_typing', true);
+
+      expect(mockReactionCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: { message_id: 'msg_user_1' },
+        }),
+      );
+    });
+
+    it('setTyping(false) 移除 emoji reaction', async () => {
+      // 先 setTyping true（设置 reactionId）
+      (channel as any).lastMessageIds.set('fs:oc_typing2', 'msg_user_2');
+      await channel.setTyping!('fs:oc_typing2', true);
+
+      await channel.setTyping!('fs:oc_typing2', false);
+
+      expect(mockReactionDelete).toHaveBeenCalled();
+    });
+
+    it('无 lastMessageId 时 setTyping(true) 不抛异常', async () => {
+      // 没有设置 lastMessageId
+      await expect(
+        channel.setTyping!('fs:oc_no_msg', true),
+      ).resolves.toBeUndefined();
+      // reaction 不应被调用
+      expect(mockReactionCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('进度消息聚合', () => {
+    it('progressDone 后忽略迟到的进度消息', async () => {
+      const jid = 'fs:oc_progress_done';
+      // 模拟 progressDone 已标记（正式回复已到达）
+      (channel as any).progressDone.add(jid);
+
+      // 发送进度消息（emoji 开头）
+      await channel.sendMessage(jid, '⚙️ 正在处理...');
+
+      // 不应调用 create（被忽略）
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it('💭 消息单独发送不加入卡片', async () => {
+      const jid = 'fs:oc_thought';
+      // 确保没有 progressDone 标记
+      (channel as any).progressDone.delete(jid);
+
+      await channel.sendMessage(jid, '💭 这是内部思考');
+
+      // 应该调用 create 发送（而非 patch 卡片）
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            receive_id: 'oc_thought',
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('cleanupProgressCard', () => {
+    const jid = 'fs:oc_test_cleanup';
+
+    /** 手动注入一个进度卡片 entry，模拟 onAgentProgress 创建后的状态 */
+    function injectProgressCard(messageId: string, steps: { title: string }[]) {
+      // 通过 private Map 注入（测试场景合理使用 as any）
+      (channel as any).progressCards.set(jid, {
+        messageId,
+        sessionId: 'sess_test',
+        steps: steps.map((s) => ({ ...s, detail: undefined })),
+        allSteps: steps.map((s) => ({ ...s, detail: undefined })),
+        frame: 0,
+        startTime: Date.now(),
+      });
+    }
+
+    it('patch 成功时正常转为完成卡片', async () => {
+      injectProgressCard('msg_card_1', [{ title: '⚙️ Bash: ls' }]);
+      mockPatch.mockResolvedValueOnce({});
+
+      await channel.cleanupProgressCard(jid);
+
+      expect(mockPatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: { message_id: 'msg_card_1' },
+        }),
+      );
+      expect(mockMessageDelete).not.toHaveBeenCalled();
+    });
+
+    it('patch 失败时 fallback 删除卡片', async () => {
+      injectProgressCard('msg_card_2', [{ title: '⚙️ Bash: ls' }]);
+      mockPatch.mockRejectedValueOnce(new Error('ErrCode: 200800'));
+
+      await channel.cleanupProgressCard(jid);
+
+      // patch 被调用且失败
+      expect(mockPatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: { message_id: 'msg_card_2' },
+        }),
+      );
+      // fallback: 删除卡片
+      expect(mockMessageDelete).toHaveBeenCalledWith({
+        path: { message_id: 'msg_card_2' },
+      });
+    });
+
+    it('patch 失败且 delete 也失败时不抛异常', async () => {
+      injectProgressCard('msg_card_3', [{ title: '⚙️ Bash: ls' }]);
+      mockPatch.mockRejectedValueOnce(new Error('200800'));
+      mockMessageDelete.mockRejectedValueOnce(new Error('delete also failed'));
+
+      // 不应抛异常
+      await expect(channel.cleanupProgressCard(jid)).resolves.toBeUndefined();
+    });
+
+    it('纯思考步骤（无工具）时删除卡片而非 patch', async () => {
+      injectProgressCard('msg_card_4', [{ title: '💭 思考中...' }]);
+
+      await channel.cleanupProgressCard(jid);
+
+      expect(mockPatch).not.toHaveBeenCalled();
+      expect(mockMessageDelete).toHaveBeenCalledWith({
+        path: { message_id: 'msg_card_4' },
+      });
+    });
+
+    it('无 messageId 时静默返回不调 API', async () => {
+      injectProgressCard('', [{ title: '⚙️ Bash: ls' }]);
+
+      await channel.cleanupProgressCard(jid);
+
+      expect(mockPatch).not.toHaveBeenCalled();
+      expect(mockMessageDelete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sendMessage 返回飞书 message_id', () => {
+    it('正式回复返回飞书 message_id', async () => {
+      mockCreate.mockResolvedValueOnce({ data: { message_id: 'om_reply_001' } });
+      const msgId = await channel.sendMessage('fs:oc_123', '正式回复');
+      expect(msgId).toBe('om_reply_001');
+    });
+
+    it('进度消息返回 undefined', async () => {
+      const msgId = await channel.sendMessage('fs:oc_123', '🔧 Bash: ls -la');
+      expect(msgId).toBeUndefined();
+    });
+
+    it('💭 思考消息返回 undefined', async () => {
+      const msgId = await channel.sendMessage('fs:oc_123', '💭 正在分析代码结构...');
+      expect(msgId).toBeUndefined();
+    });
+
+    it('命令回复返回 undefined（有意丢弃）', async () => {
+      mockCreate.mockResolvedValueOnce({ data: { message_id: 'om_cmd_001' } });
+      const msgId = await channel.sendMessage('fs:oc_123', '命令结果', {
+        isCommandReply: true,
+      });
+      expect(msgId).toBeUndefined();
+    });
+
+    it('API 返回无 message_id 时返回 undefined', async () => {
+      mockCreate.mockResolvedValueOnce({ data: {} });
+      const msgId = await channel.sendMessage('fs:oc_123', '测试');
+      expect(msgId).toBeUndefined();
+    });
+  });
+
+  describe('sendPlainOrCard 返回 message_id', () => {
+    it('纯文本发送返回 message_id', async () => {
+      mockCreate.mockResolvedValueOnce({ data: { message_id: 'om_text_001' } });
+      const msgId = await channel.sendMessage('fs:oc_123', 'short');
+      expect(msgId).toBe('om_text_001');
+    });
+
+    it('卡片发送返回 message_id', async () => {
+      mockCreate.mockResolvedValueOnce({ data: { message_id: 'om_card_001' } });
+      const longText = 'a'.repeat(501);
+      const msgId = await channel.sendMessage('fs:oc_123', longText);
+      expect(msgId).toBe('om_card_001');
+    });
+
+    it('卡片失败降级纯文本，返回降级后的 message_id', async () => {
+      mockCreate
+        .mockRejectedValueOnce(new Error('card error'))
+        .mockResolvedValueOnce({ data: { message_id: 'om_fallback_001' } });
+      const longText = 'a'.repeat(501);
+      const msgId = await channel.sendMessage('fs:oc_123', longText);
+      expect(msgId).toBe('om_fallback_001');
+    });
+  });
+
+  describe('fetchReplyContext DB 优先查询', () => {
+    let originalFetch: typeof globalThis.fetch;
+
+    beforeEach(() => {
+      mockGetMessageById.mockReset();
+      originalFetch = globalThis.fetch;
+      (channel as any).getTenantAccessToken = vi.fn().mockResolvedValue('mock_token');
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
+    // 辅助：mock 飞书 API 返回
+    function mockFeishuApi(item: Record<string, unknown>) {
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        json: async () => ({
+          code: 0,
+          data: { items: [item] },
+        }),
+      }) as any;
+    }
+
+    it('DB 命中 → 直接返回内容，不调飞书 API', async () => {
+      mockGetMessageById.mockReturnValueOnce({
+        sender_name: '大狗',
+        content: '这是 bot 的回复内容',
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_test_001');
+      expect(result).toEqual({
+        content: '这是 bot 的回复内容',
+        senderName: '大狗',
+      });
+      expect(mockGetMessageById).toHaveBeenCalledWith('om_test_001');
+    });
+
+    it('DB 命中但内容超长 → 精确截断到 200 字 + ...', async () => {
+      mockGetMessageById.mockReturnValueOnce({
+        sender_name: 'Andy',
+        content: '长'.repeat(300),
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_test_002');
+      expect(result!.content).toBe('长'.repeat(200) + '...');
+    });
+
+    it('DB 命中但无 sender_name → 使用 ASSISTANT_NAME', async () => {
+      mockGetMessageById.mockReturnValueOnce({
+        sender_name: '',
+        content: '内容',
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_test_003');
+      expect(result!.senderName).toBe(ASSISTANT_NAME);
+    });
+
+    it('DB 未命中 → fallback 到飞书 API', async () => {
+      mockGetMessageById.mockReturnValueOnce(undefined);
+      mockFeishuApi({
+        msg_type: 'text',
+        sender: { id: 'ou_user1', sender_type: 'user' },
+        body: { content: JSON.stringify({ text: '用户消息' }) },
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_user_msg');
+      expect(mockGetMessageById).toHaveBeenCalledWith('om_user_msg');
+      expect(result).toEqual({
+        content: '用户消息',
+        senderName: 'ou_user1',
+      });
+    });
+
+    it('DB 查询异常 → 静默 fallback 到飞书 API', async () => {
+      mockGetMessageById.mockImplementationOnce(() => {
+        throw new Error('DB corrupted');
+      });
+      mockFeishuApi({
+        msg_type: 'text',
+        sender: { id: 'ou_user1', sender_type: 'user' },
+        body: { content: JSON.stringify({ text: 'fallback 消息' }) },
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_err_msg');
+      expect(mockGetMessageById).toHaveBeenCalledWith('om_err_msg');
+      expect(result!.content).toBe('fallback 消息');
+    });
+
+    it('DB 命中内容为空 → fallback 到 API', async () => {
+      mockGetMessageById.mockReturnValueOnce({
+        sender_name: 'Andy',
+        content: '',
+      });
+      mockFeishuApi({
+        msg_type: 'text',
+        sender: { id: 'ou_u1', sender_type: 'user' },
+        body: { content: JSON.stringify({ text: 'API 内容' }) },
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_empty');
+      expect(result!.content).toBe('API 内容');
+    });
+
+    it('API fallback — interactive 类型提取卡片标题', async () => {
+      mockGetMessageById.mockReturnValueOnce(undefined);
+      mockFeishuApi({
+        msg_type: 'interactive',
+        sender: { id: 'cli_bot1', sender_type: 'app' },
+        body: {
+          content: JSON.stringify({
+            header: { title: { content: '任务完成报告' } },
+          }),
+        },
+      });
+
+      const result = await (channel as any).fetchReplyContext('om_card_msg');
+      expect(result).toEqual({
+        content: '[卡片: 任务完成报告]',
+        senderName: ASSISTANT_NAME,
+      });
+    });
+
+    it('DB 未命中且 token 获取失败 → 返回 null', async () => {
+      mockGetMessageById.mockReturnValueOnce(undefined);
+      (channel as any).getTenantAccessToken = vi.fn().mockResolvedValue(null);
+
+      const result = await (channel as any).fetchReplyContext('om_no_token');
+      expect(result).toBeNull();
     });
   });
 });

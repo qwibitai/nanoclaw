@@ -10,12 +10,45 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
+import { QdrantClient } from '@qdrant/js-client-rest';
+
 import { getMemoryConfig } from './config.js';
 import { loadFacts, loadProfile } from './storage.js';
 import { formatMemoryForInjection } from './prompt.js';
 import { MemoryStore } from './memory-store.js';
+import { getEmbedding } from './embeddings.js';
 import { logger } from '../logger.js';
-import { GROUPS_DIR } from '../config.js';
+import { GROUPS_DIR, QDRANT_URL } from '../config.js';
+
+// ─── Qdrant wiki 向量 ───
+
+const WIKI_COLLECTION = 'wiki_index_vectors';
+const WIKI_VECTOR_SIZE = 1024;
+let _qdrant: QdrantClient | null = null;
+let _qdrantReady = false;
+
+async function getWikiQdrant(): Promise<QdrantClient | null> {
+  if (_qdrantReady) return _qdrant;
+  try {
+    _qdrant = new QdrantClient({ url: QDRANT_URL, timeout: 5000 });
+    const collections = await _qdrant.getCollections();
+    const exists = collections.collections.some(
+      (c) => c.name === WIKI_COLLECTION,
+    );
+    if (!exists) {
+      await _qdrant.createCollection(WIKI_COLLECTION, {
+        vectors: { size: WIKI_VECTOR_SIZE, distance: 'Cosine' },
+      });
+      logger.info('创建 Qdrant collection: wiki_index_vectors');
+    }
+    _qdrantReady = true;
+    return _qdrant;
+  } catch (err) {
+    logger.warn({ err }, '[wiki-vector] Qdrant 连接失败，wiki 向量召回不可用');
+    _qdrant = null;
+    return null;
+  }
+}
 
 const MEMORY_START = '<!-- nanoclaw:memory:start -->';
 const MEMORY_END = '<!-- nanoclaw:memory:end -->';
@@ -132,33 +165,207 @@ function bm25Score(
   });
 }
 
+// 内存缓存：path → content_hash，避免每条消息都打 Qdrant retrieve
+let _wikiHashCache = new Map<string, string>();
+let _wikiHashCacheReady = false;
+
 /**
- * 匹配 Wiki index 中的相关条目（BM25 评分）
+ * 确保 wiki index 条目的向量在 Qdrant 中是最新的（懒初始化 + content_hash 增量更新）
+ * 返回 true 表示 Qdrant 可用，供后续 search 使用
  */
-export function matchWikiEntries(
+async function syncWikiVectors(
+  entries: Array<{ title: string; path: string; desc: string }>,
+): Promise<boolean> {
+  const qdrant = await getWikiQdrant();
+  if (!qdrant) return false;
+
+  // 用 path 的 MD5 转 UUID 格式作为稳定 point id（Qdrant 要求 string ID 为 UUID）
+  const pathToId = (p: string) => {
+    const hex = crypto.createHash('md5').update(p).digest('hex');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+  };
+
+  // 首次启动时从 Qdrant 加载已有 hash
+  if (!_wikiHashCacheReady) {
+    try {
+      const existing = await qdrant.retrieve(WIKI_COLLECTION, {
+        ids: entries.map((e) => pathToId(e.path)),
+        with_payload: true,
+        with_vector: false,
+      });
+      for (const pt of existing) {
+        const payload = pt.payload as Record<string, unknown> | null;
+        if (payload?.path && payload?.content_hash) {
+          _wikiHashCache.set(
+            payload.path as string,
+            payload.content_hash as string,
+          );
+        }
+      }
+    } catch {
+      // collection 可能为空，忽略
+    }
+    _wikiHashCacheReady = true;
+  }
+
+  const toEmbed: Array<{
+    path: string;
+    text: string;
+    hash: string;
+    title: string;
+    desc: string;
+  }> = [];
+  for (const e of entries) {
+    const text = `${e.title} ${e.desc}`;
+    const hash = crypto.createHash('md5').update(text).digest('hex');
+    if (_wikiHashCache.get(e.path) !== hash) {
+      toEmbed.push({ path: e.path, text, hash, title: e.title, desc: e.desc });
+    }
+  }
+
+  if (toEmbed.length > 0) {
+    logger.info(
+      { count: toEmbed.length, total: entries.length },
+      '[wiki-vector] 向量化 wiki 条目到 Qdrant',
+    );
+    const points: Array<{
+      id: string;
+      vector: number[];
+      payload: Record<string, unknown>;
+    }> = [];
+    for (const item of toEmbed) {
+      const emb = await getEmbedding(item.text);
+      if (emb) {
+        points.push({
+          id: pathToId(item.path),
+          vector: emb,
+          payload: {
+            path: item.path,
+            title: item.title,
+            desc: item.desc,
+            content_hash: item.hash,
+          },
+        });
+      }
+    }
+    if (points.length > 0) {
+      try {
+        await qdrant.upsert(WIKI_COLLECTION, { points });
+        // 更新内存缓存
+        for (const item of toEmbed) {
+          _wikiHashCache.set(item.path, item.hash);
+        }
+      } catch (upsertErr) {
+        logger.error(
+          { err: upsertErr },
+          '[wiki-vector] Qdrant upsert 失败',
+        );
+      }
+    }
+  }
+
+  // 清理已删除的条目：只保留当前 index 中存在的 path
+  const validIds = new Set(entries.map((e) => pathToId(e.path)));
+  try {
+    const allPoints = await qdrant.scroll(WIKI_COLLECTION, {
+      limit: 1000,
+      with_payload: { include: ['path'] },
+      with_vector: false,
+    });
+    const toDelete = allPoints.points
+      .filter((pt) => !validIds.has(pt.id as string))
+      .map((pt) => pt.id);
+    if (toDelete.length > 0) {
+      await qdrant.delete(WIKI_COLLECTION, {
+        points: toDelete as string[],
+      });
+      logger.info(
+        { count: toDelete.length },
+        '[wiki-vector] 清理已删除的 wiki 条目',
+      );
+    }
+  } catch {
+    // 清理失败不影响主流程
+  }
+
+  return true;
+}
+
+/**
+ * 匹配 Wiki index 中的相关条目（BM25 + 向量双路召回）
+ */
+export async function matchWikiEntries(
   text: string,
   wikiIndexPath: string,
   maxEntries: number = 3,
-): WikiMatch[] {
+): Promise<WikiMatch[]> {
   const entries = parseWikiIndex(wikiIndexPath);
   if (entries.length === 0) return [];
 
   const queryTokens = extractKeywords(text);
   if (queryTokens.length === 0) return [];
 
-  // 对每个 entry 的 title + desc 做分词
+  // ── BM25 路径 ──
   const docs = entries.map((e) => {
     const tokens = extractKeywords(`${e.title} ${e.desc}`);
     return { tokens, length: tokens.length };
   });
   const avgDl = docs.reduce((s, d) => s + d.length, 0) / docs.length || 1;
+  const bm25Scores = bm25Score(queryTokens, docs, avgDl);
 
-  const scores = bm25Score(queryTokens, docs, avgDl);
+  // 归一化 BM25 分数到 [0, 1]
+  const maxBm25 = Math.max(...bm25Scores, 1e-9);
+  const normBm25 = bm25Scores.map((s) => s / maxBm25);
 
-  // 按分数排序取 top-N，分数 > 0 的
+  // ── 向量路径（Qdrant search）──
+  let vectorScores: number[] = new Array(entries.length).fill(0);
+  try {
+    // 并行：拿 query embedding + 同步 wiki 向量到 Qdrant
+    const [queryEmbedding, qdrantReady] = await Promise.all([
+      getEmbedding(text),
+      syncWikiVectors(entries),
+    ]);
+    if (queryEmbedding && qdrantReady) {
+      const qdrant = await getWikiQdrant();
+      if (qdrant) {
+        const results = await qdrant.search(WIKI_COLLECTION, {
+          vector: queryEmbedding,
+          limit: entries.length,
+          with_payload: { include: ['path'] },
+          score_threshold: 0.01,
+        });
+        // 将 Qdrant 返回的分数映射回 entries 索引
+        const pathToIdx = new Map(entries.map((e, i) => [e.path, i]));
+        for (const r of results) {
+          const payload = r.payload as Record<string, unknown> | null;
+          const p = payload?.path as string;
+          const idx = pathToIdx.get(p);
+          if (idx !== undefined) {
+            vectorScores[idx] = r.score;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, '[wiki-vector] Qdrant 向量召回失败，仅用 BM25');
+  }
+
+  // ── 融合：0.7 * cosine + 0.3 * BM25 ──
+  const VECTOR_WEIGHT = 0.7;
+  const BM25_WEIGHT = 0.3;
+  const fusedScores = entries.map(
+    (_, i) => VECTOR_WEIGHT * vectorScores[i] + BM25_WEIGHT * normBm25[i],
+  );
+
+  // 按融合分数排序取 top-N
   const scored = entries
-    .map((e, i) => ({ entry: e, score: scores[i] }))
-    .filter((x) => x.score > 0)
+    .map((e, i) => ({
+      entry: e,
+      score: fusedScores[i],
+      vecScore: vectorScores[i],
+      bm25Score: normBm25[i],
+    }))
+    .filter((x) => x.score > 0.3)
     .sort((a, b) => b.score - a.score)
     .slice(0, maxEntries);
 
@@ -166,11 +373,13 @@ export function matchWikiEntries(
     logger.info(
       {
         topMatch: scored[0].entry.title,
-        topScore: scored[0].score.toFixed(2),
+        topFused: scored[0].score.toFixed(3),
+        topVec: scored[0].vecScore.toFixed(3),
+        topBm25: scored[0].bm25Score.toFixed(3),
         count: scored.length,
         queryTokens: queryTokens.slice(0, 5),
       },
-      '[wiki-bm25] 命中 wiki 条目',
+      '[wiki] 双路召回命中',
     );
   }
 
@@ -228,8 +437,10 @@ export async function buildMessageContext(
     ? path.join(groupDir, '..', 'global', 'wiki', 'index.md')
     : path.join(GROUPS_DIR, 'global', 'wiki', 'index.md');
 
-  const wikiMatches = matchWikiEntries(latestUserMessage, wikiDir, 3);
-  const facts = await recallRelevantFacts(latestUserMessage, 5);
+  const [wikiMatches, facts] = await Promise.all([
+    matchWikiEntries(latestUserMessage, wikiDir, 3),
+    recallRelevantFacts(latestUserMessage, 5),
+  ]);
 
   if (wikiMatches.length === 0 && facts.length === 0) return null;
 
@@ -336,7 +547,7 @@ export async function injectMemory(
       'wiki',
       'index.md',
     );
-    const matched = matchWikiEntries(latestUserMessage, wikiIndexPath, 5);
+    const matched = await matchWikiEntries(latestUserMessage, wikiIndexPath, 5);
     if (matched.length > 0) {
       const lines = matched.map(
         (e) =>

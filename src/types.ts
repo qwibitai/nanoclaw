@@ -97,7 +97,7 @@ export interface Channel {
     jid: string,
     text: string,
     options?: SendMessageOptions,
-  ): Promise<void>;
+  ): Promise<string | undefined>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;

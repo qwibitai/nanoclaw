@@ -1,10 +1,13 @@
+import { execSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import * as lark from '@larksuiteoapi/node-sdk';
 
 import { ASSISTANT_NAME } from '../config.js';
 import type { ContainerOutput } from '../container-runner.js';
+import { getMessageById } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
@@ -16,6 +19,7 @@ import {
   deleteSession,
 } from '../progress-server.js';
 import { Channel, NewMessage, SendMessageOptions } from '../types.js';
+import { notifyVoice } from '../voice-notify.js';
 
 import { registerChannel, ChannelOpts } from './registry.js';
 
@@ -367,6 +371,9 @@ export class FeishuChannel implements Channel {
   private thinkingMode = new Map<string, 'adaptive' | 'disabled'>();
   private pendingUsage = new Map<string, ContainerOutput['usage']>();
 
+  // open_id → 用户姓名缓存，避免重复调飞书 API
+  private userNameCache = new Map<string, string>();
+
   // Spinner 自动刷新定时器（每个 chat 一个）
   private spinnerTimers = new Map<string, NodeJS.Timeout>();
   // 停止标记：clearSpinnerTimer 设置后，正在运行的 callback 检测到后不再调度下一轮
@@ -468,11 +475,12 @@ export class FeishuChannel implements Channel {
     return jid.startsWith(JID_PREFIX);
   }
 
+  /** 发送消息，正式回复返回飞书 message_id（进度/命令回复返回 undefined） */
   async sendMessage(
     jid: string,
     text: string,
     options?: SendMessageOptions,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const chatId = chatIdFromJid(jid);
 
     // 命令回复：直接发消息，跳过进度卡片逻辑，避免打断正在运行的 agent
@@ -601,7 +609,17 @@ export class FeishuChannel implements Channel {
 
     // 统一媒体提取与发送（图片/文件标记提取、文本发送、媒体上传，互不阻塞）
     const groupFolder = this.getGroupFolder(jid);
-    await this.extractAndSendMedia(chatId, text, groupFolder, usage, thinking);
+
+    // 语音通知（只对主会话）：剥离媒体标记后送 LLM 摘要 → Pushover → iOS 朗读
+    // fire-and-forget，不 await，不影响飞书主流程
+    const textForSpeech = text
+      .replace(new RegExp(IMAGE_SEND_PATTERN.source, 'gi'), '')
+      .replace(new RegExp(FILE_SEND_PATTERN.source, 'gi'), '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    notifyVoice(groupFolder, textForSpeech);
+
+    return this.extractAndSendMedia(chatId, text, groupFolder, usage, thinking);
   }
 
   /** 统一路径解析：容器路径 /workspace/group/xxx → 宿主机路径，绝对路径直接用 */
@@ -614,14 +632,14 @@ export class FeishuChannel implements Channel {
     return inputPath;
   }
 
-  /** 统一媒体标记提取与发送：从文本中提取 [图片:] [文件:] 标记，上传并发送，文本/媒体互不阻塞 */
+  /** 统一媒体标记提取与发送，返回文本消息的飞书 message_id */
   private async extractAndSendMedia(
     chatId: string,
     text: string,
     groupFolder: string | null,
     usage?: ContainerOutput['usage'],
     thinking?: 'adaptive' | 'disabled',
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     // 用 matchAll + new RegExp 副本避免全局正则 lastIndex 状态污染
     const imageMatches = [
       ...text.matchAll(new RegExp(IMAGE_SEND_PATTERN.source, 'gi')),
@@ -634,15 +652,13 @@ export class FeishuChannel implements Channel {
 
     // 无标记 → 直接发文本
     if (!hasMedia) {
-      await this.sendPlainOrCard(chatId, text, usage, thinking);
-      return;
+      return this.sendPlainOrCard(chatId, text, usage, thinking);
     }
 
     // groupFolder 为 null → 无法上传媒体，原文本直接发
     if (!groupFolder) {
       logger.warn('群未注册 groupFolder，跳过媒体提取，原文本直接发送');
-      await this.sendPlainOrCard(chatId, text, usage, thinking);
-      return;
+      return this.sendPlainOrCard(chatId, text, usage, thinking);
     }
 
     // strip 标记，合并连续空白，发送剩余文本
@@ -653,9 +669,10 @@ export class FeishuChannel implements Channel {
       .trim();
 
     let textSent = !remainingText; // 无文本需要发则视为成功
+    let textMsgId: string | undefined;
     if (remainingText) {
       try {
-        await this.sendPlainOrCard(chatId, remainingText, usage, thinking);
+        textMsgId = await this.sendPlainOrCard(chatId, remainingText, usage, thinking);
         textSent = true;
       } catch (err) {
         logger.warn({ err }, '飞书文本卡片发送失败，媒体发送继续');
@@ -710,6 +727,7 @@ export class FeishuChannel implements Channel {
         `飞书消息发送全部失败 (${errors.length} 个媒体): ${errors[0]?.message}`,
       );
     }
+    return textMsgId;
   }
 
   /** IPC send_message 专用：直接发消息，不触发进度卡片清理逻辑 */
@@ -719,17 +737,21 @@ export class FeishuChannel implements Channel {
     await this.extractAndSendMedia(chatId, text, groupFolder);
   }
 
-  /** 修改飞书群名称 */
+  /** 修改飞书群名称，同时生成缩略字头像（仅群聊生效） */
   async renameChat(jid: string, name: string): Promise<void> {
     const chatId = jid.replace(JID_PREFIX, '');
     logger.info({ jid, chatId, name }, '[rename] 开始修改群名');
+
     try {
       const resp = await this.client.im.chat.update({
         path: { chat_id: chatId },
         data: { name },
       });
-      logger.info({ jid, name, code: resp?.code }, '[rename] 群名已更新');
-    } catch (err) {
+      logger.info(
+        { jid, name, code: resp?.code },
+        '[rename] 群名已更新',
+      );
+    } catch (err: any) {
       logger.warn({ err, jid, name }, '[rename] 修改群名失败');
     }
   }
@@ -772,37 +794,50 @@ export class FeishuChannel implements Channel {
         });
       } else {
         completeSession(progressEntry.sessionId);
-        await this.client.im.message.patch({
-          path: { message_id: progressEntry.messageId },
-          data: {
-            content: buildCompletedCard(
-              progressEntry.steps,
-              undefined,
-              progressEntry.startTime,
-              progressEntry.sessionId,
-            ),
-          },
-        });
+        try {
+          await this.client.im.message.patch({
+            path: { message_id: progressEntry.messageId },
+            data: {
+              content: buildCompletedCard(
+                progressEntry.steps,
+                undefined,
+                progressEntry.startTime,
+                progressEntry.sessionId,
+              ),
+            },
+          });
+        } catch (patchErr) {
+          // patch 失败（常见 200800）→ 删除卡住的卡片，避免永远显示"思考中"
+          logger.warn(
+            { err: patchErr, jid, messageId: progressEntry.messageId },
+            '[cleanup] patch 完成卡片失败，fallback 删除卡片',
+          );
+          await this.client.im.message
+            .delete({ path: { message_id: progressEntry.messageId } })
+            .catch((delErr: unknown) =>
+              logger.warn({ err: delErr, jid }, '[cleanup] 删除卡片也失败'),
+            );
+        }
       }
     } catch (err) {
-      logger.debug({ err }, '飞书进度卡片清理失败（非致命）');
+      logger.warn({ err, jid }, '飞书进度卡片清理失败（兜底 catch）');
     }
   }
 
-  /** 发送纯文本或卡片消息（内部方法）。有 usage 时强制走卡片并追加脚注，卡片失败自动降级纯文本 */
+  /** 发送纯文本或卡片消息，返回飞书 message_id（用于 DB 关联） */
   private async sendPlainOrCard(
     chatId: string,
     text: string,
     usage?: ContainerOutput['usage'],
     thinking?: 'adaptive' | 'disabled',
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     if (usage || shouldUseCard(text)) {
       const elements: unknown[] = [
         { tag: 'markdown', content: text, text_size: 'normal' },
       ];
       if (usage) appendUsageFooter(elements, usage, thinking);
       try {
-        await this.client.im.message.create({
+        const resp = await this.client.im.message.create({
           data: {
             receive_id: chatId,
             msg_type: 'interactive',
@@ -813,10 +848,11 @@ export class FeishuChannel implements Channel {
           },
           params: { receive_id_type: 'chat_id' },
         });
+        return resp?.data?.message_id;
       } catch (cardErr) {
         // 卡片发送失败（如 invalid image keys），降级为纯文本
         logger.warn({ err: cardErr }, '飞书卡片发送失败，降级为纯文本');
-        await this.client.im.message.create({
+        const resp = await this.client.im.message.create({
           data: {
             receive_id: chatId,
             msg_type: 'text',
@@ -824,9 +860,10 @@ export class FeishuChannel implements Channel {
           },
           params: { receive_id_type: 'chat_id' },
         });
+        return resp?.data?.message_id;
       }
     } else {
-      await this.client.im.message.create({
+      const resp = await this.client.im.message.create({
         data: {
           receive_id: chatId,
           msg_type: 'text',
@@ -834,6 +871,7 @@ export class FeishuChannel implements Channel {
         },
         params: { receive_id_type: 'chat_id' },
       });
+      return resp?.data?.message_id;
     }
   }
 
@@ -1207,6 +1245,160 @@ export class FeishuChannel implements Channel {
     }
   }
 
+  /**
+   * 从群名提取缩略字（1-2 个字符），生成彩色头像 PNG，上传到飞书获取 image_key。
+   * 使用 SVG + macOS qlmanage 渲染，无需额外依赖。
+   */
+  private async generateAndUploadAvatar(
+    name: string,
+  ): Promise<string | null> {
+    try {
+      // 提取缩略字：优先取开头英文大写/数字（最多 2 个），否则取前 2 个中文字
+      const abbr = this.extractAbbreviation(name);
+      if (!abbr) return null;
+
+      // 基于名称 hash 选颜色和风格，保证同名群一致
+      const colors = [
+        '#4F46E5', '#7C3AED', '#2563EB', '#0891B2', '#059669',
+        '#D97706', '#DC2626', '#DB2777', '#4338CA', '#0D9488',
+      ];
+      const hash = [...name].reduce((h, c) => h * 31 + c.charCodeAt(0), 0);
+      const absHash = Math.abs(hash);
+      const color = colors[absHash % colors.length];
+      // 两种风格：0=纯色背景白字，1=白底彩色边框+彩色字
+      const style = (absHash >> 4) % 2;
+      const fillColor = style === 0 ? 'white' : color;
+      const bgFill = style === 0 ? color : 'white';
+      const borderSvg =
+        style === 1
+          ? `<circle cx="256" cy="256" r="248" fill="none" stroke="${color}" stroke-width="16"/>`
+          : '';
+
+      // 圆形头像，超过 2 个字竖排换行
+      const size = 512;
+      const r = size / 2;
+
+      let textSvg: string;
+      if (abbr.length <= 2) {
+        const fontSize = abbr.length <= 1 ? 280 : 220;
+        textSvg = `<text x="${r}" y="${r}" font-size="${fontSize}"
+          font-family="PingFang SC,SF Pro Display,Helvetica Neue,sans-serif"
+          fill="${fillColor}" text-anchor="middle" dominant-baseline="central"
+          font-weight="bold">${this.escapeXml(abbr)}</text>`;
+      } else {
+        const line1 = abbr.slice(0, 2);
+        const line2 = abbr.slice(2);
+        const fontSize = 140;
+        const gap = fontSize * 0.25;
+        // 两行总高度 = 2字高 + 行间距，关于圆心垂直居中
+        const totalH = 2 * fontSize + gap;
+        const y1 = r - totalH / 2 + fontSize * 0.85;
+        const y2 = y1 + fontSize + gap;
+        textSvg = `<text font-size="${fontSize}"
+          font-family="PingFang SC,SF Pro Display,Helvetica Neue,sans-serif"
+          fill="${fillColor}" text-anchor="middle" font-weight="bold">
+          <tspan x="${r}" y="${y1}">${this.escapeXml(line1)}</tspan>
+          <tspan x="${r}" y="${y2}">${this.escapeXml(line2)}</tspan>
+        </text>`;
+      }
+
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">
+  <circle cx="${r}" cy="${r}" r="${r}" fill="${bgFill}"/>
+  ${borderSvg}
+  ${textSvg}
+</svg>`;
+
+      const tmpDir = os.tmpdir();
+      const svgPath = path.join(tmpDir, `avatar_${Date.now()}.svg`);
+      fs.writeFileSync(svgPath, svg);
+
+      // qlmanage 渲染 SVG → PNG（macOS 内置，512px 高清）
+      execSync(`qlmanage -t -s 512 -o "${tmpDir}" "${svgPath}"`, {
+        timeout: 5000,
+        stdio: 'pipe',
+      });
+      const pngPath = svgPath + '.png';
+      if (!fs.existsSync(pngPath)) {
+        logger.warn('[avatar] qlmanage 未生成 PNG');
+        return null;
+      }
+
+      // 上传到飞书
+      const token = await this.getTenantAccessToken();
+      if (!token) {
+        logger.warn('[avatar] 无法获取 tenant_access_token');
+        return null;
+      }
+
+      const formData = new FormData();
+      formData.append('image_type', 'avatar');
+      formData.append(
+        'image',
+        new Blob([fs.readFileSync(pngPath)]),
+        'avatar.png',
+      );
+
+      const resp = await fetch(
+        'https://open.feishu.cn/open-apis/im/v1/images',
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        },
+      );
+      const data = (await resp.json()) as {
+        data?: { image_key?: string };
+      };
+
+      // 清理临时文件
+      try {
+        fs.unlinkSync(svgPath);
+        fs.unlinkSync(pngPath);
+      } catch {}
+
+      const imageKey = data?.data?.image_key;
+      if (!imageKey) {
+        logger.warn({ data }, '[avatar] 上传失败，未返回 image_key');
+        return null;
+      }
+
+      logger.info({ abbr, imageKey }, '[avatar] 头像生成并上传成功');
+      return imageKey;
+    } catch (err) {
+      logger.warn({ err }, '[avatar] 头像生成失败，跳过');
+      return null;
+    }
+  }
+
+  /** 从群名提取缩略字（最多 4 个字符） */
+  private extractAbbreviation(name: string): string {
+    // 去掉 (完成) 等前缀标记
+    const clean = name.replace(/^\(.*?\)\s*/, '').trim();
+
+    // 优先取开头的英文大写字母+数字组合（如 "BI查询" → "BI"，"V2 Admin" → "V2"）
+    const upper = clean.match(/^[A-Z0-9]+/)?.[0];
+    if (upper && upper.length >= 1) return upper.slice(0, 4);
+
+    // 否则取前 2-4 个中文字（短名取全，长名取 2 个）
+    const cjk = clean.match(/[\u4e00-\u9fff]/g);
+    if (cjk) {
+      // 群名总中文字数 ≤ 4 就全取，否则取前 2 个
+      return cjk.slice(0, cjk.length <= 4 ? 4 : 2).join('');
+    }
+
+    // fallback: 前 2 个字符
+    return clean.slice(0, 2);
+  }
+
+  /** XML 转义 */
+  private escapeXml(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
   /** 下载飞书图片到 group 目录，返回宿主机绝对路径 */
   private async downloadImage(
     messageId: string,
@@ -1565,10 +1757,27 @@ export class FeishuChannel implements Channel {
     });
   }
 
-  /** 获取被回复消息的内容和发送者名称 */
+  /** 获取被回复消息的内容和发送者名称（DB 优先，miss 时 fallback 飞书 API） */
   private async fetchReplyContext(
     parentId: string,
   ): Promise<{ content: string; senderName: string } | null> {
+    // 1. DB 优先查询 — bot 发的消息以飞书 message_id 为主键存储，直接命中
+    try {
+      const row = getMessageById(parentId);
+      if (row?.content) {
+        let content = row.content;
+        if (content.length > 200) content = content.slice(0, 200) + '...';
+        logger.debug({ parentId }, '[reply-ctx] DB 命中引用消息');
+        return {
+          content,
+          senderName: row.sender_name || ASSISTANT_NAME,
+        };
+      }
+    } catch (err) {
+      logger.debug({ err, parentId }, '[reply-ctx] DB 查询引用消息失败，fallback API');
+    }
+
+    // 2. DB miss → 调飞书 API
     const token = await this.getTenantAccessToken();
     if (!token) return null;
 
@@ -1629,11 +1838,10 @@ export class FeishuChannel implements Channel {
       const senderType = item.sender?.sender_type ?? '';
       if (senderType === 'app') {
         // bot 自己发的消息
-        senderName = 'Andy';
+        senderName = ASSISTANT_NAME;
       } else {
         // 尝试从 DB 获取发送者名称（比 open_id 更友好）
         try {
-          const { getMessageById } = await import('../db.js');
           const row = getMessageById(parentId);
           if (row?.sender_name) {
             senderName = row.sender_name;
@@ -1648,6 +1856,43 @@ export class FeishuChannel implements Channel {
       logger.warn({ err, parentId }, '获取被回复消息失败');
       return null;
     }
+  }
+
+  /**
+   * 根据 open_id 获取飞书用户姓名，带内存缓存。
+   * 通过群成员 API 批量获取该群所有成员姓名并缓存。
+   */
+  private async getUserName(openId: string, chatId?: string): Promise<string> {
+    if (!openId || openId === 'unknown') return openId;
+
+    const cached = this.userNameCache.get(openId);
+    if (cached) return cached;
+
+    // 通过群成员 API 批量加载该群所有成员的姓名
+    if (chatId) {
+      try {
+        const resp = await this.client.im.chatMembers.get({
+          path: { chat_id: chatId },
+          params: { member_id_type: 'open_id' },
+        });
+        const items = resp?.data?.items;
+        if (items && items.length > 0) {
+          for (const member of items) {
+            if (member.member_id && member.name) {
+              this.userNameCache.set(member.member_id, member.name);
+            }
+          }
+          const name = this.userNameCache.get(openId);
+          if (name) return name;
+        }
+      } catch (err) {
+        logger.warn({ err, openId, chatId }, '获取群成员列表失败');
+      }
+    }
+
+    // 群成员 API 也没拿到，缓存 open_id 避免反复调用
+    this.userNameCache.set(openId, openId);
+    return openId;
   }
 
   private async handleMessage(data: {
@@ -1816,9 +2061,7 @@ export class FeishuChannel implements Channel {
       message.chat_type === 'group',
     );
 
-    const senderName =
-      message.mentions?.find((m) => m.id.open_id === senderId)?.name ??
-      senderId;
+    const senderName = await this.getUserName(senderId, message.chat_id);
 
     // 获取被回复消息的内容和发送者
     let replyContent: string | undefined;

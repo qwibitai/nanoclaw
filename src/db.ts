@@ -795,30 +795,34 @@ export function setRotateEnabled(enabled: boolean): void {
   ).run('enabled', String(enabled));
 }
 
-export function getRotateIndex(): number {
+export function getRotateIndex(groupFolder?: string): number {
+  const key = groupFolder ? `current_index:${groupFolder}` : 'current_index';
   const row = db
     .prepare('SELECT value FROM account_rotate_config WHERE key = ?')
-    .get('current_index') as { value: string } | undefined;
+    .get(key) as { value: string } | undefined;
   return row ? parseInt(row.value, 10) : 0;
 }
 
-export function setRotateIndex(index: number): void {
+export function setRotateIndex(index: number, groupFolder?: string): void {
+  const key = groupFolder ? `current_index:${groupFolder}` : 'current_index';
   db.prepare(
     'INSERT OR REPLACE INTO account_rotate_config (key, value) VALUES (?, ?)',
-  ).run('current_index', String(index));
+  ).run(key, String(index));
 }
 
-export function getLastRotateAt(): number | null {
+export function getLastRotateAt(groupFolder?: string): number | null {
+  const key = groupFolder ? `last_rotate_at:${groupFolder}` : 'last_rotate_at';
   const row = db
     .prepare('SELECT value FROM account_rotate_config WHERE key = ?')
-    .get('last_rotate_at') as { value: string } | undefined;
+    .get(key) as { value: string } | undefined;
   return row ? parseInt(row.value, 10) : null;
 }
 
-export function setLastRotateAt(ts: number): void {
+export function setLastRotateAt(ts: number, groupFolder?: string): void {
+  const key = groupFolder ? `last_rotate_at:${groupFolder}` : 'last_rotate_at';
   db.prepare(
     'INSERT OR REPLACE INTO account_rotate_config (key, value) VALUES (?, ?)',
-  ).run('last_rotate_at', String(ts));
+  ).run(key, String(ts));
 }
 
 // --- Last sender lookup ---
@@ -849,6 +853,14 @@ export function getFeishuTokenByUserId(
     )
     .get(userId) as (FeishuTokenRecord & { chat_jid: string }) | undefined;
   return row ?? null;
+}
+
+export function getAllFeishuTokenUsers(): { user_id: string }[] {
+  return db
+    .prepare(
+      'SELECT DISTINCT user_id FROM feishu_tokens WHERE user_id != ""',
+    )
+    .all() as { user_id: string }[];
 }
 
 export function setFeishuToken(

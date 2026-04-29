@@ -58,6 +58,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  storeMessageDirect,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
@@ -74,6 +75,7 @@ import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { withLogContext } from './log-context.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -91,7 +93,7 @@ const queue = new GroupQueue();
 const onecli = new OneCLI({ url: ONECLI_URL });
 
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
-  if (group.isMain) return;
+  // 所有群（包括 main group）都创建独立 agent，防止 rotateAccount fallback 到 Default Agent
   const identifier = group.folder.toLowerCase().replace(/_/g, '-');
   onecli.ensureAgent({ name: group.name, identifier }).then(
     (res) => {
@@ -288,6 +290,49 @@ export function _setRegisteredGroups(
 }
 
 /**
+ * 解析消息文本中的模型/思考前缀。
+ * 返回 override 对象 + 去除前缀后的文本，或 null（无前缀）。
+ *
+ * ! 或 ！ + 空格 → Sonnet 无思考
+ * !! 或 ！！ + 空格 → Sonnet 深度思考
+ * + + 空格 → Opus 深度思考
+ * ~ + 空格 → 关闭思考
+ */
+export function parseModelPrefix(
+  text: string,
+): {
+  override: { model?: string; thinking?: 'adaptive' | 'disabled' };
+  cleanedText: string;
+} | null {
+  const trimmed = text.trim();
+  if (/^[!！]{2}\s/.test(trimmed)) {
+    return {
+      override: { model: 'claude-sonnet-4-6', thinking: 'adaptive' },
+      cleanedText: trimmed.replace(/^[!！]{2}\s*/, ''),
+    };
+  }
+  if (/^[!！]\s/.test(trimmed)) {
+    return {
+      override: { model: 'claude-sonnet-4-6', thinking: 'disabled' },
+      cleanedText: trimmed.replace(/^[!！]\s*/, ''),
+    };
+  }
+  if (/^\+\s/.test(trimmed)) {
+    return {
+      override: { model: 'claude-opus-4-6', thinking: 'adaptive' },
+      cleanedText: trimmed.replace(/^\+\s*/, ''),
+    };
+  }
+  if (/^~\s/.test(trimmed)) {
+    return {
+      override: { thinking: 'disabled' },
+      cleanedText: trimmed.replace(/^~\s*/, ''),
+    };
+  }
+  return null;
+}
+
+/**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  */
@@ -300,6 +345,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
     return true;
   }
+
 
   const isMainGroup = group.isMain === true;
 
@@ -318,54 +364,32 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
-        triggerPattern.test(m.content.trim()) &&
-        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+        m.is_from_me || // 跨群/系统消息直接绕过 trigger 检查
+        (triggerPattern.test(m.content.trim()) &&
+          isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
   }
 
   // 模型/思考前缀检测（最后一条消息，单次生效）
-  // ! 或 ！ + 空格 → Sonnet 无思考（最快）
-  // !! 或 ！！ + 空格 → Sonnet 深度思考
-  // - + 空格 → 默认模型 无思考
-  // + + 空格 → Opus 4.6 深度思考
   let modelOverride:
     | { model?: string; thinking?: 'adaptive' | 'disabled' }
     | undefined;
   const lastMsg = missedMessages[missedMessages.length - 1];
   if (lastMsg) {
-    const trimmed = lastMsg.content.trim();
-    if (/^[!！]{2}\s/.test(trimmed)) {
-      // !! → Sonnet + adaptive thinking
-      lastMsg.content = trimmed.replace(/^[!！]{2}\s*/, '');
-      modelOverride = { model: 'claude-sonnet-4-6', thinking: 'adaptive' };
-      logger.info({ chatJid, ...modelOverride }, '模式切换: Sonnet 深度思考');
-    } else if (/^[!！]\s/.test(trimmed)) {
-      // ! → Sonnet + no thinking
-      lastMsg.content = trimmed.replace(/^[!！]\s*/, '');
-      modelOverride = { model: 'claude-sonnet-4-6', thinking: 'disabled' };
-      logger.info({ chatJid, ...modelOverride }, '模式切换: Sonnet 快速');
-    } else if (/^\+\s/.test(trimmed)) {
-      // + → Opus 4.6 + adaptive thinking
-      lastMsg.content = trimmed.replace(/^\+\s*/, '');
-      modelOverride = { model: 'claude-opus-4-6', thinking: 'adaptive' };
-      logger.info({ chatJid, ...modelOverride }, '模式切换: Opus 深度思考');
-    } else if (/^~\s/.test(trimmed)) {
-      // ~ → default model + no thinking
-      lastMsg.content = trimmed.replace(/^~\s*/, '');
-      modelOverride = { thinking: 'disabled' };
-      logger.info({ chatJid, ...modelOverride }, '模式切换: 关闭思考');
+    const parsed = parseModelPrefix(lastMsg.content);
+    if (parsed) {
+      lastMsg.content = parsed.cleanedText;
+      modelOverride = parsed.override;
+      logger.info({ chatJid, ...modelOverride }, '模式切换');
     }
   }
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
-  // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
+  // Cursor 在回复成功后才推进（而非提前推进），防止进程被杀时消息丢失。
+  // GroupQueue 保证同一群同一时间只跑一个 agent，不会重复处理。
+  const newCursor = missedMessages[missedMessages.length - 1].timestamp;
 
   logger.info(
     { group: group.name, messageCount: missedMessages.length },
@@ -389,9 +413,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let streamingRateLimitDetected = false;
 
   // R8.1: 收集 Agent 回复文本（用于记忆更新）
   const agentReplies: string[] = [];
+  let memoryEnqueued = false; // 标记是否已在 onOutput 中入队记忆
+  let lastFeishuMsgId: string | undefined; // 最后一条正式回复的飞书 message_id
 
   // 取最近消息用于记忆召回（用户+agent 各最多 2 条，拼接提升语义丰富度）
   const recentMsgs = [...missedMessages].reverse();
@@ -424,6 +451,22 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           ? JSON.stringify({ title: result.result, detail: result.detail })
           : result.result;
         await channel.sendMessage(chatJid, payload);
+        // tool_use 摘要存入 messages.db（供巡检和搜索使用）
+        // result.result 格式如 "🔧 Bash: ls -la"，已含工具名和简短输入
+        if (result.progressType === 'tool_use' && result.result) {
+          try {
+            storeMessageDirect({
+              id: `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              chat_jid: chatJid,
+              sender: ASSISTANT_NAME,
+              sender_name: ASSISTANT_NAME,
+              content: result.result,
+              timestamp: new Date().toISOString(),
+              is_from_me: true,
+              is_bot_message: true,
+            });
+          } catch { /* 入库失败不影响主流程 */ }
+        }
         return;
       }
 
@@ -455,9 +498,22 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
         const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
         logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+
+        // Streaming 模式下检测限流文本（"You've hit your limit" 等）
+        // 检测到后不发给用户，后续补偿轮换+重试
+        if (detectRateLimit(raw)) {
+          streamingRateLimitDetected = true;
+          logger.warn(
+            { group: group.name, text: raw.slice(0, 200) },
+            'Streaming 输出检测到限流文本，抑制发送',
+          );
+          return;
+        }
+
         if (text) {
           await channel.setTyping?.(chatJid, false);
-          await channel.sendMessage(chatJid, text);
+          const feishuMsgId = await channel.sendMessage(chatJid, text);
+          if (feishuMsgId) lastFeishuMsgId = feishuMsgId;
           outputSentToUser = true;
           agentReplies.push(text);
 
@@ -494,6 +550,32 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             ).cleanupProgressCard(chatJid);
           }
         }
+
+        // R8.1 实时记忆入队：agent 回复完成后立即入队，不等进程退出
+        // agent-runner 完成回复后会进入 IPC 等待循环（可达 8 小时），
+        // 如果等进程退出才入队，记忆会延迟数小时甚至因 SIGTERM 丢失
+        if (!memoryEnqueued && isMemoryEnabled() && agentReplies.length > 0) {
+          const memoryMessages = [
+            ...missedMessages.map((m) => ({
+              content: m.content,
+              sender_name: m.sender_name,
+              is_bot_message: m.is_bot_message,
+              is_from_me: m.is_from_me,
+            })),
+            ...agentReplies.map((text) => ({
+              content: text,
+              is_bot_message: true,
+            })),
+          ];
+          getMemoryQueue().add(
+            group.folder,
+            memoryMessages,
+            sessions[group.folder],
+            memorySenderId,
+          );
+          memoryEnqueued = true;
+        }
+
         queue.notifyIdle(chatJid);
       }
 
@@ -510,10 +592,65 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
+  // Streaming 模式下限流检测：onOutput 回调中发现 "hit your limit" 等文本
+  // 轮换账号并立即重试（保留 session 上下文）
+  if (streamingRateLimitDetected && !output.rotatedTo) {
+    const agentId = group.folder.toLowerCase().replace(/_/g, '-');
+    logger.warn(
+      { group: group.name, agentId },
+      'Streaming 输出包含限流文本，尝试轮换账号并重试',
+    );
+    const rotateResult = rotateAccount(agentId, group.folder);
+    if (rotateResult?.success) {
+      output.rotatedTo = rotateResult.newSecretName;
+      // 重试：用新账号重跑，保留 session 上下文
+      logger.info(
+        { group: group.name, newSecret: rotateResult.newSecretName },
+        'Streaming 限流，已轮换账号，重试中',
+      );
+      const retryOutput = await runAgent(
+        group,
+        prompt,
+        chatJid,
+        async (result) => {
+          if (result.result) {
+            const raw =
+              typeof result.result === 'string'
+                ? result.result
+                : JSON.stringify(result.result);
+            const text = raw
+              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+              .trim();
+            if (text) {
+              const retryFmid = await channel.sendMessage(chatJid, text);
+              if (retryFmid) lastFeishuMsgId = retryFmid;
+              outputSentToUser = true;
+              agentReplies.push(text);
+            }
+          }
+          if (result.status === 'success') {
+            queue.notifyIdle(chatJid);
+          }
+          if (result.status === 'error') {
+            hadError = true;
+          }
+        },
+        latestUserMessage,
+        memorySenderId,
+        true,
+        modelOverride,
+      );
+      // 合并重试结果
+      if (retryOutput.status === 'error') hadError = true;
+    } else if (rotateResult && !rotateResult.success) {
+      output.allExhausted = true;
+    }
+  }
+
   // 轮换通知
   if (output.rotatedTo) {
     channel
-      .sendMessage(chatJid, `🔄 账号已自动切换到 ${output.rotatedTo}`)
+      .sendMessage(chatJid, `🔄 当前额度已满，已自动切换到备用账号 (${output.rotatedTo})`, { isCommandReply: true })
       .catch(() => {});
   }
   if (output.allExhausted) {
@@ -526,25 +663,46 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
+      // error 但已有回复发给用户：推进 cursor（防止重启后重复回复）+ 入队记忆
+      lastAgentTimestamp[chatJid] = newCursor;
+      saveState();
+      if (!memoryEnqueued && isMemoryEnabled() && agentReplies.length > 0) {
+        const memoryMessages = [
+          ...missedMessages.map((m) => ({
+            content: m.content,
+            sender_name: m.sender_name,
+            is_bot_message: m.is_bot_message,
+            is_from_me: m.is_from_me,
+          })),
+          ...agentReplies.map((text) => ({
+            content: text,
+            is_bot_message: true,
+          })),
+        ];
+        getMemoryQueue().add(
+          group.folder,
+          memoryMessages,
+          sessions[group.folder],
+          memorySenderId,
+        );
+      }
       logger.warn(
         { group: group.name },
-        'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
+        'Agent error after output was sent, cursor advanced to prevent duplicates',
       );
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
-    lastAgentTimestamp[chatJid] = previousCursor;
-    saveState();
+    // 未发回复 + error：cursor 不推进，重启后会重新处理这些消息
     logger.warn(
       { group: group.name },
-      'Agent error, rolled back message cursor for retry',
+      'Agent error, cursor NOT advanced so messages will be retried',
     );
     return false;
   }
 
-  // Bot 回复入库
+  // Bot 回复入库（优先用飞书 message_id，引用时可直接命中 DB）
   const botReplyText = agentReplies.join('\n');
-  const botMsgId = `bot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const botMsgId = lastFeishuMsgId ?? `bot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   if (agentReplies.length > 0) {
     try {
       storeMessage({
@@ -562,10 +720,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   }
 
+  // 成功处理完毕，推进 cursor（在回复入库之后，确保进程被杀时不丢消息）
+  lastAgentTimestamp[chatJid] = newCursor;
+  saveState();
+
   // chatIndex 已在 onOutput 回调中实时索引，此处无需重复
 
-  // R8.1: 对话完成后，收集 Agent 回复 + 用户消息一起入队记忆更新
-  if (isMemoryEnabled()) {
+  // R8.1 兜底：如果 onOutput 中未能入队（如 agent 未发 success 状态），在进程退出后补入队
+  if (!memoryEnqueued && isMemoryEnabled()) {
     const memoryMessages = [
       ...missedMessages.map((m) => ({
         content: m.content,
@@ -711,7 +873,7 @@ async function runAgent(
           { group: group.name, agentId, error: output.error?.slice(0, 200) },
           '检测到限流错误，尝试轮换账号',
         );
-        const rotateResult = rotateAccount(agentId);
+        const rotateResult = rotateAccount(agentId, group.folder);
 
         if (rotateResult && !rotateResult.success) {
           logger.warn({ group: group.name }, '所有账号配额已耗尽');
@@ -719,11 +881,9 @@ async function runAgent(
         }
 
         if (rotateResult && rotateResult.success) {
-          delete sessions[group.folder];
-          deleteSession(group.folder);
           logger.info(
             { group: group.name, newSecret: rotateResult.newSecretName },
-            '429 检测到，已轮换账号，重试中',
+            '429 检测到，已轮换账号，重试中（保留 session）',
           );
           return runAgent(
             group,
@@ -762,7 +922,7 @@ async function runAgent(
         { group: group.name, agentId, result: output.result?.slice(0, 200) },
         '检测到假成功限流（result 包含 rate limit 关键词），尝试轮换',
       );
-      const rotateResult = rotateAccount(agentId);
+      const rotateResult = rotateAccount(agentId, group.folder);
 
       if (rotateResult && !rotateResult.success) {
         logger.warn({ group: group.name }, '所有账号配额已耗尽');
@@ -770,11 +930,9 @@ async function runAgent(
       }
 
       if (rotateResult && rotateResult.success) {
-        delete sessions[group.folder];
-        deleteSession(group.folder);
         logger.info(
           { group: group.name, newSecret: rotateResult.newSecretName },
-          '假成功限流检测到，已轮换账号，重试中',
+          '假成功限流检测到，已轮换账号，重试中（保留 session）',
         );
         return runAgent(
           group,
@@ -815,8 +973,9 @@ async function startMessageLoop(): Promise<void> {
 
   // 启动飞书 OAuth 回调 server（用户点击授权卡片后的回调）
   try {
-    const { startOAuthCallbackServer } =
+    const { startOAuthCallbackServer, startTokenRefreshTimer } =
       await import('./channels/feishu-oauth.js');
+    startTokenRefreshTimer();
     startOAuthCallbackServer(async ({ openId, chatJid }) => {
       logger.info({ openId, chatJid }, '飞书 OAuth 授权成功回调');
       const channel = findChannel(channels, chatJid);
@@ -934,8 +1093,8 @@ async function startMessageLoop(): Promise<void> {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                triggerPattern.test(m.content.trim()) &&
-                (m.is_from_me ||
+                m.is_from_me || // 跨群/系统消息直接绕过 trigger 检查
+                (triggerPattern.test(m.content.trim()) &&
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
             if (!hasTrigger) continue;
@@ -1242,6 +1401,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // 启动时同步一次群列表（获取飞书群名等元数据）
+  Promise.all(
+    channels.filter((ch) => ch.syncGroups).map((ch) => ch.syncGroups!(false)),
+  ).catch((err) => logger.warn({ err }, '启动时群列表同步失败'));
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -1253,23 +1417,25 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) {
         logger.warn({ jid }, 'No channel owns JID, cannot send message');
-        return;
+        return undefined;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (text) return channel.sendMessage(jid, text);
+      return undefined;
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: async (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       // 优先用 sendDirectMessage（跳过进度卡片清理），fallback 到 sendMessage
       if ('sendDirectMessage' in channel) {
-        return (
+        await (
           channel as {
             sendDirectMessage: (jid: string, text: string) => Promise<void>;
           }
         ).sendDirectMessage(jid, text);
+        return undefined;
       }
       return channel.sendMessage(jid, text);
     },
@@ -1285,6 +1451,7 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+    enqueueMessageCheck: (chatJid: string) => queue.enqueueMessageCheck(chatJid),
     onTasksChanged: () => {
       const tasks = getAllTasks();
       const taskRows = tasks.map((t) => ({
@@ -1328,7 +1495,13 @@ async function main(): Promise<void> {
     },
   });
   startSessionCleanup();
-  queue.setProcessMessagesFn(processGroupMessages);
+  queue.setProcessMessagesFn((chatJid) => {
+    const group = registeredGroups[chatJid];
+    return withLogContext(
+      { chatJid, groupFolder: group?.folder },
+      () => processGroupMessages(chatJid),
+    );
+  });
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');

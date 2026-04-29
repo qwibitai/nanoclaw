@@ -6,6 +6,7 @@ import { CronExpressionParser } from 'cron-parser';
 import crypto from 'crypto';
 
 import {
+  ASSISTANT_NAME,
   CHAT_INDEX_ENABLED,
   DATA_DIR,
   IPC_POLL_INTERVAL,
@@ -13,9 +14,10 @@ import {
 } from './config.js';
 import { getChatIndex } from './chat-index.js';
 import { AvailableGroup, getFeishuToken } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { createTask, deleteTask, getTaskById, storeMessageDirect, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { withLogContext } from './log-context.js';
 import { MemoryStore } from './memory/memory-store.js';
 import { extractAndRefine } from './memory/extract-fact.js';
 import { loadFacts, storeFactRaw } from './memory/storage.js';
@@ -23,7 +25,7 @@ import { isMemoryEnabled } from './memory/index.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMessage: (jid: string, text: string) => Promise<string | undefined>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -35,6 +37,7 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  enqueueMessageCheck?: (chatJid: string) => void;
   onFeishuAuthRequest?: (chatJid: string, groupFolder: string) => Promise<void>;
   renameChat?: (jid: string, name: string) => Promise<void>;
 }
@@ -57,6 +60,25 @@ export function writeIpcResponse(
 }
 
 let ipcWatcherRunning = false;
+
+// 短窗口去重：防止 session resume 重复执行 send_message
+/** @internal Exported for testing only */
+export const recentMessages = new Map<string, number>(); // hash → timestamp
+const DEDUP_WINDOW_MS = 30_000;
+
+/** @internal Exported for testing only */
+export function isDuplicateMessage(chatJid: string, text: string): boolean {
+  const key = `${chatJid}:${crypto.createHash('md5').update(text).digest('hex')}`;
+  const now = Date.now();
+  // 清理过期条目 + 防无限增长
+  for (const [k, t] of recentMessages) {
+    if (now - t > DEDUP_WINDOW_MS) recentMessages.delete(k);
+  }
+  if (recentMessages.size > 1000) recentMessages.clear();
+  if (recentMessages.has(key)) return true;
+  recentMessages.set(key, now);
+  return false;
+}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -104,7 +126,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              const raw = fs.readFileSync(filePath, 'utf-8');
+              // 先删除文件再处理，防止 async 操作期间下一个 poll cycle 重复读取
+              fs.unlinkSync(filePath);
+              const data = JSON.parse(raw);
               if (data.type === 'message' && data.chatJid && data.text) {
                 // 飞书授权请求 — text 中包含 feishu_auth_request JSON
                 let isAuthRequest = false;
@@ -126,7 +151,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
                       'Feishu auth request processed',
                     );
                   }
-                  fs.unlinkSync(filePath);
                   continue;
                 }
               }
@@ -153,18 +177,55 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC rename_chat blocked',
                   );
                 }
-                fs.unlinkSync(filePath);
                 continue;
               }
 
               if (data.type === 'message' && data.chatJid && data.text) {
+                // 短窗口去重：session resume 可能重复执行 send_message
+                if (isDuplicateMessage(data.chatJid, data.text)) {
+                  logger.info(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'IPC message deduplicated (same content within 30s window)',
+                  );
+                  continue;
+                }
+                // JID 前缀补全：agent 可能传 oc_xxx（无 fs: 前缀）
+                if (data.chatJid && !data.chatJid.includes(':') && data.chatJid.startsWith('oc_')) {
+                  data.chatJid = `fs:${data.chatJid}`;
+                }
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
+                const isSameGroup = targetGroup && targetGroup.folder === sourceGroup;
+                const isCrossGroup = !isSameGroup;
                 if (
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
                   await deps.sendMessage(data.chatJid, data.text);
+                  // 存入 messages.db，供巡检和搜索使用
+                  try {
+                    storeMessageDirect({
+                      id: `ipc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                      chat_jid: data.chatJid,
+                      sender: data.sender || ASSISTANT_NAME,
+                      sender_name: data.sender || ASSISTANT_NAME,
+                      content: data.text,
+                      timestamp: data.timestamp || new Date().toISOString(),
+                      // 跨群消息：is_from_me=true 绕过 trigger 检查，is_bot_message=false 让 agent 处理
+                      is_from_me: true,
+                      is_bot_message: !isCrossGroup,
+                    });
+                  } catch (storeErr) {
+                    logger.warn({ storeErr }, 'IPC send_message 入库失败，不影响发送');
+                  }
+                  // 跨群消息：enqueue 目标群，让目标 agent 处理
+                  if (isCrossGroup && deps.enqueueMessageCheck) {
+                    deps.enqueueMessageCheck(data.chatJid);
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'Cross-group message enqueued for target agent',
+                    );
+                  }
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
@@ -176,18 +237,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   );
                 }
               }
-              fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
                 'Error processing IPC message',
               );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
+              // 文件可能已被 unlinkSync 删除，只在文件仍存在时移到 errors
+              if (fs.existsSync(filePath)) {
+                const errorDir = path.join(ipcBaseDir, 'errors');
+                fs.mkdirSync(errorDir, { recursive: true });
+                fs.renameSync(
+                  filePath,
+                  path.join(errorDir, `${sourceGroup}-${file}`),
+                );
+              }
             }
           }
         }

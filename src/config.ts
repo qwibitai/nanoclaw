@@ -16,6 +16,8 @@ if (process.env.http_proxy || process.env.HTTP_PROXY) {
   );
   locals.add('localhost');
   locals.add('127.0.0.1');
+  locals.add('open.feishu.cn');
+  locals.add('open.larksuite.com');
   const merged = [...locals].join(',');
   process.env.NO_PROXY = merged;
   process.env.no_proxy = merged;
@@ -104,8 +106,9 @@ function escapeRegex(str: string): string {
 
 export function buildTriggerPattern(trigger: string): RegExp {
   const escaped = escapeRegex(trigger.trim());
-  // \b 不支持中文等非 ASCII 字符，改用前瞻：后面是空白、标点或结尾
-  return new RegExp(`^${escaped}(?=[\\s\\p{P}]|$)`, 'iu');
+  // 匹配消息中任意位置的 trigger（开头、中间、结尾均可）
+  // @ 本身就是明确的分隔符，不需要前瞻词边界
+  return new RegExp(`${escaped}(?=[\\s\\p{P}]|$)`, 'iu');
 }
 
 export const DEFAULT_TRIGGER = `@${ASSISTANT_NAME}`;

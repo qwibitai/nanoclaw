@@ -280,6 +280,48 @@ describe('agent spawn and timeout', () => {
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
   });
+
+  it('onOutput 抛异常时不阻塞后续消息且 resolve 正常', async () => {
+    let callCount = 0;
+    const onOutput = vi.fn(async (output: ContainerOutput) => {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error('sendMessage failed');
+      }
+      // 第二次调用正常
+    });
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    // 第一条消息：onOutput 会抛异常
+    emitOutputMarker(fakeProc, {
+      status: 'progress',
+      result: '⚙️ step 1',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+
+    // 第二条消息：应该正常处理，不被第一条的 rejection 阻断
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Final answer',
+      newSessionId: 'session-789',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    // 进程正常 resolve，不会挂死
+    expect(result.status).toBe('success');
+    // onOutput 被调用了两次
+    expect(onOutput).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('parseEnvOutput', () => {
@@ -350,5 +392,149 @@ describe('prepareGroupSession', () => {
   it('path ends with .claude', () => {
     const dir = prepareGroupSession('main');
     expect(dir).toMatch(/sessions\/main\/\.claude$/);
+  });
+});
+
+// ---- Phase 2: 跨 chunk 拼接 / JSON 畸形 / 截断 ----
+
+describe('输出解析边界', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('output marker 分两个 chunk 到达（跨 chunk 拼接）', async () => {
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    // 先发送前半段
+    const json = JSON.stringify({
+      status: 'success',
+      result: 'cross-chunk',
+      newSessionId: 'sess-cross',
+    });
+    fakeProc.stdout.push(`${OUTPUT_START_MARKER}\n${json.slice(0, 20)}`);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // 再发送后半段 + 结束标记
+    fakeProc.stdout.push(`${json.slice(20)}\n${OUTPUT_END_MARKER}\n`);
+    await vi.advanceTimersByTimeAsync(10);
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ result: 'cross-chunk' }),
+    );
+  });
+
+  it('JSON 畸形时 warn 但不中断后续消息', async () => {
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    // 发送畸形 JSON
+    fakeProc.stdout.push(
+      `${OUTPUT_START_MARKER}\n{bad json\n${OUTPUT_END_MARKER}\n`,
+    );
+    await vi.advanceTimersByTimeAsync(10);
+
+    // 发送正常 output
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'after bad json',
+      newSessionId: 'sess-ok',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+    // 畸形 JSON 被跳过，只有正常的那条被回调
+    expect(onOutput).toHaveBeenCalledTimes(1);
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ result: 'after bad json' }),
+    );
+  });
+
+  it('缺少 OUTPUT_END_MARKER 时等待后续 chunk', async () => {
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    // 只发 start marker + JSON，没有 end marker
+    const json = JSON.stringify({ status: 'progress', result: 'partial' });
+    fakeProc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n`);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // 此时不应调用 onOutput（等 end marker）
+    expect(onOutput).not.toHaveBeenCalled();
+
+    // 发送 end marker
+    fakeProc.stdout.push(`${OUTPUT_END_MARKER}\n`);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // 现在应该触发了
+    expect(onOutput).toHaveBeenCalledTimes(1);
+
+    // 清理
+    emitOutputMarker(fakeProc, { status: 'success', result: 'done' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it('多个 output marker 连续到达时全部解析', async () => {
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    // 一次 push 包含 3 条消息
+    const msg1 = JSON.stringify({ status: 'progress', result: 'step1' });
+    const msg2 = JSON.stringify({ status: 'progress', result: 'step2' });
+    const msg3 = JSON.stringify({
+      status: 'success',
+      result: 'final',
+      newSessionId: 'sess-multi',
+    });
+    fakeProc.stdout.push(
+      `${OUTPUT_START_MARKER}\n${msg1}\n${OUTPUT_END_MARKER}\n` +
+        `${OUTPUT_START_MARKER}\n${msg2}\n${OUTPUT_END_MARKER}\n` +
+        `${OUTPUT_START_MARKER}\n${msg3}\n${OUTPUT_END_MARKER}\n`,
+    );
+    await vi.advanceTimersByTimeAsync(10);
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+    expect(onOutput).toHaveBeenCalledTimes(3);
   });
 });

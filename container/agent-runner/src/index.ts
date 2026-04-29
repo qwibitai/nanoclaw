@@ -694,7 +694,7 @@ async function runQuery(
 
   // 应用模型/思考覆盖：有 override → 切换；无 override → 用 settings.json 默认模型显式恢复
   // 读取 settings.json 中的默认模型（setModel(undefined) 可能不可靠）
-  let defaultModel = 'claude-opus-4-6';
+  let defaultModel = 'claude-opus-4-7';
   try {
     const settingsPath = path.join(PATHS.group, '..', '..', 'data', 'sessions', containerInput.groupFolder, '.claude', 'settings.json');
     if (fs.existsSync(settingsPath)) {
