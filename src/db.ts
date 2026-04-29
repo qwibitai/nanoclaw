@@ -274,6 +274,13 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_spawned_threads_created_at
       ON spawned_threads(created_at);
+
+    CREATE TABLE IF NOT EXISTS rss_seen_items (
+      feed_url TEXT NOT NULL,
+      item_id TEXT NOT NULL,
+      seen_at TEXT NOT NULL,
+      PRIMARY KEY (feed_url, item_id)
+    );
   `);
 
   // sessions テーブルのスキーマを group_folder → group_jid に移行。
@@ -1204,6 +1211,23 @@ export function cleanupSpawnedThreads(
     );
   }
   return result.changes;
+}
+
+// --- RSS 既読管理 ---
+
+export function hasSeenItem(feedUrl: string, itemId: string): boolean {
+  const row = db
+    .prepare(
+      'SELECT 1 FROM rss_seen_items WHERE feed_url = ? AND item_id = ?',
+    )
+    .get(feedUrl, itemId);
+  return row !== undefined;
+}
+
+export function markItemSeen(feedUrl: string, itemId: string): void {
+  db.prepare(
+    'INSERT OR IGNORE INTO rss_seen_items (feed_url, item_id, seen_at) VALUES (?, ?, ?)',
+  ).run(feedUrl, itemId, new Date().toISOString());
 }
 
 // --- JSON マイグレーション ---
