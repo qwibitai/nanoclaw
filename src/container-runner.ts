@@ -446,6 +446,15 @@ async function buildContainerArgs(
     }
   }
 
+  // AGENT_MODEL override — per-group containerConfig.model takes priority
+  // over the host AGENT_MODEL env var. Only injected when set; absent means
+  // SDK default. Lets each group run a different Claude model (e.g. Haiku
+  // for lightweight chats) without juggling host env vars.
+  const agentModel = containerConfig.model?.trim() || process.env.AGENT_MODEL?.trim();
+  if (agentModel) {
+    args.push('-e', `AGENT_MODEL=${agentModel}`);
+  }
+
   // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls
   // are routed through the agent vault for credential injection. Treated as
   // a transient hard failure: if we can't wire the gateway, we don't spawn.
