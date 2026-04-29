@@ -281,6 +281,8 @@ function createSchema(database: Database.Database): void {
       seen_at TEXT NOT NULL,
       PRIMARY KEY (feed_url, item_id)
     );
+    CREATE INDEX IF NOT EXISTS idx_rss_seen_items_seen_at
+      ON rss_seen_items(seen_at);
   `);
 
   // sessions テーブルのスキーマを group_folder → group_jid に移行。
