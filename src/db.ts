@@ -1217,9 +1217,7 @@ export function cleanupSpawnedThreads(
 
 export function hasSeenItem(feedUrl: string, itemId: string): boolean {
   const row = db
-    .prepare(
-      'SELECT 1 FROM rss_seen_items WHERE feed_url = ? AND item_id = ?',
-    )
+    .prepare('SELECT 1 FROM rss_seen_items WHERE feed_url = ? AND item_id = ?')
     .get(feedUrl, itemId);
   return row !== undefined;
 }

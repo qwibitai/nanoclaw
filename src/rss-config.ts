@@ -57,7 +57,11 @@ export function readRssConfig(): RssChannelConfig[] {
   }
 
   const rssSection = parsed.rss;
-  if (!rssSection || typeof rssSection !== 'object' || Array.isArray(rssSection)) {
+  if (
+    !rssSection ||
+    typeof rssSection !== 'object' ||
+    Array.isArray(rssSection)
+  ) {
     return [];
   }
 
@@ -69,7 +73,10 @@ export function readRssConfig(): RssChannelConfig[] {
   const channels: RssChannelConfig[] = [];
   for (const entry of rssYaml.channels) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      logger.warn({ entry }, 'Invalid RSS channel entry in nanoclaw.yaml; skipping');
+      logger.warn(
+        { entry },
+        'Invalid RSS channel entry in nanoclaw.yaml; skipping',
+      );
       continue;
     }
     const e = entry as Record<string, unknown>;
@@ -84,7 +91,10 @@ export function readRssConfig(): RssChannelConfig[] {
     const feeds: RssFeedConfig[] = [];
     for (const feed of e.feeds) {
       if (!feed || typeof feed !== 'object' || Array.isArray(feed)) {
-        logger.warn({ feed }, 'Invalid RSS feed entry in nanoclaw.yaml; skipping');
+        logger.warn(
+          { feed },
+          'Invalid RSS feed entry in nanoclaw.yaml; skipping',
+        );
         continue;
       }
       const f = feed as Record<string, unknown>;
@@ -111,7 +121,10 @@ export function readRssConfig(): RssChannelConfig[] {
   cachedRssYamlPath = configPath;
 
   logger.info(
-    { channelCount: channels.length, feedCount: channels.reduce((s, c) => s + c.feeds.length, 0) },
+    {
+      channelCount: channels.length,
+      feedCount: channels.reduce((s, c) => s + c.feeds.length, 0),
+    },
     'RSS config loaded from nanoclaw.yaml',
   );
 

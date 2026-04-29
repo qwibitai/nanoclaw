@@ -118,7 +118,9 @@ export async function pollOnce(deps: RssPollerDeps): Promise<void> {
         const label = feed.name || feed.url;
         const title = entry.item.title?.trim() || '(no title)';
         const link = entry.item.link?.trim() || '';
-        const text = link ? `📰 **${label}**: ${title}\n${link}` : `📰 **${label}**: ${title}`;
+        const text = link
+          ? `📰 **${label}**: ${title}\n${link}`
+          : `📰 **${label}**: ${title}`;
 
         markItemSeen(feed.url, entry.guid);
         await deps.sendMessage(channelConfig.jid, text);
