@@ -91,7 +91,6 @@ async function fetchFeed(
         item,
         guid: extractGuid(item, feedUrl, index),
       }))
-      .filter((entry) => entry.guid);
   } catch (err) {
     logger.warn({ feedUrl, err }, `RSS feed "${label}" fetch failed`);
     return [];
