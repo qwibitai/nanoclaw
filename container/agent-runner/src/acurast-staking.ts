@@ -377,7 +377,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       const body = JSON.stringify({
         extrinsic: "compoundStake",
-        commitmentId: COMMITMENT_ID,
         dryRun,
       });
 
