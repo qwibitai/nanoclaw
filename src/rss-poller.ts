@@ -4,7 +4,7 @@ import { hasSeenItem, markItemSeen } from './db.js';
 import { logger } from './logger.js';
 import { readRssConfig, type RssChannelConfig } from './rss-config.js';
 
-const RSS_POLL_INTERVAL = 15 * 60 * 1000;
+const DEFAULT_RSS_POLL_INTERVAL = 15 * 60 * 1000;
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -19,21 +19,24 @@ interface RssItem {
   description?: string;
 }
 
-function extractGuid(item: RssItem, feedUrl: string): string {
+function extractGuid(item: RssItem, feedUrl: string, index: number): string {
   if (item.guid) {
     if (typeof item.guid === 'object' && item.guid['#text']) {
       return String(item.guid['#text']);
     }
     return String(item.guid);
   }
-  return item.link || feedUrl;
+  if (item.link) {
+    return item.link;
+  }
+  // guid も link もない場合は title + index でユニーク化
+  return `${feedUrl}#${index}-${item.title || 'untitled'}`;
 }
 
-function sortByPubDate(items: Array<{ item: RssItem; guid: string }>): Array<{
-  item: RssItem;
-  guid: string;
-}> {
-  return items.sort((a, b) => {
+function sortByPubDate(
+  items: Array<{ item: RssItem; guid: string }>,
+): Array<{ item: RssItem; guid: string }> {
+  return [...items].sort((a, b) => {
     const dateA = a.item.pubDate ? new Date(a.item.pubDate).getTime() : 0;
     const dateB = b.item.pubDate ? new Date(b.item.pubDate).getTime() : 0;
     return dateA - dateB;
@@ -69,14 +72,18 @@ async function fetchFeed(
     }
 
     const channel = rss.channel || rss;
-    let items: RssItem[] = channel.item || rss.item || [];
+    let items: RssItem[] =
+      channel.item || rss.item || channel.entry || rss.entry || [];
 
     if (!Array.isArray(items)) {
       items = [items];
     }
 
     return items
-      .map((item: RssItem) => ({ item, guid: extractGuid(item, feedUrl) }))
+      .map((item: RssItem, index: number) => ({
+        item,
+        guid: extractGuid(item, feedUrl, index),
+      }))
       .filter((entry) => entry.guid);
   } catch (err) {
     logger.warn({ feedUrl, err }, `RSS feed "${label}" fetch failed`);
@@ -87,18 +94,24 @@ async function fetchFeed(
 export interface RssPollerDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, unknown>;
+  getConfig?: () => RssChannelConfig[];
 }
 
-let pollerRunning = false;
+interface PollerInstance {
+  running: boolean;
+  intervalMs: number;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+let activePoller: PollerInstance | null = null;
 
 export async function pollOnce(deps: RssPollerDeps): Promise<void> {
-  const config = readRssConfig();
+  const config = deps.getConfig ? deps.getConfig() : readRssConfig();
   if (config.length === 0) return;
 
   const groups = deps.registeredGroups();
 
-  for (const channel of config) {
-    const channelConfig = channel as RssChannelConfig;
+  for (const channelConfig of config) {
     if (!(channelConfig.jid in groups)) {
       logger.debug(
         { jid: channelConfig.jid },
@@ -122,31 +135,50 @@ export async function pollOnce(deps: RssPollerDeps): Promise<void> {
           ? `📰 **${label}**: ${title}\n${link}`
           : `📰 **${label}**: ${title}`;
 
-        markItemSeen(feed.url, entry.guid);
         await deps.sendMessage(channelConfig.jid, text);
+        markItemSeen(feed.url, entry.guid);
       }
     }
   }
 }
 
-export function startRssPoller(deps: RssPollerDeps): void {
-  if (pollerRunning) {
+export interface StartRssPollerOptions {
+  intervalMs?: number;
+}
+
+export function startRssPoller(
+  deps: RssPollerDeps,
+  options?: StartRssPollerOptions,
+): void {
+  const intervalMs = options?.intervalMs ?? DEFAULT_RSS_POLL_INTERVAL;
+
+  if (activePoller?.running) {
     logger.debug('RSS poller already running, skipping duplicate start');
     return;
   }
-  pollerRunning = true;
+
+  const poller: PollerInstance = {
+    running: true,
+    intervalMs,
+    timer: null,
+  };
+  activePoller = poller;
+
   logger.info(
-    { intervalMs: RSS_POLL_INTERVAL },
+    { intervalMs },
     'RSS poller started (15-minute interval)',
   );
 
   const loop = async () => {
+    if (!poller.running) return;
     try {
       await pollOnce(deps);
     } catch (err) {
       logger.error({ err }, 'Error in RSS poller loop');
     }
-    setTimeout(loop, RSS_POLL_INTERVAL);
+    if (poller.running) {
+      poller.timer = setTimeout(loop, intervalMs);
+    }
   };
 
   loop();
@@ -154,5 +186,11 @@ export function startRssPoller(deps: RssPollerDeps): void {
 
 /** @internal - テスト用のみ。 */
 export function _resetRssPollerForTests(): void {
-  pollerRunning = false;
+  if (activePoller) {
+    activePoller.running = false;
+    if (activePoller.timer) {
+      clearTimeout(activePoller.timer);
+    }
+    activePoller = null;
+  }
 }

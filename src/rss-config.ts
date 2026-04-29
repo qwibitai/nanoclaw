@@ -26,12 +26,12 @@ let cachedRssYaml: RssChannelConfig[] | null = null;
 let cachedRssYamlMtime: number | null = null;
 let cachedRssYamlPath: string | null = null;
 
-export function readRssConfig(): RssChannelConfig[] {
-  const configPath = path.join(process.cwd(), 'nanoclaw.yaml');
+export function readRssConfig(configPath?: string): RssChannelConfig[] {
+  const resolvedPath = configPath ?? path.join(process.cwd(), 'nanoclaw.yaml');
 
   let mtime: number | undefined;
   try {
-    mtime = fs.statSync(configPath).mtimeMs;
+    mtime = fs.statSync(resolvedPath).mtimeMs;
   } catch {
     cachedRssYaml = null;
     cachedRssYamlMtime = null;
@@ -41,13 +41,13 @@ export function readRssConfig(): RssChannelConfig[] {
 
   if (
     cachedRssYaml !== null &&
-    cachedRssYamlPath === configPath &&
+    cachedRssYamlPath === resolvedPath &&
     cachedRssYamlMtime === mtime
   ) {
     return cachedRssYaml;
   }
 
-  const parsed = YAML.parse(fs.readFileSync(configPath, 'utf-8')) as
+  const parsed = YAML.parse(fs.readFileSync(resolvedPath, 'utf-8')) as
     | Record<string, unknown>
     | null
     | undefined;
@@ -118,7 +118,7 @@ export function readRssConfig(): RssChannelConfig[] {
 
   cachedRssYaml = channels;
   cachedRssYamlMtime = mtime;
-  cachedRssYamlPath = configPath;
+  cachedRssYamlPath = resolvedPath;
 
   logger.info(
     {

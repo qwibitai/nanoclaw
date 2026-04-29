@@ -477,6 +477,25 @@ function startSpawnedThreadsCleanupTimer(): void {
   spawnedThreadsCleanupTimer.unref();
 }
 
+const RSS_SEEN_ITEMS_RETENTION_DAYS = 90;
+const RSS_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+let rssCleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+function startRssCleanupTimer(): void {
+  if (rssCleanupTimer) {
+    return;
+  }
+
+  rssCleanupTimer = setInterval(() => {
+    try {
+      cleanupRssSeenItems();
+    } catch (error) {
+      logger.warn({ err: error }, 'Failed to clean up rss_seen_items');
+    }
+  }, RSS_CLEANUP_INTERVAL_MS);
+  rssCleanupTimer.unref();
+}
+
 export function initDatabase(): void {
   const dbPath = path.join(STORE_DIR, 'messages.db');
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -488,6 +507,8 @@ export function initDatabase(): void {
   migrateJsonState();
   cleanupSpawnedThreads();
   startSpawnedThreadsCleanupTimer();
+  cleanupRssSeenItems();
+  startRssCleanupTimer();
 }
 
 /** @internal - テスト用のみ。新規のインメモリデータベースを作成します。 */
@@ -495,6 +516,11 @@ export function _initTestDatabase(): void {
   if (spawnedThreadsCleanupTimer) {
     clearInterval(spawnedThreadsCleanupTimer);
     spawnedThreadsCleanupTimer = null;
+  }
+
+  if (rssCleanupTimer) {
+    clearInterval(rssCleanupTimer);
+    rssCleanupTimer = null;
   }
 
   db = new Database(':memory:');
@@ -1226,6 +1252,34 @@ export function markItemSeen(feedUrl: string, itemId: string): void {
   db.prepare(
     'INSERT OR IGNORE INTO rss_seen_items (feed_url, item_id, seen_at) VALUES (?, ?, ?)',
   ).run(feedUrl, itemId, new Date().toISOString());
+}
+
+/** @internal - テスト用のみ。seen_at を強制上書きする。 */
+export function _forceRssSeenItemTimestamp(
+  feedUrl: string,
+  itemId: string,
+  seenAt: string,
+): void {
+  db.prepare(
+    `UPDATE rss_seen_items SET seen_at = ? WHERE feed_url = ? AND item_id = ?`,
+  ).run(seenAt, feedUrl, itemId);
+}
+
+export function cleanupRssSeenItems(
+  now: Date = new Date(),
+  retentionDays: number = RSS_SEEN_ITEMS_RETENTION_DAYS,
+): number {
+  const cutoff = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+  const result = db
+    .prepare(`DELETE FROM rss_seen_items WHERE seen_at < ?`)
+    .run(cutoff.toISOString());
+  if (result.changes > 0) {
+    logger.info(
+      { deletedRows: result.changes, retentionDays },
+      'Cleaned up stale rss_seen_items rows',
+    );
+  }
+  return result.changes;
 }
 
 // --- JSON マイグレーション ---
