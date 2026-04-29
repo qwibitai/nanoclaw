@@ -164,9 +164,10 @@ export function startRssPoller(
   };
   activePoller = poller;
 
+  const intervalMinutes = Math.round(intervalMs / 60000);
   logger.info(
     { intervalMs },
-    'RSS poller started (15-minute interval)',
+    `RSS poller started (${intervalMinutes}-minute interval)`,
   );
 
   const loop = async () => {

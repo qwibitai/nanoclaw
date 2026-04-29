@@ -15,13 +15,6 @@ export interface RssChannelConfig {
   feeds: RssFeedConfig[];
 }
 
-interface RssYaml {
-  channels: Array<{
-    jid: string;
-    feeds: Array<{ url: string; name?: string }>;
-  }>;
-}
-
 let cachedRssYaml: RssChannelConfig[] | null = null;
 let cachedRssYamlMtime: number | null = null;
 let cachedRssYamlPath: string | null = null;
