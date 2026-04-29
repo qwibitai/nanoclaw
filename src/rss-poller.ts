@@ -9,7 +9,7 @@ const DEFAULT_RSS_POLL_INTERVAL = 15 * 60 * 1000;
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
-  processEntities: false,
+  processEntities: true,
 });
 
 interface RssItem {
