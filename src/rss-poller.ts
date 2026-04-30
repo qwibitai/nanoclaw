@@ -46,7 +46,9 @@ function sortByPubDate(
 ): Array<{ item: RssItem; guid: string }> {
   // Most feeds list newest-first; reverse so stable sort produces oldest-first.
   // Items without pubDate (or invalid dates) use Infinity and fall to the end.
-  return [...items].reverse().sort((a, b) => parseTime(a.item.pubDate) - parseTime(b.item.pubDate));
+  return [...items]
+    .reverse()
+    .sort((a, b) => parseTime(a.item.pubDate) - parseTime(b.item.pubDate));
 }
 
 async function fetchFeed(

@@ -1252,7 +1252,10 @@ export function hasSeenItem(feedUrl: string, itemId: string): boolean {
 
 const SQLITE_VARIABLE_LIMIT = 900;
 
-export function getSeenItemIds(feedUrl: string, itemIds: string[]): Set<string> {
+export function getSeenItemIds(
+  feedUrl: string,
+  itemIds: string[],
+): Set<string> {
   if (itemIds.length === 0) return new Set();
   const seen = new Set<string>();
   for (let i = 0; i < itemIds.length; i += SQLITE_VARIABLE_LIMIT) {
