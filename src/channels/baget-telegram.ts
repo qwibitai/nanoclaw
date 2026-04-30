@@ -33,7 +33,7 @@
 import http from 'http';
 import { randomUUID, timingSafeEqual } from 'crypto';
 
-import { registerExtraRoute, tokenHash, verifyPairingTokenHmac } from '../baget-admin-server.js';
+import { registerExtraRoute } from '../baget-admin-server.js';
 import { applyPersonaPrefix } from '../baget-persona.js';
 import { consumePairingToken } from '../db/baget-pairing-tokens.js';
 import { recordSeenUpdate, sweepOldSeenUpdates } from '../db/baget-seen-updates.js';
@@ -256,15 +256,17 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     const chatId = msg.chat.id;
     const FAILURE_MSG = "That pairing link isn't valid or has expired. Generate a fresh one from the dashboard.";
 
-    // 1. HMAC pre-check — defense in depth so a tampered token never
-    //    even hits the DB.
-    if (!verifyPairingTokenHmac(rawToken, cfg.adminToken)) {
-      log.warn('Baget telegram: /start token failed HMAC check', { chatId });
+    // Single-use consume. The token format is now 32 hex chars
+    // (Telegram caps `?start=` at 64 bytes of [A-Z a-z 0-9 _ -], so
+    // the previous JWT-shape `<payload>.<hmac>` couldn't fit). Forgery
+    // resistance comes from the 16 bytes of CSPRNG entropy in mintPairingToken
+    // (2^128 guess space) — the HMAC layer was redundant under that
+    // entropy budget.
+    if (!/^[a-f0-9]{32}$/.test(rawToken)) {
+      log.warn('Baget telegram: /start payload failed shape check', { chatId });
       await sendBotMessage(chatId, FAILURE_MSG);
       return;
     }
-
-    // 2. Single-use consume.
     const result = consumePairingToken(rawToken, new Date().toISOString());
     if (!result.ok) {
       log.warn('Baget telegram: /start token consume failed', { chatId, reason: result.reason });
@@ -273,7 +275,6 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     }
 
     const { row } = result;
-    void tokenHash; // referenced for the symbol-export contract
 
     // 3. Look up the agent_group + team names.
     const agentGroup = getBagetAgentGroupById(row.agent_group_id);

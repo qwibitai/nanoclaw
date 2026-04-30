@@ -46,7 +46,7 @@
  *     `{ ok: false, error: <code>, message: <human> }` so the baget.ai
  *     bridge can branch on `error` programmatically.
  */
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import http from 'http';
 
 import {
@@ -96,77 +96,50 @@ export function verifyAdminBearer(headerValue: string | string[] | undefined, ex
 
 const PAIRING_TOKEN_TTL_MS = 5 * 60 * 1000;
 
-interface PairingTokenPayload {
-  uid: string;
-  cid: string;
-  agid: string;
-  exp: number;
-}
-
-function b64url(buf: Buffer): string {
-  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
 /**
  * Mint a single-use pairing token.
  *
- * Format: `<base64url(payload)>.<base64url(hmac)>`. The HMAC defends
- * against forged tokens (you'd need BAGET_ADMIN_TOKEN to recompute it),
- * the DB row defends against replay (single-use via CAS update).
+ * Format: 32 lowercase hex chars (16 random bytes). Constraints:
  *
- * `exp` is encoded into the payload AND stored in the DB row. The DB
- * is the source of truth — `consumePairingToken` checks the row's
- * exp, not the payload's. Encoding exp in the payload is a courtesy to
- * the consume endpoint so it can short-circuit obviously-stale tokens
- * without a DB read.
+ *   1. Telegram's `?start=<param>` deep linking spec caps the param at
+ *      **64 bytes** of `[A-Z a-z 0-9 _ -]` only — no `.`. The previous
+ *      `<base64url-payload>.<base64url-hmac>` JWT shape was ~250 chars
+ *      AND contained `.` (the separator). Telegram silently dropped the
+ *      param, so `/start <token>` arrived as plain `/start` with no
+ *      payload, and the channel adapter's regex never matched.
+ *
+ *   2. Defense-in-depth model:
+ *      - **Replay**: the DB row's `used_at` CAS update (consumePairingToken
+ *        in db/baget-pairing-tokens.ts) — atomic, single-use.
+ *      - **Forgery**: the token is 16 bytes of CSPRNG entropy → 2^128
+ *        guess space. A brute-force attacker would need ~10^36 attempts
+ *        per token before the 5-min TTL expires. Telegram + Railway
+ *        rate-limit incoming webhooks long before that.
+ *
+ *      The HMAC verify the previous design carried was redundant given
+ *      these two layers — and not affordable under Telegram's 64-char
+ *      limit. Dropped.
+ *
+ *   3. The DB still stores SHA256(rawToken) (not the raw token) so a
+ *      DB compromise doesn't leak live tokens. Same shape as before.
  */
 export function mintPairingToken(args: {
   userId: string;
   companyId: string;
   agentGroupId: string;
-  adminToken: string;
+  /**
+   * Reserved for future re-introduction of an HMAC layer (e.g. when
+   * the channel moves to Slack/Discord which don't have Telegram's
+   * 64-char constraint). Currently unused — left in the signature so
+   * callers don't need to change when we re-add it.
+   */
+  adminToken?: string;
   now: number;
 }): { rawToken: string; expiresAt: string; expiresAtMs: number } {
+  void args.adminToken; // see jsdoc — reserved
   const expiresAtMs = args.now + PAIRING_TOKEN_TTL_MS;
-  const payload: PairingTokenPayload = {
-    uid: args.userId,
-    cid: args.companyId,
-    agid: args.agentGroupId,
-    exp: expiresAtMs,
-  };
-  // 16 bytes of nonce keeps tokens distinct even on the millisecond
-  // collision case (two pairings in the same tick).
-  const nonce = randomBytes(16);
-  const payloadJson = JSON.stringify(payload);
-  const payloadB64 = b64url(Buffer.concat([nonce, Buffer.from(payloadJson, 'utf8')]));
-  const hmac = createHmac('sha256', args.adminToken).update(payloadB64).digest();
-  const hmacB64 = b64url(hmac);
-  const rawToken = `${payloadB64}.${hmacB64}`;
+  const rawToken = randomBytes(16).toString('hex'); // 32 hex chars
   return { rawToken, expiresAt: new Date(expiresAtMs).toISOString(), expiresAtMs };
-}
-
-/**
- * Verify a pairing token's HMAC. Used by the Telegram /start handler
- * before consuming the row — defense-in-depth so a tampered token
- * never even hits the DB.
- */
-export function verifyPairingTokenHmac(rawToken: string, adminToken: string): boolean {
-  const dot = rawToken.lastIndexOf('.');
-  if (dot < 0) return false;
-  const payloadB64 = rawToken.slice(0, dot);
-  const hmacB64 = rawToken.slice(dot + 1);
-  if (payloadB64.length === 0 || hmacB64.length === 0) return false;
-  const expected = createHmac('sha256', adminToken).update(payloadB64).digest();
-  let supplied: Buffer;
-  try {
-    // Re-pad base64url to base64 so Buffer.from can decode it.
-    const padded = hmacB64 + '='.repeat((4 - (hmacB64.length % 4)) % 4);
-    supplied = Buffer.from(padded.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-  } catch {
-    return false;
-  }
-  if (supplied.length !== expected.length) return false;
-  return timingSafeEqual(supplied, expected);
 }
 
 // ── Request types ──
