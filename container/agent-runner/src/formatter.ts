@@ -11,7 +11,16 @@ import { TIMEZONE, formatLocalTime } from './timezone.js';
  */
 export type CommandCategory = 'admin' | 'filtered' | 'passthrough' | 'none';
 
-const ADMIN_COMMANDS = new Set(['/remote-control', '/clear', '/compact', '/context', '/cost', '/files']);
+const ADMIN_COMMANDS = new Set([
+  '/remote-control',
+  '/clear',
+  '/compact',
+  '/context',
+  '/cost',
+  '/files',
+  '/cancel',
+  '/stop',
+]);
 const FILTERED_COMMANDS = new Set(['/help', '/login', '/logout', '/doctor', '/config', '/start']);
 
 export interface CommandInfo {

@@ -18,7 +18,8 @@
  * for policy refusals.
  */
 import { getChannelAdapter } from './channels/channel-registry.js';
-import { gateCommand } from './command-gate.js';
+import { cancelCommand, gateCommand } from './command-gate.js';
+import { getDeliveryAdapter } from './delivery.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { recordDroppedMessage } from './db/dropped-messages.js';
 import {
@@ -26,14 +27,18 @@ import {
   getMessagingGroupAgents,
   getMessagingGroupWithAgentCount,
 } from './db/messaging-groups.js';
-import { findSessionForAgent } from './db/sessions.js';
+import { findSessionByAgentGroup, findSessionForAgent, getSession } from './db/sessions.js';
 import { startTypingRefresh, stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
-import { resolveSession, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
-import { wakeContainer } from './container-runner.js';
-import { getSession } from './db/sessions.js';
-import type { AgentGroup, MessagingGroup, MessagingGroupAgent } from './types.js';
-import type { InboundEvent } from './channels/adapter.js';
+import {
+  completeProcessingMessages,
+  resolveSession,
+  writeSessionMessage,
+  writeOutboundDirect,
+} from './session-manager.js';
+import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
+import type { AgentGroup, MessagingGroup, MessagingGroupAgent, Session } from './types.js';
+import type { DeliveryAddress, InboundEvent } from './channels/adapter.js';
 
 function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -251,6 +256,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   //    avoids the extra await).
   const parsed = safeParseContent(event.message.content);
   const messageText = parsed.text ?? '';
+  const cancel = cancelCommand(event.message.content);
 
   let engagedCount = 0;
   let accumulatedCount = 0;
@@ -259,6 +265,13 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   for (const agent of agents) {
     const agentGroup = getAgentGroup(agent.agent_group_id);
     if (!agentGroup) continue;
+
+    if (cancel) {
+      if (await handleCancelCommand(agent, agentGroup, mg, event, userId, adapter?.supportsThreads === true, cancel)) {
+        engagedCount++;
+      }
+      continue;
+    }
 
     const engages = evaluateEngage(agent, messageText, isMention, mg, event.threadId);
 
@@ -389,10 +402,7 @@ async function deliverToAgent(
   // per-thread session regardless of wiring. agent-shared preserved (it's
   // a cross-channel directive the adapter doesn't know about). DMs collapse
   // sub-threads to one session (is_group=0 short-circuit).
-  let effectiveSessionMode = agent.session_mode;
-  if (adapterSupportsThreads && effectiveSessionMode !== 'agent-shared' && mg.is_group !== 0) {
-    effectiveSessionMode = 'per-thread';
-  }
+  const effectiveSessionMode = effectiveSessionModeFor(agent, mg, adapterSupportsThreads);
 
   const { session, created } = resolveSession(agent.agent_group_id, mg.id, event.threadId, effectiveSessionMode);
 
@@ -463,6 +473,98 @@ async function deliverToAgent(
       // started so it doesn't leak; the inbound row stays pending.
       if (!woke) stopTypingRefresh(freshSession.id);
     }
+  }
+}
+
+async function handleCancelCommand(
+  agent: MessagingGroupAgent,
+  agentGroup: AgentGroup,
+  mg: MessagingGroup,
+  event: InboundEvent,
+  userId: string | null,
+  adapterSupportsThreads: boolean,
+  command: string,
+): Promise<boolean> {
+  const deliveryAddr = event.replyTo ?? {
+    channelType: event.channelType,
+    platformId: event.platformId,
+    threadId: event.threadId,
+  };
+
+  const gate = gateCommand(event.message.content, userId, agent.agent_group_id);
+  if (gate.action === 'deny') {
+    await deliverCommandResponse(deliveryAddr, `Permission denied: ${gate.command} requires admin access.`);
+    log.info('Cancel command denied by gate', { command: gate.command, userId, agentGroupId: agent.agent_group_id });
+    return true;
+  }
+  if (gate.action === 'filter') return true;
+
+  const session = findExistingSessionForAgent(agent, mg, event.threadId, adapterSupportsThreads);
+  if (!session || !isContainerRunning(session.id)) {
+    await deliverCommandResponse(deliveryAddr, 'No active run to cancel.');
+    log.info('Cancel command received with no active container', {
+      command,
+      sessionId: session?.id ?? null,
+      agentGroupId: agent.agent_group_id,
+    });
+    return true;
+  }
+
+  killContainer(session.id, `user cancel: ${command}`);
+  const completedMessages = completeProcessingMessages(session.agent_group_id, session.id);
+  await deliverCommandResponse(deliveryAddr, 'Cancelled current run.');
+  log.info('Active container cancelled by user command', {
+    command,
+    sessionId: session.id,
+    agentGroupId: agent.agent_group_id,
+    agentGroupName: agentGroup.name,
+    completedMessages,
+  });
+  return true;
+}
+
+function effectiveSessionModeFor(
+  agent: MessagingGroupAgent,
+  mg: MessagingGroup,
+  adapterSupportsThreads: boolean,
+): 'shared' | 'per-thread' | 'agent-shared' {
+  let effectiveSessionMode = agent.session_mode;
+  if (adapterSupportsThreads && effectiveSessionMode !== 'agent-shared' && mg.is_group !== 0) {
+    effectiveSessionMode = 'per-thread';
+  }
+  return effectiveSessionMode;
+}
+
+function findExistingSessionForAgent(
+  agent: MessagingGroupAgent,
+  mg: MessagingGroup,
+  threadId: string | null,
+  adapterSupportsThreads: boolean,
+): Session | undefined {
+  const effectiveSessionMode = effectiveSessionModeFor(agent, mg, adapterSupportsThreads);
+  if (effectiveSessionMode === 'agent-shared') {
+    return findSessionByAgentGroup(agent.agent_group_id);
+  }
+  return findSessionForAgent(agent.agent_group_id, mg.id, effectiveSessionMode === 'shared' ? null : threadId);
+}
+
+async function deliverCommandResponse(deliveryAddr: DeliveryAddress, text: string): Promise<void> {
+  const adapter = getDeliveryAdapter();
+  if (!adapter) {
+    log.warn('No delivery adapter configured for command response', { deliveryAddr, text });
+    return;
+  }
+
+  try {
+    await adapter.deliver(
+      deliveryAddr.channelType,
+      deliveryAddr.platformId,
+      deliveryAddr.threadId,
+      'chat',
+      JSON.stringify({ text }),
+    );
+  } catch (err) {
+    log.warn('Command response delivery failed', { deliveryAddr, text, err });
   }
 }
 

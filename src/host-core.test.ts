@@ -47,6 +47,13 @@ function now() {
 
 const TEST_DIR = '/tmp/nanoclaw-test-host';
 
+async function installDeliverySpy() {
+  const { setDeliveryAdapter } = await import('./delivery.js');
+  const deliver = vi.fn().mockResolvedValue(undefined);
+  setDeliveryAdapter({ deliver });
+  return deliver;
+}
+
 beforeEach(() => {
   // Clean test directory
   if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
@@ -449,6 +456,204 @@ describe('router', () => {
     expect(wakeContainer).not.toHaveBeenCalled();
     // No session should have been created for this agent.
     expect(findSession('mg-1', null)).toBeUndefined();
+  });
+
+  it('cancels an active run without enqueueing the cancel command', async () => {
+    const { routeInbound, setSenderResolver } = await import('./router.js');
+    const { wakeContainer, killContainer, isContainerRunning } = await import('./container-runner.js');
+    const { createUser } = await import('./modules/permissions/db/users.js');
+    const { grantRole } = await import('./modules/permissions/db/user-roles.js');
+    const deliver = await installDeliverySpy();
+
+    setSenderResolver((event) => {
+      const content = JSON.parse(event.message.content) as { senderId?: string };
+      return content.senderId ? `${event.channelType}:${content.senderId}` : null;
+    });
+    createUser({ id: 'discord:owner', kind: 'discord', display_name: 'Owner', created_at: now() });
+    grantRole({ user_id: 'discord:owner', role: 'owner', agent_group_id: null, granted_by: null, granted_at: now() });
+
+    await routeInbound({
+      channelType: 'discord',
+      platformId: 'chan-123',
+      threadId: null,
+      message: {
+        id: 'msg-running',
+        kind: 'chat',
+        content: JSON.stringify({ sender: 'Owner', senderId: 'owner', text: 'start work' }),
+        timestamp: now(),
+      },
+    });
+
+    const session = findSession('mg-1', null);
+    expect(session).toBeDefined();
+    const inDb = new Database(inboundDbPath('ag-1', session!.id));
+    const runningRow = inDb.prepare('SELECT id FROM messages_in').get() as { id: string };
+    inDb.close();
+
+    const outDb = new Database(outboundDbPath('ag-1', session!.id));
+    outDb
+      .prepare(
+        "INSERT INTO processing_ack (message_id, status, status_changed) VALUES (?, 'processing', datetime('now'))",
+      )
+      .run(runningRow.id);
+    outDb.close();
+
+    (wakeContainer as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (killContainer as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (isContainerRunning as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+    await routeInbound({
+      channelType: 'discord',
+      platformId: 'chan-123',
+      threadId: null,
+      message: {
+        id: 'msg-cancel',
+        kind: 'chat',
+        content: JSON.stringify({ sender: 'Owner', senderId: 'owner', text: '/cancel' }),
+        timestamp: now(),
+      },
+    });
+
+    expect(killContainer).toHaveBeenCalledWith(session!.id, 'user cancel: /cancel');
+    expect(wakeContainer).not.toHaveBeenCalled();
+
+    const verifyDb = new Database(inboundDbPath('ag-1', session!.id));
+    const rows = verifyDb.prepare('SELECT id, status, content FROM messages_in ORDER BY seq').all() as Array<{
+      id: string;
+      status: string;
+      content: string;
+    }>;
+    verifyDb.close();
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(runningRow.id);
+    expect(rows[0].status).toBe('completed');
+
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver).toHaveBeenCalledWith(
+      'discord',
+      'chan-123',
+      null,
+      'chat',
+      JSON.stringify({ text: 'Cancelled current run.' }),
+    );
+
+    const verifyOutDb = new Database(outboundDbPath('ag-1', session!.id));
+    const outboundRows = verifyOutDb.prepare('SELECT content FROM messages_out').all();
+    verifyOutDb.close();
+    expect(outboundRows).toHaveLength(0);
+  });
+
+  it('denies cancel aliases from non-admin senders without waking the agent', async () => {
+    const { routeInbound, setSenderResolver } = await import('./router.js');
+    const { wakeContainer, killContainer, isContainerRunning } = await import('./container-runner.js');
+    const deliver = await installDeliverySpy();
+
+    setSenderResolver((event) => {
+      const content = JSON.parse(event.message.content) as { senderId?: string };
+      return content.senderId ? `${event.channelType}:${content.senderId}` : null;
+    });
+
+    await routeInbound({
+      channelType: 'discord',
+      platformId: 'chan-123',
+      threadId: null,
+      message: {
+        id: 'msg-running',
+        kind: 'chat',
+        content: JSON.stringify({ sender: 'User', senderId: 'user', text: 'start work' }),
+        timestamp: now(),
+      },
+    });
+
+    const session = findSession('mg-1', null);
+    expect(session).toBeDefined();
+
+    (wakeContainer as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (killContainer as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (isContainerRunning as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+    await routeInbound({
+      channelType: 'discord',
+      platformId: 'chan-123',
+      threadId: null,
+      message: {
+        id: 'msg-stop',
+        kind: 'chat',
+        content: JSON.stringify({ sender: 'User', senderId: 'user', text: '/stop' }),
+        timestamp: now(),
+      },
+    });
+
+    expect(killContainer).not.toHaveBeenCalled();
+    expect(wakeContainer).not.toHaveBeenCalled();
+
+    const inDb = new Database(inboundDbPath('ag-1', session!.id));
+    const inboundRows = inDb.prepare('SELECT content FROM messages_in ORDER BY seq').all() as Array<{
+      content: string;
+    }>;
+    inDb.close();
+    expect(inboundRows).toHaveLength(1);
+    expect(JSON.parse(inboundRows[0].content).text).toBe('start work');
+
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver).toHaveBeenCalledWith(
+      'discord',
+      'chan-123',
+      null,
+      'chat',
+      JSON.stringify({ text: 'Permission denied: /stop requires admin access.' }),
+    );
+
+    const outDb = new Database(outboundDbPath('ag-1', session!.id));
+    const outboundRows = outDb.prepare('SELECT content FROM messages_out').all();
+    outDb.close();
+    expect(outboundRows).toHaveLength(0);
+  });
+
+  it('handles admin cancel without an active session without waking the agent', async () => {
+    const { routeInbound, setSenderResolver } = await import('./router.js');
+    const { wakeContainer, killContainer, isContainerRunning } = await import('./container-runner.js');
+    const { createUser } = await import('./modules/permissions/db/users.js');
+    const { grantRole } = await import('./modules/permissions/db/user-roles.js');
+    const deliver = await installDeliverySpy();
+
+    setSenderResolver((event) => {
+      const content = JSON.parse(event.message.content) as { senderId?: string };
+      return content.senderId ? `${event.channelType}:${content.senderId}` : null;
+    });
+    createUser({ id: 'discord:owner', kind: 'discord', display_name: 'Owner', created_at: now() });
+    grantRole({ user_id: 'discord:owner', role: 'owner', agent_group_id: null, granted_by: null, granted_at: now() });
+
+    (wakeContainer as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (killContainer as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (isContainerRunning as unknown as ReturnType<typeof vi.fn>).mockReturnValue(false);
+
+    await routeInbound({
+      channelType: 'discord',
+      platformId: 'chan-123',
+      threadId: null,
+      message: {
+        id: 'msg-cancel',
+        kind: 'chat',
+        content: JSON.stringify({ sender: 'Owner', senderId: 'owner', text: '/cancel' }),
+        timestamp: now(),
+      },
+    });
+
+    expect(killContainer).not.toHaveBeenCalled();
+    expect(wakeContainer).not.toHaveBeenCalled();
+
+    const session = findSession('mg-1', null);
+    expect(session).toBeUndefined();
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver).toHaveBeenCalledWith(
+      'discord',
+      'chan-123',
+      null,
+      'chat',
+      JSON.stringify({ text: 'No active run to cancel.' }),
+    );
   });
 });
 

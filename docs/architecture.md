@@ -870,6 +870,7 @@ Messages starting with `/` are checked against three lists:
 - `/remote-control` — remote control session
 - `/clear` — clear session context
 - `/compact` — force context compaction
+- `/cancel`, `/stop` — stop the active container for the session
 - If sent by a non-admin user, the command is rejected with an error message. Not forwarded to the agent.
 
 **Filtered commands (dropped entirely):**

@@ -4,7 +4,7 @@
  *
  * - Filtered commands: dropped silently (never reach the container)
  * - Admin commands: checked against user_roles; denied senders get a
- *   "Permission denied" response written directly to messages_out
+ *   "Permission denied" response
  * - Normal messages: pass through unchanged
  */
 import { getDb, hasTable } from './db/connection.js';
@@ -12,7 +12,19 @@ import { getDb, hasTable } from './db/connection.js';
 export type GateResult = { action: 'pass' } | { action: 'filter' } | { action: 'deny'; command: string };
 
 const FILTERED_COMMANDS = new Set(['/help', '/login', '/logout', '/doctor', '/config', '/remote-control']);
-const ADMIN_COMMANDS = new Set(['/clear', '/compact', '/context', '/cost', '/files']);
+const CANCEL_COMMANDS = new Set(['/cancel', '/stop']);
+const ADMIN_COMMANDS = new Set(['/clear', '/compact', '/context', '/cost', '/files', ...CANCEL_COMMANDS]);
+
+export function slashCommand(content: string): string | null {
+  const text = commandText(content);
+  if (!text.startsWith('/')) return null;
+  return text.split(/\s/)[0].toLowerCase();
+}
+
+export function cancelCommand(content: string): string | null {
+  const command = slashCommand(content);
+  return command && CANCEL_COMMANDS.has(command) ? command : null;
+}
 
 /**
  * Classify a message and decide whether it should reach the container.
@@ -21,17 +33,8 @@ const ADMIN_COMMANDS = new Set(['/clear', '/compact', '/context', '/cost', '/fil
  * admin commands.
  */
 export function gateCommand(content: string, userId: string | null, agentGroupId: string): GateResult {
-  let text: string;
-  try {
-    const parsed = JSON.parse(content);
-    text = (parsed.text || '').trim();
-  } catch {
-    text = content.trim();
-  }
-
-  if (!text.startsWith('/')) return { action: 'pass' };
-
-  const command = text.split(/\s/)[0].toLowerCase();
+  const command = slashCommand(content);
+  if (!command) return { action: 'pass' };
 
   if (FILTERED_COMMANDS.has(command)) return { action: 'filter' };
 
@@ -44,6 +47,17 @@ export function gateCommand(content: string, userId: string | null, agentGroupId
 
   // Unknown slash commands pass through (the agent/SDK handles them)
   return { action: 'pass' };
+}
+
+function commandText(content: string): string {
+  let text: string;
+  try {
+    const parsed = JSON.parse(content);
+    text = (parsed.text || '').trim();
+  } catch {
+    text = content.trim();
+  }
+  return text;
 }
 
 function isAdmin(userId: string | null, agentGroupId: string): boolean {

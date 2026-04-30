@@ -20,7 +20,6 @@ import { DATA_DIR } from './config.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import {
   createSession,
-  findSession,
   findSessionByAgentGroup,
   findSessionForAgent,
   getSession,
@@ -33,6 +32,7 @@ import {
   upsertSessionRouting,
   insertMessage,
   migrateMessagesInTable,
+  getProcessingClaims,
 } from './db/session-db.js';
 import { log } from './log.js';
 import type { Session } from './types.js';
@@ -293,6 +293,32 @@ export function openInboundDb(agentGroupId: string, sessionId: string): Database
 /** Open the outbound DB for a session (host reads only). */
 export function openOutboundDb(agentGroupId: string, sessionId: string): Database.Database {
   return openOutboundDbRaw(outboundDbPath(agentGroupId, sessionId));
+}
+
+/**
+ * Mark messages currently claimed by the killed container as completed so a
+ * user-triggered cancel does not replay the same in-flight request.
+ */
+export function completeProcessingMessages(agentGroupId: string, sessionId: string): number {
+  const inDb = openInboundDb(agentGroupId, sessionId);
+  let outDb: Database.Database | null = null;
+  try {
+    outDb = openOutboundDb(agentGroupId, sessionId);
+    const claims = getProcessingClaims(outDb);
+    if (claims.length === 0) return 0;
+
+    let completed = 0;
+    const stmt = inDb.prepare("UPDATE messages_in SET status = 'completed' WHERE id = ? AND status != 'completed'");
+    inDb.transaction(() => {
+      for (const { message_id } of claims) {
+        completed += stmt.run(message_id).changes;
+      }
+    })();
+    return completed;
+  } finally {
+    outDb?.close();
+    inDb.close();
+  }
 }
 
 /**
