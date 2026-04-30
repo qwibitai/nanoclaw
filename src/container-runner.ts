@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -213,16 +214,77 @@ function buildVolumeMounts(
 }
 
 /**
- * Read allowed secrets from .env for passing to the container via stdin.
+ * Read the access token from the host Claude Code credentials file, if it
+ * exists and isn't expired. The host `claude` CLI keeps this file refreshed
+ * via the OAuth refresh token, so reading it fresh on every container spawn
+ * gets us continuous auth without NanoClaw needing its own refresh flow.
+ */
+function readClaudeAiOauthToken(): string | null {
+  const candidates: string[] = [];
+  if (process.env.CLAUDE_CONFIG_DIR) {
+    candidates.push(
+      path.join(process.env.CLAUDE_CONFIG_DIR, '.credentials.json'),
+    );
+  }
+  candidates.push(path.join(os.homedir(), '.claude', '.credentials.json'));
+
+  for (const credsPath of candidates) {
+    let raw: string;
+    try {
+      raw = fs.readFileSync(credsPath, 'utf8');
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') {
+        logger.warn(
+          { credsPath, err: String(err) },
+          'Failed reading Claude credentials file',
+        );
+      }
+      continue;
+    }
+    let oauth: { accessToken?: string; expiresAt?: number } | undefined;
+    try {
+      oauth = JSON.parse(raw)?.claudeAiOauth;
+    } catch (err) {
+      logger.warn(
+        { credsPath, err: String(err) },
+        'Failed parsing Claude credentials file',
+      );
+      continue;
+    }
+    if (!oauth?.accessToken) continue;
+    if (
+      typeof oauth.expiresAt === 'number' &&
+      oauth.expiresAt < Date.now() + 30_000
+    ) {
+      logger.warn(
+        { credsPath, expiresAt: new Date(oauth.expiresAt).toISOString() },
+        'Claude OAuth token in credentials file is expired — run `claude` on the host to refresh',
+      );
+      continue;
+    }
+    return oauth.accessToken;
+  }
+  return null;
+}
+
+/**
+ * Read allowed secrets for passing to the container via stdin. Prefers the
+ * host Claude credentials file (auto-refreshed) over the .env value.
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile([
+  const fromEnv = readEnvFile([
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
   ]);
+  const fromCredsFile = readClaudeAiOauthToken();
+  if (fromCredsFile) {
+    return { ...fromEnv, CLAUDE_CODE_OAUTH_TOKEN: fromCredsFile };
+  }
+  return fromEnv;
 }
 
 // OneCLI integration is optional and lazy-loaded. When ONECLI_URL is set
