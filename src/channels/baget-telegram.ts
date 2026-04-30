@@ -100,15 +100,18 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
   let sweepHandle: NodeJS.Timeout | null = null;
   function startSweep() {
     if (sweepHandle) return;
-    sweepHandle = setInterval(() => {
-      const cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-      try {
-        const dropped = sweepOldSeenUpdates(cutoff);
-        if (dropped > 0) log.debug('Baget seen-updates swept', { dropped });
-      } catch (err) {
-        log.warn('Baget seen-updates sweep failed', { err });
-      }
-    }, 10 * 60 * 1000);
+    sweepHandle = setInterval(
+      () => {
+        const cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+        try {
+          const dropped = sweepOldSeenUpdates(cutoff);
+          if (dropped > 0) log.debug('Baget seen-updates swept', { dropped });
+        } catch (err) {
+          log.warn('Baget seen-updates sweep failed', { err });
+        }
+      },
+      10 * 60 * 1000,
+    );
     sweepHandle.unref?.();
   }
 
@@ -147,7 +150,7 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     try {
       update = JSON.parse(bodyText) as TelegramUpdate;
     } catch (err) {
-      log.warn('Baget telegram: webhook body wasn\'t valid JSON', { err });
+      log.warn("Baget telegram: webhook body wasn't valid JSON", { err });
       res.writeHead(400).end();
       return;
     }
@@ -169,8 +172,19 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     // Local dedup first.
     if (recentUpdates.has(update.update_id)) return;
     if (recentUpdates.size >= MAX_RECENT) {
-      // O(n) drain — fine at MAX_RECENT scale, no need for a real LRU.
-      recentUpdates.clear();
+      // Drop the oldest half to keep a continuous buffer of recently
+      // seen update_ids. A naive `.clear()` would open a brief window
+      // where a duplicate arriving just after the wipe gets reprocessed
+      // (the SQLite layer would still catch it, but we'd burn the
+      // round-trip).  Set preserves insertion order, so iterating the
+      // first MAX_RECENT/2 entries gives us the oldest reliably.
+      let dropped = 0;
+      const target = MAX_RECENT / 2;
+      for (const id of recentUpdates) {
+        if (dropped >= target) break;
+        recentUpdates.delete(id);
+        dropped++;
+      }
     }
     recentUpdates.add(update.update_id);
     // Persistent dedup. `recordSeenUpdate` returns false on duplicate.
@@ -407,9 +421,7 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
         log.warn('Baget telegram: sendMessage non-OK', { status: resp.status, chatId });
         return undefined;
       }
-      const json = (await resp.json().catch(() => null)) as
-        | { ok: boolean; result?: { message_id: number } }
-        | null;
+      const json = (await resp.json().catch(() => null)) as { ok: boolean; result?: { message_id: number } } | null;
       if (json?.ok && typeof json.result?.message_id === 'number') {
         return String(json.result.message_id);
       }

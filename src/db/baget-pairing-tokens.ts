@@ -51,14 +51,7 @@ export function insertPairingToken(row: {
          (token_sha256, user_id, company_id, agent_group_id, expires_at, used_at, created_at)
        VALUES (?, ?, ?, ?, ?, NULL, ?)`,
     )
-    .run(
-      hashPairingToken(row.rawToken),
-      row.userId,
-      row.companyId,
-      row.agentGroupId,
-      row.expiresAt,
-      row.createdAt,
-    );
+    .run(hashPairingToken(row.rawToken), row.userId, row.companyId, row.agentGroupId, row.expiresAt, row.createdAt);
 }
 
 export type ConsumePairingTokenResult =
@@ -109,8 +102,6 @@ export function consumePairingToken(rawToken: string, now: string): ConsumePairi
  * event in the timeline). Caller decides cadence — see baget-admin-server.
  */
 export function sweepExpiredPairingTokens(now: string): number {
-  const r = getDb()
-    .prepare('DELETE FROM baget_pairing_tokens WHERE expires_at <= ? AND used_at IS NULL')
-    .run(now);
+  const r = getDb().prepare('DELETE FROM baget_pairing_tokens WHERE expires_at <= ? AND used_at IS NULL').run(now);
   return r.changes;
 }

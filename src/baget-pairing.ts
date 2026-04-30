@@ -108,9 +108,7 @@ export function renderBagetClaudeMd(args: RenderClaudeMdArgs): string {
   for (const key of REQUIRED_PLACEHOLDERS) {
     const v = vars[key];
     if (typeof v !== 'string' || v.trim().length === 0) {
-      throw new Error(
-        `Baget template render: required placeholder "${key}" is empty or missing`,
-      );
+      throw new Error(`Baget template render: required placeholder "${key}" is empty or missing`);
     }
   }
 
@@ -124,9 +122,7 @@ export function renderBagetClaudeMd(args: RenderClaudeMdArgs): string {
   });
   for (const key of seenPlaceholders) {
     if (!(key in vars)) {
-      throw new Error(
-        `Baget template render: template uses {{${key}}} but renderer has no value for it`,
-      );
+      throw new Error(`Baget template render: template uses {{${key}}} but renderer has no value for it`);
     }
   }
 
@@ -197,9 +193,7 @@ export interface ProvisionedBagetGroup {
   claudeLocalPath: string;
 }
 
-export function provisionBagetGroup(
-  args: ProvisionBagetGroupArgs,
-): ProvisionedBagetGroup {
+export function provisionBagetGroup(args: ProvisionBagetGroupArgs): ProvisionedBagetGroup {
   const folder = bagetGroupFolderName(args.userId, args.companyId);
   const groupDir = path.resolve(GROUPS_DIR, folder);
   fs.mkdirSync(groupDir, { recursive: true });
@@ -232,10 +226,9 @@ export function provisionBagetGroup(
       BAGET_API_BASE_URL: args.bagetApiBaseUrl,
       BAGET_COMPANY_ID: args.companyId,
     },
-    secrets: [
-      ...(baseConfig.secrets ?? []),
-      args.channelTokenCredentialName,
-    ].filter((v, i, arr) => arr.indexOf(v) === i),
+    secrets: [...(baseConfig.secrets ?? []), args.channelTokenCredentialName].filter(
+      (v, i, arr) => arr.indexOf(v) === i,
+    ),
   };
 
   // Strip the _*_note keys we use for human reference in the template.

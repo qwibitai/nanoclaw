@@ -62,10 +62,7 @@ import { log } from './log.js';
  * header — we never log the supplied token (even truncated) because a
  * partial leak narrows brute-force time.
  */
-export function verifyAdminBearer(
-  headerValue: string | string[] | undefined,
-  expectedToken: string,
-): boolean {
+export function verifyAdminBearer(headerValue: string | string[] | undefined, expectedToken: string): boolean {
   if (typeof headerValue !== 'string') return false;
   const m = /^Bearer\s+(.+)$/i.exec(headerValue.trim());
   if (!m) return false;
@@ -362,11 +359,7 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
     sendJson(res, 200, response);
   }
 
-  async function handleRefresh(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-    groupId: string,
-  ): Promise<void> {
+  async function handleRefresh(req: http.IncomingMessage, res: http.ServerResponse, groupId: string): Promise<void> {
     const body = await readJson<CreateAgentGroupBody>(req);
     if (!body.ok) {
       sendJson(res, 400, { ok: false, error: 'invalid_body', message: body.error });

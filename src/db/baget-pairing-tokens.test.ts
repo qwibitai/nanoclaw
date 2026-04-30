@@ -80,10 +80,9 @@ describe('insertPairingToken + consumePairingToken', () => {
     // Simulate by manually flipping the row to used_at, then consume again.
     freshlyMint('TOKEN_C', '2030-01-01T00:00:00Z');
     const hash = hashPairingToken('TOKEN_C');
-    getDb().prepare('UPDATE baget_pairing_tokens SET used_at = ? WHERE token_sha256 = ?').run(
-      '2026-04-30T10:00:00Z',
-      hash,
-    );
+    getDb()
+      .prepare('UPDATE baget_pairing_tokens SET used_at = ? WHERE token_sha256 = ?')
+      .run('2026-04-30T10:00:00Z', hash);
     const r = consumePairingToken('TOKEN_C', '2026-04-30T10:00:01Z');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('already_used');
@@ -122,9 +121,9 @@ describe('sweepExpiredPairingTokens', () => {
 
     const dropped = sweepExpiredPairingTokens('2026-04-30T10:00:00Z');
     expect(dropped).toBe(1);
-    const remaining = getDb()
-      .prepare('SELECT token_sha256 FROM baget_pairing_tokens')
-      .all() as Array<{ token_sha256: string }>;
+    const remaining = getDb().prepare('SELECT token_sha256 FROM baget_pairing_tokens').all() as Array<{
+      token_sha256: string;
+    }>;
     expect(remaining.length).toBe(2);
     const remainingHashes = new Set(remaining.map((r) => r.token_sha256));
     expect(remainingHashes.has(hashPairingToken('EXPIRED_USED'))).toBe(true);

@@ -11,12 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import {
-  mintPairingToken,
-  tokenHash,
-  verifyAdminBearer,
-  verifyPairingTokenHmac,
-} from './baget-admin-server.js';
+import { mintPairingToken, tokenHash, verifyAdminBearer, verifyPairingTokenHmac } from './baget-admin-server.js';
 
 const ADMIN_TOKEN = 'test-admin-token-1234567890abcdef';
 

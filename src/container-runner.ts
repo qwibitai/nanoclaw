@@ -332,8 +332,17 @@ async function spawnSingleProcessRunner(
     LANG: process.env.LANG,
     LC_ALL: process.env.LC_ALL,
     NODE_OPTIONS: process.env.NODE_OPTIONS,
+    NODE_ENV: process.env.NODE_ENV,
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+    // Proxy settings for outbound HTTP. The OneCLI gateway uses these
+    // to route the agent's API traffic through the per-(user, company)
+    // bearer-token injection layer in docker mode; on Railway the host
+    // ingress may also set them. Either way, the runner's outbound
+    // fetches need them or they bypass the proxy and land 401.
+    HTTP_PROXY: process.env.HTTP_PROXY,
+    HTTPS_PROXY: process.env.HTTPS_PROXY,
+    NO_PROXY: process.env.NO_PROXY,
     // Workspace + identity
     TZ: TIMEZONE,
     BAGET_WORKSPACE: sessDir,

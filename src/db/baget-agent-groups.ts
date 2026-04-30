@@ -21,9 +21,9 @@ import { getDb } from './connection.js';
  * index would reject anyway.
  */
 export function getBagetAgentGroup(userId: string, companyId: string): AgentGroup | undefined {
-  return getDb()
-    .prepare('SELECT * FROM agent_groups WHERE user_id = ? AND company_id = ?')
-    .get(userId, companyId) as AgentGroup | undefined;
+  return getDb().prepare('SELECT * FROM agent_groups WHERE user_id = ? AND company_id = ?').get(userId, companyId) as
+    | AgentGroup
+    | undefined;
 }
 
 /**
@@ -101,8 +101,6 @@ export function unarchiveBagetAgentGroup(id: string): void {
  * have completed pairing).
  */
 export function unbindMessagingGroupsForAgent(agentGroupId: string): number {
-  const r = getDb()
-    .prepare('DELETE FROM messaging_group_agents WHERE agent_group_id = ?')
-    .run(agentGroupId);
+  const r = getDb().prepare('DELETE FROM messaging_group_agents WHERE agent_group_id = ?').run(agentGroupId);
   return r.changes;
 }
