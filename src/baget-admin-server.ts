@@ -226,10 +226,7 @@ const extraRoutes: Array<{ matcher: ExtraRouteMatcher; handler: ExtraRouteHandle
  * BEFORE its own admin routes (but AFTER the auth check is bypassed —
  * extra routes manage their own auth). Returns an unregister function.
  */
-export function registerExtraRoute(
-  matcher: ExtraRouteMatcher,
-  handler: ExtraRouteHandler,
-): () => void {
+export function registerExtraRoute(matcher: ExtraRouteMatcher, handler: ExtraRouteHandler): () => void {
   const entry = { matcher, handler };
   extraRoutes.push(entry);
   return () => {
@@ -525,10 +522,7 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
    *   leftover binding rows (the unbind in handleDelete is best-
    *   effort; a stale row here would falsely show "paired" forever).
    */
-  async function handleStatusByTuple(
-    res: http.ServerResponse,
-    queryString: string,
-  ): Promise<void> {
+  async function handleStatusByTuple(res: http.ServerResponse, queryString: string): Promise<void> {
     const params = new URLSearchParams(queryString);
     const userId = params.get('userId') ?? '';
     const companyId = params.get('companyId') ?? '';
@@ -576,10 +570,7 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
    * tuple (idempotent — the founder's intent is satisfied trivially
    * when there's nothing to disconnect).
    */
-  async function handleDeleteByTuple(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): Promise<void> {
+  async function handleDeleteByTuple(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const body = await readJson<{ userId?: string; companyId?: string }>(req);
     if (!body.ok) {
       sendJson(res, 400, { ok: false, error: 'invalid_body', message: body.error });
