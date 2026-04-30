@@ -448,6 +448,7 @@ async function runQuery(
   homeassistantMcpServerPath: string,
   ollamaMcpServerPath: string,
   acurastStakingMcpServerPath: string,
+  vikunjaMcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
@@ -552,6 +553,7 @@ async function runQuery(
         'mcp__homeassistant__*',
         'mcp__ollama__*',
         'mcp__acurast-staking__*',
+        'mcp__vikunja__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -609,6 +611,15 @@ async function runQuery(
             ACURAST_COMMITMENT_ID: sdkEnv.ACURAST_COMMITMENT_ID ?? '',
             ACURAST_WSS_URL: sdkEnv.ACURAST_WSS_URL ?? 'wss://public-rpc.mainnet.acurast.com',
             ACURAST_EPOCH_LAG_ALERT: sdkEnv.ACURAST_EPOCH_LAG_ALERT ?? '2',
+          },
+        },
+        vikunja: {
+          type: 'stdio',
+          command: 'node',
+          args: [vikunjaMcpServerPath],
+          env: {
+            VIKUNJA_URL: sdkEnv.VIKUNJA_URL ?? '',
+            VIKUNJA_TOKEN: sdkEnv.VIKUNJA_TOKEN ?? '',
           },
         },
       },
@@ -762,6 +773,7 @@ async function main(): Promise<void> {
   const homeassistantMcpServerPath = path.join(__dirname, 'homeassistant-mcp-stdio.js');
   const ollamaMcpServerPath = path.join(__dirname, 'ollama-mcp-stdio.js');
   const acurastStakingMcpServerPath = path.join(__dirname, 'acurast-staking.js');
+  const vikunjaMcpServerPath = path.join(__dirname, 'vikunja-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -823,6 +835,7 @@ async function main(): Promise<void> {
         homeassistantMcpServerPath,
         ollamaMcpServerPath,
         acurastStakingMcpServerPath,
+        vikunjaMcpServerPath,
         containerInput,
         sdkEnv,
         resumeAt,
