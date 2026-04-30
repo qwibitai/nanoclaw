@@ -54,6 +54,7 @@ This merges in:
 - `import './webchat.js'` added to `src/channels/index.ts`
 - `import { startChatServer, stopChatServer, setOnGroupUpdated }` and corresponding lifecycle calls added to `src/index.ts`
 - Four db functions (`updateRegisteredGroup`, `deleteRegisteredGroup`, `logMessageRoute`, `getMessageRoutes`) and a `message_routes` table added to `src/db.ts`
+- `readClaudeAiOauthToken()` in `src/container-runner.ts` — reads the host Claude Code credentials file (`~/.claude/.credentials.json` or `$CLAUDE_CONFIG_DIR/.credentials.json`) on every container spawn and prefers it over `.env`. Keeps the OAuth token fresh without NanoClaw running its own refresh flow. See "Claude authentication" → Option 1 in Phase 3.
 - npm dependencies: `ws`, `busboy`, `web-push` (plus their `@types/*`) in `package.json`
 - `@onecli-sh/sdk` as an **optional** dependency (only loaded at runtime if `ONECLI_URL` is set — see Phase 3 → "Optional: OneCLI credential proxy")
 - `CHAT_SERVER_*`, `TLS_*`, and `ONECLI_*` keys in `.env.example`
@@ -69,20 +70,80 @@ Build must be clean before proceeding.
 
 ## Phase 3: Setup
 
-### Optional: OneCLI credential proxy
+### Claude authentication
 
-By default, agents inside containers authenticate to Anthropic via `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` read from `.env` and piped via stdin. That works for most installs.
+Agent containers need to call Anthropic's API. **Use `AskUserQuestion`** to present the trade-offs and let the user pick. Frame the choice up-front in the question text:
 
-If you'd rather route auth through a [OneCLI](https://onecli.sh) gateway (for credential vaulting, per-agent identities, or central audit), set:
+> "**Claude Code session** is the easiest — zero setup if you already use Claude Code on this machine, and the runtime auto-reads `~/.claude/.credentials.json` on every container spawn so the token never goes stale (the host `claude` CLI handles OAuth refresh). **OneCLI** is the most secure — credentials never enter the container."
+
+Default to **Claude Code session** for ease and call out OneCLI as the most secure upgrade path. List the Claude Code session option first in the `AskUserQuestion` options array and append `(Recommended)` to its label.
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **1. Claude Code session (host credentials file)** *(default — easiest)* | • Zero extra steps if `claude` is installed and logged in on the host.<br>• Auto-refreshing: `src/container-runner.ts` reads `~/.claude/.credentials.json` (or `$CLAUDE_CONFIG_DIR/.credentials.json`) on every container spawn. Host `claude` CLI handles OAuth refresh; NanoClaw rides along.<br>• Validates `expiresAt` with a 30s buffer; logs a `warn` and falls through to `.env` if the host token is expired.<br>• Survives Claude Code rotations transparently — no `.env` edits, no service restarts. | Requires Claude Code installed + logged in on the host. If you `claude logout`, NanoClaw also loses access until you log back in. |
+| **2. OneCLI credential gateway** *(most secure)* | • Token never lands on disk for the container — gateway injects it per-request; even a malicious tool call inside the container has nothing to steal.<br>• Per-agent identities — scope which secrets each agent group can use.<br>• Audit log of every credentialed request.<br>• One-shot rotation: rotate a key in the vault and every agent picks it up on the next request — no `.env` editing, no service restart.<br>• Approval gating — server-side rules that hold a credentialed request for human approval before it goes through (e.g. "ask me before any write to the GitHub API").<br>• One config covers many integrations (Anthropic, Gmail, Calendar, GitHub, etc.) as you add them later. | Extra service to install and run. One more moving part to debug. Overkill for a single-user, single-machine, single-integration install. |
+| **3. Static `CLAUDE_CODE_OAUTH_TOKEN` in `.env`** | Works without Claude Code installed on the host. Dedicated token for NanoClaw, independent of any Claude Code session. | **Will rotate stale.** Tokens minted via `claude setup-token` lack the `user:profile` scope the SDK probes at startup, so once the original rotates you get `403`s and `error_during_execution`. Long-lived token sits in `.env`. The host-credentials path (Option 1) is strictly better whenever Claude Code is available. |
+| **4. Anthropic API key** | Pay-per-use, separate billing, easy to revoke. Doesn't expire. | No subscription discount. Token in `.env`. |
+
+Then configure based on the choice:
+
+#### Option 1: Claude Code session (default)
+
+Confirm `claude` is installed on the host and the credentials file exists:
+
+```bash
+test -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" \
+  && jq -e '.claudeAiOauth.accessToken' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" >/dev/null \
+  && echo "OK" \
+  || { echo "Missing or empty Claude Code credentials — install claude and run \`claude\` once to log in, or pick a different option"; exit 1; }
+```
+
+That's it — no `.env` edits needed. `src/container-runner.ts` reads the credentials file on every container spawn (after the patches in this skill branch land), so the token stays fresh as long as the host `claude` CLI keeps it refreshed.
+
+If `$CLAUDE_CONFIG_DIR` is set in the host environment, the runtime checks `$CLAUDE_CONFIG_DIR/.credentials.json` first, then falls back to `~/.claude/.credentials.json`. The runtime also validates `expiresAt` with a 30-second buffer and falls through to `.env` if the token is expired or missing — so this option pairs cleanly with Option 3 or 4 as a fallback.
+
+#### Option 2: OneCLI credential gateway
+
+If OneCLI isn't installed yet, point the user at the prod fork's `/init-onecli` skill (or the manual installer at <https://onecli.sh>). The OneCLI gateway service is out of scope for this skill — only the wiring to it is.
+
+Once the gateway is running, set:
 
 ```bash
 ONECLI_URL=http://172.17.0.1:10254
 # ONECLI_API_KEY=<gateway-api-key>   # only if your gateway requires auth
 ```
 
-The `@onecli-sh/sdk` package ships as an optional dependency — `npm install` picks it up automatically. The integration is lazy-loaded: if `ONECLI_URL` is unset, the SDK is never imported and behavior is identical to upstream NanoClaw v1.2.0. If the gateway is unreachable at runtime, the container falls back to env-var auth.
+The `@onecli-sh/sdk` package ships as an optional dependency — `npm install` picks it up automatically. The integration is lazy-loaded: if `ONECLI_URL` is unset, the SDK is never imported and behavior is identical to upstream NanoClaw v1.2.0. If the gateway is unreachable at runtime, the container falls back to env-var auth (if set) or the request fails.
 
-Setting up the OneCLI gateway service itself is out of scope for this skill. See [onecli.sh](https://onecli.sh) for installation; if you have it set up via the prod fork's `/init-onecli` skill, that gateway works as-is.
+After setting `ONECLI_URL`, register the agent with the gateway and assign secrets — see the OneCLI docs for exact steps. **Watch out** for the default `selective` secret mode: a freshly-registered agent gets *no* secrets assigned by default. Either flip the agent to `mode all` (every vault secret with a matching host pattern is injected) or assign specific secret IDs:
+
+```bash
+onecli agents list                                  # find agent id
+onecli agents set-secret-mode --id <agent-id> --mode all
+# or:
+onecli secrets list                                 # find secret ids
+onecli agents set-secrets --id <agent-id> --secret-ids <id1>,<id2>
+```
+
+The symptom of this gotcha is a `401 Unauthorized` from Anthropic even though the token is in the vault and the proxy is wired correctly.
+
+#### Option 3: Static `CLAUDE_CODE_OAUTH_TOKEN` in `.env`
+
+Tell the user to run `claude setup-token` in another terminal — do **not** collect the token in chat. Once they have it:
+
+```bash
+echo 'CLAUDE_CODE_OAUTH_TOKEN=<token-they-pasted>' >> .env
+```
+
+Warn the user that this token will rotate stale eventually (see the cons column above). Prefer Option 1 if Claude Code is available.
+
+#### Option 4: Anthropic API key
+
+Tell the user to create a key at <https://console.anthropic.com/settings/keys> and paste it. Then:
+
+```bash
+echo 'ANTHROPIC_API_KEY=<sk-ant-...>' >> .env
+```
 
 ### Configure environment
 
@@ -94,6 +155,30 @@ grep -q '^CHAT_SERVER_ENABLED=' .env 2>/dev/null || echo 'CHAT_SERVER_ENABLED=tr
 ```
 
 This is required — the server will not start without `CHAT_SERVER_ENABLED=true` in `.env`.
+
+### Generate VAPID keys for Web Push
+
+Generate VAPID keys unconditionally during install. Without them, the PWA's first-load push-subscribe step hits `/api/push/vapid-public` and gets a `501`, which surfaces in the main window as `Push: server missing VAPID key (status 501)`. This confuses users into thinking the chat server is broken even though chat (WebSocket) works fine.
+
+Generating the keys is local, takes ~1 second, has no external dependencies, and silences the 501 even when the user never enables push on a device. **Do this for every install.**
+
+```bash
+# Skip if already configured
+if ! grep -q '^VAPID_PUBLIC_KEY=' .env 2>/dev/null; then
+  VAPID_JSON=$(npx --yes web-push generate-vapid-keys --json)
+  VAPID_PUBLIC=$(echo "$VAPID_JSON" | jq -r .publicKey)
+  VAPID_PRIVATE=$(echo "$VAPID_JSON" | jq -r .privateKey)
+  # Use git user email as VAPID subject; fall back to a generic mailto.
+  VAPID_EMAIL=$(git config --get user.email 2>/dev/null || echo "admin@example.com")
+  cat >> .env <<EOF
+VAPID_PUBLIC_KEY=$VAPID_PUBLIC
+VAPID_PRIVATE_KEY=$VAPID_PRIVATE
+VAPID_SUBJECT=mailto:$VAPID_EMAIL
+EOF
+fi
+```
+
+If the user explicitly says they don't want Web Push, you can skip this — but the default behavior is to generate.
 
 ### Network access & authentication
 
