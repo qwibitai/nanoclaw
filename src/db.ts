@@ -1250,6 +1250,24 @@ export function hasSeenItem(feedUrl: string, itemId: string): boolean {
   return row !== undefined;
 }
 
+const SQLITE_VARIABLE_LIMIT = 900;
+
+export function getSeenItemIds(feedUrl: string, itemIds: string[]): Set<string> {
+  if (itemIds.length === 0) return new Set();
+  const seen = new Set<string>();
+  for (let i = 0; i < itemIds.length; i += SQLITE_VARIABLE_LIMIT) {
+    const chunk = itemIds.slice(i, i + SQLITE_VARIABLE_LIMIT);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = db
+      .prepare(
+        `SELECT item_id FROM rss_seen_items WHERE feed_url = ? AND item_id IN (${placeholders})`,
+      )
+      .all(feedUrl, ...chunk) as { item_id: string }[];
+    for (const r of rows) seen.add(r.item_id);
+  }
+  return seen;
+}
+
 export function markItemSeen(feedUrl: string, itemId: string): void {
   db.prepare(
     'INSERT OR IGNORE INTO rss_seen_items (feed_url, item_id, seen_at) VALUES (?, ?, ?)',

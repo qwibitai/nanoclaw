@@ -1,6 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 
-import { hasSeenItem, markItemSeen } from './db.js';
+import { getSeenItemIds, markItemSeen } from './db.js';
 import { logger } from './logger.js';
 import { readRssConfig, type RssChannelConfig } from './rss-config.js';
 
@@ -24,31 +24,29 @@ interface RssItem {
 
 function extractGuid(item: RssItem, feedUrl: string): string {
   if (item.guid) {
-    if (typeof item.guid === 'object' && item.guid['#text']) {
-      return String(item.guid['#text']);
-    }
-    return String(item.guid);
+    const text =
+      typeof item.guid === 'object'
+        ? String(item.guid['#text'] ?? '').trim()
+        : String(item.guid).trim();
+    if (text) return text;
   }
-  if (item.id) {
-    return item.id;
-  }
-  if (item.link) {
-    return item.link;
-  }
-  // guid も link もない場合は title でフォールバック
+  if (item.id) return item.id;
+  if (item.link) return item.link;
   return `${feedUrl}#${item.title || 'untitled'}`;
+}
+
+function parseTime(d?: string): number {
+  if (!d) return Infinity;
+  const t = new Date(d).getTime();
+  return Number.isNaN(t) ? Infinity : t;
 }
 
 function sortByPubDate(
   items: Array<{ item: RssItem; guid: string }>,
 ): Array<{ item: RssItem; guid: string }> {
-  return [...items].sort((a, b) => {
-    const dateA =
-      (a.item.pubDate ? new Date(a.item.pubDate).getTime() : 0) || 0;
-    const dateB =
-      (b.item.pubDate ? new Date(b.item.pubDate).getTime() : 0) || 0;
-    return dateA - dateB;
-  });
+  // Most feeds list newest-first; reverse so stable sort produces oldest-first.
+  // Items without pubDate (or invalid dates) use Infinity and fall to the end.
+  return [...items].reverse().sort((a, b) => parseTime(a.item.pubDate) - parseTime(b.item.pubDate));
 }
 
 async function fetchFeed(
@@ -73,7 +71,7 @@ async function fetchFeed(
     const xml = await response.text();
     const parsed = xmlParser.parse(xml);
 
-    const rss = parsed.rss || parsed.RDF || parsed.feed;
+    const rss = parsed.rss || parsed['rdf:RDF'] || parsed.RDF || parsed.feed;
     if (!rss) {
       logger.warn({ feedUrl }, `RSS feed "${label}" has unrecognizable format`);
       return [];
@@ -126,11 +124,18 @@ export async function pollOnce(deps: RssPollerDeps): Promise<void> {
       continue;
     }
 
-    for (const feed of channelConfig.feeds) {
-      const items = await fetchFeed(feed.url, feed.name);
-      const newItems = items.filter(
-        (entry) => !hasSeenItem(feed.url, entry.guid),
+    const feedResults = await Promise.all(
+      channelConfig.feeds.map((feed) =>
+        fetchFeed(feed.url, feed.name).then((items) => ({ feed, items })),
+      ),
+    );
+
+    for (const { feed, items } of feedResults) {
+      const seenIds = getSeenItemIds(
+        feed.url,
+        items.map((e) => e.guid),
       );
+      const newItems = items.filter((entry) => !seenIds.has(entry.guid));
       const sorted = sortByPubDate(newItems);
 
       for (let i = 0; i < sorted.length; i++) {
@@ -146,6 +151,7 @@ export async function pollOnce(deps: RssPollerDeps): Promise<void> {
           await deps.sendMessage(channelConfig.jid, text);
           markItemSeen(feed.url, entry.guid);
         } catch (err) {
+          // markItemSeen は送信成功後のみ呼ぶ。失敗した記事は次回ポーリングで再送する。
           logger.error(
             { err, jid: channelConfig.jid, guid: entry.guid },
             'Failed to send RSS message',

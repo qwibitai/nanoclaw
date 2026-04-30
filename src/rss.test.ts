@@ -8,6 +8,7 @@ import {
   _forceRssSeenItemTimestamp,
   _initTestDatabase,
   cleanupRssSeenItems,
+  getSeenItemIds,
   hasSeenItem,
   markItemSeen,
 } from './db.js';
@@ -138,6 +139,13 @@ describe('rss_seen_items', () => {
     expect(hasSeenItem('https://example.com/feed', 'article-1')).toBe(true);
   });
 
+  it('getSeenItemIds returns only seen items in one query', () => {
+    markItemSeen('https://example.com/feed', 'a');
+    markItemSeen('https://example.com/feed', 'b');
+    const seen = getSeenItemIds('https://example.com/feed', ['a', 'b', 'c']);
+    expect(seen).toEqual(new Set(['a', 'b']));
+  });
+
   it('cleanupRssSeenItems deletes old records and keeps recent ones', () => {
     markItemSeen('https://example.com/feed', 'old-article');
     markItemSeen('https://example.com/feed', 'new-article');
@@ -164,6 +172,10 @@ describe('rss-poller', () => {
     _initTestDatabase();
     _resetRssPollerForTests();
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('pollOnce skips unregistered channels', async () => {
@@ -294,6 +306,45 @@ describe('rss-poller', () => {
     expect(sentMessages).toHaveLength(2);
     expect(sentMessages[0].text).toContain('https://example.com/older');
     expect(sentMessages[1].text).toContain('https://example.com/newer');
+  });
+
+  it('pollOnce delivers undated items after dated items', async () => {
+    const rssXml = `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>No Date</title>
+      <link>https://example.com/no-date</link>
+      <guid>guid-no-date</guid>
+    </item>
+    <item>
+      <title>Dated</title>
+      <link>https://example.com/dated</link>
+      <guid>guid-dated</guid>
+      <pubDate>Mon, 01 Jan 2024 00:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>`;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, text: async () => rssXml }),
+    );
+
+    const sentMessages: Array<{ jid: string; text: string }> = [];
+    await pollOnce({
+      sendMessage: async (jid, text) => {
+        sentMessages.push({ jid, text });
+      },
+      registeredGroups: () => ({ 'dc:123': {} }),
+      getConfig: () => [
+        { jid: 'dc:123', feeds: [{ url: 'https://example.com/rss' }] },
+      ],
+    });
+
+    expect(sentMessages).toHaveLength(2);
+    expect(sentMessages[0].text).toContain('https://example.com/dated');
+    expect(sentMessages[1].text).toContain('https://example.com/no-date');
   });
 
   it('pollOnce continues on fetch failure without throwing', async () => {

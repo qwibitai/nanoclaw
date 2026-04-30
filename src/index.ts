@@ -1025,7 +1025,7 @@ async function main(): Promise<void> {
         logger.warn({ jid }, 'RSS: no channel owns JID, skipping');
         return;
       }
-      await channel.sendMessage(jid, text);
+      await channel.sendMessage(jid, formatOutbound(text));
     },
     registeredGroups: () => registeredGroups,
   });
