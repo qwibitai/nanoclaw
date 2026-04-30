@@ -110,6 +110,49 @@ describe('rss-config', () => {
       fs.unlinkSync(p);
     }
   });
+
+  it('returns cached result when file mtime is unchanged', () => {
+    const p = makeTempYaml(`rss:
+  channels:
+    - jid: "dc:1234"
+      feeds:
+        - url: "https://example.com/feed.xml"
+`);
+    try {
+      const first = readRssConfig(p);
+      const second = readRssConfig(p);
+      expect(second).toBe(first);
+    } finally {
+      fs.unlinkSync(p);
+    }
+  });
+
+  it('re-reads config when file mtime changes', () => {
+    const p = makeTempYaml(`rss:
+  channels:
+    - jid: "dc:original"
+      feeds:
+        - url: "https://example.com/feed.xml"
+`);
+    try {
+      const first = readRssConfig(p);
+      expect(first[0].jid).toBe('dc:original');
+
+      fs.writeFileSync(
+        p,
+        `rss:\n  channels:\n    - jid: "dc:updated"\n      feeds:\n        - url: "https://example.com/new.xml"\n`,
+        'utf-8',
+      );
+      // bump mtime by 1 second to guarantee a different value
+      const future = new Date(Date.now() + 1000);
+      fs.utimesSync(p, future, future);
+
+      const second = readRssConfig(p);
+      expect(second[0].jid).toBe('dc:updated');
+    } finally {
+      fs.unlinkSync(p);
+    }
+  });
 });
 
 describe('rss_seen_items', () => {
@@ -228,6 +271,7 @@ describe('rss-poller', () => {
       getConfig: () => [
         { jid: 'dc:123', feeds: [{ url: 'https://example.com/rss' }] },
       ],
+      burstDelayMs: 0,
     });
 
     expect(sentMessages).toHaveLength(2);
@@ -301,6 +345,7 @@ describe('rss-poller', () => {
       getConfig: () => [
         { jid: 'dc:123', feeds: [{ url: 'https://example.com/rss' }] },
       ],
+      burstDelayMs: 0,
     });
 
     expect(sentMessages).toHaveLength(2);
@@ -340,6 +385,7 @@ describe('rss-poller', () => {
       getConfig: () => [
         { jid: 'dc:123', feeds: [{ url: 'https://example.com/rss' }] },
       ],
+      burstDelayMs: 0,
     });
 
     expect(sentMessages).toHaveLength(2);

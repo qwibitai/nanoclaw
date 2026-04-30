@@ -1016,6 +1016,8 @@ async function main(): Promise<void> {
   });
   startRssPoller({
     sendMessage: async (jid, text) => {
+      // pollOnce also checks this before fetching feeds (avoids network cost).
+      // This guard is a safety net in case sendMessage is reached via other paths.
       if (!(jid in registeredGroups)) {
         logger.warn({ jid }, 'RSS: jid not in registered groups, skipping');
         return;

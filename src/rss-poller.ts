@@ -44,8 +44,9 @@ function parseTime(d?: string): number {
 function sortByPubDate(
   items: Array<{ item: RssItem; guid: string }>,
 ): Array<{ item: RssItem; guid: string }> {
-  // Most feeds list newest-first; reverse so stable sort produces oldest-first.
-  // Items without pubDate (or invalid dates) use Infinity and fall to the end.
+  // Reverse before sorting so that equal-pubDate ties break in feed order
+  // (most feeds are newest-first, so reversed = oldest-first for ties).
+  // JS sort is stable (ES2019+). Items without pubDate sort to the end via Infinity.
   return [...items]
     .reverse()
     .sort((a, b) => parseTime(a.item.pubDate) - parseTime(b.item.pubDate));
@@ -101,6 +102,7 @@ export interface RssPollerDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, unknown>;
   getConfig?: () => RssChannelConfig[];
+  burstDelayMs?: number;
 }
 
 interface PollerInstance {
@@ -162,9 +164,8 @@ export async function pollOnce(deps: RssPollerDeps): Promise<void> {
 
         // Avoid Discord rate limits on burst sends during first startup
         if (i < sorted.length - 1) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, RSS_BURST_SEND_DELAY_MS),
-          );
+          const delay = deps.burstDelayMs ?? RSS_BURST_SEND_DELAY_MS;
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
     }
