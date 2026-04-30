@@ -26,7 +26,7 @@ registerProviderContainerConfig('gemini', (ctx) => {
   if (hostHome) {
     const hostGemini = path.join(hostHome, '.gemini');
     if (fs.existsSync(hostGemini)) {
-      const AUTH_FILES = ['oauth_creds.json', 'google_accounts.json', 'settings.json'];
+      const AUTH_FILES = ['oauth_creds.json', 'google_accounts.json', 'settings.json', 'installation_id', 'state.json'];
       for (const file of AUTH_FILES) {
         const src = path.join(hostGemini, file);
         if (fs.existsSync(src)) {

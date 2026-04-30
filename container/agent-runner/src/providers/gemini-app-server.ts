@@ -86,13 +86,23 @@ export interface AppServer {
 }
 
 export function spawnGeminiAppServer(configOverrides: string[] = []): AppServer {
-  const args = ['app-server', '--listen', 'stdio://'];
-  for (const override of configOverrides) args.push('-c', override);
+  const args = ['--acp', '--skip-trust'];
+  // The current Gemini CLI uses --acp for stdio JSON-RPC.
+  // Legacy app-server command and -c flag are no longer supported.
 
   log(`Spawning: gemini ${args.join(' ')}`);
   const proc = spawn('gemini', args, {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env },
+    env: {
+      ...process.env,
+      HTTPS_PROXY: '',
+      https_proxy: '',
+      HTTP_PROXY: '',
+      http_proxy: '',
+      NODE_EXTRA_CA_CERTS: '',
+      SSL_CERT_FILE: '',
+      GEMINI_FEATURES_USE_LINUX_SANDBOX_BWRAP: 'false',
+    },
   });
 
   const rl = createInterface({ input: proc.stdout! });
@@ -254,6 +264,7 @@ export async function initializeGeminiAppServer(server: AppServer): Promise<void
     server,
     'initialize',
     {
+      protocolVersion: 1,
       clientInfo: { name: 'nanoclaw', version: '1.0.0' },
       capabilities: { experimentalApi: false },
     },
@@ -272,66 +283,64 @@ export interface ThreadParams {
   baseInstructions?: string;
 }
 
-export async function startOrResumeGeminiThread(
+export async function startOrResumeGeminiSession(
   server: AppServer,
-  threadId: string | undefined,
+  sessionId: string | undefined,
   params: ThreadParams,
 ): Promise<string> {
-  if (threadId) {
-    log(`Resuming thread: ${threadId}`);
-    const resp = await sendGeminiRequest(server, 'thread/resume', {
-      threadId,
-      ...(params as unknown as Record<string, unknown>),
+  if (sessionId) {
+    log(`Loading session: ${sessionId}`);
+    const resp = await sendGeminiRequest(server, 'session/load', {
+      sessionId,
+      model: params.model,
+      cwd: params.cwd,
     });
     if (!resp.error) {
-      log(`Thread resumed: ${threadId}`);
-      return threadId;
+      log(`Session loaded: ${sessionId}`);
+      return sessionId;
     }
-    if (!STALE_THREAD_RE.test(resp.error.message)) {
-      throw new Error(`thread/resume failed: ${resp.error.message}`);
-    }
-    log(`Stale thread ${threadId}; starting fresh thread.`);
+    // If session not found, we fall through to new session
+    log(`Session ${sessionId} load failed: ${resp.error.message}; starting fresh session.`);
   }
 
-  log('Starting new thread…');
-  const resp = await sendGeminiRequest(server, 'thread/start', {
-    ...(params as unknown as Record<string, unknown>),
+  log('Starting new session…');
+  const resp = await sendGeminiRequest(server, 'session/new', {
+    model: params.model,
+    cwd: params.cwd,
+    mcpServers: [], // We handle MCP via config.toml for now
+    instructions: params.baseInstructions,
   });
-  if (resp.error) throw new Error(`thread/start failed: ${resp.error.message}`);
+  if (resp.error) throw new Error(`session/new failed: ${resp.error.message}`);
 
-  const result = resp.result as { thread?: { id?: string } } | undefined;
-  const newThreadId = result?.thread?.id;
-  if (!newThreadId) throw new Error('thread/start response missing thread ID');
-  log(`New thread: ${newThreadId}`);
-  return newThreadId;
+  const result = resp.result as { sessionId?: string } | undefined;
+  const newSessionId = result?.sessionId;
+  if (!newSessionId) throw new Error('session/new response missing sessionId');
+  log(`New session: ${newSessionId}`);
+  return newSessionId;
 }
 
 export interface TurnParams {
-  threadId: string;
+  sessionId: string;
   inputText: string;
   model?: string;
   cwd?: string;
 }
 
 export async function startGeminiTurn(server: AppServer, params: TurnParams): Promise<void> {
-  const resp = await sendGeminiRequest(server, 'turn/start', {
-    threadId: params.threadId,
-    input: [{ type: 'text', text: params.inputText }],
-    model: params.model,
-    cwd: params.cwd,
+  const resp = await sendGeminiRequest(server, 'session/prompt', {
+    sessionId: params.sessionId,
+    prompt: [{ type: 'text', text: params.inputText }],
   });
-  if (resp.error) throw new Error(`turn/start failed: ${resp.error.message}`);
+  if (resp.error) throw new Error(`session/prompt failed: ${resp.error.message}`);
 }
 
 /**
- * Compact a Gemini thread. Triggers the app-server's native context
- * management. Returns the new thread state or metadata where relevant.
+ * Compact a Gemini session.
  */
-export async function compactGeminiThread(server: AppServer, threadId: string): Promise<void> {
-  log(`Compacting thread: ${threadId}`);
-  const resp = await sendGeminiRequest(server, 'thread/compact/start', { threadId });
+export async function compactGeminiThread(server: AppServer, sessionId: string): Promise<void> {
+  log(`Compacting session: ${sessionId}`);
+  const resp = await sendGeminiRequest(server, 'session/compact', { sessionId });
   if (resp.error) {
-    // Compaction failures are logged but non-fatal for the query.
     log(`Compaction failed: ${resp.error.message}`);
   } else {
     log('Compaction successful');

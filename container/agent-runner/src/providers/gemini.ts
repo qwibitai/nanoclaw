@@ -1,5 +1,5 @@
 /**
- * Google Gemini CLI provider — wraps `gemini app-server` via JSON-RPC.
+ * Google Gemini CLI provider — wraps `gemini` CLI via ACP JSON-RPC.
  */
 import fs from 'fs';
 import path from 'path';
@@ -9,19 +9,20 @@ import type { AgentProvider, AgentQuery, ProviderEvent, ProviderOptions, QueryIn
 import {
   type AppServer,
   type JsonRpcNotification,
-  STALE_THREAD_RE,
   attachGeminiAutoApproval,
   createGeminiConfigOverrides,
   initializeGeminiAppServer,
   killGeminiAppServer,
   spawnGeminiAppServer,
   startGeminiTurn,
-  startOrResumeGeminiThread,
+  startOrResumeGeminiSession,
   writeGeminiMcpConfigToml,
 } from './gemini-app-server.js';
 
 /** Hard ceiling for a single turn. Guards against app-server wedging. */
 const TURN_TIMEOUT_MS = 5 * 60 * 1000;
+
+const STALE_SESSION_RE = /session\s+not\s+found|unknown\s+session|session[_\s]id|no such session/i;
 
 // ── System-prompt assembly ──────────────────────────────────────────────────
 
@@ -82,7 +83,7 @@ export class GeminiProvider implements AgentProvider {
 
   isSessionInvalid(err: unknown): boolean {
     const msg = err instanceof Error ? err.message : String(err);
-    return STALE_THREAD_RE.test(msg);
+    return STALE_SESSION_RE.test(msg);
   }
 
   query(input: QueryInput): AgentQuery {
@@ -103,7 +104,7 @@ export class GeminiProvider implements AgentProvider {
       const server = spawnGeminiAppServer(createGeminiConfigOverrides());
       attachGeminiAutoApproval(server);
 
-      let threadId: string | undefined = input.continuation;
+      let sessionId: string | undefined = input.continuation;
       let initYielded = false;
 
       try {
@@ -118,7 +119,7 @@ export class GeminiProvider implements AgentProvider {
           baseInstructions: composeBaseInstructions(input.systemContext?.instructions),
         };
 
-        threadId = await startOrResumeGeminiThread(server, threadId, threadParams);
+        sessionId = await startOrResumeGeminiSession(server, sessionId, threadParams);
 
         while (!aborted) {
           while (pending.length === 0 && !ended && !aborted) {
@@ -134,7 +135,7 @@ export class GeminiProvider implements AgentProvider {
 
           yield* runOneTurn(
             server,
-            threadId!,
+            sessionId!,
             text,
             self.model,
             input.cwd,
@@ -143,15 +144,6 @@ export class GeminiProvider implements AgentProvider {
               initYielded = true;
             },
           );
-
-          // After a turn completes, check if we need to compact. We track
-          // cumulative usage via a mock-SDK state or app-server status; if
-          // we don't have a precise token count yet, we fallback to a
-          // periodic check or wait for the app-server to signal a boundary.
-          // For now, matching Codex's "native compaction" signal support.
-          if (threadId) {
-            await compactGeminiThread(server, threadId);
-          }
         }
       } finally {
         killGeminiAppServer(server);
@@ -178,7 +170,7 @@ export class GeminiProvider implements AgentProvider {
 
 async function* runOneTurn(
   server: AppServer,
-  threadId: string,
+  sessionId: string,
   inputText: string,
   model: string,
   cwd: string,
@@ -200,43 +192,20 @@ async function* runOneTurn(
     const method = n.method;
     const params = n.params;
 
-    buffer.push({ type: 'activity' });
-
-    switch (method) {
-      case 'thread/started': {
-        const thread = params.thread as { id?: string } | undefined;
-        if (thread?.id && !hasInit()) {
-          markInit();
-          buffer.push({ type: 'init', continuation: thread.id });
+    if (method === 'session/update' && params.sessionId === sessionId) {
+      const update = params.update as any;
+      if (update.sessionUpdate === 'agent_message_chunk') {
+        const chunk = update.content?.text;
+        if (chunk) {
+          resultText += chunk;
+          buffer.push({ type: 'activity' });
         }
-        break;
+      } else if (update.sessionUpdate === 'agent_thought_chunk') {
+        const thought = update.content?.text;
+        if (thought) {
+          buffer.push({ type: 'progress', message: thought });
+        }
       }
-      case 'item/agentMessage/delta': {
-        const delta = params.delta as string;
-        if (delta) resultText += delta;
-        break;
-      }
-      case 'item/completed': {
-        const item = params.item as { type?: string; text?: string } | undefined;
-        if (item?.type === 'agentMessage' && item.text) resultText = item.text;
-        break;
-      }
-      case 'turn/completed':
-        turnDone = true;
-        break;
-      case 'turn/failed': {
-        const e = params.error as { message?: string } | undefined;
-        turnState.error = new Error(e?.message || 'Turn failed');
-        turnDone = true;
-        break;
-      }
-      case 'thread/status/changed': {
-        const status = params.status as string | undefined;
-        if (status) buffer.push({ type: 'progress', message: `status: ${status}` });
-        break;
-      }
-      default:
-        break;
     }
 
     kick();
@@ -253,10 +222,20 @@ async function* runOneTurn(
   try {
     if (!hasInit()) {
       markInit();
-      buffer.push({ type: 'init', continuation: threadId });
+      buffer.push({ type: 'init', continuation: sessionId });
     }
 
-    await startGeminiTurn(server, { threadId, inputText, model, cwd });
+    // ACP session/prompt resolves when the turn completes
+    startGeminiTurn(server, { sessionId, inputText, model, cwd })
+      .then(() => {
+        turnDone = true;
+        kick();
+      })
+      .catch((err) => {
+        turnState.error = err;
+        turnDone = true;
+        kick();
+      });
 
     while (true) {
       while (buffer.length > 0) {
