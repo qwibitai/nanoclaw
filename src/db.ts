@@ -274,6 +274,15 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_spawned_threads_created_at
       ON spawned_threads(created_at);
+
+    CREATE TABLE IF NOT EXISTS rss_seen_items (
+      feed_url TEXT NOT NULL,
+      item_id TEXT NOT NULL,
+      seen_at TEXT NOT NULL,
+      PRIMARY KEY (feed_url, item_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_rss_seen_items_seen_at
+      ON rss_seen_items(seen_at);
   `);
 
   // sessions テーブルのスキーマを group_folder → group_jid に移行。
@@ -470,6 +479,25 @@ function startSpawnedThreadsCleanupTimer(): void {
   spawnedThreadsCleanupTimer.unref();
 }
 
+const RSS_SEEN_ITEMS_RETENTION_DAYS = 90;
+const RSS_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+let rssCleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+function startRssCleanupTimer(): void {
+  if (rssCleanupTimer) {
+    return;
+  }
+
+  rssCleanupTimer = setInterval(() => {
+    try {
+      cleanupRssSeenItems();
+    } catch (error) {
+      logger.warn({ err: error }, 'Failed to clean up rss_seen_items');
+    }
+  }, RSS_CLEANUP_INTERVAL_MS);
+  rssCleanupTimer.unref();
+}
+
 export function initDatabase(): void {
   const dbPath = path.join(STORE_DIR, 'messages.db');
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -481,6 +509,8 @@ export function initDatabase(): void {
   migrateJsonState();
   cleanupSpawnedThreads();
   startSpawnedThreadsCleanupTimer();
+  cleanupRssSeenItems();
+  startRssCleanupTimer();
 }
 
 /** @internal - テスト用のみ。新規のインメモリデータベースを作成します。 */
@@ -488,6 +518,11 @@ export function _initTestDatabase(): void {
   if (spawnedThreadsCleanupTimer) {
     clearInterval(spawnedThreadsCleanupTimer);
     spawnedThreadsCleanupTimer = null;
+  }
+
+  if (rssCleanupTimer) {
+    clearInterval(rssCleanupTimer);
+    rssCleanupTimer = null;
   }
 
   db = new Database(':memory:');
@@ -1201,6 +1236,70 @@ export function cleanupSpawnedThreads(
     logger.info(
       { deletedRows: result.changes, retentionDays },
       'Cleaned up stale spawned_threads rows',
+    );
+  }
+  return result.changes;
+}
+
+// --- RSS 既読管理 ---
+
+export function hasSeenItem(feedUrl: string, itemId: string): boolean {
+  const row = db
+    .prepare('SELECT 1 FROM rss_seen_items WHERE feed_url = ? AND item_id = ?')
+    .get(feedUrl, itemId);
+  return row !== undefined;
+}
+
+const SQLITE_VARIABLE_LIMIT = 900;
+
+export function getSeenItemIds(
+  feedUrl: string,
+  itemIds: string[],
+): Set<string> {
+  if (itemIds.length === 0) return new Set();
+  const seen = new Set<string>();
+  for (let i = 0; i < itemIds.length; i += SQLITE_VARIABLE_LIMIT) {
+    const chunk = itemIds.slice(i, i + SQLITE_VARIABLE_LIMIT);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = db
+      .prepare(
+        `SELECT item_id FROM rss_seen_items WHERE feed_url = ? AND item_id IN (${placeholders})`,
+      )
+      .all(feedUrl, ...chunk) as { item_id: string }[];
+    for (const r of rows) seen.add(r.item_id);
+  }
+  return seen;
+}
+
+export function markItemSeen(feedUrl: string, itemId: string): void {
+  db.prepare(
+    'INSERT OR IGNORE INTO rss_seen_items (feed_url, item_id, seen_at) VALUES (?, ?, ?)',
+  ).run(feedUrl, itemId, new Date().toISOString());
+}
+
+/** @internal - テスト用のみ。seen_at を強制上書きする。 */
+export function _forceRssSeenItemTimestamp(
+  feedUrl: string,
+  itemId: string,
+  seenAt: string,
+): void {
+  db.prepare(
+    `UPDATE rss_seen_items SET seen_at = ? WHERE feed_url = ? AND item_id = ?`,
+  ).run(seenAt, feedUrl, itemId);
+}
+
+export function cleanupRssSeenItems(
+  now: Date = new Date(),
+  retentionDays: number = RSS_SEEN_ITEMS_RETENTION_DAYS,
+): number {
+  const cutoff = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+  const result = db
+    .prepare(`DELETE FROM rss_seen_items WHERE seen_at < ?`)
+    .run(cutoff.toISOString());
+  if (result.changes > 0) {
+    logger.info(
+      { deletedRows: result.changes, retentionDays },
+      'Cleaned up stale rss_seen_items rows',
     );
   }
   return result.changes;

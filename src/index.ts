@@ -60,6 +60,7 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import { startRssPoller } from './rss-poller.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { hasPrivilege, resolveGroupType } from './group-type.js';
 import {
@@ -1012,6 +1013,23 @@ async function main(): Promise<void> {
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
+  });
+  startRssPoller({
+    sendMessage: async (jid, text) => {
+      // pollOnce also checks this before fetching feeds (avoids network cost).
+      // This guard is a safety net in case sendMessage is reached via other paths.
+      if (!(jid in registeredGroups)) {
+        logger.warn({ jid }, 'RSS: jid not in registered groups, skipping');
+        return;
+      }
+      const channel = findChannel(channels, jid);
+      if (!channel) {
+        logger.warn({ jid }, 'RSS: no channel owns JID, skipping');
+        return;
+      }
+      await channel.sendMessage(jid, formatOutbound(text));
+    },
+    registeredGroups: () => registeredGroups,
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
