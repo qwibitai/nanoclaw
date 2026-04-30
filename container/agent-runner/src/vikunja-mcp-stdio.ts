@@ -188,6 +188,39 @@ mcpServer.tool(
 );
 
 mcpServer.tool(
+  'vikunja_set_recurring',
+  'Set or clear a recurring schedule on an existing Vikunja task. repeat_after is the interval in seconds (e.g. 86400=daily, 604800=weekly). repeat_mode controls when the next occurrence is calculated: 0=from due date, 1=from current date, 2=from completion date. Set repeat_after=0 to remove recurrence.',
+  {
+    task_id: z.number().int().positive().describe('Numeric task id to set recurrence on.'),
+    repeat_after: z
+      .number()
+      .int()
+      .min(0)
+      .describe('Recurrence interval in seconds. 86400=daily, 604800=weekly. 0 removes recurrence.'),
+    repeat_mode: z
+      .number()
+      .int()
+      .min(0)
+      .max(2)
+      .optional()
+      .describe('0=from due date (default), 1=from current date, 2=from completion date.'),
+  },
+  async (args) => {
+    try {
+      return ok(
+        await updateTask({
+          task_id: args.task_id,
+          repeat_after: args.repeat_after,
+          repeat_mode: args.repeat_mode,
+        }),
+      );
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+mcpServer.tool(
   'vikunja_delete_task',
   'Delete a Vikunja task by its numeric id. Irreversible — use with care.',
   {

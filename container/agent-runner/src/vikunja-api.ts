@@ -67,6 +67,8 @@ export interface UpdateTaskInput {
   due_date?: string;
   priority?: number;
   assignees?: number[];
+  repeat_after?: number;
+  repeat_mode?: number;
 }
 
 function requireConfig(): { base: string; token: string } {
@@ -186,6 +188,8 @@ export async function updateTask(input: UpdateTaskInput): Promise<VikunjaTask> {
   if (input.done != null) body.done = input.done;
   if (input.due_date != null) body.due_date = input.due_date;
   if (input.priority != null) body.priority = input.priority;
+  if (input.repeat_after != null) body.repeat_after = input.repeat_after;
+  if (input.repeat_mode != null) body.repeat_mode = input.repeat_mode;
 
   const task = await apiRequest<VikunjaTask>(
     'POST',
