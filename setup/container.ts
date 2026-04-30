@@ -127,11 +127,22 @@ export async function run(args: string[]): Promise<void> {
     }
 
     // Socket is unreachable due to group perms — current shell's supplementary
-    // groups are fixed at login, so `usermod -aG docker` (via install-docker.sh
-    // or a prior install) doesn't affect us until next login. Re-exec this
-    // step under `sg docker` so the child picks up docker as its primary
-    // group and can talk to /var/run/docker.sock without a logout.
+    // groups are fixed at login, so `usermod -aG docker` doesn't affect us
+    // until next login. Ensure the user is in the docker group (install-docker.sh
+    // does this on fresh installs, but skips when Docker is already present),
+    // then re-exec under `sg docker` so the child picks up docker as its
+    // primary group and can talk to /var/run/docker.sock without a logout.
     if (status === 'no-permission' && getPlatform() === 'linux' && commandExists('sg')) {
+      // Ensure the current user is in the docker group — without this,
+      // sg will ask for the (typically unset) group password and fail.
+      const inGroup = spawnSync('id', ['-nG'], { encoding: 'utf-8' });
+      if (!(inGroup.stdout ?? '').split(/\s+/).includes('docker')) {
+        log.info('Adding current user to docker group');
+        spawnSync('sudo', ['usermod', '-aG', 'docker', process.env.USER ?? ''], {
+          stdio: 'inherit',
+        });
+      }
+
       log.info('Re-executing container step under `sg docker`');
       const res = spawnSync(
         'sg',

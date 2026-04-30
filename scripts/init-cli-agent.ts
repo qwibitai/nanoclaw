@@ -41,11 +41,13 @@ const CLI_SYNTHETIC_USER_ID = `${CLI_CHANNEL}:${CLI_PLATFORM_ID}`;
 interface Args {
   displayName: string;
   agentName: string;
+  folder?: string;
 }
 
 function parseArgs(argv: string[]): Args {
   let displayName: string | undefined;
   let agentName: string | undefined;
+  let folder: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     const val = argv[i + 1];
@@ -54,6 +56,9 @@ function parseArgs(argv: string[]): Args {
       i++;
     } else if (key === '--agent-name') {
       agentName = val;
+      i++;
+    } else if (key === '--folder') {
+      folder = val;
       i++;
     }
   }
@@ -67,6 +72,7 @@ function parseArgs(argv: string[]): Args {
   return {
     displayName,
     agentName: agentName?.trim() || displayName,
+    folder,
   };
 }
 
@@ -95,7 +101,7 @@ async function main(): Promise<void> {
   const promotedToOwner = false;
 
   // 2. Agent group + filesystem.
-  const folder = `cli-with-${normalizeName(args.displayName)}`;
+  const folder = args.folder || `cli-with-${normalizeName(args.displayName)}`;
   let ag: AgentGroup | undefined = getAgentGroupByFolder(folder);
   if (!ag) {
     const agId = generateId('ag');

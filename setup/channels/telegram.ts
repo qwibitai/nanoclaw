@@ -21,7 +21,7 @@ import * as p from '@clack/prompts';
 import k from 'kleur';
 
 import * as setupLog from '../logs.js';
-import { confirmThenOpen } from '../lib/browser.js';
+import { confirmThenOpen, formatNoteLink } from '../lib/browser.js';
 import { askOperatorRole } from '../lib/role-prompt.js';
 import {
   type Block,
@@ -33,7 +33,8 @@ import {
   spawnStep,
   writeStepEntry,
 } from '../lib/runner.js';
-import { brandBold } from '../lib/theme.js';
+import { readEnvKey } from '../environment.js';
+import { accentGreen, brandBold, fitToWidth, fmtDuration, note } from '../lib/theme.js';
 
 const DEFAULT_AGENT_NAME = 'Nano';
 
@@ -47,12 +48,11 @@ export async function runTelegramChannel(displayName: string): Promise<void> {
   // installed, or the bot's web profile if not. tg://resolve?domain= is
   // more direct but silently fails when the scheme isn't registered.
   const botUrl = `https://t.me/${botUsername}`;
-  p.note(
+  note(
     [
       `Opening @${botUsername} in Telegram so it's ready when the pairing code shows up.`,
-      '',
-      k.dim(botUrl),
-    ].join('\n'),
+      formatNoteLink(botUrl),
+    ].filter((line): line is string => line !== null).join('\n'),
     'Open Telegram',
   );
   await confirmThenOpen(botUrl, 'Press Enter to open Telegram');
@@ -132,7 +132,19 @@ export async function runTelegramChannel(displayName: string): Promise<void> {
 }
 
 async function collectTelegramToken(): Promise<string> {
-  p.note(
+  const existing = readEnvKey('TELEGRAM_BOT_TOKEN');
+  if (existing && /^[0-9]+:[A-Za-z0-9_-]{35,}$/.test(existing)) {
+    const reuse = ensureAnswer(await p.confirm({
+      message: `Found an existing Telegram bot token (${existing.slice(0, 8)}…). Use it?`,
+      initialValue: true,
+    }));
+    if (reuse) {
+      setupLog.userInput('telegram_token', 'reused-existing');
+      return existing;
+    }
+  }
+
+  note(
     [
       "Your assistant talks to you through a Telegram bot you create.",
       "Here's how:",
@@ -150,6 +162,7 @@ async function collectTelegramToken(): Promise<string> {
   const answer = ensureAnswer(
     await p.password({
       message: 'Paste your bot token',
+      clearOnError: true,
       validate: (v) => {
         if (!v || !v.trim()) return "Token is required";
         if (!/^[0-9]+:[A-Za-z0-9_-]{35,}$/.test(v.trim())) {
@@ -178,10 +191,9 @@ async function validateTelegramToken(token: string): Promise<string> {
       result?: { username?: string; id?: number };
       description?: string;
     };
-    const elapsedS = Math.round((Date.now() - start) / 1000);
     if (data.ok && data.result?.username) {
       const username = data.result.username;
-      s.stop(`Found your bot: @${username}. ${k.dim(`(${elapsedS}s)`)}`);
+      s.stop(`Found your bot: @${username}. ${k.dim(`(${fmtDuration(Date.now() - start)})`)}`);
       setupLog.step('telegram-validate', 'success', Date.now() - start, {
         BOT_USERNAME: username,
         BOT_ID: data.result.id ?? '',
@@ -199,8 +211,7 @@ async function validateTelegramToken(token: string): Promise<string> {
       'Copy the token again from @BotFather and try setup once more.',
     );
   } catch (err) {
-    const elapsedS = Math.round((Date.now() - start) / 1000);
-    s.stop(`Couldn't reach Telegram. ${k.dim(`(${elapsedS}s)`)}`, 1);
+    s.stop(`Couldn't reach Telegram. ${k.dim(`(${fmtDuration(Date.now() - start)})`)}`, 1);
     const message = err instanceof Error ? err.message : String(err);
     setupLog.step('telegram-validate', 'failed', Date.now() - start, {
       ERROR: message,
@@ -240,12 +251,12 @@ async function runPairTelegram(): Promise<
         } else {
           stopSpinner("Old code expired. Here's a fresh one.");
         }
-        p.note(formatCodeCard(block.fields.CODE ?? '????'), 'Secret code');
-        s.start('Waiting for you to send the code from Telegram…');
+        note(formatCodeCard(block.fields.CODE ?? '????'), 'Secret code');
+        s.start(fitToWidth('Waiting for you to send the code from Telegram…', ''));
         spinnerActive = true;
       } else if (block.type === 'PAIR_TELEGRAM_ATTEMPT') {
         stopSpinner(`Got "${block.fields.CANDIDATE ?? '?'}", not a match.`);
-        s.start('Waiting for the correct code…');
+        s.start(fitToWidth('Waiting for the correct code…', ''));
         spinnerActive = true;
       } else if (block.type === 'PAIR_TELEGRAM') {
         if (block.fields.STATUS === 'success') {
@@ -291,7 +302,7 @@ async function resolveAgentName(): Promise<string> {
   }
   const answer = ensureAnswer(
     await p.text({
-      message: 'What should your assistant be called?',
+      message: `What should your ${accentGreen('assistant')} be called?`,
       placeholder: DEFAULT_AGENT_NAME,
       defaultValue: DEFAULT_AGENT_NAME,
     }),

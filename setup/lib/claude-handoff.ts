@@ -27,6 +27,8 @@ import { execSync, spawn } from 'child_process';
 import * as p from '@clack/prompts';
 import k from 'kleur';
 
+import { brandBody, note } from './theme.js';
+
 export interface HandoffContext {
   /** Channel this handoff is happening in (e.g., 'teams'). */
   channel: string;
@@ -62,14 +64,14 @@ export interface HandoffContext {
 export async function offerClaudeHandoff(ctx: HandoffContext): Promise<boolean> {
   if (!isClaudeUsable()) {
     p.log.warn(
-      "Claude isn't installed yet — can't hand you off here. Finish setup first, then retry.",
+      brandBody("Claude isn't installed yet — can't hand you off here. Finish setup first, then retry."),
     );
     return false;
   }
 
   const systemPrompt = buildSystemPrompt(ctx);
 
-  p.note(
+  note(
     [
       "I'm handing you off to Claude in interactive mode.",
       "It has the context of where you are in setup.",
@@ -91,7 +93,7 @@ export async function offerClaudeHandoff(ctx: HandoffContext): Promise<boolean> 
       { stdio: 'inherit' },
     );
     child.on('close', () => {
-      p.log.success("Back from Claude. Let's continue.");
+      p.log.success(brandBody("Back from Claude. Let's continue."));
       resolve(true);
     });
     child.on('error', () => {

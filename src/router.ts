@@ -27,7 +27,7 @@ import {
   getMessagingGroupWithAgentCount,
 } from './db/messaging-groups.js';
 import { findSessionForAgent } from './db/sessions.js';
-import { startTypingRefresh } from './modules/typing/index.js';
+import { startTypingRefresh, stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
 import { resolveSession, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
 import { wakeContainer } from './container-runner.js';
@@ -109,6 +109,20 @@ export function setSenderScopeGate(fn: SenderScopeGateFn): void {
 }
 
 /**
+ * Message-interceptor hook. Runs at the very top of routeInbound, before
+ * messaging-group resolution. When the interceptor returns true the message
+ * is consumed and routing stops. Used by the permissions module to capture
+ * free-text replies during multi-step approval flows (e.g. agent naming).
+ */
+export type MessageInterceptorFn = (event: InboundEvent) => Promise<boolean>;
+
+let messageInterceptor: MessageInterceptorFn | null = null;
+
+export function setMessageInterceptor(fn: MessageInterceptorFn): void {
+  messageInterceptor = fn;
+}
+
+/**
  * Channel-registration hook. Runs when the router sees a mention/DM on a
  * messaging group that has no wirings AND hasn't been denied. The hook is
  * expected to escalate to an owner (card, etc.) and arrange for future
@@ -142,6 +156,10 @@ function safeParseContent(raw: string): { text?: string; sender?: string; sender
  * Creates messaging group + session if they don't exist yet.
  */
 export async function routeInbound(event: InboundEvent): Promise<void> {
+  // Pre-route interceptor — lets modules consume messages before any routing
+  // (e.g. free-text replies during multi-step approval flows).
+  if (messageInterceptor && (await messageInterceptor(event))) return;
+
   // 0. Apply the adapter's thread policy. Non-threaded adapters (Telegram,
   //    WhatsApp, iMessage, email) collapse threads to the channel.
   const adapter = getChannelAdapter(event.channelType);
@@ -289,7 +307,14 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
           log.warn('adapter.subscribe failed', { channelType: event.channelType, threadId: event.threadId, err });
         });
       }
-    } else if (agent.ignored_message_policy === 'accumulate') {
+    } else if (agent.ignored_message_policy === 'accumulate' && !(engages && (!accessOk || !scopeOk))) {
+      // Accumulate stores the message as silent context. We allow it when
+      // engagement simply didn't fire, but NOT when engagement fired and
+      // the access/scope gate refused — those refusals are security
+      // decisions about an untrusted sender, and silently storing their
+      // message (which also stages their attachments to disk via
+      // writeSessionMessage → extractAttachmentFiles) is exactly what the
+      // gate is meant to prevent.
       await deliverToAgent(agent, agentGroup, mg, event, userId, adapter?.supportsThreads === true, false);
       accumulatedCount++;
     } else {
@@ -450,7 +475,11 @@ async function deliverToAgent(
     startTypingRefresh(session.id, session.agent_group_id, event.channelType, event.platformId, event.threadId);
     const freshSession = getSession(session.id);
     if (freshSession) {
-      await wakeContainer(freshSession);
+      const woke = await wakeContainer(freshSession);
+      // wakeContainer never throws — it returns false on transient spawn
+      // failure (host-sweep retries). Stop the typing indicator we just
+      // started so it doesn't leak; the inbound row stays pending.
+      if (!woke) stopTypingRefresh(freshSession.id);
     }
   }
 }

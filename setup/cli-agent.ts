@@ -8,6 +8,7 @@
  * Args:
  *   --display-name <name>   (required) operator's display name
  *   --agent-name   <name>   (optional) agent persona name, defaults to display-name
+ *   --folder       <name>   (optional) explicit folder name, defaults to cli-with-<normalized-display-name>
  */
 import { execFileSync } from 'child_process';
 import path from 'path';
@@ -18,9 +19,11 @@ import { emitStatus } from './status.js';
 function parseArgs(args: string[]): {
   displayName: string;
   agentName?: string;
+  folder?: string;
 } {
   let displayName: string | undefined;
   let agentName: string | undefined;
+  let folder: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const key = args[i];
@@ -32,6 +35,10 @@ function parseArgs(args: string[]): {
         break;
       case '--agent-name':
         agentName = val;
+        i++;
+        break;
+      case '--folder':
+        folder = val;
         i++;
         break;
     }
@@ -46,17 +53,18 @@ function parseArgs(args: string[]): {
     process.exit(2);
   }
 
-  return { displayName, agentName };
+  return { displayName, agentName, folder };
 }
 
 export async function run(args: string[]): Promise<void> {
-  const { displayName, agentName } = parseArgs(args);
+  const { displayName, agentName, folder } = parseArgs(args);
 
   const projectRoot = process.cwd();
   const script = path.join(projectRoot, 'scripts', 'init-cli-agent.ts');
 
   const scriptArgs = ['exec', 'tsx', script, '--display-name', displayName];
   if (agentName) scriptArgs.push('--agent-name', agentName);
+  if (folder) scriptArgs.push('--folder', folder);
 
   log.info('Invoking init-cli-agent', { displayName, agentName });
 

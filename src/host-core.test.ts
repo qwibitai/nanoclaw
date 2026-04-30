@@ -173,6 +173,43 @@ describe('session manager', () => {
 
     expect(getSession(session.id)!.last_active).not.toBeNull();
   });
+
+  it('should refuse path-traversal in attachment filenames', () => {
+    // Regression: attachment.name comes from untrusted senders (E2EE-protected
+    // chat platforms can't sanitize it server-side). Without the guard, a
+    // `../../../tmp/pwned` filename escapes the inbox dir and writes anywhere
+    // the host process can reach.
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    const inboxBase = path.join(sessionDir('ag-1', session.id), 'inbox');
+    const escapeTarget = path.join('/tmp', 'nanoclaw-traversal-canary');
+    if (fs.existsSync(escapeTarget)) fs.rmSync(escapeTarget);
+
+    writeSessionMessage('ag-1', session.id, {
+      id: 'msg-attack',
+      kind: 'chat',
+      timestamp: now(),
+      content: JSON.stringify({
+        text: 'pwn',
+        attachments: [
+          {
+            type: 'document',
+            name: '../../../../../../../../tmp/nanoclaw-traversal-canary',
+            data: Buffer.from('owned').toString('base64'),
+          },
+        ],
+      }),
+    });
+
+    expect(fs.existsSync(escapeTarget)).toBe(false);
+    // The bytes should still land — under a synthesized safe name inside the
+    // inbox — so the agent doesn't lose data on a malicious filename.
+    const inboxDir = path.join(inboxBase, 'msg-attack');
+    expect(fs.existsSync(inboxDir)).toBe(true);
+    const written = fs.readdirSync(inboxDir);
+    expect(written).toHaveLength(1);
+    expect(written[0]).not.toContain('/');
+    expect(written[0]).not.toContain('..');
+  });
 });
 
 describe('router', () => {

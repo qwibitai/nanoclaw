@@ -18,6 +18,8 @@ import { SelectPrompt } from '@clack/core';
 import { isCancel } from '@clack/prompts';
 import { styleText } from 'node:util';
 
+import { brandBody } from './theme.js';
+
 const BULLET_ACTIVE = '●';
 const BULLET_INACTIVE = '○';
 const BAR = '│';
@@ -95,7 +97,7 @@ export function brightSelect<T>(
         const shown =
           st === 'cancel'
             ? styleText(['strikethrough', 'dim'], selected)
-            : styleText('dim', selected);
+            : styleText('dim', brandBody(selected));
         lines.push(`${grayBar}  ${shown}`);
         return lines.join('\n');
       }
@@ -104,11 +106,12 @@ export function brightSelect<T>(
       options.forEach((opt, idx) => {
         const label = opt.label ?? String(opt.value);
         const hint = opt.hint ? ` ${styleText('dim', `(${opt.hint})`)}` : '';
-        const marker =
-          idx === cursor
-            ? styleText('green', BULLET_ACTIVE)
-            : styleText('dim', BULLET_INACTIVE);
-        lines.push(`${bar}  ${marker} ${label}${hint}`);
+        const isActive = idx === cursor;
+        const marker = isActive
+          ? styleText('green', BULLET_ACTIVE)
+          : styleText('dim', BULLET_INACTIVE);
+        const shownLabel = isActive ? brandBody(label) : label;
+        lines.push(`${bar}  ${marker} ${shownLabel}${hint}`);
       });
       lines.push(styleText(color, CAP_BOT));
       return lines.join('\n');

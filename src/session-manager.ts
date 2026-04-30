@@ -14,6 +14,8 @@ import type Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
+import { deriveAttachmentName } from './attachment-naming.js';
+import { isSafeAttachmentName } from './attachment-safety.js';
 import type { OutboundFile } from './channels/adapter.js';
 import { DATA_DIR } from './config.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
@@ -252,11 +254,26 @@ function extractAttachmentFiles(
   let changed = false;
   for (const att of attachments) {
     if (typeof att.data === 'string') {
+      // The name field is attacker-controlled: chat platforms with E2E
+      // attachment encryption (WhatsApp, Matrix) cannot sanitize filename
+      // server-side, and other adapters pass att.name through raw. Without
+      // this guard, `path.join(inboxDir, '../../...')` writes anywhere the
+      // host process has fs permission — see Signal Desktop's Nov 2025
+      // attachment-fileName advisory for the same archetype.
+      const rawName = deriveAttachmentName(att);
+      const filename = isSafeAttachmentName(rawName) ? rawName : `attachment-${Date.now()}`;
+      if (filename !== rawName) {
+        log.warn('Refused unsafe attachment filename — would escape inbox', {
+          messageId,
+          rawName,
+          replacement: filename,
+        });
+      }
       const inboxDir = path.join(sessionDir(agentGroupId, sessionId), 'inbox', messageId);
       fs.mkdirSync(inboxDir, { recursive: true });
-      const filename = (att.name as string) || `attachment-${Date.now()}`;
       const filePath = path.join(inboxDir, filename);
       fs.writeFileSync(filePath, Buffer.from(att.data as string, 'base64'));
+      att.name = filename;
       att.localPath = `inbox/${messageId}/${filename}`;
       delete att.data;
       changed = true;
@@ -356,6 +373,11 @@ export function readOutboxFiles(
   if (!fs.existsSync(outboxDir)) return undefined;
   const files: OutboundFile[] = [];
   for (const filename of filenames) {
+    // Reject any name that isn't a bare basename before touching the filesystem.
+    if (!isSafeAttachmentName(filename)) {
+      log.warn('Refused unsafe outbox filename — would escape outbox', { messageId, filename });
+      continue;
+    }
     const filePath = path.join(outboxDir, filename);
     if (fs.existsSync(filePath)) {
       files.push({ filename, data: fs.readFileSync(filePath) });

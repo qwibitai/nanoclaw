@@ -17,7 +17,7 @@ import * as p from '@clack/prompts';
 import k from 'kleur';
 
 import { isValidTimezone } from '../../src/timezone.js';
-import { fitToWidth } from './theme.js';
+import { fitToWidth, fmtDuration } from './theme.js';
 
 export function claudeCliAvailable(): boolean {
   try {
@@ -44,18 +44,16 @@ export async function resolveTimezoneViaClaude(
   const s = p.spinner();
   const start = Date.now();
   const label = 'Looking up that timezone…';
-  s.start(fitToWidth(label, ' (999s)'));
+  s.start(fitToWidth(label, ' (99m 59s)'));
   const tick = setInterval(() => {
-    const elapsed = Math.round((Date.now() - start) / 1000);
-    const suffix = ` (${elapsed}s)`;
+    const suffix = ` (${fmtDuration(Date.now() - start)})`;
     s.message(`${fitToWidth(label, suffix)}${k.dim(suffix)}`);
   }, 1000);
 
   const reply = await queryClaude(prompt);
 
   clearInterval(tick);
-  const elapsed = Math.round((Date.now() - start) / 1000);
-  const suffix = ` (${elapsed}s)`;
+  const suffix = ` (${fmtDuration(Date.now() - start)})`;
 
   const resolved = reply ? extractTimezone(reply) : null;
   if (resolved) {

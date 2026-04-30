@@ -58,7 +58,7 @@ const activeContainers = new Map<string, { process: ChildProcess; containerName:
  * a duplicate container against the same session directory, producing
  * racy double-replies.
  */
-const wakePromises = new Map<string, Promise<void>>();
+const wakePromises = new Map<string, Promise<boolean>>();
 
 export function getActiveContainerCount(): number {
   return activeContainers.size;
@@ -73,20 +73,32 @@ export function isContainerRunning(sessionId: string): boolean {
  * (the in-flight wake promise is reused).
  *
  * The container runs the v2 agent-runner which polls the session DB.
+ *
+ * Contract: never throws. Returns `true` on successful spawn, `false` on
+ * transient spawn failure (e.g. OneCLI gateway unreachable). Callers don't
+ * need to wrap — the inbound row stays pending and host-sweep retries on
+ * its next tick. Callers that care (e.g. the router's typing indicator)
+ * can branch on the boolean.
  */
-export function wakeContainer(session: Session): Promise<void> {
+export function wakeContainer(session: Session): Promise<boolean> {
   if (activeContainers.has(session.id)) {
     log.debug('Container already running', { sessionId: session.id });
-    return Promise.resolve();
+    return Promise.resolve(true);
   }
   const existing = wakePromises.get(session.id);
   if (existing) {
     log.debug('Container wake already in-flight — joining existing promise', { sessionId: session.id });
     return existing;
   }
-  const promise = spawnContainer(session).finally(() => {
-    wakePromises.delete(session.id);
-  });
+  const promise = spawnContainer(session)
+    .then(() => true)
+    .catch((err) => {
+      log.warn('wakeContainer failed — host-sweep will retry', { sessionId: session.id, err });
+      return false;
+    })
+    .finally(() => {
+      wakePromises.delete(session.id);
+    });
   wakePromises.set(session.id, promise);
   return promise;
 }
@@ -435,20 +447,18 @@ async function buildContainerArgs(
   }
 
   // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls
-  // are routed through the agent vault for credential injection.
-  try {
-    if (agentIdentifier) {
-      await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
-    }
-    const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
-    if (onecliApplied) {
-      log.info('OneCLI gateway applied', { containerName });
-    } else {
-      log.warn('OneCLI gateway not applied — container will have no credentials', { containerName });
-    }
-  } catch (err) {
-    log.warn('OneCLI gateway error — container will have no credentials', { containerName, err });
+  // are routed through the agent vault for credential injection. Treated as
+  // a transient hard failure: if we can't wire the gateway, we don't spawn.
+  // The caller (router or host-sweep) catches the throw, leaves the inbound
+  // message pending, and the next sweep tick retries.
+  if (agentIdentifier) {
+    await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
   }
+  const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
+  if (!onecliApplied) {
+    throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
+  }
+  log.info('OneCLI gateway applied', { containerName });
 
   // Host gateway
   args.push(...hostGatewayArgs());

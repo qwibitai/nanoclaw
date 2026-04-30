@@ -20,7 +20,7 @@ import k from 'kleur';
 import * as setupLog from '../logs.js';
 import { offerClaudeAssist } from './claude-assist.js';
 import { emit as phEmit } from './diagnostics.js';
-import { fitToWidth } from './theme.js';
+import { brandBody, fitToWidth, fmtDuration } from './theme.js';
 
 export type Fields = Record<string, string>;
 export type Block = { type: string; fields: Fields };
@@ -307,18 +307,16 @@ async function runUnderSpinner<
 ): Promise<T> {
   const s = p.spinner();
   const start = Date.now();
-  s.start(fitToWidth(labels.running, ' (999s)'));
+  s.start(fitToWidth(labels.running, ' (99m 59s)'));
   const tick = setInterval(() => {
-    const elapsed = Math.round((Date.now() - start) / 1000);
-    const suffix = ` (${elapsed}s)`;
+    const suffix = ` (${fmtDuration(Date.now() - start)})`;
     s.message(`${fitToWidth(labels.running, suffix)}${k.dim(suffix)}`);
   }, 1000);
 
   const result = await work();
 
   clearInterval(tick);
-  const elapsed = Math.round((Date.now() - start) / 1000);
-  const suffix = ` (${elapsed}s)`;
+  const suffix = ` (${fmtDuration(Date.now() - start)})`;
   if (result.ok) {
     const isSkipped = result.terminal?.fields.STATUS === 'skipped';
     const msg = isSkipped && labels.skipped ? labels.skipped : labels.done;
@@ -390,7 +388,7 @@ export async function fail(
       const skipList = [
         ...new Set([...existingSkip, ...setupLog.completedStepNames()]),
       ].join(',');
-      p.log.step(`Retrying from ${stepName}…`);
+      p.log.step(brandBody(`Retrying from ${stepName}…`));
       const result = spawnSync('pnpm', ['--silent', 'run', 'setup:auto'], {
         stdio: 'inherit',
         env: { ...process.env, NANOCLAW_SKIP: skipList },
