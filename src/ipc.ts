@@ -5,8 +5,10 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
+import { createChatRoom, getChatRoom } from './chat-db.js';
+import { broadcastRooms } from './chat-server/state.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
-import { isValidGroupFolder } from './group-folder.js';
+import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -171,6 +173,7 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    instructions?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -375,6 +378,42 @@ export async function processTaskIpc(
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
         });
+        // If the agent passed bot instructions, seed the new group's CLAUDE.md.
+        // The new group's folder is created lazily on first message; create it
+        // now so the file persists.
+        if (typeof data.instructions === 'string' && data.instructions.trim()) {
+          try {
+            const groupDir = resolveGroupFolderPath(data.folder);
+            fs.mkdirSync(groupDir, { recursive: true });
+            const mdPath = path.join(groupDir, 'CLAUDE.md');
+            if (!fs.existsSync(mdPath)) {
+              fs.writeFileSync(mdPath, data.instructions);
+            }
+          } catch (err) {
+            logger.warn(
+              { folder: data.folder, err: String(err) },
+              'Failed to write initial CLAUDE.md for new group',
+            );
+          }
+        }
+        // Webchat rooms (JID `chat:<id>`) need a corresponding chat_rooms row
+        // so the PWA renders them. Idempotent: createChatRoom is INSERT OR IGNORE.
+        if (data.jid.startsWith('chat:')) {
+          const roomId = data.jid.slice('chat:'.length);
+          if (roomId && !getChatRoom(roomId)) {
+            try {
+              createChatRoom(roomId, data.name);
+              // Push the updated room list to all connected PWA clients so
+              // the sidebar updates without requiring a manual refresh.
+              broadcastRooms();
+            } catch (err) {
+              logger.warn(
+                { roomId, err: String(err) },
+                'Failed to create chat room for webchat JID',
+              );
+            }
+          }
+        }
       } else {
         logger.warn(
           { data },

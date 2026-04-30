@@ -248,12 +248,17 @@ server.tool(
   'register_group',
   `Register a new chat/group so the agent can respond to messages there. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.`,
+Use available_groups.json to find the JID for groups that already exist on a messaging platform (WhatsApp, Telegram, Discord, Slack). For webchat (the embedded PWA), no JID lookup is needed — pick a slug and pass "chat:<slug>" as the JID; the host will also create the underlying chat room so the PWA renders it immediately.
+
+The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general", "chat_code-review"). Use lowercase with hyphens for the group name part.
+
+Pass \`instructions\` to seed the new bot's CLAUDE.md (its persona, capabilities, formatting). For webchat rooms, ALWAYS ask the user about the room's purpose (what kind of help, formatting preferences, any guardrails) before calling — do not register a webchat room without instructions. For external-platform groups where the user hasn't provided context, you may skip instructions and the existing main bot's persona will be used until the user adds them.`,
   {
-    jid: z.string().describe('The chat JID (e.g., "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456")'),
-    name: z.string().describe('Display name for the group'),
-    folder: z.string().describe('Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")'),
+    jid: z.string().describe('The chat JID. Examples: "120363336345536173@g.us" (WhatsApp), "tg:-1001234567890" (Telegram), "dc:1234567890123456" (Discord), "chat:code-review" (webchat — pick any slug)'),
+    name: z.string().describe('Display name for the group (e.g., "Code Review")'),
+    folder: z.string().describe('Channel-prefixed folder name (e.g., "whatsapp_family-chat", "chat_code-review")'),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
+    instructions: z.string().optional().describe('Optional CLAUDE.md content for the new group: bot persona, capabilities, formatting rules, scope. Required for webchat rooms — ask the user first if they did not specify.'),
   },
   async (args) => {
     if (!isMain) {
@@ -269,6 +274,7 @@ Use available_groups.json to find the JID for a group. The folder name must be c
       name: args.name,
       folder: args.folder,
       trigger: args.trigger,
+      instructions: args.instructions,
       timestamp: new Date().toISOString(),
     };
 

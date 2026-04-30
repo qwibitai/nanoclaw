@@ -149,13 +149,35 @@ Fields:
 
 ### Adding a Group
 
-1. Query the database to find the group's JID
-2. Use the `register_group` MCP tool with the JID, name, folder, and trigger
-3. Optionally include `containerConfig` for additional mounts
-4. The group folder is created automatically: `/workspace/project/groups/{folder-name}/`
-5. Optionally create an initial `CLAUDE.md` for the group
+**Default path — webchat rooms (`chat:<slug>` JIDs).** When the user asks to "create a room", "create a channel", "make a new room", etc., they almost always mean a new webchat room in the PWA. **Do not ask which platform.** **Do not look anything up in `available_groups.json`.** **Do not ask about a "channel prefix"** — for webchat the folder prefix is always `chat_`.
+
+Before registering, you MUST ask the user about the new bot's instructions if they didn't already specify them. A bare "create a room called X" is not enough — every webchat room needs a CLAUDE.md so the bot knows what it's for. Ask succinctly:
+
+> "What should the *<Room Name>* bot help with? Anything specific about its tone, scope, or formatting? (Or 'just like Andy' to copy the main bot's persona.)"
+
+If the user says "just like Andy" or similar, use the main bot's persona by passing the contents of your own CLAUDE.md (or a short summary of it) as the `instructions` argument. If they give specifics, fold those into a short CLAUDE.md (purpose, tone, any guardrails or always/never rules, formatting if they care). Keep the seeded CLAUDE.md tight — under ~30 lines is plenty.
+
+Then call `register_group` with:
+   - `jid: "chat:<slug>"` (e.g., `chat:code-review` — slug is lowercase, hyphens, derived from the room name)
+   - `name: "<Display Name>"` (e.g., `"Code Review"`)
+   - `folder: "chat_<slug>"` (e.g., `chat_code-review`)
+   - `trigger: "@<AssistantName>"` (use the same trigger as the main group unless the user says otherwise)
+   - `instructions: "<seeded CLAUDE.md>"` (the persona/scope/formatting you composed from the user's answer)
+
+The host creates the routing entry, the chat-db row, the group folder, and writes the CLAUDE.md — so the PWA picks up the new room without a refresh, and the new bot starts with the persona you set.
+
+The only time you need to ask additional clarifying questions is if the room name doesn't yield an obvious slug, or if they explicitly mention an external messaging platform (WhatsApp, Telegram, Slack, Discord) — in which case use the external-platform path below.
+
+**Alternate path — existing groups on external messaging platforms** (only when the user explicitly mentions WhatsApp / Telegram / Slack / Discord):
+
+1. Query `available_groups.json` to find the group's JID (or the database fallback above).
+2. Use the `register_group` MCP tool with the JID, name, channel-prefixed folder (`whatsapp_*`, `telegram_*`, `discord_*`, `slack_*`), and trigger.
+3. Optionally include `containerConfig` for additional mounts.
+4. The group folder is created automatically at `/workspace/project/groups/{folder-name}/`.
+5. Optionally create an initial `CLAUDE.md` for the group.
 
 Folder naming convention — channel prefix with underscore separator:
+- Webchat "Code Review" → `chat_code-review` (JID `chat:code-review`) — the default for "create a room"
 - WhatsApp "Family Chat" → `whatsapp_family-chat`
 - Telegram "Dev Team" → `telegram_dev-team`
 - Discord "General" → `discord_general`
