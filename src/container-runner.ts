@@ -485,6 +485,12 @@ async function buildContainerArgs(
   if (process.env.ACURAST_SIGNER_TOKEN) {
     args.push('-e', `ACURAST_SIGNER_TOKEN=${process.env.ACURAST_SIGNER_TOKEN}`);
   }
+  if (process.env.VIKUNJA_URL) {
+    args.push('-e', `VIKUNJA_URL=${process.env.VIKUNJA_URL}`);
+  }
+  if (process.env.VIKUNJA_TOKEN) {
+    args.push('-e', `VIKUNJA_TOKEN=${process.env.VIKUNJA_TOKEN}`);
+  }
 
   // Attach to a custom Docker network when configured (e.g. shared
   // network with Ollama, Home Assistant, etc.). Falls back to Docker's
