@@ -23,6 +23,8 @@ import {
   sessionDir,
   inboundDbPath,
   outboundDbPath,
+  readOutboxFiles,
+  clearOutbox,
 } from './session-manager.js';
 import { getSession, findSession } from './db/sessions.js';
 import type { InboundEvent } from './channels/adapter.js';
@@ -106,6 +108,147 @@ describe('session manager', () => {
     expect(outTables.map((t) => t.name)).toContain('messages_out');
     expect(outTables.map((t) => t.name)).toContain('processing_ack');
     outDb.close();
+  });
+
+  it('should reject outbound attachment filenames that escape the message outbox', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const dir = sessionDir('ag-1', 'sess-test');
+    const msgOutbox = path.join(dir, 'outbox', 'msg-1');
+    fs.mkdirSync(msgOutbox, { recursive: true });
+
+    const outside = path.join(TEST_DIR, 'outside.txt');
+    fs.writeFileSync(outside, 'outside secret');
+
+    expect(readOutboxFiles('ag-1', 'sess-test', 'msg-1', ['../../../../../outside.txt'])).toBeUndefined();
+  });
+
+  it('should reject outbound attachment symlinks that escape the message outbox', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const dir = sessionDir('ag-1', 'sess-test');
+    const msgOutbox = path.join(dir, 'outbox', 'msg-1');
+    fs.mkdirSync(msgOutbox, { recursive: true });
+
+    const outside = path.join(TEST_DIR, 'outside.txt');
+    fs.writeFileSync(outside, 'outside secret');
+    fs.symlinkSync('../../../../../outside.txt', path.join(msgOutbox, 'safe-name.txt'));
+
+    expect(readOutboxFiles('ag-1', 'sess-test', 'msg-1', ['safe-name.txt'])).toBeUndefined();
+  });
+
+  it('should not recursively delete outside the outbox for unsafe message ids', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const victimDir = path.join(TEST_DIR, 'victim-dir');
+    fs.mkdirSync(victimDir, { recursive: true });
+    fs.writeFileSync(path.join(victimDir, 'keep.txt'), 'do not delete');
+
+    clearOutbox('ag-1', 'sess-test', '../../../../victim-dir');
+
+    expect(fs.existsSync(path.join(victimDir, 'keep.txt'))).toBe(true);
+  });
+
+  it('should still read and clear normal basename outbox files', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const dir = sessionDir('ag-1', 'sess-test');
+    const msgOutbox = path.join(dir, 'outbox', 'msg-1');
+    fs.mkdirSync(msgOutbox, { recursive: true });
+    fs.writeFileSync(path.join(msgOutbox, 'result.txt'), 'ok');
+
+    const files = readOutboxFiles('ag-1', 'sess-test', 'msg-1', ['result.txt']);
+    expect(files).toHaveLength(1);
+    expect(files?.[0]?.filename).toBe('result.txt');
+    expect(files?.[0]?.data.toString()).toBe('ok');
+
+    clearOutbox('ag-1', 'sess-test', 'msg-1');
+    expect(fs.existsSync(msgOutbox)).toBe(false);
+  });
+
+  it('should reject inbound attachment writes through a pre-placed symlinked inbox dir', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+
+    // The container has /workspace write access, so it can pre create
+    // inbox/<msgId> as a symlink to escape.
+    const inboxRoot = path.join(sessionDir('ag-1', session.id), 'inbox');
+    fs.mkdirSync(inboxRoot, { recursive: true });
+    const evilTarget = path.join(TEST_DIR, 'evil-target');
+    fs.mkdirSync(evilTarget, { recursive: true });
+    fs.symlinkSync(evilTarget, path.join(inboxRoot, 'msg-evil'));
+
+    writeSessionMessage('ag-1', session.id, {
+      id: 'msg-evil',
+      kind: 'chat',
+      timestamp: now(),
+      content: JSON.stringify({
+        text: 'evil',
+        attachments: [{ name: 'photo.png', data: Buffer.from('PNGBYTES').toString('base64'), size: 8 }],
+      }),
+    });
+
+    expect(fs.existsSync(path.join(evilTarget, 'photo.png'))).toBe(false);
+  });
+
+  it('should refuse to follow a pre-existing symlink at the inbound attachment path', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+
+    // The container pre creates inbox/<msgId>/photo.png as a symlink to a
+    // host file. Without the wx flag, writeFileSync would follow it.
+    const inboxDir = path.join(sessionDir('ag-1', session.id), 'inbox', 'msg-sym');
+    fs.mkdirSync(inboxDir, { recursive: true });
+    const outside = path.join(TEST_DIR, 'outside.txt');
+    fs.writeFileSync(outside, 'ORIGINAL');
+    fs.symlinkSync(outside, path.join(inboxDir, 'photo.png'));
+
+    writeSessionMessage('ag-1', session.id, {
+      id: 'msg-sym',
+      kind: 'chat',
+      timestamp: now(),
+      content: JSON.stringify({
+        text: 'sym',
+        attachments: [{ name: 'photo.png', data: Buffer.from('PNGBYTES').toString('base64'), size: 8 }],
+      }),
+    });
+
+    expect(fs.readFileSync(outside, 'utf-8')).toBe('ORIGINAL');
+  });
+
+  it('should reject inbound attachments when messageId is unsafe', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+
+    writeSessionMessage('ag-1', session.id, {
+      id: '../../escape',
+      kind: 'chat',
+      timestamp: now(),
+      content: JSON.stringify({
+        text: 'msgid',
+        attachments: [{ name: 'photo.png', data: Buffer.from('PNGBYTES').toString('base64'), size: 8 }],
+      }),
+    });
+
+    const inboxRoot = path.join(sessionDir('ag-1', session.id), 'inbox');
+    if (fs.existsSync(inboxRoot)) {
+      expect(fs.readdirSync(inboxRoot)).toEqual([]);
+    }
+  });
+
+  it('should still save inbound attachments with safe basenames', () => {
+    initSessionFolder('ag-1', 'sess-test');
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+
+    writeSessionMessage('ag-1', session.id, {
+      id: 'msg-ok',
+      kind: 'chat',
+      timestamp: now(),
+      content: JSON.stringify({
+        text: 'ok',
+        attachments: [{ name: 'photo.png', data: Buffer.from('PNGBYTES').toString('base64'), size: 8 }],
+      }),
+    });
+
+    const expected = path.join(sessionDir('ag-1', session.id), 'inbox', 'msg-ok', 'photo.png');
+    expect(fs.existsSync(expected)).toBe(true);
+    expect(fs.readFileSync(expected, 'utf-8')).toBe('PNGBYTES');
   });
 
   it('should resolve to existing session (shared mode)', () => {
