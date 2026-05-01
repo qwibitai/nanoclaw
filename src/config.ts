@@ -151,7 +151,7 @@ export const WEB_CHANNEL_ORIGINS = (
 // --- CLI Runner (host Claude Code via Max subscription) ---
 export const CLI_ENABLED = process.env.CLI_ENABLED !== 'false'; // default on
 export const CLI_FALLBACK_ENABLED = process.env.CLI_FALLBACK_ENABLED === 'true'; // default OFF — prevents silent credit burn
-export const CLI_TIMEOUT = parseInt(process.env.CLI_TIMEOUT || '600000', 10); // 10 min
+export const CLI_TIMEOUT = parseInt(process.env.CLI_TIMEOUT || '1800000', 10); // 30 min — heavy tasks (vending scrape, lead scrape, marketplace renew) routinely exceed 10 min
 export const CLI_MODEL = process.env.CLI_MODEL || 'claude-sonnet-4-6'; // Sonnet free with Max
 export const CLI_MCP_CONFIG = path.resolve(PROJECT_ROOT, 'cowork-mcp.json');
 
