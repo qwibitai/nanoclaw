@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 
 import { registerProvider } from './provider-registry.js';
+import { resolveClaudeMdIncludes } from './claude-md.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
 
@@ -17,7 +18,10 @@ const SESSION_STATUS_RETRY_ERROR_AFTER = 3;
 const STALE_SESSION_RE =
   /no conversation found|ENOENT.*\.jsonl|session.*not found|NotFoundError|connection reset|ECONNRESET|404|event timeout/i;
 
-function spawnOpencodeServer(config: Record<string, unknown>, timeoutMs = 10_000): Promise<{ url: string; proc: ChildProcess }> {
+function spawnOpencodeServer(
+  config: Record<string, unknown>,
+  timeoutMs = 10_000,
+): Promise<{ url: string; proc: ChildProcess }> {
   return new Promise((resolve, reject) => {
     const hostname = '127.0.0.1';
     const port = 4096;
@@ -62,19 +66,33 @@ function spawnOpencodeServer(config: Record<string, unknown>, timeoutMs = 10_000
   });
 }
 
+function readClaudeMdFileForPrompt(filePath: string): string | undefined {
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return undefined;
+  }
+
+  return resolveClaudeMdIncludes(fs.readFileSync(filePath, 'utf-8'), path.dirname(filePath));
+}
+
 function readClaudeMdForPrompt(): string | undefined {
   const groupPath = '/workspace/agent/CLAUDE.md';
   const globalPath = '/workspace/global/CLAUDE.md';
-  let content = '';
-  if (fs.existsSync(groupPath)) {
-    content += fs.readFileSync(groupPath, 'utf-8');
+  const chunks: string[] = [];
+
+  const groupContent = readClaudeMdFileForPrompt(groupPath);
+  if (groupContent) {
+    chunks.push(groupContent);
   }
+
   const isMain = process.env.NANOCLAW_IS_MAIN === '1';
-  if (!isMain && fs.existsSync(globalPath)) {
-    if (content) content += '\n\n---\n\n';
-    content += fs.readFileSync(globalPath, 'utf-8');
+  if (!isMain) {
+    const globalContent = readClaudeMdFileForPrompt(globalPath);
+    if (globalContent) {
+      chunks.push(globalContent);
+    }
   }
-  return content || undefined;
+
+  return chunks.length > 0 ? chunks.join('\n\n---\n\n') : undefined;
 }
 
 function wrapPromptWithContext(text: string, systemInstructions?: string): string {
