@@ -4,13 +4,14 @@
 import fs from 'fs';
 import path from 'path';
 
+import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import { registerProvider } from './provider-registry.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 import {
   type AppServer,
   type JsonRpcNotification,
+  type JsonRpcServerRequest,
   attachGeminiAutoApproval,
-  createGeminiConfigOverrides,
   initializeGeminiAppServer,
   killGeminiAppServer,
   spawnGeminiAppServer,
@@ -71,14 +72,17 @@ function composeBaseInstructions(promptAddendum: string | undefined): string | u
 // ── Provider ────────────────────────────────────────────────────────────────
 
 export class GeminiProvider implements AgentProvider {
-  readonly supportsNativeSlashCommands = false;
+  readonly supportsNativeSlashCommands = true;
 
   private readonly mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
   private readonly model: string;
 
   constructor(options: ProviderOptions = {}) {
     this.mcpServers = options.mcpServers ?? {};
-    this.model = (options.env?.GEMINI_MODEL as string | undefined) ?? 'gemini-1.5-pro';
+    // 'auto' is the Gemini CLI recommended default, resolving to the best
+    // available model (typically Gemini 3 Pro). Other valid values include
+    // 'pro', 'flash', and specific versions like 'gemini-3-pro-preview'.
+    this.model = (options.env?.GEMINI_MODEL as string | undefined) ?? 'auto';
   }
 
   isSessionInvalid(err: unknown): boolean {
@@ -101,7 +105,7 @@ export class GeminiProvider implements AgentProvider {
 
     async function* gen(): AsyncGenerator<ProviderEvent> {
       writeGeminiMcpConfigToml(self.mcpServers);
-      const server = spawnGeminiAppServer(createGeminiConfigOverrides());
+      const server = spawnGeminiAppServer();
       attachGeminiAutoApproval(server);
 
       let sessionId: string | undefined = input.continuation;
@@ -192,26 +196,57 @@ async function* runOneTurn(
     const method = n.method;
     const params = n.params;
 
+    // Every inbound notification counts as activity for the poll-loop's
+    // idle timer — yield before any event-specific translation so even
+    // long tool executions keep the loop awake.
+    buffer.push({ type: 'activity' });
+
     if (method === 'session/update' && params.sessionId === sessionId) {
+      // Any progress update (chunks, status changes) means the tool that was
+      // in flight is either done or has produced output, so we clear the
+      // stuck tolerance.
+      clearContainerToolInFlight();
+
       const update = params.update as any;
       if (update.sessionUpdate === 'agent_message_chunk') {
         const chunk = update.content?.text;
         if (chunk) {
           resultText += chunk;
-          buffer.push({ type: 'activity' });
         }
       } else if (update.sessionUpdate === 'agent_thought_chunk') {
         const thought = update.content?.text;
         if (thought) {
           buffer.push({ type: 'progress', message: thought });
         }
+      } else if (update.sessionUpdate === 'status_changed') {
+        const status = update.status;
+        if (status) {
+          buffer.push({ type: 'progress', message: `status: ${status}` });
+        }
+      }
+    } else if (method === 'assistant/message_delta' || method === 'tool/call') {
+      // Official ACP event names.
+      // Every inbound update from the assistant also clears stuck tolerance.
+      clearContainerToolInFlight();
+
+      if (method === 'assistant/message_delta') {
+        const delta = params.delta as string;
+        if (delta) resultText += delta;
       }
     }
 
     kick();
   };
 
+  const approvalHandler = (req: JsonRpcServerRequest): void => {
+    if (req.method === 'item/commandExecution/requestApproval') {
+      const p = req.params as { command?: string; timeout?: number };
+      setContainerToolInFlight('Bash', p.timeout ?? null);
+    }
+  };
+
   server.notificationHandlers.push(handler);
+  server.serverRequestHandlers.push(approvalHandler);
 
   const timer = setTimeout(() => {
     turnState.error = new Error(`Turn timed out after ${TURN_TIMEOUT_MS}ms`);
@@ -259,9 +294,13 @@ async function* runOneTurn(
     yield { type: 'result', text: resultText || null };
   } finally {
     clearTimeout(timer);
+    clearContainerToolInFlight();
     const idx = server.notificationHandlers.indexOf(handler);
     if (idx >= 0) server.notificationHandlers.splice(idx, 1);
+    const aidx = server.serverRequestHandlers.indexOf(approvalHandler);
+    if (aidx >= 0) server.serverRequestHandlers.splice(aidx, 1);
   }
 }
+
 
 registerProvider('gemini', (opts) => new GeminiProvider(opts));

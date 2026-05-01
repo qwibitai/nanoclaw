@@ -85,7 +85,7 @@ export interface AppServer {
   serverRequestHandlers: ((r: JsonRpcServerRequest) => void)[];
 }
 
-export function spawnGeminiAppServer(configOverrides: string[] = []): AppServer {
+export function spawnGeminiAppServer(): AppServer {
   const args = ['--acp', '--skip-trust'];
   // The current Gemini CLI uses --acp for stdio JSON-RPC.
   // Legacy app-server command and -c flag are no longer supported.
@@ -218,7 +218,7 @@ export function killGeminiAppServer(server: AppServer): void {
 export function attachGeminiAutoApproval(server: AppServer): void {
   server.serverRequestHandlers.push((req) => {
     const method = req.method;
-    log(`[approval] ${method}`);
+    log(`[approval] ${method} params=${JSON.stringify(req.params)}`);
 
     switch (method) {
       case 'item/commandExecution/requestApproval':
@@ -231,6 +231,14 @@ export function attachGeminiAutoApproval(server: AppServer): void {
           scope: 'session',
         });
         break;
+      case 'session/request_permission': {
+        const options = (req.params as any).options || [];
+        const optionId = options.find((o: any) => o.optionId === 'proceed_always')?.optionId || 
+                         options.find((o: any) => o.optionId === 'proceed_once')?.optionId || 
+                         'accept';
+        sendGeminiResponse(server, req.id, { optionId });
+        break;
+      }
       case 'applyPatchApproval':
       case 'execCommandApproval':
         sendGeminiResponse(server, req.id, { decision: 'approved' });
@@ -266,7 +274,10 @@ export async function initializeGeminiAppServer(server: AppServer): Promise<void
     {
       protocolVersion: 1,
       clientInfo: { name: 'nanoclaw', version: '1.0.0' },
-      capabilities: { experimentalApi: false },
+      capabilities: {
+        streaming: true,
+        toolConfirmation: false,
+      },
     },
     INIT_TIMEOUT_MS,
   );
@@ -299,16 +310,18 @@ export async function startOrResumeGeminiSession(
       log(`Session loaded: ${sessionId}`);
       return sessionId;
     }
-    // If session not found, we fall through to new session
+    // Gemini sessions don't survive container restarts — session/load failure
+    // always means the session is gone. Fall through to a fresh session.
     log(`Session ${sessionId} load failed: ${resp.error.message}; starting fresh session.`);
   }
 
   log('Starting new session…');
   const resp = await sendGeminiRequest(server, 'session/new', {
+    sessionId: `nanoclaw-${Date.now()}`,
     model: params.model,
     cwd: params.cwd,
-    mcpServers: [], // We handle MCP via config.toml for now
-    instructions: params.baseInstructions,
+    mcpServers: [],
+    ...(params.baseInstructions ? { instructions: params.baseInstructions } : {}),
   });
   if (resp.error) throw new Error(`session/new failed: ${resp.error.message}`);
 
@@ -380,8 +393,4 @@ export function writeGeminiMcpConfigToml(servers: Record<string, GeminiMcpServer
 
   fs.writeFileSync(configTomlPath, lines.join('\n'));
   log(`Wrote MCP config.toml (${Object.keys(servers).length} server(s))`);
-}
-
-export function createGeminiConfigOverrides(): string[] {
-  return ['features.use_linux_sandbox_bwrap=false'];
 }

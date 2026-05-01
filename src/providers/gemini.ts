@@ -13,28 +13,54 @@
 import fs from 'fs';
 import path from 'path';
 
+import { log } from '../log.js';
 import { registerProviderContainerConfig } from './provider-container-registry.js';
+
+log.info('Loading Gemini provider host config');
 
 registerProviderContainerConfig('gemini', (ctx) => {
   const geminiDir = path.join(ctx.sessionDir, 'gemini');
   fs.mkdirSync(geminiDir, { recursive: true });
 
-  // Copy essential auth/config files from ~/.gemini into the per-session dir.
-  // We avoid copying the whole directory to prevent leaking host session
-  // history, project metadata, or unrelated state into the container.
+  // Determine the auth method and copy essential files.
   const hostHome = ctx.hostEnv.HOME;
+  let authMethod = 'api-key';
+
   if (hostHome) {
     const hostGemini = path.join(hostHome, '.gemini');
     if (fs.existsSync(hostGemini)) {
-      const AUTH_FILES = ['oauth_creds.json', 'google_accounts.json', 'settings.json', 'installation_id', 'state.json'];
+      // oauth_creds.json & google_accounts.json: primary authentication
+      // installation_id: hardware-linked identity (often required by the API)
+      // projects.json: GCA/Vertex project selection state
+      const AUTH_FILES = ['oauth_creds.json', 'google_accounts.json', 'installation_id', 'projects.json'];
+      let hasOauth = false;
       for (const file of AUTH_FILES) {
         const src = path.join(hostGemini, file);
         if (fs.existsSync(src)) {
           fs.copyFileSync(src, path.join(geminiDir, file));
+          if (file === 'oauth_creds.json') hasOauth = true;
         }
+      }
+
+      // Favor OAuth if credentials exist and no API key is explicitly provided
+      if (hasOauth && !ctx.hostEnv.GEMINI_API_KEY && !ctx.hostEnv.GOOGLE_API_KEY) {
+        authMethod = 'oauth-personal';
       }
     }
   }
+
+  // Always generate a clean settings.json for the container. This ensures
+  // we use the correct auth method without leaking host-side MCP servers,
+  // editor preferences, or other personal settings.
+  const settings = {
+    security: {
+      auth: {
+        selectedType: authMethod,
+      },
+    },
+  };
+  fs.writeFileSync(path.join(geminiDir, 'settings.json'), JSON.stringify(settings, null, 2));
+  log.info('Gemini session auth initialized', { sessionDir: ctx.sessionDir, authMethod });
 
   const env: Record<string, string> = {};
   const VARS = [
@@ -51,22 +77,17 @@ registerProviderContainerConfig('gemini', (ctx) => {
     if (value) env[key] = value;
   }
 
-  return {
-    mounts: [{ hostPath: geminiDir, containerPath: '/home/node/.gemini', readonly: false }],
-    env,
-  };
+  const mounts: { hostPath: string; containerPath: string; readonly: boolean }[] = [
+    { hostPath: geminiDir, containerPath: '/home/node/.gemini', readonly: false },
+  ];
+
+  // Mount container skills into Gemini's user-level skills directory so the
+  // agent picks them up the same way Claude agents do via .claude-fragments.
+  const skillsHostPath = path.join(process.cwd(), 'container', 'skills');
+  if (fs.existsSync(skillsHostPath)) {
+    mounts.push({ hostPath: skillsHostPath, containerPath: '/home/node/.gemini/skills', readonly: true });
+  }
+
+  return { mounts, env };
 });
 
-function copyRecursiveSync(src: string, dest: string) {
-  const exists = fs.existsSync(src);
-  const stats = exists && fs.statSync(src);
-  const isDirectory = exists && stats && stats.isDirectory();
-  if (isDirectory) {
-    if (!fs.existsSync(dest)) fs.mkdirSync(dest);
-    fs.readdirSync(src).forEach((childItemName) => {
-      copyRecursiveSync(path.join(src, childItemName), path.join(dest, childItemName));
-    });
-  } else {
-    fs.copyFileSync(src, dest);
-  }
-}
