@@ -168,6 +168,34 @@ git log upstream/main..HEAD --oneline
 
 Show the output and wait for approval. Installation-specific files (group files, .claude/settings.json, local configs) should not be included.
 
+## Coding Standards (Biome-enforced)
+
+This project uses **Biome** for linting and formatting. Rules are enforced on pre-commit and must pass before every commit.
+
+**ERROR — never violate:**
+- No `any` type — use `unknown` + type guard instead
+- No `var` — always `const` or `let`
+- No unused variables or imports
+- No `eval()`
+- No fallthrough in switch statements
+- No async promise executor
+
+**WARNING — avoid in new code:**
+- No non-null assertions (`!`) — use type guards
+- No `console.log` in `src/` — use `log` from `./log.js`
+- No parameter reassignment
+- No explicit `any` in new code (existing code grandfathered)
+
+**Style:**
+- Single quotes, 2-space indent, 100 char line width, trailing commas
+- Use template literals over string concatenation
+- Use Node.js import protocol (`node:fs` etc.) for built-ins
+
+**After writing or modifying code in `src/tribunal/`:**
+1. Run `pnpm run lint:fix` to auto-fix Biome issues
+2. Run `pnpm run typecheck` to verify types
+3. Run `pnpm test` to verify tests pass
+
 ## Development
 
 Run commands directly — don't tell the user to run them.
