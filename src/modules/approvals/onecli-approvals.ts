@@ -21,7 +21,7 @@ import { OneCLI, type ApprovalRequest, type ManualApprovalHandle } from '@onecli
 
 import { pickApprovalDelivery, pickApprover } from './primitive.js';
 import { ONECLI_API_KEY, ONECLI_URL } from '../../config.js';
-import { getAgentGroup } from '../../db/agent-groups.js';
+import { resolveAgentGroupByOneCliIdentifier } from '../../onecli-agent-identifier.js';
 import {
   createPendingApproval,
   deletePendingApproval,
@@ -114,9 +114,17 @@ async function handleRequest(request: ApprovalRequest): Promise<Decision> {
   if (!adapterRef) return 'deny';
 
   // Originating agent group is carried on the request via OneCLI's agent
-  // identifier (set by container-runner.ts to agentGroup.id). Use it as
-  // the scope for approver selection: admin @ group → global admin → owner.
-  const originGroup = request.agent.externalId ? getAgentGroup(request.agent.externalId) : undefined;
+  // identifier. Resolve it back to the database id for scoped approver selection:
+  // admin @ group → global admin → owner.
+  const originGroup = request.agent.externalId
+    ? resolveAgentGroupByOneCliIdentifier(request.agent.externalId)
+    : undefined;
+  if (request.agent.externalId && !originGroup) {
+    log.warn('OneCLI approval agent identifier did not resolve to a unique agent group', {
+      id: request.id,
+      agent: request.agent.externalId,
+    });
+  }
   const agentGroupId = originGroup?.id ?? null;
   const approvers = pickApprover(agentGroupId);
   if (approvers.length === 0) {
