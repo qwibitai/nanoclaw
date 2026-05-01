@@ -13,6 +13,7 @@ import { migration013 } from './013-approval-render-metadata.js';
 import { moduleApprovalsPendingApprovals } from './module-approvals-pending-approvals.js';
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
 import { migration014 } from './014-tribunal-sessions.js';
+import { migration015 } from './015-tribunal-schedules.js';
 
 export interface Migration {
   version: number;
@@ -33,6 +34,7 @@ const migrations: Migration[] = [
   migration012,
   migration013,
   migration014,
+  migration015,
 ];
 
 export function runMigrations(db: Database.Database): void {

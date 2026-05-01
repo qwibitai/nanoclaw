@@ -1,10 +1,17 @@
 // ── Central DB entities ──
 
+export interface TribunalSchedule {
+  cron: string;
+  task: string;
+}
+
 export interface AgentGroup {
   id: string;
   name: string;
   folder: string;
   agent_provider: string | null;
+  /** JSON-serialized TribunalSchedule[] — null when not a tribunal agent group. */
+  tribunal_schedules?: string | null;
   created_at: string;
 }
 
