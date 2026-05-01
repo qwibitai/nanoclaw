@@ -10,6 +10,11 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Resolve the trusted remote that carries the channels branch.
+# shellcheck source=setup/lib/channels-remote.sh
+source "$PROJECT_ROOT/setup/lib/channels-remote.sh"
+CHANNELS_REMOTE=$(resolve_channels_remote)
 cd "$PROJECT_ROOT"
 
 echo "=== NANOCLAW SETUP: INSTALL_IMESSAGE ==="
@@ -27,10 +32,10 @@ if ! $needs_install; then
 fi
 
 echo "STEP: fetch-channels-branch"
-git fetch origin channels
+git fetch "$CHANNELS_REMOTE" channels
 
 echo "STEP: copy-files"
-git show origin/channels:src/channels/imessage.ts > src/channels/imessage.ts
+git show "${CHANNELS_REMOTE}/channels":src/channels/imessage.ts > src/channels/imessage.ts
 
 echo "STEP: register-import"
 if ! grep -q "import './imessage.js';" src/channels/index.ts; then

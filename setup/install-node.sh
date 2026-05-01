@@ -30,9 +30,9 @@ case "$(uname -s)" in
     ;;
   Linux)
     echo "STEP: nodesource-setup"
-    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+    sudo DEBIAN_FRONTEND=noninteractive curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
     echo "STEP: apt-install-nodejs"
-    sudo apt-get install -y nodejs
+    sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y nodejs
     ;;
   *)
     echo "STATUS: failed"
