@@ -41,3 +41,4 @@ groups/global/*
 
 agents-sdk-docs
 __pycache__/
+repos-nanoclaw.code-workspace
