@@ -24,6 +24,7 @@ ARG AGENT_BROWSER_VERSION=latest
 ARG GEMINI_CLI_VERSION=0.40.0
 ARG VERCEL_VERSION=latest
 ARG BUN_VERSION=1.3.12
+ARG GEMINI_CLI_VERSION=0.40.1
 
 # ---- System dependencies -----------------------------------------------------
 # tini: correct PID 1 / signal forwarding so outbound.db writes finalize on
@@ -107,6 +108,9 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+RUN --mount=type=cache,target=/root/.cache/pnpm \
+    pnpm install -g "@google/gemini-cli@${GEMINI_CLI_VERSION}"
 
 # ---- Entrypoint --------------------------------------------------------------
 COPY entrypoint.sh /app/entrypoint.sh
