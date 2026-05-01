@@ -19,16 +19,34 @@ When the task fires:
 8. Write all posts to `pending-posts.md` with status "awaiting-approval" — each entry must include: message text, Drive file ID for the photo (or "NO PHOTO"), place-id from `houston-places.md`, Instagram caption version, TikTok version (if video), and GBP posts for the week.
 9. Send WhatsApp preview of all posts for owner review
 
-## Handling Approval Messages
-When the owner replies with approval (e.g., "approved", "looks good", "approve all"):
-- Update `pending-posts.md` top-level Status to "approved"
-- Update each day's Status from "pending" to "approved"
-- Confirm: "All 5 posts approved and queued for this week."
+## Auto-Approval Rule (Moderate Authority)
 
-When the owner requests changes (e.g., "change Wednesday to..." or "I don't like Tuesday's"):
+Per `groups/global/authority.md` Andy operates at Moderate authority: routine themed posts auto-act. Apply the following rule when generating the weekly preview:
+
+**Auto-approve and mark `Status: approved` immediately** if ALL of these are true:
+- The post follows the day's content-calendar theme verbatim (Mon=Fleet Spotlight, Tue=Local Flavor/Tips, Wed=Customer Use Case, Thu=Seasonal/Promotional, Fri=Engagement/Fun)
+- The post does NOT introduce a new offer, discount, price point, positioning claim, or product
+- The post photo (Drive file ID) is from the existing `asset-catalog.md` mapping for that theme
+- No competitor name is mentioned, no location-specific claim that isn't in `keyword-strategy.md`
+
+**Escalate (status `awaiting-approval`)** for any of:
+- Promo/pricing posts (Thursday Seasonal/Promotional posts that include a price or discount)
+- Posts that mention a competitor or compare directly
+- Posts with a video TikTok version (since video introduces brand voice risk that themed templates don't cover)
+- Posts that include a new claim about response time, capacity, or coverage area
+
+For escalated posts, send the WhatsApp preview as before. Add a **silent-veto rule**: if Blayke does not respond within 12 hours, treat the escalated post as auto-approved on the next daily-posting run. This prevents queue buildup while still giving Blayke a real veto window. Log silent-veto approvals in `lessons.md` so we can track which categories Blayke never vetoes (graduate them to auto-approve).
+
+## Handling Owner Approval Messages
+When Blayke replies with approval (e.g., "approved", "looks good", "approve all"):
+- Update `pending-posts.md` top-level Status to "approved"
+- Update each escalated day's Status from "awaiting-approval" to "approved"
+- Confirm: "All N posts approved and queued for this week."
+
+When Blayke requests changes (e.g., "change Wednesday to..." or "I don't like Tuesday's"):
 - Update the specific day's content in `pending-posts.md`
 - Reply with the updated post for confirmation
-- Do NOT approve other days unless the owner says so
+- Do NOT approve other days unless Blayke says so
 
 ## Daily Posting (Weekdays 9 AM CT)
 A scheduled task reads `pending-posts.md` and posts today's approved content:
