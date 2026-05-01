@@ -13,6 +13,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import { DATA_DIR } from '../config.js';
 import { log } from '../log.js';
 import { registerProviderContainerConfig } from './provider-container-registry.js';
 
@@ -53,6 +54,9 @@ registerProviderContainerConfig('gemini', (ctx) => {
   // we use the correct auth method without leaking host-side MCP servers,
   // editor preferences, or other personal settings.
   const settings = {
+    context: {
+      fileName: ['CLAUDE.md'],
+    },
     security: {
       auth: {
         selectedType: authMethod,
@@ -77,17 +81,13 @@ registerProviderContainerConfig('gemini', (ctx) => {
     if (value) env[key] = value;
   }
 
-  const mounts: { hostPath: string; containerPath: string; readonly: boolean }[] = [
-    { hostPath: geminiDir, containerPath: '/home/node/.gemini', readonly: false },
-  ];
+  const claudeSharedSkillsDir = path.join(DATA_DIR, 'v2-sessions', ctx.agentGroupId, '.claude-shared', 'skills');
 
-  // Mount container skills into Gemini's user-level skills directory so the
-  // agent picks them up the same way Claude agents do via .claude-fragments.
-  const skillsHostPath = path.join(process.cwd(), 'container', 'skills');
-  if (fs.existsSync(skillsHostPath)) {
-    mounts.push({ hostPath: skillsHostPath, containerPath: '/home/node/.gemini/skills', readonly: true });
-  }
-
-  return { mounts, env };
+  return {
+    mounts: [
+      { hostPath: geminiDir, containerPath: '/home/node/.gemini', readonly: false },
+      { hostPath: claudeSharedSkillsDir, containerPath: '/home/node/.gemini/skills', readonly: true },
+    ],
+    env,
+  };
 });
-
