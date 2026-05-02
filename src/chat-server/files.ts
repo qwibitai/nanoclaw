@@ -13,7 +13,7 @@ import { broadcast, getOnNewMessage } from './state.js';
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1GB
 const CHUNK_UPLOAD_TIMEOUT = 5 * 60 * 1000; // 5 minutes to complete a chunked upload
 
-const MIME: Record<string, string> = {
+export const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript',
   '.css': 'text/css',

@@ -63,6 +63,41 @@ server.tool(
 );
 
 server.tool(
+  'send_file',
+  `Send a file from /workspace/group/uploads/ to the user as a chat attachment. Webchat rooms only.
+
+The file must already exist — write it first with Write or Bash. The path is relative to /workspace/group/ and must resolve under uploads/. The file remains in place (the chat server reads it from there); do not delete it after sending.
+
+Use this for files genuinely intended for the user (reports, generated artifacts, screenshots). Do NOT use it to dump intermediate working files — keep those elsewhere in /workspace/group/. For text messages use send_message.
+
+Errors:
+- "Not a webchat room" — the current group's JID does not start with "chat:". For WhatsApp/Telegram media the channel adapter has its own send-media path (not this tool).
+- "Path outside uploads" — path resolved outside /workspace/group/uploads/.
+- "File not found" — write the file first.
+- "File too large" — exceeds the 1 GB chat-server limit.`,
+  {
+    path: z.string().describe('Path under uploads/, relative to /workspace/group/. Example: "uploads/report.pdf". Must already exist.'),
+    caption: z.string().optional().describe('Optional one-line caption shown alongside the file. Defaults to the filename.'),
+    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, the file appears from a dedicated sub-bot.'),
+    client_id: z.string().optional().describe('Optional dedup key. Pass a stable value (e.g. a hash of the file path + caption) when retrying so the host can dedupe.'),
+  },
+  async (args) => {
+    const data: Record<string, string | undefined> = {
+      type: 'send_file',
+      chatJid,
+      path: args.path,
+      caption: args.caption || undefined,
+      sender: args.sender || undefined,
+      client_id: args.client_id || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MESSAGES_DIR, data);
+    return { content: [{ type: 'text' as const, text: 'File queued for delivery.' }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 

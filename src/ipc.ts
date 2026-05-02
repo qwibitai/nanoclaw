@@ -3,14 +3,110 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import {
+  ASSISTANT_NAME,
+  DATA_DIR,
+  IPC_POLL_INTERVAL,
+  TIMEZONE,
+} from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createChatRoom, getChatRoom } from './chat-db.js';
-import { broadcastRooms } from './chat-server/state.js';
+import { createChatRoom, getChatRoom, storeFileMessage } from './chat-db.js';
+import { MIME } from './chat-server/files.js';
+import { broadcast, broadcastRooms } from './chat-server/state.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
+
+const SEND_FILE_MAX_SIZE = 1024 * 1024 * 1024; // 1 GB — match the chat upload cap
+const sendFileSeenClientIds = new Map<string, number>();
+const SEND_FILE_DEDUP_TTL_MS = 60_000;
+
+function handleSendFile(
+  data: {
+    chatJid?: string;
+    path?: string;
+    caption?: string;
+    sender?: string;
+    client_id?: string;
+  },
+  sourceGroup: string,
+): void {
+  const { chatJid, path: relPath, caption, sender, client_id } = data;
+  if (!chatJid || !relPath) return;
+  if (client_id) {
+    const now = Date.now();
+    for (const [k, t] of sendFileSeenClientIds) {
+      if (now - t > SEND_FILE_DEDUP_TTL_MS) sendFileSeenClientIds.delete(k);
+    }
+    if (sendFileSeenClientIds.has(client_id)) {
+      logger.info({ client_id }, 'send_file deduped (replay)');
+      return;
+    }
+    sendFileSeenClientIds.set(client_id, now);
+  }
+
+  // Resolve and confine to the source group's uploads/ dir.
+  const groupDir = resolveGroupFolderPath(sourceGroup);
+  const uploadsDir = path.join(groupDir, 'uploads');
+  // Strip the agent's "uploads/" prefix if it included it (since cwd is the
+  // group dir, "uploads/foo.pdf" and "foo.pdf" both make sense).
+  const stripped = relPath.replace(/^\/?(workspace\/group\/)?uploads\//, '');
+  const candidate = path.resolve(uploadsDir, stripped);
+  const rel = path.relative(uploadsDir, candidate);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    logger.warn(
+      { sourceGroup, relPath },
+      'send_file: path outside uploads/ rejected',
+    );
+    return;
+  }
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(candidate);
+  } catch {
+    logger.warn({ sourceGroup, candidate }, 'send_file: file not found');
+    return;
+  }
+  if (stat.isSymbolicLink()) {
+    logger.warn({ sourceGroup, candidate }, 'send_file: symlinks rejected');
+    return;
+  }
+  if (!stat.isFile()) {
+    logger.warn({ sourceGroup, candidate }, 'send_file: not a regular file');
+    return;
+  }
+  if (stat.size > SEND_FILE_MAX_SIZE) {
+    logger.warn(
+      { sourceGroup, candidate, size: stat.size },
+      'send_file: file exceeds size cap',
+    );
+    return;
+  }
+
+  const filename = path.basename(candidate);
+  const ext = path.extname(filename).toLowerCase();
+  const mime = MIME[ext] || 'application/octet-stream';
+  const roomId = chatJid.slice('chat:'.length);
+  const fileMeta = {
+    url: `/api/files/${encodeURIComponent(sourceGroup)}/${encodeURIComponent(filename)}`,
+    filename,
+    mime,
+    size: stat.size,
+  };
+  const stored = storeFileMessage(
+    roomId,
+    sender || ASSISTANT_NAME,
+    'agent',
+    fileMeta,
+    caption,
+  );
+  broadcast(roomId, { type: 'message', ...stored });
+  logger.info(
+    { roomId, filename, size: stat.size, sourceGroup },
+    'IPC send_file delivered',
+  );
+}
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -92,6 +188,28 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
                   );
+                }
+              } else if (
+                data.type === 'send_file' &&
+                data.chatJid &&
+                data.path
+              ) {
+                // Authorization: same rule as 'message'.
+                const targetGroup = registeredGroups[data.chatJid];
+                const authorized =
+                  isMain || (targetGroup && targetGroup.folder === sourceGroup);
+                if (!authorized) {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC send_file attempt blocked',
+                  );
+                } else if (!data.chatJid.startsWith('chat:')) {
+                  logger.warn(
+                    { chatJid: data.chatJid },
+                    'send_file is webchat-only; non-chat: JID rejected',
+                  );
+                } else {
+                  await handleSendFile(data, sourceGroup);
                 }
               }
               fs.unlinkSync(filePath);
