@@ -11,6 +11,7 @@ import type Database from 'better-sqlite3';
 
 import { getRunningSessions, getActiveSessions, createPendingQuestion, findSessionForAgent, createSession } from './db/sessions.js';
 import { getAgentGroup, getAllAgentGroups } from './db/agent-groups.js';
+import { loadWebhookIdentity, deliverViaWebhook } from './channels/discord-webhook.js';
 import { getDb, hasTable } from './db/connection.js';
 import { getMessagingGroupByPlatform } from './db/messaging-groups.js';
 import {
@@ -197,7 +198,25 @@ async function drainSession(session: Session): Promise<void> {
           continue;
         }
 
-        const platformMsgId = await deliverMessage(msg, session, inDb);
+        // Webhook identity: if the agent group has a webhook.json and the
+        // destination is a Discord channel, deliver via webhook so the message
+        // appears under the agent's own username/avatar instead of the bot's.
+        let platformMsgId: string | undefined;
+        if (msg.channel_type === 'discord' && msg.kind !== 'system') {
+          const webhookIdentity = loadWebhookIdentity(agentGroup.folder);
+          if (webhookIdentity) {
+            platformMsgId = await deliverViaWebhook(webhookIdentity, msg.thread_id, msg.content);
+            log.info('Message delivered via webhook', {
+              id: msg.id,
+              folder: agentGroup.folder,
+              username: webhookIdentity.username,
+            });
+          } else {
+            platformMsgId = await deliverMessage(msg, session, inDb);
+          }
+        } else {
+          platformMsgId = await deliverMessage(msg, session, inDb);
+        }
         markDelivered(inDb, msg.id, platformMsgId ?? null);
         deliveryAttempts.delete(msg.id);
 
