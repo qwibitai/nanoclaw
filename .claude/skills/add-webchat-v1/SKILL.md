@@ -416,6 +416,18 @@ console.log('Chat room created');
 "
 ```
 
+### Seed the main group's CLAUDE.md from the template
+
+The repo ships a canonical main-group `CLAUDE.md` at `groups/main/CLAUDE.md` — it tells Andy how to handle "create a room"/"create a bot" requests, the slug/folder conventions for webchat, and the bot↔room mapping. The Claude SDK loads `CLAUDE.md` from the agent's `cwd` (which is the registered group's folder), so when the main group lives in any folder other than `groups/main/` (e.g. `groups/chat_control-room/`), Andy starts with **no project memory** unless the file is seeded into that folder.
+
+**Always copy the template into the new main folder. Do not skip this step on fresh installs** — without it, "create a room called X" gets routed to the WhatsApp-style flow and Andy will ask about a channel prefix.
+
+```bash
+cp groups/main/CLAUDE.md groups/chat_<room_id>/CLAUDE.md
+```
+
+Replace `<room_id>` with the slug chosen above (e.g. `groups/chat_control-room/CLAUDE.md`).
+
 ### Restart the service
 
 ```bash

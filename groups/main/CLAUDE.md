@@ -149,7 +149,9 @@ Fields:
 
 ### Adding a Group
 
-**Default path — webchat rooms (`chat:<slug>` JIDs).** When the user asks to "create a room", "create a channel", "make a new room", etc., they almost always mean a new webchat room in the PWA. **Do not ask which platform.** **Do not look anything up in `available_groups.json`.** **Do not ask about a "channel prefix"** — for webchat the folder prefix is always `chat_`.
+**"Create a bot" means "create a webchat room".** When the user says "create a bot for X", "make a bot to handle Y", "set up a bot called Z", interpret that as "create a webchat room for X" — unless they specifically ask for a *recurring or scheduled task* (in which case use `schedule_task`). Always create the room first; if they also wanted the room to run something on a schedule, schedule the task into it after the room exists. Do not respond with "do you mean a recurring task?" — assume room first, ask only if their phrasing is genuinely ambiguous about scope/persona.
+
+**Default path — webchat rooms (`chat:<slug>` JIDs).** When the user asks to "create a room", "create a bot", "create a channel", "make a new room", etc., they almost always mean a new webchat room in the PWA. **Do not ask which platform.** **Do not look anything up in `available_groups.json`.** **Do not ask about a "channel prefix"** — for webchat the folder prefix is always `chat_`.
 
 Before registering, you MUST ask the user about the new bot's instructions if they didn't already specify them. A bare "create a room called X" is not enough — every webchat room needs a CLAUDE.md so the bot knows what it's for. Ask succinctly:
 
