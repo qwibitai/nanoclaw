@@ -15,11 +15,27 @@ const xmlParser = new XMLParser({
 
 interface RssItem {
   title?: string;
-  link?: string;
+  link?:
+    | string
+    | { '@_href'?: string }
+    | Array<{ '@_href'?: string; '@_rel'?: string }>;
   guid?: string | { '#text'?: string; '@_isPermaLink'?: string };
   id?: string;
   pubDate?: string;
+  published?: string;
+  updated?: string;
   description?: string;
+}
+
+function extractLink(item: RssItem): string | undefined {
+  const l = item.link;
+  if (!l) return undefined;
+  if (typeof l === 'string') return l;
+  if (Array.isArray(l)) {
+    const alt = l.find((x) => x['@_rel'] === 'alternate') ?? l[0];
+    return alt?.['@_href'];
+  }
+  return l['@_href'];
 }
 
 function extractGuid(item: RssItem, feedUrl: string): string {
@@ -31,7 +47,8 @@ function extractGuid(item: RssItem, feedUrl: string): string {
     if (text) return text;
   }
   if (item.id) return item.id;
-  if (item.link) return item.link;
+  const link = extractLink(item);
+  if (link) return link;
   return `${feedUrl}#${item.title || 'untitled'}`;
 }
 
@@ -39,6 +56,10 @@ function parseTime(d?: string): number {
   if (!d) return Infinity;
   const t = new Date(d).getTime();
   return Number.isNaN(t) ? Infinity : t;
+}
+
+function itemDate(item: RssItem): string | undefined {
+  return item.pubDate ?? item.published ?? item.updated;
 }
 
 function sortByPubDate(
@@ -49,7 +70,7 @@ function sortByPubDate(
   // JS sort is stable (ES2019+). Items without pubDate sort to the end via Infinity.
   return [...items]
     .reverse()
-    .sort((a, b) => parseTime(a.item.pubDate) - parseTime(b.item.pubDate));
+    .sort((a, b) => parseTime(itemDate(a.item)) - parseTime(itemDate(b.item)));
 }
 
 async function fetchFeed(
@@ -146,7 +167,7 @@ export async function pollOnce(deps: RssPollerDeps): Promise<void> {
         const entry = sorted[i];
         const label = feed.name || feed.url;
         const title = entry.item.title?.trim() || '(no title)';
-        const link = entry.item.link?.trim() || '';
+        const link = extractLink(entry.item)?.trim() || '';
         const text = link
           ? `📰 **${label}**: ${title}\n${link}`
           : `📰 **${label}**: ${title}`;
