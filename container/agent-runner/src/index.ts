@@ -600,7 +600,8 @@ async function runQuery(
           command: 'node',
           args: [ollamaMcpServerPath],
           env: {
-            OLLAMA_URL: sdkEnv.OLLAMA_URL ?? '',
+            OLLAMA_HOST: sdkEnv.OLLAMA_HOST ?? '',
+            OLLAMA_ADMIN_TOOLS: sdkEnv.OLLAMA_ADMIN_TOOLS ?? '',
           },
         },
         'acurast-staking': {

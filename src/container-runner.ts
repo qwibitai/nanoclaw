@@ -14,6 +14,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  OLLAMA_ADMIN_TOOLS,
   ONECLI_API_KEY,
   ONECLI_URL,
   TIMEZONE,
@@ -400,6 +401,11 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Forward Ollama admin tools flag if enabled
+  if (OLLAMA_ADMIN_TOOLS) {
+    args.push('-e', 'OLLAMA_ADMIN_TOOLS=true');
+  }
+
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
   const onecliApplied = await onecli.applyContainerConfig(args, {
@@ -442,6 +448,9 @@ async function buildContainerArgs(
   }
   if (process.env.HA_TOKEN) {
     args.push('-e', `HA_TOKEN=${process.env.HA_TOKEN}`);
+  }
+  if (process.env.OLLAMA_HOST) {
+    args.push('-e', `OLLAMA_HOST=${process.env.OLLAMA_HOST}`);
   }
   if (process.env.OLLAMA_URL) {
     args.push('-e', `OLLAMA_URL=${process.env.OLLAMA_URL}`);
