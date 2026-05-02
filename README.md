@@ -54,6 +54,28 @@ Cron-based triggers that auto-create Discord threads in `#frontend` and wake the
 
 SQLite FTS5 full-text search over three types of records: approved code snippets, Tribunal decision logs, and manually added domain knowledge. Relevant records are surfaced automatically at the start of each task.
 
+### Module Structure
+
+```
+src/tribunal/
+  ├── orchestrator.ts       # #frontend Tribunal state machine (Owner → Reviewer → Arbiter)
+  ├── loop-guard.ts         # Infinite-loop prevention: max retry + keyword repeat detection
+  ├── scheduler.ts          # Cron-based task triggers (IANA timezone-aware)
+  ├── context-injector.ts   # Figma read injection (#frontend) + OpenAPI spec injection (#backend)
+  └── memory/
+        ├── store.ts        # SQLite FTS5 search
+        └── indexer.ts      # Indexes approved code and Tribunal decision logs
+```
+
+**DB migrations added:**
+- `014-tribunal-sessions` — Tribunal round state tracking
+- `015-tribunal-schedules` — Cron schedule JSON column on `agent_groups`
+- `016-tribunal-memory` — FTS5 full-text search table (isolated per `agent_group_id`)
+
+**Host integration:**
+- `delivery.ts` — `handleTribunalRouting` hook routes outbound messages through the Tribunal orchestrator
+- `host-sweep.ts` — `TRIBUNAL-HOOK` checks cron schedules every 60s and fires due tasks
+
 ---
 
 ## Why I Built NanoClaw
@@ -172,6 +194,7 @@ Key files:
 - `src/db/` — central DB (users, roles, agent groups, messaging groups, wiring, migrations)
 - `src/channels/` — channel adapter infra (adapters installed via `/add-<channel>` skills)
 - `src/providers/` — host-side provider config (`claude` baked in; others via skills)
+- `src/tribunal/` — B2B multi-agent pipeline (orchestrator, loop-guard, scheduler, context-injector, RAG memory)
 - `container/agent-runner/` — Bun agent-runner: poll loop, MCP tools, provider abstraction
 - `groups/<folder>/` — per-agent-group filesystem (`CLAUDE.md`, skills, container config)
 
