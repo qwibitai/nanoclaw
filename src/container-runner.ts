@@ -68,6 +68,11 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+interface ProviderOverride {
+  baseUrl: string;
+  apiKey: string;
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -395,6 +400,7 @@ async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentIdentifier?: string,
+  providerOverride?: ProviderOverride,
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -406,19 +412,25 @@ async function buildContainerArgs(
     args.push('-e', 'OLLAMA_ADMIN_TOOLS=true');
   }
 
-  // OneCLI gateway handles credential injection — containers never see real secrets.
-  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
-  if (onecliApplied) {
-    logger.info({ containerName }, 'OneCLI gateway config applied');
+  if (providerOverride) {
+    // Per-group provider override — bypass OneCLI and inject credentials directly.
+    args.push('-e', `ANTHROPIC_BASE_URL=${providerOverride.baseUrl}`);
+    args.push('-e', `ANTHROPIC_API_KEY=${providerOverride.apiKey}`);
   } else {
-    logger.warn(
-      { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
-    );
+    // OneCLI gateway handles credential injection — containers never see real secrets.
+    // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
+    const onecliApplied = await onecli.applyContainerConfig(args, {
+      addHostMapping: false, // Nanoclaw already handles host gateway
+      agent: agentIdentifier,
+    });
+    if (onecliApplied) {
+      logger.info({ containerName }, 'OneCLI gateway config applied');
+    } else {
+      logger.warn(
+        { containerName },
+        'OneCLI gateway not reachable — container will have no credentials',
+      );
+    }
   }
 
   // Pass UnraidClaw connection details if configured
@@ -553,10 +565,47 @@ export async function runContainerAgent(
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
+
+  let providerOverride: ProviderOverride | undefined;
+  const settingsPath = path.join(DATA_DIR, 'sessions', group.folder, '.claude', 'settings.json');
+  try {
+    if (fs.existsSync(settingsPath)) {
+      const raw = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      const env = raw?.env ?? {};
+      const rawBaseUrl = env.NANOCLAW_PROVIDER_BASE_URL;
+      const rawApiKey = env.NANOCLAW_PROVIDER_API_KEY;
+      if (rawBaseUrl !== undefined || rawApiKey !== undefined) {
+        if (typeof rawBaseUrl !== 'string' || !/^https?:\/\//.test(rawBaseUrl)) {
+          logger.warn(
+            { group: group.name },
+            'NANOCLAW_PROVIDER_BASE_URL is missing or invalid (must start with http:// or https://) — using default proxy',
+          );
+        } else if (typeof rawApiKey !== 'string' || rawApiKey.length === 0) {
+          logger.warn(
+            { group: group.name },
+            'NANOCLAW_PROVIDER_API_KEY is empty — using default proxy',
+          );
+        } else {
+          providerOverride = { baseUrl: rawBaseUrl, apiKey: rawApiKey };
+          logger.info(
+            { group: group.name, baseUrl: providerOverride.baseUrl },
+            'Using per-group provider override',
+          );
+        }
+      }
+    }
+  } catch (err) {
+    logger.debug(
+      { group: group.name, err },
+      'Failed to read settings.json for provider override, using default proxy',
+    );
+  }
+
   const containerArgs = await buildContainerArgs(
     mounts,
     containerName,
     agentIdentifier,
+    providerOverride,
   );
 
   logger.debug(
