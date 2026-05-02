@@ -18,6 +18,12 @@ Your output is sent to the user or group.
 
 You also have `mcp__nanoclaw__send_message` which sends a message immediately while you're still working. This is useful when you want to acknowledge a request before starting longer work.
 
+### Sending files (webchat)
+
+When the user asks for a file (a report, screenshot, generated artifact, exported data), don't just describe it — deliver it. Write it to `uploads/` (relative to your cwd, which is the group folder) and call `mcp__nanoclaw__send_file` with `path: "uploads/<filename>"` and an optional caption. The file appears in the chat as an attachment the user can preview or download. Webchat-only; for WhatsApp/Telegram media, fall back to describing the artifact in text.
+
+Use it for things genuinely intended for the user. Don't dump intermediate working files via `send_file` — keep those elsewhere in your workspace.
+
 ### Internal thoughts
 
 If part of your output is internal reasoning rather than something for the user, wrap it in `<internal>` tags:
