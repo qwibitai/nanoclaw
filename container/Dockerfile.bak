@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install claude-code and Playwright MCP globally
-RUN npm install -g @anthropic-ai/claude-code@2.1.86 @playwright/mcp
+RUN npm install -g @anthropic-ai/claude-code @playwright/mcp
 
 # Install Playwright Chromium with system deps (headless browsing)
 RUN npx playwright install --with-deps chromium
@@ -52,7 +52,7 @@ RUN printf '#!/bin/bash\nset -e\n# Dynamic uid mapping for SSH (container may ru
 RUN chmod 666 /etc/passwd
 
 # Set ownership to node user (non-root) for writable directories
-RUN chown -R node:node /workspace && chmod 777 /home/node
+RUN chown -R node:node /workspace && chmod 755 /home/node
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node

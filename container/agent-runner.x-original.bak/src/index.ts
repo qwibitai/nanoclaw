@@ -16,11 +16,14 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
-import { fileURLToPath } from 'url';
-import { routeModel } from './model-routing.js';
-import { initMongoClient } from './mongodb-client.js';
+import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { emitTokenUsage, emitToolCall } from './telemetry.js';
+import { fileURLToPath } from 'url';
+// Session call cap — prevent runaway sessions
+const CALL_CAP_WARN = 50;
+const CALL_CAP_HARD = 100;
+let sessionCallCount = 0;
+
 
 interface ContainerInput {
   prompt: string;
@@ -30,7 +33,6 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
-  secrets?: Record<string, string>;
 }
 
 interface ContainerOutput {
@@ -188,79 +190,6 @@ function createPreCompactHook(assistantName?: string): HookCallback {
   };
 }
 
-// Secrets to strip from Bash tool subprocess environments.
-// These are needed by claude-code for API auth but should never
-// be visible to commands Kit runs.
-const SECRET_ENV_VARS = [
-  'ANTHROPIC_API_KEY',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'BRAVE_API_KEY',
-  'TAVILY_API_KEY',
-  'GITHUB_PERSONAL_ACCESS_TOKEN',
-];
-
-/**
- * Docker safety blocklist: dangerous command patterns that should never
- * be executed by agent tools. Ordered from most specific to least specific
- * so longer patterns match before shorter ones (e.g. "docker rmi" before "docker rm").
- */
-const BLOCKED_COMMAND_PATTERNS = [
-  'docker system prune',
-  'docker volume rm',
-  'docker network rm',
-  'docker rmi',
-  'docker rm',
-  'docker down',
-  'docker prune',
-  'docker kill',
-  'docker stop',
-  'rm -rf /',
-  'mkfs',
-  'dd if=',
-];
-
-function matchesBlockedPattern(command: string): string | null {
-  const normalized = command.trim().toLowerCase();
-  for (const pattern of BLOCKED_COMMAND_PATTERNS) {
-    if (normalized.includes(pattern.toLowerCase())) {
-      return pattern;
-    }
-  }
-  return null;
-}
-
-function createSanitizeBashHook(): HookCallback {
-  return async (input, _toolUseId, _context) => {
-    const preInput = input as PreToolUseHookInput;
-    const command = (preInput.tool_input as { command?: string })?.command;
-    if (!command) return {};
-
-    // Check against safety blocklist before executing
-    const blocked = matchesBlockedPattern(command);
-    if (blocked) {
-      log(`BLOCKED dangerous command matching "${blocked}": ${command.slice(0, 200)}`);
-      return {
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          decision: 'block' as const,
-          reason: `Command blocked by safety policy: matches "${blocked}" pattern`,
-        },
-      };
-    }
-
-    const unsetPrefix = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
-    return {
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        updatedInput: {
-          ...(preInput.tool_input as Record<string, unknown>),
-          command: unsetPrefix + command,
-        },
-      },
-    };
-  };
-}
-
 function sanitizeFilename(summary: string): string {
   return summary
     .toLowerCase()
@@ -400,6 +329,55 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+
+const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
+const SONNET_MODEL = 'claude-sonnet-4-6';
+
+/**
+ * Classify whether a prompt needs the full model or can use Haiku.
+ * Returns the Haiku model ID for simple chat, Sonnet for complex tasks.
+ */
+function pickModel(prompt: string, isScheduledTask?: boolean): string {
+  // Scheduled tasks are automated — always use the full model
+  if (isScheduledTask) return HAIKU_MODEL;
+
+  // Extract raw user text from XML message wrappers if present
+  // formatMessages() wraps input as: <messages><message sender="..." time="...">text</message></messages>
+  let rawText = prompt;
+  const messageContents = prompt.match(/<message[^>]*>([\s\S]*?)<\/message>/g);
+  if (messageContents) {
+    rawText = messageContents
+      .map(m => m.replace(/<message[^>]*>/, '').replace(/<\/message>/, ''))
+      .join('\n')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+  }
+
+  // Strip the trigger prefix (@X, /x) for analysis
+  const cleaned = rawText.replace(/^(@\w+\s+|\/x\s+)/i, '').trim();
+
+  // Short casual messages → Haiku
+  if (cleaned.length < 200) {
+    // Check for complexity signals that warrant the full model
+    const complexSignals = [
+      /\b(debug|fix|refactor|implement|deploy|migrate|analyze|investigate|diagnose)\b/i,
+      /\b(code|function|error|bug|exception|stack\s*trace|logs?)\b/i,
+      /\b(create|build|write|generate|design|architect)\b.{10,}/i,
+      /\b(why|how)\b.{20,}\?/i,  // Long "why/how" questions
+      /```/,                        // Code blocks
+      /\b(PR|pull request|commit|branch|merge|git)\b/i,
+      /\b(config|yaml|json|env|docker|ssh|systemctl)\b/i,
+      /\b(search|find|grep|look\s+(for|into|at))\b.*\b(file|code|log|issue)\b/i,
+    ];
+    const isComplex = complexSignals.some(re => re.test(cleaned));
+    if (!isComplex) {
+      return HAIKU_MODEL;
+    }
+  }
+
+  // Long or complex messages → full model
+  return SONNET_MODEL;
+}
+
 /**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
@@ -413,15 +391,10 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
+  model?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
-  // Model routing: detect [OPUS] flag and swap model if needed
-  const routing = routeModel(prompt);
-  if (routing.model) {
-    log(`Model routing: detected [OPUS] flag, using ${routing.model}`);
-  }
-
   const stream = new MessageStream();
-  stream.push(routing.prompt);
+  stream.push(prompt);
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -472,52 +445,14 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
-  // Build MCP servers config: always include nanoclaw, conditionally add
-  // external servers when their API keys are available in the environment
-  const mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {
-    nanoclaw: {
-      command: 'node',
-      args: [mcpServerPath],
-      env: {
-        NANOCLAW_CHAT_JID: containerInput.chatJid,
-        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-      },
-    },
-  };
-
-  if (sdkEnv.BRAVE_API_KEY) {
-    mcpServers['brave-search'] = {
-      command: 'npx',
-      args: ['-y', '@anthropic-ai/mcp-server-brave-search'],
-      env: { BRAVE_API_KEY: sdkEnv.BRAVE_API_KEY },
-    };
-  }
-
-  if (sdkEnv.TAVILY_API_KEY) {
-    mcpServers['tavily'] = {
-      command: 'npx',
-      args: ['-y', 'tavily-mcp-server'],
-      env: { TAVILY_API_KEY: sdkEnv.TAVILY_API_KEY },
-    };
-  }
-
-  if (sdkEnv.GITHUB_PERSONAL_ACCESS_TOKEN) {
-    mcpServers['github'] = {
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-github'],
-      env: { GITHUB_PERSONAL_ACCESS_TOKEN: sdkEnv.GITHUB_PERSONAL_ACCESS_TOKEN },
-    };
-  }
-
   for await (const message of query({
     prompt: stream,
     options: {
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+      model,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      model: routing.model,
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
@@ -530,18 +465,33 @@ async function runQuery(
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
-        'mcp__brave-search__*',
-        'mcp__tavily__*',
-        'mcp__github__*',
+        'mcp__bot-dashboard__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers,
+      mcpServers: {
+        nanoclaw: {
+          command: 'node',
+          args: [mcpServerPath],
+          env: {
+            NANOCLAW_CHAT_JID: containerInput.chatJid,
+            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+          },
+        },
+        'bot-dashboard': {
+          command: 'node',
+          args: ['/home/node/bot-dashboard-mcp/dist/index.js'],
+          env: {
+            TELEMETRY_URL: process.env.TELEMETRY_URL || 'http://100.99.148.99:3100',
+            TELEMETRY_REGISTRATION_TOKEN: process.env.TELEMETRY_REGISTRATION_TOKEN || '',
+          },
+        },
+      },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
-        PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
       },
     }
   })) {
@@ -549,22 +499,20 @@ async function runQuery(
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
-
-      // Emit tool_call telemetry for each tool_use content block in the assistant message
-      const assistantMsg = message as { message?: { content?: Array<{ type: string; name?: string; id?: string }> }; parent_tool_use_id?: string | null };
-      if (assistantMsg.message?.content) {
-        for (const block of assistantMsg.message.content) {
-          if (block.type === 'tool_use' && block.name && block.id) {
-            emitToolCall({
-              toolName: block.name,
-              toolUseId: block.id,
-              parentToolUseId: assistantMsg.parent_tool_use_id,
-            });
+    // Telemetry: emit tool_call for each tool_use block in assistant messages
+    if (message.type === 'assistant' && 'content' in message) {
+      const msg = message as any;
+      if (Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (block.type === 'tool_use') {
+            emitToolCall({ toolName: block.name, toolUseId: block.id });
           }
         }
       }
+    }
+
+    if (message.type === 'assistant' && 'uuid' in message) {
+      lastAssistantUuid = (message as { uuid: string }).uuid;
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
@@ -578,57 +526,23 @@ async function runQuery(
     }
 
     if (message.type === 'result') {
+      // Telemetry: emit token_usage from result
+      const res = message as any;
+      if (res.usage) {
+        emitTokenUsage({
+          inputTokens: res.usage.input_tokens || 0,
+          outputTokens: res.usage.output_tokens || 0,
+          cacheReadInputTokens: res.usage.cache_read_input_tokens || 0,
+          cacheCreationInputTokens: res.usage.cache_creation_input_tokens || 0,
+          totalCostUsd: res.total_cost_usd || 0,
+          durationMs: res.duration_ms || 0,
+          numTurns: res.num_turns || 0,
+          model,
+        });
+      }
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-
-      // Emit token_usage telemetry from the result message's usage data.
-      // The SDK result message has `usage` (NonNullableUsage / BetaUsage keys) and
-      // `modelUsage` (Record<string, ModelUsage>). We cast through `unknown` because
-      // the BetaUsage key names aren't available locally — they come from @anthropic-ai/sdk.
-      const resultAny = message as unknown as Record<string, unknown>;
-      const usage = resultAny.usage as Record<string, number> | undefined;
-      const modelUsage = resultAny.modelUsage as Record<string, Record<string, number>> | undefined;
-      const totalCostUsd = (resultAny.total_cost_usd as number) ?? 0;
-      const durationMs = resultAny.duration_ms as number | undefined;
-      const numTurns = resultAny.num_turns as number | undefined;
-
-      if (usage) {
-        // BetaUsage uses snake_case keys (input_tokens, output_tokens, etc.)
-        const inputTokens = usage.input_tokens ?? 0;
-        const outputTokens = usage.output_tokens ?? 0;
-        const cacheRead = usage.cache_read_input_tokens ?? 0;
-        const cacheCreation = usage.cache_creation_input_tokens ?? 0;
-
-        // Determine primary model from modelUsage (highest token count)
-        let primaryModel: string | undefined;
-        if (modelUsage) {
-          let maxTokens = 0;
-          for (const [model, mu] of Object.entries(modelUsage)) {
-            const total = (mu.inputTokens ?? 0) + (mu.outputTokens ?? 0);
-            if (total > maxTokens) {
-              maxTokens = total;
-              primaryModel = model;
-            }
-          }
-        }
-
-        emitTokenUsage({
-          inputTokens,
-          outputTokens,
-          cacheReadInputTokens: cacheRead,
-          cacheCreationInputTokens: cacheCreation,
-          totalCostUsd,
-          model: primaryModel,
-          durationMs,
-          numTurns,
-        });
-        log(`[telemetry] Emitted token_usage: in=${inputTokens} out=${outputTokens} cost=$${totalCostUsd.toFixed(4)}`);
-      } else {
-        // SDK ^0.2.34 may not expose usage on all result subtypes — log for debugging
-        log(`[telemetry] Result message has no usage data (subtype=${message.subtype}). Keys: ${Object.keys(message).join(',')}`);
-      }
-
       writeOutput({
         status: 'success',
         result: textResult || null,
@@ -648,7 +562,6 @@ async function main(): Promise<void> {
   try {
     const stdinData = await readStdin();
     containerInput = JSON.parse(stdinData);
-    // Delete the temp file the entrypoint wrote — it contains secrets
     try { fs.unlinkSync('/tmp/input.json'); } catch { /* may not exist */ }
     log(`Received input for group: ${containerInput.groupFolder}`);
   } catch (err) {
@@ -660,15 +573,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Auth tokens and MCP secrets are injected via container env vars
-  // (proxy handles auth, -e flags handle MCP keys)
+  // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
+  // No real secrets exist in the container environment.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
-
-  // Initialise MongoDB client with URI from env vars
-  const mongoUri = process.env.MONGODB_URI;
-  if (mongoUri) {
-    initMongoClient(mongoUri);
-  }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
@@ -694,9 +601,22 @@ async function main(): Promise<void> {
   let resumeAt: string | undefined;
   try {
     while (true) {
+      // Session call cap check
+      sessionCallCount++;
+      if (sessionCallCount > CALL_CAP_HARD) {
+        log(`CALL CAP REACHED (${sessionCallCount}/${CALL_CAP_HARD}). Ending session to prevent runaway.`);
+        writeOutput({ status: 'success', result: 'Session ended: call limit reached. Please start a new conversation.', newSessionId: sessionId });
+        break;
+      }
+      if (sessionCallCount === CALL_CAP_WARN) {
+        log(`CALL CAP WARNING: ${sessionCallCount}/${CALL_CAP_HARD} calls used in this session.`);
+      }
+
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      const model = pickModel(prompt, containerInput.isScheduledTask);
+      log(`Model: ${model || 'default'} for prompt: ${prompt.slice(0, 80)}...`);
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt, model);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }

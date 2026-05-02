@@ -8,6 +8,7 @@
  *   TELEMETRY_API_URL — ingest base URL
  *   TELEMETRY_BOT_ID — this bot's registered UUID
  *   TELEMETRY_REGISTRATION_TOKEN — bearer token for ingest auth
+ *   TELEMETRY_KEY_LABEL — active subscription key label (optional, multi-key mode)
  */
 
 const TIMEOUT_MS = 3_000;
@@ -15,6 +16,7 @@ const TIMEOUT_MS = 3_000;
 const TELEMETRY_URL = (process.env.TELEMETRY_API_URL || '').replace(/\/$/, '');
 const BOT_ID = process.env.TELEMETRY_BOT_ID || '';
 const TOKEN = process.env.TELEMETRY_REGISTRATION_TOKEN || '';
+const KEY_LABEL = process.env.TELEMETRY_KEY_LABEL || '';
 
 const enabled = !!(TELEMETRY_URL && BOT_ID && TOKEN);
 
@@ -72,6 +74,7 @@ export function emitTokenUsage(data: {
     model: data.model,
     duration_ms: data.durationMs,
     num_turns: data.numTurns,
+    ...(KEY_LABEL && { key_label: KEY_LABEL }),
   }).catch(() => {});
 }
 
