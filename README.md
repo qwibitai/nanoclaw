@@ -1,247 +1,297 @@
-<p align="center">
-  <img src="assets/nanoclaw-logo.png" alt="NanoClaw" width="400">
-</p>
+# NanoClaw — B2B Multi-Agent Framework
 
-<p align="center">
-  An AI assistant that runs agents securely in their own containers. Lightweight, built to be easily understood and completely customized for your needs.
-</p>
-
-<p align="center">
-  <a href="https://nanoclaw.dev">nanoclaw.dev</a>&nbsp; • &nbsp;
-  <a href="https://docs.nanoclaw.dev">docs</a>&nbsp; • &nbsp;
-  <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
-  <a href="README_ja.md">日本語</a>&nbsp; • &nbsp;
-  <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
-  <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="repo tokens" valign="middle"></a>
-</p>
+A self-hosted multi-agent AI framework for B2B project development, built on top of [NanoClaw](https://github.com/qwibitai/nanoclaw). Runs fully automated code review pipelines, PM workflows, and backend assistance through Discord — all inside isolated containers.
 
 ---
 
-## This Fork — Multi-Agent Framework
+## What This Is
 
-This fork extends NanoClaw with a multi-agent pipeline for automated code workflows. It adds a Tribunal Loop, cron-based scheduling, context injection, and lightweight RAG memory on top of NanoClaw's container infrastructure.
+This fork extends NanoClaw's container infrastructure with a three-channel Discord setup and a multi-agent pipeline purpose-built for B2B software projects.
 
-### Tribunal Loop
+| Channel | Mode | Agents |
+|---------|------|--------|
+| `#frontend` | Fully automated (Tribunal Loop) | Owner → Reviewer → Arbiter |
+| `#pm` | User-directed | PM Agent (Figma MCP) |
+| `#backend` | User-directed | Backend Agent (OpenAPI spec injection) |
+
+Each agent runs in its own isolated container with separate memory, context, and credentials. Discord messages are delivered through per-agent webhooks so each agent appears as a distinct user in threads.
+
+---
+
+## Key Features
+
+### Tribunal Loop (`#frontend`)
 
 A three-agent verification pipeline that runs without human intervention:
 
-- **Owner** — writes code based on the task
-- **Reviewer** — reviews code quality and stderr output, issues fix instructions
-- **Arbiter** — makes the final call: approve or escalate to the user
+- **Owner** — writes or modifies code based on the task description
+- **Reviewer** — reviews the output; flags issues and issues fix instructions
+- **Arbiter** — makes the final call: approve (notifies user) or escalate
 
-Loop prevention: escalates after 3 rounds or when the Reviewer flags the same issue twice in a row. On escalation, a round summary is posted in the thread with a user @mention.
+Each task runs in its own Discord thread. Multiple tasks can run in parallel.
 
-**Self-Healing** is built into the loop — stderr from code execution is passed directly to the Reviewer, who treats it like any other code issue.
+**Infinite-loop prevention** — escalates automatically when:
+- Round count reaches 3
+- The Reviewer flags the same keyword issue twice in a row
 
-### Scheduler
+On escalation, a round summary is posted in the thread with a user @mention.
 
-Cron-based triggers that auto-create Discord threads and wake the Owner agent on schedule. Configured per agent group as code (no UI).
+### Self-Healing
+
+Stderr from code execution is passed directly to the Reviewer as part of the normal Tribunal round — no separate agent needed. Build failures and runtime errors are treated like any other code issue.
+
+### Cron Scheduler
+
+Tribunal tasks can be triggered automatically on a cron schedule. Each agent group stores its schedule as a JSON column in the DB. On the scheduled time, the host sweep auto-creates a Discord thread and wakes the Owner agent.
+
+```json
+{ "cron": "0 9 * * 1-5", "task": "Daily code review" }
+```
 
 ### Context Injection
 
-- **Figma MCP** — injects Figma design data into agent context. Per-task Figma URLs can be added inline. Access is scoped to a per-group project whitelist.
-- **OpenAPI spec** — injects API spec into agent context. Pulls from a live `/v3/api-docs` endpoint, falls back to a local `openapi.yaml`/`.json` file.
+**Figma MCP (`#pm` + `#frontend` read injection)**
+- Full read/write access to scoped Figma projects
+- Inline Figma URLs in Discord messages trigger additional file parsing
+- `#frontend` Owner gets design tokens and component structure injected at task start
 
-### Memory (RAG)
+**Spring OpenAPI (`#backend`)**
+- Pulls live spec from `/v3/api-docs`, falls back to local `openapi.yaml` / `openapi.json`
+- Injects endpoint list, request/response schemas (TypeScript types), and auth method
 
-SQLite FTS5 full-text search over three types of records: approved code snippets, Tribunal decision logs, and manually added domain knowledge. Relevant records are surfaced automatically at the start of each task.
+### Lightweight RAG Memory
 
-### Module Structure
+SQLite FTS5 full-text search — no vector DB, no extra dependencies.
 
+| Type | Content | When indexed |
+|------|---------|--------------|
+| `code` | Arbiter-approved code snippets + file path | On Arbiter approval |
+| `decision` | Tribunal round summary (issue → resolution) | On approval or escalation |
+| `domain` | Manually added domain knowledge | `/memory add <content>` command |
+
+Relevant records are surfaced automatically at the start of each Owner task.
+
+### Per-Agent Discord Identity
+
+Each agent group has its own webhook identity in Discord — different username and avatar per agent. Configured via `groups/<folder>/webhook.json`.
+
+```json
+{
+  "webhookUrl": "https://discord.com/api/webhooks/...",
+  "username": "🔨 Owner Agent",
+  "avatarUrl": "https://..."
+}
 ```
-src/tribunal/
-  ├── orchestrator.ts       # Tribunal state machine (Owner → Reviewer → Arbiter)
-  ├── loop-guard.ts         # Infinite-loop prevention: max retry + keyword repeat detection
-  ├── scheduler.ts          # Cron-based task triggers (IANA timezone-aware)
-  ├── context-injector.ts   # Figma MCP injection + OpenAPI spec injection
-  └── memory/
-        ├── store.ts        # SQLite FTS5 search
-        └── indexer.ts      # Indexes approved code and Tribunal decision logs
-```
 
-**DB migrations added:**
-- `014-tribunal-sessions` — Tribunal round state tracking
-- `015-tribunal-schedules` — Cron schedule JSON column on `agent_groups`
-- `016-tribunal-memory` — FTS5 full-text search table (isolated per `agent_group_id`)
-
-**Host integration:**
-- `delivery.ts` — `handleTribunalRouting` hook routes outbound messages through the Tribunal orchestrator
-- `host-sweep.ts` — `TRIBUNAL-HOOK` checks cron schedules every 60s and fires due tasks
+Agent sessions remain fully isolated; the webhook only affects how messages appear in Discord.
 
 ---
-
-## Why I Built NanoClaw
-
-[OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
-
-NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. Claude agents run in their own Linux containers with filesystem isolation, not merely behind permission checks.
-
-## Quick Start
-
-```bash
-git clone https://github.com/qwibitai/nanoclaw.git nanoclaw-v2
-cd nanoclaw-v2
-bash nanoclaw.sh
-```
-
-`nanoclaw.sh` walks you from a fresh machine to a named agent you can message. It installs Node, pnpm, and Docker if missing, registers your Anthropic credential with OneCLI, builds the agent container, and pairs your first channel (Telegram, Discord, WhatsApp, or a local CLI). If a step fails, Claude Code is invoked automatically to diagnose and resume from where it broke.
-
-## Philosophy
-
-**Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NanoClaw codebase, just ask Claude Code to walk you through it.
-
-**Secure by isolation.** Agents run in Linux containers and they can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
-
-**Built for the individual user.** NanoClaw isn't a monolithic framework; it's software that fits each user's exact needs. Instead of becoming bloatware, NanoClaw is designed to be bespoke. You make your own fork and have Claude Code modify it to match your needs.
-
-**Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that it's safe to make changes.
-
-**AI-native, hybrid by design.** The install and onboarding flow is an optimized scripted path, fast and deterministic. When a step needs judgment, whether a failed install, a guided decision, or a customization, control hands off to Claude Code seamlessly. Beyond setup there's no monitoring dashboard or debugging UI either: describe the problem in chat and Claude Code handles it.
-
-**Skills over features.** Trunk ships the registry and infrastructure, not specific channel adapters or alternative agent providers. Channels (Discord, Slack, Telegram, WhatsApp, …) live on a long-lived `channels` branch; alternative providers (OpenCode, Ollama) live on `providers`. You run `/add-telegram`, `/add-opencode`, etc. and the skill copies exactly the module(s) you need into your fork. No feature you didn't ask for.
-
-**Best harness, best model.** NanoClaw natively uses Claude Code via Anthropic's official Claude Agent SDK, so you get the latest Claude models and Claude Code's full toolset, including the ability to modify and expand your own NanoClaw fork. Other providers are drop-in options: `/add-codex` for OpenAI's Codex (ChatGPT subscription or API key), `/add-opencode` for OpenRouter, Google, DeepSeek and more via OpenCode, and `/add-ollama-provider` for local open-weight models. Provider is configurable per agent group.
-
-## What It Supports
-
-- **Multi-channel messaging** — WhatsApp, Telegram, Discord, Slack, Microsoft Teams, iMessage, Matrix, Google Chat, Webex, Linear, GitHub, WeChat, and email via Resend. Installed on demand with `/add-<channel>` skills. Run one or many at the same time.
-- **Flexible isolation** — connect each channel to its own agent for full privacy, share one agent across many channels for unified memory with separate conversations, or fold multiple channels into a single shared session so one conversation spans many surfaces. Pick per channel via `/manage-channels`. See [docs/isolation-model.md](docs/isolation-model.md).
-- **Per-agent workspace** — each agent group has its own `CLAUDE.md`, its own memory, its own container, and only the mounts you allow. Nothing crosses the boundary unless you wire it to.
-- **Scheduled tasks** — recurring jobs that run Claude and can message you back
-- **Web access** — search and fetch content from the web
-- **Container isolation** — agents are sandboxed in Docker (macOS/Linux/WSL2), with optional [Docker Sandboxes](docs/docker-sandboxes.md) micro-VM isolation or Apple Container as a macOS-native opt-in
-- **Credential security** — agents never hold raw API keys. Outbound requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects credentials at request time and enforces per-agent policies and rate limits.
-
-## Usage
-
-Talk to your assistant with the trigger word (default: `@Andy`):
-
-```
-@Andy send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
-@Andy review the git history for the past week each Friday and update the README if there's drift
-@Andy every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
-```
-
-From a channel you own or administer, you can manage groups and tasks:
-```
-@Andy list all scheduled tasks across groups
-@Andy pause the Monday briefing task
-@Andy join the Family Chat group
-```
-
-## Customizing
-
-NanoClaw doesn't use configuration files. To make changes, just tell Claude Code what you want:
-
-- "Change the trigger word to @Bob"
-- "Remember in the future to make responses shorter and more direct"
-- "Add a custom greeting when I say good morning"
-- "Store conversation summaries weekly"
-
-Or run `/customize` for guided changes.
-
-The codebase is small enough that Claude can safely modify it.
-
-## Contributing
-
-**Don't add features. Add skills.**
-
-If you want to add a new channel or agent provider, don't add it to trunk. New channel adapters land on the `channels` branch; new agent providers land on `providers`. Users install them in their own fork with `/add-<name>` skills, which copy the relevant module(s) into the standard paths, wire the registration, and pin dependencies.
-
-This keeps trunk as pure registry and infra, and every fork stays lean — users get the channels and providers they asked for and nothing else.
-
-### RFS (Request for Skills)
-
-Skills we'd like to see:
-
-**Communication Channels**
-- `/add-signal` — Add Signal as a channel
-
-## Requirements
-
-- macOS or Linux (Windows via WSL2)
-- Node.js 20+ and pnpm 10+ (the installer will install both if missing)
-- [Docker Desktop](https://docker.com/products/docker-desktop) (macOS/Windows) or Docker Engine (Linux)
-- [Claude Code](https://claude.ai/download) for `/customize`, `/debug`, error recovery during setup, and all `/add-<channel>` skills
 
 ## Architecture
 
 ```
-messaging apps → host process (router) → inbound.db → container (Bun, Claude Agent SDK) → outbound.db → host process (delivery) → messaging apps
+Discord
+  ├── #frontend ─── Tribunal Loop (fully automated)
+  │     └── 🧵 Thread    Owner → Reviewer → Arbiter
+  │                      Self-Healing, Scheduler, RAG Memory
+  │
+  ├── #pm ──────────── User ↔ PM Agent (1:1)
+  │                    Figma MCP (full read/write)
+  │
+  └── #backend ──────── User ↔ Backend Agent (collaborative)
+                        Spring OpenAPI spec injection
+
+NanoClaw Host (Node.js)
+  ├── src/router.ts          — inbound routing → inbound.db → wake container
+  ├── src/delivery.ts        — polls outbound.db → channel adapter (webhook)
+  ├── src/host-sweep.ts      — 60s sweep: stale detection, cron triggers
+  └── src/tribunal/
+        ├── orchestrator.ts  — Tribunal state machine
+        ├── loop-guard.ts    — infinite-loop prevention
+        ├── scheduler.ts     — cron-based task triggers
+        ├── context-injector.ts — Figma + OpenAPI injection
+        └── memory/
+              ├── store.ts   — FTS5 search
+              └── indexer.ts — approval/decision indexing
+
+Agent Containers (Bun + Claude Agent SDK)
+  ├── frontend-owner    — inbound.db / outbound.db (isolated)
+  ├── frontend-reviewer — inbound.db / outbound.db (isolated)
+  ├── frontend-arbiter  — inbound.db / outbound.db (isolated)
+  ├── pm                — inbound.db / outbound.db (isolated)
+  └── backend           — inbound.db / outbound.db (isolated)
 ```
 
-A single Node host orchestrates per-session agent containers. When a message arrives, the host routes it via the entity model (user → messaging group → agent group → session), writes it to the session's `inbound.db`, and wakes the container. The agent-runner inside the container polls `inbound.db`, runs Claude, and writes responses to `outbound.db`. The host polls `outbound.db` and delivers back through the channel adapter.
+**Everything is a message.** The host and containers communicate only through SQLite files — no IPC, no stdin piping. Each session has two DBs: `inbound.db` (host writes, container reads) and `outbound.db` (container writes, host reads). Exactly one writer per file.
 
-Two SQLite files per session, each with exactly one writer — no cross-mount contention, no IPC, no stdin piping. Channels and alternative providers self-register at startup; trunk ships the registry and the Chat SDK bridge, while the adapters themselves are skill-installed per fork.
+---
 
-For the full architecture writeup see [docs/architecture.md](docs/architecture.md); for the three-level isolation model see [docs/isolation-model.md](docs/isolation-model.md).
+## Requirements
 
-Key files:
-- `src/index.ts` — entry point: DB init, channel adapters, delivery polls, sweep
-- `src/router.ts` — inbound routing: messaging group → agent group → session → `inbound.db`
-- `src/delivery.ts` — polls `outbound.db`, delivers via adapter, handles system actions
-- `src/host-sweep.ts` — 60s sweep: stale detection, due-message wake, recurrence
-- `src/session-manager.ts` — resolves sessions, opens `inbound.db` / `outbound.db`
-- `src/container-runner.ts` — spawns per-agent-group containers, OneCLI credential injection
-- `src/db/` — central DB (users, roles, agent groups, messaging groups, wiring, migrations)
-- `src/channels/` — channel adapter infra (adapters installed via `/add-<channel>` skills)
-- `src/providers/` — host-side provider config (`claude` baked in; others via skills)
-- `src/tribunal/` — B2B multi-agent pipeline (orchestrator, loop-guard, scheduler, context-injector, RAG memory)
-- `container/agent-runner/` — Bun agent-runner: poll loop, MCP tools, provider abstraction
-- `groups/<folder>/` — per-agent-group filesystem (`CLAUDE.md`, skills, container config)
+- **macOS** (Apple Silicon recommended) or Linux
+- **Node.js 22+** and **pnpm 10+**
+- **Docker Desktop** (macOS) or Docker Engine (Linux) — or Apple Container (`/convert-to-apple-container`)
+- **Claude Code** — for setup, skills, and ongoing customization
+- **Anthropic API key** — managed via [OneCLI Agent Vault](https://github.com/onecli/onecli)
+- **Discord bot** — one bot token with `Message Content Intent` enabled
+- **Discord server** — three text channels: `#frontend`, `#pm`, `#backend`
 
-## FAQ
+---
 
-**Why Docker?**
+## Setup
 
-Docker provides cross-platform support (macOS, Linux and Windows via WSL2) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime. For additional isolation, [Docker Sandboxes](docs/docker-sandboxes.md) run each container inside a micro VM.
-
-**Can I run this on Linux or Windows?**
-
-Yes. Docker is the default runtime and works on macOS, Linux, and Windows (via WSL2). Just run `bash nanoclaw.sh`.
-
-**Is this secure?**
-
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. Credentials never enter the container — outbound API requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects authentication at the proxy level and supports rate limits and access policies. You should still review what you're running, but the codebase is small enough that you actually can. See the [security documentation](https://docs.nanoclaw.dev/concepts/security) for the full security model.
-
-**Why no configuration files?**
-
-We don't want configuration sprawl. Every user should customize NanoClaw so that the code does exactly what they want, rather than configuring a generic system. If you prefer having config files, you can tell Claude to add them.
-
-**Can I use third-party or open-source models?**
-
-Yes. The supported path is `/add-opencode` (OpenRouter, OpenAI, Google, DeepSeek, and more via OpenCode config) or `/add-ollama-provider` (local open-weight models via Ollama). Both are configurable per agent group, so different agents can run on different backends in the same install.
-
-For one-off experiments, any Claude API-compatible endpoint also works via `.env`:
+### 1. Clone and install
 
 ```bash
-ANTHROPIC_BASE_URL=https://your-api-endpoint.com
-ANTHROPIC_AUTH_TOKEN=your-token-here
+git clone https://github.com/HJinS/nanoclaw.git
+cd nanoclaw
+pnpm install
 ```
 
-**How do I debug issues?**
+### 2. Create a Discord bot
 
-Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies NanoClaw.
+1. Go to [discord.com/developers/applications](https://discord.com/developers/applications) → **New Application**
+2. **Bot** tab → **Add Bot** → disable **Public Bot** → enable **Message Content Intent**
+3. **OAuth2 → URL Generator** — scopes: `bot`, `applications.commands`; permissions: `View Channels`, `Send Messages`, `Send Messages in Threads`, `Create Public Threads`, `Read Message History`, `Manage Webhooks`
+4. Open the generated URL and invite the bot to your server
 
-**Why isn't the setup working for me?**
+### 3. Create channel webhooks
 
-If a step fails, `nanoclaw.sh` hands off to Claude Code to diagnose and resume. If that doesn't resolve it, run `claude`, then `/debug`. If Claude identifies an issue likely to affect other users, open a PR against the relevant setup step or skill.
+In each Discord channel (Settings → Integrations → Webhooks → New Webhook → Copy URL):
 
-**What changes will be accepted into the codebase?**
+- `#frontend` webhook URL
+- `#pm` webhook URL
+- `#backend` webhook URL
 
-Only security fixes, bug fixes, and clear improvements will be accepted to the base configuration. That's all.
+### 4. Configure credentials
 
-Everything else (new capabilities, OS compatibility, hardware support, enhancements) should be contributed as skills on the `channels` or `providers` branch.
+Add to `.env`:
 
-This keeps the base system minimal and lets every user customize their installation without inheriting features they don't want.
+```bash
+DISCORD_BOT_TOKEN=your-bot-token
+DISCORD_APPLICATION_ID=your-application-id
+DISCORD_PUBLIC_KEY=your-public-key
+```
 
-## Community
+Sync to container:
 
-Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
+```bash
+mkdir -p data/env && cp .env data/env/env
+```
 
-## Changelog
+### 5. Configure agent webhook identities
 
-See [CHANGELOG.md](CHANGELOG.md) for breaking changes, or the [full release history](https://docs.nanoclaw.dev/changelog) on the documentation site.
+Create `groups/<folder>/webhook.json` for each agent group:
+
+```
+groups/
+  frontend-owner/webhook.json
+  frontend-reviewer/webhook.json
+  frontend-arbiter/webhook.json
+  pm/webhook.json
+  backend/webhook.json
+```
+
+Example (`groups/frontend-owner/webhook.json`):
+
+```json
+{
+  "webhookUrl": "https://discord.com/api/webhooks/...",
+  "username": "🔨 Owner Agent",
+  "avatarUrl": "https://..."
+}
+```
+
+`frontend-owner`, `frontend-reviewer`, `frontend-arbiter` all use the `#frontend` webhook URL — they share the channel but have different usernames. `pm` and `backend` each use their own channel's webhook URL.
+
+### 6. Register the service and wire channels
+
+```bash
+# Register as a launchd service (macOS)
+/setup
+
+# Bootstrap the first agent + set operator as owner
+/init-first-agent
+
+# Wire #frontend, #pm, #backend to their agent groups
+/manage-channels
+```
+
+---
+
+## Agent Groups
+
+| Folder | Channel | Role |
+|--------|---------|------|
+| `frontend-owner` | `#frontend` | Writes code based on task |
+| `frontend-reviewer` | `#frontend` | Reviews output, flags issues |
+| `frontend-arbiter` | `#frontend` | Final approval or escalation |
+| `pm` | `#pm` | Figma MCP — design to spec |
+| `backend` | `#backend` | API integration, OpenAPI-aware |
+
+Each group has its own filesystem at `groups/<folder>/`:
+
+```
+groups/<folder>/
+  CLAUDE.md         — agent persona and instructions
+  webhook.json      — Discord webhook identity
+  skills/           — agent-specific skills
+  container-config/ — apt/npm deps, MCP servers
+```
+
+---
+
+## Development
+
+```bash
+# Host (Node + pnpm)
+pnpm run dev          # hot reload
+pnpm run build        # compile TypeScript
+pnpm test             # run tests (vitest, 247 tests)
+
+# Agent container (Bun)
+cd container/agent-runner && bun install
+cd container/agent-runner && bun test
+
+# Rebuild container image
+./container/build.sh
+```
+
+**Service management (macOS)**
+
+```bash
+launchctl load   ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw   # restart
+```
+
+**Troubleshooting**
+
+| What | Where |
+|------|-------|
+| Host logs | `logs/nanoclaw.error.log` (errors), `logs/nanoclaw.log` (full trace) |
+| Session DBs | `data/v2-sessions/<agent-group>/<session>/` |
+| Central DB | `data/v2.db` — agent groups, messaging groups, wiring, memory |
+
+---
+
+## DB Migrations
+
+Custom migrations added on top of NanoClaw base:
+
+| Migration | Purpose |
+|-----------|---------|
+| `014-tribunal-sessions` | Tribunal round state tracking |
+| `015-tribunal-schedules` | Cron schedule JSON column on `agent_groups` |
+| `016-tribunal-memory` | FTS5 full-text search (isolated per `agent_group_id`) |
+
+---
+
+## Based On
+
+[NanoClaw](https://github.com/qwibitai/nanoclaw) — lightweight self-hosted AI assistant framework. This fork adds the Tribunal Loop, per-agent Discord webhook identity, RAG memory, context injection, and cron scheduling on top of NanoClaw's container infrastructure.
+
+---
 
 ## License
 
