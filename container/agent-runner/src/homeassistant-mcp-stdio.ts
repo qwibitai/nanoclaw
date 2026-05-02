@@ -2,9 +2,9 @@
  * Stdio MCP Server for Home Assistant
  * Exposes the Home Assistant REST API as tools for the container agent.
  *
- * Auth:
- *   HA_URL=http://<host>:8123   (no trailing slash)
- *   HA_TOKEN=<long-lived access token>
+ * Auth (one of two paths, detected at startup):
+ *   OneCLI  — ONECLI_URL is set and reachable; HA_URL + HA_TOKEN are injected by OneCLI
+ *   Env var — HA_URL + HA_TOKEN read directly from process.env / .env file
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -44,6 +44,46 @@ function err(e: unknown) {
     content: [{ type: 'text' as const, text: `Error: ${e instanceof Error ? e.message : String(e)}` }],
     isError: true as const,
   };
+}
+
+// --- Credential path detection ---
+
+async function detectCredentialPath(): Promise<void> {
+  const onecliUrl = process.env.ONECLI_URL;
+  let source: 'onecli' | 'env' = 'env';
+
+  if (onecliUrl) {
+    try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 2000);
+      const res = await fetch(`${onecliUrl}/health`, { signal: ac.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        source = 'onecli';
+        console.error('[homeassistant] credential path: OneCLI (HA_URL + HA_TOKEN injected by vault)');
+      } else {
+        console.error(`[homeassistant] OneCLI responded HTTP ${res.status} — falling back to process.env`);
+      }
+    } catch {
+      console.error('[homeassistant] OneCLI unreachable (ONECLI_URL set but probe timed out or failed) — falling back to process.env');
+    }
+  } else {
+    console.error('[homeassistant] credential path: process.env (ONECLI_URL not set)');
+  }
+
+  const haUrl = process.env.HA_URL;
+  const haToken = process.env.HA_TOKEN;
+  const missing = [!haUrl && 'HA_URL', !haToken && 'HA_TOKEN'].filter(Boolean).join(', ');
+
+  if (missing) {
+    const hint = source === 'onecli'
+      ? `OneCLI is reachable but did not inject ${missing} — check your vault configuration.`
+      : `Set ${missing} in your .env file.`;
+    console.error(`[homeassistant] missing required credentials: ${missing}\n  ${hint}`);
+    process.exit(1);
+  }
+
+  console.error(`[homeassistant] credentials verified (source: ${source === 'onecli' ? 'OneCLI' : 'process.env'})`);
 }
 
 // --- MCP Server ---
@@ -135,6 +175,8 @@ mcpServer.tool(
     } catch (e) { return err(e); }
   },
 );
+
+await detectCredentialPath();
 
 const transport = new StdioServerTransport();
 await mcpServer.connect(transport);
