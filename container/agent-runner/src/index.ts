@@ -125,6 +125,26 @@ function resolveAgentConfig(): { model: string; effort: EffortLevel } {
     }
   }
 
+  // TODO: Remove when upstream v2 implements per-provider model config.
+  // When a provider override is active, allow a raw model string that bypasses
+  // Anthropic SDK model validation (which rejects non-Anthropic model names).
+  if (groupEnv.NANOCLAW_PROVIDER_BASE_URL) {
+    const rawProviderModel = pickString(groupEnv.NANOCLAW_PROVIDER_MODEL);
+    if (rawProviderModel !== undefined) {
+      if (MODEL_ID_RE.test(rawProviderModel)) {
+        model = rawProviderModel;
+      } else {
+        log(
+          `Ignoring invalid NANOCLAW_PROVIDER_MODEL (regex mismatch); falling back to '${model}'`,
+        );
+      }
+    } else {
+      log(
+        `NANOCLAW_PROVIDER_BASE_URL set but no NANOCLAW_PROVIDER_MODEL; using resolved model '${model}'`,
+      );
+    }
+  }
+
   const config = { model, effort };
   console.error(
     `[nanoclaw] agent config resolved: model=${config.model} effort=${config.effort}`,
