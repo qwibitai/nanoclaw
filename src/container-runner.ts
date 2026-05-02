@@ -567,7 +567,13 @@ export async function runContainerAgent(
     : group.folder.toLowerCase().replace(/_/g, '-');
 
   let providerOverride: ProviderOverride | undefined;
-  const settingsPath = path.join(DATA_DIR, 'sessions', group.folder, '.claude', 'settings.json');
+  const settingsPath = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    '.claude',
+    'settings.json',
+  );
   try {
     if (fs.existsSync(settingsPath)) {
       const raw = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
@@ -575,7 +581,10 @@ export async function runContainerAgent(
       const rawBaseUrl = env.NANOCLAW_PROVIDER_BASE_URL;
       const rawApiKey = env.NANOCLAW_PROVIDER_API_KEY;
       if (rawBaseUrl !== undefined || rawApiKey !== undefined) {
-        if (typeof rawBaseUrl !== 'string' || !/^https?:\/\//.test(rawBaseUrl)) {
+        if (
+          typeof rawBaseUrl !== 'string' ||
+          !/^https?:\/\//.test(rawBaseUrl)
+        ) {
           logger.warn(
             { group: group.name },
             'NANOCLAW_PROVIDER_BASE_URL is missing or invalid (must start with http:// or https://) — using default proxy',
