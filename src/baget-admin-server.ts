@@ -153,6 +153,17 @@ export interface CreateAgentGroupBody {
   userId: string;
   companyId: string;
   companyName: string;
+  /**
+   * Per-founder team names. `cos` is required (every founder has one);
+   * specialists (`developer | marketing | analyst | design | ops`) are
+   * each optional and only present when the founder has actively-hired
+   * that role on the dashboard. Older baget.ai builds may still send
+   * the full six-role payload — both shapes are accepted, the renderer
+   * gates each specialist block on its name being present. Missing
+   * specialists are stripped from CLAUDE.local.md AND the persona
+   * resolver falls back to the CoS persona if the model still tags a
+   * reply with a role that's not on the founder's roster.
+   */
   teamMembers: BagetTeamMembers;
   channelTokenCredentialName: string;
   /** Default https://app.baget.ai. Must match the founder's environment. */
@@ -1103,9 +1114,33 @@ export function validateCreateBody(body: CreateAgentGroupBody): string | null {
   }
   const tm = body.teamMembers;
   if (!tm || typeof tm !== 'object') return 'teamMembers must be an object';
-  for (const role of ['cos', 'developer', 'marketing', 'analyst', 'design', 'ops'] as const) {
-    if (typeof tm[role] !== 'string' || tm[role].trim().length === 0) {
-      return `teamMembers.${role} must be a non-empty string`;
+  // CoS is the only required member — every founder has one regardless
+  // of plan tier. Apprenti has CoS + Intern; intern is not modeled by
+  // this fork. The remaining specialists are optional: present iff the
+  // founder has actively hired that role on the baget.ai dashboard.
+  if (typeof tm.cos !== 'string' || tm.cos.trim().length === 0) {
+    return 'teamMembers.cos must be a non-empty string';
+  }
+  // Optional specialists. If a key is absent OR explicitly null, treat
+  // as "not hired" — fine. If present, it must be a non-empty string;
+  // anything else (number, boolean, empty/whitespace string) is a
+  // structural bug from the dashboard side and we want a clear error.
+  const knownRoles = ['cos', 'developer', 'marketing', 'analyst', 'design', 'ops'] as const;
+  for (const role of ['developer', 'marketing', 'analyst', 'design', 'ops'] as const) {
+    const v = (tm as Record<string, unknown>)[role];
+    if (v === undefined || v === null) continue;
+    if (typeof v !== 'string' || v.trim().length === 0) {
+      return `teamMembers.${role} must be a non-empty string when present`;
+    }
+  }
+  // Reject unknown keys. Catches dashboard-side typos and the case
+  // where a new role is added on baget.ai before the fork knows about
+  // it — silent dropping at render time would lose the founder's data
+  // with no signal. Only enforce on string-shaped keys to avoid choking
+  // on `__proto__`-style noise from JSON.parse on untrusted input.
+  for (const key of Object.keys(tm)) {
+    if (!(knownRoles as readonly string[]).includes(key)) {
+      return `teamMembers.${key} is not a known role (allowed: ${knownRoles.join(', ')})`;
     }
   }
   // Cap user-controlled strings on the way in so a 10MB body doesn't

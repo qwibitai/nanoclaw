@@ -44,29 +44,41 @@ const BAGET_TEMPLATE_DIR = path.join(process.cwd(), 'setup', 'baget-template');
 const BAGET_TEMPLATE_FILE = path.join(BAGET_TEMPLATE_DIR, 'CLAUDE.md.template');
 
 /**
- * The closed set of role placeholders the Baget template uses. Adding a
- * new role: extend this type, the template, AND the renderer's required-
- * key check below — the renderer fails fast on missing keys to surface
- * a typo before the agent_group is created with a half-rendered prompt.
+ * Per-founder team names sent to this fork at provision time. CoS is
+ * the only required member — every founder has a CoS regardless of
+ * their plan (apprenti has CoS + Intern; intern is not modeled here).
+ * The remaining specialists are optional and only sent when the
+ * founder has actively-hired that role on baget.ai's dashboard.
+ *
+ * When a specialist is omitted:
+ *   - The renderer strips the role's block from CLAUDE.local.md (so
+ *     the LLM doesn't think a "Clara the analyst" exists when only
+ *     CoS is hired).
+ *   - The persona resolver falls back to the CoS persona if the
+ *     model still tags a reply with that role.
+ *
+ * Adding a new role: extend this type, add `<!--role:X-->...<!--/role:X-->`
+ * blocks in the template, and add the role to OPTIONAL_ROLES below.
  */
 export type BagetTeamMembers = {
   cos: string;
-  developer: string;
-  marketing: string;
-  analyst: string;
-  design: string;
-  ops: string;
+  developer?: string;
+  marketing?: string;
+  analyst?: string;
+  design?: string;
+  ops?: string;
 };
 
-const REQUIRED_PLACEHOLDERS: ReadonlyArray<string> = [
-  'company_name',
-  'cos_name',
-  'developer_name',
-  'marketing_name',
-  'analyst_name',
-  'design_name',
-  'ops_name',
-];
+/** The optional specialist roles, in template order. CoS is always present. */
+const OPTIONAL_ROLES = ['developer', 'marketing', 'analyst', 'design', 'ops'] as const;
+type OptionalRole = (typeof OPTIONAL_ROLES)[number];
+
+/**
+ * Required placeholders that MUST have a non-empty value at render time.
+ * Specialist placeholders (e.g. `developer_name`) are only required when
+ * the corresponding role is present in `teamMembers` — see render logic.
+ */
+const REQUIRED_PLACEHOLDERS: ReadonlyArray<string> = ['company_name', 'cos_name'];
 
 export interface RenderClaudeMdArgs {
   companyName: string;
@@ -79,28 +91,70 @@ export interface RenderClaudeMdArgs {
  * Render the Baget CLAUDE.md template with founder-specific team names.
  * Returns the fully-substituted markdown content.
  *
- * Substitution rules:
- *   - `{{key}}` → variables[key]
- *   - Unknown placeholders throw — better to fail loudly at provision
- *     time than to ship a half-rendered prompt to the founder.
- *   - Missing required placeholders throw — same reason.
+ * Two-phase render:
+ *
+ *   1. Pre-process role blocks. Lines wrapped in
+ *      `<!--role:X-->...<!--/role:X-->` are kept iff `teamMembers[X]`
+ *      is a non-empty string. When a specialist role is missing, its
+ *      block is stripped before substitution so the resulting prompt
+ *      doesn't reference roster members the founder hasn't hired.
+ *
+ *   2. Substitute placeholders. `{{key}}` → variables[key].
+ *      - Unknown placeholders throw — better to fail loudly at
+ *        provision time than to ship a half-rendered prompt.
+ *      - Missing required placeholders (company_name, cos_name) throw.
+ *      - Specialist placeholders that have already been stripped via
+ *        block removal don't need a value.
  */
 export function renderBagetClaudeMd(args: RenderClaudeMdArgs): string {
   const templatePath = args.templatePath ?? BAGET_TEMPLATE_FILE;
   if (!fs.existsSync(templatePath)) {
     throw new Error(`Baget template not found at ${templatePath}`);
   }
-  const template = fs.readFileSync(templatePath, 'utf8');
+  const rawTemplate = fs.readFileSync(templatePath, 'utf8');
+
+  // Determine which optional roles are present + valid. A role with
+  // an empty / whitespace-only string counts as missing — the
+  // dashboard-side caller is expected to omit absent roles entirely,
+  // but we treat an empty value as "absent" so a sloppy caller can't
+  // accidentally render `- 💻 ** ** — Developer.` lines.
+  const presentRoles = new Set<OptionalRole>();
+  for (const role of OPTIONAL_ROLES) {
+    const v = args.teamMembers[role];
+    if (typeof v === 'string' && v.trim().length > 0) {
+      presentRoles.add(role);
+    }
+  }
+
+  // Strip role blocks for missing roles, then strip the markers for
+  // roles that are present. Done before placeholder substitution so a
+  // missing `developer_name` placeholder inside a stripped block isn't
+  // flagged as an unsubstituted-placeholder error below.
+  const template = stripRoleBlocks(rawTemplate, presentRoles);
+
+  // Sanity check: after processing, no `<!--role:` or `<!--/role:`
+  // markers should remain. A leftover marker means the template has
+  // an unbalanced / mismatched / typo'd block (e.g. open without
+  // close, or a close tag for a role that doesn't exist in
+  // OPTIONAL_ROLES). Fail loud at provision time so the operator sees
+  // it instead of letting half-rendered template directives leak into
+  // the LLM's context.
+  const leftover = /<!--\/?role:[a-z]+-->/.exec(template);
+  if (leftover) {
+    throw new Error(
+      `Baget template render: orphan role marker "${leftover[0]}" left after block processing — check template for typos or unbalanced markers`,
+    );
+  }
 
   const vars: Record<string, string> = {
     company_name: args.companyName,
     cos_name: args.teamMembers.cos,
-    developer_name: args.teamMembers.developer,
-    marketing_name: args.teamMembers.marketing,
-    analyst_name: args.teamMembers.analyst,
-    design_name: args.teamMembers.design,
-    ops_name: args.teamMembers.ops,
   };
+  for (const role of OPTIONAL_ROLES) {
+    if (presentRoles.has(role)) {
+      vars[`${role}_name`] = args.teamMembers[role] as string;
+    }
+  }
 
   // Verify every required placeholder has a non-empty value before
   // substitution. Empty names produce confusing prompts ("- 🧭  —
@@ -112,9 +166,10 @@ export function renderBagetClaudeMd(args: RenderClaudeMdArgs): string {
     }
   }
 
-  // Validate every {{placeholder}} in the template is something we can
-  // substitute. Catches new placeholders added to the template that the
-  // renderer doesn't know about.
+  // Validate every {{placeholder}} in the (block-stripped) template is
+  // something we can substitute. Catches new placeholders the renderer
+  // doesn't know about — and missing specialist names whose block
+  // wasn't gated by a role marker (template author error).
   const seenPlaceholders = new Set<string>();
   template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
     seenPlaceholders.add(key);
@@ -136,6 +191,40 @@ export function renderBagetClaudeMd(args: RenderClaudeMdArgs): string {
   });
 
   return rendered;
+}
+
+/**
+ * Process `<!--role:X-->...<!--/role:X-->` blocks in the template:
+ *   - For each role NOT in `presentRoles`, drop the entire block
+ *     (markers + content), including the trailing newline so we don't
+ *     leave blank gaps in the prompt.
+ *   - For each role IN `presentRoles`, drop just the marker comments
+ *     (keep the content) — the LLM should never see template-internal
+ *     directives.
+ *
+ * The regex anchors on `<!--role:X-->` and `<!--/role:X-->` and matches
+ * across newlines. Blocks must NOT nest — each role's open marker must
+ * be closed before another opens. The template is hand-authored so this
+ * is enforced by review, not by a parser.
+ */
+function stripRoleBlocks(template: string, presentRoles: Set<OptionalRole>): string {
+  let out = template;
+  for (const role of OPTIONAL_ROLES) {
+    // Match `<!--role:X-->\n? ... \n?<!--/role:X-->` plus an optional
+    // trailing newline so removed blocks don't leave a blank line.
+    const blockRe = new RegExp(`<!--role:${role}-->\\n?[\\s\\S]*?<!--/role:${role}-->\\n?`, 'g');
+    if (presentRoles.has(role)) {
+      // Keep the content, drop only the markers (and any single trailing
+      // newline immediately after each marker so we don't leave double
+      // blank lines).
+      out = out.replace(new RegExp(`<!--role:${role}-->\\n?`, 'g'), '');
+      out = out.replace(new RegExp(`<!--/role:${role}-->\\n?`, 'g'), '');
+    } else {
+      // Drop the whole block.
+      out = out.replace(blockRe, '');
+    }
+  }
+  return out;
 }
 
 /**

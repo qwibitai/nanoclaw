@@ -129,26 +129,39 @@ export function parseRoleTag(message: string): ParsedRoleTag {
 /**
  * Render a model output as `<emoji> <Member>: <body>`.
  *
- * - On a recognized tag, prefix with the corresponding emoji + the
- *   founder's actual member name.
- * - On no tag detected, fall through to the CoS persona — matches the
- *   prompt's "Default greetings use cos:" rule. Founders should still
- *   feel like they're hearing from a named person.
- * - On a junk tag (parsed shape, unknown name), pass through the raw
- *   message untouched. We leave it visible rather than silently
- *   re-prefixing so QA notices.
+ * - On a recognized tag whose role is on the founder's team: prefix
+ *   with the role's emoji + the founder's actual member name.
+ * - On a recognized tag whose role is NOT on the team (apprenti
+ *   founder, model hallucinated a `analyst:` reply when only CoS is
+ *   hired): drop the tag and re-prefix as the CoS persona. This is
+ *   the active-team-only safety net — the LLM's prompt has already
+ *   been stripped of off-team roles, but we belt-and-braces here too
+ *   so a stale prompt or a rogue model output can't surface a ghost
+ *   name like "Clara" to the founder.
+ * - On no tag detected: fall through to the CoS persona — matches the
+ *   prompt's "Default greetings use cos:" rule.
+ * - On a junk tag (looked tag-shaped but isn't one we know): pass
+ *   through the raw message untouched. We leave it visible rather
+ *   than silently re-prefixing so QA notices.
  */
 export function applyPersonaPrefix(message: string, team: BagetTeamMembers): string {
   const parsed = parseRoleTag(message);
 
   if (parsed.tag !== null) {
     const memberName = team[ROLE_TO_MEMBER[parsed.tag]];
-    if (typeof memberName !== 'string' || memberName.trim().length === 0) {
-      // Team data is malformed — fall through to the body without a
-      // prefix rather than render `🧭 : body`.
-      return parsed.body;
+    if (typeof memberName === 'string' && memberName.trim().length > 0) {
+      return `${ROLE_EMOJI[parsed.tag]} ${memberName}: ${parsed.body}`;
     }
-    return `${ROLE_EMOJI[parsed.tag]} ${memberName}: ${parsed.body}`;
+    // Role's name is missing — the founder hasn't hired this role.
+    // Re-prefix as CoS using the body sans the original tag.
+    const cos = team.cos;
+    if (typeof cos === 'string' && cos.trim().length > 0) {
+      return `${ROLE_EMOJI.cos} ${cos}: ${parsed.body}`;
+    }
+    // CoS also missing (malformed payload — should never happen
+    // because validateCreateBody requires it). Return the body without
+    // a prefix rather than render `🧭 : body`.
+    return parsed.body;
   }
 
   if (parsed.rawTag !== null) {

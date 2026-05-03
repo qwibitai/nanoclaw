@@ -508,24 +508,43 @@ function extractText(message: OutboundMessage): string | null {
   return null;
 }
 
+/**
+ * Parse the JSON-encoded `agent_groups.baget_team_members` column into
+ * a `BagetTeamMembers`. CoS is required (every founder has one);
+ * specialists (developer / marketing / analyst / design / ops) are each
+ * optional — present iff the founder hired that role on the dashboard.
+ *
+ * Returns null on any structural error (non-string, malformed JSON,
+ * missing/empty cos, present-but-non-string specialist). The caller
+ * downgrades to a generic CoS-less code path when null — see the
+ * `team_members unparseable` log line in delivery / welcome paths.
+ *
+ * Older 6-role payloads continue to parse cleanly: every specialist is
+ * a non-empty string, every check passes.
+ */
 function parseTeamMembers(json: string | null | undefined): BagetTeamMembers | null {
   if (typeof json !== 'string' || json.length === 0) return null;
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(json) as Partial<BagetTeamMembers>;
-    if (
-      typeof parsed.cos === 'string' &&
-      typeof parsed.developer === 'string' &&
-      typeof parsed.marketing === 'string' &&
-      typeof parsed.analyst === 'string' &&
-      typeof parsed.design === 'string' &&
-      typeof parsed.ops === 'string'
-    ) {
-      return parsed as BagetTeamMembers;
-    }
-    return null;
+    parsed = JSON.parse(json);
   } catch {
     return null;
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const obj = parsed as Record<string, unknown>;
+  // CoS is mandatory.
+  if (typeof obj.cos !== 'string' || obj.cos.trim().length === 0) return null;
+  // Validate each optional specialist: absent (undefined / null) is OK,
+  // present must be a non-empty string. Anything else (number, etc.)
+  // means the dashboard wrote a malformed row — treat the whole record
+  // as unparseable so the founder gets a generic welcome rather than a
+  // half-broken persona resolution.
+  for (const role of ['developer', 'marketing', 'analyst', 'design', 'ops'] as const) {
+    const v = obj[role];
+    if (v === undefined || v === null) continue;
+    if (typeof v !== 'string' || v.trim().length === 0) return null;
+  }
+  return obj as BagetTeamMembers;
 }
 
 // ── Registration ──
@@ -565,3 +584,10 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
 export function _testBuildBagetTelegramAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
   return buildAdapter(cfg);
 }
+
+// Exported for direct unit testing of the JSON-roundtrip parse path —
+// the integration tests in baget-telegram.test.ts cover the full
+// adapter, but parseTeamMembers is the single chokepoint that was
+// rejecting partial teams in production. A focused unit test here
+// guards against regressions to that specific gate.
+export const _testParseTeamMembers = parseTeamMembers;
