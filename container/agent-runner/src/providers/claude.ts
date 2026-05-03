@@ -55,6 +55,9 @@ const TOOL_ALLOWLIST = [
   'Skill',
   'NotebookEdit',
   'mcp__nanoclaw__*',
+  'mcp__imap__*',
+  'mcp__dav__*',
+  'mcp__anytype__*',
 ];
 
 interface SDKUserMessage {

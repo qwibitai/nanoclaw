@@ -18,6 +18,9 @@ import {
   ONECLI_API_KEY,
   ONECLI_URL,
   TIMEZONE,
+  ANYTYPE_API_KEY,
+  ANYTYPE_API_BASE_URL,
+  ANYTYPE_HOST_IP,
 } from './config.js';
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
@@ -438,6 +441,15 @@ async function buildContainerArgs(
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Anytype MCP credentials — passed as env vars so the MCP server wrapper can access them.
+  // The claude SDK spawns MCP servers with an isolated env (no inherited PATH etc.),
+  // so vars needed by MCP wrappers must be injected here, not in container.json mcpServers.env.
+  if (ANYTYPE_API_KEY) {
+    args.push('-e', `ANYTYPE_API_KEY=${ANYTYPE_API_KEY}`);
+    args.push('-e', `ANYTYPE_API_BASE_URL=${ANYTYPE_API_BASE_URL}`);
+    args.push('-e', `ANYTYPE_HOST_IP=${ANYTYPE_HOST_IP}`);
+  }
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {

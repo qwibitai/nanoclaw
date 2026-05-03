@@ -12,6 +12,9 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.116",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "cron-parser": "^5.0.0",
+    "dav-mcp": "*",
+    "imapflow": "^1.0.166",
+    "nodemailer": "^6.10.1",
     "zod": "^4.0.0"
   },
   "devDependencies": {

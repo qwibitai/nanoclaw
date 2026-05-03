@@ -6,7 +6,16 @@ import { getContainerImageBase, getDefaultContainerImage, getInstallSlug } from 
 import { isValidTimezone } from './timezone.js';
 
 // Read config values from .env (falls back to process.env).
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'ONECLI_URL', 'ONECLI_API_KEY', 'TZ']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'ONECLI_URL',
+  'ONECLI_API_KEY',
+  'TZ',
+  'ANYTYPE_API_KEY',
+  'ANYTYPE_API_BASE_URL',
+  'ANYTYPE_HOST_IP',
+]);
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_HAS_OWN_NUMBER =
@@ -66,3 +75,9 @@ function resolveConfigTimezone(): string {
   return 'UTC';
 }
 export const TIMEZONE = resolveConfigTimezone();
+
+// Anytype MCP integration — optional, only used when key is present
+export const ANYTYPE_API_KEY = process.env.ANYTYPE_API_KEY || envConfig.ANYTYPE_API_KEY;
+export const ANYTYPE_API_BASE_URL =
+  process.env.ANYTYPE_API_BASE_URL || envConfig.ANYTYPE_API_BASE_URL || 'http://172.18.0.1:31012';
+export const ANYTYPE_HOST_IP = process.env.ANYTYPE_HOST_IP || envConfig.ANYTYPE_HOST_IP || '172.18.0.1';
