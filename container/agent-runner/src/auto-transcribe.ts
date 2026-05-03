@@ -5,14 +5,13 @@
  * and injects the transcript inline with a source label:
  *
  *   [Voice (local-whisper): "Can you review the PR before EOD?"]
- *   [Voice (openai-fallback): "..."]
  *   [Voice: transcription failed — <reason>]
  *
- * The source label is mandatory — it lets the agent disclose to the user when
- * audio was processed remotely, satisfying the sovereignty model.
+ * The source label is mandatory — it lets the agent disclose to the user how
+ * the audio was processed, satisfying the sovereignty model.
  *
- * If transcription is unavailable and disabled, the label includes the error
- * so the agent can inform the user rather than silently dropping the content.
+ * If transcription fails, the label includes the error so the agent can
+ * inform the user rather than silently dropping the content.
  */
 import path from 'path';
 
@@ -89,8 +88,7 @@ async function preprocessMessage(msg: MessageInRow): Promise<MessageInRow> {
 
     try {
       const result = await transcribeAudio(fullPath);
-      const sourceLabel = result.source === 'local-whisper' ? 'local-whisper' : 'openai-fallback';
-      labels.push(`[Voice (${sourceLabel}): "${result.text}"]`);
+      labels.push(`[Voice (${result.source}): "${result.text}"]`);
       log(`Transcribed ${name} via ${result.source} in ${result.durationMs}ms`);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);

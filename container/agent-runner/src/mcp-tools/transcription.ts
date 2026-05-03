@@ -3,8 +3,7 @@
  *
  * Wraps the core transcribeAudio() function as an explicit tool so agents can:
  *   - Transcribe arbitrary files outside the auto-injection inbound flow
- *   - Override the default fallback/approval policy from env vars
- *   - Access the raw result (source, durationMs, model) for disclosure to the user
+ *   - Access the raw result (source, durationMs, model) for disclosure
  *
  * Auto-injection in the poll loop is the default UX — this tool is for
  * advanced cases where the agent needs explicit control.
@@ -17,9 +16,9 @@ registerTools([
     tool: {
       name: 'transcribe',
       description:
-        'Transcribe an audio file to text. Uses local Whisper by default (sovereign: audio stays on-device). ' +
-        'Set allowFallback:true to permit OpenAI Whisper API when local is unavailable. ' +
-        'Returns the transcript text plus the source (local-whisper or openai-fallback) for disclosure.',
+        'Transcribe an audio file to text via local Whisper inside the container. ' +
+        'Sovereign: audio never leaves the machine. Returns the transcript text plus ' +
+        'the source label (local-whisper) and timing for disclosure.',
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -27,31 +26,15 @@ registerTools([
             type: 'string',
             description: 'Absolute path to the audio file (e.g. /workspace/attachments/abc123)',
           },
-          allowFallback: {
-            type: 'boolean',
-            description:
-              'Allow OpenAI Whisper API fallback when local Whisper is unavailable. ' +
-              'Default: WHISPER_OPENAI_FALLBACK env var (default false — local-only).',
-          },
-          requireApproval: {
-            type: 'boolean',
-            description:
-              'When true, throw rather than silently calling OpenAI — use this to surface the decision to the user. ' +
-              'Default: WHISPER_REQUIRE_APPROVAL env var (default false).',
-          },
         },
         required: ['filePath'],
       },
     },
     async handler(args) {
-      const { filePath, allowFallback, requireApproval } = args as {
-        filePath: string;
-        allowFallback?: boolean;
-        requireApproval?: boolean;
-      };
+      const { filePath } = args as { filePath: string };
 
       try {
-        const result = await transcribeAudio(filePath, { allowFallback, requireApproval });
+        const result = await transcribeAudio(filePath);
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result) }],
         };
