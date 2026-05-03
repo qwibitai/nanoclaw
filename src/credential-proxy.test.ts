@@ -11,6 +11,20 @@ vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
+// Prevent reading real ~/.claude/.credentials.json in tests
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs');
+  return {
+    ...actual,
+    readFileSync: vi.fn((filePath: unknown, ...args: unknown[]) => {
+      if (typeof filePath === 'string' && filePath.endsWith('.credentials.json')) {
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      }
+      return (actual.readFileSync as (...a: unknown[]) => unknown)(filePath, ...args);
+    }),
+  };
+});
+
 import { startCredentialProxy } from './credential-proxy.js';
 
 function makeRequest(
@@ -23,20 +37,17 @@ function makeRequest(
   headers: http.IncomingHttpHeaders;
 }> {
   return new Promise((resolve, reject) => {
-    const req = http.request(
-      { ...options, hostname: '127.0.0.1', port },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => {
-          resolve({
-            statusCode: res.statusCode!,
-            body: Buffer.concat(chunks).toString(),
-            headers: res.headers,
-          });
+    const req = http.request({ ...options, hostname: '127.0.0.1', port }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        resolve({
+          statusCode: res.statusCode!,
+          body: Buffer.concat(chunks).toString(),
+          headers: res.headers,
         });
-      },
-    );
+      });
+    });
     req.on('error', reject);
     req.write(body);
     req.end();
@@ -58,9 +69,7 @@ describe('credential-proxy', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     });
-    await new Promise<void>((resolve) =>
-      upstreamServer.listen(0, '127.0.0.1', resolve),
-    );
+    await new Promise<void>((resolve) => upstreamServer.listen(0, '127.0.0.1', resolve));
     upstreamPort = (upstreamServer.address() as AddressInfo).port;
   });
 
@@ -97,7 +106,7 @@ describe('credential-proxy', () => {
     expect(lastUpstreamHeaders['x-api-key']).toBe('sk-ant-real-key');
   });
 
-  it('OAuth mode replaces Authorization when container sends one', async () => {
+  it('OAuth mode replaces Authorization with live token', async () => {
     proxyPort = await startProxy({
       CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
     });
@@ -106,7 +115,7 @@ describe('credential-proxy', () => {
       proxyPort,
       {
         method: 'POST',
-        path: '/api/oauth/claude_cli/create_api_key',
+        path: '/v1/messages',
         headers: {
           'content-type': 'application/json',
           authorization: 'Bearer placeholder',
@@ -115,17 +124,52 @@ describe('credential-proxy', () => {
       '{}',
     );
 
-    expect(lastUpstreamHeaders['authorization']).toBe(
-      'Bearer real-oauth-token',
-    );
+    expect(lastUpstreamHeaders['authorization']).toBe('Bearer real-oauth-token');
   });
 
-  it('OAuth mode does not inject Authorization when container omits it', async () => {
+  it('OAuth mode injects authorization even when container omits it', async () => {
     proxyPort = await startProxy({
       CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
     });
 
-    // Post-exchange: container uses x-api-key only, no Authorization header
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: { 'content-type': 'application/json' },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamHeaders['authorization']).toBe('Bearer real-oauth-token');
+  });
+
+  it('OAuth mode injects required OAuth inference headers', async () => {
+    proxyPort = await startProxy({
+      CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
+    });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: { 'content-type': 'application/json' },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamHeaders['anthropic-beta']).toContain('oauth-2025-04-20');
+    expect(lastUpstreamHeaders['anthropic-dangerous-direct-browser-access']).toBe('true');
+    expect(lastUpstreamHeaders['x-app']).toBe('cli');
+  });
+
+  it('OAuth mode appends oauth-2025-04-20 to existing anthropic-beta header', async () => {
+    proxyPort = await startProxy({
+      CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
+    });
+
     await makeRequest(
       proxyPort,
       {
@@ -133,14 +177,55 @@ describe('credential-proxy', () => {
         path: '/v1/messages',
         headers: {
           'content-type': 'application/json',
-          'x-api-key': 'temp-key-from-exchange',
+          'anthropic-beta': 'existing-feature',
         },
       },
       '{}',
     );
 
-    expect(lastUpstreamHeaders['x-api-key']).toBe('temp-key-from-exchange');
-    expect(lastUpstreamHeaders['authorization']).toBeUndefined();
+    expect(lastUpstreamHeaders['anthropic-beta']).toBe('existing-feature,oauth-2025-04-20');
+  });
+
+  it('OAuth mode does not duplicate oauth-2025-04-20 if already present', async () => {
+    proxyPort = await startProxy({
+      CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
+    });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: {
+          'content-type': 'application/json',
+          'anthropic-beta': 'oauth-2025-04-20',
+        },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamHeaders['anthropic-beta']).toBe('oauth-2025-04-20');
+  });
+
+  it('OAuth mode does not override existing x-app header', async () => {
+    proxyPort = await startProxy({
+      CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
+    });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: {
+          'content-type': 'application/json',
+          'x-app': 'custom-app',
+        },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamHeaders['x-app']).toBe('custom-app');
   });
 
   it('strips hop-by-hop headers', async () => {
