@@ -126,6 +126,7 @@ describe('SignalAdapter', () => {
     tcpRef.fakeSocket = null;
     tcpRef.rpcResponses.set('send', { timestamp: 1234567890 });
     tcpRef.rpcResponses.set('sendTyping', {});
+    tcpRef.rpcResponses.set('sendReaction', { timestamp: 1234567890 });
   });
 
   afterEach(() => {
@@ -956,6 +957,403 @@ describe('SignalAdapter', () => {
     it('does not support threads', () => {
       const adapter = createAdapter();
       expect(adapter.supportsThreads).toBe(false);
+    });
+  });
+
+  // --- Reactions ---
+
+  describe('outbound reactions', () => {
+    it('issues sendReaction with targetAuthor and targetTimestamp parsed from messageId', async () => {
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('+15555550123', null, {
+        kind: 'chat',
+        content: {
+          operation: 'reaction',
+          messageId: '1700000000000:+15555550123',
+          emoji: '👍',
+        },
+      });
+
+      const calls = getRpcCallsForMethod('sendReaction');
+      expect(calls).toHaveLength(1);
+      const params = calls[0].params as Record<string, unknown>;
+      expect(params.recipient).toEqual(['+15555550123']);
+      expect(params.account).toBe('+15551234567');
+      expect(params.targetAuthor).toBe('+15555550123');
+      expect(params.targetTimestamp).toBe(1700000000000);
+      expect(params.emoji).toBe('👍');
+      expect(params.remove).toBeUndefined();
+
+      await adapter.teardown();
+    });
+
+    it('uses groupId for group destinations', async () => {
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('group:abc123', null, {
+        kind: 'chat',
+        content: {
+          operation: 'reaction',
+          messageId: '1700000000000:+15555550123',
+          emoji: '❤️',
+        },
+      });
+
+      const calls = getRpcCallsForMethod('sendReaction');
+      expect(calls).toHaveLength(1);
+      const params = calls[0].params as Record<string, unknown>;
+      expect(params.groupId).toBe('abc123');
+      expect(params.recipient).toBeUndefined();
+      expect(params.targetAuthor).toBe('+15555550123');
+
+      await adapter.teardown();
+    });
+
+    it('converts shortcode emoji names to unicode', async () => {
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('+15555550123', null, {
+        kind: 'chat',
+        content: {
+          operation: 'reaction',
+          messageId: '1700000000000:+15555550123',
+          emoji: 'thumbs_up',
+        },
+      });
+
+      const calls = getRpcCallsForMethod('sendReaction');
+      expect(calls).toHaveLength(1);
+      expect((calls[0].params as Record<string, unknown>).emoji).toBe('👍');
+
+      await adapter.teardown();
+    });
+
+    it('passes literal unicode emoji through unchanged', async () => {
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('+15555550123', null, {
+        kind: 'chat',
+        content: {
+          operation: 'reaction',
+          messageId: '1700000000000:+15555550123',
+          emoji: '🎉',
+        },
+      });
+
+      const calls = getRpcCallsForMethod('sendReaction');
+      expect((calls[0].params as Record<string, unknown>).emoji).toBe('🎉');
+
+      await adapter.teardown();
+    });
+
+    it('falls back to a default emoji when the shortcode is unknown', async () => {
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('+15555550123', null, {
+        kind: 'chat',
+        content: {
+          operation: 'reaction',
+          messageId: '1700000000000:+15555550123',
+          emoji: 'totally_made_up_shortcode',
+        },
+      });
+
+      const calls = getRpcCallsForMethod('sendReaction');
+      expect(calls).toHaveLength(1);
+      // Fallback character must be a real emoji, not the original shortcode
+      expect((calls[0].params as Record<string, unknown>).emoji).toBe('👍');
+
+      await adapter.teardown();
+    });
+
+    it('propagates remove=true to sendReaction', async () => {
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('+15555550123', null, {
+        kind: 'chat',
+        content: {
+          operation: 'reaction',
+          messageId: '1700000000000:+15555550123',
+          emoji: '👍',
+          remove: true,
+        },
+      });
+
+      const calls = getRpcCallsForMethod('sendReaction');
+      expect((calls[0].params as Record<string, unknown>).remove).toBe(true);
+
+      await adapter.teardown();
+    });
+
+    it('targets self-account when messageId has no author suffix (own outbound)', async () => {
+      // Legacy / self-message: messageId is just the timestamp string. Target
+      // author defaults to the bot account so reactions on the agent's own
+      // sends still resolve.
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('+15555550123', null, {
+        kind: 'chat',
+        content: {
+          operation: 'reaction',
+          messageId: '1700000000000',
+          emoji: '👀',
+        },
+      });
+
+      const calls = getRpcCallsForMethod('sendReaction');
+      expect(calls).toHaveLength(1);
+      const params = calls[0].params as Record<string, unknown>;
+      expect(params.targetAuthor).toBe('+15551234567');
+      expect(params.targetTimestamp).toBe(1700000000000);
+
+      await adapter.teardown();
+    });
+
+    it('does not invoke send for reaction-only payloads', async () => {
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('+15555550123', null, {
+        kind: 'chat',
+        content: {
+          operation: 'reaction',
+          messageId: '1700000000000:+15555550123',
+          emoji: '👍',
+        },
+      });
+
+      expect(getRpcCallsForMethod('send')).toHaveLength(0);
+
+      await adapter.teardown();
+    });
+  });
+
+  describe('outbound text returns platform message id', () => {
+    it('returns "<timestamp>:<account>" so the host can target it later', async () => {
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+      tcpRef.rpcResponses.set('send', { timestamp: 1700000111111 });
+
+      const id = await adapter.deliver('+15555550123', null, {
+        kind: 'chat',
+        content: { text: 'hello' },
+      });
+
+      expect(id).toBe('1700000111111:+15551234567');
+
+      await adapter.teardown();
+    });
+
+    it('returns the first chunk timestamp when chunking', async () => {
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      // Each send returns the same timestamp from the test mock; we just want
+      // the deliver() return to be the first chunk's timestamp, not undefined.
+      tcpRef.rpcResponses.set('send', { timestamp: 1700000222222 });
+
+      const id = await adapter.deliver('+15555550123', null, {
+        kind: 'chat',
+        content: { text: 'x'.repeat(8500) },
+      });
+
+      expect(id).toBe('1700000222222:+15551234567');
+
+      await adapter.teardown();
+    });
+  });
+
+  describe('inbound reactions', () => {
+    it('emits a chat InboundMessage with structured reaction object for a DM reaction', async () => {
+      const adapter = createAdapter();
+      const cfg = createMockSetup();
+      await adapter.setup(cfg);
+
+      pushEvent({
+        sourceNumber: '+15555550123',
+        sourceName: 'Alice',
+        sourceUuid: 'uuid-alice',
+        dataMessage: {
+          timestamp: 1700000999999,
+          reaction: {
+            emoji: '👍',
+            targetAuthor: '+15551234567',
+            targetSentTimestamp: 1700000111111,
+            isRemove: false,
+          },
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(cfg.onInbound).toHaveBeenCalledTimes(1);
+      const [platformId, threadId, msg] = (cfg.onInbound as any).mock.calls[0];
+      expect(platformId).toBe('+15555550123');
+      expect(threadId).toBeNull();
+      expect(msg.kind).toBe('chat');
+      // id is the reaction's own timestamp so it doesn't collide with the
+      // original message in messages_in
+      expect(msg.id).toBe('1700000999999');
+      const content = msg.content as Record<string, unknown>;
+      expect(content.text).toBe('[reacted ➕ 👍 to message]');
+      expect(content.sender).toBe('+15555550123');
+      expect(content.senderName).toBe('Alice');
+      const reaction = content.reaction as Record<string, unknown>;
+      expect(reaction.emoji).toBe('👍');
+      expect(reaction.isAdded).toBe(true);
+      expect(reaction.targetMessageId).toBe('1700000111111:+15551234567');
+
+      await adapter.teardown();
+    });
+
+    it('marks remove reactions with isAdded=false and a ➖ marker', async () => {
+      const adapter = createAdapter();
+      const cfg = createMockSetup();
+      await adapter.setup(cfg);
+
+      pushEvent({
+        sourceNumber: '+15555550123',
+        sourceName: 'Alice',
+        dataMessage: {
+          timestamp: 1700000999999,
+          reaction: {
+            emoji: '❤️',
+            targetAuthor: '+15551234567',
+            targetSentTimestamp: 1700000111111,
+            isRemove: true,
+          },
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const msg = (cfg.onInbound as any).mock.calls[0][2];
+      const content = msg.content as Record<string, unknown>;
+      expect(content.text).toBe('[reacted ➖ ❤️ to message]');
+      const reaction = content.reaction as Record<string, unknown>;
+      expect(reaction.isAdded).toBe(false);
+
+      await adapter.teardown();
+    });
+
+    it('routes group reactions to group:<id> platformId', async () => {
+      const adapter = createAdapter();
+      const cfg = createMockSetup();
+      await adapter.setup(cfg);
+
+      pushEvent({
+        sourceNumber: '+15555550123',
+        sourceName: 'Alice',
+        dataMessage: {
+          timestamp: 1700000999999,
+          groupV2: { id: 'group-id-xyz' },
+          reaction: {
+            emoji: '🎉',
+            targetAuthor: '+15551234567',
+            targetSentTimestamp: 1700000111111,
+            isRemove: false,
+          },
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const [platformId] = (cfg.onInbound as any).mock.calls[0];
+      expect(platformId).toBe('group:group-id-xyz');
+
+      await adapter.teardown();
+    });
+
+    it('suppresses echo of our own outbound reaction', async () => {
+      const adapter = createAdapter();
+      const cfg = createMockSetup();
+      await adapter.setup(cfg);
+
+      // Bot sends a reaction first
+      await adapter.deliver('+15555550123', null, {
+        kind: 'chat',
+        content: {
+          operation: 'reaction',
+          messageId: '1700000111111:+15555550123',
+          emoji: '👍',
+        },
+      });
+
+      // signal-cli echoes it back via syncMessage. The adapter must not
+      // forward this round-trip to the agent.
+      pushEvent({
+        sourceNumber: '+15551234567',
+        syncMessage: {
+          sentMessage: {
+            timestamp: 1700000222222,
+            destinationNumber: '+15555550123',
+            reaction: {
+              emoji: '👍',
+              targetAuthor: '+15555550123',
+              targetSentTimestamp: 1700000111111,
+              isRemove: false,
+            },
+          },
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(cfg.onInbound).not.toHaveBeenCalled();
+
+      await adapter.teardown();
+    });
+
+    it('treats reaction envelope as reaction even when alongside other dataMessage fields', async () => {
+      // signal-cli normally sends reactions in their own dataMessage, but if
+      // a message arrives with both `reaction` and `message` populated we
+      // should treat it as a reaction (don't double-emit a text inbound).
+      const adapter = createAdapter();
+      const cfg = createMockSetup();
+      await adapter.setup(cfg);
+
+      pushEvent({
+        sourceNumber: '+15555550123',
+        sourceName: 'Alice',
+        dataMessage: {
+          timestamp: 1700000999999,
+          message: 'should not surface as text',
+          reaction: {
+            emoji: '🔥',
+            targetAuthor: '+15551234567',
+            targetSentTimestamp: 1700000111111,
+            isRemove: false,
+          },
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(cfg.onInbound).toHaveBeenCalledTimes(1);
+      const msg = (cfg.onInbound as any).mock.calls[0][2];
+      const content = msg.content as Record<string, unknown>;
+      expect(content.text).toBe('[reacted ➕ 🔥 to message]');
+      // No raw text leaked through
+      expect(content.text).not.toContain('should not surface as text');
+
+      await adapter.teardown();
     });
   });
 });

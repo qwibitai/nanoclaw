@@ -262,8 +262,9 @@ Otherwise, run `/init-first-agent` to create an agent and wire it to your Signal
 - Echo suppression — outbound messages matched on `(platformId, text)` within a 10 s TTL to avoid syncMessage loops
 - Note to Self — messages you send to your own account from another device route to the agent as inbound with `isFromMe: true`
 - Voice attachments — detected but not transcribed by default; the agent receives `[Voice Message]` placeholder text. Run `/add-voice-transcription` for local transcription via parakeet-mlx
+- Reactions (inbound + outbound) — agents can call `add_reaction({ messageId, emoji })` and the emoji is applied as a Signal reaction on the target message. Inbound reactions arrive as a `chat` message with structured `content.reaction` and a `[reacted ➕ 👍 to message]` text fallback the formatter renders without changes. Emoji input accepts either a shortcode (`thumbs_up`, `:heart:`, `white_check_mark`) or the literal unicode character (`👍`); unknown shortcodes log a warning and fall back to 👍.
 
-Not supported yet: outbound file attachments (logged and dropped), edit/delete messages, reactions.
+Not supported yet: outbound file attachments (logged and dropped), edit/delete messages.
 
 ## Troubleshooting
 
