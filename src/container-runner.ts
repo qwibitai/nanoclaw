@@ -16,10 +16,13 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   ONECLI_API_KEY,
+  ONECLI_BIN,
+  ONECLI_OAUTH_SECRET_ID,
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
+import { ensureFreshOAuthToken } from './oauth-token.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
@@ -445,6 +448,11 @@ async function buildContainerArgs(
       args.push('-e', `${key}=${value}`);
     }
   }
+
+  // Ensure the OAuth token is fresh before asking OneCLI to apply credentials.
+  // This refreshes ~/.claude/.credentials.json and syncs the OneCLI secret
+  // on-demand so containers always receive a valid token.
+  await ensureFreshOAuthToken({ secretId: ONECLI_OAUTH_SECRET_ID, onecliPath: ONECLI_BIN });
 
   // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls
   // are routed through the agent vault for credential injection. Treated as

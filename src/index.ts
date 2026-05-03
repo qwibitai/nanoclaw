@@ -6,7 +6,8 @@
  */
 import path from 'path';
 
-import { DATA_DIR } from './config.js';
+import { DATA_DIR, ONECLI_BIN, ONECLI_OAUTH_SECRET_ID } from './config.js';
+import { ensureFreshOAuthToken } from './oauth-token.js';
 import { enforceStartupBackoff, resetCircuitBreaker } from './circuit-breaker.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
 import { initDb } from './db/connection.js';
@@ -162,6 +163,15 @@ async function main(): Promise<void> {
   // 6. Start host sweep
   startHostSweep();
   log.info('Host sweep started');
+
+  // Proactively refresh the OAuth token every 30 minutes so it doesn't expire
+  // during periods of inactivity (container-runner also refreshes on demand).
+  const refreshOAuth = () =>
+    ensureFreshOAuthToken({ secretId: ONECLI_OAUTH_SECRET_ID, onecliPath: ONECLI_BIN }).catch(
+      (err) => log.error('Background OAuth refresh failed', { err }),
+    );
+  refreshOAuth();
+  setInterval(refreshOAuth, 30 * 60 * 1000);
 
   log.info('NanoClaw running');
 }
