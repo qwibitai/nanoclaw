@@ -32,6 +32,20 @@ export function registerTools(tools: McpToolDefinition[]): void {
   }
 }
 
+/**
+ * In-process accessors for the registered tool catalog. The Claude path
+ * spawns this module as a child stdio MCP server (see `index.ts`). In-process
+ * providers (Gemini) bypass the wire protocol and call tool handlers directly
+ * after listing them via these getters.
+ */
+export function getRegisteredTools(): readonly McpToolDefinition[] {
+  return allTools;
+}
+
+export function getRegisteredToolByName(name: string): McpToolDefinition | undefined {
+  return toolMap.get(name);
+}
+
 export async function startMcpServer(): Promise<void> {
   const server = new Server({ name: 'nanoclaw', version: '2.0.0' }, { capabilities: { tools: {} } });
 
