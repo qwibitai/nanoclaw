@@ -350,6 +350,16 @@ async function spawnSingleProcessRunner(
     BAGET_AGENT_GROUP_ID: agentGroup.id,
     BAGET_AGENT_GROUP_NAME: agentGroup.name,
     BAGET_SESSION_ID: session.id,
+    // The agent-runner's baget-mcp tools (container/agent-runner/src/
+    // mcp-tools/baget.ts) read process.env.BAGET_COMPANY_ID +
+    // BAGET_USER_ID directly to construct callbacks like
+    // `/api/companies/${companyId}/overview`. agent_groups carries
+    // these via migration 014's user_id / company_id columns; for
+    // non-Baget rows they're null and the MCP tools surface a clear
+    // error to the founder. Keep the explicit-allowlist pattern —
+    // never `...process.env`.
+    ...(agentGroup.user_id ? { BAGET_USER_ID: agentGroup.user_id } : {}),
+    ...(agentGroup.company_id ? { BAGET_COMPANY_ID: agentGroup.company_id } : {}),
   };
   if (providerContribution.env) {
     for (const [k, v] of Object.entries(providerContribution.env)) {
