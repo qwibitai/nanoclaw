@@ -194,3 +194,131 @@ describe('validateCreateBody — channelToken rules', () => {
     expect(validateCreateBody(body)).toContain('Missing required field: companyName');
   });
 });
+
+describe('validateCreateBody — partial teamMembers (active-team-only)', () => {
+  // Reuse the same baseBody pattern but vary teamMembers shape to
+  // simulate apprenti / artisan / atelier founders whose dashboards
+  // hire a different subset of specialists.
+  function withTeam(team: Record<string, unknown>): CreateAgentGroupBody {
+    return {
+      userId: 'u-' + 'a'.repeat(36),
+      companyId: 'c-' + 'b'.repeat(36),
+      companyName: 'Acme Corp',
+      teamMembers: team as never,
+      channelTokenCredentialName: 'baget-channel-token-aaaaaaaa-bbbbbbbb',
+      bagetApiBaseUrl: 'https://stg-app.baget.ai',
+    };
+  }
+
+  it('accepts apprenti-shaped team (cos only)', () => {
+    expect(validateCreateBody(withTeam({ cos: 'Raphaël' }))).toBeNull();
+  });
+
+  it('accepts artisan-shaped team (cos + 2 specialists)', () => {
+    expect(
+      validateCreateBody(
+        withTeam({
+          cos: 'Raphaël',
+          developer: 'Valentin',
+          marketing: 'Chloé',
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('accepts the full six-role payload (older baget.ai builds, atelier+)', () => {
+    expect(
+      validateCreateBody(
+        withTeam({
+          cos: 'Louis',
+          developer: 'Tristan',
+          marketing: 'Valentin',
+          analyst: 'Chloé',
+          design: 'Nicolas',
+          ops: 'Théo',
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('accepts a team with explicit-null specialist (treated as absent)', () => {
+    // Some serializers emit null for absent JSON fields. The validator
+    // should treat null as "not hired" rather than rejecting the body.
+    expect(
+      validateCreateBody(
+        withTeam({
+          cos: 'Raphaël',
+          analyst: null,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('rejects when cos is missing', () => {
+    expect(validateCreateBody(withTeam({}))).toContain('teamMembers.cos must be a non-empty string');
+  });
+
+  it('rejects when cos is empty string', () => {
+    expect(validateCreateBody(withTeam({ cos: '' }))).toContain('teamMembers.cos must be a non-empty string');
+  });
+
+  it('rejects when cos is whitespace-only', () => {
+    expect(validateCreateBody(withTeam({ cos: '   ' }))).toContain('teamMembers.cos must be a non-empty string');
+  });
+
+  it('rejects when an OPTIONAL specialist is sent with the wrong type', () => {
+    // Founder hired analyst on the dashboard but the dashboard side
+    // serialized the value as a number — caller bug, not "absent."
+    expect(
+      validateCreateBody(
+        withTeam({
+          cos: 'Raphaël',
+          analyst: 12345,
+        }),
+      ),
+    ).toContain('teamMembers.analyst must be a non-empty string when present');
+  });
+
+  it('rejects when an optional specialist is an empty string', () => {
+    // Empty string ≠ absent — could mean the dashboard sent a hired
+    // specialist whose name field is corrupt. Surface the error.
+    expect(
+      validateCreateBody(
+        withTeam({
+          cos: 'Raphaël',
+          developer: '',
+        }),
+      ),
+    ).toContain('teamMembers.developer must be a non-empty string when present');
+  });
+
+  it('rejects when an optional specialist is whitespace-only', () => {
+    expect(
+      validateCreateBody(
+        withTeam({
+          cos: 'Raphaël',
+          marketing: '   ',
+        }),
+      ),
+    ).toContain('teamMembers.marketing must be a non-empty string when present');
+  });
+
+  it('rejects when teamMembers is not an object', () => {
+    expect(validateCreateBody(withTeam('not-an-object' as unknown as Record<string, unknown>))).toContain(
+      'teamMembers must be an object',
+    );
+  });
+
+  it('rejects unknown role keys (dashboard typo / unsynced new role)', () => {
+    // Catches a class of silent data loss: dashboard adds a `producer`
+    // role before the fork knows about it. Without this check, the
+    // value would persist but be dropped at render time with no signal.
+    const result = validateCreateBody(
+      withTeam({
+        cos: 'Raphaël',
+        producer: 'Anaïs',
+      }),
+    );
+    expect(result).toContain('teamMembers.producer is not a known role');
+  });
+});

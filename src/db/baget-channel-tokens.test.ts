@@ -1,11 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { archiveBagetAgentGroup, getBagetAgentGroupById } from './baget-agent-groups.js';
-import {
-  deleteChannelToken,
-  getChannelToken,
-  upsertChannelToken,
-} from './baget-channel-tokens.js';
+import { deleteChannelToken, getChannelToken, upsertChannelToken } from './baget-channel-tokens.js';
 import { closeDb, getDb, initTestDb } from './connection.js';
 import { runMigrations } from './migrations/index.js';
 
@@ -54,9 +50,9 @@ describe('upsertChannelToken (insert path)', () => {
     // guard against orphan tokens. If initTestDb / runMigrations ever
     // forgets `PRAGMA foreign_keys = ON`, this test catches the
     // regression immediately.
-    expect(() =>
-      upsertChannelToken({ agentGroupId: 'ag-does-not-exist', tokenValue: 'token-orphan' }),
-    ).toThrow(/FOREIGN KEY/i);
+    expect(() => upsertChannelToken({ agentGroupId: 'ag-does-not-exist', tokenValue: 'token-orphan' })).toThrow(
+      /FOREIGN KEY/i,
+    );
   });
 });
 

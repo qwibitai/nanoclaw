@@ -62,11 +62,7 @@ export interface ChannelTokenReadResult {
  * at the call site, which is the footgun the original `now: string`
  * design invited.
  */
-export function upsertChannelToken(args: {
-  agentGroupId: string;
-  tokenValue: string;
-  now?: Date;
-}): void {
+export function upsertChannelToken(args: { agentGroupId: string; tokenValue: string; now?: Date }): void {
   const persistedAt = (args.now ?? new Date()).toISOString();
   getDb()
     .prepare(
@@ -92,12 +88,8 @@ export function upsertChannelToken(args: {
  */
 export function getChannelToken(agentGroupId: string): ChannelTokenReadResult | null {
   const row = getDb()
-    .prepare(
-      'SELECT token_value, persisted_at, rotated_from_at FROM baget_channel_tokens WHERE agent_group_id = ?',
-    )
-    .get(agentGroupId) as
-    | { token_value: string; persisted_at: string; rotated_from_at: string | null }
-    | undefined;
+    .prepare('SELECT token_value, persisted_at, rotated_from_at FROM baget_channel_tokens WHERE agent_group_id = ?')
+    .get(agentGroupId) as { token_value: string; persisted_at: string; rotated_from_at: string | null } | undefined;
   if (!row) return null;
   return {
     tokenValue: row.token_value,

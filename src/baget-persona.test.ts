@@ -101,12 +101,81 @@ describe('applyPersonaPrefix', () => {
     expect(applyPersonaPrefix('hi', broken)).toBe('hi');
   });
 
-  it('returns body without prefix when targeted role name is empty', () => {
-    const broken = { ...TEAM, analyst: '   ' } as BagetTeamMembers;
+  it('handles multi-line body intact', () => {
+    expect(applyPersonaPrefix('cos: line1\nline2', TEAM)).toBe('🧭 Louis: line1\nline2');
+  });
+});
+
+describe('applyPersonaPrefix — CoS fallback for off-team roles', () => {
+  // Apprenti-shaped team: only CoS + Intern (intern is not modeled in
+  // BagetTeamMembers — fork doesn't render an intern persona). Every
+  // specialist is omitted. If the model still emits an `analyst:`
+  // reply, we re-prefix as the CoS persona so the founder sees a
+  // familiar name rather than a ghost or a naked body.
+  const APPRENTI_TEAM: BagetTeamMembers = { cos: 'Raphaël' };
+
+  it('falls back to CoS when analyst is missing', () => {
+    expect(applyPersonaPrefix('analyst: 142', APPRENTI_TEAM)).toBe('🧭 Raphaël: 142');
+  });
+
+  it('falls back to CoS when developer is missing (dev tag)', () => {
+    expect(applyPersonaPrefix('dev: deploy live', APPRENTI_TEAM)).toBe('🧭 Raphaël: deploy live');
+  });
+
+  it('falls back to CoS when marketing is missing', () => {
+    expect(applyPersonaPrefix('marketing: campaign launched', APPRENTI_TEAM)).toBe('🧭 Raphaël: campaign launched');
+  });
+
+  it('falls back to CoS when design is missing', () => {
+    expect(applyPersonaPrefix('design: hero copy too generic', APPRENTI_TEAM)).toBe(
+      '🧭 Raphaël: hero copy too generic',
+    );
+  });
+
+  it('falls back to CoS when ops is missing', () => {
+    expect(applyPersonaPrefix('ops: vendor confirmed', APPRENTI_TEAM)).toBe('🧭 Raphaël: vendor confirmed');
+  });
+
+  it('falls back to CoS when role is present in type but value is empty string', () => {
+    const partial: BagetTeamMembers = { cos: 'Raphaël', analyst: '' };
+    expect(applyPersonaPrefix('analyst: 142', partial)).toBe('🧭 Raphaël: 142');
+  });
+
+  it('falls back to CoS when role value is whitespace-only', () => {
+    const partial: BagetTeamMembers = { cos: 'Raphaël', analyst: '   ' };
+    expect(applyPersonaPrefix('analyst: 142', partial)).toBe('🧭 Raphaël: 142');
+  });
+
+  it('returns body unprefixed when both role AND cos are missing (defensive)', () => {
+    // Should never happen because validateCreateBody requires cos, but
+    // the resolver shouldn't produce `🧭 : body` if it does.
+    const broken = { cos: '' } as BagetTeamMembers;
     expect(applyPersonaPrefix('analyst: 142', broken)).toBe('142');
   });
 
-  it('handles multi-line body intact', () => {
-    expect(applyPersonaPrefix('cos: line1\nline2', TEAM)).toBe('🧭 Louis: line1\nline2');
+  it('passes through unknown tag untouched even on partial team', () => {
+    // Unknown tags fall through unconditionally — partial-team CoS
+    // fallback only kicks in for KNOWN tags whose role is missing.
+    // An unrecognized tag could be model junk OR a future role; we
+    // surface it unmodified so QA notices.
+    const APPRENTI: BagetTeamMembers = { cos: 'Raphaël' };
+    expect(applyPersonaPrefix('captain: ahoy', APPRENTI)).toBe('captain: ahoy');
+  });
+
+  it('uses partial team for present roles, falls back for absent ones', () => {
+    // Artisan-shaped: CoS + dev + marketing only.
+    const ARTISAN: BagetTeamMembers = {
+      cos: 'Raphaël',
+      developer: 'Valentin',
+      marketing: 'Chloé',
+    };
+    expect(applyPersonaPrefix('dev: deploy', ARTISAN)).toBe('💻 Valentin: deploy');
+    expect(applyPersonaPrefix('marketing: live', ARTISAN)).toBe('📢 Chloé: live');
+    // analyst not on roster → fallback
+    expect(applyPersonaPrefix('analyst: 142', ARTISAN)).toBe('🧭 Raphaël: 142');
+    // design not on roster → fallback
+    expect(applyPersonaPrefix('design: brand', ARTISAN)).toBe('🧭 Raphaël: brand');
+    // ops not on roster → fallback
+    expect(applyPersonaPrefix('ops: vendor', ARTISAN)).toBe('🧭 Raphaël: vendor');
   });
 });

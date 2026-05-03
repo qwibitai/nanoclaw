@@ -18,7 +18,11 @@ import {
 } from '../db/index.js';
 import { insertPairingToken } from '../db/baget-pairing-tokens.js';
 import { bindBagetTelegramChat } from './baget-telegram-bind.js';
-import { _testBuildBagetTelegramAdapter, BAGET_TELEGRAM_CHANNEL_TYPE } from './baget-telegram.js';
+import {
+  _testBuildBagetTelegramAdapter,
+  _testParseTeamMembers,
+  BAGET_TELEGRAM_CHANNEL_TYPE,
+} from './baget-telegram.js';
 import type { ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
 
 const ADMIN_TOKEN = 'test-admin-token-1234567890abcdef';
@@ -474,5 +478,82 @@ describe('Baget Telegram adapter', () => {
       unknown_sender_policy: 'request_approval',
       is_group: 1,
     });
+  });
+});
+
+// `parseTeamMembers` is the JSON-roundtrip gate between the
+// `agent_groups.baget_team_members` column and `applyPersonaPrefix`.
+// Before partial-team support, this gate required ALL six roles to be
+// present-as-strings — which silently broke the entire delivery
+// persona-prefix path for apprenti / artisan founders.
+describe('parseTeamMembers (JSON-roundtrip gate)', () => {
+  it('accepts the full six-role payload (older baget.ai builds, atelier+)', () => {
+    const json = JSON.stringify({
+      cos: 'Louis',
+      developer: 'Valentin',
+      marketing: 'Chloé',
+      analyst: 'Théo',
+      design: 'Nicolas',
+      ops: 'Tristan',
+    });
+    const parsed = _testParseTeamMembers(json);
+    expect(parsed).toEqual({
+      cos: 'Louis',
+      developer: 'Valentin',
+      marketing: 'Chloé',
+      analyst: 'Théo',
+      design: 'Nicolas',
+      ops: 'Tristan',
+    });
+  });
+
+  it('accepts apprenti-shaped payload (cos only)', () => {
+    expect(_testParseTeamMembers(JSON.stringify({ cos: 'Raphaël' }))).toEqual({ cos: 'Raphaël' });
+  });
+
+  it('accepts artisan-shaped payload (cos + 2 specialists)', () => {
+    const parsed = _testParseTeamMembers(JSON.stringify({ cos: 'Raphaël', developer: 'Valentin', marketing: 'Chloé' }));
+    expect(parsed).toEqual({ cos: 'Raphaël', developer: 'Valentin', marketing: 'Chloé' });
+  });
+
+  it('accepts payload with explicit-null specialist (treated as absent)', () => {
+    // Some serializers emit `null` for absent JSON fields. We treat
+    // null the same as missing — keep cos, drop the null entry.
+    const parsed = _testParseTeamMembers(JSON.stringify({ cos: 'Raphaël', analyst: null }));
+    expect(parsed).toEqual({ cos: 'Raphaël', analyst: null });
+  });
+
+  it('rejects payload missing cos', () => {
+    expect(_testParseTeamMembers(JSON.stringify({ developer: 'V' }))).toBeNull();
+  });
+
+  it('rejects payload with empty-string cos', () => {
+    expect(_testParseTeamMembers(JSON.stringify({ cos: '' }))).toBeNull();
+  });
+
+  it('rejects payload with whitespace-only cos', () => {
+    expect(_testParseTeamMembers(JSON.stringify({ cos: '   ' }))).toBeNull();
+  });
+
+  it('rejects payload with non-string specialist value (dashboard write bug)', () => {
+    expect(_testParseTeamMembers(JSON.stringify({ cos: 'Raphaël', analyst: 12345 }))).toBeNull();
+  });
+
+  it('rejects payload with empty-string specialist value', () => {
+    expect(_testParseTeamMembers(JSON.stringify({ cos: 'Raphaël', developer: '' }))).toBeNull();
+  });
+
+  it('rejects malformed JSON', () => {
+    expect(_testParseTeamMembers('{not json}')).toBeNull();
+  });
+
+  it('rejects JSON arrays (must be an object)', () => {
+    expect(_testParseTeamMembers('["Raphaël"]')).toBeNull();
+  });
+
+  it('rejects null and empty inputs', () => {
+    expect(_testParseTeamMembers(null)).toBeNull();
+    expect(_testParseTeamMembers(undefined)).toBeNull();
+    expect(_testParseTeamMembers('')).toBeNull();
   });
 });
