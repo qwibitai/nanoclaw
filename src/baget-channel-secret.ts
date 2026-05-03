@@ -2,6 +2,22 @@
  * baget-channel-secret — persist baget.ai's per-(user, company) bearer
  * token into the OneCLI vault.
  *
+ * IMPORTANT — runtime scope:
+ *   This module is DOCKER-MODE ONLY. The admin server gates the call
+ *   site on `process.env.RUNTIME === 'docker'`. Single-process mode
+ *   (Baget on Railway) persists the same token into local SQLite via
+ *   `src/db/baget-channel-tokens.ts` and injects it directly into the
+ *   spawn env — no OneCLI gateway required, no shellout to a binary
+ *   that isn't installed in the Railway image.
+ *
+ *   We keep this helper alive specifically because the fork's deploy
+ *   doc still claims docker-mode support. Any non-Baget operator
+ *   running `RUNTIME=docker` (with a real OneCLI gateway provisioned)
+ *   continues to get the same secret-injection behavior they had
+ *   before the SQLite migration. Docker-mode containers can't read
+ *   the host's SQLite file, so SQLite alone is not enough for them —
+ *   the gateway proxy is the load-bearing injection layer.
+ *
  * Why a CLI shell-out (not the SDK):
  *   The `@onecli-sh/sdk` v0.3.x does NOT expose secret-management
  *   methods — only `getContainerConfig` / `applyContainerConfig`,
@@ -33,13 +49,6 @@
  *     before logging because OneCLI sometimes echoes the failed CLI
  *     args (with --value).
  *   - This module is server-side only — never bundled to a client.
- *
- * Failure semantics:
- *   The caller (handleBindTelegram / handleCreate) treats persist
- *   failure as a 500 with `channel_token_persist_failed` so baget.ai
- *   can retry. The agent_group folder is already on disk by the time
- *   we run; a retried bind will re-render the prompt + retry the
- *   secret create — both are idempotent.
  */
 import { execFileSync } from 'child_process';
 import os from 'os';
@@ -94,14 +103,21 @@ export interface PersistChannelTokenArgs {
   hostPattern: string;
 }
 
-export async function persistChannelToken(args: PersistChannelTokenArgs): Promise<void> {
+/**
+ * Persist a baget.ai per-(user, company) bearer into the OneCLI vault.
+ * Caller MUST verify `process.env.RUNTIME === 'docker'` before calling
+ * — single-process mode uses the SQLite path in
+ * `src/db/baget-channel-tokens.ts` instead and this shellout will
+ * ENOENT on Railway because the binary isn't installed.
+ */
+export async function persistChannelTokenToOneCLI(args: PersistChannelTokenArgs): Promise<void> {
   // ── 1. Best-effort delete (idempotency: re-pair must overwrite) ──
   try {
     execFileSync('onecli', ['secrets', 'delete', '--name', args.credentialName], {
       env: childEnv(),
       stdio: ['ignore', 'ignore', 'pipe'],
     });
-    log.info('Baget channel-token: deleted prior secret for re-pair', {
+    log.info('Baget channel-token: deleted prior OneCLI secret for re-pair', {
       credentialName: args.credentialName,
     });
   } catch {
@@ -116,19 +132,25 @@ export async function persistChannelToken(args: PersistChannelTokenArgs): Promis
     execFileSync(
       'onecli',
       [
-        'secrets', 'create',
-        '--name', args.credentialName,
-        '--type', 'bearer',
-        '--value', args.tokenValue,
-        '--host-pattern', args.hostPattern,
-        '--agent', args.agentName,
+        'secrets',
+        'create',
+        '--name',
+        args.credentialName,
+        '--type',
+        'bearer',
+        '--value',
+        args.tokenValue,
+        '--host-pattern',
+        args.hostPattern,
+        '--agent',
+        args.agentName,
       ],
       {
         env: childEnv(),
         stdio: ['ignore', 'ignore', 'pipe'],
       },
     );
-    log.info('Baget channel-token: persisted via OneCLI', {
+    log.info('Baget channel-token: persisted via OneCLI (docker mode)', {
       credentialName: args.credentialName,
       agentName: args.agentName,
       hostPattern: args.hostPattern,
@@ -136,10 +158,10 @@ export async function persistChannelToken(args: PersistChannelTokenArgs): Promis
     });
   } catch (err) {
     const e = err as { stderr?: string | Buffer; status?: number; message?: string };
-    const rawStderr = typeof e.stderr === 'string' ? e.stderr : e.stderr?.toString('utf-8') ?? '';
+    const rawStderr = typeof e.stderr === 'string' ? e.stderr : (e.stderr?.toString('utf-8') ?? '');
     const stderr = scrubSecret(rawStderr, args.tokenValue);
     const message = scrubSecret(e.message ?? 'unknown', args.tokenValue);
-    log.error('Baget channel-token: persist failed', {
+    log.error('Baget channel-token: OneCLI persist failed', {
       credentialName: args.credentialName,
       agentName: args.agentName,
       exitCode: e.status ?? -1,

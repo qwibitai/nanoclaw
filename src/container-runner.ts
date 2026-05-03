@@ -29,6 +29,7 @@ import {
 } from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
+import { getChannelToken } from './db/baget-channel-tokens.js';
 import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
@@ -354,6 +355,35 @@ async function spawnSingleProcessRunner(
     for (const [k, v] of Object.entries(providerContribution.env)) {
       childEnv[k] = v;
     }
+  }
+
+  // Inject the per-(user, company) channel token from local SQLite (see
+  // src/db/baget-channel-tokens.ts). The agent-runner's baget-mcp tools
+  // read process.env.BAGET_CHANNEL_TOKEN directly to authenticate
+  // callbacks into baget.ai's bearer-auth routes (e.g. /api/companies/
+  // <id>/overview). When no token has been persisted (pre-bridge baget.ai
+  // builds, or the founder hasn't paired yet via the new flow), the env
+  // is left unset and the MCP tool surfaces "re-pair from dashboard" to
+  // the founder — same UX as the prior OneCLI-vault path.
+  //
+  // This injection happens AFTER the providerContribution.env loop so a
+  // misbehaving provider can't override the channel token. Also placed
+  // here (not in the literal above) because it depends on a runtime
+  // SQLite read that can't sit in the const initializer. Single SELECT
+  // returns value+metadata atomically so the breadcrumb cannot describe
+  // a different generation than the value injected.
+  const channelToken = getChannelToken(agentGroup.id);
+  if (channelToken) {
+    childEnv.BAGET_CHANNEL_TOKEN = channelToken.tokenValue;
+    log.info('Baget channel-token: injected into spawn env', {
+      sessionId: session.id,
+      agentGroupId: agentGroup.id,
+      // Token VALUE intentionally never logged. Only the metadata
+      // timestamps appear here so we can distinguish a fresh persist
+      // from a rotation in postmortem timelines.
+      persistedAt: channelToken.persistedAt,
+      rotatedFromAt: channelToken.rotatedFromAt,
+    });
   }
 
   // Clear any orphan heartbeat — same reason as the docker branch.
