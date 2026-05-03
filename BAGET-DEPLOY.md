@@ -115,6 +115,49 @@ between baget.ai and baget-channel, rotated on incident.
    TTL — single-use is enforced by `GETDEL` on consume.
 6. Return the deep link.
 
+### POST /baget/agent-groups/bind-telegram
+
+Direct-bind variant for the baget.ai Login Widget flow. Same auth and
+body shape as create, plus:
+
+```ts
+{
+  telegramUserId: number;
+  telegramFirstName?: string;
+}
+```
+
+Behavior:
+
+1. Provision / refresh the founder group as above.
+2. Get-or-create the founder's `baget-telegram` messaging_group.
+3. Normalize the founder channel into DM semantics:
+   - `unknown_sender_policy = 'public'`
+   - `is_group = 0`
+   - `denied_at = NULL`
+   - wiring upgraded to `sender_scope='all'`, `ignored_message_policy='drop'`
+4. Enforce one active founder binding per Telegram chat. Rebinding the
+   same chat to a new company replaces the old `messaging_group_agents`
+   row so delivery remains persona-safe and 1:1.
+5. Attempt the immediate welcome DM, but report whether Telegram
+   accepted it. If Telegram refuses because the founder has not opened
+   the bot chat yet, baget.ai gets a canonical `telegramOpenUrl` it can
+   surface in the UI.
+
+Response (200):
+
+```ts
+{
+  ok: true;
+  agentGroupId: string;
+  folder: string;
+  messagingGroupCreated: boolean;
+  welcomeMessageDelivered: boolean;
+  founderActionRequired: boolean;
+  telegramOpenUrl: string; // https://t.me/<bot_username>
+}
+```
+
 ### POST /baget/agent-groups/:groupId/refresh-prompt
 
 Re-renders the persona prompt — used when a founder renames a team

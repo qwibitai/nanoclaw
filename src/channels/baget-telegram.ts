@@ -38,10 +38,7 @@ import { applyPersonaPrefix } from '../baget-persona.js';
 import { consumePairingToken } from '../db/baget-pairing-tokens.js';
 import { recordSeenUpdate, sweepOldSeenUpdates } from '../db/baget-seen-updates.js';
 import { getBagetAgentGroupById, normalizeBoundBagetTelegramFounderChannels } from '../db/baget-agent-groups.js';
-import {
-  getMessagingGroupAgents,
-  getMessagingGroupByPlatform,
-} from '../db/messaging-groups.js';
+import { getMessagingGroupAgents, getMessagingGroupByPlatform } from '../db/messaging-groups.js';
 import { log } from '../log.js';
 import type { BagetTeamMembers } from '../baget-pairing.js';
 import type { ChannelAdapter, ChannelSetup, OutboundMessage } from './adapter.js';
@@ -303,10 +300,7 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       firstName: msg.from?.first_name ?? null,
     });
     if (!bind.ok) {
-      await sendBotMessage(
-        chatId,
-        'Something went wrong wiring this chat. Try the link again in a minute.',
-      );
+      await sendBotMessage(chatId, 'Something went wrong wiring this chat. Try the link again in a minute.');
       return;
     }
 
@@ -331,10 +325,7 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
         chatId,
         agentGroupId: row.agent_group_id,
       });
-      await sendBotMessage(
-        chatId,
-        `🧭 your CoS: All wired up. What's on your mind?`,
-      );
+      await sendBotMessage(chatId, `🧭 your CoS: All wired up. What's on your mind?`);
     }
     log.info('Baget telegram: paired chat to agent_group', {
       chatId,

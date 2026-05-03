@@ -1,4 +1,6 @@
 # Lessons
 
+- 2026-05-03: For Baget Telegram founder pairing, do not treat a successful DB bind as equivalent to a reachable founder chat. Telegram may reject proactive DMs until the founder opens the bot, so the direct-bind API must return delivery state plus an explicit open-chat URL instead of blindly 200-ing “paired”.
+- 2026-05-03: When normalizing founder Telegram channels, update both `messaging_groups` and `messaging_group_agents`. Fixing only `unknown_sender_policy` / `is_group` leaves stale `sender_scope='known'` and `ignored_message_policy='accumulate'` rows that still block founder DMs after pairing.
 - 2026-05-01: When a deployed child runner says a provider key is missing, verify the service variables before assuming Railway misconfiguration. In Baget single-process mode, child processes inherit only an explicit env allowlist, so provider registry imports and env passthrough are the first code paths to check.
 - 2026-05-01: When a non-Claude provider ignores the Baget persona and answers as the underlying model, verify the actual provider system instruction path instead of assuming `CLAUDE.local.md` is auto-loaded. In this fork, Gemini needs the rendered workspace prompt bundle injected explicitly, and Baget founder groups should not set `assistantName` to the company name.

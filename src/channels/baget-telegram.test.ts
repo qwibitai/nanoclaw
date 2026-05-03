@@ -10,12 +10,14 @@ import {
   closeDb,
   createMessagingGroup,
   getDb,
+  getMessagingGroupAgents,
   getMessagingGroupAgentByPair,
   getMessagingGroupByPlatform,
   initTestDb,
   runMigrations,
 } from '../db/index.js';
 import { insertPairingToken } from '../db/baget-pairing-tokens.js';
+import { bindBagetTelegramChat } from './baget-telegram-bind.js';
 import { _testBuildBagetTelegramAdapter, BAGET_TELEGRAM_CHANNEL_TYPE } from './baget-telegram.js';
 import type { ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
 
@@ -62,6 +64,9 @@ describe('Baget Telegram adapter', () => {
   let baseUrl: string;
   let outbound: TelegramSend[];
   let inboundEvents: Array<{ platformId: string; threadId: string | null; message: InboundMessage }>;
+  let telegramSendStatus: number;
+  let telegramSendJson: unknown;
+  let telegramSendError: Error | null;
   let adapter: ReturnType<typeof _testBuildBagetTelegramAdapter> | null = null;
   let server: ReturnType<typeof createBagetAdminServer> | null = null;
 
@@ -97,6 +102,9 @@ describe('Baget Telegram adapter', () => {
 
     outbound = [];
     inboundEvents = [];
+    telegramSendStatus = 200;
+    telegramSendJson = null;
+    telegramSendError = null;
     port = 33000 + Math.floor(Math.random() * 1000);
     baseUrl = `http://127.0.0.1:${port}`;
 
@@ -110,8 +118,18 @@ describe('Baget Telegram adapter', () => {
           url: String(url),
           body: JSON.parse(String(init?.body ?? '{}')) as TelegramSend['body'],
         });
-        return new Response(JSON.stringify({ ok: true, result: { message_id: outbound.length } }), {
-          status: 200,
+
+        if (telegramSendError) {
+          throw telegramSendError;
+        }
+
+        const json =
+          telegramSendJson ?? (telegramSendStatus >= 200 && telegramSendStatus < 300
+            ? { ok: true, result: { message_id: outbound.length } }
+            : { ok: false });
+
+        return new Response(JSON.stringify(json), {
+          status: telegramSendStatus,
           headers: { 'Content-Type': 'application/json' },
         });
       },
@@ -132,6 +150,28 @@ describe('Baget Telegram adapter', () => {
       port,
       adminToken: ADMIN_TOKEN,
       telegramBotUsername: 'baget_team_staging_bot',
+      telegramBotToken: 'bot-token',
+      telegramApiBaseUrl: 'https://api.telegram.test',
+      telegramFetchImpl: async (url, init) => {
+        outbound.push({
+          url: String(url),
+          body: JSON.parse(String(init?.body ?? '{}')) as TelegramSend['body'],
+        });
+
+        if (telegramSendError) {
+          throw telegramSendError;
+        }
+
+        const json =
+          telegramSendJson ?? (telegramSendStatus >= 200 && telegramSendStatus < 300
+            ? { ok: true, result: { message_id: outbound.length } }
+            : { ok: false });
+
+        return new Response(JSON.stringify(json), {
+          status: telegramSendStatus,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
       generateAgentGroupId: () => 'unused-in-this-test',
     });
     await server.listen();
@@ -222,6 +262,56 @@ describe('Baget Telegram adapter', () => {
     expect(outbound[1]?.body.text).toBe('🧭 Louis: We are on track.');
   });
 
+  it('direct-bind reports when Telegram cannot deliver the welcome DM yet', async () => {
+    telegramSendStatus = 403;
+    telegramSendJson = {
+      ok: false,
+      description: "Forbidden: bot can't initiate conversation with a user",
+    };
+
+    const resp = await fetch(`${baseUrl}/baget/agent-groups/bind-telegram`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${ADMIN_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        userId: 'user-direct-bind',
+        companyId: 'company-direct-bind',
+        companyName: 'Direct Bind Co',
+        teamMembers: {
+          cos: 'Louis',
+          developer: 'Valentin',
+          marketing: 'Chloe',
+          analyst: 'Theo',
+          design: 'Nicolas',
+          ops: 'Marie',
+        },
+        channelTokenCredentialName: 'cred-direct-bind',
+        bagetApiBaseUrl: 'https://app.baget.ai',
+        telegramUserId: CHAT_ID,
+        telegramFirstName: 'Sam',
+      }),
+    });
+
+    expect(resp.status).toBe(200);
+    expect(await resp.json()).toEqual({
+      ok: true,
+      agentGroupId: 'unused-in-this-test',
+      folder: 'baget-userdire-companyd',
+      messagingGroupCreated: true,
+      welcomeMessageDelivered: false,
+      founderActionRequired: true,
+      telegramOpenUrl: 'https://t.me/baget_team_staging_bot',
+    });
+
+    const messagingGroup = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, `baget-telegram:${CHAT_ID}`);
+    expect(messagingGroup).toBeDefined();
+    expect(getMessagingGroupAgentByPair(messagingGroup!.id, 'unused-in-this-test')).toBeDefined();
+    expect(outbound).toHaveLength(1);
+    expect(outbound[0]?.body.chat_id).toBe(CHAT_ID);
+  });
+
   it('upgrades a pre-pair DM row to a public founder channel on /start', async () => {
     createMessagingGroup({
       id: 'mg-preexisting',
@@ -257,6 +347,45 @@ describe('Baget Telegram adapter', () => {
       denied_at: null,
     });
     expect(getMessagingGroupAgentByPair('mg-preexisting', AGENT_GROUP_ID)).toBeDefined();
+  });
+
+  it('rebinding the same founder chat replaces the previous agent_group wiring', async () => {
+    createBagetAgentGroup({
+      id: 'ag-baget-2',
+      name: 'Second Team',
+      folder: 'baget-second-team',
+      user_id: 'user-2',
+      company_id: 'company-2',
+      baget_team_members: JSON.stringify({
+        cos: 'Ava',
+        developer: 'Devon',
+        marketing: 'Mira',
+        analyst: 'Noah',
+        design: 'Iris',
+        ops: 'Kai',
+      }),
+      created_at: nowIso(),
+    });
+
+    expect(bindBagetTelegramChat({ chatId: CHAT_ID, agentGroupId: AGENT_GROUP_ID, firstName: 'Sam' }).ok).toBe(true);
+    expect(bindBagetTelegramChat({ chatId: CHAT_ID, agentGroupId: 'ag-baget-2', firstName: 'Sam' }).ok).toBe(true);
+
+    const messagingGroup = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, `baget-telegram:${CHAT_ID}`);
+    expect(messagingGroup).toBeDefined();
+
+    const wired = getMessagingGroupAgents(messagingGroup!.id);
+    expect(wired).toHaveLength(1);
+    expect(wired[0]?.agent_group_id).toBe('ag-baget-2');
+    expect(getMessagingGroupAgentByPair(messagingGroup!.id, AGENT_GROUP_ID)).toBeUndefined();
+    expect(getMessagingGroupAgentByPair(messagingGroup!.id, 'ag-baget-2')).toBeDefined();
+
+    const messageId = await adapter!.deliver(`baget-telegram:${CHAT_ID}`, null, {
+      kind: 'chat',
+      content: { text: 'cos: The new company is active.' },
+    } satisfies OutboundMessage);
+
+    expect(messageId).toBe('1');
+    expect(outbound[0]?.body.text).toBe('🧭 Ava: The new company is active.');
   });
 
   it('normalizes already-bound founder telegram chats back to public DMs', () => {
@@ -305,12 +434,12 @@ describe('Baget Telegram adapter', () => {
           'mga-existing-bound',
           'mg-existing-bound',
           AGENT_GROUP_ID,
-          'pattern',
-          '.',
-          'all',
-          'drop',
+          'mention-sticky',
+          null,
+          'known',
+          'accumulate',
           'shared',
-          0,
+          9,
           nowIso(-120_000),
         ),
     ).not.toThrow();
@@ -325,12 +454,19 @@ describe('Baget Telegram adapter', () => {
         .run('mga-unrelated', 'mg-unrelated', 'ag-other', 'pattern', '.', 'all', 'drop', 'shared', 0, nowIso(-120_000)),
     ).not.toThrow();
 
-    expect(normalizeBoundBagetTelegramFounderChannels()).toBe(1);
+    expect(normalizeBoundBagetTelegramFounderChannels()).toBe(2);
 
     expect(getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, `baget-telegram:${CHAT_ID + 1}`)).toMatchObject({
       unknown_sender_policy: 'public',
       is_group: 0,
       denied_at: null,
+    });
+    expect(getMessagingGroupAgentByPair('mg-existing-bound', AGENT_GROUP_ID)).toMatchObject({
+      engage_mode: 'pattern',
+      engage_pattern: '.',
+      sender_scope: 'all',
+      ignored_message_policy: 'drop',
+      priority: 0,
     });
     expect(getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, `baget-telegram:${CHAT_ID + 2}`)).toMatchObject({
       unknown_sender_policy: 'request_approval',

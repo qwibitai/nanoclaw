@@ -10,6 +10,7 @@ import type { MessagingGroup, MessagingGroupAgent } from '../types.js';
 // refactor plan.
 import {
   createDestination,
+  deleteDestination,
   getDestinationByName,
   getDestinationByTarget,
   normalizeName,
@@ -237,6 +238,16 @@ export function updateMessagingGroupAgent(
 }
 
 export function deleteMessagingGroupAgent(id: string): void {
+  const existing = getMessagingGroupAgent(id);
+  if (!existing) return;
+
+  if (hasTable(getDb(), 'agent_destinations')) {
+    const dest = getDestinationByTarget(existing.agent_group_id, 'channel', existing.messaging_group_id);
+    if (dest) {
+      deleteDestination(existing.agent_group_id, dest.local_name);
+    }
+  }
+
   getDb().prepare('DELETE FROM messaging_group_agents WHERE id = ?').run(id);
 }
 

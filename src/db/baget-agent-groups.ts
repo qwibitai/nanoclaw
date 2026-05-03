@@ -158,10 +158,11 @@ export function firstBoundChatId(agentGroupId: string): string | null {
  * explicitly paired, it must bypass the generic unknown-sender approval
  * flow even if the founder messaged the shared bot before tapping the deep
  * link. This reconciles any already-bound Baget Telegram chats back to the
- * founder-DM shape: direct/public, never denied.
+ * founder-DM shape: direct/public, never denied, and wired with
+ * sender_scope='all' plus ignored_message_policy='drop'.
  */
 export function normalizeBoundBagetTelegramFounderChannels(): number {
-  const result = getDb()
+  const messagingGroupResult = getDb()
     .prepare(
       `UPDATE messaging_groups
         SET unknown_sender_policy = 'public',
@@ -182,5 +183,32 @@ export function normalizeBoundBagetTelegramFounderChannels(): number {
         )`,
     )
     .run();
-  return result.changes;
+  const wiringResult = getDb()
+    .prepare(
+      `UPDATE messaging_group_agents
+          SET engage_mode = 'pattern',
+              engage_pattern = '.',
+              sender_scope = 'all',
+              ignored_message_policy = 'drop',
+              session_mode = 'shared',
+              priority = 0
+        WHERE id IN (
+          SELECT DISTINCT mga.id
+            FROM messaging_group_agents mga
+            JOIN messaging_groups mg ON mg.id = mga.messaging_group_id
+            JOIN agent_groups ag ON ag.id = mga.agent_group_id
+           WHERE mg.channel_type = 'baget-telegram'
+             AND ag.company_id IS NOT NULL
+        )
+          AND (
+            engage_mode <> 'pattern'
+            OR COALESCE(engage_pattern, '') <> '.'
+            OR sender_scope <> 'all'
+            OR ignored_message_policy <> 'drop'
+            OR session_mode <> 'shared'
+            OR priority <> 0
+          )`,
+    )
+    .run();
+  return messagingGroupResult.changes + wiringResult.changes;
 }

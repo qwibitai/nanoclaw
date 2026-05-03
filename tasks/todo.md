@@ -1,5 +1,30 @@
 # Baget Channel Gemini Provider Plan
 
+## Telegram Bind Stabilization Plan
+
+### Goal
+
+Fix the post-review Telegram founder-pairing regressions so a reused founder chat stays 1:1 with the intended company, existing conservative wirings get upgraded into founder-DM semantics, and the direct-bind API tells baget.ai whether the bot could actually reach the founder.
+
+### Plan
+
+- [x] Add regression tests for direct-bind delivery reporting, same-chat rebind replacement, and conservative founder-wiring normalization.
+- [x] Patch the Baget Telegram bind primitive to enforce founder-chat exclusivity and normalize existing `messaging_group_agents` rows into founder-DM settings.
+- [x] Make the direct-bind admin response report whether the welcome DM was actually delivered and include the chat-open URL baget.ai can surface to the founder.
+- [x] Run focused typecheck/test verification, then record findings and the new lesson from this correction.
+
+### Review
+
+- Verification:
+- `npm test -- --run src/channels/baget-telegram.test.ts`
+- `npm run typecheck`
+- `npm test`
+
+- Findings:
+- Founder direct-bind no longer pretends the bot is reachable when Telegram rejects proactive `sendMessage`; the admin API now reports `welcomeMessageDelivered`, `founderActionRequired`, and `telegramOpenUrl`.
+- Rebinding the same Telegram founder chat now evicts competing `messaging_group_agents` rows before delivery, preserving the 1:1 chat↔agent invariant that the persona-prefix logic expects.
+- Existing Baget founder wirings created through the conservative approval path are normalized both on pair and on adapter startup, so stale `sender_scope='known'` / `ignored_message_policy='accumulate'` rows no longer block founder DMs after a “successful” pair.
+
 ## Goal
 
 Path B1 handoff follow-through: replace the default Bun-incompatible Claude runner path with a Bun-compatible Gemini provider so a paired founder DM can reach the agent runner and receive a real reply.

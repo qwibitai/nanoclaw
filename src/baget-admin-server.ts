@@ -62,10 +62,7 @@ import {
 } from './db/baget-agent-groups.js';
 import { insertPairingToken, sweepExpiredPairingTokens } from './db/baget-pairing-tokens.js';
 import { provisionBagetGroup, type BagetTeamMembers } from './baget-pairing.js';
-import {
-  bindBagetTelegramChat,
-  sendBagetTelegramWelcome,
-} from './channels/baget-telegram-bind.js';
+import { bindBagetTelegramChat, sendBagetTelegramWelcome } from './channels/baget-telegram-bind.js';
 import { log } from './log.js';
 
 // ── Auth ──
@@ -190,6 +187,13 @@ export interface BindTelegramResponse {
    *  the founder had DMed the bot before binding (the row already
    *  existed and was upgraded in place). */
   messagingGroupCreated: boolean;
+  /** True iff Telegram accepted the immediate welcome DM. */
+  welcomeMessageDelivered: boolean;
+  /** When true, baget.ai should prompt the founder to open the bot chat. */
+  founderActionRequired: boolean;
+  /** Canonical bot-chat URL baget.ai can surface when the founder still
+   *  needs to open or re-open the shared bot. */
+  telegramOpenUrl: string;
 }
 
 // ── Server ──
@@ -474,21 +478,15 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
    * is responsible for HMAC-verifying the Login Widget payload BEFORE
    * sending the founder's Telegram identity here. We trust the bearer.
    *
-   * Idempotent on (userId, companyId, telegramUserId):
+   * Idempotent on the canonical founder mapping:
    *   - re-calling with same tuple → same agent_group_id, same
-   *     messaging_group_id, same messaging_group_agents row, same
-   *     welcome message (delivered again — Telegram dedups by message
-   *     content if rapid-fire, otherwise the founder sees one extra
-   *     "all wired up" greeting which is harmless).
-   *   - re-calling with a different telegramUserId for the same
-   *     (userId, companyId) → bind a SECOND Telegram chat to the same
-   *     agent_group. Out of scope for MVP single-channel-per-company,
-   *     but the schema permits it.
+   *     messaging_group_id, same founder-DM wiring, same welcome
+   *     delivery report.
+   *   - re-calling with the same Telegram chat for a different
+   *     company/group replaces the old founder binding on that chat so
+   *     delivery stays 1:1 and persona-safe.
    */
-  async function handleBindTelegram(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): Promise<void> {
+  async function handleBindTelegram(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     if (!config.telegramBotToken) {
       log.error('bind-telegram called but telegramBotToken not configured on admin server');
       sendJson(res, 503, {
@@ -608,9 +606,10 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
 
     // 4. Welcome the founder. Best-effort — failure here doesn't
     //    invalidate the bind (the rows above are already committed),
-    //    so we always 200 the response. Send-failures are logged in
-    //    sendBagetTelegramWelcome.
-    await sendBagetTelegramWelcome({
+    //    but baget.ai needs the delivery result so it can surface an
+    //    "open the bot chat" CTA instead of pretending the founder is
+    //    already reachable.
+    const welcome = await sendBagetTelegramWelcome({
       botToken: config.telegramBotToken,
       apiBaseUrl: config.telegramApiBaseUrl,
       fetchImpl: config.telegramFetchImpl,
@@ -625,6 +624,8 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
       agentGroupId,
       messagingGroupId: bind.messagingGroupId,
       created: bind.created,
+      welcomeMessageDelivered: welcome.ok,
+      founderActionRequired: welcome.ok ? false : welcome.founderActionRequired,
     });
 
     const response: BindTelegramResponse = {
@@ -632,6 +633,9 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
       agentGroupId,
       folder: provisioned.folder,
       messagingGroupCreated: bind.created,
+      welcomeMessageDelivered: welcome.ok,
+      founderActionRequired: welcome.ok ? false : welcome.founderActionRequired,
+      telegramOpenUrl: `https://t.me/${config.telegramBotUsername}`,
     };
     sendJson(res, 200, response);
   }

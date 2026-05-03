@@ -25,15 +25,26 @@ import { log } from '../log.js';
 import {
   createMessagingGroup,
   createMessagingGroupAgent,
+  deleteMessagingGroupAgent,
+  getMessagingGroupAgents,
   getMessagingGroupAgentByPair,
   getMessagingGroupByPlatform,
   setMessagingGroupDeniedAt,
   updateMessagingGroup,
+  updateMessagingGroupAgent,
 } from '../db/messaging-groups.js';
 import type { BagetTeamMembers } from '../baget-pairing.js';
 
 export const BAGET_TELEGRAM_CHANNEL_TYPE = 'baget-telegram';
 const PLATFORM_PREFIX = 'baget-telegram:';
+const FOUNDER_DM_AGENT_BINDING = {
+  engage_mode: 'pattern' as const,
+  engage_pattern: '.',
+  sender_scope: 'all' as const,
+  ignored_message_policy: 'drop' as const,
+  session_mode: 'shared' as const,
+  priority: 0,
+};
 
 export function platformIdFromChatId(chatId: number | string): string {
   return `${PLATFORM_PREFIX}${chatId}`;
@@ -47,12 +58,14 @@ export type BindTelegramChatResult =
  * Get-or-create the messaging_group for this Telegram chat AND ensure a
  * messaging_group_agents row links it to the agent_group.
  *
- * Idempotent — re-binding the same (chatId, agentGroupId) is a no-op
- * (UNIQUE on (channel_type, platform_id) + UNIQUE on (messaging_group_id,
- * agent_group_id) catch the races silently). Both rows are upgraded to
- * the founder-DM shape (`unknown_sender_policy='public'`, `is_group=0`,
- * `denied_at=NULL`) so any pre-pair traffic that auto-created a
- * placeholder row with `request_approval` semantics gets reconciled.
+ * Idempotent for the canonical founder mapping. Re-binding the same
+ * (chatId, agentGroupId) is a no-op; re-binding the same Telegram chat
+ * to a different agent_group replaces the old wiring so the founder DM
+ * stays 1:1. Both rows are upgraded to the founder-DM shape
+ * (`unknown_sender_policy='public'`, `is_group=0`, sender_scope='all',
+ * ignored_message_policy='drop'`) so any pre-pair traffic that
+ * auto-created a placeholder row or a conservative approval-path wiring
+ * gets reconciled.
  */
 export function bindBagetTelegramChat(args: {
   chatId: number | string;
@@ -103,6 +116,19 @@ export function bindBagetTelegramChat(args: {
     mg = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, platformId) ?? mg;
   }
 
+  const competingWires = getMessagingGroupAgents(mg.id).filter((row) => row.agent_group_id !== args.agentGroupId);
+  for (const row of competingWires) {
+    deleteMessagingGroupAgent(row.id);
+  }
+  if (competingWires.length > 0) {
+    log.info('Baget telegram bind: replaced competing founder chat wiring', {
+      chatId: args.chatId,
+      messagingGroupId: mg.id,
+      keptAgentGroupId: args.agentGroupId,
+      removedAgentGroupIds: competingWires.map((row) => row.agent_group_id),
+    });
+  }
+
   const existingMga = getMessagingGroupAgentByPair(mg.id, args.agentGroupId);
   if (!existingMga) {
     try {
@@ -110,12 +136,7 @@ export function bindBagetTelegramChat(args: {
         id: `mga-${randomUUID()}`,
         messaging_group_id: mg.id,
         agent_group_id: args.agentGroupId,
-        engage_mode: 'pattern',
-        engage_pattern: '.', // every message in this DM
-        sender_scope: 'all',
-        ignored_message_policy: 'drop',
-        session_mode: 'shared',
-        priority: 0,
+        ...FOUNDER_DM_AGENT_BINDING,
         created_at: nowIso,
       });
     } catch {
@@ -124,24 +145,31 @@ export function bindBagetTelegramChat(args: {
       // (chatId, agentGroupId) pair under the founder-DM 1:1 invariant,
       // so the existing row is the right one to keep.
     }
+  } else {
+    updateMessagingGroupAgent(existingMga.id, FOUNDER_DM_AGENT_BINDING);
   }
 
   return { ok: true, messagingGroupId: mg.id, created };
 }
 
 /**
- * Telegram Bot API `sendMessage`. Best-effort: returns the resulting
- * message_id on success, undefined on any failure. Logs warnings but
- * never throws — a transport failure must not propagate to the bind
- * caller because the DB writes already succeeded.
+ * Telegram Bot API `sendMessage`. Best-effort: reports whether the send
+ * landed, and whether the likely fix is "founder still needs to open the
+ * bot chat". Logs warnings but never throws — a transport failure must
+ * not propagate to the bind caller because the DB writes already
+ * succeeded.
  */
+export type BagetTelegramSendResult =
+  | { ok: true; messageId: string }
+  | { ok: false; founderActionRequired: boolean };
+
 export async function sendBagetBotMessage(args: {
   botToken: string;
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
   chatId: number | string;
   text: string;
-}): Promise<string | undefined> {
+}): Promise<BagetTelegramSendResult> {
   const apiBase = args.apiBaseUrl ?? 'https://api.telegram.org';
   const fetchFn = args.fetchImpl ?? fetch;
   const url = `${apiBase}/bot${args.botToken}/sendMessage`;
@@ -151,23 +179,26 @@ export async function sendBagetBotMessage(args: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: args.chatId, text: args.text }),
     });
+    const json = (await resp.json().catch(() => null)) as { ok?: boolean; result?: { message_id?: number }; description?: unknown } | null;
     if (!resp.ok) {
+      const description = typeof json?.description === 'string' ? json.description.toLowerCase() : '';
+      const founderActionRequired =
+        description.includes("can't initiate conversation with a user") || description.includes('chat not found');
       log.warn('Baget telegram bind: sendMessage non-OK', {
         status: resp.status,
         chatId: args.chatId,
+        description: typeof json?.description === 'string' ? json.description : undefined,
+        founderActionRequired,
       });
-      return undefined;
+      return { ok: false, founderActionRequired };
     }
-    const json = (await resp.json().catch(() => null)) as
-      | { ok: boolean; result?: { message_id: number } }
-      | null;
     if (json?.ok && typeof json.result?.message_id === 'number') {
-      return String(json.result.message_id);
+      return { ok: true, messageId: String(json.result.message_id) };
     }
-    return undefined;
+    return { ok: false, founderActionRequired: false };
   } catch (err) {
     log.warn('Baget telegram bind: sendMessage threw', { err, chatId: args.chatId });
-    return undefined;
+    return { ok: false, founderActionRequired: false };
   }
 }
 
@@ -186,7 +217,7 @@ export async function sendBagetTelegramWelcome(args: {
   fetchImpl?: typeof fetch;
   chatId: number | string;
   teamMembers: BagetTeamMembers;
-}): Promise<string | undefined> {
+}): Promise<BagetTelegramSendResult> {
   const cosName = args.teamMembers.cos || 'your CoS';
   const text = `🧭 ${cosName}: All wired up. What's on your mind? Ask me about the batch, the metrics, or anything that's blocking you.`;
   return sendBagetBotMessage({
