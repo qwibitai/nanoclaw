@@ -54,8 +54,22 @@ import type { AgentGroup, Session } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 
-/** Active containers tracked by session ID. */
-const activeContainers = new Map<string, { process: ChildProcess; containerName: string }>();
+/**
+ * Active containers tracked by session ID.
+ *
+ * `agentGroupId` is denormalized into the entry so disconnect-side
+ * teardown (`killActiveSessionsForAgent`) can filter without a DB
+ * round-trip per entry. Reading the spawn-time `agent_group_id` from
+ * the in-memory entry is also more reliable than re-reading the
+ * `sessions` row, which could drift if a session is deleted while a
+ * runner is mid-flight.
+ */
+type ActiveContainerEntry = {
+  process: ChildProcess;
+  containerName: string;
+  agentGroupId: string;
+};
+const activeContainers = new Map<string, ActiveContainerEntry>();
 
 /**
  * In-flight wake promises, keyed by session id. Deduplicates concurrent
@@ -154,6 +168,35 @@ async function spawnContainer(session: Session): Promise<void> {
     return;
   }
 
+  // Refuse to spawn for an archived agent group. Without this gate,
+  // the host sweep can re-wake a session minutes after the founder
+  // clicked Disconnect: `getActiveSessions()` filters on
+  // `sessions.status = 'active'` only — it has no join against
+  // `agent_groups.archived_at`. If a message was pending in
+  // `messages_in` at disconnect time, the next sweep tick reads the
+  // session, sees `dueCount > 0`, and lands here with an archived
+  // agent group. Without this short-circuit, a fresh runner would
+  // spawn for a (user, company) that the founder has already
+  // disconnected — re-introducing the same stale-reply bug
+  // `killActiveSessionsForAgent` was added to fix.
+  //
+  // Logged at info, not error: this is an EXPECTED outcome on the
+  // post-disconnect window, not a malfunction. The pending message
+  // stays in `messages_in` and the session stays `status='active'`
+  // so a future re-pair (which clears archived_at via
+  // `unarchiveBagetAgentGroup`) can still pick up the work — though
+  // in practice the channel-token is also gone, so the runner would
+  // surface a re-pair prompt rather than silently process old
+  // context.
+  if (agentGroup.archived_at) {
+    log.info('Skipping spawn — agent group is archived (post-disconnect)', {
+      agentGroupId: agentGroup.id,
+      sessionId: session.id,
+      archivedAt: agentGroup.archived_at,
+    });
+    return;
+  }
+
   // Refresh the destination map and default reply routing so any admin
   // changes take effect on wake. Destinations come from the agent-to-agent
   // module — skip when the module isn't installed (table absent).
@@ -209,7 +252,7 @@ async function spawnContainer(session: Session): Promise<void> {
 
   const container = spawn(CONTAINER_RUNTIME_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
-  activeContainers.set(session.id, { process: container, containerName });
+  activeContainers.set(session.id, { process: container, containerName, agentGroupId: agentGroup.id });
   markContainerRunning(session.id);
 
   // Log stderr
@@ -268,6 +311,56 @@ export function killContainer(sessionId: string, reason: string): void {
   } catch {
     entry.process.kill('SIGKILL');
   }
+}
+
+/**
+ * Kill every in-flight runner whose `agent_group_id` matches.
+ *
+ * Called from the Baget admin DELETE handlers after the unbind/deny
+ * transaction commits, so a Bun child the founder kicked off seconds
+ * before clicking Disconnect doesn't finish its turn and post a stale
+ * reply to a now-disconnected channel.
+ *
+ * Calls `killContainer` per match so docker-mode and single-process
+ * mode share the same teardown path. Returns the number of session
+ * entries we issued a kill against — `0` is normal (nothing was
+ * running for this agent_group at disconnect time).
+ *
+ * Thread/iterator safety: we snapshot the matching session ids into a
+ * plain array BEFORE calling `killContainer` in a loop. Each
+ * `killContainer` only mutates the Map indirectly (via the child's
+ * `close` handler, which fires asynchronously), but the snapshot makes
+ * the iteration unambiguously safe regardless of timing — we never
+ * iterate the live Map while another arm of this function is removing
+ * from it.
+ */
+export function killActiveSessionsForAgent(agentGroupId: string, reason: string): number {
+  const targetSessionIds: string[] = [];
+  for (const [sessionId, entry] of activeContainers) {
+    if (entry.agentGroupId === agentGroupId) targetSessionIds.push(sessionId);
+  }
+  if (targetSessionIds.length === 0) return 0;
+  log.info('Killing active runners for agent_group', {
+    agentGroupId,
+    reason,
+    sessionCount: targetSessionIds.length,
+  });
+  for (const sessionId of targetSessionIds) {
+    killContainer(sessionId, reason);
+  }
+  return targetSessionIds.length;
+}
+
+/**
+ * Test-only: register a fake `ActiveContainerEntry` so unit tests can
+ * exercise `killActiveSessionsForAgent` without spawning real
+ * children. Returns a teardown thunk that removes the entry. Production
+ * code never calls this — runners are added by `spawnContainer` /
+ * `spawnSingleProcessRunner` only.
+ */
+export function __addActiveContainerForTest(sessionId: string, entry: ActiveContainerEntry): () => void {
+  activeContainers.set(sessionId, entry);
+  return () => activeContainers.delete(sessionId);
 }
 
 /**
@@ -413,7 +506,7 @@ async function spawnSingleProcessRunner(
     cwd: path.join(sessDir, 'agent'),
   });
 
-  activeContainers.set(session.id, { process: child, containerName });
+  activeContainers.set(session.id, { process: child, containerName, agentGroupId: agentGroup.id });
   markContainerRunning(session.id);
 
   child.stderr?.on('data', (data) => {

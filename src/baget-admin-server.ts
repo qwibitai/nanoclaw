@@ -61,6 +61,7 @@ import {
   updateBagetTeamMembers,
 } from './db/baget-agent-groups.js';
 import { persistChannelTokenToOneCLI } from './baget-channel-secret.js';
+import { killActiveSessionsForAgent } from './container-runner.js';
 import { deleteChannelToken, upsertChannelToken } from './db/baget-channel-tokens.js';
 import { getDb } from './db/connection.js';
 import { insertPairingToken, sweepExpiredPairingTokens } from './db/baget-pairing-tokens.js';
@@ -888,25 +889,35 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
     //
     // Token-drop → archive → unbind, all wrapped in a single SQLite
     // transaction. better-sqlite3 transactions execute synchronously
-    // so this is a true atomic unit of work — either all three
-    // statements land or none do. Without the wrapper, an exception
+    // so this is a true atomic unit of work — either all four
+    // writes land or none do. Without the wrapper, an exception
     // mid-sequence (disk full, lock contention) could leave the token
     // gone but archived_at still NULL — the dashboard would show
     // "active" while the agent surfaces "re-pair" on every spawn.
     // baget.ai's resolveChannelToken is still the second-line
     // guarantee for any in-flight spawn that grabbed the token
     // microseconds before the transaction landed.
+    const nowIso = new Date(now()).toISOString();
     const result = getDb().transaction(() => {
       const tokenDeleted = deleteChannelToken(groupId);
-      archiveBagetAgentGroup(groupId, new Date(now()).toISOString());
-      const unbound = unbindMessagingGroupsForAgent(groupId);
-      return { tokenDeleted, unbound };
+      archiveBagetAgentGroup(groupId, nowIso);
+      const { unbound, denied } = unbindMessagingGroupsForAgent(groupId, nowIso);
+      return { tokenDeleted, unbound, denied };
     })();
+    // After the DB has settled, SIGTERM any in-flight runners for this
+    // agent_group. Without this, a Bun child that the founder kicked
+    // off seconds earlier (sent a message, then clicked Disconnect)
+    // finishes its turn and posts a reply to a now-disconnected
+    // channel. Done OUTSIDE the transaction so a kill failure can't
+    // roll back the unbind/deny that the founder just confirmed.
+    const killedRunners = killActiveSessionsForAgent(groupId, 'founder disconnected via admin DELETE');
     sendJson(res, 200, {
       ok: true,
       agentGroupId: groupId,
       archived: true,
       unboundChats: result.unbound,
+      deniedChats: result.denied,
+      killedRunners,
       channelTokenDeleted: result.tokenDeleted > 0,
     });
   }
@@ -1017,17 +1028,25 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
     // Token-drop → archive → unbind in one atomic transaction —
     // same fail-closed ordering and same atomicity guarantee as the
     // path-style DELETE (handleDelete above).
+    const nowIso = new Date(now()).toISOString();
     const result = getDb().transaction(() => {
       const tokenDeleted = deleteChannelToken(existing.id);
-      archiveBagetAgentGroup(existing.id, new Date(now()).toISOString());
-      const unbound = unbindMessagingGroupsForAgent(existing.id);
-      return { tokenDeleted, unbound };
+      archiveBagetAgentGroup(existing.id, nowIso);
+      const { unbound, denied } = unbindMessagingGroupsForAgent(existing.id, nowIso);
+      return { tokenDeleted, unbound, denied };
     })();
+    // SIGTERM any in-flight runners for this agent_group AFTER the DB
+    // has committed. Same rationale as handleDelete above — a child
+    // mid-turn would otherwise post a stale reply to a disconnected
+    // channel.
+    const killedRunners = killActiveSessionsForAgent(existing.id, 'founder disconnected via tuple DELETE');
     sendJson(res, 200, {
       ok: true,
       agentGroupId: existing.id,
       archived: true,
       unboundChats: result.unbound,
+      deniedChats: result.denied,
+      killedRunners,
       channelTokenDeleted: result.tokenDeleted > 0,
     });
   }

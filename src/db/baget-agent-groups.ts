@@ -93,16 +93,92 @@ export function unarchiveBagetAgentGroup(id: string): void {
 
 /**
  * Drop every `messaging_group_agents` row that wires a chat to this
- * agent_group. Used by `DELETE /baget/agent-groups/:groupId` to make
- * sure post-archive DMs from the founder's chat fall through the
- * router's no-agent path instead of waking a soft-deleted runner.
+ * agent_group, AND stamp `messaging_groups.denied_at` on every chat
+ * this disconnect ORPHANS (i.e. no other agent is wired to it after
+ * the unbind). Used by `DELETE /baget/agent-groups/:groupId` so
+ * post-archive DMs from the founder's chat fall through the router's
+ * no-agent fast-drop path instead of waking the (newly-archived)
+ * runner OR escalating to the channel-request gate, which would build
+ * an owner-approval card and re-create the binding behind the
+ * founder's back.
  *
- * Returns the number of rows dropped — 0 is fine (founder may never
- * have completed pairing).
+ * Why both columns:
+ *
+ *   - **DELETE on messaging_group_agents** drops the wiring so non-DM
+ *     traffic (group chats with `agentCount === 0` and `!isMention`)
+ *     silently drops at router.ts line 192.
+ *
+ *   - **UPDATE on messaging_groups.denied_at** is what handles the DM
+ *     case (`isMention === true` for 1:1 founder DMs). Without the
+ *     stamp, router.ts line 213 hands the message to
+ *     `channelRequestGate` which, on owner approval, would
+ *     `createMessagingGroupAgent(...)` — silently re-pairing the
+ *     supposedly-disconnected channel.
+ *
+ * Why "orphans only" (NOT EXISTS clause):
+ *
+ *   The schema permits a chat to be wired to multiple agent_groups
+ *   (UNIQUE is on the (mg, ag) pair, not on the chat). In Baget today
+ *   that's a 1:1 invariant in practice (one founder = one agent_group
+ *   per (user, company)), but if it ever becomes 1:N — or if a
+ *   non-Baget operator wires up a shared chat — stamping `denied_at`
+ *   on a chat that still has another wiring would silently mute the
+ *   OTHER agent's traffic at router.ts line 194 with no UI breadcrumb.
+ *   Restricting the UPDATE to chats this disconnect actually orphans
+ *   keeps the deny semantically tied to "no agent serves this chat
+ *   anymore."
+ *
+ * Idempotent on `denied_at` — only stamps rows that aren't already
+ * denied, so calling this twice doesn't overwrite the original deny
+ * timestamp. The original timestamp is forensically useful (when did
+ * this chat first go dark) — overwriting it on re-disconnect would
+ * erase that audit signal for no benefit.
+ *
+ * The two statements are issued sequentially, but every production
+ * caller wraps this in a `getDb().transaction(...)` (see
+ * `handleDelete` / `handleDeleteByTuple` in baget-admin-server.ts), so
+ * a crash mid-helper rolls both back atomically. The UPDATE MUST run
+ * before the DELETE — once the wiring rows are gone, the
+ * `messaging_group_agents` subquery has nothing to match against.
+ *
+ * `deniedAt` must be an ISO-8601 string (caller decides — we don't
+ * read the clock here so tests stay deterministic).
+ *
+ * Returns counts for both writes. Either can be 0:
+ *   - `unbound: 0` → founder never completed pairing
+ *   - `denied: 0` → all of this agent's chats were either already
+ *     denied OR are still wired to another agent (so this disconnect
+ *     didn't orphan them)
  */
-export function unbindMessagingGroupsForAgent(agentGroupId: string): number {
-  const r = getDb().prepare('DELETE FROM messaging_group_agents WHERE agent_group_id = ?').run(agentGroupId);
-  return r.changes;
+export function unbindMessagingGroupsForAgent(
+  agentGroupId: string,
+  deniedAt: string,
+): { unbound: number; denied: number } {
+  const db = getDb();
+  // Stamp denied_at FIRST — once we delete the wiring rows, the IN
+  // subquery has nothing to join against and would silently no-op.
+  // The NOT EXISTS clause restricts the stamp to chats THIS disconnect
+  // orphans (see jsdoc "Why 'orphans only'").
+  const denyRes = db
+    .prepare(
+      `UPDATE messaging_groups
+          SET denied_at = ?
+        WHERE denied_at IS NULL
+          AND id IN (
+            SELECT messaging_group_id
+              FROM messaging_group_agents
+             WHERE agent_group_id = ?
+          )
+          AND NOT EXISTS (
+            SELECT 1
+              FROM messaging_group_agents other
+             WHERE other.messaging_group_id = messaging_groups.id
+               AND other.agent_group_id <> ?
+          )`,
+    )
+    .run(deniedAt, agentGroupId, agentGroupId);
+  const unbindRes = db.prepare('DELETE FROM messaging_group_agents WHERE agent_group_id = ?').run(agentGroupId);
+  return { unbound: unbindRes.changes, denied: denyRes.changes };
 }
 
 /**
