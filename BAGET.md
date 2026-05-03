@@ -96,9 +96,9 @@ NanoClaw host (this fork — one Vercel deploy)
         ├─ host-sweep.ts    → 60s cron for proactive pings + reminders
         │
         ▼
-Per-session Docker container
+Per-session agent runner
         │
-        ├─ Claude Agent SDK loop (Anthropic)
+        ├─ Gemini chat loop (`@google/genai` by default)
         ├─ System prompt (groups/baget/CLAUDE.md — team-of-six)
         │
         ▼

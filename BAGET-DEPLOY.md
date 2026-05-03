@@ -108,7 +108,7 @@ between baget.ai and baget-channel, rotated on incident.
 3. Render `setup/baget-template/container_config.json` with patched env
    (`BAGET_COMPANY_ID = companyId`, `BAGET_API_BASE_URL = …`) +
    `secrets: [channelTokenCredentialName]` → write to
-   `groups/<folder>/container_config.json`.
+   `groups/<folder>/container.json`.
 4. Insert / update `agent_groups` row keyed by folder slug.
 5. Mint a single-use Telegram pairing token (HMAC over (userId,
    companyId, agentGroupId, exp)). Store SHA256 in Redis with 5-min
@@ -188,20 +188,25 @@ The Railway service reads these at startup. Set them on the
 | Var | Required | Default | Purpose |
 |-----|---------|---------|---------|
 | `RUNTIME` | yes | `docker` | Set to `single-process` on Railway. Skips Docker readiness check, spawns the agent runner as a child Bun process per session. |
-| `ANTHROPIC_API_KEY` | yes | — | Claude Agent SDK auth. Read by the agent-runner provider. |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | yes (or `GOOGLE_AI_API_KEY`) | — | Primary Gemini credential. Read by the default `gemini` agent-runner provider. |
+| `GOOGLE_AI_API_KEY` | yes (or `GOOGLE_GENERATIVE_AI_API_KEY`) | — | Backward-compatible Gemini credential alias. |
+| `BAGET_GEMINI_MODEL` | no | `gemini-2.5-flash` | Optional model override for the default `gemini` provider. |
+| `ANTHROPIC_API_KEY` | no | — | Legacy Claude provider credential. Keep only if you intentionally switch an agent group back to `claude`. |
 | `TELEGRAM_BOT_TOKEN` | yes | — | Bot token for `@baget_team_bot`. Single shared bot across all founders; per-founder routing happens via `messaging_group_agents`. |
 | `TELEGRAM_WEBHOOK_SECRET` | yes | — | Echoed in `X-Telegram-Bot-Api-Secret-Token` on every webhook delivery. Constant-time-checked. |
 | `TELEGRAM_WEBHOOK_PORT` | no | `3001` | HTTP server port for inbound Telegram webhooks. |
 | `BAGET_TELEGRAM_BOT_USERNAME` | yes | `baget_team_bot` | Used to build the `t.me/<username>?start=<token>` deep link returned by the pairing API. |
 | `BAGET_ADMIN_TOKEN` | yes | — | Bearer token shared with `baget.ai`. ≥ 16 chars. Rotate by changing both ends; rotate on any incident. Also used as the HMAC key for pairing tokens. |
 | `BAGET_ADMIN_PORT` | no | `8443` | HTTP port for the admin pairing API. |
-| `BAGET_API_BASE_URL` | yes | — | The baget.ai public API the agent fans tool calls into (`https://app.baget.ai` for prod, `https://stg-app.baget.ai` for staging). Written into each rendered `container_config.json`. |
+| `BAGET_API_BASE_URL` | yes | — | The baget.ai public API the agent fans tool calls into (`https://app.baget.ai` for prod, `https://stg-app.baget.ai` for staging). Written into each rendered `container.json`. |
 | `ONECLI_URL`, `ONECLI_API_KEY` | yes (docker) / no (single-process) | — | Vault config. In single-process mode the agent inherits the host process env, so OneCLI is optional. |
 | `BAGET_BUN_PATH` | no | `bun` | Override the `bun` binary path. Useful for local dev where bun lives at `~/.bun/bin/bun`. |
 | `DATABASE_URL` | no | `data/v2.db` | Currently the host writes a per-volume SQLite file under `data/`. Future: switch to a managed Postgres if multi-replica becomes a thing. |
 | `WEBHOOK_PORT` | no | `3000` | Used by the upstream Chat-SDK webhook server (legacy). Distinct from `TELEGRAM_WEBHOOK_PORT` above. |
 
 **Important:** `RUNTIME=single-process` does NOT bypass tenant isolation. Every founder still gets a distinct `agent_groups` row, distinct session DB files (3-DB model), and distinct OneCLI bearer-token credential. What it bypasses is the kernel-level Docker isolation between sessions — safe in our threat model because the agent has no shell. See § "Why we don't need DinD" above.
+
+**Provider note:** existing group folders keep whichever provider was last rendered into `groups/<folder>/container.json`. New groups pick up the `gemini` default from `setup/baget-template/container_config.json`; older test groups may need to be re-provisioned if they were rendered before this default changed.
 
 ## Build & deploy
 
