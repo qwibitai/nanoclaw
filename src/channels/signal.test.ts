@@ -202,7 +202,7 @@ describe('SignalAdapter', () => {
         '+15555550123',
         null,
         expect.objectContaining({
-          id: '1700000000000',
+          id: '1700000000000:+15555550123',
           kind: 'chat',
           content: expect.objectContaining({
             text: 'Hello from Signal',
@@ -1124,6 +1124,34 @@ describe('SignalAdapter', () => {
       await adapter.teardown();
     });
 
+    it('extracts targetAuthor from router-suffixed `<ts>:<author>:<ag-id>` ids', async () => {
+      // After the router's `messageIdForAgent` (src/router.ts:511) suffixes
+      // `:<agent-group-id>` to the inbound message id, the agent's
+      // add_reaction tool sees an id like `1700000111111:+15555550123:ag-xxx`.
+      // sendReaction must drop the trailing agent-group segment and send the
+      // real Signal author to signal-cli.
+      const adapter = createAdapter();
+      await adapter.setup(createMockSetup());
+      tcpRef.fakeSocket.write.mockClear();
+
+      await adapter.deliver('+15555550123', null, {
+        kind: 'chat',
+        content: {
+          operation: 'reaction',
+          messageId: '1700000111111:+15555550123:ag-1776971233072-qyooix',
+          emoji: '👍',
+        },
+      });
+
+      const calls = getRpcCallsForMethod('sendReaction');
+      expect(calls).toHaveLength(1);
+      const params = calls[0].params as Record<string, unknown>;
+      expect(params.targetAuthor).toBe('+15555550123');
+      expect(params.targetTimestamp).toBe(1700000111111);
+
+      await adapter.teardown();
+    });
+
     it('does not invoke send for reaction-only payloads', async () => {
       const adapter = createAdapter();
       await adapter.setup(createMockSetup());
@@ -1209,9 +1237,10 @@ describe('SignalAdapter', () => {
       expect(platformId).toBe('+15555550123');
       expect(threadId).toBeNull();
       expect(msg.kind).toBe('chat');
-      // id is the reaction's own timestamp so it doesn't collide with the
-      // original message in messages_in
-      expect(msg.id).toBe('1700000999999');
+      // id is the reaction's own timestamp PLUS the sender — see the encoding
+      // explanation in handleEnvelope. The router will further suffix
+      // `:<agent-group-id>` for fan-out uniqueness.
+      expect(msg.id).toBe('1700000999999:+15555550123');
       const content = msg.content as Record<string, unknown>;
       expect(content.text).toBe('[reacted ➕ 👍 to message]');
       expect(content.sender).toBe('+15555550123');

@@ -721,7 +721,10 @@ export function createSignalAdapter(config: {
         setup.onMetadata(platformId, 'Note to Self', false);
 
         const msg: InboundMessage = {
-          id: String(syncSent.timestamp ?? Date.now()),
+          // Encode the sender into the id so a later add_reaction can recover
+          // the targetAuthor. The router suffixes `:<agent-group-id>` for
+          // fan-out uniqueness; sendReaction takes the second `:`-component.
+          id: `${syncSent.timestamp ?? Date.now()}:${config.account}`,
           kind: 'chat',
           content: {
             text,
@@ -826,7 +829,9 @@ export function createSignalAdapter(config: {
     }
 
     const msg: InboundMessage = {
-      id: String(dataMessage.timestamp ?? Date.now()),
+      // Encode the sender so sendReaction can recover targetAuthor — see
+      // syncSent path above for the full rationale.
+      id: `${dataMessage.timestamp ?? Date.now()}:${sender}`,
       kind: 'chat',
       content: {
         text: content,
@@ -887,7 +892,10 @@ export function createSignalAdapter(config: {
     setup.onMetadata(platformId, chatName, isGroup);
 
     const msg: InboundMessage = {
-      id: String(dataMessage.timestamp ?? Date.now()),
+      // Encode sender so reactions stay reactable — same rationale as the
+      // text path. The reaction's own timestamp keeps the row distinct from
+      // the original message it reacted to.
+      id: `${dataMessage.timestamp ?? Date.now()}:${sender}`,
       kind: 'chat',
       content: {
         text,
@@ -1053,9 +1061,19 @@ export function createSignalAdapter(config: {
   ): Promise<string | undefined> {
     if (!connected || !tcp) return undefined;
 
-    const sepIdx = encodedMessageId.indexOf(':');
-    const tsRaw = sepIdx === -1 ? encodedMessageId : encodedMessageId.slice(0, sepIdx);
-    const targetAuthor = sepIdx === -1 ? config.account : encodedMessageId.slice(sepIdx + 1);
+    // messageId encoding (see handleEnvelope and deliver):
+    //   - `<ts>`                      — legacy / no-author fallback
+    //   - `<ts>:<author>`             — outbound reply (deliver())
+    //   - `<ts>:<author>:<ag-id>`     — inbound message after the router's
+    //                                   per-agent fan-out suffix in router.ts
+    //                                   `messageIdForAgent`
+    // Author is always the SECOND `:`-segment when present; trailing
+    // segments (e.g. agent-group id) are dropped. Without an author segment,
+    // fall back to our own account so reactions on the agent's own outbound
+    // still resolve.
+    const parts = encodedMessageId.split(':');
+    const tsRaw = parts[0];
+    const targetAuthor = parts[1] && parts[1].length > 0 ? parts[1] : config.account;
     const targetTimestamp = Number(tsRaw);
     if (!Number.isFinite(targetTimestamp) || targetTimestamp <= 0) {
       log.error('Signal: sendReaction got unparseable messageId', { encodedMessageId });
