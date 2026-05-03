@@ -58,6 +58,7 @@ const TOOL_ALLOWLIST = [
   'mcp__imap__*',
   'mcp__dav__*',
   'mcp__anytype__*',
+  'mcp__ollama__*',
 ];
 
 interface SDKUserMessage {

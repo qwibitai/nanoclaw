@@ -9,6 +9,8 @@ import { isValidTimezone } from './timezone.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'OLLAMA_ADMIN_TOOLS',
+  'OLLAMA_HOST',
   'ONECLI_URL',
   'ONECLI_API_KEY',
   'TZ',
@@ -20,6 +22,8 @@ const envConfig = readEnvFile([
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER || envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+export const OLLAMA_ADMIN_TOOLS =
+  (process.env.OLLAMA_ADMIN_TOOLS || envConfig.OLLAMA_ADMIN_TOOLS) === 'true';
 
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
@@ -81,3 +85,6 @@ export const ANYTYPE_API_KEY = process.env.ANYTYPE_API_KEY || envConfig.ANYTYPE_
 export const ANYTYPE_API_BASE_URL =
   process.env.ANYTYPE_API_BASE_URL || envConfig.ANYTYPE_API_BASE_URL || 'http://172.18.0.1:31012';
 export const ANYTYPE_HOST_IP = process.env.ANYTYPE_HOST_IP || envConfig.ANYTYPE_HOST_IP || '172.18.0.1';
+
+// Ollama MCP integration — points to local or remote Ollama instance
+export const OLLAMA_HOST = process.env.OLLAMA_HOST || envConfig.OLLAMA_HOST;

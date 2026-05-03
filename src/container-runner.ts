@@ -16,6 +16,8 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   ONECLI_API_KEY,
+  OLLAMA_ADMIN_TOOLS,
+  OLLAMA_HOST,
   ONECLI_URL,
   TIMEZONE,
   ANYTYPE_API_KEY,
@@ -449,6 +451,15 @@ async function buildContainerArgs(
     args.push('-e', `ANYTYPE_API_KEY=${ANYTYPE_API_KEY}`);
     args.push('-e', `ANYTYPE_API_BASE_URL=${ANYTYPE_API_BASE_URL}`);
     args.push('-e', `ANYTYPE_HOST_IP=${ANYTYPE_HOST_IP}`);
+  }
+
+  // Forward Ollama config — MCP server reads OLLAMA_HOST and OLLAMA_ADMIN_TOOLS from env.
+  // Same isolation reason as Anytype: SDK spawns MCP children with a replaced env.
+  if (OLLAMA_HOST) {
+    args.push('-e', `OLLAMA_HOST=${OLLAMA_HOST}`);
+  }
+  if (OLLAMA_ADMIN_TOOLS) {
+    args.push('-e', 'OLLAMA_ADMIN_TOOLS=true');
   }
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
