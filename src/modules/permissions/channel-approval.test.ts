@@ -153,8 +153,10 @@ describe('unknown-channel registration flow', () => {
     expect(kind).toBe('chat-sdk');
     const payload = JSON.parse(content as string);
     expect(payload.type).toBe('ask_question');
-    // Card names the target agent so the owner knows what they're wiring to.
-    expect(payload.question).toContain('Andy');
+    // Single-agent card offers a direct "Connect to <name>" button.
+    const connectOption = payload.options.find((o: { value: string }) => o.value.startsWith('connect:'));
+    expect(connectOption).toBeDefined();
+    expect(connectOption.label).toContain('Andy');
 
     const { getDb } = await import('../../db/connection.js');
     const rows = getDb().prepare('SELECT * FROM pending_channel_approvals').all() as Array<{
@@ -202,11 +204,11 @@ describe('unknown-channel registration flow', () => {
     };
     expect(pending).toBeDefined();
 
-    // Owner clicks approve.
+    // Owner clicks "Connect to Andy" (single-agent card).
     for (const handler of getResponseHandlers()) {
       const claimed = await handler({
         questionId: pending.messaging_group_id,
-        value: 'approve',
+        value: 'connect:ag-1',
         userId: 'owner', // raw platform id — handler namespaces it
         channelType: 'telegram',
         platformId: 'dm-owner',
@@ -215,7 +217,7 @@ describe('unknown-channel registration flow', () => {
       if (claimed) break;
     }
 
-    // Wiring created with MVP defaults.
+    // Wiring created with defaults.
     const mga = getDb()
       .prepare('SELECT * FROM messaging_group_agents WHERE messaging_group_id = ?')
       .get(pending.messaging_group_id) as {
@@ -261,7 +263,7 @@ describe('unknown-channel registration flow', () => {
     for (const handler of getResponseHandlers()) {
       const claimed = await handler({
         questionId: pending.messaging_group_id,
-        value: 'approve',
+        value: 'connect:ag-1',
         userId: 'owner',
         channelType: 'telegram',
         platformId: 'dm-owner',

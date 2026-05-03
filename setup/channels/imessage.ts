@@ -37,6 +37,7 @@ import { brightSelect } from '../lib/bright-select.js';
 import { askOperatorRole } from '../lib/role-prompt.js';
 import { ensureAnswer, fail, runQuietChild } from '../lib/runner.js';
 import { accentGreen, note, wrapForGutter } from '../lib/theme.js';
+import { readEnvKey } from '../environment.js';
 
 const DEFAULT_AGENT_NAME = 'Nano';
 
@@ -222,8 +223,8 @@ async function walkThroughFullDiskAccess(): Promise<void> {
 }
 
 async function collectRemoteCreds(): Promise<RemoteCreds> {
-  const existingUrl = process.env.IMESSAGE_SERVER_URL?.trim();
-  const existingKey = process.env.IMESSAGE_API_KEY?.trim();
+  const existingUrl = readEnvKey('IMESSAGE_SERVER_URL');
+  const existingKey = readEnvKey('IMESSAGE_API_KEY');
   if (existingUrl && existingKey && /^https?:\/\//i.test(existingUrl)) {
     const reuse = ensureAnswer(await p.confirm({
       message: `Found existing Photon credentials (${existingUrl}). Use them?`,

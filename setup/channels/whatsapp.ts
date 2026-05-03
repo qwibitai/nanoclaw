@@ -46,7 +46,7 @@ import {
   writeStepEntry,
 } from '../lib/runner.js';
 import { askOperatorRole } from '../lib/role-prompt.js';
-import { accentGreen, brandBody, brandBold, note } from '../lib/theme.js';
+import { accentGreen, brandBody, brandBold, fmtDuration, note } from '../lib/theme.js';
 
 const DEFAULT_AGENT_NAME = 'Nano';
 const AUTH_CREDS_PATH = path.join(process.cwd(), 'store', 'auth', 'creds.json');
@@ -379,8 +379,7 @@ async function restartService(): Promise<void> {
     // Give the adapter a moment to reconnect before init-first-agent's
     // welcome DM hits the delivery path.
     await new Promise((r) => setTimeout(r, 5000));
-    const elapsed = Math.round((Date.now() - start) / 1000);
-    s.stop(`NanoClaw restarted. ${k.dim(`(${elapsed}s)`)}`);
+    s.stop(`NanoClaw restarted. ${k.dim(`(${fmtDuration(Date.now() - start)})`)}`);
     setupLog.step('whatsapp-restart', 'success', Date.now() - start, {
       PLATFORM: platform,
     });

@@ -42,6 +42,7 @@ import { ensureAnswer, fail, runQuietChild } from '../lib/runner.js';
 import { buildTeamsAppPackage } from '../lib/teams-manifest.js';
 import { note } from '../lib/theme.js';
 import * as setupLog from '../logs.js';
+import { readEnvKey } from '../environment.js';
 
 const CHANNEL = 'teams';
 const MANIFEST_DIR = path.join(process.cwd(), 'data', 'teams');
@@ -60,8 +61,8 @@ export async function runTeamsChannel(_displayName: string): Promise<void> {
   const collected: Collected = {};
   const completed: string[] = [];
 
-  const existingAppId = process.env.TEAMS_APP_ID?.trim();
-  const existingPassword = process.env.TEAMS_APP_PASSWORD?.trim();
+  const existingAppId = readEnvKey('TEAMS_APP_ID');
+  const existingPassword = readEnvKey('TEAMS_APP_PASSWORD');
   if (existingAppId && existingPassword) {
     const reuse = ensureAnswer(await p.confirm({
       message: `Found existing Teams credentials (App ID: ${existingAppId.slice(0, 8)}…). Use them?`,
@@ -70,9 +71,9 @@ export async function runTeamsChannel(_displayName: string): Promise<void> {
     if (reuse) {
       collected.appId = existingAppId;
       collected.appPassword = existingPassword;
-      collected.appType = (process.env.TEAMS_APP_TYPE?.trim() as 'SingleTenant' | 'MultiTenant') || 'MultiTenant';
+      collected.appType = (readEnvKey('TEAMS_APP_TYPE') as 'SingleTenant' | 'MultiTenant') || 'MultiTenant';
       if (collected.appType === 'SingleTenant') {
-        collected.tenantId = process.env.TEAMS_APP_TENANT_ID?.trim();
+        collected.tenantId = readEnvKey('TEAMS_APP_TENANT_ID') ?? undefined;
       }
       setupLog.userInput('teams_credentials', 'reused-existing');
       await installAdapter(collected);

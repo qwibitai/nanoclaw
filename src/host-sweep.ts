@@ -33,6 +33,7 @@ import { getActiveSessions } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import {
   countDueMessages,
+  deleteOrphanProcessingClaims,
   getContainerState,
   getMessageForRetry,
   getProcessingClaims,
@@ -42,7 +43,7 @@ import {
   type ContainerState,
 } from './db/session-db.js';
 import { log } from './log.js';
-import { openInboundDb, openOutboundDb, inboundDbPath, heartbeatPath } from './session-manager.js';
+import { openInboundDb, openOutboundDb, openOutboundDbRw, inboundDbPath, heartbeatPath } from './session-manager.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
 import type { Session } from './types.js';
 
@@ -249,6 +250,15 @@ function enforceRunningContainerSla(
   resetStuckProcessingRows(inDb, outDb, session, 'claim-stuck');
 }
 
+export function _resetStuckProcessingRowsForTesting(
+  inDb: Database.Database,
+  outDb: Database.Database,
+  session: Session,
+  reason: string,
+): void {
+  resetStuckProcessingRows(inDb, outDb, session, reason);
+}
+
 function resetStuckProcessingRows(
   inDb: Database.Database,
   outDb: Database.Database,
@@ -284,5 +294,25 @@ function resetStuckProcessingRows(
         reason,
       });
     }
+  }
+
+  // Drop the orphan 'processing' rows. Without this, the next sweep tick
+  // would re-read them, see the old status_changed timestamp, conclude the
+  // freshly respawned container is stuck, and SIGKILL it before its
+  // agent-runner has a chance to run clearStaleProcessingAcks() on startup.
+  // We're safe to write outbound.db here because we just killed the container
+  // that owned it (or it crashed and left no writer behind).
+  // outDb was opened readonly for reads above; reopen with write access for this delete.
+  let outDbRw: Database.Database | null = null;
+  try {
+    outDbRw = openOutboundDbRw(session.agent_group_id, session.id);
+    const cleared = deleteOrphanProcessingClaims(outDbRw);
+    if (cleared > 0) {
+      log.info('Cleared orphan processing claims', { sessionId: session.id, cleared, reason });
+    }
+  } catch (err) {
+    log.warn('Failed to clear orphan processing claims', { sessionId: session.id, err });
+  } finally {
+    outDbRw?.close();
   }
 }

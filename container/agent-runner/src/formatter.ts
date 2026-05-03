@@ -66,6 +66,18 @@ export function isClearCommand(msg: MessageInRow): boolean {
   return text.toLowerCase().startsWith('/clear');
 }
 
+/**
+ * True for any chat that needs the outer loop's command path: /clear plus
+ * admin/passthrough slash commands the SDK can only dispatch when they are
+ * a query's first input. Used by the follow-up poller to bail out and let
+ * the outer loop reopen the query.
+ */
+export function isRunnerCommand(msg: MessageInRow): boolean {
+  if (msg.kind !== 'chat' && msg.kind !== 'chat-sdk') return false;
+  const cat = categorizeMessage(msg).category;
+  return cat === 'admin' || cat === 'passthrough';
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractSenderId(msg: MessageInRow, content: any): string | null {
   const raw: string | null = content?.senderId || content?.author?.userId || null;

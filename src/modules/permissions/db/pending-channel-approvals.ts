@@ -51,6 +51,12 @@ export function hasInFlightChannelApproval(messagingGroupId: string): boolean {
   return row !== undefined;
 }
 
+export function updatePendingChannelApprovalCard(messagingGroupId: string, title: string, optionsJson: string): void {
+  getDb()
+    .prepare('UPDATE pending_channel_approvals SET title = ?, options_json = ? WHERE messaging_group_id = ?')
+    .run(title, optionsJson, messagingGroupId);
+}
+
 export function deletePendingChannelApproval(messagingGroupId: string): void {
   getDb().prepare('DELETE FROM pending_channel_approvals WHERE messaging_group_id = ?').run(messagingGroupId);
 }

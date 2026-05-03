@@ -109,6 +109,20 @@ export function setSenderScopeGate(fn: SenderScopeGateFn): void {
 }
 
 /**
+ * Message-interceptor hook. Runs at the very top of routeInbound, before
+ * messaging-group resolution. When the interceptor returns true the message
+ * is consumed and routing stops. Used by the permissions module to capture
+ * free-text replies during multi-step approval flows (e.g. agent naming).
+ */
+export type MessageInterceptorFn = (event: InboundEvent) => Promise<boolean>;
+
+let messageInterceptor: MessageInterceptorFn | null = null;
+
+export function setMessageInterceptor(fn: MessageInterceptorFn): void {
+  messageInterceptor = fn;
+}
+
+/**
  * Channel-registration hook. Runs when the router sees a mention/DM on a
  * messaging group that has no wirings AND hasn't been denied. The hook is
  * expected to escalate to an owner (card, etc.) and arrange for future
@@ -142,6 +156,10 @@ function safeParseContent(raw: string): { text?: string; sender?: string; sender
  * Creates messaging group + session if they don't exist yet.
  */
 export async function routeInbound(event: InboundEvent): Promise<void> {
+  // Pre-route interceptor — lets modules consume messages before any routing
+  // (e.g. free-text replies during multi-step approval flows).
+  if (messageInterceptor && (await messageInterceptor(event))) return;
+
   // 0. Apply the adapter's thread policy. Non-threaded adapters (Telegram,
   //    WhatsApp, iMessage, email) collapse threads to the channel.
   const adapter = getChannelAdapter(event.channelType);

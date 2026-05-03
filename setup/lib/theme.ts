@@ -52,6 +52,22 @@ export function accentGreen(s: string): string {
 }
 
 /**
+ * Format an elapsed-time duration (in milliseconds) for the spinner
+ * suffixes setup writes everywhere. Sub-minute durations stay in plain
+ * seconds (`47s`); once the timer crosses 60 seconds we switch to the
+ * `Xm Ys` form (`2m 34s`) so a long step doesn't read as `247s` or
+ * similar. The format is consistent above 60s — `4m 0s` over `4m` —
+ * so live spinner output doesn't change shape at every whole minute.
+ */
+export function fmtDuration(ms: number): string {
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}m ${s}s`;
+}
+
+/**
  * Brand body color for setup-flow prose. Used for card bodies (via the
  * `note()` formatter) and `p.log.*` body arguments — anywhere the
  * previous "dim" treatment was making prose hard to read or washing

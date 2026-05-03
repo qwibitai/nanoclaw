@@ -20,7 +20,10 @@ export function classifyPingResult(exitCode: number | null, stdout: string, stde
   if (
     /Invalid bearer token/i.test(output) ||
     /authentication[_ ]error/i.test(output) ||
-    /Failed to authenticate/i.test(output)
+    /Failed to authenticate/i.test(output) ||
+    /Please run \/login/i.test(output) ||
+    /Not logged in/i.test(output) ||
+    /Invalid API key/i.test(output)
   ) {
     return 'auth_error';
   }

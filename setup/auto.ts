@@ -14,8 +14,8 @@
  *                          "Terminal Agent".
  *   NANOCLAW_SKIP          comma-separated step names to skip
  *                          (environment|container|onecli|auth|mounts|
- *                           service|cli-agent|timezone|channel|verify|
- *                           first-chat)
+ *                           service|cli-agent|timezone|channel|
+ *                           verify|first-chat)
  *
  * Timezone is auto-detected after the CLI agent step. UTC resolves are
  * confirmed with the user, and free-text replies fall through to a
@@ -23,6 +23,7 @@
  */
 import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
+import * as os from 'os';
 import path from 'path';
 
 import * as p from '@clack/prompts';
@@ -51,9 +52,9 @@ import { pollHealth } from './onecli.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
 import { claudeCliAvailable, resolveTimezoneViaClaude } from './lib/tz-from-claude.js';
 import * as setupLog from './logs.js';
-import { ensureAnswer, fail, runQuietChild, runQuietStep } from './lib/runner.js';
+import { ensureAnswer, fail, runQuietChild, runQuietStep, spawnQuiet } from './lib/runner.js';
 import { emit as phEmit } from './lib/diagnostics.js';
-import { accentGreen, brandBody, brandBold, brandChip, dimWrap, fitToWidth, note, wrapForGutter } from './lib/theme.js';
+import { accentGreen, brandBody, brandBold, brandChip, dimWrap, fitToWidth, fmtDuration, note, wrapForGutter } from './lib/theme.js';
 import { isValidTimezone } from '../src/timezone.js';
 
 const CLI_AGENT_NAME = 'Terminal Agent';
@@ -62,6 +63,13 @@ const RUN_START = Date.now();
 type ChannelChoice = 'telegram' | 'discord' | 'whatsapp' | 'signal' | 'teams' | 'slack' | 'imessage' | 'skip';
 
 async function main(): Promise<void> {
+  // Make sure ~/.local/bin is on PATH for every child process we spawn.
+  // Installers we run mid-setup (OneCLI, claude) drop binaries there and
+  // append a PATH line to the user's shell rc, but rc updates don't reach
+  // an already-running Node process — so without this patch a freshly
+  // installed `onecli` is invisible to a subsequent `runInheritScript`.
+  ensureLocalBinOnPath();
+
   // Parse CLI flags first — `--help` short-circuits before we render anything,
   // and flag values get folded into process.env so existing step code reading
   // NANOCLAW_* sees them unchanged.
@@ -85,17 +93,21 @@ async function main(): Promise<void> {
 
   // Welcome menu — default path or open advanced overrides before any setup
   // work begins. Default lands on standard so Enter is the happy path.
-  const startChoice = ensureAnswer(
-    await brightSelect<'default' | 'advanced'>({
-      message: 'How would you like to begin?',
-      options: [
-        { value: 'default', label: 'Standard setup' },
-        { value: 'advanced', label: 'Advanced', hint: 'override defaults' },
-      ],
-      initialValue: 'default',
-    }),
-  ) as 'default' | 'advanced';
-  setupLog.userInput('start_choice', startChoice);
+  // On sg re-exec, the user already chose — skip straight to standard.
+  let startChoice: 'default' | 'advanced' = 'default';
+  if (process.env.NANOCLAW_REEXEC_SG !== '1') {
+    startChoice = ensureAnswer(
+      await brightSelect<'default' | 'advanced'>({
+        message: 'How would you like to begin?',
+        options: [
+          { value: 'default', label: 'Standard setup' },
+          { value: 'advanced', label: 'Advanced', hint: 'override defaults' },
+        ],
+        initialValue: 'default',
+      }),
+    ) as 'default' | 'advanced';
+    setupLog.userInput('start_choice', startChoice);
+  }
   if (startChoice === 'advanced') {
     configValues = await runAdvancedScreen(configValues);
     applyToEnv(configValues);
@@ -119,39 +131,6 @@ async function main(): Promise<void> {
         "Your system doesn't look quite right.",
         'See logs/setup-steps/ for details, then retry.',
       );
-    }
-  }
-
-  // Detect existing .env and offer to reuse it so the user doesn't have to
-  // paste credentials again on a re-run.
-  const existingEnv = detectExistingEnv();
-  if (existingEnv) {
-    const lines = Object.values(existingEnv.groups).map(
-      (g) => `  ${k.green('✓')} ${g.label}`,
-    );
-    note(lines.join('\n'), 'Found existing configuration');
-
-    const reuseChoice = ensureAnswer(
-      await brightSelect({
-        message: 'Use this existing environment?',
-        options: [
-          { value: 'reuse', label: 'Yes, use what I already have', hint: 'recommended' },
-          { value: 'fresh', label: 'No, start fresh' },
-        ],
-        initialValue: 'reuse',
-      }),
-    ) as 'reuse' | 'fresh';
-    setupLog.userInput('existing_env_choice', reuseChoice);
-
-    if (reuseChoice === 'reuse') {
-      for (const [key, value] of Object.entries(existingEnv.raw)) {
-        if (!process.env[key]) process.env[key] = value;
-      }
-      if (existingEnv.groups.onecli) skip.add('onecli');
-      if (detectRegisteredGroups(process.cwd())) {
-        skip.add('cli-agent');
-        skip.add('first-chat');
-      }
     }
   }
 
@@ -344,6 +323,11 @@ async function main(): Promise<void> {
     return displayName;
   }
 
+  if (!skip.has('cli-agent') && detectRegisteredGroups(process.cwd())) {
+    skip.add('cli-agent');
+    skip.add('first-chat');
+  }
+
   if (!skip.has('cli-agent')) {
     await resolveDisplayName();
     const res = await runQuietStep(
@@ -352,7 +336,7 @@ async function main(): Promise<void> {
         running: 'Bringing your assistant online…',
         done: 'Assistant wired up.',
       },
-      ['--display-name', displayName!, '--agent-name', CLI_AGENT_NAME],
+      ['--display-name', displayName!, '--agent-name', CLI_AGENT_NAME, '--folder', '_ping-test'],
     );
     if (!res.ok) {
       await fail(
@@ -373,6 +357,27 @@ async function main(): Promise<void> {
       const ping = await confirmAssistantResponds();
       if (ping === 'ok') {
         phEmit('first_chat_ready');
+        const cleanupRawLog = setupLog.stepRawLog('cleanup-cli-agent');
+        const cleanupStart = Date.now();
+        const cleanup = await spawnQuiet(
+          'pnpm',
+          ['exec', 'tsx', 'scripts/delete-cli-agent.ts', '--folder', '_ping-test'],
+          cleanupRawLog,
+        );
+        setupLog.step(
+          'cleanup-cli-agent',
+          cleanup.ok ? 'success' : 'failed',
+          Date.now() - cleanupStart,
+          { exit_code: cleanup.exitCode },
+          cleanupRawLog,
+        );
+        if (!cleanup.ok) {
+          p.log.warn(
+            brandBody(
+              `Couldn't clean up the test agent — it may still appear in your agent list. See ${cleanupRawLog} for details.`,
+            ),
+          );
+        }
         const next = ensureAnswer(
           await brightSelect<'continue' | 'chat'>({
             message: 'What next?',
@@ -390,7 +395,23 @@ async function main(): Promise<void> {
           }),
         ) as 'continue' | 'chat';
         setupLog.userInput('first_chat_choice', next);
-        if (next === 'chat') await runFirstChat();
+        if (next === 'chat') {
+          const terminalAgentName = `${displayName!}'s Terminal`;
+          const createRes = await runQuietChild(
+            'create-terminal-agent',
+            'pnpm',
+            ['exec', 'tsx', 'scripts/init-cli-agent.ts', '--display-name', displayName!, '--agent-name', terminalAgentName],
+            { running: `Creating ${terminalAgentName}…`, done: `${terminalAgentName} is ready.` },
+          );
+          if (!createRes.ok) {
+            await fail(
+              'create-terminal-agent',
+              `Couldn't create ${terminalAgentName}.`,
+              'You can retry later with `pnpm exec tsx scripts/init-cli-agent.ts`.',
+            );
+          }
+          await runFirstChat();
+        }
       } else {
         phEmit('first_chat_failed', { reason: ping });
         renderPingFailureNote(ping);
@@ -413,7 +434,11 @@ async function main(): Promise<void> {
     await runTimezoneStep();
   }
 
+  // v1 → v2 migration is handled by `bash migrate-v2.sh`, not the setup flow.
+  // Users migrating from v1 run that script before (or instead of) setup.
+
   let channelChoice: ChannelChoice = 'skip';
+
   if (!skip.has('channel')) {
     channelChoice = await askChannelChoice();
     if (channelChoice !== 'skip') {
@@ -470,14 +495,6 @@ async function main(): Promise<void> {
             6,
           ),
         );
-      } else {
-        const agentPing = res.terminal?.fields.AGENT_PING;
-        if (agentPing && agentPing !== 'ok' && agentPing !== 'skipped') {
-          notes.push(
-            "• Your assistant didn't reply to a test message. " +
-              'Check `logs/nanoclaw.log` for clues, then try `pnpm run chat hi`.',
-          );
-        }
       }
       if (!res.terminal?.fields.CONFIGURED_CHANNELS) {
         notes.push(
@@ -497,7 +514,6 @@ async function main(): Promise<void> {
         unresolved_count: notes.length,
         service_running: res.terminal?.fields.SERVICE === 'running',
         has_credentials: res.terminal?.fields.CREDENTIALS === 'configured',
-        agent_responds: res.terminal?.fields.AGENT_PING === 'ok',
       });
       await offerClaudeAssist({
         stepName: 'verify',
@@ -579,18 +595,16 @@ async function confirmAssistantResponds(): Promise<PingResult> {
   const s = p.spinner();
   const start = Date.now();
   const label = 'Waking your assistant…';
-  s.start(fitToWidth(label, ' (999s)'));
+  s.start(fitToWidth(label, ' (99m 59s)'));
   const tick = setInterval(() => {
-    const elapsed = Math.round((Date.now() - start) / 1000);
-    const suffix = ` (${elapsed}s)`;
+    const suffix = ` (${fmtDuration(Date.now() - start)})`;
     s.message(`${fitToWidth(label, suffix)}${k.dim(suffix)}`);
   }, 1000);
 
   const result = await pingCliAgent();
 
   clearInterval(tick);
-  const elapsed = Math.round((Date.now() - start) / 1000);
-  const suffix = ` (${elapsed}s)`;
+  const suffix = ` (${fmtDuration(Date.now() - start)})`;
   if (result === 'ok') {
     s.stop(`${k.bold(fitToWidth('Your assistant is ready.', suffix))}${k.dim(suffix)}`);
   } else {
@@ -758,15 +772,25 @@ async function runPasteAuth(method: 'oauth' | 'api'): Promise<void> {
       message: `Paste your ${label}`,
       clearOnError: true,
       validate: (v) => {
-        if (!v || !v.trim()) return 'Required';
-        if (!v.trim().startsWith(prefix)) {
+        // Strip any internal whitespace so a line-wrapped paste that did
+        // survive into clack can still validate. The mid-token-newline
+        // case where clack only sees the first line is caught by the
+        // shape check below.
+        const cleaned = (v ?? '').replace(/\s+/g, '');
+        if (!cleaned) return 'Required';
+        if (!cleaned.startsWith(prefix)) {
           return `Should start with ${prefix}…`;
+        }
+        if (method === 'oauth' && !/^sk-ant-oat[A-Za-z0-9_-]{80,500}AA$/.test(cleaned)) {
+          return cleaned.length < 90
+            ? 'Token looks truncated — line breaks in the paste can cut it off. Widen your terminal so the token fits on one line, then paste again.'
+            : "Token shape doesn't look right (expected sk-ant-oat…AA).";
         }
         return undefined;
       },
     }),
   );
-  const token = (answer as string).trim();
+  const token = (answer as string).replace(/\s+/g, '');
 
   const res = await runQuietChild(
     'auth',
@@ -1063,54 +1087,12 @@ async function askChannelChoice(): Promise<ChannelChoice> {
 
 // ─── interactive / env helpers ─────────────────────────────────────────
 
-interface ExistingEnvGroup {
-  label: string;
-  keys: string[];
-}
-
-const ENV_KEY_GROUPS: Record<string, { label: string; keys: string[] }> = {
-  onecli: { label: 'OneCLI', keys: ['ONECLI_URL'] },
-  telegram: { label: 'Telegram', keys: ['TELEGRAM_BOT_TOKEN'] },
-  discord: { label: 'Discord', keys: ['DISCORD_BOT_TOKEN', 'DISCORD_APPLICATION_ID', 'DISCORD_PUBLIC_KEY'] },
-  slack: { label: 'Slack', keys: ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET'] },
-  signal: { label: 'Signal', keys: ['SIGNAL_ACCOUNT'] },
-  teams: { label: 'Teams', keys: ['TEAMS_APP_ID', 'TEAMS_APP_PASSWORD', 'TEAMS_APP_TENANT_ID', 'TEAMS_APP_TYPE'] },
-  whatsapp: { label: 'WhatsApp', keys: ['ASSISTANT_HAS_OWN_NUMBER'] },
-  imessage: { label: 'iMessage', keys: ['IMESSAGE_LOCAL', 'IMESSAGE_ENABLED', 'IMESSAGE_SERVER_URL', 'IMESSAGE_API_KEY'] },
-};
-
-function detectExistingEnv(): { groups: Record<string, ExistingEnvGroup>; raw: Record<string, string> } | null {
-  const envPath = path.join(process.cwd(), '.env');
-  if (!fs.existsSync(envPath)) return null;
-
-  let content: string;
-  try {
-    content = fs.readFileSync(envPath, 'utf-8');
-  } catch {
-    return null;
-  }
-
-  const raw: Record<string, string> = {};
-  for (const line of content.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq < 1) continue;
-    raw[trimmed.slice(0, eq)] = trimmed.slice(eq + 1);
-  }
-
-  if (Object.keys(raw).length === 0) return null;
-
-  const groups: Record<string, ExistingEnvGroup> = {};
-  for (const [id, def] of Object.entries(ENV_KEY_GROUPS)) {
-    const found = def.keys.filter((key) => raw[key] !== undefined);
-    if (found.length > 0) {
-      groups[id] = { label: def.label, keys: found };
-    }
-  }
-
-  if (Object.keys(groups).length === 0) return null;
-  return { groups, raw };
+function ensureLocalBinOnPath(): void {
+  const localBin = path.join(os.homedir(), '.local', 'bin');
+  const current = process.env.PATH ?? '';
+  const segments = current.split(path.delimiter).filter(Boolean);
+  if (segments.includes(localBin)) return;
+  process.env.PATH = current ? `${localBin}${path.delimiter}${current}` : localBin;
 }
 
 function anthropicSecretExists(): boolean {
@@ -1190,9 +1172,11 @@ function maybeReexecUnderSg(): void {
   if (spawnSync('which', ['sg'], { stdio: 'ignore' }).status !== 0) return;
 
   p.log.warn(brandBody('Docker socket not accessible in current group. Re-executing under `sg docker`.'));
+  const existingSkip = (process.env.NANOCLAW_SKIP ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const skipList = [...new Set([...existingSkip, ...setupLog.completedStepNames()])].join(',');
   const res = spawnSync('sg', ['docker', '-c', 'pnpm run setup:auto'], {
     stdio: 'inherit',
-    env: { ...process.env, NANOCLAW_REEXEC_SG: '1' },
+    env: { ...process.env, NANOCLAW_REEXEC_SG: '1', ...(skipList ? { NANOCLAW_SKIP: skipList } : {}) },
   });
   process.exit(res.status ?? 1);
 }
