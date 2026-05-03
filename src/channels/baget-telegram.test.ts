@@ -124,7 +124,8 @@ describe('Baget Telegram adapter', () => {
         }
 
         const json =
-          telegramSendJson ?? (telegramSendStatus >= 200 && telegramSendStatus < 300
+          telegramSendJson ??
+          (telegramSendStatus >= 200 && telegramSendStatus < 300
             ? { ok: true, result: { message_id: outbound.length } }
             : { ok: false });
 
@@ -163,7 +164,8 @@ describe('Baget Telegram adapter', () => {
         }
 
         const json =
-          telegramSendJson ?? (telegramSendStatus >= 200 && telegramSendStatus < 300
+          telegramSendJson ??
+          (telegramSendStatus >= 200 && telegramSendStatus < 300
             ? { ok: true, result: { message_id: outbound.length } }
             : { ok: false });
 

@@ -18,7 +18,13 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { mintPairingToken, tokenHash, verifyAdminBearer } from './baget-admin-server.js';
+import {
+  mintPairingToken,
+  tokenHash,
+  validateCreateBody,
+  verifyAdminBearer,
+  type CreateAgentGroupBody,
+} from './baget-admin-server.js';
 
 const ADMIN_TOKEN = 'test-admin-token-1234567890abcdef';
 
@@ -116,5 +122,75 @@ describe('tokenHash', () => {
     // the hot path on /start consume. Sanity-check that it works.
     const sample = '0123456789abcdef0123456789abcdef';
     expect(tokenHash(sample)).toMatch(/^[a-f0-9]{64}$/);
+  });
+});
+
+describe('validateCreateBody — channelToken rules', () => {
+  // The base body baget.ai's bridge sends. Each test mutates only the
+  // channelToken field so the rule under test isn't shadowed by an
+  // earlier rule failing first.
+  function baseBody(overrides: Partial<CreateAgentGroupBody> = {}): CreateAgentGroupBody {
+    return {
+      userId: 'u-' + 'a'.repeat(36),
+      companyId: 'c-' + 'b'.repeat(36),
+      companyName: 'Acme Corp',
+      teamMembers: {
+        cos: 'Louis',
+        developer: 'Tristan',
+        marketing: 'Valentin',
+        analyst: 'Chloé',
+        design: 'Nicolas',
+        ops: 'Théo',
+      },
+      channelTokenCredentialName: 'baget-channel-token-aaaaaaaa-bbbbbbbb',
+      bagetApiBaseUrl: 'https://stg-app.baget.ai',
+      ...overrides,
+    };
+  }
+
+  // 32 random bytes → base64url (43 chars). The shape baget.ai's
+  // mintChannelToken produces. Use a fixed valid sample so tests are
+  // deterministic.
+  const VALID_TOKEN = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-AbCdE';
+
+  it('accepts a body with no channelToken (backwards-compat path)', () => {
+    expect(validateCreateBody(baseBody())).toBeNull();
+  });
+
+  it('accepts a body with a well-formed channelToken', () => {
+    expect(validateCreateBody(baseBody({ channelToken: VALID_TOKEN }))).toBeNull();
+  });
+
+  it('rejects a non-string channelToken', () => {
+    // The body type says channelToken?: string but at runtime baget.ai
+    // could send anything. Cast through unknown to simulate.
+    const body = baseBody({ channelToken: 12345 as unknown as string });
+    expect(validateCreateBody(body)).toContain('channelToken must be a string');
+  });
+
+  it('rejects a channelToken with invalid (non-base64url) characters', () => {
+    // `+` and `/` are valid in base64 but NOT in base64url.
+    const body = baseBody({ channelToken: 'A+/'.padEnd(43, 'a') });
+    expect(validateCreateBody(body)).toContain('invalid characters');
+  });
+
+  it('rejects a channelToken below the minimum length (30 chars)', () => {
+    const body = baseBody({ channelToken: 'tooShort' });
+    expect(validateCreateBody(body)).toContain('out of range');
+  });
+
+  it('rejects a channelToken above the maximum length (256 chars)', () => {
+    const body = baseBody({ channelToken: 'A'.repeat(257) });
+    expect(validateCreateBody(body)).toContain('out of range');
+  });
+
+  it('still rejects bodies missing OTHER required fields when channelToken is OK', () => {
+    // Sanity: the new rule didn't accidentally short-circuit the
+    // existing required-field checks.
+    const body = baseBody({
+      channelToken: VALID_TOKEN,
+      companyName: '',
+    });
+    expect(validateCreateBody(body)).toContain('Missing required field: companyName');
   });
 });

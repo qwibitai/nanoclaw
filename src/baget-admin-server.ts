@@ -63,6 +63,7 @@ import {
 import { insertPairingToken, sweepExpiredPairingTokens } from './db/baget-pairing-tokens.js';
 import { provisionBagetGroup, type BagetTeamMembers } from './baget-pairing.js';
 import { bindBagetTelegramChat, sendBagetTelegramWelcome } from './channels/baget-telegram-bind.js';
+import { persistChannelToken } from './baget-channel-secret.js';
 import { log } from './log.js';
 
 // ── Auth ──
@@ -153,6 +154,26 @@ export interface CreateAgentGroupBody {
   channelTokenCredentialName: string;
   /** Default https://app.baget.ai. Must match the founder's environment. */
   bagetApiBaseUrl: string;
+  /**
+   * Plaintext per-(user, company) bearer token from baget.ai's
+   * `mintChannelToken`. Persisted into our OneCLI vault under
+   * `channelTokenCredentialName` so the per-founder agent container
+   * reads it as `BAGET_CHANNEL_TOKEN` env on every spawn and uses it
+   * to call back into baget.ai's bearer-auth routes.
+   *
+   * Optional for backwards-compat: pre-bridge baget.ai builds (and
+   * the legacy /start <token> path) don't supply it. When omitted,
+   * the agent container starts without `BAGET_CHANNEL_TOKEN` and
+   * the baget-mcp tools surface a clear "container not authenticated
+   * to baget.ai — re-pair from the dashboard" error to the founder.
+   * Once baget.ai's bridge code goes live in prod, future fork
+   * versions can mark this required.
+   *
+   * NEVER log this. NEVER echo in error messages. The persist helper
+   * (`persistChannelToken` in `baget-channel-secret.ts`) scrubs it
+   * from any OneCLI stderr before logging.
+   */
+  channelToken?: string;
 }
 
 export interface CreateAgentGroupResponse {
@@ -359,6 +380,66 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
     sendJson(res, 404, { ok: false, error: 'not_found', message: `No route for ${method} ${url}` });
   }
 
+  /**
+   * Shared post-provision step: if baget.ai supplied `channelToken`,
+   * persist it into our OneCLI vault so the agent container reads it
+   * as `BAGET_CHANNEL_TOKEN` env on every spawn. Returns true on
+   * success (or when no token was supplied — backwards compat path);
+   * returns false after writing a 500 response on persist failure.
+   *
+   * The host-pattern is derived from `bagetApiBaseUrl` because OneCLI
+   * scopes secret injection per-host. A founder on staging
+   * (stg-app.baget.ai) gets a token that only injects on that host;
+   * prod (app.baget.ai) gets a separate one — no cross-env leak.
+   */
+  async function maybePersistChannelToken(
+    res: http.ServerResponse,
+    body: CreateAgentGroupBody,
+    agentName: string,
+  ): Promise<boolean> {
+    if (!body.channelToken) {
+      // Backwards-compat: pre-bridge baget.ai builds (and the legacy
+      // /start <token> path) don't supply this. The agent container
+      // starts without BAGET_CHANNEL_TOKEN and the baget-mcp tools
+      // surface a clear error to the founder.
+      return true;
+    }
+
+    let hostPattern: string;
+    try {
+      hostPattern = new URL(body.bagetApiBaseUrl).host;
+    } catch {
+      // Already validated as non-empty in validateCreateBody, but the
+      // URL parser is the load-bearing check for actual URL-shape.
+      sendJson(res, 400, {
+        ok: false,
+        error: 'invalid_body',
+        message: 'bagetApiBaseUrl must be a valid URL',
+      });
+      return false;
+    }
+
+    try {
+      await persistChannelToken({
+        agentName,
+        credentialName: body.channelTokenCredentialName,
+        tokenValue: body.channelToken,
+        hostPattern,
+      });
+      return true;
+    } catch (err) {
+      // persistChannelToken already logged the scrubbed error. Don't
+      // double-log here — and definitely don't surface the original
+      // err to the wire (it might contain CLI argv).
+      sendJson(res, 500, {
+        ok: false,
+        error: 'channel_token_persist_failed',
+        message: 'Failed to persist channel token in OneCLI vault',
+      });
+      return false;
+    }
+  }
+
   async function handleCreate(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const body = await readJson<CreateAgentGroupBody>(req);
     if (!body.ok) {
@@ -435,6 +516,19 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
         }
         agentGroupId = winner.id;
       }
+    }
+
+    // 2b. Persist baget.ai's per-(user, company) bearer token into
+    //     OneCLI so the per-spawn agent container reads it as
+    //     BAGET_CHANNEL_TOKEN env. Skip silently when baget.ai didn't
+    //     supply one (backwards-compat with pre-bridge builds and the
+    //     legacy /start <token> path).
+    if (!(await maybePersistChannelToken(res, body.value, companyName))) {
+      // The helper already wrote the 500 response. Note: the
+      // agent_groups row above is committed and will get re-used on
+      // a retry; the pairing token mint below is skipped on this
+      // failure so a retried bind doesn't leak unused tokens.
+      return;
     }
 
     // 3. Mint pairing token + store SHA256.
@@ -579,6 +673,18 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
         }
         agentGroupId = winner.id;
       }
+    }
+
+    // 2b. Persist baget.ai's per-(user, company) bearer token before
+    //     we wire the Telegram chat. Order matters: if the token
+    //     persist fails, we don't want a "bound chat" without the
+    //     token to back its calls — the founder would DM the bot,
+    //     get a useless reply, and not know why. Bail before bind.
+    if (!(await maybePersistChannelToken(res, body.value, companyName))) {
+      // The helper already wrote the 500. The agent_groups row above
+      // is committed; a retry will hit the existing row + retry the
+      // OneCLI persist (idempotent via delete-then-create).
+      return;
     }
 
     // 3. Wire the Telegram chat to the agent_group. For 1:1 DMs,
@@ -858,7 +964,7 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
   };
 }
 
-function validateCreateBody(body: CreateAgentGroupBody): string | null {
+export function validateCreateBody(body: CreateAgentGroupBody): string | null {
   const required: Array<keyof CreateAgentGroupBody> = [
     'userId',
     'companyId',
@@ -885,6 +991,22 @@ function validateCreateBody(body: CreateAgentGroupBody): string | null {
     return 'userId / companyId too long (max 64 chars)';
   }
   if (body.companyName.length > 200) return 'companyName too long (max 200 chars)';
+  // channelToken is optional; when present, sanity-check the shape so
+  // a malformed value can't propagate into the OneCLI vault. baget.ai
+  // mints `crypto.randomBytes(32).toString('base64url')` → 43 chars
+  // [A-Za-z0-9_-]. Allow [30, 256] for forward-compat (rotation could
+  // pick a different size). Anything outside is structurally bogus.
+  if (body.channelToken !== undefined) {
+    if (typeof body.channelToken !== 'string') {
+      return 'channelToken must be a string when present';
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(body.channelToken)) {
+      return 'channelToken contains invalid characters (expected base64url)';
+    }
+    if (body.channelToken.length < 30 || body.channelToken.length > 256) {
+      return 'channelToken length out of range';
+    }
+  }
   return null;
 }
 

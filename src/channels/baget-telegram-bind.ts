@@ -159,9 +159,7 @@ export function bindBagetTelegramChat(args: {
  * not propagate to the bind caller because the DB writes already
  * succeeded.
  */
-export type BagetTelegramSendResult =
-  | { ok: true; messageId: string }
-  | { ok: false; founderActionRequired: boolean };
+export type BagetTelegramSendResult = { ok: true; messageId: string } | { ok: false; founderActionRequired: boolean };
 
 export async function sendBagetBotMessage(args: {
   botToken: string;
@@ -179,7 +177,11 @@ export async function sendBagetBotMessage(args: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: args.chatId, text: args.text }),
     });
-    const json = (await resp.json().catch(() => null)) as { ok?: boolean; result?: { message_id?: number }; description?: unknown } | null;
+    const json = (await resp.json().catch(() => null)) as {
+      ok?: boolean;
+      result?: { message_id?: number };
+      description?: unknown;
+    } | null;
     if (!resp.ok) {
       const description = typeof json?.description === 'string' ? json.description.toLowerCase() : '';
       const founderActionRequired =
