@@ -62,6 +62,10 @@ import {
 } from './db/baget-agent-groups.js';
 import { insertPairingToken, sweepExpiredPairingTokens } from './db/baget-pairing-tokens.js';
 import { provisionBagetGroup, type BagetTeamMembers } from './baget-pairing.js';
+import {
+  bindBagetTelegramChat,
+  sendBagetTelegramWelcome,
+} from './channels/baget-telegram-bind.js';
 import { log } from './log.js';
 
 // ── Auth ──
@@ -162,6 +166,32 @@ export interface CreateAgentGroupResponse {
   pairingTokenExpiresAt: string;
 }
 
+/**
+ * Body for `POST /baget/agent-groups/bind-telegram` — direct-bind from
+ * the baget.ai Login Widget OAuth flow, bypassing the deep-link
+ * `/start <token>` UX. Same shape as Create plus the founder's
+ * Telegram identity (verified by baget.ai's HMAC check on the widget
+ * payload BEFORE this admin call).
+ */
+export interface BindTelegramBody extends CreateAgentGroupBody {
+  /** Telegram user.id from the Login Widget payload. For 1:1 DMs this
+   *  equals the chat.id (Telegram invariant), so we use it as both. */
+  telegramUserId: number;
+  /** Optional first_name from the Login Widget. Stored on the
+   *  messaging_group row as the chat's display name. */
+  telegramFirstName?: string;
+}
+
+export interface BindTelegramResponse {
+  ok: true;
+  agentGroupId: string;
+  folder: string;
+  /** True iff this call created a new messaging_group row. False when
+   *  the founder had DMed the bot before binding (the row already
+   *  existed and was upgraded in place). */
+  messagingGroupCreated: boolean;
+}
+
 // ── Server ──
 
 export interface BagetAdminServerConfig {
@@ -170,6 +200,23 @@ export interface BagetAdminServerConfig {
   adminToken: string;
   /** Telegram bot username, e.g. `baget_team_bot`. Used to build the deep link. */
   telegramBotUsername: string;
+  /**
+   * Telegram bot token. Required only when the bind-telegram endpoint
+   * needs to send the welcome message. Optional so existing pure-admin
+   * deployments don't have to set it; the bind-telegram route returns
+   * `bot_token_unconfigured` when it's missing.
+   */
+  telegramBotToken?: string;
+  /**
+   * Override for the Telegram API base URL — tests inject this. Defaults
+   * to `https://api.telegram.org`.
+   */
+  telegramApiBaseUrl?: string;
+  /**
+   * Override for the fetch implementation used to call Telegram. Tests
+   * inject this; production uses the global `fetch`.
+   */
+  telegramFetchImpl?: typeof fetch;
   /**
    * Function the route handlers use to ULID/UUID a new agent group.
    * Wired as a parameter so tests can inject a deterministic generator.
@@ -274,6 +321,15 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
 
     if (method === 'POST' && urlNoQuery === '/baget/agent-groups') {
       await handleCreate(req, res);
+      return;
+    }
+    // Direct-bind: provision agent_group + wire Telegram chat in one
+    // call. Used by baget.ai's Login Widget callback after it has
+    // verified the founder's Telegram authorization HMAC. Sidesteps
+    // the deep-link `/start <token>` UX and the Telegram Desktop
+    // payload-drop bug it suffers from. See bind-telegram body type.
+    if (method === 'POST' && urlNoQuery === '/baget/agent-groups/bind-telegram') {
+      await handleBindTelegram(req, res);
       return;
     }
     // Body-keyed DELETE /baget/agent-groups (with body { userId, companyId })
@@ -403,6 +459,179 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
       folder: provisioned.folder,
       telegramDeepLink: `https://t.me/${config.telegramBotUsername}?start=${minted.rawToken}`,
       pairingTokenExpiresAt: minted.expiresAt,
+    };
+    sendJson(res, 200, response);
+  }
+
+  /**
+   * Provision the agent_group + directly bind a Telegram chat in one
+   * call. The Login Widget on baget.ai gives us the founder's Telegram
+   * user.id (== chat.id for 1:1 DMs) without needing the founder to
+   * type `/start <token>` — sidestep for the Telegram Desktop deep-link
+   * payload-drop quirk documented in the handoff.
+   *
+   * Auth: bearer-gated (admin token), same as `handleCreate`. baget.ai
+   * is responsible for HMAC-verifying the Login Widget payload BEFORE
+   * sending the founder's Telegram identity here. We trust the bearer.
+   *
+   * Idempotent on (userId, companyId, telegramUserId):
+   *   - re-calling with same tuple → same agent_group_id, same
+   *     messaging_group_id, same messaging_group_agents row, same
+   *     welcome message (delivered again — Telegram dedups by message
+   *     content if rapid-fire, otherwise the founder sees one extra
+   *     "all wired up" greeting which is harmless).
+   *   - re-calling with a different telegramUserId for the same
+   *     (userId, companyId) → bind a SECOND Telegram chat to the same
+   *     agent_group. Out of scope for MVP single-channel-per-company,
+   *     but the schema permits it.
+   */
+  async function handleBindTelegram(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    if (!config.telegramBotToken) {
+      log.error('bind-telegram called but telegramBotToken not configured on admin server');
+      sendJson(res, 503, {
+        ok: false,
+        error: 'bot_token_unconfigured',
+        message:
+          'Direct-bind needs telegramBotToken on the admin server config. Set TELEGRAM_BOT_TOKEN in env and restart.',
+      });
+      return;
+    }
+
+    const body = await readJson<BindTelegramBody>(req);
+    if (!body.ok) {
+      sendJson(res, 400, { ok: false, error: 'invalid_body', message: body.error });
+      return;
+    }
+    const validation = validateBindTelegramBody(body.value);
+    if (validation) {
+      sendJson(res, 400, { ok: false, error: 'invalid_body', message: validation });
+      return;
+    }
+    const {
+      userId,
+      companyId,
+      companyName,
+      teamMembers,
+      bagetApiBaseUrl,
+      channelTokenCredentialName,
+      telegramUserId,
+      telegramFirstName,
+    } = body.value;
+
+    // 1. Idempotent provision: render CLAUDE.local.md + write
+    //    runtime container.json under groups/<folder>/. Same call as
+    //    handleCreate; pure file IO, safe to re-run.
+    let provisioned: ReturnType<typeof provisionBagetGroup>;
+    try {
+      provisioned = provisionBagetGroup({
+        userId,
+        companyId,
+        companyName,
+        teamMembers,
+        bagetApiBaseUrl,
+        channelTokenCredentialName,
+      });
+    } catch (err) {
+      log.error('Baget bind-telegram provision failed', { userId, companyId, err });
+      sendJson(res, 500, {
+        ok: false,
+        error: 'provision_failed',
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+
+    // 2. Insert / resurrect the agent_groups row. Same logic as
+    //    handleCreate — keeping inline to avoid a third caller of an
+    //    extracted helper drifting from the create-side semantics.
+    const teamMembersJson = JSON.stringify(teamMembers);
+    const existing = getBagetAgentGroup(userId, companyId);
+    let agentGroupId: string;
+    if (existing) {
+      agentGroupId = existing.id;
+      if (existing.archived_at) {
+        unarchiveBagetAgentGroup(existing.id);
+      }
+      updateBagetTeamMembers(existing.id, teamMembersJson);
+    } else {
+      agentGroupId = config.generateAgentGroupId();
+      try {
+        createBagetAgentGroup({
+          id: agentGroupId,
+          name: companyName,
+          folder: provisioned.folder,
+          user_id: userId,
+          company_id: companyId,
+          baget_team_members: teamMembersJson,
+          created_at: new Date(now()).toISOString(),
+        });
+      } catch (err) {
+        const winner = getBagetAgentGroup(userId, companyId);
+        if (!winner) {
+          log.error('Baget bind-telegram create race had no winner', { userId, companyId, err });
+          sendJson(res, 500, {
+            ok: false,
+            error: 'create_failed',
+            message: err instanceof Error ? err.message : String(err),
+          });
+          return;
+        }
+        agentGroupId = winner.id;
+      }
+    }
+
+    // 3. Wire the Telegram chat to the agent_group. For 1:1 DMs,
+    //    chat.id == user.id (Telegram invariant), so we use
+    //    telegramUserId as the chat.id. Idempotent.
+    const bind = bindBagetTelegramChat({
+      chatId: telegramUserId,
+      agentGroupId,
+      firstName: telegramFirstName ?? null,
+    });
+    if (!bind.ok) {
+      log.error('Baget bind-telegram chat-bind failed', {
+        userId,
+        companyId,
+        telegramUserId,
+        reason: bind.reason,
+      });
+      sendJson(res, 500, {
+        ok: false,
+        error: 'bind_failed',
+        message: `Chat-bind failed: ${bind.reason}`,
+      });
+      return;
+    }
+
+    // 4. Welcome the founder. Best-effort — failure here doesn't
+    //    invalidate the bind (the rows above are already committed),
+    //    so we always 200 the response. Send-failures are logged in
+    //    sendBagetTelegramWelcome.
+    await sendBagetTelegramWelcome({
+      botToken: config.telegramBotToken,
+      apiBaseUrl: config.telegramApiBaseUrl,
+      fetchImpl: config.telegramFetchImpl,
+      chatId: telegramUserId,
+      teamMembers,
+    });
+
+    log.info('Baget bind-telegram: paired chat to agent_group via direct bind', {
+      userId,
+      companyId,
+      telegramUserId,
+      agentGroupId,
+      messagingGroupId: bind.messagingGroupId,
+      created: bind.created,
+    });
+
+    const response: BindTelegramResponse = {
+      ok: true,
+      agentGroupId,
+      folder: provisioned.folder,
+      messagingGroupCreated: bind.created,
     };
     sendJson(res, 200, response);
   }
@@ -652,6 +881,27 @@ function validateCreateBody(body: CreateAgentGroupBody): string | null {
     return 'userId / companyId too long (max 64 chars)';
   }
   if (body.companyName.length > 200) return 'companyName too long (max 200 chars)';
+  return null;
+}
+
+function validateBindTelegramBody(body: BindTelegramBody): string | null {
+  const baseError = validateCreateBody(body);
+  if (baseError) return baseError;
+  if (typeof body.telegramUserId !== 'number' || !Number.isInteger(body.telegramUserId)) {
+    return 'telegramUserId must be an integer';
+  }
+  // Telegram user IDs are positive 64-bit ints; reject obviously-bogus
+  // values defensively (negatives, zero, > 2^53 which JS can't store
+  // safely as a Number).
+  if (body.telegramUserId <= 0 || body.telegramUserId > Number.MAX_SAFE_INTEGER) {
+    return 'telegramUserId out of valid range';
+  }
+  if (
+    body.telegramFirstName !== undefined &&
+    (typeof body.telegramFirstName !== 'string' || body.telegramFirstName.length > 200)
+  ) {
+    return 'telegramFirstName must be a string ≤ 200 chars';
+  }
   return null;
 }
 

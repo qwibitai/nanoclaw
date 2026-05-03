@@ -178,6 +178,10 @@ async function main(): Promise<void> {
       port,
       adminToken: process.env.BAGET_ADMIN_TOKEN,
       telegramBotUsername: username,
+      // Pass through so the bind-telegram direct-bind endpoint can
+      // send the welcome message. Same env var the channel adapter
+      // reads — keeping a single source of truth for the bot token.
+      telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
       generateAgentGroupId: () => `ag-${randomUUID()}`,
     });
     await bagetAdmin.listen();

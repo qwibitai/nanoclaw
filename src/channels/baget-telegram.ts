@@ -31,7 +31,7 @@
  *     Telegram's 25s timeout never bites us.
  */
 import http from 'http';
-import { randomUUID, timingSafeEqual } from 'crypto';
+import { timingSafeEqual } from 'crypto';
 
 import { registerExtraRoute } from '../baget-admin-server.js';
 import { applyPersonaPrefix } from '../baget-persona.js';
@@ -39,20 +39,24 @@ import { consumePairingToken } from '../db/baget-pairing-tokens.js';
 import { recordSeenUpdate, sweepOldSeenUpdates } from '../db/baget-seen-updates.js';
 import { getBagetAgentGroupById, normalizeBoundBagetTelegramFounderChannels } from '../db/baget-agent-groups.js';
 import {
-  createMessagingGroup,
-  createMessagingGroupAgent,
-  getMessagingGroupAgentByPair,
   getMessagingGroupAgents,
   getMessagingGroupByPlatform,
-  setMessagingGroupDeniedAt,
-  updateMessagingGroup,
 } from '../db/messaging-groups.js';
 import { log } from '../log.js';
 import type { BagetTeamMembers } from '../baget-pairing.js';
 import type { ChannelAdapter, ChannelSetup, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
+import {
+  BAGET_TELEGRAM_CHANNEL_TYPE,
+  bindBagetTelegramChat,
+  platformIdFromChatId,
+  sendBagetTelegramWelcome,
+} from './baget-telegram-bind.js';
 
-export const BAGET_TELEGRAM_CHANNEL_TYPE = 'baget-telegram';
+// Re-export so existing importers (admin server, db helpers) keep
+// working without churn — this constant lives in -bind now to avoid
+// the circular import via baget-admin-server.ts.
+export { BAGET_TELEGRAM_CHANNEL_TYPE };
 const PLATFORM_PREFIX = 'baget-telegram:';
 
 export interface BagetTelegramConfig {
@@ -289,83 +293,53 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       return;
     }
 
-    // 4. Bind: ensure messaging_group + messaging_group_agents.
-    //    UUID-based ids so two rapid /start calls in the same ms can't
-    //    collide on PK insert.
-    const platformId = platformIdFor(chatId);
-    let mg = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, platformId);
-    const nowIso = new Date().toISOString();
-    if (!mg) {
-      try {
-        createMessagingGroup({
-          id: `mg-${randomUUID()}`,
-          channel_type: BAGET_TELEGRAM_CHANNEL_TYPE,
-          platform_id: platformId,
-          name: msg.from?.first_name ?? null,
-          is_group: 0,
-          unknown_sender_policy: 'public',
-          created_at: nowIso,
-        });
-      } catch {
-        // Concurrent /start raced and created the row first. The
-        // UNIQUE(channel_type, platform_id) constraint rejected ours;
-        // re-read and proceed with the winner.
-      }
-      mg = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, platformId);
-      if (!mg) {
-        log.error('Baget telegram: failed to read back messaging_group after insert', { chatId });
-        await sendBotMessage(chatId, 'Something went wrong wiring this chat. Try the link again in a minute.');
-        return;
-      }
-    } else {
-      // A founder may DM the shared bot before tapping the deep link. In that
-      // case the router auto-creates a placeholder messaging_group with the
-      // default request_approval policy. Pairing upgrades that row into the
-      // real founder channel: direct DM, public to the paired founder, and no
-      // lingering denied flag from earlier unwired traffic.
-      updateMessagingGroup(mg.id, {
-        name: msg.from?.first_name ?? mg.name,
-        is_group: 0,
-        unknown_sender_policy: 'public',
-      });
-      if (mg.denied_at) setMessagingGroupDeniedAt(mg.id, null);
-      mg = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, platformId) ?? mg;
-    }
-
-    const existingMga = getMessagingGroupAgentByPair(mg.id, row.agent_group_id);
-    if (!existingMga) {
-      try {
-        createMessagingGroupAgent({
-          id: `mga-${randomUUID()}`,
-          messaging_group_id: mg.id,
-          agent_group_id: row.agent_group_id,
-          engage_mode: 'pattern',
-          engage_pattern: '.', // every message in this DM
-          sender_scope: 'all',
-          ignored_message_policy: 'drop',
-          session_mode: 'shared',
-          priority: 0,
-          created_at: nowIso,
-        });
-      } catch {
-        // UNIQUE(messaging_group_id, agent_group_id) — concurrent bind
-        // landed first. Both racing tokens belonged to the same agent
-        // group (single-use semantics gate that), so the existing row
-        // is the right one to keep.
-      }
-    }
-
-    // 5. Welcome the founder. Use the team's CoS persona for the first
-    //    message — the prompt will pick it up on the next exchange.
-    const team = parseTeamMembers(agentGroup.baget_team_members);
-    const cosName = team?.cos ?? 'your CoS';
-    await sendBotMessage(
+    // 4. Bind: messaging_group + messaging_group_agents. Shared with
+    //    the admin server's bind-telegram endpoint so both pairing
+    //    paths (deep-link via /start and Login-Widget direct-bind from
+    //    baget.ai) write the exact same rows.
+    const bind = bindBagetTelegramChat({
       chatId,
-      `🧭 ${cosName}: All wired up. What's on your mind? Ask me about the batch, the metrics, or anything that's blocking you.`,
-    );
+      agentGroupId: row.agent_group_id,
+      firstName: msg.from?.first_name ?? null,
+    });
+    if (!bind.ok) {
+      await sendBotMessage(
+        chatId,
+        'Something went wrong wiring this chat. Try the link again in a minute.',
+      );
+      return;
+    }
+
+    // 5. Welcome the founder. Same template as the admin direct-bind
+    //    path so the founder sees a consistent first message regardless
+    //    of which pairing UX they came through.
+    const team = parseTeamMembers(agentGroup.baget_team_members);
+    if (team) {
+      await sendBagetTelegramWelcome({
+        botToken: cfg.botToken,
+        apiBaseUrl: cfg.apiBaseUrl,
+        fetchImpl: cfg.fetchImpl,
+        chatId,
+        teamMembers: team,
+      });
+    } else {
+      // Defensive: agent_group exists but team_members JSON is missing
+      // or unparseable. Still greet the founder (without a team-name
+      // prefix) so the chat doesn't look broken; ops will see the
+      // warn log.
+      log.warn('Baget telegram: bound but team_members unparseable, sending generic welcome', {
+        chatId,
+        agentGroupId: row.agent_group_id,
+      });
+      await sendBotMessage(
+        chatId,
+        `🧭 your CoS: All wired up. What's on your mind?`,
+      );
+    }
     log.info('Baget telegram: paired chat to agent_group', {
       chatId,
       agentGroupId: row.agent_group_id,
+      messagingGroupId: bind.messagingGroupId,
     });
   }
 
