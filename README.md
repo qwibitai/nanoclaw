@@ -28,7 +28,7 @@ A three-agent verification pipeline that runs without human intervention:
 - **Reviewer** — reviews the output; flags issues and issues fix instructions
 - **Arbiter** — makes the final call: approve (notifies user) or escalate
 
-Each task runs in its own Discord thread. Multiple tasks can run in parallel.
+Multiple tasks can run in parallel — each Tribunal session is isolated via the host orchestrator, not Discord threads.
 
 **Infinite-loop prevention** — escalates automatically when:
 - Round count reaches 3
@@ -92,8 +92,8 @@ Agent sessions remain fully isolated; the webhook only affects how messages appe
 ```
 Discord
   ├── #frontend ─── Tribunal Loop (fully automated)
-  │     └── 🧵 Thread    Owner → Reviewer → Arbiter
-  │                      Self-Healing, Scheduler, RAG Memory
+  │                  Owner → Reviewer → Arbiter
+  │                  Self-Healing, Scheduler, RAG Memory
   │
   ├── #pm ──────────── User ↔ PM Agent (1:1)
   │                    Figma MCP (full read/write)

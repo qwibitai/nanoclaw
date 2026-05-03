@@ -75,7 +75,11 @@ export async function deliverViaWebhook(
 
   const url = new URL(identity.webhookUrl);
   url.searchParams.set('wait', 'true');
-  if (threadId) url.searchParams.set('thread_id', threadId);
+  // Discord thread_id must be a numeric snowflake. NanoClaw platform IDs
+  // ("discord:guildId:channelId") are not snowflakes — omit thread_id in
+  // that case so the message lands in the main channel.
+  const isSnowflake = threadId !== null && /^\d{17,20}$/.test(threadId);
+  if (isSnowflake) url.searchParams.set('thread_id', threadId);
 
   const body: Record<string, unknown> = { content: text, username: identity.username };
   if (identity.avatarUrl) body.avatar_url = identity.avatarUrl;
