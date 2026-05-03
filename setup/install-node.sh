@@ -19,14 +19,18 @@ fi
 
 case "$(uname -s)" in
   Darwin)
-    echo "STEP: brew-install-node"
-    if ! command -v brew >/dev/null 2>&1; then
+    if command -v brew >/dev/null 2>&1; then
+      echo "STEP: brew-install-node"
+      brew install node@22
+    elif command -v port >/dev/null 2>&1; then
+      echo "STEP: port-install-node"
+      sudo port install nodejs22 npm10
+    else
       echo "STATUS: failed"
-      echo "ERROR: Homebrew not installed. Install brew first (https://brew.sh) then re-run."
+      echo "ERROR: No macOS package manager found. Install Homebrew (https://brew.sh) or MacPorts (https://macports.org) and re-run."
       echo "=== END ==="
       exit 1
     fi
-    brew install node@22
     ;;
   Linux)
     echo "STEP: nodesource-setup"

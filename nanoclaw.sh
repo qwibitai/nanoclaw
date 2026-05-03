@@ -170,15 +170,17 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" -eq 0 ]; then
   esac
 fi
 
-# ─── pre-flight: Homebrew on macOS ─────────────────────────────────────
-# setup/install-node.sh and setup/install-docker.sh both require `brew` on
-# macOS. On a factory Mac there's no brew, and those helpers would fail
-# later inside the bootstrap spinner with a cryptic error. Prompt here,
-# before the spinner starts, so the user knows what's about to happen and
-# brew's own interactive sudo/CLT prompts stay readable.
-if [ "$(uname -s)" = "Darwin" ] && ! command -v brew >/dev/null 2>&1; then
+# ─── pre-flight: macOS package manager ─────────────────────────────────
+# setup/install-node.sh and setup/install-docker.sh need a macOS package
+# manager. Homebrew is the default; MacPorts is also accepted (Node only —
+# Docker Desktop is not packaged by MacPorts and must be installed manually).
+# On a factory Mac with neither, prompt to install Homebrew before the
+# spinner starts so brew's own interactive sudo/CLT prompts stay readable.
+if [ "$(uname -s)" = "Darwin" ] \
+   && ! command -v brew >/dev/null 2>&1 \
+   && ! command -v port >/dev/null 2>&1; then
   printf '  %s\n' \
-    "$(dim "Homebrew isn't installed. NanoClaw uses it to install Node and Docker on your Mac.")"
+    "$(dim "No macOS package manager found. NanoClaw uses Homebrew (or MacPorts) to install Node and Docker.")"
   printf '  %s\n\n' \
     "$(dim "This also installs Apple's Command Line Tools, which can take 5-10 minutes.")"
   read -r -p "  $(bold 'Install Homebrew now?') [Y/n] " BREW_ANS </dev/tty
@@ -205,14 +207,14 @@ if [ "$(uname -s)" = "Darwin" ] && ! command -v brew >/dev/null 2>&1; then
       if ! command -v brew >/dev/null 2>&1; then
         printf '\n  %s %s\n' "$(red '✗')" "Homebrew install didn't complete."
         printf '  %s\n\n' \
-          "$(dim 'Install manually from https://brew.sh and re-run: bash nanoclaw.sh')"
+          "$(dim 'Install manually from https://brew.sh (or MacPorts from https://macports.org) and re-run: bash nanoclaw.sh')"
         exit 1
       fi
       printf '\n'
       ;;
     *)
       printf '\n  %s\n\n' \
-        "$(dim 'NanoClaw needs Homebrew. Install it from https://brew.sh and re-run.')"
+        "$(dim 'NanoClaw needs Homebrew or MacPorts. Install one (https://brew.sh or https://macports.org) and re-run.')"
       exit 1
       ;;
   esac

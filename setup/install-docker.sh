@@ -20,14 +20,20 @@ fi
 
 case "$(uname -s)" in
   Darwin)
-    echo "STEP: brew-install-docker"
-    if ! command -v brew >/dev/null 2>&1; then
+    if command -v brew >/dev/null 2>&1; then
+      echo "STEP: brew-install-docker"
+      brew install --cask docker
+    elif command -v port >/dev/null 2>&1; then
       echo "STATUS: failed"
-      echo "ERROR: Homebrew not installed. Install brew first (https://brew.sh) then re-run."
+      echo "ERROR: MacPorts detected but Docker Desktop isn't packaged by MacPorts. Install Docker Desktop manually from https://www.docker.com/products/docker-desktop and re-run."
+      echo "=== END ==="
+      exit 1
+    else
+      echo "STATUS: failed"
+      echo "ERROR: No macOS package manager found. Install Homebrew (https://brew.sh) and re-run, or install Docker Desktop manually from https://www.docker.com/products/docker-desktop."
       echo "=== END ==="
       exit 1
     fi
-    brew install --cask docker
     ;;
   Linux)
     echo "STEP: docker-get-script"

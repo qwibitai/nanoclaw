@@ -140,13 +140,23 @@ async function ensureSignalCli(): Promise<void> {
   if (!probe.error && probe.status === 0) return;
 
   if (process.platform === 'darwin') {
+    const hasBrew =
+      spawnSync('command', ['-v', 'brew'], { shell: true, stdio: 'ignore' })
+        .status === 0;
+    const hasPort =
+      spawnSync('command', ['-v', 'port'], { shell: true, stdio: 'ignore' })
+        .status === 0;
+    const installLine =
+      !hasBrew && hasPort
+        ? { cmd: '  sudo port install signal-cli', label: 'MacPorts' }
+        : { cmd: '  brew install signal-cli', label: 'Homebrew' };
     note(
       [
         "NanoClaw talks to Signal through signal-cli, which isn't installed yet.",
         '',
-        'The quickest way on macOS is Homebrew:',
+        `The quickest way on macOS is ${installLine.label}:`,
         '',
-        k.cyan('  brew install signal-cli'),
+        k.cyan(installLine.cmd),
         '',
         "Install it in another terminal, then re-run setup.",
       ].join('\n'),
