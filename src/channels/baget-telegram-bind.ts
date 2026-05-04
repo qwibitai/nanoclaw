@@ -386,7 +386,12 @@ export async function sendBagetBotPhoto(args: {
   chatId: number | string;
   photoPath: string;
   caption?: string;
-  agentGroupId: string;
+  /**
+   * Null is reserved for pre-pair traffic where the agent_group is
+   * genuinely not yet known. Routine deliver() calls always pass a
+   * real id.
+   */
+  agentGroupId: string | null;
 }): Promise<BagetTelegramSendResult> {
   const apiBase = args.apiBaseUrl ?? 'https://api.telegram.org';
   const fetchFn = args.fetchImpl ?? fetch;
@@ -407,15 +412,17 @@ export async function sendBagetBotPhoto(args: {
       result?: { message_id?: number };
       description?: unknown;
     } | null;
+    const telegramDescription = typeof json?.description === 'string' ? json.description : undefined;
     if (!resp.ok) {
-      const description = typeof json?.description === 'string' ? json.description.toLowerCase() : '';
+      const lowerDescription = telegramDescription?.toLowerCase() ?? '';
       const founderActionRequired =
-        description.includes("can't initiate conversation with a user") || description.includes('chat not found');
-      log.warn('Baget telegram bind: sendPhoto non-OK', {
-        status: resp.status,
-        chatId: args.chatId,
+        lowerDescription.includes("can't initiate conversation with a user") ||
+        lowerDescription.includes('chat not found');
+      emitTelegramDeliveryFailure({
         agentGroupId: args.agentGroupId,
-        description: typeof json?.description === 'string' ? json.description : undefined,
+        chatId: args.chatId,
+        telegramErrorCode: resp.status,
+        telegramDescription,
         founderActionRequired,
       });
       return { ok: false, founderActionRequired };
@@ -423,9 +430,22 @@ export async function sendBagetBotPhoto(args: {
     if (json?.ok && typeof json.result?.message_id === 'number') {
       return { ok: true, messageId: String(json.result.message_id) };
     }
+    // 200 with malformed body — same contract as sendBagetBotMessage.
+    emitTelegramDeliveryFailure({
+      agentGroupId: args.agentGroupId,
+      chatId: args.chatId,
+      telegramErrorCode: resp.status,
+      telegramDescription,
+      founderActionRequired: false,
+    });
     return { ok: false, founderActionRequired: false };
   } catch (err) {
-    log.warn('Baget telegram bind: sendPhoto threw', { err, chatId: args.chatId, agentGroupId: args.agentGroupId });
+    emitTelegramDeliveryFailure({
+      agentGroupId: args.agentGroupId,
+      chatId: args.chatId,
+      err,
+      founderActionRequired: false,
+    });
     return { ok: false, founderActionRequired: false };
   }
 }
@@ -445,7 +465,12 @@ export async function sendBagetBotDocument(args: {
   documentPath: string;
   caption?: string;
   filename?: string;
-  agentGroupId: string;
+  /**
+   * Null is reserved for pre-pair traffic where the agent_group is
+   * genuinely not yet known. Routine deliver() calls always pass a
+   * real id.
+   */
+  agentGroupId: string | null;
 }): Promise<BagetTelegramSendResult> {
   const apiBase = args.apiBaseUrl ?? 'https://api.telegram.org';
   const fetchFn = args.fetchImpl ?? fetch;
@@ -467,15 +492,17 @@ export async function sendBagetBotDocument(args: {
       result?: { message_id?: number };
       description?: unknown;
     } | null;
+    const telegramDescription = typeof json?.description === 'string' ? json.description : undefined;
     if (!resp.ok) {
-      const description = typeof json?.description === 'string' ? json.description.toLowerCase() : '';
+      const lowerDescription = telegramDescription?.toLowerCase() ?? '';
       const founderActionRequired =
-        description.includes("can't initiate conversation with a user") || description.includes('chat not found');
-      log.warn('Baget telegram bind: sendDocument non-OK', {
-        status: resp.status,
-        chatId: args.chatId,
+        lowerDescription.includes("can't initiate conversation with a user") ||
+        lowerDescription.includes('chat not found');
+      emitTelegramDeliveryFailure({
         agentGroupId: args.agentGroupId,
-        description: typeof json?.description === 'string' ? json.description : undefined,
+        chatId: args.chatId,
+        telegramErrorCode: resp.status,
+        telegramDescription,
         founderActionRequired,
       });
       return { ok: false, founderActionRequired };
@@ -483,9 +510,21 @@ export async function sendBagetBotDocument(args: {
     if (json?.ok && typeof json.result?.message_id === 'number') {
       return { ok: true, messageId: String(json.result.message_id) };
     }
+    emitTelegramDeliveryFailure({
+      agentGroupId: args.agentGroupId,
+      chatId: args.chatId,
+      telegramErrorCode: resp.status,
+      telegramDescription,
+      founderActionRequired: false,
+    });
     return { ok: false, founderActionRequired: false };
   } catch (err) {
-    log.warn('Baget telegram bind: sendDocument threw', { err, chatId: args.chatId, agentGroupId: args.agentGroupId });
+    emitTelegramDeliveryFailure({
+      agentGroupId: args.agentGroupId,
+      chatId: args.chatId,
+      err,
+      founderActionRequired: false,
+    });
     return { ok: false, founderActionRequired: false };
   }
 }

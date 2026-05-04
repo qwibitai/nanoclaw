@@ -59,7 +59,9 @@ import {
   BAGET_TELEGRAM_CHANNEL_TYPE,
   bindBagetTelegramChat,
   platformIdFromChatId,
+  sendBagetBotDocument,
   sendBagetBotMessage,
+  sendBagetBotPhoto,
   sendBagetTelegramWelcome,
 } from './baget-telegram-bind.js';
 import {
@@ -602,8 +604,16 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       return sendBotMessage(chatId, celebText, agentGroupId);
     }
 
-    const text = extractText(message);
-    if (text === null) return undefined;
+    const rawText = extractText(message);
+    // Empty-string text is treated as "no text" — happens when the
+    // caller sends an attachment with no commentary. Don't fire a
+    // sendMessage with an empty body (Telegram rejects it AND it would
+    // count as a bogus founder-facing event).
+    const text = rawText !== null && rawText.length > 0 ? rawText : null;
+    const attachments = message.attachments ?? [];
+    // Drop entirely empty messages. Same contract as before media support
+    // landed: nothing to render → return undefined.
+    if (text === null && attachments.length === 0) return undefined;
 
     // SECURITY: refuse to deliver if the chat has more than one wired
     // agent. Baget founders are 1:1 chat↔agent_group by construction.
@@ -634,11 +644,68 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
           return undefined;
         }
         const team = parseTeamMembers(ag?.baget_team_members);
-        if (team) prefixed = applyPersonaPrefix(text, team);
+        if (team && text !== null) prefixed = applyPersonaPrefix(text, team);
       }
     }
 
-    return sendBotMessage(chatId, prefixed, agentGroupId);
+    // Send attachments first, then the (persona-prefixed) text. Founders
+    // see the artifact, then the team's commentary. Attachments are NOT
+    // persona-prefixed — they're artifacts, not utterances. Caption
+    // (already on the attachment) is the only text that rides with the
+    // file itself; the model's prose ships separately as the trailing
+    // sendMessage so the persona prefix lands cleanly.
+    //
+    // Per-attachment failure does NOT abort the whole delivery: each
+    // primitive emits its own kind:'delivery_failure' structured log
+    // (PR #20 contract), and we keep sending the rest. Returning the
+    // LAST messageId preserves the existing deliver() return contract
+    // — callers just want "did anything land" not "what's the id of
+    // each artifact".
+    let lastMessageId: string | undefined;
+    for (const attachment of attachments) {
+      let result;
+      if (attachment.kind === 'photo') {
+        result = await sendBagetBotPhoto({
+          botToken: cfg.botToken,
+          apiBaseUrl: apiBase,
+          fetchImpl: fetchFn,
+          chatId,
+          photoPath: attachment.path,
+          caption: attachment.caption,
+          agentGroupId,
+        });
+      } else if (attachment.kind === 'document') {
+        result = await sendBagetBotDocument({
+          botToken: cfg.botToken,
+          apiBaseUrl: apiBase,
+          fetchImpl: fetchFn,
+          chatId,
+          documentPath: attachment.path,
+          caption: attachment.caption,
+          filename: attachment.filename,
+          agentGroupId,
+        });
+      } else {
+        // Future-proof: photo|document is the entire union today (PR #18
+        // adapter contract). A new kind landing in OutboundAttachment
+        // without a corresponding branch here would silently drop —
+        // log loud so the omission surfaces in production telemetry.
+        log.warn('Baget telegram: deliver — unknown attachment kind', {
+          platformId,
+          agentGroupId,
+          kind: (attachment as { kind: string }).kind,
+        });
+        continue;
+      }
+      if (result.ok) lastMessageId = result.messageId;
+    }
+
+    if (text !== null) {
+      const messageId = await sendBotMessage(chatId, prefixed!, agentGroupId);
+      if (messageId !== undefined) lastMessageId = messageId;
+    }
+
+    return lastMessageId;
   }
 
   // Thin shim over `sendBagetBotMessage` (in baget-telegram-bind.ts).
