@@ -72,7 +72,11 @@ import {
   provisionBagetGroup,
   type BagetTeamMembers,
 } from './baget-pairing.js';
-import { bindBagetTelegramChat, sendBagetTelegramWelcome } from './channels/baget-telegram-bind.js';
+import {
+  bindBagetTelegramChat,
+  sendBagetTelegramFarewell,
+  sendBagetTelegramWelcome,
+} from './channels/baget-telegram-bind.js';
 import { log } from './log.js';
 
 // ── Auth ──
@@ -984,11 +988,17 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
     // microseconds before the transaction landed.
     const nowIso = new Date(now()).toISOString();
     const wasAlreadyArchived = Boolean(existing.archived_at);
+    // Capture the bound Telegram chat id BEFORE running the cleanup
+    // — performDisconnectCleanup drops the messaging_group_agents
+    // row that firstBoundChatId joins through, so reading it after
+    // would always return null.
+    const farewellChatId = firstBoundChatId(groupId);
     const result = performDisconnectCleanup(groupId, {
       wasAlreadyArchived,
       nowIso,
       reason: 'founder disconnected via admin DELETE',
     });
+    const farewellDelivered = await maybeSendFarewell(farewellChatId, groupId);
     sendJson(res, 200, {
       ok: true,
       agentGroupId: groupId,
@@ -997,6 +1007,7 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
       deniedChats: result.denied,
       killedRunners: result.killedRunners,
       channelTokenDeleted: result.tokenDeleted > 0,
+      farewellDelivered,
     });
   }
 
@@ -1101,11 +1112,16 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
     // permissions).
     const nowIso = new Date(now()).toISOString();
     const wasAlreadyArchived = Boolean(existing.archived_at);
+    // Capture the bound Telegram chat id BEFORE the cleanup tears
+    // down messaging_group_agents — see the matching comment in
+    // handleDelete.
+    const farewellChatId = firstBoundChatId(existing.id);
     const result = performDisconnectCleanup(existing.id, {
       wasAlreadyArchived,
       nowIso,
       reason: 'founder disconnected via tuple DELETE',
     });
+    const farewellDelivered = await maybeSendFarewell(farewellChatId, existing.id);
     sendJson(res, 200, {
       ok: true,
       agentGroupId: existing.id,
@@ -1120,7 +1136,49 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
       deniedChats: result.denied,
       killedRunners: result.killedRunners,
       channelTokenDeleted: result.tokenDeleted > 0,
+      farewellDelivered,
     });
+  }
+
+  /**
+   * Send the "channel disconnected" farewell to the founder's bound
+   * Telegram chat — visible signal in the chat itself that the
+   * dashboard's Disconnect actually did something. Without this, the
+   * bot just goes silent (the cleanup works), and the founder reports
+   * "the bot is still active in Telegram" because Telegram has no
+   * built-in disconnect indicator.
+   *
+   * Best-effort:
+   *   - Returns `null` when there's nothing to send (no bound chat,
+   *     bot token unconfigured) — neither delivered nor failed.
+   *   - Returns `false` on any transport failure (Telegram outage,
+   *     chat-not-found, bot blocked by user). Logged at warn level.
+   *     The DB cleanup ALREADY ran, so a failed farewell is purely
+   *     cosmetic — never roll back, never throw.
+   *   - Returns `true` only when Telegram acknowledges delivery.
+   */
+  async function maybeSendFarewell(chatId: string | null, agentGroupId: string): Promise<boolean | null> {
+    if (!chatId || !config.telegramBotToken) return null;
+    try {
+      const result = await sendBagetTelegramFarewell({
+        botToken: config.telegramBotToken,
+        apiBaseUrl: config.telegramApiBaseUrl,
+        fetchImpl: config.telegramFetchImpl,
+        chatId,
+      });
+      if (!result.ok) {
+        log.warn('Disconnect farewell not delivered', {
+          agentGroupId,
+          chatId,
+          founderActionRequired: result.founderActionRequired,
+        });
+        return false;
+      }
+      return true;
+    } catch (err) {
+      log.warn('Disconnect farewell threw', { agentGroupId, chatId, err });
+      return false;
+    }
   }
 
   return {

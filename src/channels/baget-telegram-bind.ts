@@ -230,3 +230,41 @@ export async function sendBagetTelegramWelcome(args: {
     text,
   });
 }
+
+/**
+ * "Channel disconnected" farewell, sent on the founder's bound chat
+ * right after the admin DELETE handler runs the cleanup.
+ *
+ * Telegram has no built-in signal for "this bot has stopped serving
+ * you" — the bot just goes silent. From the founder's POV that's
+ * indistinguishable from a network blip or the bot being slow.
+ * Without an explicit message in the chat, "disconnect" feels like a
+ * no-op even though every layer underneath has correctly torn down.
+ *
+ * Best-effort: a transport failure (chat blocked, founder hasn't
+ * opened the bot DM in a long time, Telegram outage) MUST NOT roll
+ * back the disconnect on the admin server side — the cleanup already
+ * ran, the bot is silent, and the founder can re-pair when they
+ * notice. Caller catches and logs the failure.
+ *
+ * No team-member personalization here — the founder may have hired/
+ * fired specialists since pairing, and the disconnect message stands
+ * on its own without a CoS name. (The welcome message uses the name
+ * because at bind time the team is freshly synced.)
+ */
+export async function sendBagetTelegramFarewell(args: {
+  botToken: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+  chatId: number | string;
+}): Promise<BagetTelegramSendResult> {
+  const text =
+    "🔌 Channel disconnected from the dashboard. The team is offline — reconnect any time from app.baget.ai → Settings → Telegram.";
+  return sendBagetBotMessage({
+    botToken: args.botToken,
+    apiBaseUrl: args.apiBaseUrl,
+    fetchImpl: args.fetchImpl,
+    chatId: args.chatId,
+    text,
+  });
+}
