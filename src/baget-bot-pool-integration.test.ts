@@ -22,14 +22,10 @@
  * regression in one area doesn't cause a cascade of unrelated test
  * failures.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createBagetAdminServer } from './baget-admin-server.js';
-import {
-  buildPerBotWebhookUrl,
-  registerTelegramWebhook,
-  setBotDisplayName,
-} from './channels/baget-telegram-bind.js';
+import { buildPerBotWebhookUrl, registerTelegramWebhook, setBotDisplayName } from './channels/baget-telegram-bind.js';
 import { _testBuildBagetTelegramAdapter } from './channels/baget-telegram.js';
 import {
   countAvailableBots,
@@ -307,7 +303,10 @@ const VALID_BIND_BODY = {
   telegramFirstName: 'Sam',
 };
 
-async function postBind(baseUrl: string, body: unknown = VALID_BIND_BODY): Promise<{ status: number; json: BindTelegramResp }> {
+async function postBind(
+  baseUrl: string,
+  body: unknown = VALID_BIND_BODY,
+): Promise<{ status: number; json: BindTelegramResp }> {
   const resp = await fetch(`${baseUrl}/baget/agent-groups/bind-telegram`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${ADMIN_TOKEN}`, 'Content-Type': 'application/json' },
@@ -543,7 +542,7 @@ describe('handleBindTelegram — legacy global-bot path', () => {
     expect(getBotPoolEntryByAgentGroup('ag-legacy-1')).toBeUndefined();
   });
 
-  it('skips per-bot setWebhook when publicBaseUrl is unset (operator hasn\'t opted into pool mode)', async () => {
+  it("skips per-bot setWebhook when publicBaseUrl is unset (operator hasn't opted into pool mode)", async () => {
     seedBotPoolEntry({
       botUsername: 'acme_bot_no_url',
       botTokenValue: 'tok-no-url',
@@ -611,7 +610,10 @@ describe('disconnect releases the assigned bot back to the pool', () => {
       telegramRoutes: [
         { match: (u) => u.endsWith('/setWebhook'), handler: () => okResponse({ ok: true }) },
         { match: (u) => u.endsWith('/setMyName'), handler: () => okResponse({ ok: true }) },
-        { match: (u) => u.endsWith('/sendMessage'), handler: () => okResponse({ ok: true, result: { message_id: 1 } }) },
+        {
+          match: (u) => u.endsWith('/sendMessage'),
+          handler: () => okResponse({ ok: true, result: { message_id: 1 } }),
+        },
       ],
       generateAgentGroupId: () => 'ag-dc-bind',
     });
@@ -673,7 +675,10 @@ describe('GET /baget/agent-groups/by-tuple — botUsername field', () => {
       telegramRoutes: [
         { match: (u) => u.endsWith('/setWebhook'), handler: () => okResponse({ ok: true }) },
         { match: (u) => u.endsWith('/setMyName'), handler: () => okResponse({ ok: true }) },
-        { match: (u) => u.endsWith('/sendMessage'), handler: () => okResponse({ ok: true, result: { message_id: 1 } }) },
+        {
+          match: (u) => u.endsWith('/sendMessage'),
+          handler: () => okResponse({ ok: true, result: { message_id: 1 } }),
+        },
       ],
       generateAgentGroupId: () => 'ag-tuple-bind',
     });
@@ -700,7 +705,10 @@ describe('GET /baget/agent-groups/by-tuple — botUsername field', () => {
       publicBaseUrl: PUBLIC_BASE_URL,
       telegramBotToken: 'tok-global',
       telegramRoutes: [
-        { match: (u) => u.endsWith('/sendMessage'), handler: () => okResponse({ ok: true, result: { message_id: 1 } }) },
+        {
+          match: (u) => u.endsWith('/sendMessage'),
+          handler: () => okResponse({ ok: true, result: { message_id: 1 } }),
+        },
       ],
       generateAgentGroupId: () => 'ag-tuple-legacy',
     });

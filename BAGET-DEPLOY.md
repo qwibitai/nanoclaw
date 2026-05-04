@@ -238,7 +238,8 @@ The Railway service reads these at startup. Set them on the
 | `TELEGRAM_BOT_TOKEN` | yes | — | Bot token for `@baget_team_bot`. Single shared bot across all founders; per-founder routing happens via `messaging_group_agents`. |
 | `TELEGRAM_WEBHOOK_SECRET` | yes | — | Echoed in `X-Telegram-Bot-Api-Secret-Token` on every webhook delivery. Constant-time-checked. |
 | `TELEGRAM_WEBHOOK_PORT` | no | `3001` | HTTP server port for inbound Telegram webhooks. |
-| `BAGET_TELEGRAM_BOT_USERNAME` | yes | `baget_team_bot` | Used to build the `t.me/<username>?start=<token>` deep link returned by the pairing API. |
+| `BAGET_TELEGRAM_BOT_USERNAME` | yes | `baget_team_bot` | Used to build the `t.me/<username>?start=<token>` deep link returned by the pairing API. Falls back to this username for legacy / global-bot pairings; new pairings under multi-bot pool mode get their own per-company bot username. |
+| `BAGET_PUBLIC_BASE_URL` | no | derived from `RAILWAY_PUBLIC_DOMAIN` | Public origin for this Railway service (e.g. `https://nanoclaw.baget.ai`). Required to opt into multi-bot pool mode — used to build the per-bot Telegram webhook URL `<publicBaseUrl>/api/channels/telegram/bot/<username>/webhook` at bind time. When unset, the bind handler falls back to the legacy global-bot path (no per-bot setWebhook); existing single-bot deployments keep working unchanged. |
 | `BAGET_ADMIN_TOKEN` | yes | — | Bearer token shared with `baget.ai`. ≥ 16 chars. Rotate by changing both ends; rotate on any incident. Also used as the HMAC key for pairing tokens. |
 | `BAGET_ADMIN_PORT` | no | `8443` | HTTP port for the admin pairing API. |
 | `BAGET_API_BASE_URL` | yes | — | The baget.ai public API the agent fans tool calls into (`https://app.baget.ai` for prod, `https://stg-app.baget.ai` for staging). Written into each rendered `container.json`. |
