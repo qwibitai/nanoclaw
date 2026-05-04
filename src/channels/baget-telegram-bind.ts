@@ -38,7 +38,6 @@ import {
 import type { BagetTeamMembers } from '../baget-pairing.js';
 
 export const BAGET_TELEGRAM_CHANNEL_TYPE = 'baget-telegram';
-const PLATFORM_PREFIX = 'baget-telegram:';
 const FOUNDER_DM_AGENT_BINDING = {
   engage_mode: 'pattern' as const,
   engage_pattern: '.',
@@ -48,42 +47,65 @@ const FOUNDER_DM_AGENT_BINDING = {
   priority: 0,
 };
 
-export function platformIdFromChatId(chatId: number | string): string {
-  return `${PLATFORM_PREFIX}${chatId}`;
+/**
+ * Build the channel-namespaced platform_id for a given chat. Per the
+ * v2 entity model, a `messaging_group.platform_id` is `<channel>:<id>`
+ * — channel-prefixed so two different channels can hold the same
+ * external chat id without colliding in `UNIQUE(channel_type,
+ * platform_id)`. The default `channelType` keeps existing callsites
+ * (deep-link `/start` handler, tests) unchanged.
+ */
+export function platformIdFromChatId(
+  chatId: number | string,
+  channelType: string = BAGET_TELEGRAM_CHANNEL_TYPE,
+): string {
+  return `${channelType}:${chatId}`;
 }
 
-export type BindTelegramChatResult =
+export type BindChannelChatResult =
   | { ok: true; messagingGroupId: string; created: boolean }
   | { ok: false; reason: 'mg-readback-failed' };
 
+// Back-compat alias — same shape, the "Telegram" name was misleading
+// once the bind became channel-generic. New callers should use
+// `BindChannelChatResult` directly.
+export type BindTelegramChatResult = BindChannelChatResult;
+
 /**
- * Get-or-create the messaging_group for this Telegram chat AND ensure a
- * messaging_group_agents row links it to the agent_group.
+ * Get-or-create the messaging_group for this channel chat AND ensure
+ * a messaging_group_agents row links it to the agent_group.
+ *
+ * Channel-generic core: parameterized on `channelType` so a future
+ * WhatsApp / Slack / Discord adapter can call this directly with its
+ * own channel constant. The legacy `bindBagetTelegramChat` shim below
+ * pins channelType to `BAGET_TELEGRAM_CHANNEL_TYPE` for callers that
+ * predate the bot-pool / multi-channel refactor.
  *
  * Idempotent for the canonical founder mapping. Re-binding the same
- * (chatId, agentGroupId) is a no-op; re-binding the same Telegram chat
- * to a different agent_group replaces the old wiring so the founder DM
+ * (chatId, agentGroupId) is a no-op; re-binding the same chat to a
+ * different agent_group replaces the old wiring so the founder DM
  * stays 1:1. Both rows are upgraded to the founder-DM shape
- * (`unknown_sender_policy='public'`, `is_group=0`, sender_scope='all',
- * ignored_message_policy='drop'`) so any pre-pair traffic that
- * auto-created a placeholder row or a conservative approval-path wiring
- * gets reconciled.
+ * (`unknown_sender_policy='public'`, `is_group=0`,
+ * `sender_scope='all'`, `ignored_message_policy='drop'`) so any
+ * pre-pair traffic that auto-created a placeholder row or a
+ * conservative approval-path wiring gets reconciled.
  */
-export function bindBagetTelegramChat(args: {
+export function bindBagetChannelChat(args: {
+  channelType: string;
   chatId: number | string;
   agentGroupId: string;
   firstName?: string | null;
-}): BindTelegramChatResult {
-  const platformId = platformIdFromChatId(args.chatId);
+}): BindChannelChatResult {
+  const platformId = platformIdFromChatId(args.chatId, args.channelType);
   const nowIso = new Date().toISOString();
-  let mg = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, platformId);
+  let mg = getMessagingGroupByPlatform(args.channelType, platformId);
   let created = false;
 
   if (!mg) {
     try {
       createMessagingGroup({
         id: `mg-${randomUUID()}`,
-        channel_type: BAGET_TELEGRAM_CHANNEL_TYPE,
+        channel_type: args.channelType,
         platform_id: platformId,
         name: args.firstName ?? null,
         is_group: 0,
@@ -95,16 +117,17 @@ export function bindBagetTelegramChat(args: {
       // Concurrent create raced and won; UNIQUE(channel_type,
       // platform_id) rejected ours. Re-read and proceed with the winner.
     }
-    mg = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, platformId);
+    mg = getMessagingGroupByPlatform(args.channelType, platformId);
     if (!mg) {
-      log.error('Baget telegram bind: failed to read back messaging_group after insert', {
+      log.error('Baget channel bind: failed to read back messaging_group after insert', {
+        channelType: args.channelType,
         chatId: args.chatId,
       });
       return { ok: false, reason: 'mg-readback-failed' };
     }
   } else {
-    // A founder may DM the shared bot before tapping the deep link
-    // (or completing the Login Widget). The router auto-creates a
+    // A founder may DM the bot before tapping the deep link (or
+    // completing the Login Widget). The router auto-creates a
     // placeholder messaging_group with the default request_approval
     // policy. Pairing upgrades that row into the real founder
     // channel: direct DM, public to the paired founder, and no
@@ -115,7 +138,7 @@ export function bindBagetTelegramChat(args: {
       unknown_sender_policy: 'public',
     });
     if (mg.denied_at) setMessagingGroupDeniedAt(mg.id, null);
-    mg = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, platformId) ?? mg;
+    mg = getMessagingGroupByPlatform(args.channelType, platformId) ?? mg;
   }
 
   const competingWires = getMessagingGroupAgents(mg.id).filter((row) => row.agent_group_id !== args.agentGroupId);
@@ -123,7 +146,8 @@ export function bindBagetTelegramChat(args: {
     deleteMessagingGroupAgent(row.id);
   }
   if (competingWires.length > 0) {
-    log.info('Baget telegram bind: replaced competing founder chat wiring', {
+    log.info('Baget channel bind: replaced competing founder chat wiring', {
+      channelType: args.channelType,
       chatId: args.chatId,
       messagingGroupId: mg.id,
       keptAgentGroupId: args.agentGroupId,
@@ -152,6 +176,26 @@ export function bindBagetTelegramChat(args: {
   }
 
   return { ok: true, messagingGroupId: mg.id, created };
+}
+
+/**
+ * Telegram-pinned shim. Existing callsites (the deep-link `/start`
+ * handler, the admin server's bind-telegram endpoint, tests) still
+ * pass just `{ chatId, agentGroupId, firstName }` — this keeps them
+ * unchanged. New channel adapters should call `bindBagetChannelChat`
+ * directly with their own channelType constant.
+ */
+export function bindBagetTelegramChat(args: {
+  chatId: number | string;
+  agentGroupId: string;
+  firstName?: string | null;
+}): BindTelegramChatResult {
+  return bindBagetChannelChat({
+    channelType: BAGET_TELEGRAM_CHANNEL_TYPE,
+    chatId: args.chatId,
+    agentGroupId: args.agentGroupId,
+    firstName: args.firstName,
+  });
 }
 
 /**
@@ -211,6 +255,12 @@ export async function sendBagetBotMessage(args: {
  * immediately after a successful bind so the founder sees a real reply
  * before they've even typed their first message.
  *
+ * The greeting names the company explicitly so a founder running
+ * multiple Baget companies can tell at a glance which chat they're in.
+ * Telegram has no per-chat header beyond the bot's own name, and the
+ * bot is shared across all founders / companies — without the company
+ * name in the chat body, every paired company looks identical.
+ *
  * NOTE the CoS persona prefix here uses the team's resolved cos name
  * (Louis / whatever the founder configured) — same string the model
  * will pick up on the next exchange via the rendered CLAUDE.local.md.
@@ -220,10 +270,11 @@ export async function sendBagetTelegramWelcome(args: {
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
   chatId: number | string;
+  companyName: string;
   teamMembers: BagetTeamMembers;
 }): Promise<BagetTelegramSendResult> {
   const cosName = args.teamMembers.cos || 'your CoS';
-  const text = `🧭 ${cosName}: All wired up. What's on your mind? Ask me about the batch, the metrics, or anything that's blocking you.`;
+  const text = `🧭 ${cosName}: All wired up — your ${args.companyName} team is ready. What's on your mind? Ask me about the batch, the metrics, or anything that's blocking you.`;
   return sendBagetBotMessage({
     botToken: args.botToken,
     apiBaseUrl: args.apiBaseUrl,
@@ -261,7 +312,7 @@ export async function sendBagetTelegramFarewell(args: {
   chatId: number | string;
 }): Promise<BagetTelegramSendResult> {
   const text =
-    "🔌 Channel disconnected from the dashboard. The team is offline — reconnect any time from app.baget.ai → Settings → Telegram.";
+    '🔌 Channel disconnected from the dashboard. The team is offline — reconnect any time from app.baget.ai → Settings → Telegram.';
   return sendBagetBotMessage({
     botToken: args.botToken,
     apiBaseUrl: args.apiBaseUrl,
