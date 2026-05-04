@@ -45,4 +45,31 @@ describe('initSentry', () => {
     const { init } = await import('@sentry/node');
     expect(init).not.toHaveBeenCalled();
   });
+
+  it('passes environment:"production" when NODE_ENV is unset', async () => {
+    process.env.SENTRY_DSN = 'https://abc123@o0.ingest.sentry.io/42';
+    const savedNodeEnv = process.env.NODE_ENV;
+    delete process.env.NODE_ENV;
+    try {
+      const { initSentry } = await import('./sentry.js');
+      initSentry();
+      const { init } = await import('@sentry/node');
+      expect(init).toHaveBeenCalledWith(expect.objectContaining({ environment: 'production' }));
+    } finally {
+      if (savedNodeEnv !== undefined) {
+        process.env.NODE_ENV = savedNodeEnv;
+      } else {
+        delete process.env.NODE_ENV;
+      }
+    }
+  });
+
+  it('passes environment from NODE_ENV when set', async () => {
+    process.env.SENTRY_DSN = 'https://abc123@o0.ingest.sentry.io/42';
+    process.env.NODE_ENV = 'staging';
+    const { initSentry } = await import('./sentry.js');
+    initSentry();
+    const { init } = await import('@sentry/node');
+    expect(init).toHaveBeenCalledWith(expect.objectContaining({ environment: 'staging' }));
+  });
 });
