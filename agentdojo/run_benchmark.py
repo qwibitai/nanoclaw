@@ -36,11 +36,15 @@ import sys
 from agentdojo.attacks.attack_registry import ATTACKS
 from agentdojo.benchmark import (
     SuiteResults,
+    TaskResults,
     benchmark_suite_with_injections,
     benchmark_suite_without_injections,
     get_suite,
 )
+from agentdojo.functions_runtime import FunctionCall  # noqa: F401 — needed for TaskResults.model_rebuild()
 from agentdojo.logging import OutputLogger
+
+TaskResults.model_rebuild()
 
 from nanoclaw_agent import build_pipeline
 
