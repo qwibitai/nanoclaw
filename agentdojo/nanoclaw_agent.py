@@ -3,20 +3,20 @@ NanoClaw AgentDojo pipeline adapter.
 
 Builds an AgentDojo pipeline that mirrors NanoClaw's agent configuration:
 - System prompt from container/CLAUDE.md (the file modified to harden security)
-- Anthropic LLM (same model the container agent-runner uses)
+- Anthropic, Google Gemini, or OpenAI LLM
 - Standard tool execution loop
 
 Usage:
     from agentdojo.nanoclaw_agent import build_pipeline
-    pipeline = build_pipeline()
+    pipeline = build_pipeline()                          # Anthropic (default)
+    pipeline = build_pipeline(provider="google")         # Gemini (free tier)
+    pipeline = build_pipeline(provider="openai")         # OpenAI
 """
 
 import pathlib
 
-import anthropic
 from agentdojo.agent_pipeline import (
     AgentPipeline,
-    AnthropicLLM,
     InitQuery,
     SystemMessage,
     ToolsExecutionLoop,
@@ -39,6 +39,13 @@ directly — no special wrapping needed.
 To mark something as scratchpad (logged but not sent), wrap it in \
 `<internal>...</internal>`."""
 
+# Default models per provider — all in AgentDojo's MODEL_NAMES allowlist.
+DEFAULT_MODELS = {
+    "anthropic": "claude-3-5-sonnet-20241022",
+    "google": "gemini-2.0-flash-001",
+    "openai": "gpt-4o-mini-2024-07-18",
+}
+
 
 def load_system_prompt(extra: str | None = None) -> str:
     """
@@ -57,7 +64,8 @@ def load_system_prompt(extra: str | None = None) -> str:
 
 
 def build_pipeline(
-    model: str = "claude-3-5-sonnet-20241022",
+    provider: str = "anthropic",
+    model: str | None = None,
     max_tokens: int = 4096,
     extra_system_prompt: str | None = None,
 ) -> AgentPipeline:
@@ -65,18 +73,21 @@ def build_pipeline(
     Build an AgentDojo pipeline that mirrors NanoClaw's agent configuration.
 
     Args:
-        model: Claude model ID to use.
+        provider: LLM provider — "anthropic", "google", or "openai".
+        model: Model ID. Defaults to a sensible cheap model per provider.
         max_tokens: Max tokens per LLM call.
-        extra_system_prompt: Extra text appended to the system prompt. Useful
-            for testing proposed hardening instructions before committing them.
+        extra_system_prompt: Extra text appended to the system prompt.
 
     Returns:
         An AgentPipeline ready to pass to benchmark_suite_with_injections or
         benchmark_suite_without_injections.
     """
+    provider = provider.lower()
+    if model is None:
+        model = DEFAULT_MODELS.get(provider, DEFAULT_MODELS["anthropic"])
+
+    llm = _build_llm(provider, model, max_tokens)
     system_prompt = load_system_prompt(extra_system_prompt)
-    client = anthropic.Anthropic()
-    llm = AnthropicLLM(client=client, model=model, max_tokens=max_tokens)
 
     pipeline = AgentPipeline(
         [
@@ -90,3 +101,25 @@ def build_pipeline(
     # which requires pipeline.name to contain a known model string.
     pipeline.name = model
     return pipeline
+
+
+def _build_llm(provider: str, model: str, max_tokens: int):
+    if provider == "anthropic":
+        import anthropic
+        from agentdojo.agent_pipeline import AnthropicLLM
+        client = anthropic.Anthropic()
+        return AnthropicLLM(client=client, model=model, max_tokens=max_tokens)
+
+    if provider == "google":
+        import google.genai as genai
+        from agentdojo.agent_pipeline import GoogleLLM
+        client = genai.Client()
+        return GoogleLLM(model=model, client=client, max_tokens=max_tokens)
+
+    if provider == "openai":
+        import openai
+        from agentdojo.agent_pipeline import OpenAILLM
+        client = openai.OpenAI()
+        return OpenAILLM(client=client, model=model, max_tokens=max_tokens)
+
+    raise ValueError(f"Unknown provider '{provider}'. Choose: anthropic, google, openai")

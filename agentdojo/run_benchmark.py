@@ -61,7 +61,8 @@ def run(args: argparse.Namespace) -> None:
     logdir = pathlib.Path(args.logdir) if args.logdir else default_logdir
 
     pipeline = build_pipeline(
-        model=args.model,
+        provider=args.provider,
+        model=args.model or None,
         extra_system_prompt=args.extra_system_prompt,
     )
 
@@ -155,9 +156,15 @@ def main() -> None:
         help="Run without injection attacks (baseline utility score only)",
     )
     parser.add_argument(
+        "--provider",
+        default="anthropic",
+        choices=["anthropic", "google", "openai"],
+        help="LLM provider (default: anthropic). google uses GEMINI_API_KEY, openai uses OPENAI_API_KEY",
+    )
+    parser.add_argument(
         "--model",
-        default="claude-3-5-sonnet-20241022",
-        help="Claude model ID — must be one AgentDojo recognises (default: claude-3-5-sonnet-20241022)",
+        default=None,
+        help="Model ID override. Defaults: anthropic=claude-3-5-sonnet-20241022, google=gemini-2.0-flash-001, openai=gpt-4o-mini-2024-07-18",
     )
     parser.add_argument(
         "--logdir",
