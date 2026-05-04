@@ -17,11 +17,12 @@
  *
  * Tool surface:
  *
- *   READ (3 today; full set lands once the corresponding GET routes
+ *   READ (4 today; full set lands once the corresponding GET routes
  *   ship on baget.ai — see the spawned follow-up):
  *     - baget_get_company_overview
  *     - baget_query_metrics
  *     - baget_list_documents
+ *     - baget_read_document
  *
  *   WRITE — direct (free, immediate; calls /approval/execute):
  *     - baget_set_direction
@@ -98,9 +99,7 @@ interface BagetFetchErr {
   error: string;
 }
 
-async function bagetFetch<T = unknown>(
-  args: BagetFetchArgs,
-): Promise<BagetFetchOk<T> | BagetFetchErr> {
+async function bagetFetch<T = unknown>(args: BagetFetchArgs): Promise<BagetFetchOk<T> | BagetFetchErr> {
   const token = getChannelToken();
   if (!token) {
     return {
@@ -156,8 +155,7 @@ function requireCompanyId(): { ok: true; companyId: string } | { ok: false; erro
   if (!companyId) {
     return {
       ok: false,
-      error:
-        'BAGET_COMPANY_ID not set. This container is not bound to a company. Check the agent group config.',
+      error: 'BAGET_COMPANY_ID not set. This container is not bound to a company. Check the agent group config.',
     };
   }
   return { ok: true, companyId };
@@ -172,11 +170,7 @@ function requireCompanyId(): { ok: true; companyId: string } | { ok: false; erro
  * Use for free, idempotent, non-destructive write actions where there's
  * no card flow.
  */
-async function dispatchDirect(args: {
-  action: string;
-  payload: Record<string, unknown>;
-  fallbackMessage: string;
-}) {
+async function dispatchDirect(args: { action: string; payload: Record<string, unknown>; fallbackMessage: string }) {
   const ctx = requireCompanyId();
   if (!ctx.ok) return fail(ctx.error);
 
@@ -248,8 +242,7 @@ async function dispatchApproval(args: {
           remaining: cost.remaining,
           tasksRemaining: cost.tasksRemaining,
         },
-        note:
-          'Show the founder the summary + cost. Ask them to confirm by replying "yes" / "go" / "approve" — or "no" / "cancel". On confirmation, call this same tool with `confirmed: true` and the IDENTICAL payload.',
+        note: 'Show the founder the summary + cost. Ask them to confirm by replying "yes" / "go" / "approve" — or "no" / "cancel". On confirmation, call this same tool with `confirmed: true` and the IDENTICAL payload.',
       }),
     );
   }
@@ -308,7 +301,7 @@ const listDocuments: McpToolDefinition = {
   tool: {
     name: 'baget_list_documents',
     description:
-      "List the founder's documents — business plan, brand guide, pitch deck, research, etc. Returns id, title, category, and createdAt for each. Call this first before referring to a specific document by name; never guess document ids.",
+      "List the founder's documents — business plan, brand guide, pitch deck, research, etc. Returns id, title, category, and createdAt for each. Call this first before referring to a specific document by name; never guess document ids. After listing, call `baget_read_document` with the chosen document's id to fetch its full content (e.g., when the founder asks to see, share, or send it).",
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   async handler() {
@@ -320,6 +313,50 @@ const listDocuments: McpToolDefinition = {
     });
     if (!result.ok) return fail(`list_documents failed: ${result.error}`);
     return ok(JSON.stringify(result.data, null, 2));
+  },
+};
+
+const readDocument: McpToolDefinition = {
+  tool: {
+    name: 'baget_read_document',
+    description:
+      "Fetch the full content (markdown body) of a single document by id. Use this whenever the founder asks to SEE, SHARE, SEND, READ, VIEW, OR QUOTE a specific document — pitch deck, business plan, brand guide, research, etc. The chat surface can't transfer files, so this tool is how you 'send' a document: read it, then quote or excerpt the body inline in your reply. Call `baget_list_documents` FIRST to resolve a name (e.g., 'pitch deck') to a documentId; never guess document ids. If the founder wants the document as a downloadable file (PDF, etc.), point them to the dashboard's documents tab.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        documentId: {
+          type: 'string',
+          format: 'uuid',
+          description: 'UUID of the document to read; resolve via baget_list_documents.',
+        },
+      },
+      required: ['documentId'],
+      additionalProperties: false,
+    },
+  },
+  async handler(args) {
+    const ctx = requireCompanyId();
+    if (!ctx.ok) return fail(ctx.error);
+    const documentId = String(args.documentId ?? '').trim();
+    if (!documentId) return fail('documentId is required');
+    // encodeURIComponent on the model-supplied id — a hallucinated `..`
+    // or `/` would otherwise change the request path semantics before
+    // the server's UUID guard could reject it cleanly.
+    const result = await bagetFetch<{ document?: unknown }>({
+      method: 'GET',
+      path: `/api/companies/${ctx.companyId}/documents/${encodeURIComponent(documentId)}`,
+    });
+    if (!result.ok) return fail(`read_document failed: ${result.error}`);
+    // Unwrap the `{ document: ... }` envelope so the model gets just the
+    // document object, not the wrapper. Saves tokens in the agent's
+    // context window (Gemini medium on PR #12). Falls back to the raw
+    // payload if the upstream shape ever changes — better to surface
+    // unfamiliar JSON than to hide it under a defensive null.
+    const inner =
+      result.data && typeof result.data === 'object' && 'document' in result.data
+        ? (result.data as { document: unknown }).document
+        : result.data;
+    return ok(JSON.stringify(inner, null, 2));
   },
 };
 
@@ -580,10 +617,7 @@ const pauseAd: McpToolDefinition = {
   async handler(args) {
     return dispatchDirect({
       action: 'pause-ad',
-      payload:
-        args.campaignNameOrId !== undefined
-          ? { campaignNameOrId: String(args.campaignNameOrId) }
-          : {},
+      payload: args.campaignNameOrId !== undefined ? { campaignNameOrId: String(args.campaignNameOrId) } : {},
       fallbackMessage: `Ad campaign paused.`,
     });
   },
@@ -605,10 +639,7 @@ const resumeAd: McpToolDefinition = {
   async handler(args) {
     return dispatchDirect({
       action: 'resume-ad',
-      payload:
-        args.campaignNameOrId !== undefined
-          ? { campaignNameOrId: String(args.campaignNameOrId) }
-          : {},
+      payload: args.campaignNameOrId !== undefined ? { campaignNameOrId: String(args.campaignNameOrId) } : {},
       fallbackMessage: `Ad campaign resumed.`,
     });
   },
@@ -715,10 +746,7 @@ const sendCampaign: McpToolDefinition = {
   async handler(args) {
     return dispatchApproval({
       action: 'send-campaign',
-      payload:
-        args.campaignNameOrId !== undefined
-          ? { campaignNameOrId: String(args.campaignNameOrId) }
-          : {},
+      payload: args.campaignNameOrId !== undefined ? { campaignNameOrId: String(args.campaignNameOrId) } : {},
       confirmed: args.confirmed === true,
       summary: args.campaignNameOrId
         ? `Send "${String(args.campaignNameOrId)}" to all eligible recipients.`
@@ -734,6 +762,7 @@ registerTools([
   getCompanyOverview,
   queryMetrics,
   listDocuments,
+  readDocument,
   // Write — direct
   setDirection,
   updateMetric,
@@ -754,4 +783,4 @@ registerTools([
   sendCampaign,
 ]);
 
-log('baget MCP tools registered: 3 read + 12 direct write + 4 approval-gated = 19 total');
+log('baget MCP tools registered: 4 read + 12 direct write + 4 approval-gated = 20 total');
