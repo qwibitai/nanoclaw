@@ -23,7 +23,7 @@ import path from 'path';
 
 import { isSafeAttachmentName } from '../../attachment-safety.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
-import { getInboundSourceSessionId } from '../../db/session-db.js';
+import { getInboundSourceSessionId, getMostRecentPeerSourceSessionId } from '../../db/session-db.js';
 import { getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
 import { log } from '../../log.js';
@@ -114,34 +114,46 @@ export interface RoutableAgentMessage {
 /**
  * Pick which session of `targetAgentGroupId` should receive this a2a message.
  *
- * Return-path lookup: if the message is a reply (`in_reply_to` set), open the
- * source agent's inbound DB and read the original triggering row's
- * `source_session_id`. That column was stamped when the original outbound was
- * routed — it's the session that started the conversation, and replies should
- * land there even when the target agent group has multiple active sessions.
+ * Three layers, highest-fidelity first:
  *
- * Falls back to `resolveSession(..., 'agent-shared')` (which selects the
- * newest active session) when:
- *   - the message has no `in_reply_to` (fresh-initiated a2a), OR
- *   - the referenced row isn't in source's inbound (cross-batch reference), OR
- *   - the referenced row's source_session_id is NULL (channel inbound or
- *     pre-migration row), OR
- *   - the recovered session no longer exists / belongs to a different agent.
+ * 1. **Direct return-path** (in_reply_to lookup): if the message is a reply
+ *    (`in_reply_to` set), open the source agent's inbound DB and read the
+ *    triggering row's `source_session_id`. That column was stamped when the
+ *    original outbound was routed — it's the session that started the
+ *    conversation, and replies should land there even when the target has
+ *    multiple active sessions.
+ *
+ * 2. **Peer-affinity fallback**: if (1) misses (in_reply_to is null or the
+ *    referenced row isn't an a2a inbound), look up the most recent a2a
+ *    inbound *from the target agent group* in source's inbound and use its
+ *    `source_session_id`. The intuition: the last time this peer talked to
+ *    me, which target session was driving? Route the reply there, since
+ *    that's the session most plausibly in active conversation.
+ *
+ * 3. **Newest active session**: legacy heuristic. Used when no prior a2a
+ *    has been recorded with `source_session_id` (e.g. fresh installs,
+ *    pre-migration data).
  */
 function resolveTargetSession(msg: RoutableAgentMessage, sourceSession: Session, targetAgentGroupId: string): Session {
-  if (msg.in_reply_to) {
-    const srcDb = openInboundDb(sourceSession.agent_group_id, sourceSession.id);
-    let originSessionId: string | null;
-    try {
+  const srcDb = openInboundDb(sourceSession.agent_group_id, sourceSession.id);
+  let originSessionId: string | null = null;
+  try {
+    if (msg.in_reply_to) {
       originSessionId = getInboundSourceSessionId(srcDb, msg.in_reply_to);
-    } finally {
-      srcDb.close();
     }
-    if (originSessionId) {
-      const candidate = getSession(originSessionId);
-      if (candidate && candidate.agent_group_id === targetAgentGroupId && candidate.status === 'active') {
-        return candidate;
-      }
+    if (!originSessionId) {
+      // Peer-affinity fallback — covers the case where the container's
+      // outbound write didn't carry in_reply_to (e.g. legacy MCP send_message
+      // path, container running pre-fix code).
+      originSessionId = getMostRecentPeerSourceSessionId(srcDb, targetAgentGroupId);
+    }
+  } finally {
+    srcDb.close();
+  }
+  if (originSessionId) {
+    const candidate = getSession(originSessionId);
+    if (candidate && candidate.agent_group_id === targetAgentGroupId && candidate.status === 'active') {
+      return candidate;
     }
   }
   return resolveSession(targetAgentGroupId, null, null, 'agent-shared').session;

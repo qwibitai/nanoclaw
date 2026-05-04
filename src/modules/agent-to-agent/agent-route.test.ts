@@ -238,4 +238,39 @@ describe('routeAgentMessage return-path', () => {
     expect(s1Rows).toHaveLength(0);
     expect(s2Rows).toHaveLength(1);
   });
+
+  it('peer-affinity fallback: with no in_reply_to, routes to most recent peer-source session', async () => {
+    // A.S1 sends to B (establishing affinity: B's last contact from A was via S1).
+    await routeAgentMessage(
+      {
+        id: 'msg-from-A-S1-pre',
+        platform_id: B,
+        content: JSON.stringify({ text: 'context-establishing' }),
+        in_reply_to: null,
+      },
+      S1,
+    );
+
+    // B sends a follow-up but its container forgot to set in_reply_to (e.g.
+    // emitted via an MCP tool path that doesn't thread the batch's in_reply_to
+    // through). The host should still route this to S1 because S1 is the
+    // session most recently in conversation with B — not the chronologically
+    // newest session of A.
+    await routeAgentMessage(
+      {
+        id: 'msg-from-B-followup',
+        platform_id: A,
+        content: JSON.stringify({ text: 'standing by' }),
+        in_reply_to: null,
+      },
+      SB,
+    );
+
+    const s1Rows = readInbound(A, S1.id);
+    const s2Rows = readInbound(A, S2.id);
+    // Affinity wins: reply to S1, not the newer S2.
+    expect(s1Rows).toHaveLength(1);
+    expect(JSON.parse(s1Rows[0].content).text).toBe('standing by');
+    expect(s2Rows).toHaveLength(0);
+  });
 });
