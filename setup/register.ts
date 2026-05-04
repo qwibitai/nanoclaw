@@ -22,6 +22,7 @@ import { initGroupFilesystem } from '../src/group-init.js';
 import { log } from '../src/log.js';
 import { namespacedPlatformId } from '../src/platform-id.js';
 import { resolveSession, writeSessionMessage } from '../src/session-manager.js';
+import type { WiringPermission } from '../src/types.js';
 import { emitStatus } from './status.js';
 
 interface RegisterArgs {
@@ -41,6 +42,8 @@ interface RegisterArgs {
   assistantName: string;
   /** Session mode: 'shared' (one session per channel) or 'per-thread' */
   sessionMode: string;
+  /** Channel permission: 'read' (monitor-only), 'write' (post-only), or 'read+write' (default). */
+  permission: WiringPermission;
 }
 
 function parseArgs(args: string[]): RegisterArgs {
@@ -53,6 +56,7 @@ function parseArgs(args: string[]): RegisterArgs {
     requiresTrigger: false,
     assistantName: 'Andy',
     sessionMode: 'shared',
+    permission: 'read+write',
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -81,6 +85,17 @@ function parseArgs(args: string[]): RegisterArgs {
       case '--session-mode':
         result.sessionMode = args[++i] || 'shared';
         break;
+      case '--permission': {
+        const raw = (args[++i] || '').toLowerCase();
+        if (raw !== 'read' && raw !== 'write' && raw !== 'read+write') {
+          // Stay loose at parse time — validation happens in run() so the
+          // failure surfaces through emitStatus like other arg errors.
+          result.permission = raw as WiringPermission;
+        } else {
+          result.permission = raw;
+        }
+        break;
+      }
     }
   }
 
@@ -108,6 +123,15 @@ export async function run(args: string[]): Promise<void> {
     emitStatus('REGISTER_CHANNEL', {
       STATUS: 'failed',
       ERROR: 'invalid_folder',
+      LOG: 'logs/setup.log',
+    });
+    process.exit(4);
+  }
+
+  if (parsed.permission !== 'read' && parsed.permission !== 'write' && parsed.permission !== 'read+write') {
+    emitStatus('REGISTER_CHANNEL', {
+      STATUS: 'failed',
+      ERROR: 'invalid_permission',
       LOG: 'logs/setup.log',
     });
     process.exit(4);
@@ -183,6 +207,7 @@ export async function run(args: string[]): Promise<void> {
       ignored_message_policy: 'drop',
       session_mode: parsed.sessionMode as 'shared' | 'per-thread' | 'agent-shared',
       priority: 0,
+      permission: parsed.permission,
       created_at: new Date().toISOString(),
     });
     log.info('Wired agent to messaging group', {
@@ -253,6 +278,7 @@ export async function run(args: string[]): Promise<void> {
     REQUIRES_TRIGGER: parsed.requiresTrigger,
     ASSISTANT_NAME: parsed.assistantName,
     SESSION_MODE: parsed.sessionMode,
+    PERMISSION: parsed.permission,
     NAME_UPDATED: nameUpdated,
     STATUS: 'success',
     LOG: 'logs/setup.log',

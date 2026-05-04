@@ -278,6 +278,19 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
     const agentGroup = getAgentGroup(agent.agent_group_id);
     if (!agentGroup) continue;
 
+    // Channel permission: `write` means post-only — the agent posts here
+    // but never receives inbound. Skip silently; the bottom-of-routine
+    // drop record records the no-engaged-agent case as usual. The
+    // companion `read` direction is enforced in delivery.ts.
+    // See migration 014.
+    if (agent.permission === 'write') {
+      log.warn('Skipping write-only wiring on inbound', {
+        agentGroupId: agent.agent_group_id,
+        messagingGroupId: mg.id,
+      });
+      continue;
+    }
+
     const engages = evaluateEngage(agent, messageText, isMention, mg, event.threadId);
 
     const accessOk = engages && (!accessGate || accessGate(event, userId, mg, agent.agent_group_id).allowed);
