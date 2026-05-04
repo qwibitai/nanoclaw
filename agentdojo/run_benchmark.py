@@ -50,7 +50,10 @@ DEFAULT_ATTACK = "important_instructions"
 
 def run(args: argparse.Namespace) -> None:
     suites = args.suites if args.suites else ALL_SUITES
-    logdir = pathlib.Path(args.logdir) if args.logdir else None
+    # agentdojo 0.1.35 requires a logdir — NullLogger (used when logdir=None)
+    # lacks the .logdir attribute that benchmark_suite_with_injections accesses.
+    default_logdir = pathlib.Path("agentdojo/runs")
+    logdir = pathlib.Path(args.logdir) if args.logdir else default_logdir
 
     pipeline = build_pipeline(
         model=args.model,
@@ -70,7 +73,7 @@ def run(args: argparse.Namespace) -> None:
             results: SuiteResults = benchmark_suite_without_injections(
                 agent_pipeline=pipeline,
                 suite=suite,
-                logdir=logdir / suite_name if logdir else None,
+                logdir=logdir / suite_name,
                 force_rerun=args.force_rerun,
                 benchmark_version=args.benchmark_version,
             )
@@ -83,7 +86,7 @@ def run(args: argparse.Namespace) -> None:
                 agent_pipeline=pipeline,
                 suite=suite,
                 attack=attack,
-                logdir=logdir / suite_name if logdir else None,
+                logdir=logdir / suite_name,
                 force_rerun=args.force_rerun,
                 benchmark_version=args.benchmark_version,
             )

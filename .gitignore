@@ -32,6 +32,7 @@ groups/*
 __pycache__/
 *.pyc
 *.pyo
+agentdojo/runs/
 
 # OS
 .DS_Store
