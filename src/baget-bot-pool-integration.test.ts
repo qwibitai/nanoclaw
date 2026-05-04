@@ -453,10 +453,12 @@ describe('handleBindTelegram — pool path', () => {
     const r2 = await postBind(server.baseUrl);
     expect(r2.json.botUsername).toBe('acme_bot_re');
     // Second bind: webhook_registered_at is now set, so setWebhook
-    // is skipped. setMyName fires every bind (rate-limit handled
-    // gracefully). sendMessage fires every bind (welcome).
+    // is skipped. setMyName is ALSO skipped — we gate it on the
+    // first-bind flag (webhook_registered_at being null) to avoid
+    // burning Telegram's per-bot daily quota for setMyName on a
+    // re-pair storm. sendMessage fires every bind (welcome).
     expect(setWebhookCalls).toBe(1);
-    expect(setMyNameCalls).toBe(2);
+    expect(setMyNameCalls).toBe(1);
     expect(sendMessageCalls).toBe(2);
 
     // The same bot still serves the same agent_group.
@@ -540,6 +542,69 @@ describe('handleBindTelegram — legacy global-bot path', () => {
     expect(calls).toHaveLength(1); // ONLY sendMessage, no setWebhook / setMyName
     expect(calls[0]!.url).toContain('/bottok-global-legacy/sendMessage');
     expect(getBotPoolEntryByAgentGroup('ag-legacy-1')).toBeUndefined();
+  });
+
+  it('mixed deployment: re-binding a pre-existing legacy agent_group keeps it on the global bot (does NOT re-home to pool)', async () => {
+    // Vela scenario: operator has BOTH a global telegramBotToken AND
+    // a pool seeded. Vela's agent_group exists from before the pool
+    // migration, paired against the global bot. A re-bind for Vela
+    // through the bind-telegram endpoint MUST NOT silently grab a
+    // fresh pool bot — that would break the founder's chat (the new
+    // bot is a different Telegram account, the founder hasn't DMed
+    // it). Pin the legacy preservation contract.
+    seedBotPoolEntry({
+      botUsername: 'fresh_pool_bot',
+      botTokenValue: 'tok-fresh-pool',
+      webhookSecret: 'sec-fresh-pool',
+      createdAt: new Date().toISOString(),
+    });
+
+    // Pre-existing legacy agent_group (created OUTSIDE the bind
+    // flow — simulates a Vela company that was paired before pool
+    // existed and is now in the DB without a pool entry).
+    const { createBagetAgentGroup } = await import('./db/baget-agent-groups.js');
+    createBagetAgentGroup({
+      id: 'ag-vela-legacy',
+      name: 'Vela',
+      folder: 'baget-vela',
+      user_id: VALID_BIND_BODY.userId,
+      company_id: VALID_BIND_BODY.companyId,
+      baget_team_members: JSON.stringify({ cos: 'Louis' }),
+      created_at: new Date().toISOString(),
+    });
+
+    server = await startBindServer({
+      publicBaseUrl: PUBLIC_BASE_URL,
+      telegramBotToken: 'tok-vela-global',
+      telegramRoutes: [
+        // No setWebhook / setMyName expected — we should land on the
+        // global path, not auto-assign.
+        {
+          match: (u) => u.endsWith('/sendMessage'),
+          handler: () => okResponse({ ok: true, result: { message_id: 1 } }),
+        },
+      ],
+      generateAgentGroupId: () => 'unused-already-exists',
+    });
+
+    const { status, json } = await postBind(server.baseUrl);
+    expect(status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.agentGroupId).toBe('ag-vela-legacy');
+    // Critical: legacy preservation. No botUsername in response,
+    // because no pool entry was assigned. The deeplink falls back
+    // to the global cfg.telegramBotUsername.
+    expect(json.botUsername).toBeUndefined();
+    expect(json.telegramOpenUrl).toBe('https://t.me/baget_global_bot');
+
+    // Pool depth unchanged — fresh_pool_bot is still available.
+    expect(countAvailableBots()).toBe(1);
+    expect(getBotPoolEntryByAgentGroup('ag-vela-legacy')).toBeUndefined();
+
+    // Welcome went out on the GLOBAL token, not the pool token.
+    const calls = server.fetchCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toContain('/bottok-vela-global/sendMessage');
   });
 
   it("skips per-bot setWebhook when publicBaseUrl is unset (operator hasn't opted into pool mode)", async () => {
@@ -641,6 +706,46 @@ describe('disconnect releases the assigned bot back to the pool', () => {
     expect(after?.assigned_agent_group_id).toBeNull();
     expect(after?.webhook_registered_at).toBe(before?.webhook_registered_at);
     expect(getBotPoolEntryByAgentGroup('ag-dc-bind')).toBeUndefined();
+  });
+
+  it('disconnect on a legacy global-bot pairing returns releasedBot:null without erroring', async () => {
+    // The performDisconnectCleanup transaction calls releaseBot
+    // unconditionally. For a legacy pairing (no pool assignment ever
+    // made), releaseBot returns null — that needs to surface cleanly
+    // through the DELETE response as releasedBot:null, NOT a 500 or
+    // a missing field. Pin the contract so a refactor that adds an
+    // "if (poolEntry) releaseBot(...)" guard around the call doesn't
+    // silently regress: the unconditional call is intentional, and
+    // null is the legitimate response shape.
+    server = await startBindServer({
+      publicBaseUrl: PUBLIC_BASE_URL,
+      telegramBotToken: 'tok-global-dc',
+      telegramRoutes: [
+        // Welcome on bind, farewell on disconnect — both via global.
+        { match: (u) => u.endsWith('/sendMessage'), handler: () => okResponse({ ok: true, result: { message_id: 1 } }) },
+      ],
+      generateAgentGroupId: () => 'ag-legacy-dc',
+    });
+
+    // Bind via the legacy global path (no pool seeded).
+    const bind = await postBind(server.baseUrl);
+    expect(bind.status).toBe(200);
+    expect(bind.json.botUsername).toBeUndefined();
+    expect(getBotPoolEntryByAgentGroup('ag-legacy-dc')).toBeUndefined();
+
+    // Disconnect.
+    const dc = await fetch(`${server.baseUrl}/baget/agent-groups`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${ADMIN_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: VALID_BIND_BODY.userId, companyId: VALID_BIND_BODY.companyId }),
+    });
+    expect(dc.status).toBe(200);
+    const dcJson = (await dc.json()) as { ok: boolean; archived: boolean; releasedBot: string | null };
+    expect(dcJson.ok).toBe(true);
+    expect(dcJson.archived).toBe(true);
+    // Pin: legacy path returns releasedBot:null, not undefined or
+    // an error.
+    expect(dcJson.releasedBot).toBeNull();
   });
 });
 

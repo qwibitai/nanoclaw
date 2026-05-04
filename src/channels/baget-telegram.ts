@@ -450,9 +450,17 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
 
       const destDir = path.resolve(groupsDir, agentGroup.folder, 'inbound');
 
+      // Download MUST use the same bot token that received the
+      // upload — Telegram `file_id`s are per-bot-scoped. Pool-paired
+      // founders' uploads land on their per-company bot's webhook,
+      // so the file_id only resolves under that token. Falling
+      // through to `cfg.botToken` for legacy / Vela pairings is
+      // correct (those agent_groups have no pool entry).
+      const inboundBotToken = getBotPoolEntryByAgentGroup(agentGroup.id)?.bot_token_value ?? cfg.botToken;
+
       try {
         const { filePath, sizeBytes } = await downloadTelegramAttachment({
-          botToken: cfg.botToken,
+          botToken: inboundBotToken,
           fileId: parsedAttachment.fileId,
           destDir,
           fetchImpl: fetchFn,
@@ -475,6 +483,11 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
             msg.chat.id,
             'That file is too big for me to receive (20 MB limit). Try splitting it or sharing a link.',
             agentGroup.id,
+            // Reply on the SAME bot the founder uploaded to — pool-
+            // assigned bot if present, else global. Without this, a
+            // pool-paired founder would never see this error message
+            // because cfg.botToken can't reach their per-company chat.
+            inboundBotToken,
           );
           return;
         }
@@ -621,10 +634,17 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     //    so reading `agentGroup.name` here is the canonical way to
     //    surface the founder's company in the chat — important when a
     //    founder runs multiple Baget companies through the shared bot.
+    //
+    //    Token resolution: pool > global. If this agent_group has a
+    //    pool assignment (e.g. a founder previously paired via Login
+    //    Widget then re-paired via deep-link), the welcome MUST ride
+    //    the per-company bot — `cfg.botToken` would land in the wrong
+    //    chat or a chat the founder hasn't opened.
+    const startWelcomeBotToken = getBotPoolEntryByAgentGroup(row.agent_group_id)?.bot_token_value ?? cfg.botToken;
     const team = parseTeamMembers(agentGroup.baget_team_members);
     if (team) {
       await sendBagetTelegramWelcome({
-        botToken: cfg.botToken,
+        botToken: startWelcomeBotToken,
         apiBaseUrl: cfg.apiBaseUrl,
         fetchImpl: cfg.fetchImpl,
         chatId,
@@ -645,6 +665,7 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
         chatId,
         `🧭 your CoS: All wired up — your ${agentGroup.name} team is ready. What's on your mind?`,
         row.agent_group_id,
+        startWelcomeBotToken,
       );
     }
     log.info('Baget telegram: paired chat to agent_group', {
