@@ -1223,7 +1223,11 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
     return null;
   }
 
-  async function handleCelebrate(req: http.IncomingMessage, res: http.ServerResponse, agentGroupId: string): Promise<void> {
+  async function handleCelebrate(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    agentGroupId: string,
+  ): Promise<void> {
     const body = await readJson<CelebrateBody>(req);
     if (!body.ok) {
       sendJson(res, 400, { ok: false, error: 'invalid_body', message: body.error });
@@ -1237,7 +1241,11 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
 
     const ag = getBagetAgentGroupById(agentGroupId);
     if (!ag || !ag.user_id || ag.archived_at) {
-      sendJson(res, 404, { ok: false, error: 'group_not_found', message: `No active Baget agent_group with id ${agentGroupId}` });
+      sendJson(res, 404, {
+        ok: false,
+        error: 'group_not_found',
+        message: `No active Baget agent_group with id ${agentGroupId}`,
+      });
       return;
     }
 
@@ -1263,7 +1271,12 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
         });
         delivered.push({ channelType: mg.channel_type, platformId: mg.platform_id, messageId });
       } catch (err) {
-        log.warn('Baget celebrate: deliver threw', { channelType: mg.channel_type, platformId: mg.platform_id, agentGroupId, err });
+        log.warn('Baget celebrate: deliver threw', {
+          channelType: mg.channel_type,
+          platformId: mg.platform_id,
+          agentGroupId,
+          err,
+        });
       }
     }
 

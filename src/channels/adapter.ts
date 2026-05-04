@@ -85,6 +85,22 @@ export interface InboundMessage {
   isMention?: boolean;
   /** True when the source is a group/channel thread, false for DMs. */
   isGroup?: boolean;
+  /** File attachments received from the platform (photos, documents, voice notes, etc.). */
+  attachments?: InboundAttachment[];
+}
+
+/** An inbound attachment received from the messaging platform. */
+export interface InboundAttachment {
+  kind: 'photo' | 'document' | 'voice' | 'video' | 'video_note' | 'audio';
+  /** Absolute path on the host filesystem where the media is stored. */
+  path: string;
+  /** MIME type as reported by the platform (e.g. 'image/jpeg', 'application/pdf'). */
+  mimeType: string;
+  /** Original filename if the platform provides one (Telegram only sets this for documents). */
+  originalName?: string;
+  sizeBytes: number;
+  /** Platform-native id for the file (Telegram file_id, Twilio MediaSid, etc.). */
+  platformFileId: string;
 }
 
 /** A file attachment to deliver alongside a message. */
