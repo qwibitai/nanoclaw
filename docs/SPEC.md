@@ -52,9 +52,9 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 │  ┌──────────────────────────────────────────────────────────────┐    │
 │  │                    AGENT RUNNER                               │    │
 │  │                                                                │    │
-│  │  Working directory: /workspace/group (mounted from host)       │    │
+│  │  Working directory: /workspace/agent (mounted from host)       │    │
 │  │  Volume mounts:                                                │    │
-│  │    • groups/{name}/ → /workspace/group                         │    │
+│  │    • groups/{name}/ → /workspace/agent                         │    │
 │  │    • groups/global/ → /workspace/global/ (non-main only)       │    │
 │  │    • data/sessions/{group}/.claude/ → /home/node/.claude/      │    │
 │  │    • Additional dirs → /workspace/extra/*                      │    │

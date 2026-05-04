@@ -36,7 +36,7 @@ echo "Channel: main"
 echo "=== Workspace ==="
 ls /workspace/ 2>/dev/null
 echo "=== Group folder ==="
-ls /workspace/group/ 2>/dev/null | head -20
+ls /workspace/agent/ 2>/dev/null | head -20
 echo "=== Extra mounts ==="
 ls /workspace/extra/ 2>/dev/null || echo "none"
 echo "=== IPC ==="
@@ -80,7 +80,7 @@ Present as a clean, readable message:
 *Session:*
 • Channel: main
 • Time: 2026-03-14 09:30 UTC
-• Working dir: /workspace/group
+• Working dir: /workspace/agent
 
 *Workspace:*
 • Group folder: ✓ (N files)

@@ -18,7 +18,7 @@ src/container-runner.ts               container/agent-runner/
     │ with volume mounts                   │ with MCP servers
     │                                      │
     ├── data/env/env ──────────────> /workspace/env-dir/env
-    ├── groups/{folder} ───────────> /workspace/group
+    ├── groups/{folder} ───────────> /workspace/agent
     ├── data/ipc/{folder} ────────> /workspace/ipc
     ├── data/sessions/{folder}/.claude/ ──> /home/node/.claude/ (isolated per-group)
     └── (main only) project root ──> /workspace/project
@@ -187,7 +187,7 @@ cp .env data/env/env
 echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isMain":false}' | \
   docker run -i \
   -v $(pwd)/data/env:/workspace/env-dir:ro \
-  -v $(pwd)/groups/test:/workspace/group \
+  -v $(pwd)/groups/test:/workspace/agent \
   -v $(pwd)/data/ipc:/workspace/ipc \
   nanoclaw-agent:latest
 ```
@@ -215,7 +215,7 @@ The agent-runner uses these Claude Agent SDK options:
 query({
   prompt: input.prompt,
   options: {
-    cwd: '/workspace/group',
+    cwd: '/workspace/agent',
     allowedTools: ['Bash', 'Read', 'Write', ...],
     permissionMode: 'bypassPermissions',
     allowDangerouslySkipPermissions: true,  // Required with bypassPermissions
