@@ -7,9 +7,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { Notifier, OutboundSender, renderEvent } from '../notifier.js';
 
-function makeMockSqs(
-  messages: { body: string; receiptHandle: string }[],
-): { client: SQSClient; sends: unknown[] } {
+function makeMockSqs(messages: { body: string; receiptHandle: string }[]): {
+  client: SQSClient;
+  sends: unknown[];
+} {
   const sends: unknown[] = [];
   let drained = false;
   const send = vi.fn(async (cmd: unknown) => {
@@ -139,9 +140,7 @@ describe('Notifier.pollOnce', () => {
       event: 'wa.outbound.something_else',
       data: { waPhoneE164: '+5491100000001' },
     });
-    const { client, sends } = makeMockSqs([
-      { body, receiptHandle: 'rh-3' },
-    ]);
+    const { client, sends } = makeMockSqs([{ body, receiptHandle: 'rh-3' }]);
     const sender: OutboundSender = { sendMessage: vi.fn(async () => {}) };
     const notifier = new Notifier({
       queueUrl: 'https://sqs.example/queue',

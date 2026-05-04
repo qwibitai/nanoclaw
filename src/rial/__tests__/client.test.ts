@@ -1,11 +1,7 @@
 import { createHash, createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
-import {
-  buildAuthHeader,
-  RialApiError,
-  RialClient,
-} from '../client.js';
+import { buildAuthHeader, RialApiError, RialClient } from '../client.js';
 import { RialConfig } from '../secrets.js';
 
 const baseConfig: RialConfig = {
@@ -63,11 +59,12 @@ describe('buildAuthHeader', () => {
 
 describe('RialClient', () => {
   it('sends the X-Bot-Auth header with HMAC', async () => {
-    const { fn, calls } = makeFetchMock(() =>
-      new Response(JSON.stringify({ tenantId: 't_1' }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+    const { fn, calls } = makeFetchMock(
+      () =>
+        new Response(JSON.stringify({ tenantId: 't_1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
     );
     const now = () => 1_700_000_000_000;
     const client = new RialClient({ config: baseConfig, fetchImpl: fn, now });
@@ -83,8 +80,8 @@ describe('RialClient', () => {
   });
 
   it('signs only the path, not the query string', async () => {
-    const { fn, calls } = makeFetchMock(() =>
-      new Response('{"tenantId":"t_1"}', { status: 200 }),
+    const { fn, calls } = makeFetchMock(
+      () => new Response('{"tenantId":"t_1"}', { status: 200 }),
     );
     const now = () => 1_700_000_000_000;
     const client = new RialClient({ config: baseConfig, fetchImpl: fn, now });
@@ -104,10 +101,11 @@ describe('RialClient', () => {
   });
 
   it('encodes the body and matches its hash in the signature', async () => {
-    const { fn, calls } = makeFetchMock(() =>
-      new Response('{"id":"vfy_1","url":"https://x","expiresInMinutes":10}', {
-        status: 200,
-      }),
+    const { fn, calls } = makeFetchMock(
+      () =>
+        new Response('{"id":"vfy_1","url":"https://x","expiresInMinutes":10}', {
+          status: 200,
+        }),
     );
     const now = () => 1_700_000_000_000;
     const client = new RialClient({ config: baseConfig, fetchImpl: fn, now });
@@ -130,7 +128,9 @@ describe('RialClient', () => {
   });
 
   it('maps 404 to RialApiError with kind=not-found', async () => {
-    const { fn } = makeFetchMock(() => new Response('not found', { status: 404 }));
+    const { fn } = makeFetchMock(
+      () => new Response('not found', { status: 404 }),
+    );
     const client = new RialClient({ config: baseConfig, fetchImpl: fn });
     await expect(client.getVerification('vfy_x')).rejects.toMatchObject({
       name: 'RialApiError',
@@ -157,7 +157,9 @@ describe('RialClient', () => {
   });
 
   it('maps 429 to kind=rate-limited', async () => {
-    const { fn } = makeFetchMock(() => new Response('slow down', { status: 429 }));
+    const { fn } = makeFetchMock(
+      () => new Response('slow down', { status: 429 }),
+    );
     const client = new RialClient({ config: baseConfig, fetchImpl: fn });
     await expect(client.resolveTenant('+5491100000001')).rejects.toMatchObject({
       kind: 'rate-limited',
@@ -199,7 +201,9 @@ describe('RialClient', () => {
   });
 
   it('maps non-JSON responses to kind=invalid-response', async () => {
-    const { fn } = makeFetchMock(() => new Response('not-json', { status: 200 }));
+    const { fn } = makeFetchMock(
+      () => new Response('not-json', { status: 200 }),
+    );
     const client = new RialClient({ config: baseConfig, fetchImpl: fn });
     await expect(client.resolveTenant('+5491100000001')).rejects.toMatchObject({
       kind: 'invalid-response',

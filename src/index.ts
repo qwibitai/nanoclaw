@@ -65,7 +65,11 @@ import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
-import { handleRialMessage, isRialEnabled, preloadAllowlist } from './rial/index.js';
+import {
+  handleRialMessage,
+  isRialEnabled,
+  preloadAllowlist,
+} from './rial/index.js';
 import { Notifier } from './rial/notifier.js';
 import { loadRialConfig } from './rial/secrets.js';
 import { normalisePhone } from './rial/allowlist.js';

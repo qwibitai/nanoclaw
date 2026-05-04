@@ -48,7 +48,9 @@ describe('parseCommand', () => {
     expect(parseCommand('   ')).toEqual({ kind: 'unknown' });
     expect(parseCommand('hello there')).toEqual({ kind: 'unknown' });
     expect(parseCommand('/unknown command')).toEqual({ kind: 'unknown' });
-    expect(parseCommand(null as unknown as string)).toEqual({ kind: 'unknown' });
+    expect(parseCommand(null as unknown as string)).toEqual({
+      kind: 'unknown',
+    });
     expect(parseCommand(undefined as unknown as string)).toEqual({
       kind: 'unknown',
     });

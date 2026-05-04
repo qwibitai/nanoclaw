@@ -36,7 +36,9 @@ export function loadRialConfig(): RialConfig | null {
   const hmacSecret = (process.env.RIAL_BOT_HMAC_SECRET || '').trim();
   const notifyQueueUrl = (process.env.RIAL_WA_NOTIFY_QUEUE_URL || '').trim();
   const awsRegion = (process.env.AWS_REGION || 'us-east-1').trim();
-  const userAgent = (process.env.RIAL_BOT_USER_AGENT || DEFAULT_USER_AGENT).trim();
+  const userAgent = (
+    process.env.RIAL_BOT_USER_AGENT || DEFAULT_USER_AGENT
+  ).trim();
 
   const missing: string[] = [];
   if (!apiBaseUrl) missing.push('RIAL_API_BASE_URL');

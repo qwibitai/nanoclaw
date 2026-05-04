@@ -130,8 +130,7 @@ export class Notifier {
   private abort: AbortController | null = null;
 
   constructor(opts: NotifierOptions) {
-    this.client =
-      opts.client ?? new SQSClient({ region: opts.region });
+    this.client = opts.client ?? new SQSClient({ region: opts.region });
     this.opts = {
       queueUrl: opts.queueUrl,
       region: opts.region,

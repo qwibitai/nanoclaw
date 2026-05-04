@@ -55,11 +55,7 @@ export function normalisePhone(input: string): string {
 }
 
 function resolvePath(override?: string): string {
-  return (
-    override ||
-    process.env.RIAL_BUSINESS_ALLOWLIST_PATH ||
-    DEFAULT_PATH
-  );
+  return override || process.env.RIAL_BUSINESS_ALLOWLIST_PATH || DEFAULT_PATH;
 }
 
 export function loadBusinessAllowlist(pathOverride?: string): Set<string> {
