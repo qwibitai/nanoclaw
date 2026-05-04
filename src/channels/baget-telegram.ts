@@ -33,6 +33,8 @@
 import http from 'http';
 import { timingSafeEqual } from 'crypto';
 
+import * as Sentry from '@sentry/node';
+
 import { registerExtraRoute } from '../baget-admin-server.js';
 import { applyPersonaPrefix } from '../baget-persona.js';
 import { consumePairingToken } from '../db/baget-pairing-tokens.js';
@@ -47,6 +49,7 @@ import {
   BAGET_TELEGRAM_CHANNEL_TYPE,
   bindBagetTelegramChat,
   platformIdFromChatId,
+  sendBagetBotMessage,
   sendBagetTelegramWelcome,
 } from './baget-telegram-bind.js';
 
@@ -163,6 +166,7 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
 
     setImmediate(() => {
       processUpdate(update).catch((err) => {
+        Sentry.captureException(err);
         log.error('Baget telegram: update processing threw', { err, updateId: update.update_id });
       });
     });
@@ -257,7 +261,8 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
    */
   async function handleStartCommand(msg: UpdateMessage, rawToken: string): Promise<void> {
     const chatId = msg.chat.id;
-    const FAILURE_MSG = "That pairing link isn't valid or has expired. Generate a fresh one from the dashboard.";
+    const dashboardBase = process.env.BAGET_DASHBOARD_URL ?? 'https://app.baget.ai';
+    const FAILURE_MSG = `That pairing link isn't valid or has expired. Tap here to get a fresh one: ${dashboardBase}/team?regenerate=1`;
 
     // Single-use consume. The token format is now 32 hex chars
     // (Telegram caps `?start=` at 64 bytes of [A-Z a-z 0-9 _ -], so
@@ -372,16 +377,26 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       }
       const single = wired[0];
       if (single) {
-        const ag = getBagetAgentGroupById(single.agent_group_id);
+        const agentGroupId = single.agent_group_id;
+        const ag = getBagetAgentGroupById(agentGroupId);
         if (ag?.archived_at) {
           log.warn('Baget telegram: drop deliver — agent_group archived', {
             platformId,
-            agentGroupId: single.agent_group_id,
+            agentGroupId,
           });
           return undefined;
         }
         const team = parseTeamMembers(ag?.baget_team_members);
         if (team) prefixed = applyPersonaPrefix(text, team);
+        const result = await sendBagetBotMessage({
+          botToken: cfg.botToken,
+          apiBaseUrl: cfg.apiBaseUrl,
+          fetchImpl: cfg.fetchImpl,
+          chatId,
+          text: prefixed,
+          agentGroupId,
+        });
+        return result.ok ? result.messageId : undefined;
       }
     }
 

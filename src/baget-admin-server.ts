@@ -886,6 +886,7 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
       fetchImpl: config.telegramFetchImpl,
       chatId: telegramUserId,
       teamMembers,
+      agentGroupId,
     });
 
     log.info('Baget bind-telegram: paired chat to agent_group via direct bind', {
@@ -1165,6 +1166,7 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
         apiBaseUrl: config.telegramApiBaseUrl,
         fetchImpl: config.telegramFetchImpl,
         chatId,
+        agentGroupId,
       });
       if (!result.ok) {
         log.warn('Disconnect farewell not delivered', {

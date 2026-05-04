@@ -167,6 +167,7 @@ export async function sendBagetBotMessage(args: {
   fetchImpl?: typeof fetch;
   chatId: number | string;
   text: string;
+  agentGroupId?: string;
 }): Promise<BagetTelegramSendResult> {
   const apiBase = args.apiBaseUrl ?? 'https://api.telegram.org';
   const fetchFn = args.fetchImpl ?? fetch;
@@ -183,14 +184,19 @@ export async function sendBagetBotMessage(args: {
       description?: unknown;
     } | null;
     if (!resp.ok) {
-      const description = typeof json?.description === 'string' ? json.description.toLowerCase() : '';
+      const rawDescription = typeof json?.description === 'string' ? json.description : undefined;
+      const descLower = rawDescription?.toLowerCase() ?? '';
       const founderActionRequired =
-        description.includes("can't initiate conversation with a user") || description.includes('chat not found');
-      log.warn('Baget telegram bind: sendMessage non-OK', {
-        status: resp.status,
+        descLower.includes("can't initiate conversation with a user") || descLower.includes('chat not found');
+      log.warn('Baget channel delivery_failure', {
+        kind: 'delivery_failure',
+        channelType: BAGET_TELEGRAM_CHANNEL_TYPE,
+        agentGroupId: args.agentGroupId,
         chatId: args.chatId,
-        description: typeof json?.description === 'string' ? json.description : undefined,
+        telegramErrorCode: resp.status,
+        telegramDescription: rawDescription,
         founderActionRequired,
+        attempt: 1,
       });
       return { ok: false, founderActionRequired };
     }
@@ -199,7 +205,16 @@ export async function sendBagetBotMessage(args: {
     }
     return { ok: false, founderActionRequired: false };
   } catch (err) {
-    log.warn('Baget telegram bind: sendMessage threw', { err, chatId: args.chatId });
+    log.warn('Baget channel delivery_failure', {
+      kind: 'delivery_failure',
+      channelType: BAGET_TELEGRAM_CHANNEL_TYPE,
+      agentGroupId: args.agentGroupId,
+      chatId: args.chatId,
+      telegramErrorCode: undefined,
+      telegramDescription: err instanceof Error ? err.message : String(err),
+      founderActionRequired: false,
+      attempt: 1,
+    });
     return { ok: false, founderActionRequired: false };
   }
 }
@@ -219,6 +234,7 @@ export async function sendBagetTelegramWelcome(args: {
   fetchImpl?: typeof fetch;
   chatId: number | string;
   teamMembers: BagetTeamMembers;
+  agentGroupId?: string;
 }): Promise<BagetTelegramSendResult> {
   const cosName = args.teamMembers.cos || 'your CoS';
   const text = `🧭 ${cosName}: All wired up. What's on your mind? Ask me about the batch, the metrics, or anything that's blocking you.`;
@@ -228,6 +244,7 @@ export async function sendBagetTelegramWelcome(args: {
     fetchImpl: args.fetchImpl,
     chatId: args.chatId,
     text,
+    agentGroupId: args.agentGroupId,
   });
 }
 
@@ -257,6 +274,7 @@ export async function sendBagetTelegramFarewell(args: {
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
   chatId: number | string;
+  agentGroupId?: string;
 }): Promise<BagetTelegramSendResult> {
   const text =
     "🔌 Channel disconnected from the dashboard. The team is offline — reconnect any time from app.baget.ai → Settings → Telegram.";
@@ -266,5 +284,6 @@ export async function sendBagetTelegramFarewell(args: {
     fetchImpl: args.fetchImpl,
     chatId: args.chatId,
     text,
+    agentGroupId: args.agentGroupId,
   });
 }

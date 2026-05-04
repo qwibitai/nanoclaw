@@ -93,11 +93,41 @@ export interface OutboundFile {
   data: Buffer;
 }
 
+/** A path-based media attachment (photo or document) to deliver alongside a message. */
+export interface OutboundAttachment {
+  kind: 'photo' | 'document';
+  path: string;
+  caption?: string;
+  filename?: string;
+}
+
+/** Media capability declaration for adapters that support binary media sends. */
+export interface MediaSupport {
+  photo: boolean;
+  document: boolean;
+  maxBytesPerAttachment: number;
+}
+
 /** Outbound message from host to adapter. */
 export interface OutboundMessage {
   kind: string;
   content: unknown; // parsed JSON from messages_out
   files?: OutboundFile[]; // file attachments from the session outbox
+  attachments?: OutboundAttachment[]; // path-based media attachments
+}
+
+/** One deliverable item in a batch-complete celebration. */
+export interface CelebrationDeliverable {
+  label: string;
+  href?: string;
+}
+
+/** Payload for OutboundMessage.kind === 'celebration'. */
+export interface CelebrationPayload {
+  batchNumber: number;
+  summary: string;
+  deliverables?: CelebrationDeliverable[];
+  streakDays?: number;
 }
 
 /** Discovered conversation info (from syncConversations). */
@@ -131,6 +161,9 @@ export interface ChannelAdapter {
 
   // Outbound delivery — returns the platform message ID if available
   deliver(platformId: string, threadId: string | null, message: OutboundMessage): Promise<string | undefined>;
+
+  /** Declared media capabilities; absent means no attachment support. */
+  mediaSupport?: MediaSupport;
 
   // Optional
   setTyping?(platformId: string, threadId: string | null): Promise<void>;

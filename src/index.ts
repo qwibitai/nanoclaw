@@ -9,6 +9,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 
 import { createBagetAdminServer, type BagetAdminServer } from './baget-admin-server.js';
+import { initSentry } from './sentry.js';
 import { DATA_DIR } from './config.js';
 import { enforceStartupBackoff, resetCircuitBreaker } from './circuit-breaker.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
@@ -60,6 +61,7 @@ import type { ChannelAdapter, ChannelSetup } from './channels/adapter.js';
 import { initChannelAdapters, teardownChannelAdapters, getChannelAdapter } from './channels/channel-registry.js';
 
 async function main(): Promise<void> {
+  initSentry();
   log.info('NanoClaw starting');
 
   // 0. Circuit breaker — backoff on rapid restarts
