@@ -37,10 +37,11 @@ grep -q '^INSTALL_FFMPEG=' .env \
 ./container/build.sh
 ```
 
-Adds ~80 MB to the image. Verify:
+Adds ~80 MB to the image. Verify (the image tag is install-slug-derived and printed at the end of `build.sh` — substitute it below; `--entrypoint sh` is required so the agent-runner entrypoint doesn't intercept):
 
 ```bash
-docker run --rm nanoclaw-agent:latest which ffmpeg ffprobe
+IMAGE=$(docker images --filter 'reference=nanoclaw-agent*:latest' --format '{{.Repository}}:{{.Tag}}' | head -1)
+docker run --rm --entrypoint sh "$IMAGE" -c 'which ffmpeg && ffmpeg -version | head -1'
 ```
 
 ## Phase 3: Wire per-agent-group
