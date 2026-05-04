@@ -16,4 +16,5 @@ COPY . .
 RUN npm run build
 # Prune dev dependencies — keeps the image lean
 RUN npm prune --omit=dev
+EXPOSE 3003
 CMD ["npm", "start"]

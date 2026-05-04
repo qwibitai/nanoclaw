@@ -1,200 +1,52 @@
 /**
- * WhatsApp Authentication Script
+ * WhatsApp Cloud API credential validator.
  *
- * Run this during setup to authenticate with WhatsApp.
- * Displays QR code, waits for scan, saves credentials, then exits.
+ * Verifies that WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN are set
+ * and valid by calling the Graph API. Run during setup or to troubleshoot.
  *
  * Usage: npx tsx src/whatsapp-auth.ts
  */
-import fs from 'fs';
-import path from 'path';
-import pino from 'pino';
-// @ts-expect-error no type declarations
-import qrcode from 'qrcode-terminal';
-import readline from 'readline';
+const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID ?? '';
+const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN ?? '';
+const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN ?? '';
+const GRAPH_API_VERSION = 'v19.0';
 
-import {
-  makeWASocket,
-  Browsers,
-  DisconnectReason,
-  fetchLatestWaWebVersion,
-  makeCacheableSignalKeyStore,
-  useMultiFileAuthState,
-} from '@whiskeysockets/baileys';
+async function validate(): Promise<void> {
+  const missing = [];
+  if (!PHONE_NUMBER_ID) missing.push('WHATSAPP_PHONE_NUMBER_ID');
+  if (!ACCESS_TOKEN) missing.push('WHATSAPP_ACCESS_TOKEN');
+  if (!VERIFY_TOKEN) missing.push('WHATSAPP_VERIFY_TOKEN');
 
-// Fix Baileys 6.x bug: getPlatformId sends charCode (49) instead of enum value (1).
-// Fixed in Baileys 7.x but not backported. Without this, pairing codes fail with
-// "couldn't link device" because WhatsApp receives an invalid platform ID.
-// NOTE: Must use createRequire — ESM `import *` creates a read-only namespace.
-import { createRequire } from 'module';
-const _require = createRequire(import.meta.url);
-const _generics = _require(
-  '@whiskeysockets/baileys/lib/Utils/generics',
-) as Record<string, unknown>;
-const { proto } = _require('@whiskeysockets/baileys') as { proto: any };
-_generics.getPlatformId = (browser: string): string => {
-  const platformType =
-    proto.DeviceProps.PlatformType[
-      browser.toUpperCase() as keyof typeof proto.DeviceProps.PlatformType
-    ];
-  return platformType ? platformType.toString() : '1';
-};
-
-const AUTH_DIR = './store/auth';
-const QR_FILE = './store/qr-data.txt';
-const STATUS_FILE = './store/auth-status.txt';
-
-const logger = pino({
-  level: 'warn', // Quiet logging - only show errors
-});
-
-// Check for --pairing-code flag and phone number
-const usePairingCode = process.argv.includes('--pairing-code');
-const phoneArg = process.argv.find((_, i, arr) => arr[i - 1] === '--phone');
-
-function askQuestion(prompt: string): Promise<string> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  return new Promise((resolve) => {
-    rl.question(prompt, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
-}
-
-async function connectSocket(
-  phoneNumber?: string,
-  isReconnect = false,
-): Promise<void> {
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-
-  if (state.creds.registered && !isReconnect) {
-    fs.writeFileSync(STATUS_FILE, 'already_authenticated');
-    console.log('✓ Already authenticated with WhatsApp');
-    console.log(
-      '  To re-authenticate, delete the store/auth folder and run again.',
-    );
-    process.exit(0);
+  if (missing.length > 0) {
+    console.error(`✗ Missing required environment variables: ${missing.join(', ')}`);
+    console.error('  Set these in your .env file and restart.');
+    process.exit(1);
   }
 
-  const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
-    logger.warn(
-      { err },
-      'Failed to fetch latest WA Web version, using default',
-    );
-    return { version: undefined };
-  });
-  const sock = makeWASocket({
-    version,
-    auth: {
-      creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
-    },
-    printQRInTerminal: false,
-    logger,
-    browser: Browsers.macOS('Chrome'),
-  });
+  console.log('Validating WhatsApp Cloud API credentials...\n');
 
-  if (usePairingCode && phoneNumber && !state.creds.me) {
-    // Request pairing code after a short delay for connection to initialize
-    // Only on first connect (not reconnect after 515)
-    setTimeout(async () => {
-      try {
-        const code = await sock.requestPairingCode(phoneNumber!);
-        console.log(`\n🔗 Your pairing code: ${code}\n`);
-        console.log('  1. Open WhatsApp on your phone');
-        console.log('  2. Tap Settings → Linked Devices → Link a Device');
-        console.log('  3. Tap "Link with phone number instead"');
-        console.log(`  4. Enter this code: ${code}\n`);
-        fs.writeFileSync(STATUS_FILE, `pairing_code:${code}`);
-      } catch (err: any) {
-        console.error('Failed to request pairing code:', err.message);
-        process.exit(1);
-      }
-    }, 3000);
+  const res = await fetch(
+    `https://graph.facebook.com/${GRAPH_API_VERSION}/${PHONE_NUMBER_ID}?fields=display_phone_number,verified_name,quality_rating`,
+    { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } },
+  );
+
+  if (!res.ok) {
+    const body = await res.text();
+    console.error(`✗ API request failed (${res.status}): ${body}`);
+    console.error('  Check that WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID are correct.');
+    process.exit(1);
   }
 
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect, qr } = update;
+  const data = await res.json() as { display_phone_number?: string; verified_name?: string; quality_rating?: string };
 
-    if (qr) {
-      // Write raw QR data to file so the setup skill can render it
-      fs.writeFileSync(QR_FILE, qr);
-      console.log('Scan this QR code with WhatsApp:\n');
-      console.log('  1. Open WhatsApp on your phone');
-      console.log('  2. Tap Settings → Linked Devices → Link a Device');
-      console.log('  3. Point your camera at the QR code below\n');
-      qrcode.generate(qr, { small: true });
-    }
-
-    if (connection === 'close') {
-      const reason = (lastDisconnect?.error as any)?.output?.statusCode;
-
-      if (reason === DisconnectReason.loggedOut) {
-        fs.writeFileSync(STATUS_FILE, 'failed:logged_out');
-        console.log('\n✗ Logged out. Delete store/auth and try again.');
-        process.exit(1);
-      } else if (reason === DisconnectReason.timedOut) {
-        fs.writeFileSync(STATUS_FILE, 'failed:qr_timeout');
-        console.log('\n✗ QR code timed out. Please try again.');
-        process.exit(1);
-      } else if (reason === 515) {
-        // 515 = stream error, often happens after pairing succeeds but before
-        // registration completes. Reconnect to finish the handshake.
-        console.log('\n⟳ Stream error (515) after pairing — reconnecting...');
-        connectSocket(phoneNumber, true);
-      } else {
-        fs.writeFileSync(STATUS_FILE, `failed:${reason || 'unknown'}`);
-        console.log('\n✗ Connection failed. Please try again.');
-        process.exit(1);
-      }
-    }
-
-    if (connection === 'open') {
-      fs.writeFileSync(STATUS_FILE, 'authenticated');
-      // Clean up QR file now that we're connected
-      try {
-        fs.unlinkSync(QR_FILE);
-      } catch {}
-      console.log('\n✓ Successfully authenticated with WhatsApp!');
-      console.log('  Credentials saved to store/auth/');
-      console.log('  You can now start the NanoClaw service.\n');
-
-      // Give it a moment to save credentials, then exit
-      setTimeout(() => process.exit(0), 1000);
-    }
-  });
-
-  sock.ev.on('creds.update', saveCreds);
+  console.log('✓ WhatsApp Cloud API credentials are valid\n');
+  console.log(`  Phone number : ${data.display_phone_number ?? PHONE_NUMBER_ID}`);
+  console.log(`  Verified name: ${data.verified_name ?? '(not set)'}`);
+  console.log(`  Quality rating: ${data.quality_rating ?? '(unknown)'}`);
+  console.log(`  Verify token : ${VERIFY_TOKEN} (set this in your Meta webhook config)\n`);
 }
 
-async function authenticate(): Promise<void> {
-  fs.mkdirSync(AUTH_DIR, { recursive: true });
-
-  // Clean up any stale QR/status files from previous runs
-  try {
-    fs.unlinkSync(QR_FILE);
-  } catch {}
-  try {
-    fs.unlinkSync(STATUS_FILE);
-  } catch {}
-
-  let phoneNumber = phoneArg;
-  if (usePairingCode && !phoneNumber) {
-    phoneNumber = await askQuestion(
-      'Enter your phone number (with country code, no + or spaces, e.g. 14155551234): ',
-    );
-  }
-
-  console.log('Starting WhatsApp authentication...\n');
-
-  await connectSocket(phoneNumber);
-}
-
-authenticate().catch((err) => {
-  console.error('Authentication failed:', err.message);
+validate().catch((err: Error) => {
+  console.error('Validation failed:', err.message);
   process.exit(1);
 });

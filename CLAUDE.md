@@ -71,9 +71,39 @@ systemctl --user stop nanoclaw
 systemctl --user restart nanoclaw
 ```
 
-## Pending Work
+## WhatsApp Cloud API — Webhook Setup
 
-- **WhatsApp pairing in AKS** — when Jordan gets a dedicated SIM, add a channel-agnostic HTTP endpoint (`GET :3002/setup/whatsapp`) that returns the pairing code as plain text. Access via `kubectl port-forward -n nanoclaw deployment/nanoclaw 3002:3002` then `curl localhost:3002/setup/whatsapp`. Do NOT send via Telegram or any channel — it must work regardless of which channels are configured.
+NanoClaw now uses the Meta WhatsApp Business Cloud API instead of Baileys. Required env vars:
+
+```
+WHATSAPP_PHONE_NUMBER_ID=   # from Meta Developer Console → WhatsApp → API Setup
+WHATSAPP_ACCESS_TOKEN=       # permanent system user token from Meta
+WHATSAPP_VERIFY_TOKEN=       # any string you pick — set the same value in Meta webhook config
+WHATSAPP_WEBHOOK_PORT=3003   # port the webhook server listens on (default: 3003)
+```
+
+The webhook server listens at `POST /webhook/whatsapp` on port 3003. Meta must be able to reach it over HTTPS. For WSL + Docker:
+
+1. Expose port 3003 from the container: add `-p 3003:3003` to your `docker run` command (or the equivalent in your compose/deployment config).
+2. In WSL, the Docker port is accessible on the Windows host at `localhost:3003`.
+3. For Meta to reach the webhook, you need a public HTTPS URL. Use **ngrok** or **cloudflared**:
+   ```bash
+   # ngrok (easiest for dev):
+   ngrok http 3003
+   # Use the generated https://xxxx.ngrok-free.app URL as your Meta webhook URL
+
+   # cloudflared (free, no account needed for dev):
+   cloudflared tunnel --url http://localhost:3003
+   ```
+4. In Meta Developer Console → WhatsApp → Configuration → Webhooks:
+   - Webhook URL: `https://<your-tunnel>/webhook/whatsapp`
+   - Verify token: value of `WHATSAPP_VERIFY_TOKEN`
+   - Subscribe to: `messages`
+5. In AKS, expose port 3003 via a Service/Ingress and point Meta at the public URL.
+
+Validate credentials: `npm run auth` — calls the Graph API and prints phone number details.
+
+## Pending Work
 
 - **Register Telegram chat on fresh AKS deploy** — `groupCount: 0` on first start. No sqlite3 in container — use Node:
   ```
@@ -89,7 +119,9 @@ systemctl --user restart nanoclaw
 
 ## Troubleshooting
 
-**WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.
+**WhatsApp channel disabled at startup:** Set `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, and `WHATSAPP_VERIFY_TOKEN` in `.env`. Run `npm run auth` to validate.
+
+**Meta webhook verification failing:** Confirm the verify token in Meta Developer Console matches `WHATSAPP_VERIFY_TOKEN` in `.env`, and that port 3003 is reachable from the internet (see Webhook Setup above).
 
 ## Container Build Cache
 
