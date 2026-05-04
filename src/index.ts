@@ -65,6 +65,10 @@ import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { handleRialMessage, isRialEnabled, preloadAllowlist } from './rial/index.js';
+import { Notifier } from './rial/notifier.js';
+import { loadRialConfig } from './rial/secrets.js';
+import { normalisePhone } from './rial/allowlist.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -646,6 +650,33 @@ async function main(): Promise<void> {
         return;
       }
 
+      // rial integration — opt-in via RIAL_INTEGRATION_ENABLED. Intercepts
+      // /link, /status, /help from registered business numbers and replies
+      // directly without invoking the Claude agent. Returns null for
+      // non-business numbers / unknown commands → falls through unchanged.
+      if (isRialEnabled() && !msg.is_from_me && !msg.is_bot_message) {
+        handleRialMessage(msg.sender, msg.content)
+          .then((reply) => {
+            if (reply === null) return;
+            const channel = findChannel(channels, chatJid);
+            if (!channel) {
+              logger.warn(
+                { chatJid },
+                'rial: no channel for chatJid, cannot reply',
+              );
+              return;
+            }
+            return channel.sendMessage(chatJid, reply);
+          })
+          .catch((err) =>
+            logger.error({ err, chatJid }, 'rial: handleRialMessage failed'),
+          );
+        // Don't return — let the message continue through normal storage
+        // so audit logs stay complete. handleRialMessage's reply path is
+        // independent of the agent loop, and the rate-limit guard inside
+        // ensures we don't double-process.
+      }
+
       // Sender allowlist drop mode: discard messages from denied senders before storing
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
         const cfg = loadSenderAllowlist();
@@ -748,6 +779,35 @@ async function main(): Promise<void> {
     },
   });
   startSessionCleanup();
+
+  // rial integration: outbound notifier (SQS poll → WA send). Opt-in via
+  // RIAL_INTEGRATION_ENABLED + RIAL_WA_NOTIFY_QUEUE_URL. Starts as a
+  // background task; never blocks boot.
+  if (isRialEnabled()) {
+    preloadAllowlist();
+    const rialConfig = loadRialConfig();
+    if (rialConfig && rialConfig.notifyQueueUrl) {
+      const notifier = new Notifier({
+        queueUrl: rialConfig.notifyQueueUrl,
+        region: rialConfig.awsRegion,
+        // WA JIDs use `<digits>@s.whatsapp.net`. We strip the `+` and
+        // append the WA domain — the channel registry's ownsJid()
+        // implementation matches the same shape.
+        resolveJid: (phone) => {
+          const digits = normalisePhone(phone).replace(/^\+/, '');
+          if (!digits) return null;
+          return `${digits}@s.whatsapp.net`;
+        },
+        findSender: (jid) => findChannel(channels, jid) ?? null,
+      });
+      notifier.start();
+    } else {
+      logger.warn(
+        'rial: integration enabled but notifier disabled (config or queue URL missing)',
+      );
+    }
+  }
+
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
