@@ -885,6 +885,7 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
       apiBaseUrl: config.telegramApiBaseUrl,
       fetchImpl: config.telegramFetchImpl,
       chatId: telegramUserId,
+      companyName,
       teamMembers,
     });
 

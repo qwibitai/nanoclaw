@@ -307,6 +307,12 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     // 5. Welcome the founder. Same template as the admin direct-bind
     //    path so the founder sees a consistent first message regardless
     //    of which pairing UX they came through.
+    //
+    //    The agent_groups.name column is set to the company name at
+    //    create-time (`createBagetAgentGroup({ name: companyName })`),
+    //    so reading `agentGroup.name` here is the canonical way to
+    //    surface the founder's company in the chat — important when a
+    //    founder runs multiple Baget companies through the shared bot.
     const team = parseTeamMembers(agentGroup.baget_team_members);
     if (team) {
       await sendBagetTelegramWelcome({
@@ -314,6 +320,7 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
         apiBaseUrl: cfg.apiBaseUrl,
         fetchImpl: cfg.fetchImpl,
         chatId,
+        companyName: agentGroup.name,
         teamMembers: team,
       });
     } else {
@@ -325,7 +332,10 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
         chatId,
         agentGroupId: row.agent_group_id,
       });
-      await sendBotMessage(chatId, `🧭 your CoS: All wired up. What's on your mind?`);
+      await sendBotMessage(
+        chatId,
+        `🧭 your CoS: All wired up — your ${agentGroup.name} team is ready. What's on your mind?`,
+      );
     }
     log.info('Baget telegram: paired chat to agent_group', {
       chatId,

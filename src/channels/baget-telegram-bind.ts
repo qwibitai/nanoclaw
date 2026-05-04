@@ -209,6 +209,12 @@ export async function sendBagetBotMessage(args: {
  * immediately after a successful bind so the founder sees a real reply
  * before they've even typed their first message.
  *
+ * The greeting names the company explicitly so a founder running
+ * multiple Baget companies can tell at a glance which chat they're in.
+ * Telegram has no per-chat header beyond the bot's own name, and the
+ * bot is shared across all founders / companies — without the company
+ * name in the chat body, every paired company looks identical.
+ *
  * NOTE the CoS persona prefix here uses the team's resolved cos name
  * (Louis / whatever the founder configured) — same string the model
  * will pick up on the next exchange via the rendered CLAUDE.local.md.
@@ -218,10 +224,11 @@ export async function sendBagetTelegramWelcome(args: {
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
   chatId: number | string;
+  companyName: string;
   teamMembers: BagetTeamMembers;
 }): Promise<BagetTelegramSendResult> {
   const cosName = args.teamMembers.cos || 'your CoS';
-  const text = `🧭 ${cosName}: All wired up. What's on your mind? Ask me about the batch, the metrics, or anything that's blocking you.`;
+  const text = `🧭 ${cosName}: All wired up — your ${args.companyName} team is ready. What's on your mind? Ask me about the batch, the metrics, or anything that's blocking you.`;
   return sendBagetBotMessage({
     botToken: args.botToken,
     apiBaseUrl: args.apiBaseUrl,

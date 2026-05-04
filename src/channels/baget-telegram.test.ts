@@ -230,6 +230,11 @@ describe('Baget Telegram adapter', () => {
     expect(outbound[0]?.body.chat_id).toBe(CHAT_ID);
     expect(outbound[0]?.body.text).toContain('Louis');
     expect(outbound[0]?.body.text).toContain("What's on your mind?");
+    // Company name surfaces in the welcome so a founder running multiple
+    // Baget companies can tell which chat they're in. agent_groups.name
+    // is seeded to 'Baget Team' above; the welcome reads it via
+    // getBagetAgentGroupById in the /start handler.
+    expect(outbound[0]?.body.text).toContain('Baget Team');
 
     const dmResp = await fetch(`${baseUrl}/api/channels/telegram/webhook`, {
       method: 'POST',
