@@ -32,16 +32,18 @@
  */
 import http from 'http';
 import { timingSafeEqual } from 'crypto';
+import path from 'path';
 
 import { registerExtraRoute } from '../baget-admin-server.js';
 import { applyPersonaPrefix } from '../baget-persona.js';
+import { GROUPS_DIR } from '../config.js';
 import { consumePairingToken } from '../db/baget-pairing-tokens.js';
 import { recordSeenUpdate, sweepOldSeenUpdates } from '../db/baget-seen-updates.js';
 import { getBagetAgentGroupById, normalizeBoundBagetTelegramFounderChannels } from '../db/baget-agent-groups.js';
 import { getMessagingGroupAgents, getMessagingGroupByPlatform } from '../db/messaging-groups.js';
 import { log } from '../log.js';
 import { OPTIONAL_ROLES, type BagetTeamMembers } from '../baget-pairing.js';
-import type { ChannelAdapter, ChannelSetup, OutboundMessage } from './adapter.js';
+import type { ChannelAdapter, ChannelSetup, InboundAttachment, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 import {
   BAGET_TELEGRAM_CHANNEL_TYPE,
@@ -49,6 +51,12 @@ import {
   platformIdFromChatId,
   sendBagetTelegramWelcome,
 } from './baget-telegram-bind.js';
+import {
+  downloadTelegramAttachment,
+  OversizedAttachmentError,
+  parseTelegramAttachments,
+  type TelegramMessage,
+} from './baget-telegram-attachments.js';
 
 // Re-export so existing importers (admin server, db helpers) keep
 // working without churn — this constant lives in -bind now to avoid
@@ -66,9 +74,11 @@ export interface BagetTelegramConfig {
   apiBaseUrl?: string;
   /** Optional override of the fetch implementation, for tests. */
   fetchImpl?: typeof fetch;
+  /** Override the groups directory root. Tests use a temp dir. */
+  _testGroupsDir?: string;
 }
 
-interface UpdateMessage {
+interface UpdateMessage extends TelegramMessage {
   message_id: number;
   from?: { id: number; first_name?: string; username?: string };
   chat: { id: number; type: string };
@@ -85,6 +95,7 @@ interface TelegramUpdate {
 function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
   const apiBase = cfg.apiBaseUrl ?? 'https://api.telegram.org';
   const fetchFn = cfg.fetchImpl ?? fetch;
+  const groupsDir = cfg._testGroupsDir ?? GROUPS_DIR;
   let unregisterRoute: (() => void) | null = null;
   let setup: ChannelSetup | null = null;
 
@@ -205,13 +216,22 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     if (!fresh) return;
 
     const msg = update.message ?? update.edited_message;
-    if (!msg || !msg.text) return;
+    if (!msg) return;
 
-    // Pairing flow: /start <token>
-    const startMatch = /^\/start\s+(.+?)\s*$/.exec(msg.text.trim());
-    if (startMatch) {
-      await handleStartCommand(msg, startMatch[1]);
-      return;
+    const hasText = typeof msg.text === 'string' && msg.text.length > 0;
+    const hasCaption = typeof msg.caption === 'string' && msg.caption.length > 0;
+    const parsedAttachment = parseTelegramAttachments(msg);
+
+    // Drop updates with neither text nor media (e.g. service messages)
+    if (!hasText && !hasCaption && !parsedAttachment) return;
+
+    // Pairing flow: /start <token> — only on plain text messages
+    if (hasText) {
+      const startMatch = /^\/start\s+(.+?)\s*$/.exec(msg.text!.trim());
+      if (startMatch) {
+        await handleStartCommand(msg, startMatch[1]);
+        return;
+      }
     }
 
     // Plain DM — route through the standard adapter contract.
@@ -228,14 +248,79 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       : 'unknown';
     const senderId = msg.from ? `telegram:${msg.from.id}` : `telegram:unknown`;
 
+    // Resolve attachments — download to the agent_group's inbound folder
+    let attachments: InboundAttachment[] | undefined;
+    if (parsedAttachment) {
+      const mg = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, platformId);
+      if (!mg) {
+        log.warn('Baget telegram: attachment received on unpaired chat — dropping', {
+          chatId: msg.chat.id,
+          updateId: update.update_id,
+        });
+        return;
+      }
+      const wired = getMessagingGroupAgents(mg.id);
+      if (wired.length === 0) {
+        log.warn('Baget telegram: attachment received on chat with no wired agents — dropping', {
+          chatId: msg.chat.id,
+          updateId: update.update_id,
+        });
+        return;
+      }
+      const agentGroup = getBagetAgentGroupById(wired[0]!.agent_group_id);
+      if (!agentGroup) {
+        log.warn('Baget telegram: attachment agent_group not found — dropping', {
+          chatId: msg.chat.id,
+          agentGroupId: wired[0]!.agent_group_id,
+        });
+        return;
+      }
+
+      const destDir = path.resolve(groupsDir, agentGroup.folder, 'inbound');
+
+      try {
+        const { filePath, sizeBytes } = await downloadTelegramAttachment({
+          botToken: cfg.botToken,
+          fileId: parsedAttachment.fileId,
+          destDir,
+          fetchImpl: fetchFn,
+          apiBaseUrl: apiBase,
+        });
+
+        attachments = [
+          {
+            kind: parsedAttachment.kind,
+            path: filePath,
+            mimeType: parsedAttachment.mimeType,
+            originalName: parsedAttachment.originalName,
+            sizeBytes,
+            platformFileId: parsedAttachment.fileId,
+          },
+        ];
+      } catch (err) {
+        if (err instanceof OversizedAttachmentError) {
+          await sendBotMessage(
+            msg.chat.id,
+            "That file is too big for me to receive (20 MB limit). Try splitting it or sharing a link.",
+          );
+          return;
+        }
+        log.error('Baget telegram: attachment download failed', { err, updateId: update.update_id });
+        return;
+      }
+    }
+
+    const textContent = hasText ? msg.text! : hasCaption ? msg.caption! : '';
+
     try {
       await setup.onInbound(platformId, null, {
         id: `tg-${update.update_id}`,
         kind: 'chat',
         timestamp: new Date(msg.date * 1000).toISOString(),
-        content: { text: msg.text, sender, senderId },
-        isMention: msg.chat.type === 'private', // every DM is implicitly a mention
+        content: { text: textContent, sender, senderId },
+        isMention: msg.chat.type === 'private',
         isGroup: msg.chat.type !== 'private',
+        attachments,
       });
     } catch (err) {
       log.error('Baget telegram: onInbound threw', { err, updateId: update.update_id });
