@@ -4,6 +4,11 @@
  * Thin orchestrator: init DB, run migrations, start channel adapters,
  * start delivery polls, start sweep, handle shutdown.
  */
+// MUST be the first import: installs Sentry's global error handlers
+// before any subsequent module has a chance to throw at load time. No-op
+// when SENTRY_DSN is unset (local dev). See src/sentry-init.ts.
+import './sentry-init.js';
+
 import path from 'path';
 
 import { randomUUID } from 'crypto';

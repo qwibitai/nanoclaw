@@ -37,6 +37,7 @@ describe('sendBagetTelegramFarewell', () => {
       botToken: 'bot-token-stub',
       chatId: 424242,
       fetchImpl,
+      agentGroupId: 'ag-test-farewell',
     });
 
     expect(result).toEqual({ ok: true, messageId: '12345' });
@@ -71,6 +72,7 @@ describe('sendBagetTelegramFarewell', () => {
       botToken: 'bot-token-stub',
       chatId: 424242,
       fetchImpl,
+      agentGroupId: 'ag-test-farewell',
     });
     expect(result).toEqual({ ok: false, founderActionRequired: true });
   });
@@ -85,6 +87,7 @@ describe('sendBagetTelegramFarewell', () => {
       botToken: 'bot-token-stub',
       chatId: 424242,
       fetchImpl,
+      agentGroupId: 'ag-test-farewell',
     });
     expect(result).toEqual({ ok: false, founderActionRequired: false });
   });

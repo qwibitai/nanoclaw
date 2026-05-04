@@ -34,6 +34,8 @@ import http from 'http';
 import { timingSafeEqual } from 'crypto';
 import path from 'path';
 
+import * as Sentry from '@sentry/node';
+
 import { registerExtraRoute } from '../baget-admin-server.js';
 import { applyPersonaPrefix } from '../baget-persona.js';
 import { GROUPS_DIR } from '../config.js';
@@ -57,6 +59,7 @@ import {
   BAGET_TELEGRAM_CHANNEL_TYPE,
   bindBagetTelegramChat,
   platformIdFromChatId,
+  sendBagetBotMessage,
   sendBagetTelegramWelcome,
 } from './baget-telegram-bind.js';
 import {
@@ -245,7 +248,15 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
 
     setImmediate(() => {
       processUpdate(update).catch((err) => {
+        // The webhook handler has already 200-ACK'd to Telegram, so any
+        // error here is fully detached from the request thread — only
+        // the structured log + Sentry capture surface it. Sentry is a
+        // no-op when SENTRY_DSN is unset (local dev).
         log.error('Baget telegram: update processing threw', { err, updateId: update.update_id });
+        Sentry.captureException(err, {
+          tags: { source: 'baget-telegram-webhook' },
+          extra: { updateId: update.update_id },
+        });
       });
     });
   }
@@ -378,6 +389,7 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
           await sendBotMessage(
             msg.chat.id,
             'That file is too big for me to receive (20 MB limit). Try splitting it or sharing a link.',
+            agentGroup.id,
           );
           return;
         }
@@ -460,7 +472,10 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       });
       return;
     }
-    const FAILURE_MSG = "That pairing link isn't valid or has expired. Generate a fresh one from the dashboard.";
+    // ASSUMPTION: the canonical team-settings path is `/team`. If the
+    // dashboard team reorganizes routing, patch the path here.
+    const dashboardBase = process.env.BAGET_DASHBOARD_URL || 'https://app.baget.ai';
+    const FAILURE_MSG = `That pairing link isn't valid or has expired. Tap here to get a fresh one: ${dashboardBase}/team`;
 
     // Single-use consume. The token format is now 32 hex chars
     // (Telegram caps `?start=` at 64 bytes of [A-Z a-z 0-9 _ -], so
@@ -470,13 +485,14 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     // entropy budget.
     if (!/^[a-f0-9]{32}$/.test(rawToken)) {
       log.warn('Baget telegram: /start payload failed shape check', { chatId });
-      await sendBotMessage(chatId, FAILURE_MSG);
+      // agentGroupId=null: pre-consume failure, no agent_group resolvable.
+      await sendBotMessage(chatId, FAILURE_MSG, null);
       return;
     }
     const result = consumePairingToken(rawToken, new Date().toISOString());
     if (!result.ok) {
       log.warn('Baget telegram: /start token consume failed', { chatId, reason: result.reason });
-      await sendBotMessage(chatId, FAILURE_MSG);
+      await sendBotMessage(chatId, FAILURE_MSG, null);
       return;
     }
 
@@ -489,7 +505,7 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
         chatId,
         agentGroupId: row.agent_group_id,
       });
-      await sendBotMessage(chatId, FAILURE_MSG);
+      await sendBotMessage(chatId, FAILURE_MSG, row.agent_group_id);
       return;
     }
 
@@ -503,7 +519,11 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       firstName: msg.from?.first_name ?? null,
     });
     if (!bind.ok) {
-      await sendBotMessage(chatId, 'Something went wrong wiring this chat. Try the link again in a minute.');
+      await sendBotMessage(
+        chatId,
+        'Something went wrong wiring this chat. Try the link again in a minute.',
+        row.agent_group_id,
+      );
       return;
     }
 
@@ -525,6 +545,7 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
         chatId,
         companyName: agentGroup.name,
         teamMembers: team,
+        agentGroupId: row.agent_group_id,
       });
     } else {
       // Defensive: agent_group exists but team_members JSON is missing
@@ -538,6 +559,7 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       await sendBotMessage(
         chatId,
         `🧭 your CoS: All wired up — your ${agentGroup.name} team is ready. What's on your mind?`,
+        row.agent_group_id,
       );
     }
     log.info('Baget telegram: paired chat to agent_group', {
@@ -557,19 +579,32 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     const chatId = chatIdFromPlatformId(platformId);
     if (chatId === null) return undefined;
 
-    // Celebrations bypass persona-prefix — they're from the team collectively.
+    // Resolve the wired agent_group up front so the structured
+    // `delivery_failure` log emitted by sendBotMessage → sendBagetBotMessage
+    // can carry an `agentGroupId` for the dashboard UX. The strict 1:1
+    // mapping (`wired.length === 1`) is what we'd consider authoritative;
+    // for the delivery-failure log we report null on unpaired or
+    // multi-bound chats and let downstream filter them out.
+    const mg = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, platformId);
+    const wired = mg ? getMessagingGroupAgents(mg.id) : [];
+    const agentGroupId = wired.length === 1 ? (wired[0]?.agent_group_id ?? null) : null;
+
+    // Celebrations BYPASS the multi-bind / archived security checks below
+    // by design. The `/celebrate` admin endpoint (#19) has already
+    // validated wiring + agent_group state before dispatching, and a
+    // celebration is from "the team" collectively (no persona-prefix), so
+    // there's no cross-tenant impersonation risk that the multi-bind
+    // check would catch in the persona-prefixed path. If you change this
+    // branch order, keep `agentGroupId` resolved before the check so the
+    // delivery_failure log still has it.
     if (message.kind === 'celebration') {
       const celebText = renderCelebrationText(message.content as CelebrationPayload);
-      return sendBotMessage(chatId, celebText);
+      return sendBotMessage(chatId, celebText, agentGroupId);
     }
 
     const text = extractText(message);
     if (text === null) return undefined;
 
-    // Resolve the agent_group from the messaging_group → applyPersonaPrefix.
-    // We don't currently have the agent_group_id on the OutboundMessage
-    // payload, so look it up via messaging_group's wired agents.
-    //
     // SECURITY: refuse to deliver if the chat has more than one wired
     // agent. Baget founders are 1:1 chat↔agent_group by construction.
     // A multi-bind state would let the model in agent_group A render
@@ -578,10 +613,8 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     // detect it here and drop loud rather than silently render under
     // the wrong identity. Single-bind is enforced by the /start
     // handler's UNIQUE constraint, but this is the second-line check.
-    const mg = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, platformId);
     let prefixed = text;
     if (mg) {
-      const wired = getMessagingGroupAgents(mg.id);
       if (wired.length > 1) {
         log.error('Baget telegram: refusing to deliver — chat has >1 wired agent_group', {
           platformId,
@@ -605,30 +638,30 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       }
     }
 
-    return sendBotMessage(chatId, prefixed);
+    return sendBotMessage(chatId, prefixed, agentGroupId);
   }
 
-  async function sendBotMessage(chatId: number | string, text: string): Promise<string | undefined> {
-    const url = `${apiBase}/bot${cfg.botToken}/sendMessage`;
-    try {
-      const resp = await fetchFn(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text }),
-      });
-      if (!resp.ok) {
-        log.warn('Baget telegram: sendMessage non-OK', { status: resp.status, chatId });
-        return undefined;
-      }
-      const json = (await resp.json().catch(() => null)) as { ok: boolean; result?: { message_id: number } } | null;
-      if (json?.ok && typeof json.result?.message_id === 'number') {
-        return String(json.result.message_id);
-      }
-      return undefined;
-    } catch (err) {
-      log.warn('Baget telegram: sendMessage threw', { err, chatId });
-      return undefined;
-    }
+  // Thin shim over `sendBagetBotMessage` (in baget-telegram-bind.ts).
+  // The bind module owns the structured `delivery_failure` log + Telegram
+  // 403-detection so EVERY send in this adapter emits the same shape; this
+  // helper just adapts the result type to the `string | undefined` callers
+  // expect. agentGroupId is `null` for pre-pair traffic (token-shape /
+  // consume failure paths in handleStartCommand) and a real id everywhere
+  // else.
+  async function sendBotMessage(
+    chatId: number | string,
+    text: string,
+    agentGroupId: string | null,
+  ): Promise<string | undefined> {
+    const result = await sendBagetBotMessage({
+      botToken: cfg.botToken,
+      apiBaseUrl: apiBase,
+      fetchImpl: fetchFn,
+      chatId,
+      text,
+      agentGroupId,
+    });
+    return result.ok ? result.messageId : undefined;
   }
 
   async function setTyping(platformId: string, _threadId: string | null): Promise<void> {

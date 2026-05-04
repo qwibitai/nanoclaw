@@ -204,8 +204,33 @@ export function bindBagetTelegramChat(args: {
  * bot chat". Logs warnings but never throws — a transport failure must
  * not propagate to the bind caller because the DB writes already
  * succeeded.
+ *
+ * Emits `kind: 'delivery_failure'` on every transport failure (non-OK
+ * response, malformed-200 body, or network throw). This shape is the
+ * cross-repo CONTRACT consumed by the dashboard delivery-receipt UI —
+ * same shape used by `/celebrate` (#19) and future channel adapters.
+ * Callers MUST pass `agentGroupId`; null is reserved for pre-pair
+ * traffic where the agent_group is genuinely not yet known.
  */
 export type BagetTelegramSendResult = { ok: true; messageId: string } | { ok: false; founderActionRequired: boolean };
+
+const DELIVERY_FAILURE_LOG = 'Baget channel delivery_failure';
+
+function emitTelegramDeliveryFailure(payload: {
+  agentGroupId: string | null;
+  chatId: number | string;
+  telegramErrorCode?: number;
+  telegramDescription?: string;
+  err?: unknown;
+  founderActionRequired: boolean;
+}): void {
+  log.warn(DELIVERY_FAILURE_LOG, {
+    kind: 'delivery_failure',
+    channelType: BAGET_TELEGRAM_CHANNEL_TYPE,
+    attempt: 1,
+    ...payload,
+  });
+}
 
 export async function sendBagetBotMessage(args: {
   botToken: string;
@@ -213,6 +238,7 @@ export async function sendBagetBotMessage(args: {
   fetchImpl?: typeof fetch;
   chatId: number | string;
   text: string;
+  agentGroupId: string | null;
 }): Promise<BagetTelegramSendResult> {
   const apiBase = args.apiBaseUrl ?? 'https://api.telegram.org';
   const fetchFn = args.fetchImpl ?? fetch;
@@ -228,14 +254,17 @@ export async function sendBagetBotMessage(args: {
       result?: { message_id?: number };
       description?: unknown;
     } | null;
+    const telegramDescription = typeof json?.description === 'string' ? json.description : undefined;
     if (!resp.ok) {
-      const description = typeof json?.description === 'string' ? json.description.toLowerCase() : '';
+      const lowerDescription = telegramDescription?.toLowerCase() ?? '';
       const founderActionRequired =
-        description.includes("can't initiate conversation with a user") || description.includes('chat not found');
-      log.warn('Baget telegram bind: sendMessage non-OK', {
-        status: resp.status,
+        lowerDescription.includes("can't initiate conversation with a user") ||
+        lowerDescription.includes('chat not found');
+      emitTelegramDeliveryFailure({
+        agentGroupId: args.agentGroupId,
         chatId: args.chatId,
-        description: typeof json?.description === 'string' ? json.description : undefined,
+        telegramErrorCode: resp.status,
+        telegramDescription,
         founderActionRequired,
       });
       return { ok: false, founderActionRequired };
@@ -243,9 +272,25 @@ export async function sendBagetBotMessage(args: {
     if (json?.ok && typeof json.result?.message_id === 'number') {
       return { ok: true, messageId: String(json.result.message_id) };
     }
+    // 200 with malformed body: HTTP succeeded but the envelope wasn't a
+    // valid Telegram OK (null json, json.ok=false, or missing message_id).
+    // The founder didn't receive the message — same delivery_failure
+    // contract.
+    emitTelegramDeliveryFailure({
+      agentGroupId: args.agentGroupId,
+      chatId: args.chatId,
+      telegramErrorCode: resp.status,
+      telegramDescription,
+      founderActionRequired: false,
+    });
     return { ok: false, founderActionRequired: false };
   } catch (err) {
-    log.warn('Baget telegram bind: sendMessage threw', { err, chatId: args.chatId });
+    emitTelegramDeliveryFailure({
+      agentGroupId: args.agentGroupId,
+      chatId: args.chatId,
+      err,
+      founderActionRequired: false,
+    });
     return { ok: false, founderActionRequired: false };
   }
 }
@@ -272,6 +317,7 @@ export async function sendBagetTelegramWelcome(args: {
   chatId: number | string;
   companyName: string;
   teamMembers: BagetTeamMembers;
+  agentGroupId: string;
 }): Promise<BagetTelegramSendResult> {
   const cosName = args.teamMembers.cos || 'your CoS';
   const text = `🧭 ${cosName}: All wired up — your ${args.companyName} team is ready. What's on your mind? Ask me about the batch, the metrics, or anything that's blocking you.`;
@@ -281,6 +327,7 @@ export async function sendBagetTelegramWelcome(args: {
     fetchImpl: args.fetchImpl,
     chatId: args.chatId,
     text,
+    agentGroupId: args.agentGroupId,
   });
 }
 
@@ -310,6 +357,7 @@ export async function sendBagetTelegramFarewell(args: {
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
   chatId: number | string;
+  agentGroupId: string;
 }): Promise<BagetTelegramSendResult> {
   const text =
     '🔌 Channel disconnected from the dashboard. The team is offline — reconnect any time from app.baget.ai → Settings → Telegram.';
@@ -319,6 +367,7 @@ export async function sendBagetTelegramFarewell(args: {
     fetchImpl: args.fetchImpl,
     chatId: args.chatId,
     text,
+    agentGroupId: args.agentGroupId,
   });
 }
 

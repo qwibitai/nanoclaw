@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createBagetAdminServer } from '../baget-admin-server.js';
+import { log } from '../log.js';
 import {
   createBagetAgentGroup,
   getBagetAgentGroupById,
@@ -341,6 +342,92 @@ describe('Baget Telegram adapter', () => {
     expect(getMessagingGroupAgentByPair(messagingGroup!.id, 'unused-in-this-test')).toBeDefined();
     expect(outbound).toHaveLength(1);
     expect(outbound[0]?.body.chat_id).toBe(CHAT_ID);
+  });
+
+  it('failure-msg includes a deeplink to the team-settings page (default app.baget.ai)', async () => {
+    // Token that passes the regex ([a-f0-9]{32}) but has no DB row →
+    // exercises the consume-failure path. The shape-check failure path
+    // (non-hex token) emits the same message; we exercise consume-failure
+    // because it doesn't depend on a different code path.
+    const fakeToken = 'deadbeefdeadbeefdeadbeefdeadbeef';
+    const startResp = await fetch(`${baseUrl}/api/channels/telegram/webhook`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Bot-Api-Secret-Token': WEBHOOK_SECRET,
+      },
+      body: JSON.stringify(makeUpdate(701, `/start ${fakeToken}`)),
+    });
+
+    expect(startResp.status).toBe(200);
+    await waitFor(() => outbound.length === 1);
+
+    expect(outbound[0]?.body.text).toContain('https://app.baget.ai/team');
+    // Message preserves the user-facing copy contract.
+    expect(outbound[0]?.body.text?.toLowerCase()).toContain('expired');
+  });
+
+  it('deliver() plumbs the resolved agentGroupId into the structured delivery_failure log on transport error', async () => {
+    // Pair the chat first so wired.length === 1 and the resolved
+    // agentGroupId is the real id.
+    expect(bindBagetTelegramChat({ chatId: CHAT_ID, agentGroupId: AGENT_GROUP_ID, firstName: 'Sam' }).ok).toBe(true);
+
+    // Force the next send to fail with a 500. The delivery_failure
+    // log MUST carry the bound agentGroupId — a regression that drops
+    // the parameter would silently log `agentGroupId: null` and the
+    // dashboard receipt UI would lose the team association.
+    telegramSendStatus = 500;
+    telegramSendJson = { ok: false, description: 'Internal server error' };
+    const warnSpy = vi.spyOn(log, 'warn');
+
+    const messageId = await adapter!.deliver(`baget-telegram:${CHAT_ID}`, null, {
+      kind: 'chat',
+      content: { text: 'cos: hello' },
+    } satisfies OutboundMessage);
+
+    expect(messageId).toBeUndefined();
+    const failureCalls = warnSpy.mock.calls.filter((c: unknown[]) => c[0] === 'Baget channel delivery_failure');
+    expect(failureCalls.length).toBeGreaterThanOrEqual(1);
+    // chatId is a string here because deliver() resolves it via
+    // chatIdFromPlatformId, which returns the post-prefix slice as a
+    // string. The bind module accepts `number | string` and writes
+    // through verbatim. Pin the string form so a future refactor that
+    // accidentally coerces back to a number gets caught.
+    expect(failureCalls[0]![1]).toMatchObject({
+      kind: 'delivery_failure',
+      channelType: 'baget-telegram',
+      agentGroupId: AGENT_GROUP_ID,
+      chatId: String(CHAT_ID),
+      telegramErrorCode: 500,
+    });
+
+    warnSpy.mockRestore();
+  });
+
+  it('failure-msg honors the BAGET_DASHBOARD_URL env override', async () => {
+    const previous = process.env.BAGET_DASHBOARD_URL;
+    process.env.BAGET_DASHBOARD_URL = 'https://staging.dashboard.baget.test';
+    try {
+      const fakeToken = 'cafebabecafebabecafebabecafebabe';
+      const startResp = await fetch(`${baseUrl}/api/channels/telegram/webhook`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Telegram-Bot-Api-Secret-Token': WEBHOOK_SECRET,
+        },
+        body: JSON.stringify(makeUpdate(702, `/start ${fakeToken}`)),
+      });
+
+      expect(startResp.status).toBe(200);
+      await waitFor(() => outbound.length === 1);
+
+      expect(outbound[0]?.body.text).toContain('https://staging.dashboard.baget.test/team');
+      // Default must NOT leak through when env is set.
+      expect(outbound[0]?.body.text).not.toContain('app.baget.ai');
+    } finally {
+      if (previous === undefined) delete process.env.BAGET_DASHBOARD_URL;
+      else process.env.BAGET_DASHBOARD_URL = previous;
+    }
   });
 
   it('upgrades a pre-pair DM row to a public founder channel on /start', async () => {
