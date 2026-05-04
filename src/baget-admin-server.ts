@@ -1307,9 +1307,22 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
     // is a Vela-style legacy pairing. Don't auto-assign; keep it on
     // the global bot.
     if (hadExistingChatBind && config.telegramBotToken) return null;
-    // Fresh agent_group (no chat-binds yet) → safe to assign a pool
-    // bot. Covers both the genuine first-pair and the
-    // partial-failure-retry case.
+    // Codex P1 (re-review of ec1c742): never assign a fresh pool
+    // bot when `publicBaseUrl` is unset. Without a webhook URL we
+    // cannot register the per-bot inbound route, which means the
+    // founder's chat would be one-way broken — outbound works
+    // (we'd return the pool token), but Telegram updates land
+    // nowhere because nothing is bound on the per-bot route. The
+    // bind would *appear* successful while the chat is silently
+    // half-dead. Fall back to the global bot if available, else
+    // surface `pool_exhausted` so the operator sees the
+    // misconfiguration immediately.
+    if (!config.publicBaseUrl) {
+      return config.telegramBotToken ? null : 'pool_exhausted';
+    }
+    // Fresh agent_group (no chat-binds yet) + publicBaseUrl set →
+    // safe to assign a pool bot. Covers both the genuine first-pair
+    // and the partial-failure-retry case.
     const assigned = assignNextAvailableBot(agentGroupId);
     // Idempotency note: assignNextAvailableBot's step-0 returns an
     // existing assignment if it sees one, but we already gated on

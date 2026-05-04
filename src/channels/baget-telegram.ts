@@ -330,7 +330,24 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       res.writeHead(404).end();
       return;
     }
-    const botUsername = decodeURIComponent(m[1]!);
+    // Codex P2 (re-review of ec1c742): `decodeURIComponent` throws
+    // `URIError` on malformed `%` sequences. An attacker (or buggy
+    // probe) that hits `/api/channels/telegram/bot/%XX/webhook`
+    // would otherwise get a 500 + a noisy stack-trace in logs, vs
+    // the intended opaque 401 every other unauthenticated path
+    // returns. Catch and treat as "unknown username" — same
+    // pool-membership-opaque 401 as the unknown-bot path below.
+    let botUsername: string;
+    try {
+      botUsername = decodeURIComponent(m[1]!);
+    } catch {
+      log.warn('Baget telegram: per-bot webhook with malformed username encoding', {
+        rawSegment: m[1]!.slice(0, 80),
+        routeSource: 'per-bot',
+      });
+      res.writeHead(401).end();
+      return;
+    }
     const entry = getBotPoolEntryByUsername(botUsername);
     if (!entry) {
       // Don't leak pool membership: same 401 as a wrong-secret

@@ -618,19 +618,27 @@ describe('handleBindTelegram — legacy global-bot path', () => {
     expect(calls[0]!.url).toContain('/bottok-vela-global/sendMessage');
   });
 
-  it("skips per-bot setWebhook when publicBaseUrl is unset (operator hasn't opted into pool mode)", async () => {
+  it('publicBaseUrl unset + global token configured → falls back to global; pool NOT auto-assigned (Codex re-review P1)', async () => {
+    // Codex re-review on ec1c742 caught that the previous behavior
+    // (auto-assign a pool bot when publicBaseUrl is unset) created
+    // a one-way-broken chat: outbound rode the per-company token
+    // but inbound was never registered (no URL → no setWebhook).
+    // The fix: when we can't register the webhook, refuse to make
+    // a fresh assignment and fall back to the global token instead.
+    //
+    // This pins the corrected behavior — pool stays untouched, the
+    // founder lands on the global bot via cfg.telegramBotToken,
+    // botUsername is omitted from the response (legacy shape).
     seedBotPoolEntry({
-      botUsername: 'acme_bot_no_url',
-      botTokenValue: 'tok-no-url',
-      webhookSecret: 'sec-no-url',
+      botUsername: 'reserved_bot_no_url',
+      botTokenValue: 'tok-reserved-no-url',
+      webhookSecret: 'sec-reserved-no-url',
       createdAt: new Date().toISOString(),
     });
 
     server = await startBindServer({
-      // publicBaseUrl deliberately omitted — pool is seeded but the
-      // operator hasn't set BAGET_PUBLIC_BASE_URL. Bind still uses
-      // the per-company token (better than nothing) but skips
-      // setWebhook because we don't know the URL to register.
+      // publicBaseUrl deliberately omitted.
+      telegramBotToken: 'tok-global-fallback',
       telegramRoutes: [
         {
           match: (u) => u.endsWith('/sendMessage'),
@@ -640,18 +648,99 @@ describe('handleBindTelegram — legacy global-bot path', () => {
       generateAgentGroupId: () => 'ag-no-url',
     });
 
+    const { status, json } = await postBind(server.baseUrl);
+    expect(status).toBe(200);
+    expect(json.ok).toBe(true);
+    // Legacy shape — no botUsername in response, default deeplink.
+    expect(json.botUsername).toBeUndefined();
+    expect(json.telegramOpenUrl).toBe('https://t.me/baget_global_bot');
+
+    // Only sendMessage fired, on the GLOBAL token. No pool
+    // assignment took place — `reserved_bot_no_url` is still
+    // available for a properly-configured later deployment.
+    const calls = server.fetchCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toContain('/bottok-global-fallback/sendMessage');
+    expect(getBotPoolEntryByAgentGroup('ag-no-url')).toBeUndefined();
+    expect(countAvailableBots()).toBe(1);
+  });
+
+  it('publicBaseUrl unset + NO global token + pool seeded → 503 pool_exhausted (no silent half-broken bind, Codex re-review P1)', async () => {
+    // Same condition as the previous test, but without a global
+    // fallback. The bind handler must surface the misconfiguration
+    // (no setWebhook URL, no global bot) rather than silently
+    // pool-assign a bot whose webhook can't be registered.
+    seedBotPoolEntry({
+      botUsername: 'untouched_bot',
+      botTokenValue: 'tok-untouched',
+      webhookSecret: 'sec-untouched',
+      createdAt: new Date().toISOString(),
+    });
+
+    server = await startBindServer({
+      // publicBaseUrl unset, no global token either.
+      telegramRoutes: [],
+      generateAgentGroupId: () => 'ag-half-broken',
+    });
+
+    const { status, json } = await postBind(server.baseUrl);
+    expect(status).toBe(503);
+    expect(json.error).toBe('pool_exhausted');
+    // Pool stays untouched — operator didn't lose a bot to a
+    // malformed deployment.
+    expect(getBotPoolEntryByAgentGroup('ag-half-broken')).toBeUndefined();
+    expect(countAvailableBots()).toBe(1);
+  });
+
+  it('publicBaseUrl unset + EXISTING pool assignment → still works (no side-effects, but token still resolves)', async () => {
+    // Idempotency: if a previous bind (when publicBaseUrl WAS set)
+    // assigned a pool bot and registered its webhook, a later
+    // re-bind with publicBaseUrl now unset must still return that
+    // existing assignment. The webhook is already registered; no
+    // setWebhook call needed; sendMessage rides the per-company
+    // token. Don't punish operators who had a temporary env-var
+    // misconfiguration.
+    seedBotPoolEntry({
+      botUsername: 'already_bound_bot',
+      botTokenValue: 'tok-already-bound',
+      webhookSecret: 'sec-already-bound',
+      createdAt: new Date().toISOString(),
+    });
+    // Simulate prior assignment + webhook registration.
+    const { assignNextAvailableBot, markWebhookRegistered } = await import('./db/baget-bot-pool.js');
+    const { createBagetAgentGroup } = await import('./db/baget-agent-groups.js');
+    createBagetAgentGroup({
+      id: 'ag-already-bound',
+      name: 'Already Bound Co',
+      folder: 'baget-already-bound',
+      user_id: VALID_BIND_BODY.userId,
+      company_id: VALID_BIND_BODY.companyId,
+      baget_team_members: JSON.stringify({ cos: 'Louis' }),
+      created_at: new Date().toISOString(),
+    });
+    assignNextAvailableBot('ag-already-bound');
+    markWebhookRegistered('already_bound_bot', new Date().toISOString());
+
+    server = await startBindServer({
+      // publicBaseUrl now unset.
+      telegramRoutes: [
+        {
+          match: (u) => u.endsWith('/sendMessage'),
+          handler: () => okResponse({ ok: true, result: { message_id: 1 } }),
+        },
+      ],
+      generateAgentGroupId: () => 'unused',
+    });
+
     const { json } = await postBind(server.baseUrl);
     expect(json.ok).toBe(true);
-    expect(json.botUsername).toBe('acme_bot_no_url');
-
-    // Only sendMessage fired — no setWebhook / setMyName because
-    // publicBaseUrl is unset.
+    // Existing assignment preserved.
+    expect(json.botUsername).toBe('already_bound_bot');
+    // Sends used the per-company token (existing assignment),
+    // not the unset-global path.
     const calls = server.fetchCalls();
-    expect(calls.map((c) => c.url)).toEqual([expect.stringContaining('/sendMessage')]);
-    // Pool assignment still landed (assign happens regardless of
-    // publicBaseUrl; the side-effects skip).
-    expect(getBotPoolEntryByAgentGroup('ag-no-url')?.bot_username).toBe('acme_bot_no_url');
-    expect(getBotPoolEntryByAgentGroup('ag-no-url')?.webhook_registered_at).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toContain('/bottok-already-bound/sendMessage');
   });
 
   it('partial-failure retry: pre-existing agent_group with NO chat-binds gets pool-assigned (Codex P2)', async () => {
@@ -1108,6 +1197,28 @@ describe('per-bot webhook route — secret check', () => {
     expect(resp.status).toBe(200);
     await waitFor(() => inboundEvents.length === 1);
     expect(inboundEvents[0]!.messageText).toBe('legacy global route');
+  });
+
+  it('returns 401 (not 500) for malformed %-encoding in the bot-username path segment (Codex re-review P2)', async () => {
+    // `decodeURIComponent('%XX')` throws URIError. Without the
+    // try/catch added in this PR, an attacker (or a buggy probe)
+    // hitting `/api/channels/telegram/bot/%XX/webhook` would crash
+    // the route handler → 500 + a noisy stack trace in logs.
+    // The fix maps URIError to the same opaque 401 we return for
+    // any other unauthenticated/unknown bot, keeping the route's
+    // failure shape uniform and the logs clean.
+    const resp = await fetch(`${baseUrl}/api/channels/telegram/bot/%XX/webhook`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Bot-Api-Secret-Token': 'whatever',
+      },
+      body: JSON.stringify(makeUpdate(2005, 'malformed encoding')),
+    });
+    expect(resp.status).toBe(401);
+    // Crucially NOT 500 — verifies the route doesn't 500 on
+    // malformed URIs.
+    expect(resp.status).not.toBe(500);
   });
 });
 
