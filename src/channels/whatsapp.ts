@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import http from 'http';
 
 import {
@@ -26,6 +27,9 @@ const creds = {
   },
   get verifyToken() {
     return process.env.WHATSAPP_VERIFY_TOKEN ?? '';
+  },
+  get appSecret() {
+    return process.env.WHATSAPP_APP_SECRET ?? '';
   },
 };
 
@@ -133,11 +137,37 @@ export class WhatsAppChannel implements Channel {
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
     req.on('end', () => {
+      const rawBody = Buffer.concat(chunks);
+
+      // Verify Meta's HMAC-SHA256 signature when app secret is configured.
+      // Header format: X-Hub-Signature-256: sha256=<hex>
+      const appSecret = creds.appSecret;
+      if (appSecret) {
+        const signature = req.headers['x-hub-signature-256'];
+        if (!signature || typeof signature !== 'string') {
+          logger.warn('Rejected webhook: missing X-Hub-Signature-256 header');
+          res.writeHead(401);
+          res.end();
+          return;
+        }
+        const expected = `sha256=${crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex')}`;
+        // Hash both values so timingSafeEqual always receives equal-length buffers,
+        // preventing length-based short-circuit even if the signature is malformed.
+        const sigHash = crypto.createHmac('sha256', appSecret).update(signature).digest();
+        const expHash = crypto.createHmac('sha256', appSecret).update(expected).digest();
+        if (!crypto.timingSafeEqual(sigHash, expHash)) {
+          logger.warn('Rejected webhook: invalid signature');
+          res.writeHead(401);
+          res.end();
+          return;
+        }
+      }
+
       // Acknowledge immediately — Meta requires a 200 within 20 seconds
       res.writeHead(200);
       res.end();
 
-      const body = Buffer.concat(chunks).toString();
+      const body = rawBody.toString();
       try {
         this.processPayload(JSON.parse(body) as WebhookPayload);
       } catch (err) {

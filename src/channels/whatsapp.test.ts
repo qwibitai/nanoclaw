@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import http from 'http';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
@@ -509,6 +510,75 @@ describe('WhatsAppChannel', () => {
         channel.setTyping('15551234567@s.whatsapp.net', true),
       ).resolves.toBeUndefined();
       expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  // --- Webhook signature verification ---
+
+  describe('HMAC-SHA256 signature verification', () => {
+    const APP_SECRET = 'test-app-secret';
+
+    function signedPost(port: number, body: object, secret: string, tamper = false): Promise<http.IncomingMessage> {
+      const data = JSON.stringify(body);
+      const rawBody = Buffer.from(data);
+      const hmac = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+      const signature = tamper ? `sha256=badhash` : `sha256=${hmac}`;
+
+      return new Promise((resolve, reject) => {
+        const req = http.request(
+          {
+            hostname: '127.0.0.1', port, path: '/webhook/whatsapp', method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Content-Length': rawBody.byteLength,
+              'X-Hub-Signature-256': signature,
+            },
+          },
+          resolve,
+        );
+        req.on('error', reject);
+        req.write(data);
+        req.end();
+      });
+    }
+
+    beforeEach(() => {
+      process.env.WHATSAPP_APP_SECRET = APP_SECRET;
+    });
+
+    afterEach(() => {
+      delete process.env.WHATSAPP_APP_SECRET;
+    });
+
+    it('accepts requests with valid signature', async () => {
+      const opts = createTestOpts();
+      port = await startChannel(opts);
+
+      const res = await signedPost(port, { object: 'whatsapp_business_account', entry: [] }, APP_SECRET);
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('rejects requests with invalid signature', async () => {
+      port = await startChannel();
+
+      const res = await signedPost(port, { object: 'whatsapp_business_account', entry: [] }, APP_SECRET, true);
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('rejects requests with no signature header', async () => {
+      port = await startChannel();
+
+      const res = await postWebhook(port, { object: 'whatsapp_business_account', entry: [] });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('allows unsigned requests when WHATSAPP_APP_SECRET is not set', async () => {
+      delete process.env.WHATSAPP_APP_SECRET;
+      const opts = createTestOpts();
+      port = await startChannel(opts);
+
+      const res = await postWebhook(port, { object: 'whatsapp_business_account', entry: [] });
+      expect(res.statusCode).toBe(200);
     });
   });
 
