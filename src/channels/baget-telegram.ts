@@ -32,16 +32,25 @@
  */
 import http from 'http';
 import { timingSafeEqual } from 'crypto';
+import path from 'path';
 
 import { registerExtraRoute } from '../baget-admin-server.js';
 import { applyPersonaPrefix } from '../baget-persona.js';
+import { GROUPS_DIR } from '../config.js';
 import { consumePairingToken } from '../db/baget-pairing-tokens.js';
 import { recordSeenUpdate, sweepOldSeenUpdates } from '../db/baget-seen-updates.js';
 import { getBagetAgentGroupById, normalizeBoundBagetTelegramFounderChannels } from '../db/baget-agent-groups.js';
 import { getMessagingGroupAgents, getMessagingGroupByPlatform } from '../db/messaging-groups.js';
 import { log } from '../log.js';
 import { OPTIONAL_ROLES, type BagetTeamMembers } from '../baget-pairing.js';
-import type { ChannelAdapter, ChannelSetup, InboundMessage, OutboundMessage, CelebrationPayload } from './adapter.js';
+import type {
+  ChannelAdapter,
+  ChannelSetup,
+  CelebrationPayload,
+  InboundAttachment,
+  InboundMessage,
+  OutboundMessage,
+} from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 import { createInboundDebouncer, type InboundDebouncer } from './inbound-debouncer.js';
 import {
@@ -50,6 +59,12 @@ import {
   platformIdFromChatId,
   sendBagetTelegramWelcome,
 } from './baget-telegram-bind.js';
+import {
+  downloadTelegramAttachment,
+  OversizedAttachmentError,
+  parseTelegramAttachments,
+  type TelegramMessage,
+} from './baget-telegram-attachments.js';
 
 // Re-export so existing importers (admin server, db helpers) keep
 // working without churn — this constant lives in -bind now to avoid
@@ -67,6 +82,8 @@ export interface BagetTelegramConfig {
   apiBaseUrl?: string;
   /** Optional override of the fetch implementation, for tests. */
   fetchImpl?: typeof fetch;
+  /** Override the groups directory root. Tests use a temp dir. */
+  _testGroupsDir?: string;
   /** Inbound debounce window in ms. Default 1500. Tests pass small values. */
   inboundDebounceMs?: number;
 }
@@ -98,7 +115,7 @@ function safeSliceUtf16(s: string, len: number): string {
   return s.slice(0, len);
 }
 
-interface UpdateMessage {
+interface UpdateMessage extends TelegramMessage {
   message_id: number;
   from?: { id: number; first_name?: string; username?: string };
   chat: { id: number; type: string };
@@ -115,6 +132,7 @@ interface TelegramUpdate {
 function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
   const apiBase = cfg.apiBaseUrl ?? 'https://api.telegram.org';
   const fetchFn = cfg.fetchImpl ?? fetch;
+  const groupsDir = cfg._testGroupsDir ?? GROUPS_DIR;
   const inboundDebounceMs = cfg.inboundDebounceMs ?? 1500;
   let unregisterRoute: (() => void) | null = null;
   let setup: ChannelSetup | null = null;
@@ -270,13 +288,22 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
 
     const isEdit = !update.message && !!update.edited_message;
     const msg = update.message ?? update.edited_message;
-    if (!msg || !msg.text) return;
+    if (!msg) return;
 
-    // Pairing flow: /start <token>
-    const startMatch = /^\/start\s+(.+?)\s*$/.exec(msg.text.trim());
-    if (startMatch) {
-      await handleStartCommand(msg, startMatch[1]);
-      return;
+    const hasText = typeof msg.text === 'string' && msg.text.length > 0;
+    const hasCaption = typeof msg.caption === 'string' && msg.caption.length > 0;
+    const parsedAttachment = parseTelegramAttachments(msg);
+
+    // Drop updates with neither text nor media (e.g. service messages)
+    if (!hasText && !hasCaption && !parsedAttachment) return;
+
+    // Pairing flow: /start <token> — only on plain text messages
+    if (hasText) {
+      const startMatch = /^\/start\s+(.+?)\s*$/.exec(msg.text!.trim());
+      if (startMatch) {
+        await handleStartCommand(msg, startMatch[1]);
+        return;
+      }
     }
 
     // Plain DM — route through the standard adapter contract.
@@ -293,16 +320,87 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       : 'unknown';
     const senderId = msg.from ? `telegram:${msg.from.id}` : `telegram:unknown`;
 
+    // Resolve attachments — download to the agent_group's inbound folder.
+    // (PR #18: media handling) Three drop cases that BAIL before
+    // building the inbound message: chat unpaired, no wired agents,
+    // or agent_group missing. Oversized media → founder gets a clear
+    // DM and the runner is NOT woken.
+    let attachments: InboundAttachment[] | undefined;
+    if (parsedAttachment) {
+      const mg = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, platformId);
+      if (!mg) {
+        log.warn('Baget telegram: attachment received on unpaired chat — dropping', {
+          chatId: msg.chat.id,
+          updateId: update.update_id,
+        });
+        return;
+      }
+      const wired = getMessagingGroupAgents(mg.id);
+      if (wired.length === 0) {
+        log.warn('Baget telegram: attachment received on chat with no wired agents — dropping', {
+          chatId: msg.chat.id,
+          updateId: update.update_id,
+        });
+        return;
+      }
+      const agentGroup = getBagetAgentGroupById(wired[0]!.agent_group_id);
+      if (!agentGroup) {
+        log.warn('Baget telegram: attachment agent_group not found — dropping', {
+          chatId: msg.chat.id,
+          agentGroupId: wired[0]!.agent_group_id,
+        });
+        return;
+      }
+
+      const destDir = path.resolve(groupsDir, agentGroup.folder, 'inbound');
+
+      try {
+        const { filePath, sizeBytes } = await downloadTelegramAttachment({
+          botToken: cfg.botToken,
+          fileId: parsedAttachment.fileId,
+          destDir,
+          fetchImpl: fetchFn,
+          apiBaseUrl: apiBase,
+        });
+
+        attachments = [
+          {
+            kind: parsedAttachment.kind,
+            path: filePath,
+            mimeType: parsedAttachment.mimeType,
+            originalName: parsedAttachment.originalName,
+            sizeBytes,
+            platformFileId: parsedAttachment.fileId,
+          },
+        ];
+      } catch (err) {
+        if (err instanceof OversizedAttachmentError) {
+          await sendBotMessage(
+            msg.chat.id,
+            'That file is too big for me to receive (20 MB limit). Try splitting it or sharing a link.',
+          );
+          return;
+        }
+        log.error('Baget telegram: attachment download failed', { err, updateId: update.update_id });
+        return;
+      }
+    }
+
+    // Text content can come from `msg.text` (plain text DM) or
+    // `msg.caption` (caption attached to a photo/video/document).
+    const textContent = hasText ? msg.text! : hasCaption ? msg.caption! : '';
+
     const inbound: InboundMessage = {
       id: `tg-${update.update_id}`,
       kind: 'chat',
       timestamp: new Date(msg.date * 1000).toISOString(),
-      content: { text: msg.text, sender, senderId },
+      content: { text: textContent, sender, senderId },
       isMention: msg.chat.type === 'private', // every DM is implicitly a mention
       isGroup: msg.chat.type !== 'private',
+      ...(attachments ? { attachments } : {}),
     };
 
-    // Three cases bypass the debouncer and route immediately:
+    // Four cases bypass the debouncer and route immediately:
     //   1. Slash commands (`/whoami`, `/companies`, future control
     //      commands) — protocol actions, not conversation. The
     //      `/start <token>` happy path was already intercepted above.
@@ -314,15 +412,21 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     //      garbled "hello\nhellow"-shaped string. Routing edits
     //      immediately keeps the existing buffer untouched; the
     //      original (if still buffered) flushes on its own timer.
-    const isCommand = msg.text.trimStart().startsWith('/');
-    if (isCommand || isEdit) {
+    //   3. Messages with attachments — debouncing those would coalesce
+    //      multiple media files into one event, but the agent_runner
+    //      pipeline expects per-message attachment context. Route
+    //      attachment-bearing messages immediately so each artifact
+    //      gets its own LLM turn.
+    const isCommand = textContent.trimStart().startsWith('/');
+    const hasAttachments = !!attachments && attachments.length > 0;
+    if (isCommand || isEdit || hasAttachments) {
       try {
         await setup.onInbound(platformId, null, inbound);
       } catch (err) {
         log.error('Baget telegram: onInbound threw (immediate path)', {
           err,
           updateId: update.update_id,
-          reason: isCommand ? 'command' : 'edit',
+          reason: isCommand ? 'command' : isEdit ? 'edit' : 'attachment',
         });
       }
       return;
@@ -346,6 +450,16 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
    */
   async function handleStartCommand(msg: UpdateMessage, rawToken: string): Promise<void> {
     const chatId = msg.chat.id;
+    // Pairing tokens are for private DMs only. A group admin could otherwise send
+    // /start <token> in a group chat, binding the whole group to the founder's agent
+    // and leaking replies to all group members.
+    if (msg.chat.type !== 'private') {
+      log.warn('Baget telegram: /start received in non-private chat — ignoring', {
+        chatId,
+        chatType: msg.chat.type,
+      });
+      return;
+    }
     const FAILURE_MSG = "That pairing link isn't valid or has expired. Generate a fresh one from the dashboard.";
 
     // Single-use consume. The token format is now 32 hex chars
@@ -536,6 +650,12 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     name: 'baget-telegram',
     channelType: BAGET_TELEGRAM_CHANNEL_TYPE,
     supportsThreads: false,
+    mediaSupport: {
+      photo: true,
+      document: true,
+      // Telegram Bot API hard limit for multipart file uploads.
+      maxBytesPerAttachment: 50 * 1024 * 1024,
+    },
 
     async setup(s: ChannelSetup): Promise<void> {
       setup = s;
@@ -657,13 +777,13 @@ function coalesceInboundMessages(messages: InboundMessage[]): InboundMessage {
       ? { ...(latestContent as Record<string, unknown>), text: joinedText }
       : joinedText;
 
-  // Future-proof attachments concat. PR #2 (inbound media) will add
-  // `attachments?: unknown[]` to InboundMessage; this read returns
-  // [] today and lights up automatically when the field exists.
-  // TODO: drop the cast when PR #2 lands and the field is on the type.
-  const allAttachments = messages.flatMap(
-    (m) => (m as InboundMessage & { attachments?: unknown[] }).attachments ?? [],
-  );
+  // PR #18 (inbound media) added `attachments?: InboundAttachment[]`
+  // to InboundMessage. Concat them in arrival order. Note: in practice
+  // attachment-bearing messages bypass the debouncer (see processUpdate
+  // routing), so this branch is rarely exercised — but if a future
+  // change lets attachments through the debouncer, the concat keeps
+  // them intact.
+  const allAttachments = messages.flatMap((m) => m.attachments ?? []);
 
   const result: InboundMessage = {
     id: latest.id,
@@ -672,10 +792,8 @@ function coalesceInboundMessages(messages: InboundMessage[]): InboundMessage {
     content: coalescedContent,
     isMention: latest.isMention,
     isGroup: latest.isGroup,
+    ...(allAttachments.length > 0 ? { attachments: allAttachments } : {}),
   };
-  if (allAttachments.length > 0) {
-    (result as InboundMessage & { attachments: unknown[] }).attachments = allAttachments;
-  }
   return result;
 }
 

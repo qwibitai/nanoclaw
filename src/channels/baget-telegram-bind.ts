@@ -20,6 +20,8 @@
  * verification here — we trust the bearer.
  */
 import { randomUUID } from 'crypto';
+import { readFileSync } from 'fs';
+import { basename } from 'path';
 
 import { log } from '../log.js';
 import {
@@ -318,4 +320,123 @@ export async function sendBagetTelegramFarewell(args: {
     chatId: args.chatId,
     text,
   });
+}
+
+/**
+ * Telegram Bot API `sendPhoto`. POSTs multipart/form-data with the file
+ * read from `photoPath`. Throws if the file does not exist — the caller
+ * (MCP tool or deliver() wiring in PR #7) must validate paths before
+ * calling here.
+ *
+ * Same `founderActionRequired` 403-detection as `sendBagetBotMessage`.
+ */
+export async function sendBagetBotPhoto(args: {
+  botToken: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+  chatId: number | string;
+  photoPath: string;
+  caption?: string;
+  agentGroupId: string;
+}): Promise<BagetTelegramSendResult> {
+  const apiBase = args.apiBaseUrl ?? 'https://api.telegram.org';
+  const fetchFn = args.fetchImpl ?? fetch;
+  const url = `${apiBase}/bot${args.botToken}/sendPhoto`;
+
+  // Throws ENOENT if missing — caller's responsibility to validate.
+  const fileBuffer = readFileSync(args.photoPath);
+
+  const form = new FormData();
+  form.append('chat_id', String(args.chatId));
+  form.append('photo', new Blob([fileBuffer]), basename(args.photoPath));
+  if (args.caption !== undefined) form.append('caption', args.caption);
+
+  try {
+    const resp = await fetchFn(url, { method: 'POST', body: form });
+    const json = (await resp.json().catch(() => null)) as {
+      ok?: boolean;
+      result?: { message_id?: number };
+      description?: unknown;
+    } | null;
+    if (!resp.ok) {
+      const description = typeof json?.description === 'string' ? json.description.toLowerCase() : '';
+      const founderActionRequired =
+        description.includes("can't initiate conversation with a user") || description.includes('chat not found');
+      log.warn('Baget telegram bind: sendPhoto non-OK', {
+        status: resp.status,
+        chatId: args.chatId,
+        agentGroupId: args.agentGroupId,
+        description: typeof json?.description === 'string' ? json.description : undefined,
+        founderActionRequired,
+      });
+      return { ok: false, founderActionRequired };
+    }
+    if (json?.ok && typeof json.result?.message_id === 'number') {
+      return { ok: true, messageId: String(json.result.message_id) };
+    }
+    return { ok: false, founderActionRequired: false };
+  } catch (err) {
+    log.warn('Baget telegram bind: sendPhoto threw', { err, chatId: args.chatId, agentGroupId: args.agentGroupId });
+    return { ok: false, founderActionRequired: false };
+  }
+}
+
+/**
+ * Telegram Bot API `sendDocument`. POSTs multipart/form-data with the
+ * file read from `documentPath`. Throws if the file does not exist.
+ *
+ * `filename` overrides the filename shown in Telegram; defaults to
+ * `basename(documentPath)`.
+ */
+export async function sendBagetBotDocument(args: {
+  botToken: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+  chatId: number | string;
+  documentPath: string;
+  caption?: string;
+  filename?: string;
+  agentGroupId: string;
+}): Promise<BagetTelegramSendResult> {
+  const apiBase = args.apiBaseUrl ?? 'https://api.telegram.org';
+  const fetchFn = args.fetchImpl ?? fetch;
+  const url = `${apiBase}/bot${args.botToken}/sendDocument`;
+
+  // Throws ENOENT if missing — caller's responsibility to validate.
+  const fileBuffer = readFileSync(args.documentPath);
+  const displayName = args.filename ?? basename(args.documentPath);
+
+  const form = new FormData();
+  form.append('chat_id', String(args.chatId));
+  form.append('document', new Blob([fileBuffer]), displayName);
+  if (args.caption !== undefined) form.append('caption', args.caption);
+
+  try {
+    const resp = await fetchFn(url, { method: 'POST', body: form });
+    const json = (await resp.json().catch(() => null)) as {
+      ok?: boolean;
+      result?: { message_id?: number };
+      description?: unknown;
+    } | null;
+    if (!resp.ok) {
+      const description = typeof json?.description === 'string' ? json.description.toLowerCase() : '';
+      const founderActionRequired =
+        description.includes("can't initiate conversation with a user") || description.includes('chat not found');
+      log.warn('Baget telegram bind: sendDocument non-OK', {
+        status: resp.status,
+        chatId: args.chatId,
+        agentGroupId: args.agentGroupId,
+        description: typeof json?.description === 'string' ? json.description : undefined,
+        founderActionRequired,
+      });
+      return { ok: false, founderActionRequired };
+    }
+    if (json?.ok && typeof json.result?.message_id === 'number') {
+      return { ok: true, messageId: String(json.result.message_id) };
+    }
+    return { ok: false, founderActionRequired: false };
+  } catch (err) {
+    log.warn('Baget telegram bind: sendDocument threw', { err, chatId: args.chatId, agentGroupId: args.agentGroupId });
+    return { ok: false, founderActionRequired: false };
+  }
 }

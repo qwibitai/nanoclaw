@@ -85,12 +85,45 @@ export interface InboundMessage {
   isMention?: boolean;
   /** True when the source is a group/channel thread, false for DMs. */
   isGroup?: boolean;
+  /** File attachments received from the platform (photos, documents, voice notes, etc.). */
+  attachments?: InboundAttachment[];
+}
+
+/** An inbound attachment received from the messaging platform. */
+export interface InboundAttachment {
+  kind: 'photo' | 'document' | 'voice' | 'video' | 'video_note' | 'audio';
+  /** Absolute path on the host filesystem where the media is stored. */
+  path: string;
+  /** MIME type as reported by the platform (e.g. 'image/jpeg', 'application/pdf'). */
+  mimeType: string;
+  /** Original filename if the platform provides one (Telegram only sets this for documents). */
+  originalName?: string;
+  sizeBytes: number;
+  /** Platform-native id for the file (Telegram file_id, Twilio MediaSid, etc.). */
+  platformFileId: string;
 }
 
 /** A file attachment to deliver alongside a message. */
 export interface OutboundFile {
   filename: string;
   data: Buffer;
+}
+
+/**
+ * A filesystem-path attachment to deliver to the founder.
+ * Path-based rather than buffer-based so the MCP tool can hand off
+ * large files (PDFs, CSVs) without loading them into memory twice.
+ * Future channels (WhatsApp, Slack) declare their own mediaSupport
+ * values; callers capability-check before attempting a send.
+ */
+export interface OutboundAttachment {
+  kind: 'photo' | 'document';
+  /** Absolute path on the host filesystem to the file to send. */
+  path: string;
+  /** Optional caption rendered with the media (Telegram + WhatsApp support this). */
+  caption?: string;
+  /** Optional filename override for documents (defaults to basename(path)). */
+  filename?: string;
 }
 
 /** One deliverable item in a batch-complete celebration. */
@@ -112,6 +145,15 @@ export interface OutboundMessage {
   kind: string;
   content: unknown; // parsed JSON from messages_out
   files?: OutboundFile[]; // file attachments from the session outbox
+  attachments?: OutboundAttachment[]; // path-based media — used by the MCP send-document tool
+}
+
+/** Per-channel media capability declaration. */
+export interface MediaSupport {
+  photo: boolean;
+  document: boolean;
+  /** Maximum bytes per attachment. 0 = unsupported. */
+  maxBytesPerAttachment: number;
 }
 
 /** Discovered conversation info (from syncConversations). */
@@ -125,6 +167,13 @@ export interface ConversationInfo {
 export interface ChannelAdapter {
   name: string;
   channelType: string;
+
+  /**
+   * Media capabilities for this channel.
+   * Absent means no media support — callers should treat it as
+   * { photo: false, document: false, maxBytesPerAttachment: 0 }.
+   */
+  mediaSupport?: MediaSupport;
 
   /**
    * Whether this adapter models conversations as threads.
