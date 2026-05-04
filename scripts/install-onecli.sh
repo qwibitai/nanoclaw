@@ -11,6 +11,17 @@
 #   4. If ONECLI_API_KEY available (env or .env), run `onecli auth login`
 #   5. If no API key, print bootstrap instructions and exit cleanly
 #
+# Optional env vars:
+#   ONECLI_PORT          gateway port (default: 10254)
+#   ONECLI_SCHEME        http | https (default: http). Set https when
+#                        the gateway is fronted by TLS in production.
+#   ONECLI_INSECURE_TLS  0 | 1 (default: 0). Pair with ONECLI_SCHEME=https
+#                        on self-signed deployments to skip cert verification.
+#                        Production-CA installs leave this at 0 so curl
+#                        stays strict.
+#   HEALTH_TIMEOUT       seconds to wait for /api/health (default: 30)
+#   ENV_FILE             where to persist ONECLI_URL (default: ./.env)
+#
 # Exit codes:
 #   0 = OneCLI installed; auth complete OR awaiting manual API key step
 #   1 = install failed (network, missing curl, etc.)
@@ -20,8 +31,31 @@
 set -euo pipefail
 
 ONECLI_PORT="${ONECLI_PORT:-10254}"
+# Scheme used when assembling candidate gateway URLs. Defaults to `http`
+# for back-compat with local-dev / loopback installations. Set to
+# `https` for production deployments where the gateway is fronted by
+# TLS. Anything else exits with a config error.
+ONECLI_SCHEME="${ONECLI_SCHEME:-http}"
+# When ONECLI_SCHEME=https and the gateway is using a self-signed cert
+# (typical for a private deployment), set ONECLI_INSECURE_TLS=1 so the
+# health probe + onecli config don't reject the cert. Off by default
+# so production-CA setups stay strict.
+ONECLI_INSECURE_TLS="${ONECLI_INSECURE_TLS:-0}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-30}"
 ENV_FILE="${ENV_FILE:-$(pwd)/.env}"
+
+case "$ONECLI_SCHEME" in
+  http|https) ;;
+  *) printf '[install-onecli] FAIL: ONECLI_SCHEME must be "http" or "https" (got %q)\n' "$ONECLI_SCHEME" >&2; exit 3 ;;
+esac
+
+# Curl flags shared by every probe + auth call. -k is gated by the
+# explicit opt-in env var so an https deployment with a real cert
+# behaves strictly.
+CURL_TLS_FLAGS=()
+if [ "$ONECLI_SCHEME" = "https" ] && [ "$ONECLI_INSECURE_TLS" = "1" ]; then
+  CURL_TLS_FLAGS+=("-k")
+fi
 
 # OneCLI compose lives at $HOME/.onecli/ by default (root install -> /root/.onecli/).
 # Its env_file directive loads $HOME/.env one level up (used at container runtime
@@ -174,15 +208,15 @@ fi
 CANDIDATES=()
 if [ -d /sys/class/net/docker0 ]; then
   BRIDGE_IP=$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1)
-  [ -n "${BRIDGE_IP:-}" ] && CANDIDATES+=("http://${BRIDGE_IP}:${ONECLI_PORT}")
+  [ -n "${BRIDGE_IP:-}" ] && CANDIDATES+=("${ONECLI_SCHEME}://${BRIDGE_IP}:${ONECLI_PORT}")
 fi
-CANDIDATES+=("http://127.0.0.1:${ONECLI_PORT}")
-CANDIDATES+=("http://localhost:${ONECLI_PORT}")
+CANDIDATES+=("${ONECLI_SCHEME}://127.0.0.1:${ONECLI_PORT}")
+CANDIDATES+=("${ONECLI_SCHEME}://localhost:${ONECLI_PORT}")
 
 probe_health() {
   # OneCLI 1.5+ uses /api/health; fall back to /health for older versions.
-  curl -sf -m 2 "${1}/api/health" >/dev/null 2>&1 || \
-    curl -sf -m 2 "${1}/health" >/dev/null 2>&1
+  curl -sf "${CURL_TLS_FLAGS[@]}" -m 2 "${1}/api/health" >/dev/null 2>&1 || \
+    curl -sf "${CURL_TLS_FLAGS[@]}" -m 2 "${1}/health" >/dev/null 2>&1
 }
 
 log "probing gateway candidates: ${CANDIDATES[*]}"
@@ -265,12 +299,13 @@ fi
 
 log "ensuring OneCLI agents for groups: ${DETECTED_GROUPS[*]}"
 
-# Helper: get JSON via HTTP API (no auth needed in single-user mode)
+# Helper: get JSON via HTTP API (no auth needed in single-user mode).
+# Inherits CURL_TLS_FLAGS so https + insecure-tls flows through here too.
 api_get() {
-  curl -sf -m 5 "${ONECLI_URL}$1" 2>/dev/null
+  curl -sf "${CURL_TLS_FLAGS[@]}" -m 5 "${ONECLI_URL}$1" 2>/dev/null
 }
 api_post() {
-  curl -sf -m 5 -X POST -H 'Content-Type: application/json' \
+  curl -sf "${CURL_TLS_FLAGS[@]}" -m 5 -X POST -H 'Content-Type: application/json' \
     -d "$2" "${ONECLI_URL}$1" 2>/dev/null
 }
 
@@ -458,7 +493,7 @@ signup before the API can be used.
 
   1. Open the dashboard:
        ssh -L 10254:$(echo "$ONECLI_URL" | sed -E 's#https?://##') root@<this-host>
-       then open: http://localhost:10254
+       then open: ${ONECLI_SCHEME}://localhost:10254
 
   2. Sign in (Google OAuth if configured) and create an agent.
   3. Copy the agent access token and re-run:
