@@ -3,7 +3,7 @@ NanoClaw AgentDojo pipeline adapter.
 
 Builds an AgentDojo pipeline that mirrors NanoClaw's agent configuration:
 - System prompt from container/CLAUDE.md (the file modified to harden security)
-- Anthropic, Google Gemini, or OpenAI LLM
+- Anthropic, Google Gemini, OpenAI, or NVIDIA NIM LLM
 - Standard tool execution loop
 
 Usage:
@@ -11,6 +11,7 @@ Usage:
     pipeline = build_pipeline()                          # Anthropic (default)
     pipeline = build_pipeline(provider="google")         # Gemini (free tier)
     pipeline = build_pipeline(provider="openai")         # OpenAI
+    pipeline = build_pipeline(provider="nim")            # NVIDIA NIM (needs NIM_API_KEY)
 """
 
 import pathlib
@@ -44,7 +45,11 @@ DEFAULT_MODELS = {
     "anthropic": "claude-3-5-sonnet-20241022",
     "google": "gemini-2.0-flash-001",
     "openai": "gpt-4o-mini-2024-07-18",
+    # meta-llama/Llama-3-70b-chat-hf is in AgentDojo's allowlist
+    "nim": "meta-llama/Llama-3-70b-chat-hf",
 }
+
+NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
 
 def load_system_prompt(extra: str | None = None) -> str:
@@ -122,4 +127,14 @@ def _build_llm(provider: str, model: str, max_tokens: int):
         client = openai.OpenAI()
         return OpenAILLM(client=client, model=model, max_tokens=max_tokens)
 
-    raise ValueError(f"Unknown provider '{provider}'. Choose: anthropic, google, openai")
+    if provider == "nim":
+        import os
+        import openai
+        from agentdojo.agent_pipeline import OpenAILLM
+        api_key = os.environ.get("NIM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
+        if not api_key:
+            raise ValueError("Set NIM_API_KEY or NVIDIA_API_KEY to use NVIDIA NIM")
+        client = openai.OpenAI(base_url=NIM_BASE_URL, api_key=api_key)
+        return OpenAILLM(client=client, model=model, max_tokens=max_tokens)
+
+    raise ValueError(f"Unknown provider '{provider}'. Choose: anthropic, google, openai, nim")

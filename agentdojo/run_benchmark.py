@@ -158,8 +158,8 @@ def main() -> None:
     parser.add_argument(
         "--provider",
         default="anthropic",
-        choices=["anthropic", "google", "openai"],
-        help="LLM provider (default: anthropic). google uses GEMINI_API_KEY, openai uses OPENAI_API_KEY",
+        choices=["anthropic", "google", "openai", "nim"],
+        help="LLM provider (default: anthropic). google=GEMINI_API_KEY, nim=NIM_API_KEY",
     )
     parser.add_argument(
         "--model",
