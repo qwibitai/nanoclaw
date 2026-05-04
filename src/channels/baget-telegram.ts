@@ -41,8 +41,9 @@ import { getBagetAgentGroupById, normalizeBoundBagetTelegramFounderChannels } fr
 import { getMessagingGroupAgents, getMessagingGroupByPlatform } from '../db/messaging-groups.js';
 import { log } from '../log.js';
 import { OPTIONAL_ROLES, type BagetTeamMembers } from '../baget-pairing.js';
-import type { ChannelAdapter, ChannelSetup, OutboundMessage } from './adapter.js';
+import type { ChannelAdapter, ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
+import { createInboundDebouncer, type InboundDebouncer } from './inbound-debouncer.js';
 import {
   BAGET_TELEGRAM_CHANNEL_TYPE,
   bindBagetTelegramChat,
@@ -66,6 +67,35 @@ export interface BagetTelegramConfig {
   apiBaseUrl?: string;
   /** Optional override of the fetch implementation, for tests. */
   fetchImpl?: typeof fetch;
+  /** Inbound debounce window in ms. Default 1500. Tests pass small values. */
+  inboundDebounceMs?: number;
+}
+
+// Cap the coalesced text size handed to the runner. Telegram's per-msg
+// input is 4096 chars; 16000 ≈ 4 messages of max-length text. A founder
+// pasting a 50-message wall would otherwise hand the LLM a 200KB blob
+// and burn budget. We coalesce up to the cap, then truncate with a
+// visible suffix so the agent can SEE that more was said.
+const COALESCED_TEXT_CAP = 16000;
+const COALESCED_TRUNCATION_SUFFIX = '\n…[truncated by debouncer]';
+
+/**
+ * Truncate a JS string to at most `len` UTF-16 code units WITHOUT splitting
+ * a surrogate pair. JavaScript strings index by code units; emoji and other
+ * non-BMP characters take two code units (a high+low surrogate pair). A
+ * naive `s.slice(0, len)` that lands between the two halves orphans the
+ * high surrogate, producing a `\uD800-\uDBFF` codepoint that crashes
+ * downstream JSON consumers or renders as `�`. If the cut would leave a
+ * high surrogate as the last character, back up one position so the pair
+ * stays intact (or both halves are dropped together).
+ */
+function safeSliceUtf16(s: string, len: number): string {
+  if (s.length <= len) return s;
+  // 0xD800..0xDBFF == high surrogate. Mask 0xFC00 isolates the top 6 bits.
+  if (len > 0 && (s.charCodeAt(len - 1) & 0xfc00) === 0xd800) {
+    return s.slice(0, len - 1);
+  }
+  return s.slice(0, len);
 }
 
 interface UpdateMessage {
@@ -85,8 +115,42 @@ interface TelegramUpdate {
 function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
   const apiBase = cfg.apiBaseUrl ?? 'https://api.telegram.org';
   const fetchFn = cfg.fetchImpl ?? fetch;
+  const inboundDebounceMs = cfg.inboundDebounceMs ?? 1500;
   let unregisterRoute: (() => void) | null = null;
   let setup: ChannelSetup | null = null;
+
+  // Per-chat debounce coalesces rapid-fire DMs into a single inbound
+  // event. Key is the Telegram chat_id (stringified). See spec at the
+  // top of this file and inbound-debouncer.ts for behavior detail.
+  const debouncer: InboundDebouncer<InboundMessage> = createInboundDebouncer<InboundMessage>({
+    flushMs: inboundDebounceMs,
+    coalesce: coalesceInboundMessages,
+    onFlush: async (chatIdKey, coalesced) => {
+      if (!setup) {
+        log.warn('Baget telegram: debounced flush after teardown — dropping', {
+          chatId: chatIdKey,
+          messageId: coalesced.id,
+        });
+        return;
+      }
+      const platformId = platformIdFor(chatIdKey);
+      try {
+        await setup.onInbound(platformId, null, coalesced);
+      } catch (err) {
+        log.error('Baget telegram: onInbound (debounced) threw', {
+          err,
+          chatId: chatIdKey,
+          messageId: coalesced.id,
+        });
+      }
+    },
+    onError: (err, chatIdKey) => {
+      // We already try/catch onInbound above, so this fires for
+      // unexpected errors (e.g. coalesce throwing on a malformed
+      // buffer). Log loud rather than silently lose the burst.
+      log.error('Baget telegram: inbound debouncer flush failed', { err, chatId: chatIdKey });
+    },
+  });
 
   /**
    * Per-process buffer of recently-seen update_ids for fast dedup before
@@ -204,6 +268,7 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     }
     if (!fresh) return;
 
+    const isEdit = !update.message && !!update.edited_message;
     const msg = update.message ?? update.edited_message;
     if (!msg || !msg.text) return;
 
@@ -228,18 +293,42 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       : 'unknown';
     const senderId = msg.from ? `telegram:${msg.from.id}` : `telegram:unknown`;
 
-    try {
-      await setup.onInbound(platformId, null, {
-        id: `tg-${update.update_id}`,
-        kind: 'chat',
-        timestamp: new Date(msg.date * 1000).toISOString(),
-        content: { text: msg.text, sender, senderId },
-        isMention: msg.chat.type === 'private', // every DM is implicitly a mention
-        isGroup: msg.chat.type !== 'private',
-      });
-    } catch (err) {
-      log.error('Baget telegram: onInbound threw', { err, updateId: update.update_id });
+    const inbound: InboundMessage = {
+      id: `tg-${update.update_id}`,
+      kind: 'chat',
+      timestamp: new Date(msg.date * 1000).toISOString(),
+      content: { text: msg.text, sender, senderId },
+      isMention: msg.chat.type === 'private', // every DM is implicitly a mention
+      isGroup: msg.chat.type !== 'private',
+    };
+
+    // Three cases bypass the debouncer and route immediately:
+    //   1. Slash commands (`/whoami`, `/companies`, future control
+    //      commands) — protocol actions, not conversation. The
+    //      `/start <token>` happy path was already intercepted above.
+    //      We don't differentiate "real command" from "founder's prose
+    //      that happens to start with /" because Telegram's UX makes
+    //      the latter ~zero in practice.
+    //   2. Edited messages — an edit replaces, not appends. Coalescing
+    //      a fresh edit with the buffered original would produce a
+    //      garbled "hello\nhellow"-shaped string. Routing edits
+    //      immediately keeps the existing buffer untouched; the
+    //      original (if still buffered) flushes on its own timer.
+    const isCommand = msg.text.trimStart().startsWith('/');
+    if (isCommand || isEdit) {
+      try {
+        await setup.onInbound(platformId, null, inbound);
+      } catch (err) {
+        log.error('Baget telegram: onInbound threw (immediate path)', {
+          err,
+          updateId: update.update_id,
+          reason: isCommand ? 'command' : 'edit',
+        });
+      }
+      return;
     }
+
+    debouncer.push(String(msg.chat.id), inbound);
   }
 
   /**
@@ -459,6 +548,9 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     },
 
     async teardown(): Promise<void> {
+      // Dispose first so any pending flush whose timer fires during the
+      // teardown window can't reach a half-torn-down adapter.
+      debouncer.dispose();
       if (sweepHandle) {
         clearInterval(sweepHandle);
         sweepHandle = null;
@@ -507,6 +599,77 @@ async function readBody(req: http.IncomingMessage, max: number): Promise<string>
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
+}
+
+/**
+ * Combine N buffered inbound messages from the same chat into one.
+ *
+ *   - Texts joined with `\n` in arrival order.
+ *   - Identity / metadata fields (`id`, `kind`, `timestamp`, `isMention`,
+ *     `isGroup`, and `sender`/`senderId` inside `content`) carry over
+ *     from the LATEST message — that's the one whose update_id and
+ *     wall-clock time most accurately describe "the burst landed".
+ *   - Attachments (when InboundMessage gains them in a follow-up PR)
+ *     concatenate. Today the read returns `[]` for every message and
+ *     the attachments key is omitted from the output.
+ *
+ * Pure / synchronous; safe for the debouncer's setTimeout callback.
+ */
+function coalesceInboundMessages(messages: InboundMessage[]): InboundMessage {
+  // Defensive: createInboundDebouncer never invokes coalesce with an
+  // empty buffer (the buffer is created by the first push), but we
+  // guard so a future contract change doesn't crash the runner with a
+  // confusing "Cannot read properties of undefined" inside a timer.
+  if (messages.length === 0) {
+    throw new Error('coalesceInboundMessages: empty buffer');
+  }
+  const latest = messages[messages.length - 1]!;
+
+  const texts: string[] = [];
+  for (const m of messages) {
+    const c = m.content;
+    if (typeof c === 'string') {
+      if (c.length > 0) texts.push(c);
+    } else if (c && typeof c === 'object' && typeof (c as { text?: unknown }).text === 'string') {
+      const t = (c as { text: string }).text;
+      if (t.length > 0) texts.push(t);
+    }
+  }
+  const rawJoined = texts.join('\n');
+  const joinedText =
+    rawJoined.length <= COALESCED_TEXT_CAP
+      ? rawJoined
+      : safeSliceUtf16(rawJoined, COALESCED_TEXT_CAP - COALESCED_TRUNCATION_SUFFIX.length) +
+        COALESCED_TRUNCATION_SUFFIX;
+
+  // Carry sender/senderId from the latest content if it's an object
+  // shape. String content fallback (rare) just becomes the joined text.
+  const latestContent = latest.content;
+  const coalescedContent: unknown =
+    latestContent && typeof latestContent === 'object' && !Array.isArray(latestContent)
+      ? { ...(latestContent as Record<string, unknown>), text: joinedText }
+      : joinedText;
+
+  // Future-proof attachments concat. PR #2 (inbound media) will add
+  // `attachments?: unknown[]` to InboundMessage; this read returns
+  // [] today and lights up automatically when the field exists.
+  // TODO: drop the cast when PR #2 lands and the field is on the type.
+  const allAttachments = messages.flatMap(
+    (m) => (m as InboundMessage & { attachments?: unknown[] }).attachments ?? [],
+  );
+
+  const result: InboundMessage = {
+    id: latest.id,
+    kind: latest.kind,
+    timestamp: latest.timestamp,
+    content: coalescedContent,
+    isMention: latest.isMention,
+    isGroup: latest.isGroup,
+  };
+  if (allAttachments.length > 0) {
+    (result as InboundMessage & { attachments: unknown[] }).attachments = allAttachments;
+  }
+  return result;
 }
 
 function extractText(message: OutboundMessage): string | null {
@@ -601,3 +764,8 @@ export function _testBuildBagetTelegramAdapter(cfg: BagetTelegramConfig): Channe
 // rejecting partial teams in production. A focused unit test here
 // guards against regressions to that specific gate.
 export const _testParseTeamMembers = parseTeamMembers;
+
+// Exported for direct unit testing of the debouncer-coalesce hook —
+// validates the text-join + carry-from-latest behavior without
+// spinning up the full webhook → router round trip.
+export const _testCoalesceInboundMessages = coalesceInboundMessages;
