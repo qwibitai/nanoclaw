@@ -61,12 +61,23 @@ function buildPayload(messages: object[], contacts: object[] = []) {
   };
 }
 
-async function postWebhook(port: number, body: object): Promise<http.IncomingMessage> {
+async function postWebhook(
+  port: number,
+  body: object,
+): Promise<http.IncomingMessage> {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
     const req = http.request(
-      { hostname: '127.0.0.1', port, path: '/webhook/whatsapp', method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } },
+      {
+        hostname: '127.0.0.1',
+        port,
+        path: '/webhook/whatsapp',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data),
+        },
+      },
       resolve,
     );
     req.on('error', reject);
@@ -75,15 +86,28 @@ async function postWebhook(port: number, body: object): Promise<http.IncomingMes
   });
 }
 
-async function getWebhook(port: number, params: Record<string, string>): Promise<{ status: number; body: string }> {
+async function getWebhook(
+  port: number,
+  params: Record<string, string>,
+): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const qs = new URLSearchParams(params).toString();
     const req = http.request(
-      { hostname: '127.0.0.1', port, path: `/webhook/whatsapp?${qs}`, method: 'GET' },
+      {
+        hostname: '127.0.0.1',
+        port,
+        path: `/webhook/whatsapp?${qs}`,
+        method: 'GET',
+      },
       (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() }));
+        res.on('end', () =>
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString(),
+          }),
+        );
       },
     );
     req.on('error', reject);
@@ -179,7 +203,10 @@ describe('WhatsAppChannel', () => {
       const opts = createTestOpts();
       port = await startChannel(opts);
 
-      const res = await postWebhook(port, { object: 'whatsapp_business_account', entry: [] });
+      const res = await postWebhook(port, {
+        object: 'whatsapp_business_account',
+        entry: [],
+      });
       expect(res.statusCode).toBe(200);
     });
 
@@ -187,10 +214,21 @@ describe('WhatsAppChannel', () => {
       const opts = createTestOpts();
       port = await startChannel(opts);
 
-      await postWebhook(port, buildPayload(
-        [{ id: 'msg-1', from: '15551234567', timestamp: '1700000000', type: 'text', text: { body: 'Hello Andy' } }],
-        [{ wa_id: '15551234567', profile: { name: 'Jordan' } }],
-      ));
+      await postWebhook(
+        port,
+        buildPayload(
+          [
+            {
+              id: 'msg-1',
+              from: '15551234567',
+              timestamp: '1700000000',
+              type: 'text',
+              text: { body: 'Hello Andy' },
+            },
+          ],
+          [{ wa_id: '15551234567', profile: { name: 'Jordan' } }],
+        ),
+      );
 
       // Give async processing time to complete
       await new Promise((r) => setTimeout(r, 20));
@@ -211,10 +249,21 @@ describe('WhatsAppChannel', () => {
       const opts = createTestOpts();
       port = await startChannel(opts);
 
-      await postWebhook(port, buildPayload(
-        [{ id: 'msg-2', from: '19990000000', timestamp: '1700000001', type: 'text', text: { body: 'Hi' } }],
-        [{ wa_id: '19990000000', profile: { name: 'Stranger' } }],
-      ));
+      await postWebhook(
+        port,
+        buildPayload(
+          [
+            {
+              id: 'msg-2',
+              from: '19990000000',
+              timestamp: '1700000001',
+              type: 'text',
+              text: { body: 'Hi' },
+            },
+          ],
+          [{ wa_id: '19990000000', profile: { name: 'Stranger' } }],
+        ),
+      );
       await new Promise((r) => setTimeout(r, 20));
 
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
@@ -231,9 +280,18 @@ describe('WhatsAppChannel', () => {
       const opts = createTestOpts();
       port = await startChannel(opts);
 
-      await postWebhook(port, buildPayload(
-        [{ id: 'msg-3', from: '15551234567', timestamp: '1700000002', type: 'image', image: { caption: 'Look at this' } }],
-      ));
+      await postWebhook(
+        port,
+        buildPayload([
+          {
+            id: 'msg-3',
+            from: '15551234567',
+            timestamp: '1700000002',
+            type: 'image',
+            image: { caption: 'Look at this' },
+          },
+        ]),
+      );
       await new Promise((r) => setTimeout(r, 20));
 
       expect(opts.onMessage).toHaveBeenCalledWith(
@@ -246,9 +304,18 @@ describe('WhatsAppChannel', () => {
       const opts = createTestOpts();
       port = await startChannel(opts);
 
-      await postWebhook(port, buildPayload(
-        [{ id: 'msg-4', from: '15551234567', timestamp: '1700000003', type: 'video', video: { caption: 'Watch this' } }],
-      ));
+      await postWebhook(
+        port,
+        buildPayload([
+          {
+            id: 'msg-4',
+            from: '15551234567',
+            timestamp: '1700000003',
+            type: 'video',
+            video: { caption: 'Watch this' },
+          },
+        ]),
+      );
       await new Promise((r) => setTimeout(r, 20));
 
       expect(opts.onMessage).toHaveBeenCalledWith(
@@ -261,9 +328,18 @@ describe('WhatsAppChannel', () => {
       const opts = createTestOpts();
       port = await startChannel(opts);
 
-      await postWebhook(port, buildPayload(
-        [{ id: 'msg-5', from: '15551234567', timestamp: '1700000004', type: 'document', document: { caption: 'See doc' } }],
-      ));
+      await postWebhook(
+        port,
+        buildPayload([
+          {
+            id: 'msg-5',
+            from: '15551234567',
+            timestamp: '1700000004',
+            type: 'document',
+            document: { caption: 'See doc' },
+          },
+        ]),
+      );
       await new Promise((r) => setTimeout(r, 20));
 
       expect(opts.onMessage).toHaveBeenCalledWith(
@@ -276,9 +352,17 @@ describe('WhatsAppChannel', () => {
       const opts = createTestOpts();
       port = await startChannel(opts);
 
-      await postWebhook(port, buildPayload(
-        [{ id: 'msg-6', from: '15551234567', timestamp: '1700000005', type: 'audio' }],
-      ));
+      await postWebhook(
+        port,
+        buildPayload([
+          {
+            id: 'msg-6',
+            from: '15551234567',
+            timestamp: '1700000005',
+            type: 'audio',
+          },
+        ]),
+      );
       await new Promise((r) => setTimeout(r, 20));
 
       expect(opts.onMessage).not.toHaveBeenCalled();
@@ -288,10 +372,21 @@ describe('WhatsAppChannel', () => {
       const opts = createTestOpts();
       port = await startChannel(opts);
 
-      await postWebhook(port, buildPayload(
-        [{ id: 'msg-7', from: '15551234567', timestamp: '1700000006', type: 'text', text: { body: 'Hi' } }],
-        // No contacts array
-      ));
+      await postWebhook(
+        port,
+        buildPayload(
+          [
+            {
+              id: 'msg-7',
+              from: '15551234567',
+              timestamp: '1700000006',
+              type: 'text',
+              text: { body: 'Hi' },
+            },
+          ],
+          // No contacts array
+        ),
+      );
       await new Promise((r) => setTimeout(r, 20));
 
       expect(opts.onMessage).toHaveBeenCalledWith(
@@ -327,7 +422,10 @@ describe('WhatsAppChannel', () => {
     it('returns 404 for unknown paths', async () => {
       port = await startChannel();
       const res = await new Promise<http.IncomingMessage>((resolve, reject) => {
-        const req = http.request({ hostname: '127.0.0.1', port, path: '/other', method: 'POST' }, resolve);
+        const req = http.request(
+          { hostname: '127.0.0.1', port, path: '/other', method: 'POST' },
+          resolve,
+        );
         req.on('error', reject);
         req.end();
       });
@@ -347,7 +445,9 @@ describe('WhatsAppChannel', () => {
         expect.stringContaining('/test-phone-id/messages'),
         expect.objectContaining({
           method: 'POST',
-          headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+          headers: expect.objectContaining({
+            Authorization: 'Bearer test-token',
+          }),
         }),
       );
 
@@ -405,7 +505,9 @@ describe('WhatsAppChannel', () => {
     it('is a no-op (Cloud API does not support typing indicators)', async () => {
       channel = new WhatsAppChannel(createTestOpts());
       // Should resolve without throwing and without calling fetch
-      await expect(channel.setTyping('15551234567@s.whatsapp.net', true)).resolves.toBeUndefined();
+      await expect(
+        channel.setTyping('15551234567@s.whatsapp.net', true),
+      ).resolves.toBeUndefined();
       expect(mockFetch).not.toHaveBeenCalled();
     });
   });

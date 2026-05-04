@@ -1,17 +1,32 @@
 import http from 'http';
 
-import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, WHATSAPP_WEBHOOK_PORT } from '../config.js';
+import {
+  ASSISTANT_HAS_OWN_NUMBER,
+  ASSISTANT_NAME,
+  WHATSAPP_WEBHOOK_PORT,
+} from '../config.js';
 import { logger } from '../logger.js';
-import type { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import type {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
 import { registerChannel, type ChannelOpts } from './registry.js';
 
 const GRAPH_API_VERSION = 'v19.0';
 
 // Read credentials lazily so they pick up runtime values (env injected after module load)
 const creds = {
-  get phoneNumberId() { return process.env.WHATSAPP_PHONE_NUMBER_ID ?? ''; },
-  get accessToken() { return process.env.WHATSAPP_ACCESS_TOKEN ?? ''; },
-  get verifyToken() { return process.env.WHATSAPP_VERIFY_TOKEN ?? ''; },
+  get phoneNumberId() {
+    return process.env.WHATSAPP_PHONE_NUMBER_ID ?? '';
+  },
+  get accessToken() {
+    return process.env.WHATSAPP_ACCESS_TOKEN ?? '';
+  },
+  get verifyToken() {
+    return process.env.WHATSAPP_VERIFY_TOKEN ?? '';
+  },
 };
 
 export interface WhatsAppChannelOpts {
@@ -64,7 +79,10 @@ export class WhatsAppChannel implements Channel {
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => {
-        const url = new URL(req.url ?? '/', `http://localhost:${WHATSAPP_WEBHOOK_PORT}`);
+        const url = new URL(
+          req.url ?? '/',
+          `http://localhost:${WHATSAPP_WEBHOOK_PORT}`,
+        );
         if (url.pathname !== '/webhook/whatsapp') {
           res.writeHead(404);
           res.end();
@@ -83,7 +101,10 @@ export class WhatsAppChannel implements Channel {
       this.server.on('error', reject);
       this.server.listen(WHATSAPP_WEBHOOK_PORT, () => {
         this.connected = true;
-        logger.info({ port: WHATSAPP_WEBHOOK_PORT }, 'WhatsApp Cloud API webhook listening');
+        logger.info(
+          { port: WHATSAPP_WEBHOOK_PORT },
+          'WhatsApp Cloud API webhook listening',
+        );
         resolve();
       });
     });
@@ -105,7 +126,10 @@ export class WhatsAppChannel implements Channel {
     }
   }
 
-  private handleWebhook(req: http.IncomingMessage, res: http.ServerResponse): void {
+  private handleWebhook(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
     req.on('end', () => {
@@ -117,7 +141,10 @@ export class WhatsAppChannel implements Channel {
       try {
         this.processPayload(JSON.parse(body) as WebhookPayload);
       } catch (err) {
-        logger.error({ err, body: body.slice(0, 200) }, 'Failed to parse webhook payload');
+        logger.error(
+          { err, body: body.slice(0, 200) },
+          'Failed to parse webhook payload',
+        );
       }
     });
   }
@@ -143,9 +170,14 @@ export class WhatsAppChannel implements Channel {
     }
   }
 
-  private processMessage(msg: WaMessage, nameByWaId: Record<string, string>): void {
+  private processMessage(
+    msg: WaMessage,
+    nameByWaId: Record<string, string>,
+  ): void {
     const chatJid = `${msg.from}@s.whatsapp.net`;
-    const timestamp = new Date(parseInt(msg.timestamp, 10) * 1000).toISOString();
+    const timestamp = new Date(
+      parseInt(msg.timestamp, 10) * 1000,
+    ).toISOString();
     const senderName = nameByWaId[msg.from] ?? msg.from;
 
     this.opts.onChatMetadata(chatJid, timestamp, senderName, 'whatsapp', false);
@@ -176,7 +208,9 @@ export class WhatsAppChannel implements Channel {
 
   async sendMessage(jid: string, text: string): Promise<void> {
     const phone = jid.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '');
-    const prefixed = ASSISTANT_HAS_OWN_NUMBER ? text : `${ASSISTANT_NAME}: ${text}`;
+    const prefixed = ASSISTANT_HAS_OWN_NUMBER
+      ? text
+      : `${ASSISTANT_NAME}: ${text}`;
 
     const res = await fetch(
       `https://graph.facebook.com/${GRAPH_API_VERSION}/${creds.phoneNumberId}/messages`,

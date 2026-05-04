@@ -9,7 +9,10 @@ const SCRIPT_PATH = path.resolve(process.cwd(), 'scripts/cleanup-sessions.sh');
 
 function runCleanup(): void {
   if (!fs.existsSync(SCRIPT_PATH)) {
-    logger.debug({ path: SCRIPT_PATH }, 'Session cleanup script not found, skipping');
+    logger.debug(
+      { path: SCRIPT_PATH },
+      'Session cleanup script not found, skipping',
+    );
     return;
   }
   execFile('/bin/bash', [SCRIPT_PATH], { timeout: 60_000 }, (err, stdout) => {

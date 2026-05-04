@@ -18,7 +18,9 @@ async function validate(): Promise<void> {
   if (!VERIFY_TOKEN) missing.push('WHATSAPP_VERIFY_TOKEN');
 
   if (missing.length > 0) {
-    console.error(`✗ Missing required environment variables: ${missing.join(', ')}`);
+    console.error(
+      `✗ Missing required environment variables: ${missing.join(', ')}`,
+    );
     console.error('  Set these in your .env file and restart.');
     process.exit(1);
   }
@@ -33,17 +35,27 @@ async function validate(): Promise<void> {
   if (!res.ok) {
     const body = await res.text();
     console.error(`✗ API request failed (${res.status}): ${body}`);
-    console.error('  Check that WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID are correct.');
+    console.error(
+      '  Check that WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID are correct.',
+    );
     process.exit(1);
   }
 
-  const data = await res.json() as { display_phone_number?: string; verified_name?: string; quality_rating?: string };
+  const data = (await res.json()) as {
+    display_phone_number?: string;
+    verified_name?: string;
+    quality_rating?: string;
+  };
 
   console.log('✓ WhatsApp Cloud API credentials are valid\n');
-  console.log(`  Phone number : ${data.display_phone_number ?? PHONE_NUMBER_ID}`);
+  console.log(
+    `  Phone number : ${data.display_phone_number ?? PHONE_NUMBER_ID}`,
+  );
   console.log(`  Verified name: ${data.verified_name ?? '(not set)'}`);
   console.log(`  Quality rating: ${data.quality_rating ?? '(unknown)'}`);
-  console.log(`  Verify token : ${VERIFY_TOKEN} (set this in your Meta webhook config)\n`);
+  console.log(
+    `  Verify token : ${VERIFY_TOKEN} (set this in your Meta webhook config)\n`,
+  );
 }
 
 validate().catch((err: Error) => {
