@@ -87,10 +87,12 @@ if command -v onecli >/dev/null 2>&1; then
   ALREADY_INSTALLED=1
 else
   log "installing OneCLI gateway..."
-  curl -fsSL onecli.sh/install | sh || fail "gateway install failed" 1
+  # Explicit https:// — curl defaults to http:// when no scheme is
+  # given, which fails immediately on hosts that don't expose port 80.
+  curl -fsSL https://onecli.sh/install | sh || fail "gateway install failed" 1
 
   log "installing OneCLI CLI..."
-  curl -fsSL onecli.sh/cli/install | sh || fail "CLI install failed" 1
+  curl -fsSL https://onecli.sh/cli/install | sh || fail "CLI install failed" 1
 
   # Re-export PATH in case installer just dropped binary in ~/.local/bin
   export PATH="$HOME/.local/bin:$PATH"
