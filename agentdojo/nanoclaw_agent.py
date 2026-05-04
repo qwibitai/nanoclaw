@@ -80,8 +80,8 @@ def build_pipeline(
 
     pipeline = AgentPipeline(
         [
-            InitQuery(),
             SystemMessage(system_prompt),
+            InitQuery(),
             llm,
             ToolsExecutionLoop([ToolsExecutor()]),
         ]
