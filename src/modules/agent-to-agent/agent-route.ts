@@ -23,10 +23,11 @@ import path from 'path';
 
 import { isSafeAttachmentName } from '../../attachment-safety.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
+import { getInboundSourceSessionId } from '../../db/session-db.js';
 import { getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
 import { log } from '../../log.js';
-import { resolveSession, sessionDir, writeSessionMessage } from '../../session-manager.js';
+import { openInboundDb, resolveSession, sessionDir, writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { hasDestination } from './db/agent-destinations.js';
 
@@ -101,6 +102,49 @@ export interface RoutableAgentMessage {
   id: string;
   platform_id: string | null;
   content: string;
+  /**
+   * For replies, the id of the inbound message being replied to. The
+   * container's formatter sets this from the first inbound in the batch
+   * (`container/agent-runner/src/formatter.ts`). Used here to route the
+   * reply back to the originating session — see `resolveTargetSession`.
+   */
+  in_reply_to: string | null;
+}
+
+/**
+ * Pick which session of `targetAgentGroupId` should receive this a2a message.
+ *
+ * Return-path lookup: if the message is a reply (`in_reply_to` set), open the
+ * source agent's inbound DB and read the original triggering row's
+ * `source_session_id`. That column was stamped when the original outbound was
+ * routed — it's the session that started the conversation, and replies should
+ * land there even when the target agent group has multiple active sessions.
+ *
+ * Falls back to `resolveSession(..., 'agent-shared')` (which selects the
+ * newest active session) when:
+ *   - the message has no `in_reply_to` (fresh-initiated a2a), OR
+ *   - the referenced row isn't in source's inbound (cross-batch reference), OR
+ *   - the referenced row's source_session_id is NULL (channel inbound or
+ *     pre-migration row), OR
+ *   - the recovered session no longer exists / belongs to a different agent.
+ */
+function resolveTargetSession(msg: RoutableAgentMessage, sourceSession: Session, targetAgentGroupId: string): Session {
+  if (msg.in_reply_to) {
+    const srcDb = openInboundDb(sourceSession.agent_group_id, sourceSession.id);
+    let originSessionId: string | null;
+    try {
+      originSessionId = getInboundSourceSessionId(srcDb, msg.in_reply_to);
+    } finally {
+      srcDb.close();
+    }
+    if (originSessionId) {
+      const candidate = getSession(originSessionId);
+      if (candidate && candidate.agent_group_id === targetAgentGroupId && candidate.status === 'active') {
+        return candidate;
+      }
+    }
+  }
+  return resolveSession(targetAgentGroupId, null, null, 'agent-shared').session;
 }
 
 export async function routeAgentMessage(msg: RoutableAgentMessage, session: Session): Promise<void> {
@@ -119,7 +163,7 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
   if (!getAgentGroup(targetAgentGroupId)) {
     throw new Error(`target agent group ${targetAgentGroupId} not found for message ${msg.id}`);
   }
-  const { session: targetSession } = resolveSession(targetAgentGroupId, null, null, 'agent-shared');
+  const targetSession = resolveTargetSession(msg, session, targetAgentGroupId);
   const a2aMsgId = `a2a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // If the source message references files (via `send_file`), forward the
@@ -137,6 +181,7 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
     channelType: 'agent',
     threadId: null,
     content: forwardedContent,
+    sourceSessionId: session.id,
   });
   log.info('Agent message routed', {
     from: session.agent_group_id,

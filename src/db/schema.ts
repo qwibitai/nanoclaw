@@ -171,7 +171,13 @@ CREATE TABLE IF NOT EXISTS messages_in (
   platform_id    TEXT,
   channel_type   TEXT,
   thread_id      TEXT,
-  content        TEXT NOT NULL
+  content        TEXT NOT NULL,
+  -- For agent-to-agent inbound rows: the source session that emitted the
+  -- triggering outbound. Used as a return path when the target replies —
+  -- the reply routes back to this exact session, not to the source agent
+  -- group's "newest" session. NULL on channel-side inbound and on a2a rows
+  -- written before this column existed.
+  source_session_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_in_series ON messages_in(series_id);
 
