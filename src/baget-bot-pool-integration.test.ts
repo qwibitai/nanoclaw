@@ -396,6 +396,7 @@ describe('handleBindTelegram — pool path', () => {
     server = await startBindServer({
       publicBaseUrl: PUBLIC_BASE_URL,
       telegramRoutes: [],
+      generateAgentGroupId: () => 'ag-exhausted-clean',
     });
     const { status, json } = await postBind(server.baseUrl);
     expect(status).toBe(503);
@@ -404,6 +405,19 @@ describe('handleBindTelegram — pool path', () => {
     // dashboard can surface "ask the operator to seed more bots"
     // rather than a generic 503.
     expect(json.message).toMatch(/seed/i);
+
+    // Codex P1 (re-review of 1e41ac9): pool_exhausted MUST NOT
+    // leave the system in a mutated-but-failed state. Specifically:
+    // no chat-bind, no channel-token persist, no by-tuple "paired"
+    // false-positive. The agent_groups row is allowed to exist
+    // (idempotent across retries) but no Telegram-side wiring.
+    const byTupleResp = await fetch(
+      `${server.baseUrl}/baget/agent-groups/by-tuple?userId=${VALID_BIND_BODY.userId}&companyId=${VALID_BIND_BODY.companyId}`,
+      { headers: { Authorization: `Bearer ${ADMIN_TOKEN}` } },
+    );
+    const byTuple = (await byTupleResp.json()) as { paired: boolean; platformChatId?: string };
+    expect(byTuple.paired).toBe(false);
+    expect(byTuple.platformChatId).toBeUndefined();
   });
 
   it('idempotent re-bind reuses the existing pool assignment and skips setWebhook on the second bind', async () => {
@@ -781,7 +795,10 @@ describe('handleBindTelegram — legacy global-bot path', () => {
       telegramRoutes: [
         { match: (u) => u.endsWith('/setWebhook'), handler: () => okResponse({ ok: true }) },
         { match: (u) => u.endsWith('/setMyName'), handler: () => okResponse({ ok: true }) },
-        { match: (u) => u.endsWith('/sendMessage'), handler: () => okResponse({ ok: true, result: { message_id: 1 } }) },
+        {
+          match: (u) => u.endsWith('/sendMessage'),
+          handler: () => okResponse({ ok: true, result: { message_id: 1 } }),
+        },
       ],
       generateAgentGroupId: () => 'unused',
     });
@@ -874,7 +891,10 @@ describe('disconnect releases the assigned bot back to the pool', () => {
       telegramBotToken: 'tok-global-dc',
       telegramRoutes: [
         // Welcome on bind, farewell on disconnect — both via global.
-        { match: (u) => u.endsWith('/sendMessage'), handler: () => okResponse({ ok: true, result: { message_id: 1 } }) },
+        {
+          match: (u) => u.endsWith('/sendMessage'),
+          handler: () => okResponse({ ok: true, result: { message_id: 1 } }),
+        },
       ],
       generateAgentGroupId: () => 'ag-legacy-dc',
     });
@@ -929,7 +949,10 @@ describe('disconnect releases the assigned bot back to the pool', () => {
             return okResponse({ ok: true });
           },
         },
-        { match: (u) => u.endsWith('/sendMessage'), handler: () => okResponse({ ok: true, result: { message_id: 1 } }) },
+        {
+          match: (u) => u.endsWith('/sendMessage'),
+          handler: () => okResponse({ ok: true, result: { message_id: 1 } }),
+        },
       ],
       generateAgentGroupId: () => `ag-${setMyNameCalls.length}-${Math.random().toString(36).slice(2, 8)}`,
     });

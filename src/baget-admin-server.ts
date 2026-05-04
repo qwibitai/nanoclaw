@@ -1049,7 +1049,40 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
     // bots forever.
     const preBindChatCount = countMessagingGroupBindings(agentGroupId);
 
-    // 2b. Persist baget.ai's per-(user, company) bearer token before
+    // 2b. Resolve pool assignment FIRST — before any state-mutating
+    //     side-effect writes (channel-token persist, chat-bind). If
+    //     the pool is exhausted and no global fallback is configured,
+    //     we return 503 immediately and the founder's chat-bind /
+    //     channel-token state stays untouched. Codex P1 (re-review):
+    //     under the previous order, a `pool_exhausted` 503 came
+    //     AFTER `bindBagetTelegramChat` had already rewired the
+    //     founder's messaging_group, leaving by-tuple in a
+    //     "paired:true but bind-failed" state.
+    //
+    //     Precedence: pool > global. If publicBaseUrl is unset we
+    //     refuse fresh pool assignment (no setWebhook URL → one-way
+    //     broken chat); resolvePoolAssignment handles that case by
+    //     falling back to global or returning pool_exhausted.
+    const poolResult = resolvePoolAssignment(agentGroupId, preBindChatCount > 0);
+    if (poolResult === 'pool_exhausted') {
+      log.error('Baget bind-telegram: pool exhausted and no global token configured', {
+        userId,
+        companyId,
+        agentGroupId,
+      });
+      sendJson(res, 503, {
+        ok: false,
+        error: 'pool_exhausted',
+        message: 'Bot pool is empty — operator must seed more bots via POST /baget/bot-pool/seed.',
+      });
+      return;
+    }
+    // Unpack: { row, wasFreshlyAssigned } when we have a pool entry,
+    // null on the legacy global-bot path.
+    const poolEntry = poolResult ? poolResult.row : null;
+    const poolEntryFreshlyAssigned = poolResult ? poolResult.wasFreshlyAssigned : false;
+
+    // 2c. Persist baget.ai's per-(user, company) bearer token before
     //     we wire the Telegram chat. Order matters: if the token
     //     persist fails, we don't want a "bound chat" without the
     //     token to back its calls — the founder would DM the bot,
@@ -1058,6 +1091,8 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
       // The helper already wrote the 500. The agent_groups row above
       // is committed; a retry will hit the existing row + UPSERT the
       // token (idempotent via INSERT … ON CONFLICT … DO UPDATE).
+      // Pool assignment from step 2b is also idempotent across
+      // retries (`getBotPoolEntryByAgentGroup` returns it).
       return;
     }
 
@@ -1083,37 +1118,6 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
       });
       return;
     }
-
-    // 3b. Pool assignment + per-bot Telegram side-effects. Reusable
-    //      lifecycle for any future channel that adopts the same
-    //      assign/release pattern (WhatsApp, Slack) — the helpers in
-    //      `db/baget-bot-pool.ts` are channel-agnostic; only the
-    //      Telegram-specific `registerTelegramWebhook` /
-    //      `setBotDisplayName` calls below are per-channel.
-    //
-    //      Precedence: pool > global. We try to assign a pool bot
-    //      first; if the pool is empty AND the global
-    //      `telegramBotToken` is configured, fall back to that
-    //      (legacy single-bot path). If neither is available, return
-    //      503 with `pool_exhausted` so the operator knows to seed.
-    const poolResult = resolvePoolAssignment(agentGroupId, preBindChatCount > 0);
-    if (poolResult === 'pool_exhausted') {
-      log.error('Baget bind-telegram: pool exhausted and no global token configured', {
-        userId,
-        companyId,
-        agentGroupId,
-      });
-      sendJson(res, 503, {
-        ok: false,
-        error: 'pool_exhausted',
-        message: 'Bot pool is empty — operator must seed more bots via POST /baget/bot-pool/seed.',
-      });
-      return;
-    }
-    // Unpack: { row, wasFreshlyAssigned } when we have a pool entry,
-    // null on the legacy global-bot path.
-    const poolEntry = poolResult ? poolResult.row : null;
-    const poolEntryFreshlyAssigned = poolResult ? poolResult.wasFreshlyAssigned : false;
 
     // Resolve the (botToken, botUsername) pair to use for ALL
     // outbound calls below — welcome message, setWebhook, setMyName.
