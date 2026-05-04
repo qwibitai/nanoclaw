@@ -16,15 +16,18 @@
  * from 16 bytes of CSPRNG entropy + DB single-use CAS — see the
  * `mintPairingToken` jsdoc.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   mintPairingToken,
+  performDisconnectCleanup,
   tokenHash,
   validateCreateBody,
   verifyAdminBearer,
   type CreateAgentGroupBody,
 } from './baget-admin-server.js';
+import { closeDb, getDb, initTestDb } from './db/connection.js';
+import { runMigrations } from './db/migrations/index.js';
 
 const ADMIN_TOKEN = 'test-admin-token-1234567890abcdef';
 
@@ -320,5 +323,139 @@ describe('validateCreateBody — partial teamMembers (active-team-only)', () => 
       }),
     );
     expect(result).toContain('teamMembers.producer is not a known role');
+  });
+});
+
+// ─── performDisconnectCleanup ──────────────────────────────────────
+//
+// Pins the regression that PR #4's first attempt missed. Sam's bot
+// kept replying after Disconnect because the DELETE handler had a
+// pre-existing `if (existing.archived_at) return early` short-circuit
+// that prevented the new unbind/deny/kill logic from running on
+// already-archived groups. The channel-approval flow re-introduces
+// wiring under owner permissions in DMs (see comment in
+// handleDeleteByTuple), so an already-archived group can still have
+// LIVE wiring pointing at it. Running the cleanup again is the only
+// way to recover.
+describe('performDisconnectCleanup', () => {
+  const NOW_ISO = '2026-05-03T15:55:00.000Z';
+  const FIRST_DISCONNECT_ISO = '2026-05-03T12:00:00.000Z';
+
+  beforeEach(() => {
+    const db = initTestDb();
+    runMigrations(db);
+    db.prepare(
+      `INSERT INTO agent_groups (id, name, folder, created_at, user_id, company_id)
+       VALUES ('ag-1', 'Acme', 'baget-acme', '2026-01-01T00:00:00Z', 'u-1', 'c-1')`,
+    ).run();
+  });
+
+  afterEach(() => {
+    closeDb();
+  });
+
+  function insertMg(id: string): void {
+    getDb()
+      .prepare(
+        `INSERT INTO messaging_groups
+           (id, channel_type, platform_id, name, is_group, unknown_sender_policy, created_at)
+         VALUES (?, 'baget-telegram', ?, ?, 0, 'public', '2026-04-01T00:00:00Z')`,
+      )
+      .run(id, `tg-${id}`, `chat-${id}`);
+  }
+
+  function insertWiring(mgaId: string, mgId: string, agId: string): void {
+    getDb()
+      .prepare(
+        `INSERT INTO messaging_group_agents
+           (id, messaging_group_id, agent_group_id, engage_mode, engage_pattern,
+            sender_scope, ignored_message_policy, session_mode, priority, created_at)
+         VALUES (?, ?, ?, 'pattern', '.', 'all', 'drop', 'shared', 0, '2026-04-01T00:00:00Z')`,
+      )
+      .run(mgaId, mgId, agId);
+  }
+
+  function getMg(id: string): { denied_at: string | null } | undefined {
+    return getDb().prepare('SELECT denied_at FROM messaging_groups WHERE id = ?').get(id) as
+      | { denied_at: string | null }
+      | undefined;
+  }
+
+  function countWiring(agentGroupId: string): number {
+    return (
+      getDb()
+        .prepare('SELECT COUNT(*) AS n FROM messaging_group_agents WHERE agent_group_id = ?')
+        .get(agentGroupId) as { n: number }
+    ).n;
+  }
+
+  function getArchivedAt(agentGroupId: string): string | null {
+    return (
+      (getDb().prepare('SELECT archived_at FROM agent_groups WHERE id = ?').get(agentGroupId) as {
+        archived_at: string | null;
+      }).archived_at ?? null
+    );
+  }
+
+  it('first-time disconnect: archives, unbinds, and stamps denied_at', () => {
+    insertMg('mg-1');
+    insertWiring('mga-1', 'mg-1', 'ag-1');
+
+    const result = performDisconnectCleanup('ag-1', {
+      wasAlreadyArchived: false,
+      nowIso: NOW_ISO,
+      reason: 'unit test — first disconnect',
+    });
+
+    expect(result.unbound).toBe(1);
+    expect(result.denied).toBe(1);
+    expect(result.killedRunners).toBe(0); // no fake runner registered
+    expect(getMg('mg-1')?.denied_at).toBe(NOW_ISO);
+    expect(getArchivedAt('ag-1')).toBe(NOW_ISO);
+    expect(countWiring('ag-1')).toBe(0);
+  });
+
+  // The actual regression test. Reproduces Sam's stuck state:
+  // archived_at is set (founder disconnected once before), but the
+  // channel-approval flow re-created the wiring after the archive.
+  // The second disconnect MUST clean it up — that's exactly what the
+  // missing-from-PR-#4 short-circuit was preventing.
+  it('re-disconnect with stuck wiring: cleans up unbind+deny+kill, preserves original archive timestamp', () => {
+    // Simulate the post-bug, pre-fix state: agent_group archived
+    // earlier; wiring re-introduced afterward via channel-approval.
+    getDb().prepare('UPDATE agent_groups SET archived_at = ? WHERE id = ?').run(FIRST_DISCONNECT_ISO, 'ag-1');
+    insertMg('mg-1');
+    insertWiring('mga-1', 'mg-1', 'ag-1'); // the rogue wiring
+
+    const result = performDisconnectCleanup('ag-1', {
+      wasAlreadyArchived: true,
+      nowIso: NOW_ISO,
+      reason: 'unit test — recovery from stuck state',
+    });
+
+    // Cleanup happened.
+    expect(result.unbound).toBe(1);
+    expect(result.denied).toBe(1);
+    expect(countWiring('ag-1')).toBe(0);
+    expect(getMg('mg-1')?.denied_at).toBe(NOW_ISO);
+    // BUT the archive timestamp is the ORIGINAL one — re-running
+    // the cleanup must not bump it (forensic stability).
+    expect(getArchivedAt('ag-1')).toBe(FIRST_DISCONNECT_ISO);
+  });
+
+  it('re-disconnect with no stuck state: still safe (token, deny, kill all no-op)', () => {
+    getDb().prepare('UPDATE agent_groups SET archived_at = ? WHERE id = ?').run(FIRST_DISCONNECT_ISO, 'ag-1');
+    // No messaging_groups, no wiring — clean already-archived state.
+
+    const result = performDisconnectCleanup('ag-1', {
+      wasAlreadyArchived: true,
+      nowIso: NOW_ISO,
+      reason: 'unit test — clean re-disconnect',
+    });
+
+    expect(result.unbound).toBe(0);
+    expect(result.denied).toBe(0);
+    expect(result.killedRunners).toBe(0);
+    expect(getArchivedAt('ag-1')).toBe(FIRST_DISCONNECT_ISO);
   });
 });

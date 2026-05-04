@@ -315,6 +315,56 @@ export type BagetAdminServer = {
   close(): Promise<void>;
 };
 
+/**
+ * Disconnect-cleanup primitive. Both DELETE handlers (path-style and
+ * tuple-style) compose around this, so the recovery semantics live in
+ * one place.
+ *
+ * Cleanly idempotent — every step here either no-ops or stays bounded
+ * when called against an already-archived group with re-introduced
+ * (stuck) state:
+ *
+ *   - `deleteChannelToken` — no-op if already gone.
+ *   - `archiveBagetAgentGroup` — skipped on re-disconnect so the
+ *     ORIGINAL archive timestamp is preserved (forensically valuable —
+ *     "when did this founder first disconnect").
+ *   - `unbindMessagingGroupsForAgent` — drops any wiring that re-
+ *     appeared (the channel-approval re-bind path is the most likely
+ *     re-introducer; see comment in handleDeleteByTuple) and stamps
+ *     `denied_at` on every newly-orphaned chat. `denied_at` itself is
+ *     guarded `WHERE denied_at IS NULL` so the original deny stamp
+ *     also survives a re-run.
+ *   - `killActiveSessionsForAgent` — SIGTERM by current `agentGroupId`
+ *     filter; no-ops when nothing is running.
+ *
+ * Why this exists as its own function (instead of being inlined in
+ * each handler): pinning the recovery semantics with a test. The
+ * regression we fixed (rogue wiring sticking around because the
+ * handler short-circuited on `archived_at`) is invisible from the
+ * unit tests on the underlying helpers — it only surfaced in
+ * production. Exporting + testing this function directly catches
+ * future regressions where someone re-adds the short-circuit.
+ *
+ * Wrapped in a single SQLite transaction so an exception mid-DB
+ * leaves no half-state. The kill is OUTSIDE the transaction on
+ * purpose — a SIGTERM failure must not roll back the founder-
+ * initiated unbind/deny (the founder asked to disconnect; we honor
+ * that even if cleanup of in-flight processes throws).
+ */
+export function performDisconnectCleanup(
+  agentGroupId: string,
+  args: { wasAlreadyArchived: boolean; nowIso: string; reason: string },
+): { tokenDeleted: number; unbound: number; denied: number; killedRunners: number } {
+  const result = getDb().transaction(() => {
+    const tokenDeleted = deleteChannelToken(agentGroupId);
+    if (!args.wasAlreadyArchived) archiveBagetAgentGroup(agentGroupId, args.nowIso);
+    const { unbound, denied } = unbindMessagingGroupsForAgent(agentGroupId, args.nowIso);
+    return { tokenDeleted, unbound, denied };
+  })();
+  const killedRunners = killActiveSessionsForAgent(agentGroupId, args.reason);
+  return { ...result, killedRunners };
+}
+
 export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdminServer {
   if (!config.adminToken || config.adminToken.length < 16) {
     throw new Error('BAGET_ADMIN_TOKEN must be at least 16 characters');
@@ -914,26 +964,19 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
     // guarantee for any in-flight spawn that grabbed the token
     // microseconds before the transaction landed.
     const nowIso = new Date(now()).toISOString();
-    const result = getDb().transaction(() => {
-      const tokenDeleted = deleteChannelToken(groupId);
-      archiveBagetAgentGroup(groupId, nowIso);
-      const { unbound, denied } = unbindMessagingGroupsForAgent(groupId, nowIso);
-      return { tokenDeleted, unbound, denied };
-    })();
-    // After the DB has settled, SIGTERM any in-flight runners for this
-    // agent_group. Without this, a Bun child that the founder kicked
-    // off seconds earlier (sent a message, then clicked Disconnect)
-    // finishes its turn and posts a reply to a now-disconnected
-    // channel. Done OUTSIDE the transaction so a kill failure can't
-    // roll back the unbind/deny that the founder just confirmed.
-    const killedRunners = killActiveSessionsForAgent(groupId, 'founder disconnected via admin DELETE');
+    const wasAlreadyArchived = Boolean(existing.archived_at);
+    const result = performDisconnectCleanup(groupId, {
+      wasAlreadyArchived,
+      nowIso,
+      reason: 'founder disconnected via admin DELETE',
+    });
     sendJson(res, 200, {
       ok: true,
       agentGroupId: groupId,
-      archived: true,
+      archived: !wasAlreadyArchived,
       unboundChats: result.unbound,
       deniedChats: result.denied,
-      killedRunners,
+      killedRunners: result.killedRunners,
       channelTokenDeleted: result.tokenDeleted > 0,
     });
   }
@@ -1031,38 +1074,32 @@ export function createBagetAdminServer(config: BagetAdminServerConfig): BagetAdm
       sendJson(res, 200, { ok: true, archived: false, unboundChats: 0 });
       return;
     }
-    if (existing.archived_at) {
-      // Already archived — also a no-op success.
-      sendJson(res, 200, {
-        ok: true,
-        agentGroupId: existing.id,
-        archived: false,
-        unboundChats: 0,
-      });
-      return;
-    }
-    // Token-drop → archive → unbind in one atomic transaction —
-    // same fail-closed ordering and same atomicity guarantee as the
-    // path-style DELETE (handleDelete above).
+    // No `existing.archived_at` short-circuit here — see the long
+    // comment on `performDisconnectCleanup`. Re-disconnect MUST run
+    // the cleanup so the founder can recover from stuck state (rogue
+    // wiring re-introduced after the first archive — most commonly
+    // by the channel-approval flow auto-approving a DM under owner
+    // permissions).
     const nowIso = new Date(now()).toISOString();
-    const result = getDb().transaction(() => {
-      const tokenDeleted = deleteChannelToken(existing.id);
-      archiveBagetAgentGroup(existing.id, nowIso);
-      const { unbound, denied } = unbindMessagingGroupsForAgent(existing.id, nowIso);
-      return { tokenDeleted, unbound, denied };
-    })();
-    // SIGTERM any in-flight runners for this agent_group AFTER the DB
-    // has committed. Same rationale as handleDelete above — a child
-    // mid-turn would otherwise post a stale reply to a disconnected
-    // channel.
-    const killedRunners = killActiveSessionsForAgent(existing.id, 'founder disconnected via tuple DELETE');
+    const wasAlreadyArchived = Boolean(existing.archived_at);
+    const result = performDisconnectCleanup(existing.id, {
+      wasAlreadyArchived,
+      nowIso,
+      reason: 'founder disconnected via tuple DELETE',
+    });
     sendJson(res, 200, {
       ok: true,
       agentGroupId: existing.id,
-      archived: true,
+      // `archived` reflects whether THIS call did the archive write.
+      // False on a re-disconnect of an already-archived group, even
+      // though we still ran the rest of the cleanup (unbind/deny/kill)
+      // — so a non-zero `unboundChats` / `killedRunners` paired with
+      // `archived: false` is the "we found stuck state and cleaned it
+      // up" signal the dashboard can surface for postmortem.
+      archived: !wasAlreadyArchived,
       unboundChats: result.unbound,
       deniedChats: result.denied,
-      killedRunners,
+      killedRunners: result.killedRunners,
       channelTokenDeleted: result.tokenDeleted > 0,
     });
   }
