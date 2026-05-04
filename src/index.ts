@@ -62,6 +62,7 @@ import './channels/index.js';
 import './modules/index.js';
 
 import type { ChannelAdapter, ChannelSetup } from './channels/adapter.js';
+import { buildOutboundMessage } from './channels/build-outbound-message.js';
 import { initChannelAdapters, teardownChannelAdapters, getChannelAdapter } from './channels/channel-registry.js';
 
 async function main(): Promise<void> {
@@ -153,7 +154,11 @@ async function main(): Promise<void> {
         log.warn('No adapter for channel type', { channelType });
         return;
       }
-      return adapter.deliver(platformId, threadId, { kind, content: JSON.parse(content), files });
+      // The OutboundMessage construction is in `buildOutboundMessage` so
+      // it's testable without booting the whole host. The non-trivial bit
+      // is the attachments lift — see that helper's docblock for why.
+      const parsedContent = JSON.parse(content);
+      return adapter.deliver(platformId, threadId, buildOutboundMessage(kind, parsedContent, files));
     },
     async setTyping(channelType: string, platformId: string, threadId: string | null): Promise<void> {
       const adapter = getChannelAdapter(channelType);

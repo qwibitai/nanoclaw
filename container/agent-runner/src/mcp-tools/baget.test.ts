@@ -395,12 +395,30 @@ describe('baget_send_document_file handler — success path', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].platform_id).toBe('tg-chat-42');
     expect(rows[0].channel_type).toBe('telegram');
+    // Path-based attachments contract (PR #18 / OutboundAttachment) — the
+    // ONLY contract the Telegram adapter's deliver() loop reads. Asserting
+    // on this shape locks in the wire so a future regression to the
+    // legacy `content.files` shape (which silently drops on Telegram)
+    // surfaces here instead of in production.
     const content = JSON.parse(rows[0].content);
-    expect(content.files).toEqual(['pitch-deck.pdf']);
     expect(content.text).toBe('');
+    expect(content.files).toBeUndefined();
+    expect(content.attachments).toHaveLength(1);
+    expect(content.attachments[0]).toMatchObject({
+      kind: 'document',
+      filename: 'pitch-deck.pdf',
+    });
+    // The path is absolute and points at the staged outbox file the
+    // host process can read directly.
+    expect(content.attachments[0].path).toBe(stagedFile);
   });
 
-  it('passes an optional caption text through to the messages_out content', async () => {
+  it('rides the optional caption text WITH the attachment (not as a separate sendMessage)', async () => {
+    // Telegram's sendDocument supports up to 1024 chars of caption that
+    // renders as a single bubble with the file. Splitting into a
+    // separate text bubble would make the founder see two messages
+    // for one user-facing intent. Caption stays on the attachment;
+    // outer `text` stays empty.
     seedSingleDestination();
     setupWorkspace();
     routeResponse(
@@ -422,7 +440,30 @@ describe('baget_send_document_file handler — success path', () => {
     });
 
     const rows = getOutboundDb().prepare('SELECT content FROM messages_out').all() as Array<{ content: string }>;
-    expect(JSON.parse(rows[0].content).text).toBe("Here's the BP — section 3 covers the moat.");
+    const content = JSON.parse(rows[0].content);
+    expect(content.text).toBe('');
+    expect(content.attachments[0].caption).toBe("Here's the BP — section 3 covers the moat.");
+  });
+
+  it('omits caption when text arg is missing or whitespace-only', async () => {
+    seedSingleDestination();
+    setupWorkspace();
+    routeResponse(
+      (url) => url.includes('/render-pdf'),
+      () =>
+        new Response(JSON.stringify({ blobUrl: BLOB_URL, filename: 'bp.pdf', mimeType: 'application/pdf' }), {
+          status: 200,
+        }),
+    );
+    routeResponse(
+      (url) => url === BLOB_URL,
+      () => new Response(PDF_HEADER, { status: 200 }),
+    );
+    const tool = getRegisteredToolByName('baget_send_document_file');
+    await tool!.handler({ documentId: 'doc-uuid-456', text: '   ' });
+    const rows = getOutboundDb().prepare('SELECT content FROM messages_out').all() as Array<{ content: string }>;
+    const content = JSON.parse(rows[0].content);
+    expect(content.attachments[0].caption).toBeUndefined();
   });
 
   it('URL-encodes the documentId so a hallucinated path traversal is neutralized', async () => {

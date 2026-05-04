@@ -600,16 +600,25 @@ const sendDocumentFile: McpToolDefinition = {
     if (!safeFilename || safeFilename === '.' || safeFilename === '..') {
       return fail(`send_document_file got an unusable filename from /render-pdf: ${JSON.stringify(filename)}`);
     }
+    const stagedPath = path.join(outboxDir, safeFilename);
     try {
       fs.mkdirSync(outboxDir, { recursive: true });
-      fs.writeFileSync(path.join(outboxDir, safeFilename), buffer);
+      fs.writeFileSync(stagedPath, buffer);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return fail(`send_document_file failed to stage the attachment locally: ${msg}`);
     }
 
-    // 5. Enqueue the outbound message — the host wakes, sees the file
-    //    on disk + the messages_out row, and ships it on the channel.
+    // 5. Enqueue the outbound message using the path-based attachments
+    //    contract (PR #18 / `OutboundAttachment`) — the only contract the
+    //    Telegram adapter's deliver() loop reads. The legacy `content.files`
+    //    contract is buffer-based and never wired to Telegram, so a
+    //    messages_out row that only sets `files` ships nothing and the
+    //    founder sees an empty reply (this was the original bug). Caption
+    //    rides WITH the file (Telegram's sendDocument supports up to 1024
+    //    chars of caption); `text` left empty so we don't also fire a
+    //    separate sendMessage for the same content. The model still emits
+    //    its own conversational follow-up via `send_message` if it wants.
     const captionText = typeof args.text === 'string' ? args.text.trim() : '';
     writeMessageOut({
       id,
@@ -617,7 +626,17 @@ const sendDocumentFile: McpToolDefinition = {
       platform_id: routing.platform_id,
       channel_type: routing.channel_type,
       thread_id: routing.thread_id,
-      content: JSON.stringify({ text: captionText, files: [safeFilename] }),
+      content: JSON.stringify({
+        text: '',
+        attachments: [
+          {
+            kind: 'document',
+            path: stagedPath,
+            filename: safeFilename,
+            ...(captionText ? { caption: captionText } : {}),
+          },
+        ],
+      }),
     });
 
     log(`send_document_file: ${id} → ${routing.resolvedName} (${safeFilename}, ${buffer.length} bytes)`);
