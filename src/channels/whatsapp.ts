@@ -153,8 +153,14 @@ export class WhatsAppChannel implements Channel {
         const expected = `sha256=${crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex')}`;
         // Hash both values so timingSafeEqual always receives equal-length buffers,
         // preventing length-based short-circuit even if the signature is malformed.
-        const sigHash = crypto.createHmac('sha256', appSecret).update(signature).digest();
-        const expHash = crypto.createHmac('sha256', appSecret).update(expected).digest();
+        const sigHash = crypto
+          .createHmac('sha256', appSecret)
+          .update(signature)
+          .digest();
+        const expHash = crypto
+          .createHmac('sha256', appSecret)
+          .update(expected)
+          .digest();
         if (!crypto.timingSafeEqual(sigHash, expHash)) {
           logger.warn('Rejected webhook: invalid signature');
           res.writeHead(401);

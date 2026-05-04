@@ -518,16 +518,27 @@ describe('WhatsAppChannel', () => {
   describe('HMAC-SHA256 signature verification', () => {
     const APP_SECRET = 'test-app-secret';
 
-    function signedPost(port: number, body: object, secret: string, tamper = false): Promise<http.IncomingMessage> {
+    function signedPost(
+      port: number,
+      body: object,
+      secret: string,
+      tamper = false,
+    ): Promise<http.IncomingMessage> {
       const data = JSON.stringify(body);
       const rawBody = Buffer.from(data);
-      const hmac = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+      const hmac = crypto
+        .createHmac('sha256', secret)
+        .update(rawBody)
+        .digest('hex');
       const signature = tamper ? `sha256=badhash` : `sha256=${hmac}`;
 
       return new Promise((resolve, reject) => {
         const req = http.request(
           {
-            hostname: '127.0.0.1', port, path: '/webhook/whatsapp', method: 'POST',
+            hostname: '127.0.0.1',
+            port,
+            path: '/webhook/whatsapp',
+            method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'Content-Length': rawBody.byteLength,
@@ -554,21 +565,33 @@ describe('WhatsAppChannel', () => {
       const opts = createTestOpts();
       port = await startChannel(opts);
 
-      const res = await signedPost(port, { object: 'whatsapp_business_account', entry: [] }, APP_SECRET);
+      const res = await signedPost(
+        port,
+        { object: 'whatsapp_business_account', entry: [] },
+        APP_SECRET,
+      );
       expect(res.statusCode).toBe(200);
     });
 
     it('rejects requests with invalid signature', async () => {
       port = await startChannel();
 
-      const res = await signedPost(port, { object: 'whatsapp_business_account', entry: [] }, APP_SECRET, true);
+      const res = await signedPost(
+        port,
+        { object: 'whatsapp_business_account', entry: [] },
+        APP_SECRET,
+        true,
+      );
       expect(res.statusCode).toBe(401);
     });
 
     it('rejects requests with no signature header', async () => {
       port = await startChannel();
 
-      const res = await postWebhook(port, { object: 'whatsapp_business_account', entry: [] });
+      const res = await postWebhook(port, {
+        object: 'whatsapp_business_account',
+        entry: [],
+      });
       expect(res.statusCode).toBe(401);
     });
 
@@ -577,7 +600,10 @@ describe('WhatsAppChannel', () => {
       const opts = createTestOpts();
       port = await startChannel(opts);
 
-      const res = await postWebhook(port, { object: 'whatsapp_business_account', entry: [] });
+      const res = await postWebhook(port, {
+        object: 'whatsapp_business_account',
+        entry: [],
+      });
       expect(res.statusCode).toBe(200);
     });
   });
