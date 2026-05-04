@@ -372,6 +372,154 @@ export async function sendBagetTelegramFarewell(args: {
 }
 
 /**
+ * Per-bot webhook URL builder. Mirrors the route the admin server
+ * registers (`POST /api/channels/telegram/bot/:botUsername/webhook`)
+ * so the bind handler and the route layer share a single source of
+ * truth for the path. Telegram echoes our `secret_token` on every
+ * delivery; we verify it against `baget_bot_pool.webhook_secret` in
+ * the route handler.
+ *
+ * Encodes the username defensively even though Telegram bot usernames
+ * are constrained to `[A-Za-z0-9_]` — paranoia against a future
+ * accepted character set or operator-supplied junk.
+ */
+export function buildPerBotWebhookUrl(args: { publicBaseUrl: string; botUsername: string }): string {
+  const base = args.publicBaseUrl.replace(/\/+$/, '');
+  return `${base}/api/channels/telegram/bot/${encodeURIComponent(args.botUsername)}/webhook`;
+}
+
+/**
+ * Register a per-bot webhook with Telegram via `setWebhook`. Best-
+ * effort: a Telegram outage or a transient 5xx must NOT fail the
+ * bind, because the pool assignment + agent_group rows are already
+ * committed and the founder will recover on the next bind (the
+ * caller short-circuits if `webhook_registered_at` is already
+ * stamped, so re-binds are a no-op against a healthy registration).
+ *
+ * `allowed_updates` is set explicitly to the three update types the
+ * adapter actually consumes — keeps Telegram from delivering edits-
+ * we-don't-handle, callback queries we silently drop, etc. Adding a
+ * new update type later requires an explicit re-call (or a fresh
+ * pool seed).
+ *
+ * Returns `{ ok: true }` on Telegram-200-success or
+ * `{ ok: false, reason }` on every failure mode (non-2xx HTTP,
+ * malformed body, transport throw). The caller logs the warning;
+ * this helper does NOT log internally so unit tests can assert on
+ * the caller's log shape without spy-on-spy gymnastics.
+ */
+export type RegisterTelegramWebhookResult =
+  | { ok: true }
+  | { ok: false; reason: string; telegramErrorCode?: number; telegramDescription?: string };
+
+export async function registerTelegramWebhook(args: {
+  botToken: string;
+  webhookUrl: string;
+  webhookSecret: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<RegisterTelegramWebhookResult> {
+  const apiBase = args.apiBaseUrl ?? 'https://api.telegram.org';
+  const fetchFn = args.fetchImpl ?? fetch;
+  const url = `${apiBase}/bot${args.botToken}/setWebhook`;
+  try {
+    const resp = await fetchFn(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: args.webhookUrl,
+        secret_token: args.webhookSecret,
+        allowed_updates: ['message', 'edited_message', 'callback_query'],
+      }),
+    });
+    const json = (await resp.json().catch(() => null)) as {
+      ok?: boolean;
+      description?: unknown;
+    } | null;
+    const telegramDescription = typeof json?.description === 'string' ? json.description : undefined;
+    if (!resp.ok || json?.ok !== true) {
+      return {
+        ok: false,
+        reason: 'telegram_setWebhook_failed',
+        telegramErrorCode: resp.status,
+        ...(telegramDescription ? { telegramDescription } : {}),
+      };
+    }
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'telegram_setWebhook_threw',
+      telegramDescription: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Set the bot's display name via Telegram `setMyName`. Best-effort:
+ * Telegram rate-limits this to 1 change per minute per bot, so a
+ * second bind in the same minute (e.g. the founder re-pairs after a
+ * disconnect) returns `429 Too Many Requests` — we treat that as a
+ * non-fatal "shrug, the name from last bind is still fine" and don't
+ * propagate. A persistent failure (auth, network) is also non-fatal:
+ * the bot's name in the user's chat list stays the previous value
+ * (initial @BotFather name on first ever bind, or a stale company
+ * name on re-bind), but the chat itself functions.
+ *
+ * Telegram clamps `name` to 64 chars; we trim defensively here so a
+ * 100-char company name doesn't get silently rejected at API time.
+ *
+ * Same return contract as registerTelegramWebhook so callers can
+ * branch on `ok` without juggling two distinct shapes.
+ */
+export type SetBotDisplayNameResult =
+  | { ok: true }
+  | { ok: false; reason: string; telegramErrorCode?: number; telegramDescription?: string };
+
+export async function setBotDisplayName(args: {
+  botToken: string;
+  displayName: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<SetBotDisplayNameResult> {
+  const apiBase = args.apiBaseUrl ?? 'https://api.telegram.org';
+  const fetchFn = args.fetchImpl ?? fetch;
+  const url = `${apiBase}/bot${args.botToken}/setMyName`;
+  // Telegram's 64-char limit on bot display names. UTF-16 slice is
+  // fine here — display names rarely contain emoji, and even if they
+  // did, Telegram trims its own way. Our job is to not get rejected
+  // for length, not to perfectly mirror Telegram's slice.
+  const name = args.displayName.length > 64 ? args.displayName.slice(0, 64) : args.displayName;
+  try {
+    const resp = await fetchFn(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const json = (await resp.json().catch(() => null)) as {
+      ok?: boolean;
+      description?: unknown;
+    } | null;
+    const telegramDescription = typeof json?.description === 'string' ? json.description : undefined;
+    if (!resp.ok || json?.ok !== true) {
+      return {
+        ok: false,
+        reason: resp.status === 429 ? 'telegram_rate_limited' : 'telegram_setMyName_failed',
+        telegramErrorCode: resp.status,
+        ...(telegramDescription ? { telegramDescription } : {}),
+      };
+    }
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'telegram_setMyName_threw',
+      telegramDescription: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
  * Telegram Bot API `sendPhoto`. POSTs multipart/form-data with the file
  * read from `photoPath`. Throws if the file does not exist — the caller
  * (MCP tool or deliver() wiring in PR #7) must validate paths before

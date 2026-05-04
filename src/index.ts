@@ -179,6 +179,18 @@ async function main(): Promise<void> {
   if (process.env.BAGET_ADMIN_TOKEN) {
     const port = parseInt(process.env.PORT ?? process.env.BAGET_ADMIN_PORT ?? '8443', 10);
     const username = process.env.BAGET_TELEGRAM_BOT_USERNAME ?? 'baget_team_bot';
+    // Multi-bot pool mode is gated on `publicBaseUrl` because that's
+    // the only thing we need from env to call Telegram setWebhook
+    // with a per-bot URL. Resolution order: explicit
+    // BAGET_PUBLIC_BASE_URL (operator override; takes precedence on
+    // Railway too because it disambiguates custom-domain vs
+    // *.railway.app) → derive from RAILWAY_PUBLIC_DOMAIN if Railway's
+    // auto-injected. When neither is set, the bind handler falls back
+    // to the legacy global-bot path — preserves existing single-bot
+    // deployments unchanged.
+    const publicBaseUrl =
+      process.env.BAGET_PUBLIC_BASE_URL ??
+      (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : undefined);
     bagetAdmin = createBagetAdminServer({
       port,
       adminToken: process.env.BAGET_ADMIN_TOKEN,
@@ -187,6 +199,7 @@ async function main(): Promise<void> {
       // send the welcome message. Same env var the channel adapter
       // reads — keeping a single source of truth for the bot token.
       telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
+      publicBaseUrl,
       generateAgentGroupId: () => `ag-${randomUUID()}`,
     });
     await bagetAdmin.listen();
