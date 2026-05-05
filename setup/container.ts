@@ -185,7 +185,6 @@ export async function run(args: string[]): Promise<void> {
         return val === 'true';
       };
       if (readFlag('INSTALL_CJK_FONTS')) buildArgs.push('--build-arg INSTALL_CJK_FONTS=true');
-      if (readFlag('INSTALL_FFMPEG')) buildArgs.push('--build-arg INSTALL_FFMPEG=true');
     }
   } catch {
     // .env is optional; absence is normal on a fresh checkout

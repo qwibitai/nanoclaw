@@ -1,11 +1,13 @@
 ---
-name: add-ffmpeg-tool
+name: add-ffmpeg
 description: Add ffmpeg as an MCP tool so the agent can convert, trim, extract audio from, and compress media files (mp4, mp3, wav, mov, webm, etc.) and send the result back to the channel. Wraps the ffmpeg/ffprobe binaries as a stdio MCP server; no third-party npm package, no credentials, no sidecar.
 ---
 
-# Add ffmpeg Tool
+# Add ffmpeg
 
-Wires the in-repo `container/agent-runner/src/ffmpeg-mcp/server.ts` MCP server into selected agent groups and adds the `ffmpeg` + `ffprobe` binaries to the container image. After install, the agent can transform an inbound media attachment and reply with the result via `mcp__nanoclaw__send_file`.
+Patches `container/Dockerfile` to install `ffmpeg` + `ffprobe` (~80MB), wires the in-repo `container/agent-runner/src/ffmpeg-mcp/server.ts` MCP server into selected agent groups, and rebuilds. After install the agent can transform an inbound media attachment and reply with the result via `mcp__nanoclaw__send_file`.
+
+The trunk container image ships **without** ffmpeg — it's added only when this skill runs. There is no `INSTALL_FFMPEG` env flag; the patch is a real Dockerfile edit so it survives `./container/build.sh` and `pnpm run dev` invocations consistently.
 
 Tools surfaced as `mcp__ffmpeg__<name>`:
 
@@ -20,24 +22,35 @@ Tools surfaced as `mcp__ffmpeg__<name>`:
 ## Phase 1: Pre-flight
 
 ```bash
-grep -q 'INSTALL_FFMPEG' container/Dockerfile && \
-grep -q '^INSTALL_FFMPEG=true' .env 2>/dev/null && \
-echo "ALREADY APPLIED — skip to Phase 3"
+grep -q '# ---- ffmpeg' container/Dockerfile && echo "ALREADY PATCHED — skip to Phase 3"
+test -f container/agent-runner/src/ffmpeg-mcp/server.ts || echo "MISSING ffmpeg-mcp server source — pull the branch that ships it"
 ```
 
-Confirm `.env` exists (`ls .env`); if absent, run `/setup` first or `touch .env`.
+## Phase 2: Patch the Dockerfile and rebuild
 
-## Phase 2: Enable the build flag and rebuild
+Use the Edit tool to insert a new RUN block into `container/Dockerfile` immediately before the `# Chromium path for agent-browser ...` ENV line (i.e. right after the system-deps `apt-get` block). Insert exactly:
+
+```dockerfile
+# ---- ffmpeg (added by /add-ffmpeg) -----------------------------------------
+# ffmpeg + ffprobe (~80MB). Used by the ffmpeg-mcp MCP server so the agent
+# can convert/trim/extract-audio/compress inbound media files. Remove this
+# block to revert (`/add-ffmpeg` removal section).
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+```
+
+The leading `# ---- ffmpeg` marker is the idempotency anchor — re-running the skill on a patched Dockerfile is a no-op.
+
+Then rebuild:
 
 ```bash
-grep -q '^INSTALL_FFMPEG=' .env \
-  && sed -i.bak 's/^INSTALL_FFMPEG=.*/INSTALL_FFMPEG=true/' .env && rm -f .env.bak \
-  || echo 'INSTALL_FFMPEG=true' >> .env
-
 ./container/build.sh
 ```
 
-Adds ~80 MB to the image. Verify (the image tag is install-slug-derived and printed at the end of `build.sh` — substitute it below; `--entrypoint sh` is required so the agent-runner entrypoint doesn't intercept):
+Verify (the image tag is install-slug-derived and printed at the end of `build.sh`; `--entrypoint sh` is required so the agent-runner entrypoint doesn't intercept):
 
 ```bash
 IMAGE=$(docker images --filter 'reference=nanoclaw-agent*:latest' --format '{{.Repository}}:{{.Tag}}' | head -1)
@@ -94,10 +107,10 @@ If something's off:
 tail -200 logs/nanoclaw.log logs/nanoclaw.error.log | grep -F '[ffmpeg-mcp]'
 ```
 
-Every failure path emits a `[ffmpeg-mcp]` line on the container's stderr, captured by the host into `logs/nanoclaw.log`.
+Every failure path emits `[ffmpeg-mcp] ERROR <tool>: <reason>`, routed to `log.error` by `src/container-runner.ts`, so it appears at the default `info` threshold.
 
 Common signals:
-- `command not found: ffmpeg` → image wasn't rebuilt with `INSTALL_FFMPEG=true`. Re-run `./container/build.sh`.
+- `command not found: ffmpeg` → image wasn't rebuilt after the Dockerfile patch. Re-run `./container/build.sh`.
 - `Input path must live under /workspace` → tell the agent to operate on `/workspace/inbox/...`.
 - `Unsupported output_format` → check `OUTPUT_EXT_WHITELIST` in `server.ts`.
 - `ffmpeg failed: ...` → the line includes the last 200 chars of ffmpeg's stderr; usually the input isn't valid media.
@@ -106,5 +119,5 @@ Common signals:
 ## Removal
 
 1. Delete the `"ffmpeg"` entry from `mcpServers` in each group's `container.json`.
-2. Set `INSTALL_FFMPEG=false` in `.env`.
+2. Edit `container/Dockerfile` and remove the `# ---- ffmpeg (added by /add-ffmpeg) ---` block (the comment header through the trailing blank line).
 3. `./container/build.sh && pnpm run build && systemctl --user restart nanoclaw`.

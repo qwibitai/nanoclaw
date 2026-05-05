@@ -16,10 +16,6 @@ FROM node:22-slim
 # CJK fonts add ~200MB. Opt in only if you render Chinese/Japanese/Korean text.
 ARG INSTALL_CJK_FONTS=false
 
-# ffmpeg + ffprobe add ~80MB. Opt in if the agent transforms media via the
-# /add-ffmpeg-tool MCP server (cut/convert/extract audio/etc.).
-ARG INSTALL_FFMPEG=false
-
 # Pin CLI versions for reproducibility. Bump deliberately — unpinned installs
 # mean every rebuild silently picks up the latest and can break in lockstep
 # across all users.
@@ -57,9 +53,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         unzip \
     && if [ "$INSTALL_CJK_FONTS" = "true" ]; then \
         apt-get install -y --no-install-recommends fonts-noto-cjk; \
-       fi \
-    && if [ "$INSTALL_FFMPEG" = "true" ]; then \
-        apt-get install -y --no-install-recommends ffmpeg; \
        fi \
     && rm -rf /var/lib/apt/lists/*
 
