@@ -1,5 +1,3 @@
-import fs from 'fs';
-import path from 'path';
 /**
  * Approval handlers for self-modification actions.
  *
@@ -16,11 +14,10 @@ import path from 'path';
 import fs from 'fs';
 import path from 'path';
 import { updateContainerConfig } from '../../container-config.js';
-import { sessionDir } from '../../session-manager.js';
 import { buildAgentGroupImage, killContainer } from '../../container-runner.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { log } from '../../log.js';
-import { writeSessionMessage } from '../../session-manager.js';
+import { writeSessionMessage, sessionDir } from '../../session-manager.js';
 import type { ApprovalHandler } from '../approvals/index.js';
 
 export const applyInstallPackages: ApprovalHandler = async ({ session, payload, userId, notify }) => {
@@ -104,7 +101,11 @@ export const applyChangeModel: ApprovalHandler = async ({ session, payload, user
   // Clear the OpenCode XDG session DB so the next container starts a fresh
   // session using the new model instead of resuming the old one.
   const xdgOpencode = path.join(sessionDir(session.agent_group_id, session.id), 'opencode-xdg', 'opencode');
-  try { fs.rmSync(xdgOpencode, { recursive: true, force: true }); } catch { /* ignore */ }
+  try {
+    fs.rmSync(xdgOpencode, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 
   killContainer(session.id, 'model changed');
   log.info('Model change approved', { agentGroupId: session.agent_group_id, model, userId });
