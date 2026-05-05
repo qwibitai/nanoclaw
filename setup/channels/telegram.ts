@@ -17,6 +17,9 @@
  * structured entries in logs/setup.log, full raw output in per-step files
  * under logs/setup-steps/. See docs/setup-flow.md.
  */
+import fs from 'node:fs';
+import path from 'node:path';
+
 import * as p from '@clack/prompts';
 import k from 'kleur';
 
@@ -37,6 +40,25 @@ import { readEnvKey } from '../environment.js';
 import { accentGreen, brandBold, fitToWidth, fmtDuration, note } from '../lib/theme.js';
 
 const DEFAULT_AGENT_NAME = 'Nano';
+
+/**
+ * BotFather QR code (deep-link to https://t.me/BotFather), pre-rendered
+ * as UTF8 half-blocks via `qrencode -t UTF8 -m 1`. Embedded in the
+ * BotFather instructions card so users uncertain about typing
+ * `@BotFather` directly can scan with their phone instead — sidesteps
+ * typo-induced impostor accounts (Telegram has plenty of @BotF4ther /
+ * @BotFAther look-alikes). Falls back to an empty string if the asset
+ * is missing — the surrounding instructions still work.
+ */
+const BOTFATHER_QR = (() => {
+  try {
+    return fs
+      .readFileSync(path.resolve(process.cwd(), 'assets/telegram-botfather-qr.txt'), 'utf8')
+      .replace(/\n+$/, '');
+  } catch {
+    return '';
+  }
+})();
 
 export async function runTelegramChannel(displayName: string): Promise<void> {
   const token = await collectTelegramToken();
@@ -155,6 +177,9 @@ async function collectTelegramToken(): Promise<string> {
       '',
       k.dim('Planning to add your assistant to group chats? In @BotFather:'),
       k.dim('    /mybots → your bot → Bot Settings → Group Privacy → OFF'),
+      ...(BOTFATHER_QR
+        ? ['', k.dim('Or scan this QR with your phone to open BotFather directly:'), BOTFATHER_QR]
+        : []),
     ].join('\n'),
     'Set up your Telegram bot',
   );
