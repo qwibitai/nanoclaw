@@ -76,7 +76,10 @@ export function loadProviderEnvDefaults(): Partial<ContainerConfig> {
   if (provider === 'anthropic' || provider === 'ollama') {
     out.provider = provider;
   } else if (provider) {
-    logger.warn({ provider }, 'TALON_PROVIDER must be "anthropic" or "ollama" — ignoring');
+    logger.warn(
+      { provider },
+      'TALON_PROVIDER must be "anthropic" or "ollama" — ignoring',
+    );
   }
 
   if (out.provider === 'ollama') {
@@ -89,13 +92,17 @@ export function loadProviderEnvDefaults(): Partial<ContainerConfig> {
       out.ollama = {
         baseUrl: env.TALON_OLLAMA_BASE_URL,
         model: env.TALON_OLLAMA_MODEL,
-        ...(env.TALON_OLLAMA_API_KEY ? { apiKey: env.TALON_OLLAMA_API_KEY } : {}),
+        ...(env.TALON_OLLAMA_API_KEY
+          ? { apiKey: env.TALON_OLLAMA_API_KEY }
+          : {}),
       };
     }
   }
 
   if (env.TALON_BLOCKED_HOSTS) {
-    out.blockedHosts = env.TALON_BLOCKED_HOSTS.split(',').map((s) => s.trim()).filter(Boolean);
+    out.blockedHosts = env.TALON_BLOCKED_HOSTS.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
 
   return out;
@@ -127,7 +134,10 @@ export function mergeProviderConfig(
   // Union blockedHosts so group can add to (not replace) the .env list.
   if (envDefaults.blockedHosts || groupConfig?.blockedHosts) {
     merged.blockedHosts = [
-      ...new Set([...(envDefaults.blockedHosts ?? []), ...(groupConfig?.blockedHosts ?? [])]),
+      ...new Set([
+        ...(envDefaults.blockedHosts ?? []),
+        ...(groupConfig?.blockedHosts ?? []),
+      ]),
     ];
   }
 

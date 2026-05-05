@@ -17,7 +17,11 @@ import {
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
-import { loadProviderEnvDefaults, mergeProviderConfig, readEnvFile } from './env.js';
+import {
+  loadProviderEnvDefaults,
+  mergeProviderConfig,
+  readEnvFile,
+} from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -188,12 +192,18 @@ function buildVolumeMounts(
   //     the SDK falls back to Anthropic defaults instead of erroring with
   //     "model qwen2.5-... doesn't exist" after a provider switch.
   // Read-merge-write to preserve other keys (env, hooks, permissions).
-  const effectiveConfig = mergeProviderConfig(PROVIDER_ENV_DEFAULTS, group.containerConfig);
+  const effectiveConfig = mergeProviderConfig(
+    PROVIDER_ENV_DEFAULTS,
+    group.containerConfig,
+  );
   try {
     const raw = fs.readFileSync(settingsFile, 'utf-8');
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     let dirty = false;
-    if (effectiveConfig.provider === 'ollama' && effectiveConfig.ollama?.model) {
+    if (
+      effectiveConfig.provider === 'ollama' &&
+      effectiveConfig.ollama?.model
+    ) {
       if (parsed.model !== effectiveConfig.ollama.model) {
         parsed.model = effectiveConfig.ollama.model;
         dirty = true;
@@ -392,9 +402,10 @@ function buildVolumeMounts(
  * function — no I/O. The caller appends to `args` in the right place
  * (after OneCLI applies its proxy vars so NO_PROXY actually wins).
  */
-function buildProviderArgs(
-  containerConfig: ContainerConfig | undefined,
-): { envArgs: string[]; addHostArgs: string[] } {
+function buildProviderArgs(containerConfig: ContainerConfig | undefined): {
+  envArgs: string[];
+  addHostArgs: string[];
+} {
   const env: Record<string, string> = {};
   const blockedHosts = new Set<string>();
 
