@@ -15,7 +15,7 @@ const SESSION_STATUS_RETRY_ERROR_AFTER = 3;
 
 /** Stale / dead OpenCode session heuristics (complement Claude-centric host patterns). */
 const STALE_SESSION_RE =
-  /no conversation found|ENOENT.*\.jsonl|session.*not found|NotFoundError|connection reset|ECONNRESET|404|event timeout|stream ended unexpectedly/i;
+  /no conversation found|ENOENT.*\.jsonl|session.*not found|NotFoundError|connection reset|ECONNRESET|404|event timeout|stream ended unexpectedly|model not found/i;
 
 function killProcessTree(proc: ChildProcess): void {
   if (!proc.pid) return;
@@ -98,8 +98,11 @@ function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> 
     .filter(Boolean)
     .filter((mid, i, a) => a.indexOf(mid as string) === i);
 
+  // opencode-go is a native built-in provider — it reads OPENCODE_API_KEY
+  // from the environment directly. Do not set a custom baseURL or apiKey
+  // placeholder (that would route auth calls to the wrong endpoint).
   const providerOptions: Record<string, unknown> =
-    provider === 'anthropic'
+    provider === 'anthropic' || provider === 'opencode-go'
       ? {}
       : {
           [provider]: {
