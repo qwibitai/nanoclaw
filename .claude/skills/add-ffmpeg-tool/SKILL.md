@@ -62,11 +62,19 @@ For each group that should be able to transform media, merge into `groups/<folde
 
 No `additionalMounts`, no credentials. Inputs are read from `/workspace/inbox/...` (already mounted), outputs go to `/workspace/agent/tmp/`.
 
-Optional: extend the per-tool timeout (default 5 min) for groups that handle very long media:
+Outputs in `tmp/` are reaped on a periodic timer (default: files older than 15 min, swept every 5 min) plus a startup sweep. Long enough that an `mcp__nanoclaw__send_file` call right after the tool returns always wins; short enough that long-running sessions don't accumulate disk.
+
+Optional env overrides (default 5 min per-call timeout, 15 min tmp TTL, 5 min sweep cadence):
 
 ```jsonc
-"env": { "NANOCLAW_FFMPEG_TIMEOUT_SEC": "900" }
+"env": {
+  "NANOCLAW_FFMPEG_TIMEOUT_SEC": "900",      // global default per-call timeout
+  "NANOCLAW_FFMPEG_TMP_TTL_SEC": "900",      // tmp file lifetime before sweep
+  "NANOCLAW_FFMPEG_TMP_SWEEP_SEC": "300"     // sweep interval
+}
 ```
+
+Each tool also accepts a per-call `timeout_seconds` arg (range 5–1800) — useful when a single long convert needs more time than the group default. The ffmpeg process is `SIGKILL`ed on expiry so a hung encoder can't block the MCP transport.
 
 ## Phase 4: Restart
 

@@ -35,7 +35,25 @@ function tmpDir(): string {
   return path.join(workspaceRoot(), 'agent', 'tmp');
 }
 const DEFAULT_TIMEOUT_SEC = Number(process.env.NANOCLAW_FFMPEG_TIMEOUT_SEC) || 300;
+// Per-call timeout ceiling. The lower bound of 1800s is the policy default;
+// if an operator deliberately raised the global default above 1800 we honor
+// that as the new ceiling — otherwise an agent could never opt into the same
+// budget the operator already permitted.
+const MAX_TIMEOUT_SEC = Math.max(1800, DEFAULT_TIMEOUT_SEC);
+const MIN_TIMEOUT_SEC = 5;
 const STDERR_TAIL_BYTES = 2048;
+
+// Tmp file lifecycle:
+//   - Each tool writes its output under tmpDir() (`/workspace/agent/tmp/`).
+//   - The agent then calls `mcp__nanoclaw__send_file` on that path. send_file
+//     copies the bytes into /workspace/outbox/<msg-id>/, where delivery picks
+//     them up. Once that copy succeeds, the original tmp file is no longer
+//     needed — keeping it around just doubles disk usage.
+//   - This server reaps tmp files older than TMP_TTL_MS on a periodic timer.
+//     The TTL is generous enough that an in-flight send_file (called right
+//     after the tool returned) always wins the race.
+const TMP_TTL_MS = (Number(process.env.NANOCLAW_FFMPEG_TMP_TTL_SEC) || 900) * 1000;
+const TMP_SWEEP_INTERVAL_MS = (Number(process.env.NANOCLAW_FFMPEG_TMP_SWEEP_SEC) || 300) * 1000;
 
 const OUTPUT_EXT_WHITELIST = new Set([
   'mp4', 'mov', 'webm', 'mkv', 'avi',
@@ -182,12 +200,90 @@ export function __setSpawnForTesting(fn: SpawnFn | null): void {
   _spawn = fn ?? defaultSpawn;
 }
 
-async function runFfmpeg(args: string[]): Promise<RunResult> {
-  return _spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], DEFAULT_TIMEOUT_SEC);
+async function runFfmpeg(args: string[], timeoutSec: number = DEFAULT_TIMEOUT_SEC): Promise<RunResult> {
+  return _spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], timeoutSec);
 }
 
-async function runFfprobe(args: string[]): Promise<RunResult> {
-  return _spawn('ffprobe', ['-hide_banner', '-loglevel', 'error', ...args], DEFAULT_TIMEOUT_SEC);
+async function runFfprobe(args: string[], timeoutSec: number = DEFAULT_TIMEOUT_SEC): Promise<RunResult> {
+  return _spawn('ffprobe', ['-hide_banner', '-loglevel', 'error', ...args], timeoutSec);
+}
+
+/**
+ * Validate and clamp an optional per-call `timeout_seconds` argument.
+ * Returns either a usable timeout or a string error to surface.
+ */
+function resolveTimeoutSec(raw: unknown): number | { error: string } {
+  if (raw === undefined || raw === null) return DEFAULT_TIMEOUT_SEC;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    return { error: 'timeout_seconds must be a positive number' };
+  }
+  if (n < MIN_TIMEOUT_SEC) {
+    return { error: `timeout_seconds must be >= ${MIN_TIMEOUT_SEC}` };
+  }
+  if (n > MAX_TIMEOUT_SEC) {
+    return { error: `timeout_seconds must be <= ${MAX_TIMEOUT_SEC}` };
+  }
+  return Math.floor(n);
+}
+
+/**
+ * Best-effort sweep of `ffmpeg-*` files in the tmp dir older than the
+ * configured TTL. Run on a timer so that the natural lifecycle is:
+ *   tool produces tmp file → agent send_file copies it to outbox → user
+ *   receives it → next sweep drops the now-orphan source.
+ *
+ * The TTL is intentionally several minutes — long enough that a send_file
+ * called immediately after a tool return always wins, but short enough that
+ * a chain of trim → compress → extract_audio doesn't accumulate disk for
+ * an hour. Files newer than the TTL are left alone.
+ */
+function sweepStaleTmp(ttlMs: number = TMP_TTL_MS): void {
+  const dir = tmpDir();
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - ttlMs;
+  let removed = 0;
+  for (const name of entries) {
+    if (!name.startsWith('ffmpeg-')) continue;
+    const full = path.join(dir, name);
+    try {
+      const stat = fs.statSync(full);
+      if (!stat.isFile()) continue;
+      if (stat.mtimeMs < cutoff) {
+        fs.unlinkSync(full);
+        removed++;
+      }
+    } catch {
+      // skip
+    }
+  }
+  if (removed > 0) logInfo(`tmp sweep removed ${removed} stale file(s) (ttl ${Math.round(ttlMs / 1000)}s)`);
+}
+
+let tmpSweepTimer: ReturnType<typeof setInterval> | null = null;
+
+function startTmpSweepTimer(): void {
+  if (tmpSweepTimer) return;
+  tmpSweepTimer = setInterval(() => {
+    try { sweepStaleTmp(); } catch (e) {
+      logErr('tmp-sweep', 'unhandled', { error: e instanceof Error ? e.message : String(e) });
+    }
+  }, TMP_SWEEP_INTERVAL_MS);
+  // Don't keep the event loop alive for cleanup alone.
+  if (typeof tmpSweepTimer.unref === 'function') tmpSweepTimer.unref();
+}
+
+/** Test-only: stop the periodic sweep so tests don't leak timers. */
+export function __stopTmpSweepForTesting(): void {
+  if (tmpSweepTimer) {
+    clearInterval(tmpSweepTimer);
+    tmpSweepTimer = null;
+  }
 }
 
 // ---- Tool: probe ------------------------------------------------------------
@@ -265,6 +361,7 @@ const convertTool: Tool = {
       },
       audio_bitrate_kbps: { type: 'number', description: 'Optional audio bitrate in kbps (e.g. 128, 192, 320).' },
       video_crf: { type: 'number', description: 'Optional H.264/H.265 CRF (lower = higher quality, 18–28 typical).' },
+      timeout_seconds: { type: 'number', description: `Optional per-call timeout in seconds (${MIN_TIMEOUT_SEC}–${MAX_TIMEOUT_SEC}, default ${DEFAULT_TIMEOUT_SEC}). The ffmpeg process is killed on expiry.` },
     },
     required: ['input', 'output_format'],
   },
@@ -291,8 +388,11 @@ async function convertHandler(args: Record<string, unknown>): Promise<CallToolRe
     ffArgs.push('-crf', String(Math.round(crf)));
   }
 
+  const timeoutSec = resolveTimeoutSec(args.timeout_seconds);
+  if (typeof timeoutSec !== 'number') return fail('convert', timeoutSec.error);
+
   ffArgs.push(out);
-  return await runAndPackage('convert', ffArgs, out, ext);
+  return await runAndPackage('convert', ffArgs, out, ext, { timeoutSec });
 }
 
 // ---- Tool: trim -------------------------------------------------------------
@@ -311,6 +411,7 @@ const trimTool: Tool = {
         type: 'string',
         description: 'Optional output format extension (defaults to the source extension).',
       },
+      timeout_seconds: { type: 'number', description: `Optional per-call timeout in seconds (${MIN_TIMEOUT_SEC}–${MAX_TIMEOUT_SEC}, default ${DEFAULT_TIMEOUT_SEC}). The ffmpeg process is killed on expiry.` },
     },
     required: ['input', 'start_seconds', 'duration_seconds'],
   },
@@ -325,6 +426,26 @@ async function trimHandler(args: Record<string, unknown>): Promise<CallToolResul
   if (!Number.isFinite(start) || start < 0) return fail('trim', 'start_seconds must be >= 0');
   if (!Number.isFinite(dur) || dur <= 0) return fail('trim', 'duration_seconds must be > 0');
 
+  const timeoutSec = resolveTimeoutSec(args.timeout_seconds);
+  if (typeof timeoutSec !== 'number') return fail('trim', timeoutSec.error);
+
+  // Probe the source duration so we don't burn CPU on a request whose window
+  // sits beyond the end of the file. ffprobe failure is treated as
+  // best-effort — fall through and let ffmpeg surface the real error. The
+  // probe inherits the per-call timeout so a tight `timeout_seconds` budget
+  // bounds both the probe and the encode.
+  const total = await probeDurationSec(resolved.path, timeoutSec);
+  if (total !== null && total > 0 && start >= total) {
+    return fail('trim', `start_seconds (${start}) is past end of media (${total.toFixed(2)}s)`, {
+      total_duration_s: total,
+    });
+  }
+  if (total !== null && total > 0 && start + dur > total) {
+    return fail('trim', `start_seconds + duration_seconds (${start + dur}) exceeds media duration (${total.toFixed(2)}s)`, {
+      total_duration_s: total,
+    });
+  }
+
   const sourceExt = path.extname(resolved.path).slice(1).toLowerCase();
   const requested = args.output_format ? String(args.output_format) : sourceExt;
   const ext = validateOutputExt(requested);
@@ -333,7 +454,7 @@ async function trimHandler(args: Record<string, unknown>): Promise<CallToolResul
   const out = makeOutputPath(ext);
   // Place -ss before -i for fast seek (keyframe-snapped, accurate enough for most cuts).
   const ffArgs = ['-ss', String(start), '-i', resolved.path, '-t', String(dur), out];
-  return await runAndPackage('trim', ffArgs, out, ext);
+  return await runAndPackage('trim', ffArgs, out, ext, { timeoutSec });
 }
 
 // ---- Tool: extract_audio ----------------------------------------------------
@@ -350,6 +471,7 @@ const extractAudioTool: Tool = {
         type: 'string',
         description: 'Audio format extension. Allowed: mp3, wav, ogg, flac, m4a, aac, opus. Default: mp3.',
       },
+      timeout_seconds: { type: 'number', description: `Optional per-call timeout in seconds (${MIN_TIMEOUT_SEC}–${MAX_TIMEOUT_SEC}, default ${DEFAULT_TIMEOUT_SEC}). The ffmpeg process is killed on expiry.` },
     },
     required: ['input'],
   },
@@ -366,10 +488,13 @@ async function extractAudioHandler(args: Record<string, unknown>): Promise<CallT
     return fail('extract_audio', 'Unsupported audio format', { requested });
   }
 
+  const timeoutSec = resolveTimeoutSec(args.timeout_seconds);
+  if (typeof timeoutSec !== 'number') return fail('extract_audio', timeoutSec.error);
+
   const out = makeOutputPath(requested);
   // -vn drops the video stream; let ffmpeg pick the default codec for the container.
   const ffArgs = ['-i', resolved.path, '-vn', out];
-  return await runAndPackage('extract_audio', ffArgs, out, requested);
+  return await runAndPackage('extract_audio', ffArgs, out, requested, { timeoutSec });
 }
 
 // ---- Tool: compress ---------------------------------------------------------
@@ -384,6 +509,7 @@ const compressTool: Tool = {
       input: { type: 'string', description: 'Path to the source file.' },
       crf: { type: 'number', description: 'H.264/H.265 CRF in [0, 51]. Mutually exclusive with target_size_mb.' },
       target_size_mb: { type: 'number', description: 'Approx target size in MB. Mutually exclusive with crf.' },
+      timeout_seconds: { type: 'number', description: `Optional per-call timeout in seconds (${MIN_TIMEOUT_SEC}–${MAX_TIMEOUT_SEC}, default ${DEFAULT_TIMEOUT_SEC}). The ffmpeg process is killed on expiry.` },
     },
     required: ['input'],
   },
@@ -399,6 +525,9 @@ async function compressHandler(args: Record<string, unknown>): Promise<CallToolR
     return fail('compress', 'Pass exactly one of `crf` or `target_size_mb`');
   }
 
+  const timeoutSec = resolveTimeoutSec(args.timeout_seconds);
+  if (typeof timeoutSec !== 'number') return fail('compress', timeoutSec.error);
+
   const sourceExt = path.extname(resolved.path).slice(1).toLowerCase();
   const ext = validateOutputExt(sourceExt) ?? 'mp4';
   const out = makeOutputPath(ext);
@@ -412,8 +541,9 @@ async function compressHandler(args: Record<string, unknown>): Promise<CallToolR
     const targetMb = Number(args.target_size_mb);
     if (!Number.isFinite(targetMb) || targetMb <= 0) return fail('compress', 'target_size_mb must be > 0');
     // Probe duration to compute bitrate. Failure here is non-fatal — we fall
-    // back to a fixed mid-quality CRF.
-    const dur = await probeDurationSec(resolved.path);
+    // back to a fixed mid-quality CRF. The probe inherits the per-call
+    // timeout so a tight budget covers both the probe and the encode.
+    const dur = await probeDurationSec(resolved.path, timeoutSec);
     if (dur && dur > 0) {
       const bitrateKbps = Math.max(64, Math.floor((targetMb * 8 * 1024) / dur));
       ffArgs.push('-b:v', `${bitrateKbps}k`);
@@ -423,15 +553,15 @@ async function compressHandler(args: Record<string, unknown>): Promise<CallToolR
   }
 
   ffArgs.push(out);
-  return await runAndPackage('compress', ffArgs, out, ext);
+  return await runAndPackage('compress', ffArgs, out, ext, { timeoutSec });
 }
 
-async function probeDurationSec(filePath: string): Promise<number | null> {
+async function probeDurationSec(filePath: string, timeoutSec: number = DEFAULT_TIMEOUT_SEC): Promise<number | null> {
   const result = await runFfprobe([
     '-print_format', 'json',
     '-show_format',
     filePath,
-  ]);
+  ], timeoutSec);
   if (result.exitCode !== 0) return null;
   try {
     const parsed = JSON.parse(result.stdout) as { format?: { duration?: string } };
@@ -449,12 +579,14 @@ async function runAndPackage(
   ffArgs: string[],
   outPath: string,
   ext: string,
+  opts: { timeoutSec?: number } = {},
 ): Promise<CallToolResult> {
-  const result = await runFfmpeg(ffArgs);
+  const timeoutSec = opts.timeoutSec ?? DEFAULT_TIMEOUT_SEC;
+  const result = await runFfmpeg(ffArgs, timeoutSec);
 
   if (result.timedOut) {
     safeUnlink(outPath);
-    return fail(tool, 'ffmpeg timed out', { timeout_sec: DEFAULT_TIMEOUT_SEC });
+    return fail(tool, `ffmpeg timed out after ${timeoutSec}s (process killed)`, { timeout_sec: timeoutSec });
   }
   if (result.exitCode !== 0) {
     safeUnlink(outPath);
@@ -502,6 +634,13 @@ const TOOLS: Array<{ tool: Tool; handler: (a: Record<string, unknown>) => Promis
 ];
 
 export async function startFfmpegMcpServer(): Promise<void> {
+  // Sweep stale intermediates from prior containers/sessions before serving,
+  // then keep sweeping on a timer so per-call tmp files don't pile up over
+  // the life of this process. Files are only removed once they're older than
+  // the TTL, which gives `send_file` time to copy them to the outbox.
+  sweepStaleTmp();
+  startTmpSweepTimer();
+
   const server = new Server({ name: 'ffmpeg', version: '1.0.0' }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -546,4 +685,9 @@ export const __test__ = {
   trimHandler,
   extractAudioHandler,
   compressHandler,
+  resolveTimeoutSec,
+  sweepStaleTmp,
+  tmpDir,
+  DEFAULT_TIMEOUT_SEC,
+  MAX_TIMEOUT_SEC,
 };
