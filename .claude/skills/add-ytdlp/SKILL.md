@@ -1,13 +1,13 @@
 ---
 name: add-ytdlp
-description: Add yt-dlp as an MCP tool so the agent can search, fetch metadata, download subtitles/transcripts, and pull video/audio from YouTube, Vimeo, X, TikTok, and ~1000 other sites. Patches `container/Dockerfile` to install the standalone yt-dlp binary, adds `@kevinwatt/yt-dlp-mcp` as an agent-runner dep, and wires it as a stdio MCP server. No credentials, no sidecar.
+description: Add yt-dlp as an MCP tool so the agent can search, fetch metadata, download subtitles/transcripts, and pull video/audio from YouTube, Vimeo, X, TikTok, and ~1000 other sites. Patches `container/Dockerfile` to install the standalone yt-dlp binary, adds `@kevinwatt/yt-dlp-mcp` as an agent-runner dep, and wires it as a stdio MCP server.
 ---
 
 # Add Video Download
 
 Patches `container/Dockerfile` to install `yt-dlp` (~30MB), adds the upstream `@kevinwatt/yt-dlp-mcp` npm package as an agent-runner runtime dep, and wires it into selected agent groups as a stdio MCP server. After install the agent can take a URL the user shares and reply with the file via `mcp__nanoclaw__send_file`, or with metadata/transcripts/subtitles inline.
 
-The trunk container image ships **without** yt-dlp — it's added only when this skill runs. There is no `INSTALL_YTDLP` env flag; the patch is a real Dockerfile edit so it survives `./container/build.sh` and `pnpm run dev` invocations consistently. Same shape as `/add-ffmpeg`.
+The trunk container image ships **without** yt-dlp — it's added only when this skill runs. The patch is a real Dockerfile edit so it survives `./container/build.sh` and `pnpm run dev` invocations consistently.
 
 The MCP server itself is the upstream `@kevinwatt/yt-dlp-mcp` package (MIT, Node 18+, single maintainer Dewei Yen). We pin a specific version into `container/agent-runner/package.json` rather than vendoring or wrapping — the package is a thin Zod-validated stdio bridge to the yt-dlp CLI, so its API surface is whatever yt-dlp itself can do.
 
@@ -43,7 +43,8 @@ Use the Edit tool to insert a new RUN block into `container/Dockerfile` immediat
 # (~30MB). No apt package, no Python on PATH required. Used by the
 # @kevinwatt/yt-dlp-mcp MCP server. The --version smoke-test fails the build
 # if the download is corrupt or the tag was retracted. Bump deliberately.
-ARG YTDLP_VERSION=2026.03.17
+# Replace <tag> with the N-1 tag in the releases page
+ARG YTDLP_VERSION=<tag>
 RUN curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_linux" \
          -o /usr/local/bin/yt-dlp \
     && chmod +x /usr/local/bin/yt-dlp \
@@ -97,7 +98,7 @@ For each group that should get video-download capability, merge into `groups/<fo
 }
 ```
 
-`YTDLP_DOWNLOADS_DIR` redirects downloads from the package's default `~/Downloads` (which doesn't exist in the container) to the existing session tmp path — same path the ffmpeg MCP uses, swept periodically by `mcp__nanoclaw__send_file` consumers. No `additionalMounts`, no credentials.
+`YTDLP_DOWNLOADS_DIR` redirects downloads from the package's default `~/Downloads` (which doesn't exist in the container) to the existing session tmp path, swept periodically by `mcp__nanoclaw__send_file` consumers.
 
 Optional env overrides (see [package config docs](https://github.com/kevinwatt/yt-dlp-mcp/blob/main/docs/configuration.md)):
 
