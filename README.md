@@ -159,6 +159,20 @@ Key files:
 - `container/agent-runner/` — Bun agent-runner: poll loop, MCP tools, provider abstraction
 - `groups/<folder>/` — per-agent-group filesystem (`CLAUDE.md`, skills, container config)
 
+### Example Structure for `groups/{name}/CLAUDE.md`
+
+```text
+## Persona (Tone & Style)
+Voice, warmth, verbosity, and interaction style.
+Persona adjustments should not alter execution or memory rules.
+
+## Execution Preferences
+Tool hierarchy, CLI vs MCP preference, token discipline, task decomposition strategy.
+
+## Memory & Persistence
+Long-term fact storage, indexing approach, and global memory constraints.
+```
+
 ## FAQ
 
 **Why Docker?**
