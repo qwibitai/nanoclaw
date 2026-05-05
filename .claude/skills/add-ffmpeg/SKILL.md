@@ -73,9 +73,9 @@ For each group that should be able to transform media, merge into `groups/<folde
 }
 ```
 
-No `additionalMounts`, no credentials. Inputs are read from `/workspace/inbox/...` (already mounted), outputs go to `/workspace/agent/tmp/`.
+No `additionalMounts`, no credentials. Inputs are read from `/workspace/inbox/...` (already mounted) or from a prior tool's output under `/tmp`; outputs go to `/tmp/ffmpeg-<uuid>.<ext>`. `/tmp` is container-internal (not bind-mounted), so outputs auto-clean on container exit and don't accumulate on the host.
 
-Outputs in `tmp/` are reaped on a periodic timer (default: files older than 15 min, swept every 5 min) plus a startup sweep. Long enough that an `mcp__nanoclaw__send_file` call right after the tool returns always wins; short enough that long-running sessions don't accumulate disk.
+Within a long-running container, outputs are still reaped on a periodic timer (default: files older than 15 min, swept every 5 min) plus a startup sweep — relevant for chains like trim → compress → extract_audio that produce intermediates in a single session.
 
 Optional env overrides (default 5 min per-call timeout, 15 min tmp TTL, 5 min sweep cadence):
 

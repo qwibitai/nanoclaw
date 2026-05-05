@@ -31,8 +31,12 @@ import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 function workspaceRoot(): string {
   return process.env.NANOCLAW_FFMPEG_WORKSPACE_ROOT || '/workspace';
 }
+// Output dir for tool products. Defaults to /tmp, which is container-internal
+// (not bind-mounted) — so outputs auto-clean on container exit and don't
+// accumulate on the host. Tests override via NANOCLAW_FFMPEG_TMP_DIR to a
+// staged path so they can stage files without touching the real /tmp.
 function tmpDir(): string {
-  return path.join(workspaceRoot(), 'agent', 'tmp');
+  return process.env.NANOCLAW_FFMPEG_TMP_DIR || '/tmp';
 }
 const DEFAULT_TIMEOUT_SEC = Number(process.env.NANOCLAW_FFMPEG_TIMEOUT_SEC) || 300;
 // Per-call timeout ceiling. The lower bound of 1800s is the policy default;
@@ -44,14 +48,18 @@ const MIN_TIMEOUT_SEC = 5;
 const STDERR_TAIL_BYTES = 2048;
 
 // Tmp file lifecycle:
-//   - Each tool writes its output under tmpDir() (`/workspace/agent/tmp/`).
+//   - Each tool writes its output under tmpDir() (`/tmp` by default —
+//     container-internal, not bind-mounted).
 //   - The agent then calls `mcp__nanoclaw__send_file` on that path. send_file
 //     copies the bytes into /workspace/outbox/<msg-id>/, where delivery picks
 //     them up. Once that copy succeeds, the original tmp file is no longer
 //     needed — keeping it around just doubles disk usage.
 //   - This server reaps tmp files older than TMP_TTL_MS on a periodic timer.
 //     The TTL is generous enough that an in-flight send_file (called right
-//     after the tool returned) always wins the race.
+//     after the tool returned) always wins the race. The sweep is still
+//     useful within a long-lived container even though `--rm` cleans /tmp
+//     on exit, since chains like trim → compress → extract_audio can
+//     accumulate intermediate files within a single session.
 const TMP_TTL_MS = (Number(process.env.NANOCLAW_FFMPEG_TMP_TTL_SEC) || 900) * 1000;
 const TMP_SWEEP_INTERVAL_MS = (Number(process.env.NANOCLAW_FFMPEG_TMP_SWEEP_SEC) || 300) * 1000;
 
@@ -85,9 +93,10 @@ function fail(tool: string, error: string, logExtra?: Record<string, unknown>): 
   return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error }) }], isError: true };
 }
 
-// Resolve an input path: accepts absolute paths under /workspace or paths
-// relative to /workspace/agent. Rejects `..` or symlink escapes — realpath
-// is the source of truth.
+// Resolve an input path: accepts absolute paths under /workspace, absolute
+// paths under tmpDir() (so chained tool→tool calls can re-read prior
+// outputs), or paths relative to /workspace/agent. Rejects `..` or symlink
+// escapes — realpath is the source of truth.
 function resolveInputPath(input: string): { path: string } | { error: string } {
   if (!input || typeof input !== 'string') return { error: 'input path is required' };
   const candidate = path.isAbsolute(input) ? input : path.resolve('/workspace/agent', input);
@@ -97,9 +106,12 @@ function resolveInputPath(input: string): { path: string } | { error: string } {
   } catch {
     return { error: `Input not found: ${input}` };
   }
-  const root = workspaceRoot();
-  if (real !== root && !real.startsWith(root + path.sep)) {
-    return { error: 'Input path must live under /workspace' };
+  const allowedRoots = [workspaceRoot(), tmpDir()];
+  const inAllowedRoot = allowedRoots.some(
+    (root) => real === root || real.startsWith(root + path.sep),
+  );
+  if (!inAllowedRoot) {
+    return { error: 'Input path must live under /workspace or /tmp' };
   }
   if (!fs.statSync(real).isFile()) {
     return { error: 'Input path is not a regular file' };

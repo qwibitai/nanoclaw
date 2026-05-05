@@ -15,6 +15,9 @@ import path from 'path';
 
 const TEST_WORKSPACE = fs.mkdtempSync(path.join(os.tmpdir(), 'ffmpeg-mcp-test-'));
 process.env.NANOCLAW_FFMPEG_WORKSPACE_ROOT = TEST_WORKSPACE;
+// Override the tmp output dir to a path under TEST_WORKSPACE so tests stage
+// outputs without touching the real /tmp.
+process.env.NANOCLAW_FFMPEG_TMP_DIR = path.join(TEST_WORKSPACE, 'agent', 'tmp');
 
 const FIXTURE_DIR = path.join(TEST_WORKSPACE, 'agent', 'test-fixtures');
 fs.mkdirSync(FIXTURE_DIR, { recursive: true });
