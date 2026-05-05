@@ -121,6 +121,9 @@ function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> 
     '/app/CLAUDE.md',
     '/workspace/agent/.claude-fragments/*.md',
     '/workspace/agent/CLAUDE.local.md',
+    // Per-group memory files — loaded automatically so the agent never has to
+    // remember to read them at session start.
+    '/workspace/agent/memory/*.md',
   ];
 
   return {
