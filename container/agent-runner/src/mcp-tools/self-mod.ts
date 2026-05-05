@@ -117,4 +117,45 @@ export const addMcpServer: McpToolDefinition = {
   },
 };
 
-registerTools([installPackages, addMcpServer]);
+export const changeModel: McpToolDefinition = {
+  tool: {
+    name: 'change_model',
+    description:
+      'Switch YOUR underlying AI model. Requires admin approval; fire-and-forget. The container restarts automatically after approval and you will be running on the new model from the next message.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        model: {
+          type: 'string',
+          description: 'Model identifier, e.g. "opencode-go/kimi-k2.6", "opencode-go/deepseek-v4-pro", "deepseek/deepseek-v4-flash"',
+        },
+        reason: { type: 'string', description: 'Why you want to switch models' },
+      },
+      required: ['model'],
+    },
+  },
+  async handler(args) {
+    const model = (args.model as string)?.trim();
+    if (!model) return err('model is required');
+    // Basic format validation: provider/model-name or just model-name
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._+-]*(\/[a-zA-Z0-9][a-zA-Z0-9._+-]*)?$/.test(model)) {
+      return err(`Invalid model identifier "${model}". Expected format: "provider/model" or "model-name".`);
+    }
+
+    const requestId = generateId();
+    writeMessageOut({
+      id: requestId,
+      kind: 'system',
+      content: JSON.stringify({
+        action: 'change_model',
+        model,
+        reason: (args.reason as string) || '',
+      }),
+    });
+
+    log(`change_model: ${requestId} → "${model}"`);
+    return ok(`Model change request submitted (→ ${model}). You will be notified when admin approves or rejects.`);
+  },
+};
+
+registerTools([installPackages, addMcpServer, changeModel]);

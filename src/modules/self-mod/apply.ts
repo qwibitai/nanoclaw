@@ -83,3 +83,20 @@ export const applyAddMcpServer: ApprovalHandler = async ({ session, payload, use
   notify(`MCP server "${payload.name}" added. Your container will restart with it on the next message.`);
   log.info('MCP server add approved', { agentGroupId: session.agent_group_id, userId });
 };
+
+export const applyChangeModel: ApprovalHandler = async ({ session, payload, userId, notify }) => {
+  const agentGroup = getAgentGroup(session.agent_group_id);
+  if (!agentGroup) {
+    notify('change_model approved but agent group missing.');
+    return;
+  }
+
+  const model = payload.model as string;
+  updateContainerConfig(agentGroup.folder, (cfg) => {
+    cfg.model = model;
+  });
+
+  killContainer(session.id, 'model changed');
+  notify(`Model switched to ${model}. Your container will restart with the new model on the next message.`);
+  log.info('Model change approved', { agentGroupId: session.agent_group_id, model, userId });
+};
