@@ -113,9 +113,20 @@ See [docs/ANON_PROXY.md](docs/ANON_PROXY.md) for a full walkthrough of the proxy
 
 ## Local LLM Support (Ollama)
 
-If [Ollama](https://ollama.com) is running on the same host, Talon automatically routes raw event interpretation through a local model rather than the cloud. This keeps the most sensitive step — reading the full raw event and extracting IOCs — entirely on-premises.
+Two distinct Ollama integrations, used independently or together:
 
-The agent checks for Ollama at startup. If it's not running, the investigation continues without it — no errors, no configuration required. See step 14 of the deployment guide below for setup.
+**1. IOC extraction tool (existing)** — when an investigation runs, the agent routes raw-event interpretation through a local Ollama model so the full event JSON never leaves the host. The cloud agent still runs the investigation; Ollama just handles the "extract IOCs from this raw blob" step. Auto-detected at startup; no `.env` required for same-machine installs. See step 14 of the deployment guide.
+
+**2. Agent runtime replacement (air-gapped mode, new)** — replace the **entire Claude Agent runtime** with a local Ollama instance via four `.env` lines. The Claude Agent SDK is redirected at Ollama via `ANTHROPIC_BASE_URL`; Ollama 0.4+ speaks the Anthropic v1/messages API natively. No traffic to `api.anthropic.com`. Suitable for fully air-gapped or compliance-driven deployments.
+
+```bash
+TALON_PROVIDER=ollama
+TALON_OLLAMA_BASE_URL=http://host.docker.internal:11434
+TALON_OLLAMA_MODEL=llama3.3:70b
+TALON_OLLAMA_API_KEY=ollama
+```
+
+Restart Talon and every group inherits the provider. Default mode (no env vars) keeps using Anthropic Claude. See [docs/PROVIDER_SELECTION.md](docs/PROVIDER_SELECTION.md) for model picker, latency expectations (~60-100s/turn vs 3-15s on Anthropic), and troubleshooting. Practical model floor for full Talon scaffolding is 32B; 70B recommended.
 
 ---
 
@@ -160,6 +171,14 @@ HTTP_API_KEY=your-secret-key-here
 # Optional: restrict the native credential-proxy fallback to loopback only
 # (only used when OneCLI is unavailable; default: 0.0.0.0)
 # CREDENTIAL_PROXY_HOST=127.0.0.1
+
+# Optional: agent runtime provider. Default is 'anthropic' (Claude via OneCLI).
+# Set to 'ollama' for fully air-gapped operation. See docs/PROVIDER_SELECTION.md
+# and .env.provider.example for model recommendations and latency expectations.
+# TALON_PROVIDER=ollama
+# TALON_OLLAMA_BASE_URL=http://host.docker.internal:11434
+# TALON_OLLAMA_MODEL=llama3.3:70b
+# TALON_OLLAMA_API_KEY=ollama
 EOF
 ```
 
