@@ -122,13 +122,13 @@ export const changeModel: McpToolDefinition = {
   tool: {
     name: 'change_model',
     description:
-      'Switch YOUR underlying AI model. Requires admin approval; fire-and-forget. The container restarts automatically after approval and you will be running on the new model from the next message.',
+      'Switch YOUR underlying AI model. Always call get_model first to see valid model IDs. Requires admin approval; fire-and-forget.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         model: {
           type: 'string',
-          description: 'Model identifier, e.g. "opencode-go/kimi-k2.6", "opencode-go/deepseek-v4-pro", "deepseek/deepseek-v4-flash"',
+          description: 'Full model identifier with provider prefix, e.g. "opencode-go/kimi-k2.6". Call get_model first to see the valid list.',
         },
         reason: { type: 'string', description: 'Why you want to switch models' },
       },
@@ -138,9 +138,32 @@ export const changeModel: McpToolDefinition = {
   async handler(args) {
     const model = (args.model as string)?.trim();
     if (!model) return err('model is required');
-    // Basic format validation: provider/model-name or just model-name
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._+-]*(\/[a-zA-Z0-9][a-zA-Z0-9._+-]*)?$/.test(model)) {
-      return err(`Invalid model identifier "${model}". Expected format: "provider/model" or "model-name".`);
+
+    const provider = process.env.OPENCODE_PROVIDER || '';
+    const apiKey = process.env.OPENCODE_API_KEY;
+
+    // When running on opencode-go, validate against the live model list.
+    if (provider === 'opencode-go' && apiKey) {
+      if (!model.startsWith('opencode-go/')) {
+        return err(`Model must start with "opencode-go/" for this provider. Call get_model to see valid options.`);
+      }
+      const modelId = model.replace('opencode-go/', '');
+      try {
+        const res = await fetch('https://opencode.ai/zen/go/v1/models', {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { data?: { id: string }[] };
+          const valid = (data.data ?? []).map((m) => m.id);
+          if (!valid.includes(modelId)) {
+            return err(
+              `Unknown model "${modelId}". Valid opencode-go models:\n${valid.map((m) => `  opencode-go/${m}`).join('\n')}`,
+            );
+          }
+        }
+      } catch {
+        // Network error — let it through and let the host validate
+      }
     }
 
     const requestId = generateId();
