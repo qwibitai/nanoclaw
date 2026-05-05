@@ -93,20 +93,20 @@ export interface RoutingContext {
  * Uses the first message's routing fields.
  */
 export function extractRouting(messages: MessageInRow[]): RoutingContext {
-  const first = messages[0];
-  // When every message in the batch came from an agent-to-agent channel, do NOT
-  // inherit that channel for the reply — it creates an echo loop where the reply
-  // is routed back to the same agent as another a2a message. Fall back to null
-  // routing so dispatchResultText uses the single-destination shortcut (Telegram).
-  const isAllAgent = messages.length > 0 && messages.every((m) => m.channel_type === 'agent');
-  if (isAllAgent) {
-    return { platformId: null, channelType: null, threadId: null, inReplyTo: first?.id ?? null };
+  // Skip agent-to-agent messages for reply routing — inheriting an agent channel
+  // would route the reply back to the agent itself (echo loop) or get blocked
+  // by the host self-routing guard. Prefer the first non-agent message instead.
+  const first = messages.find((m) => m.channel_type !== 'agent') ?? null;
+  if (!first) {
+    // All-agent batch: fall through to the single-destination shortcut in
+    // dispatchResultText so the reply goes to Telegram instead of looping.
+    return { platformId: null, channelType: null, threadId: null, inReplyTo: messages[0]?.id ?? null };
   }
   return {
-    platformId: first?.platform_id ?? null,
-    channelType: first?.channel_type ?? null,
-    threadId: first?.thread_id ?? null,
-    inReplyTo: first?.id ?? null,
+    platformId: first.platform_id ?? null,
+    channelType: first.channel_type ?? null,
+    threadId: first.thread_id ?? null,
+    inReplyTo: first.id ?? null,
   };
 }
 

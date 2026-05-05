@@ -97,6 +97,5 @@ export const applyChangeModel: ApprovalHandler = async ({ session, payload, user
   });
 
   killContainer(session.id, 'model changed');
-  notify(`Model switched to ${model}. Your container will restart with the new model on the next message.`);
   log.info('Model change approved', { agentGroupId: session.agent_group_id, model, userId });
 };
