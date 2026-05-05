@@ -107,6 +107,20 @@ export const applyChangeModel: ApprovalHandler = async ({ session, payload, user
     /* ignore */
   }
 
+  // Also clear the stored OpenCode session ID (continuation) in outbound.db
+  // so the next container starts a fresh session, not the now-invalid one.
+  const outboundPath = path.join(sessionDir(session.agent_group_id, session.id), 'outbound.db');
+  if (fs.existsSync(outboundPath)) {
+    try {
+      const Database = (await import('better-sqlite3')).default;
+      const outDb = new Database(outboundPath);
+      outDb.prepare('DELETE FROM session_state').run();
+      outDb.close();
+    } catch {
+      /* ignore */
+    }
+  }
+
   killContainer(session.id, 'model changed');
   log.info('Model change approved', { agentGroupId: session.agent_group_id, model, userId });
 };
