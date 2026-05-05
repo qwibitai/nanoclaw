@@ -17,7 +17,11 @@ import {
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
-import { readEnvFile } from './env.js';
+import {
+  loadProviderEnvDefaults,
+  mergeProviderConfig,
+  readEnvFile,
+} from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -29,13 +33,28 @@ import {
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import { ContainerConfig, RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+
+// Provider defaults from .env (single-tenant Talon — most operators set
+// TALON_PROVIDER once and every group inherits it). Loaded at module init;
+// per-group containerConfig still overrides via mergeProviderConfig().
+// Restart Talon to pick up .env changes.
+const PROVIDER_ENV_DEFAULTS = loadProviderEnvDefaults();
+if (PROVIDER_ENV_DEFAULTS.provider) {
+  logger.info(
+    {
+      provider: PROVIDER_ENV_DEFAULTS.provider,
+      ollamaModel: PROVIDER_ENV_DEFAULTS.ollama?.model,
+    },
+    'Provider defaults loaded from .env',
+  );
+}
 
 export interface ContainerInput {
   prompt: string;
@@ -164,6 +183,46 @@ function buildVolumeMounts(
         null,
         2,
       ) + '\n',
+    );
+  }
+
+  // Sync settings.json `model` field with the effective provider:
+  //   - provider=ollama → upsert model = ollama.model
+  //   - provider=anthropic (or unset) → remove any leftover model field so
+  //     the SDK falls back to Anthropic defaults instead of erroring with
+  //     "model qwen2.5-... doesn't exist" after a provider switch.
+  // Read-merge-write to preserve other keys (env, hooks, permissions).
+  const effectiveConfig = mergeProviderConfig(
+    PROVIDER_ENV_DEFAULTS,
+    group.containerConfig,
+  );
+  try {
+    const raw = fs.readFileSync(settingsFile, 'utf-8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    let dirty = false;
+    if (
+      effectiveConfig.provider === 'ollama' &&
+      effectiveConfig.ollama?.model
+    ) {
+      if (parsed.model !== effectiveConfig.ollama.model) {
+        parsed.model = effectiveConfig.ollama.model;
+        dirty = true;
+      }
+    } else if (parsed.model !== undefined) {
+      // Provider is anthropic (or unset) — strip any stale Ollama model
+      // left behind from a previous spawn. Without this, switching back
+      // to Anthropic fails with "model not found" until the file is
+      // hand-edited.
+      delete parsed.model;
+      dirty = true;
+    }
+    if (dirty) {
+      fs.writeFileSync(settingsFile, JSON.stringify(parsed, null, 2) + '\n');
+    }
+  } catch (err) {
+    logger.warn(
+      { group: group.name, settingsFile, err },
+      'Failed to sync model field in settings.json',
     );
   }
 
@@ -335,10 +394,67 @@ function buildVolumeMounts(
   return mounts;
 }
 
+/**
+ * Resolve provider-derived env + host-block args.
+ *
+ * Returns the env and `--add-host` args that the provider config implies,
+ * plus any raw `env`/`blockedHosts` overlays from `containerConfig`. Pure
+ * function — no I/O. The caller appends to `args` in the right place
+ * (after OneCLI applies its proxy vars so NO_PROXY actually wins).
+ */
+function buildProviderArgs(containerConfig: ContainerConfig | undefined): {
+  envArgs: string[];
+  addHostArgs: string[];
+} {
+  const env: Record<string, string> = {};
+  const blockedHosts = new Set<string>();
+
+  if (containerConfig?.provider === 'ollama' && containerConfig.ollama) {
+    const { baseUrl, apiKey } = containerConfig.ollama;
+    env.ANTHROPIC_BASE_URL = baseUrl;
+    env.ANTHROPIC_AUTH_TOKEN = apiKey ?? 'ollama';
+    // NO_PROXY beats HTTPS_PROXY at request time — the SDK's HTTP client
+    // honours both lowercase and uppercase, so set both for safety.
+    let host: string | null = null;
+    try {
+      host = new URL(baseUrl).hostname;
+    } catch {
+      /* non-URL; skip NO_PROXY wiring */
+    }
+    if (host) {
+      env.NO_PROXY = host;
+      env.no_proxy = host;
+    }
+    // Fail-closed: if the SDK ever ignores ANTHROPIC_BASE_URL (e.g. someone
+    // unsets it post-spawn), DNS for api.anthropic.com resolves to the
+    // container itself — request fails fast instead of leaking traffic.
+    blockedHosts.add('api.anthropic.com');
+  }
+
+  // Raw overlay — user-provided env wins.
+  if (containerConfig?.env) {
+    Object.assign(env, containerConfig.env);
+  }
+  for (const h of containerConfig?.blockedHosts ?? []) {
+    blockedHosts.add(h);
+  }
+
+  const envArgs: string[] = [];
+  for (const [k, v] of Object.entries(env)) {
+    envArgs.push('-e', `${k}=${v}`);
+  }
+  const addHostArgs: string[] = [];
+  for (const h of blockedHosts) {
+    addHostArgs.push('--add-host', `${h}:127.0.0.1`);
+  }
+  return { envArgs, addHostArgs };
+}
+
 async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   isMain: boolean,
+  containerConfig: ContainerConfig | undefined,
   agentIdentifier?: string,
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
@@ -353,31 +469,47 @@ async function buildContainerArgs(
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
-  if (onecliApplied) {
-    logger.info({ containerName }, 'OneCLI gateway config applied');
-  } else {
-    const { CLAUDE_CODE_OAUTH_TOKEN } = readEnvFile([
-      'CLAUDE_CODE_OAUTH_TOKEN',
-    ]);
-    if (CLAUDE_CODE_OAUTH_TOKEN) {
-      // Long-lived OAuth token (generated via `claude setup-token`) — inject
-      // directly so containers authenticate without a separate login.
-      args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}`);
-      logger.info(
-        { containerName },
-        'Injecting CLAUDE_CODE_OAUTH_TOKEN into container',
-      );
+  // Skip OneCLI entirely when running an Ollama-only container — there are no
+  // upstream secrets to inject and we don't want the proxy intercepting our
+  // ANTHROPIC_BASE_URL redirect.
+  if (containerConfig?.provider !== 'ollama') {
+    const onecliApplied = await onecli.applyContainerConfig(args, {
+      addHostMapping: false, // Nanoclaw already handles host gateway
+      agent: agentIdentifier,
+    });
+    if (onecliApplied) {
+      logger.info({ containerName }, 'OneCLI gateway config applied');
     } else {
-      logger.warn(
-        { containerName },
-        'No credentials available — container may fail to authenticate',
-      );
+      const { CLAUDE_CODE_OAUTH_TOKEN } = readEnvFile([
+        'CLAUDE_CODE_OAUTH_TOKEN',
+      ]);
+      if (CLAUDE_CODE_OAUTH_TOKEN) {
+        // Long-lived OAuth token (generated via `claude setup-token`) — inject
+        // directly so containers authenticate without a separate login.
+        args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}`);
+        logger.info(
+          { containerName },
+          'Injecting CLAUDE_CODE_OAUTH_TOKEN into container',
+        );
+      } else {
+        logger.warn(
+          { containerName },
+          'No credentials available — container may fail to authenticate',
+        );
+      }
     }
+  } else {
+    logger.info(
+      { containerName, provider: 'ollama' },
+      'Provider=ollama — skipping OneCLI gateway, using ANTHROPIC_BASE_URL redirect',
+    );
   }
+
+  // Provider-derived env + host blocks. Pushed AFTER OneCLI so NO_PROXY
+  // (set by Ollama provider) overrides any HTTPS_PROXY OneCLI may have applied.
+  const { envArgs, addHostArgs } = buildProviderArgs(containerConfig);
+  args.push(...envArgs);
+  args.push(...addHostArgs);
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
@@ -441,10 +573,17 @@ export async function runContainerAgent(
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
+  // Merge .env provider defaults with per-group overrides — single source
+  // of truth for provider-related decisions in buildContainerArgs.
+  const effectiveContainerConfig = mergeProviderConfig(
+    PROVIDER_ENV_DEFAULTS,
+    group.containerConfig,
+  );
   const containerArgs = await buildContainerArgs(
     mounts,
     containerName,
     input.isMain,
+    effectiveContainerConfig,
     agentIdentifier,
   );
 
