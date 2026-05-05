@@ -1,0 +1,6 @@
+{
+  "_comment": "Default Anthropic mode (Claude API via OneCLI gateway). This is what runs out of the box — no env overrides, OneCLI handles credential injection. Copy to container.json (or omit the file entirely; Talon defaults to Anthropic).",
+
+  "timeout": 600000,
+  "provider": "anthropic"
+}

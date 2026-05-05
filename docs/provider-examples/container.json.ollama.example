@@ -1,0 +1,15 @@
+{
+  "_comment": "PER-GROUP OVERRIDE — only needed when this customer should run a different provider than the instance-wide default in /opt/talon/.env. For single-tenant Talon (the common case), set TALON_PROVIDER + TALON_OLLAMA_* in .env instead and leave container.json absent. This file demonstrates an explicit per-customer override.",
+
+  "timeout": 600000,
+  "provider": "ollama",
+  "ollama": {
+    "baseUrl": "https://qggwu1g2nyt6dw-11434.proxy.runpod.net",
+    "model": "llama3.2:latest",
+    "apiKey": "ollama"
+  },
+  "blockedHosts": [
+    "api.openai.com",
+    "generativelanguage.googleapis.com"
+  ]
+}
