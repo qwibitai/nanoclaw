@@ -22,6 +22,7 @@ export interface AgentProvider {
  */
 export interface ProviderOptions {
   assistantName?: string;
+  model?: string;
   mcpServers?: Record<string, McpServerConfig>;
   env?: Record<string, string | undefined>;
   additionalDirectories?: string[];

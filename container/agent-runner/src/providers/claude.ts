@@ -233,15 +233,35 @@ function createPreCompactHook(assistantName?: string): HookCallback {
 
 // ── Provider ──
 
-/**
- * Claude Code auto-compacts context at this window (tokens). Kept here so
- * the generic bootstrap doesn't need to know about Claude-specific env vars.
- *
- * Operator override: set CLAUDE_CODE_AUTO_COMPACT_WINDOW in the host env to
- * raise or lower the threshold without editing source — useful when running
- * with a 1M-context model variant or when emergency-tuning a deployment.
- */
-const CLAUDE_CODE_AUTO_COMPACT_WINDOW = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW || '165000';
+// ── Model-aware compaction ──
+
+const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  'claude-sonnet-4-6': 1_000_000,
+  'claude-opus-4-6': 1_000_000,
+  'claude-opus-4-7': 1_000_000,
+  'claude-haiku-4-5-20251001': 200_000,
+};
+const DEFAULT_CONTEXT_WINDOW = 200_000;
+const COMPACT_RATIO = 0.8;
+const MODELS_1M = new Set(['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-opus-4-7']);
+
+function compactWindowForModel(model?: string): string {
+  if (process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW) {
+    return process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+  }
+  const ctx = (model && MODEL_CONTEXT_WINDOWS[model]) || DEFAULT_CONTEXT_WINDOW;
+  return String(Math.round(ctx * COMPACT_RATIO));
+}
+
+// The CLI recognizes `[1m]` in the model name as a direct signal to use 1M
+// context (checked before betas or remote config). It strips the tag before
+// API calls via its internal normalizer. This avoids a race where --betas
+// aren't stored in the CLI's global state before the first compaction check.
+function modelForSdk(model?: string): string | undefined {
+  if (!model) return undefined;
+  if (MODELS_1M.has(model)) return `${model}[1m]`;
+  return model;
+}
 
 /**
  * Stale-session detection. Matches Claude Code's error text when a
@@ -254,17 +274,19 @@ export class ClaudeProvider implements AgentProvider {
   readonly supportsNativeSlashCommands = true;
 
   private assistantName?: string;
+  private model?: string;
   private mcpServers: Record<string, McpServerConfig>;
   private env: Record<string, string | undefined>;
   private additionalDirectories?: string[];
 
   constructor(options: ProviderOptions = {}) {
     this.assistantName = options.assistantName;
+    this.model = options.model;
     this.mcpServers = options.mcpServers ?? {};
     this.additionalDirectories = options.additionalDirectories;
     this.env = {
       ...(options.env ?? {}),
-      CLAUDE_CODE_AUTO_COMPACT_WINDOW,
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: compactWindowForModel(this.model),
     };
   }
 
@@ -282,6 +304,7 @@ export class ClaudeProvider implements AgentProvider {
     const sdkResult = sdkQuery({
       prompt: stream,
       options: {
+        model: modelForSdk(this.model),
         cwd: input.cwd,
         additionalDirectories: this.additionalDirectories,
         resume: input.continuation,
