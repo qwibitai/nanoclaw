@@ -376,13 +376,32 @@ function dispatchResultText(text: string, routing: RoutingContext): void {
       scratchpadParts.push(text.slice(lastIndex, match.index));
     }
     const toName = match[1];
-    const body = match[2].trim();
+    // Strip <internal>…</internal> tags BEFORE sending to the destination.
+    // Bug #19 (2026-05-05 smoke): the LLM sometimes nests scratchpad
+    // inside a `<message to="founder">` block, e.g.
+    //   <message to="founder">
+    //     <internal>Writing Pitch Deck content to a markdown file.</internal>
+    //     [actual reply or none]
+    //   </message>
+    // The earlier strip only fired on text OUTSIDE `<message>` blocks
+    // (the scratchpadParts.join below) — bodies INSIDE went to
+    // sendToDestination raw, so the founder saw the literal
+    // `<internal>...</internal>` tags in Telegram. Strip here so any
+    // scratchpad nested inside a delivery block is dropped before
+    // it ships.
+    const body = stripInternalTags(match[2]);
     lastIndex = MESSAGE_RE.lastIndex;
 
     const dest = findByName(toName);
     if (!dest) {
       log(`Unknown destination in <message to="${toName}">, dropping block`);
       scratchpadParts.push(`[dropped: unknown destination "${toName}"] ${body}`);
+      continue;
+    }
+    if (!body) {
+      // After strip, the message block was nothing but scratchpad.
+      // Skip rather than fire an empty Telegram message.
+      log(`Empty body after stripping <internal> from <message to="${toName}">; not sending`);
       continue;
     }
     sendToDestination(dest, body, routing);
