@@ -267,7 +267,7 @@ async function dispatchApproval(args: {
           remaining: cost.remaining,
           tasksRemaining: cost.tasksRemaining,
         },
-        note: 'Show the founder the summary + cost. Ask them to confirm by replying "yes" / "go" / "approve" — or "no" / "cancel". On confirmation, call this same tool with `confirmed: true` and the IDENTICAL payload.',
+        note: 'Tell the founder the summary + cost in PLAIN TEXT. Ask them to confirm by REPLYING WITH A WORD — "yes" / "go" / "approve" — or "no" / "cancel". DO NOT say "tap", "press", "click", "✅", or any phrasing that implies a button — there is no button on this surface, the founder confirms by typing a word. On their confirmation, call this same tool with `confirmed: true` and the IDENTICAL payload.',
       }),
     );
   }
