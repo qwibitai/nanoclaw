@@ -21,10 +21,8 @@ fs.mkdirSync(FIXTURE_DIR, { recursive: true });
 
 import { afterEach, describe, expect, it } from 'bun:test';
 
-import { __setSpawnForTesting, __test__ } from './server.js';
-import type { RunResult, SpawnFn } from './server.js';
-
-const {
+import {
+  __setSpawnForTesting,
   resolveInputPath,
   validateOutputExt,
   mimeFor,
@@ -36,8 +34,10 @@ const {
   resolveTimeoutSec,
   sweepStaleTmp,
   tmpDir,
+  DEFAULT_TIMEOUT_SEC,
   MAX_TIMEOUT_SEC,
-} = __test__;
+} from './server.js';
+import type { RunResult, SpawnFn } from './server.js';
 
 function stageFixture(name: string, contents = 'fake media bytes'): string {
   const p = path.join(FIXTURE_DIR, name);
@@ -302,8 +302,8 @@ describe('compress handler', () => {
 
 describe('resolveTimeoutSec', () => {
   it('returns the default when arg is omitted', () => {
-    expect(resolveTimeoutSec(undefined)).toBe(__test__.DEFAULT_TIMEOUT_SEC);
-    expect(resolveTimeoutSec(null)).toBe(__test__.DEFAULT_TIMEOUT_SEC);
+    expect(resolveTimeoutSec(undefined)).toBe(DEFAULT_TIMEOUT_SEC);
+    expect(resolveTimeoutSec(null)).toBe(DEFAULT_TIMEOUT_SEC);
   });
   it('accepts in-range numbers', () => {
     expect(resolveTimeoutSec(60)).toBe(60);
@@ -326,7 +326,7 @@ describe('resolveTimeoutSec', () => {
     // larger budget — otherwise the policy is asymmetric (the default is
     // allowed but no explicit request matching it is). Asserts the invariant
     // even though this test process didn't set the env override itself.
-    expect(MAX_TIMEOUT_SEC).toBeGreaterThanOrEqual(__test__.DEFAULT_TIMEOUT_SEC);
+    expect(MAX_TIMEOUT_SEC).toBeGreaterThanOrEqual(DEFAULT_TIMEOUT_SEC);
   });
 });
 

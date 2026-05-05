@@ -55,71 +55,39 @@ const STDERR_TAIL_BYTES = 2048;
 const TMP_TTL_MS = (Number(process.env.NANOCLAW_FFMPEG_TMP_TTL_SEC) || 900) * 1000;
 const TMP_SWEEP_INTERVAL_MS = (Number(process.env.NANOCLAW_FFMPEG_TMP_SWEEP_SEC) || 300) * 1000;
 
-const OUTPUT_EXT_WHITELIST = new Set([
-  'mp4', 'mov', 'webm', 'mkv', 'avi',
-  'mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus',
-  'gif', 'jpg', 'jpeg', 'png',
-]);
-
+// Single source of truth: every supported output extension and its MIME.
+// OUTPUT_EXT_WHITELIST and AUDIO_ONLY_EXTS are derived so they can't drift.
 const MIME_BY_EXT: Record<string, string> = {
-  mp4: 'video/mp4',
-  mov: 'video/quicktime',
-  webm: 'video/webm',
-  mkv: 'video/x-matroska',
-  avi: 'video/x-msvideo',
-  mp3: 'audio/mpeg',
-  wav: 'audio/wav',
-  ogg: 'audio/ogg',
-  flac: 'audio/flac',
-  m4a: 'audio/mp4',
-  aac: 'audio/aac',
-  opus: 'audio/opus',
-  gif: 'image/gif',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
+  mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska', avi: 'video/x-msvideo',
+  mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac', m4a: 'audio/mp4', aac: 'audio/aac', opus: 'audio/opus',
+  gif: 'image/gif', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
 };
+const OUTPUT_EXT_WHITELIST = new Set(Object.keys(MIME_BY_EXT));
+const AUDIO_ONLY_EXTS = new Set(
+  Object.entries(MIME_BY_EXT).filter(([, m]) => m.startsWith('audio/')).map(([e]) => e),
+);
 
-// ---- Logging ----------------------------------------------------------------
-
-/**
- * Operator-facing log line. Captured via the container's stderr pipe and
- * surfaced in `logs/nanoclaw.log` alongside the rest of the agent runtime
- * output. The user-facing error returned to the agent is intentionally
- * shorter — this line carries the debugging detail.
- */
+// Operator-facing logging. Captured via the container stderr pipe and surfaced
+// in logs/nanoclaw.log; user-facing errors are kept terser via fail().
 function logErr(tool: string, reason: string, extra?: Record<string, unknown>): void {
   const detail = extra ? ' ' + JSON.stringify(extra) : '';
   console.error(`[ffmpeg-mcp] ${tool}: ${reason}${detail}`);
 }
-
 function logInfo(msg: string): void {
   console.error(`[ffmpeg-mcp] ${msg}`);
 }
 
-// ---- MCP response helpers ---------------------------------------------------
-
 function ok(payload: object): CallToolResult {
   return { content: [{ type: 'text', text: JSON.stringify({ ok: true, ...payload }) }] };
 }
-
 function fail(tool: string, error: string, logExtra?: Record<string, unknown>): CallToolResult {
   logErr(tool, error, logExtra);
-  return {
-    content: [{ type: 'text', text: JSON.stringify({ ok: false, error }) }],
-    isError: true,
-  };
+  return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error }) }], isError: true };
 }
 
-// ---- Path + extension validation -------------------------------------------
-
-/**
- * Resolve and validate an input path.
- *
- * Accepts absolute paths under /workspace or relative paths (resolved
- * against /workspace/agent). Rejects anything that escapes /workspace via
- * `..` or symlink — `realpath` is the source of truth.
- */
+// Resolve an input path: accepts absolute paths under /workspace or paths
+// relative to /workspace/agent. Rejects `..` or symlink escapes — realpath
+// is the source of truth.
 function resolveInputPath(input: string): { path: string } | { error: string } {
   if (!input || typeof input !== 'string') return { error: 'input path is required' };
   const candidate = path.isAbsolute(input) ? input : path.resolve('/workspace/agent', input);
@@ -155,7 +123,7 @@ function makeOutputPath(ext: string): string {
   return path.join(dir, `ffmpeg-${randomUUID()}.${ext}`);
 }
 
-// ---- Spawn layer (injectable for tests) -------------------------------------
+// Spawn layer (injectable for tests).
 
 export interface RunResult {
   exitCode: number;
@@ -208,10 +176,7 @@ async function runFfprobe(args: string[], timeoutSec: number = DEFAULT_TIMEOUT_S
   return _spawn('ffprobe', ['-hide_banner', '-loglevel', 'error', ...args], timeoutSec);
 }
 
-/**
- * Validate and clamp an optional per-call `timeout_seconds` argument.
- * Returns either a usable timeout or a string error to surface.
- */
+// Validate + clamp an optional per-call `timeout_seconds`.
 function resolveTimeoutSec(raw: unknown): number | { error: string } {
   if (raw === undefined || raw === null) return DEFAULT_TIMEOUT_SEC;
   const n = Number(raw);
@@ -225,6 +190,35 @@ function resolveTimeoutSec(raw: unknown): number | { error: string } {
     return { error: `timeout_seconds must be <= ${MAX_TIMEOUT_SEC}` };
   }
   return Math.floor(n);
+}
+
+// Shared schema partials + the `input` + `timeout_seconds` validator that
+// every non-probe tool runs first.
+const INPUT_PROP = {
+  type: 'string' as const,
+  description: 'Path to the source file (absolute under /workspace, or relative to /workspace/agent).',
+};
+const TIMEOUT_PROP = {
+  type: 'number' as const,
+  description: `Optional per-call timeout in seconds (${MIN_TIMEOUT_SEC}–${MAX_TIMEOUT_SEC}, default ${DEFAULT_TIMEOUT_SEC}). The ffmpeg process is killed on expiry.`,
+};
+
+function resolveInputAndTimeout(
+  tool: string,
+  args: Record<string, unknown>,
+): { inputPath: string; timeoutSec: number } | CallToolResult {
+  const resolved = resolveInputPath(args.input as string);
+  if ('error' in resolved) return fail(tool, resolved.error, { input: basename(args.input) });
+  const timeoutSec = resolveTimeoutSec(args.timeout_seconds);
+  if (typeof timeoutSec !== 'number') return fail(tool, timeoutSec.error);
+  return { inputPath: resolved.path, timeoutSec };
+}
+
+// CRF range gate, shared by `convert.video_crf` and `compress.crf`.
+function parseCrf(raw: unknown, field: string): number | { error: string } {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 51) return { error: `${field} must be in [0, 51]` };
+  return Math.round(n);
 }
 
 /**
@@ -286,7 +280,6 @@ export function __stopTmpSweepForTesting(): void {
   }
 }
 
-// ---- Tool: probe ------------------------------------------------------------
 
 const probeTool: Tool = {
   name: 'probe',
@@ -345,7 +338,6 @@ async function probeHandler(args: Record<string, unknown>): Promise<CallToolResu
   });
 }
 
-// ---- Tool: convert ----------------------------------------------------------
 
 const convertTool: Tool = {
   name: 'convert',
@@ -354,28 +346,28 @@ const convertTool: Tool = {
   inputSchema: {
     type: 'object',
     properties: {
-      input: { type: 'string', description: 'Path to the source file.' },
+      input: INPUT_PROP,
       output_format: {
         type: 'string',
         description: `Target format extension (without the dot). Allowed: ${[...OUTPUT_EXT_WHITELIST].sort().join(', ')}.`,
       },
       audio_bitrate_kbps: { type: 'number', description: 'Optional audio bitrate in kbps (e.g. 128, 192, 320).' },
       video_crf: { type: 'number', description: 'Optional H.264/H.265 CRF (lower = higher quality, 18–28 typical).' },
-      timeout_seconds: { type: 'number', description: `Optional per-call timeout in seconds (${MIN_TIMEOUT_SEC}–${MAX_TIMEOUT_SEC}, default ${DEFAULT_TIMEOUT_SEC}). The ffmpeg process is killed on expiry.` },
+      timeout_seconds: TIMEOUT_PROP,
     },
     required: ['input', 'output_format'],
   },
 };
 
 async function convertHandler(args: Record<string, unknown>): Promise<CallToolResult> {
-  const resolved = resolveInputPath(args.input as string);
-  if ('error' in resolved) return fail('convert', resolved.error, { input: basename(args.input) });
+  const common = resolveInputAndTimeout('convert', args);
+  if ('content' in common) return common;
 
   const ext = validateOutputExt(String(args.output_format ?? ''));
   if (!ext) return fail('convert', 'Unsupported output_format', { requested: args.output_format });
 
   const out = makeOutputPath(ext);
-  const ffArgs: string[] = ['-i', resolved.path];
+  const ffArgs: string[] = ['-i', common.inputPath];
 
   if (args.audio_bitrate_kbps !== undefined) {
     const br = Number(args.audio_bitrate_kbps);
@@ -383,19 +375,15 @@ async function convertHandler(args: Record<string, unknown>): Promise<CallToolRe
     ffArgs.push('-b:a', `${Math.round(br)}k`);
   }
   if (args.video_crf !== undefined) {
-    const crf = Number(args.video_crf);
-    if (!Number.isFinite(crf) || crf < 0 || crf > 51) return fail('convert', 'video_crf must be in [0, 51]');
-    ffArgs.push('-crf', String(Math.round(crf)));
+    const crf = parseCrf(args.video_crf, 'video_crf');
+    if (typeof crf !== 'number') return fail('convert', crf.error);
+    ffArgs.push('-crf', String(crf));
   }
 
-  const timeoutSec = resolveTimeoutSec(args.timeout_seconds);
-  if (typeof timeoutSec !== 'number') return fail('convert', timeoutSec.error);
-
   ffArgs.push(out);
-  return await runAndPackage('convert', ffArgs, out, ext, { timeoutSec });
+  return await runAndPackage('convert', ffArgs, out, ext, { timeoutSec: common.timeoutSec });
 }
 
-// ---- Tool: trim -------------------------------------------------------------
 
 const trimTool: Tool = {
   name: 'trim',
@@ -404,37 +392,34 @@ const trimTool: Tool = {
   inputSchema: {
     type: 'object',
     properties: {
-      input: { type: 'string', description: 'Path to the source file.' },
+      input: INPUT_PROP,
       start_seconds: { type: 'number', description: 'Segment start in seconds (>= 0).' },
       duration_seconds: { type: 'number', description: 'Segment length in seconds (> 0).' },
       output_format: {
         type: 'string',
         description: 'Optional output format extension (defaults to the source extension).',
       },
-      timeout_seconds: { type: 'number', description: `Optional per-call timeout in seconds (${MIN_TIMEOUT_SEC}–${MAX_TIMEOUT_SEC}, default ${DEFAULT_TIMEOUT_SEC}). The ffmpeg process is killed on expiry.` },
+      timeout_seconds: TIMEOUT_PROP,
     },
     required: ['input', 'start_seconds', 'duration_seconds'],
   },
 };
 
 async function trimHandler(args: Record<string, unknown>): Promise<CallToolResult> {
-  const resolved = resolveInputPath(args.input as string);
-  if ('error' in resolved) return fail('trim', resolved.error, { input: basename(args.input) });
+  const common = resolveInputAndTimeout('trim', args);
+  if ('content' in common) return common;
 
   const start = Number(args.start_seconds);
   const dur = Number(args.duration_seconds);
   if (!Number.isFinite(start) || start < 0) return fail('trim', 'start_seconds must be >= 0');
   if (!Number.isFinite(dur) || dur <= 0) return fail('trim', 'duration_seconds must be > 0');
 
-  const timeoutSec = resolveTimeoutSec(args.timeout_seconds);
-  if (typeof timeoutSec !== 'number') return fail('trim', timeoutSec.error);
-
   // Probe the source duration so we don't burn CPU on a request whose window
   // sits beyond the end of the file. ffprobe failure is treated as
   // best-effort — fall through and let ffmpeg surface the real error. The
   // probe inherits the per-call timeout so a tight `timeout_seconds` budget
   // bounds both the probe and the encode.
-  const total = await probeDurationSec(resolved.path, timeoutSec);
+  const total = await probeDurationSec(common.inputPath, common.timeoutSec);
   if (total !== null && total > 0 && start >= total) {
     return fail('trim', `start_seconds (${start}) is past end of media (${total.toFixed(2)}s)`, {
       total_duration_s: total,
@@ -446,18 +431,17 @@ async function trimHandler(args: Record<string, unknown>): Promise<CallToolResul
     });
   }
 
-  const sourceExt = path.extname(resolved.path).slice(1).toLowerCase();
+  const sourceExt = path.extname(common.inputPath).slice(1).toLowerCase();
   const requested = args.output_format ? String(args.output_format) : sourceExt;
   const ext = validateOutputExt(requested);
   if (!ext) return fail('trim', 'Unsupported output_format', { requested });
 
   const out = makeOutputPath(ext);
   // Place -ss before -i for fast seek (keyframe-snapped, accurate enough for most cuts).
-  const ffArgs = ['-ss', String(start), '-i', resolved.path, '-t', String(dur), out];
-  return await runAndPackage('trim', ffArgs, out, ext, { timeoutSec });
+  const ffArgs = ['-ss', String(start), '-i', common.inputPath, '-t', String(dur), out];
+  return await runAndPackage('trim', ffArgs, out, ext, { timeoutSec: common.timeoutSec });
 }
 
-// ---- Tool: extract_audio ----------------------------------------------------
 
 const extractAudioTool: Tool = {
   name: 'extract_audio',
@@ -466,38 +450,32 @@ const extractAudioTool: Tool = {
   inputSchema: {
     type: 'object',
     properties: {
-      input: { type: 'string', description: 'Path to the source file.' },
+      input: INPUT_PROP,
       output_format: {
         type: 'string',
-        description: 'Audio format extension. Allowed: mp3, wav, ogg, flac, m4a, aac, opus. Default: mp3.',
+        description: `Audio format extension. Allowed: ${[...AUDIO_ONLY_EXTS].sort().join(', ')}. Default: mp3.`,
       },
-      timeout_seconds: { type: 'number', description: `Optional per-call timeout in seconds (${MIN_TIMEOUT_SEC}–${MAX_TIMEOUT_SEC}, default ${DEFAULT_TIMEOUT_SEC}). The ffmpeg process is killed on expiry.` },
+      timeout_seconds: TIMEOUT_PROP,
     },
     required: ['input'],
   },
 };
 
-const AUDIO_ONLY_EXTS = new Set(['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus']);
-
 async function extractAudioHandler(args: Record<string, unknown>): Promise<CallToolResult> {
-  const resolved = resolveInputPath(args.input as string);
-  if ('error' in resolved) return fail('extract_audio', resolved.error, { input: basename(args.input) });
+  const common = resolveInputAndTimeout('extract_audio', args);
+  if ('content' in common) return common;
 
   const requested = String(args.output_format ?? 'mp3').toLowerCase().replace(/^\./, '');
   if (!AUDIO_ONLY_EXTS.has(requested)) {
     return fail('extract_audio', 'Unsupported audio format', { requested });
   }
 
-  const timeoutSec = resolveTimeoutSec(args.timeout_seconds);
-  if (typeof timeoutSec !== 'number') return fail('extract_audio', timeoutSec.error);
-
   const out = makeOutputPath(requested);
   // -vn drops the video stream; let ffmpeg pick the default codec for the container.
-  const ffArgs = ['-i', resolved.path, '-vn', out];
-  return await runAndPackage('extract_audio', ffArgs, out, requested, { timeoutSec });
+  const ffArgs = ['-i', common.inputPath, '-vn', out];
+  return await runAndPackage('extract_audio', ffArgs, out, requested, { timeoutSec: common.timeoutSec });
 }
 
-// ---- Tool: compress ---------------------------------------------------------
 
 const compressTool: Tool = {
   name: 'compress',
@@ -506,18 +484,18 @@ const compressTool: Tool = {
   inputSchema: {
     type: 'object',
     properties: {
-      input: { type: 'string', description: 'Path to the source file.' },
+      input: INPUT_PROP,
       crf: { type: 'number', description: 'H.264/H.265 CRF in [0, 51]. Mutually exclusive with target_size_mb.' },
       target_size_mb: { type: 'number', description: 'Approx target size in MB. Mutually exclusive with crf.' },
-      timeout_seconds: { type: 'number', description: `Optional per-call timeout in seconds (${MIN_TIMEOUT_SEC}–${MAX_TIMEOUT_SEC}, default ${DEFAULT_TIMEOUT_SEC}). The ffmpeg process is killed on expiry.` },
+      timeout_seconds: TIMEOUT_PROP,
     },
     required: ['input'],
   },
 };
 
 async function compressHandler(args: Record<string, unknown>): Promise<CallToolResult> {
-  const resolved = resolveInputPath(args.input as string);
-  if ('error' in resolved) return fail('compress', resolved.error, { input: basename(args.input) });
+  const common = resolveInputAndTimeout('compress', args);
+  if ('content' in common) return common;
 
   const hasCrf = args.crf !== undefined;
   const hasTarget = args.target_size_mb !== undefined;
@@ -525,25 +503,22 @@ async function compressHandler(args: Record<string, unknown>): Promise<CallToolR
     return fail('compress', 'Pass exactly one of `crf` or `target_size_mb`');
   }
 
-  const timeoutSec = resolveTimeoutSec(args.timeout_seconds);
-  if (typeof timeoutSec !== 'number') return fail('compress', timeoutSec.error);
-
-  const sourceExt = path.extname(resolved.path).slice(1).toLowerCase();
+  const sourceExt = path.extname(common.inputPath).slice(1).toLowerCase();
   const ext = validateOutputExt(sourceExt) ?? 'mp4';
   const out = makeOutputPath(ext);
-  const ffArgs: string[] = ['-i', resolved.path];
+  const ffArgs: string[] = ['-i', common.inputPath];
 
   if (hasCrf) {
-    const crf = Number(args.crf);
-    if (!Number.isFinite(crf) || crf < 0 || crf > 51) return fail('compress', 'crf must be in [0, 51]');
-    ffArgs.push('-crf', String(Math.round(crf)));
+    const crf = parseCrf(args.crf, 'crf');
+    if (typeof crf !== 'number') return fail('compress', crf.error);
+    ffArgs.push('-crf', String(crf));
   } else {
     const targetMb = Number(args.target_size_mb);
     if (!Number.isFinite(targetMb) || targetMb <= 0) return fail('compress', 'target_size_mb must be > 0');
     // Probe duration to compute bitrate. Failure here is non-fatal — we fall
     // back to a fixed mid-quality CRF. The probe inherits the per-call
     // timeout so a tight budget covers both the probe and the encode.
-    const dur = await probeDurationSec(resolved.path, timeoutSec);
+    const dur = await probeDurationSec(common.inputPath, common.timeoutSec);
     if (dur && dur > 0) {
       const bitrateKbps = Math.max(64, Math.floor((targetMb * 8 * 1024) / dur));
       ffArgs.push('-b:v', `${bitrateKbps}k`);
@@ -553,7 +528,7 @@ async function compressHandler(args: Record<string, unknown>): Promise<CallToolR
   }
 
   ffArgs.push(out);
-  return await runAndPackage('compress', ffArgs, out, ext, { timeoutSec });
+  return await runAndPackage('compress', ffArgs, out, ext, { timeoutSec: common.timeoutSec });
 }
 
 async function probeDurationSec(filePath: string, timeoutSec: number = DEFAULT_TIMEOUT_SEC): Promise<number | null> {
@@ -572,7 +547,6 @@ async function probeDurationSec(filePath: string, timeoutSec: number = DEFAULT_T
   }
 }
 
-// ---- Shared run-and-package -------------------------------------------------
 
 async function runAndPackage(
   tool: string,
@@ -623,7 +597,6 @@ function basename(input: unknown): string {
   try { return path.basename(input); } catch { return '<unparseable>'; }
 }
 
-// ---- Server bootstrap -------------------------------------------------------
 
 const TOOLS: Array<{ tool: Tool; handler: (a: Record<string, unknown>) => Promise<CallToolResult> }> = [
   { tool: probeTool, handler: probeHandler },
@@ -675,19 +648,11 @@ if (import.meta.main) {
   });
 }
 
-// Test-only exports.
-export const __test__ = {
-  resolveInputPath,
-  validateOutputExt,
-  mimeFor,
-  probeHandler,
-  convertHandler,
-  trimHandler,
-  extractAudioHandler,
-  compressHandler,
-  resolveTimeoutSec,
-  sweepStaleTmp,
-  tmpDir,
-  DEFAULT_TIMEOUT_SEC,
-  MAX_TIMEOUT_SEC,
+// Test-only re-exports. Kept here (rather than `export` at each declaration)
+// so the public surface for tests is visible in one place.
+export {
+  resolveInputPath, validateOutputExt, mimeFor,
+  probeHandler, convertHandler, trimHandler, extractAudioHandler, compressHandler,
+  resolveTimeoutSec, sweepStaleTmp, tmpDir,
+  DEFAULT_TIMEOUT_SEC, MAX_TIMEOUT_SEC,
 };
