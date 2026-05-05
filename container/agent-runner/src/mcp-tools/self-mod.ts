@@ -12,7 +12,7 @@
  * Package names are sanitized here at the tool boundary AND re-validated on
  * the host side (defense in depth).
  */
-import { getConfig } from '../config.js';
+import { loadConfig } from '../config.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { registerTools } from './server.js';
 import type { McpToolDefinition } from './types.js';
@@ -191,7 +191,7 @@ export const getModel: McpToolDefinition = {
     inputSchema: { type: 'object' as const, properties: {} },
   },
   async handler() {
-    const config = getConfig();
+    const config = loadConfig();
     const current = config.model || process.env.OPENCODE_MODEL || 'unknown';
     const provider = process.env.OPENCODE_PROVIDER || 'unknown';
     const apiKey = process.env.OPENCODE_API_KEY;
