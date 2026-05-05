@@ -98,7 +98,7 @@ export function extractRouting(messages: MessageInRow[]): RoutingContext {
   // inherit that channel for the reply — it creates an echo loop where the reply
   // is routed back to the same agent as another a2a message. Fall back to null
   // routing so dispatchResultText uses the single-destination shortcut (Telegram).
-  const isAllAgent = messages.length > 0 && messages.every((m) => m.channel_type === agent);
+  const isAllAgent = messages.length > 0 && messages.every((m) => m.channel_type === 'agent');
   if (isAllAgent) {
     return { platformId: null, channelType: null, threadId: null, inReplyTo: first?.id ?? null };
   }
