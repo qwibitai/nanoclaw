@@ -516,7 +516,20 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
             : [editText];
         await adapter.editMessage(tid, content.messageId as string, wrapBody(chunks[0]));
         for (let i = 1; i < chunks.length; i++) {
-          await adapter.postMessage(tid, wrapBody(chunks[i]));
+          try {
+            await adapter.postMessage(tid, wrapBody(chunks[i]));
+          } catch (err) {
+            // Same duplicate-on-retry trap as the fresh-post chunk loop below.
+            // The edit on chunk 0 already succeeded; if a later chunk throws
+            // and we let the host retry, it'll re-edit chunk 0 and re-post
+            // every chunk that did land. Truncate instead.
+            log.warn('chat-sdk-bridge: chunk post (after edit) failed mid-message; truncating', {
+              chunkIndex: i,
+              totalChunks: chunks.length,
+              err,
+            });
+            break;
+          }
         }
         return;
       }
@@ -588,8 +601,24 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           const chunk = chunks[i];
           const attachFiles = i === 0 && fileUploads && fileUploads.length > 0;
           const body = wrapBody(chunk);
-          const result = await adapter.postMessage(tid, attachFiles ? { ...body, files: fileUploads } : body);
-          if (i === 0) firstId = result?.id;
+          try {
+            const result = await adapter.postMessage(tid, attachFiles ? { ...body, files: fileUploads } : body);
+            if (i === 0) firstId = result?.id;
+          } catch (err) {
+            // Mid-message chunk failure (e.g. Discord 429 on chunk 5 of 6).
+            // Letting this throw makes the host retry the whole message, which
+            // re-posts every chunk that already landed → user sees duplicates
+            // (in extreme cases up to MAX_DELIVERY_ATTEMPTS × successful chunks).
+            // First chunk failures still propagate so the host can retry from
+            // scratch with no duplicates.
+            if (i === 0) throw err;
+            log.warn('chat-sdk-bridge: chunk post failed mid-message; truncating to avoid duplicate-on-retry', {
+              chunkIndex: i,
+              totalChunks: chunks.length,
+              err,
+            });
+            break;
+          }
         }
         return firstId;
       } else if (message.files && message.files.length > 0) {
