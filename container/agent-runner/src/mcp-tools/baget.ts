@@ -1040,7 +1040,7 @@ const revealProspect: McpToolDefinition = {
   tool: {
     name: 'baget_reveal_prospect',
     description:
-      'Reveal email addresses for N prospects from the most-recent discovery search. Use when the founder says "reveal 10 leads", "unlock 20 prospects", "get me emails for the next 5". Costs 1 credit per successful email match. APPROVAL-GATED — the cost preview shows the worst-case credit charge (= count) before the founder confirms. Cap is 100 from chat (vs 500 from dashboard) to limit runaway spends.',
+      'Reveal email addresses for N prospects from the most-recent discovery search. Use when the founder says "reveal 10 leads", "unlock 20 prospects", "get me emails for the next 5". Costs 1 credit per SUCCESSFUL email match — fewer than `count` may be returned if some prospects have no matchable contact. APPROVAL-GATED — the cost preview shows the worst-case credit charge (= count) before the founder confirms. Cap is 100 from chat (vs 500 from dashboard) to limit runaway spends. WHEN RELAYING THE RESULT to the founder, ALWAYS state the actual reveal count vs the requested count — e.g. "Revealed 2 of the 3 you asked for (1 prospect had no matchable contact). Charged 2 credits." Never report the requested count as if it were the result; mismatch reads as a bug.',
     inputSchema: {
       type: 'object',
       properties: {
