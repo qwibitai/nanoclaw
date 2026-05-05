@@ -3,6 +3,7 @@
  * Self-registers on import.
  */
 import { createDiscordAdapter } from '@chat-adapter/discord';
+import { Constants, MessageType } from 'discord.js';
 
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
@@ -107,17 +108,21 @@ function makeFetchThreadAnchor(
 }
 
 /**
- * Drop Discord system messages (thread renames, member joins, pins, etc.).
- * Discord MESSAGE_CREATE payloads carry a `type` field — 0 is a normal user
- * message; anything else is system-generated. The Chat SDK adapter doesn't
- * filter these, so without this they reach the agent as ordinary chat input
- * and trigger replies. v1 filtered via discord.js `message.system`; restoring
- * the equivalent here.
+ * Mirror discord.js's `message.system` semantics: keep DEFAULT, REPLY,
+ * CHAT_INPUT_COMMAND, CONTEXT_MENU_COMMAND; drop everything else.
+ *
+ * THREAD_STARTER_MESSAGE (the synthetic echo Discord inserts inside an
+ * auto-thread) would otherwise route the parent's content twice — once at
+ * the parent and again when the bridge sees the starter — so it stays
+ * filtered even though it carries user-authored text.
  */
+const NON_SYSTEM_TYPES = new Set<number>(Constants.NonSystemMessageTypes);
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function isUserMessage(message: { raw?: any }): boolean {
-  const type = message.raw?.type;
-  return type === undefined || type === 0;
+export function isUserMessage(message: { raw?: any }): boolean {
+  const type = message.raw?.type as MessageType | undefined;
+  if (type === undefined) return true;
+  return NON_SYSTEM_TYPES.has(type);
 }
 
 const MARKDOWN_LINK_PATTERN = /\[([^\]]+)\]\(([^)]+)\)/g;
