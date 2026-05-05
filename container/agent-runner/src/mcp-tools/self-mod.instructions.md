@@ -34,3 +34,14 @@ change_model({ model: "opencode-go/kimi-k2.6", reason: "Trying a stronger model 
 ```
 
 Valid model identifiers follow the format `provider/model-name` (e.g. `opencode-go/deepseek-v4-pro`, `opencode-go/kimi-k2.6`) or just `model-name` for direct API models. After approval your container restarts and you will be running on the new model from the next message.
+
+
+### Checking your current model (`get_model`)
+
+Use **`get_model`** at any time to see which model you are running on and list all models available on your current provider.
+
+```
+get_model()
+```
+
+Returns the current model ID, provider, and — when running on `opencode-go` — the full list of available models fetched live from the API.

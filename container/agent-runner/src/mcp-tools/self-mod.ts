@@ -12,6 +12,7 @@
  * Package names are sanitized here at the tool boundary AND re-validated on
  * the host side (defense in depth).
  */
+import { getConfig } from '../config.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { registerTools } from './server.js';
 import type { McpToolDefinition } from './types.js';
@@ -158,4 +159,38 @@ export const changeModel: McpToolDefinition = {
   },
 };
 
-registerTools([installPackages, addMcpServer, changeModel]);
+
+export const getModel: McpToolDefinition = {
+  tool: {
+    name: 'get_model',
+    description:
+      'Returns the AI model you are currently running on, and fetches the list of models available on your current provider.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  async handler() {
+    const config = getConfig();
+    const current = config.model || process.env.OPENCODE_MODEL || 'unknown';
+    const provider = process.env.OPENCODE_PROVIDER || 'unknown';
+    const apiKey = process.env.OPENCODE_API_KEY;
+
+    let modelsText = '';
+    if (apiKey && provider === 'opencode-go') {
+      try {
+        const res = await fetch('https://opencode.ai/zen/go/v1/models', {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { data?: { id: string }[] };
+          const ids = (data.data ?? []).map((m) => `- ${m.id}`).join('\n');
+          modelsText = ids ? `\n\nAvailable models on opencode-go:\n${ids}` : '';
+        }
+      } catch {
+        modelsText = '\n\n(Could not fetch model list — network error)';
+      }
+    }
+
+    return ok(`Current model: ${current}\nProvider: ${provider}${modelsText}`);
+  },
+};
+
+registerTools([installPackages, addMcpServer, changeModel, getModel]);
