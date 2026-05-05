@@ -28,6 +28,36 @@ function ok(text: string) {
   return { content: [{ type: 'text' as const, text }] };
 }
 
+/**
+ * Defensive coercion for `args`. The MCP framework's input schema doesn't
+ * strictly reject string inputs, and the LLM occasionally hands us a JSON-
+ * encoded string instead of a real array. Normalize here so the system
+ * action row written below carries the right shape — the host re-coerces
+ * at the request and apply hops as well (issue #2051).
+ *
+ * Exported for unit tests.
+ */
+export function normalizeStringArray(v: unknown): string[] {
+  if (Array.isArray(v)) {
+    return v.filter((x): x is string => typeof x === 'string');
+  }
+  if (typeof v === 'string') {
+    const trimmed = v.trim();
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((x): x is string => typeof x === 'string');
+        }
+      } catch {
+        // Fall through — treat as a single-element array below.
+      }
+    }
+    return [v];
+  }
+  return [];
+}
+
 function err(text: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${text}` }], isError: true };
 }
@@ -107,7 +137,7 @@ export const addMcpServer: McpToolDefinition = {
         action: 'add_mcp_server',
         name,
         command,
-        args: (args.args as string[]) || [],
+        args: normalizeStringArray(args.args),
         env: (args.env as Record<string, string>) || {},
       }),
     });
