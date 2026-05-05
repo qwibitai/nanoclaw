@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb } from './db/connection.js';
 import { getPendingMessages } from './db/messages-in.js';
-import { formatMessages, stripInternalTags } from './formatter.js';
+import { formatMessages, stripInternalTags, mergeRouting, type RoutingContext } from './formatter.js';
 import { TIMEZONE } from './timezone.js';
 
 beforeEach(() => {
@@ -163,5 +163,50 @@ describe('stripInternalTags', () => {
     expect(stripInternalTags('<internal>thinking</internal>The answer is 42')).toBe(
       'The answer is 42',
     );
+  });
+});
+
+describe('mergeRouting', () => {
+  const empty: RoutingContext = { platformId: null, channelType: null, threadId: null, inReplyTo: null };
+
+  it('overlays non-null fields onto null current', () => {
+    const incoming: RoutingContext = {
+      platformId: 'platform-1',
+      channelType: 'signal',
+      threadId: 'thr-1',
+      inReplyTo: 'm1',
+    };
+    expect(mergeRouting(empty, incoming)).toEqual(incoming);
+  });
+
+  it('preserves prior values when incoming is null (task follow-up after chat)', () => {
+    const current: RoutingContext = {
+      platformId: 'platform-1',
+      channelType: 'signal',
+      threadId: 'thr-1',
+      inReplyTo: 'm1',
+    };
+    expect(mergeRouting(current, empty)).toEqual(current);
+  });
+
+  it('merges field-by-field — incoming partial overlays only its non-null fields', () => {
+    const current: RoutingContext = {
+      platformId: 'old-platform',
+      channelType: 'old-channel',
+      threadId: 'old-thread',
+      inReplyTo: 'old-reply',
+    };
+    const incoming: RoutingContext = {
+      platformId: 'new-platform',
+      channelType: null,
+      threadId: null,
+      inReplyTo: 'new-reply',
+    };
+    expect(mergeRouting(current, incoming)).toEqual({
+      platformId: 'new-platform',
+      channelType: 'old-channel',
+      threadId: 'old-thread',
+      inReplyTo: 'new-reply',
+    });
   });
 });

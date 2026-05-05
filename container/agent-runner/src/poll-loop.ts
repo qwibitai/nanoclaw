@@ -7,7 +7,7 @@ import {
   migrateLegacyContinuation,
   setContinuation,
 } from './db/session-state.js';
-import { formatMessages, extractRouting, categorizeMessage, isClearCommand, isRunnerCommand, stripInternalTags, type RoutingContext } from './formatter.js';
+import { formatMessages, extractRouting, mergeRouting, categorizeMessage, isClearCommand, isRunnerCommand, stripInternalTags, type RoutingContext } from './formatter.js';
 import type { AgentProvider, AgentQuery, ProviderEvent } from './providers/types.js';
 
 const POLL_INTERVAL_MS = 1000;
@@ -322,6 +322,22 @@ async function processQuery(
         // was awaited. Pushing into a closed stream is wasted work; the
         // claimed messages get released by the host's processing-claim sweep.
         if (done) return;
+
+        // Refresh in-flight routing from the follow-up batch. Without this,
+        // the outer `routing` stays frozen on whatever the initial batch had
+        // — and when the initial batch was a null-routed cron task, the agent
+        // reply hits dispatchResultText with all-null routing and the
+        // single-destination scratchpad fallback can't reply on the channel
+        // the follow-up came from. mergeRouting overlays non-null fields so a
+        // later task follow-up doesn't clobber routing seeded by an earlier
+        // chat. Mutating the existing object propagates by reference to the
+        // dispatchResultText/sendToDestination call sites without changing
+        // their signatures.
+        const merged = mergeRouting(routing, extractRouting(keep));
+        routing.platformId = merged.platformId;
+        routing.channelType = merged.channelType;
+        routing.threadId = merged.threadId;
+        routing.inReplyTo = merged.inReplyTo;
 
         const keptIds = keep.map((m) => m.id);
         const prompt = formatMessages(keep);

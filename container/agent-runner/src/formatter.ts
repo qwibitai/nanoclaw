@@ -115,6 +115,26 @@ export function extractRouting(messages: MessageInRow[]): RoutingContext {
 }
 
 /**
+ * Overlay non-null fields from `incoming` onto `current`. Latest non-null wins;
+ * a null in `incoming` preserves the prior value.
+ *
+ * Used by the poll loop when follow-ups arrive mid-query: a chat follow-up
+ * should override routing seeded by a null-routed task batch, but a later task
+ * follow-up must NOT clobber the chat's routing back to null. Without this,
+ * `dispatchResultText`'s scratchpad fallback can't recover when the initial
+ * batch was a cron task and the user later sends a chat — the agent reply is
+ * dropped to scratchpad and never delivered.
+ */
+export function mergeRouting(current: RoutingContext, incoming: RoutingContext): RoutingContext {
+  return {
+    platformId: incoming.platformId ?? current.platformId,
+    channelType: incoming.channelType ?? current.channelType,
+    threadId: incoming.threadId ?? current.threadId,
+    inReplyTo: incoming.inReplyTo ?? current.inReplyTo,
+  };
+}
+
+/**
  * Format a batch of messages_in rows into a prompt string.
  *
  * Prepends a `<context timezone="<IANA>" />` header so the agent always knows
