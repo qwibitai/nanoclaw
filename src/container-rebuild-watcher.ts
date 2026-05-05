@@ -87,11 +87,27 @@ interface StalenessCheck {
  * Otherwise compares `imageCommit..origin/main` for files under `container/`.
  * A failed `git diff` is logged and treated as "stale" (fail-open) so a
  * transient git error doesn't silently suppress rebuilds.
+ *
+ * If origin/main is an ancestor of the image's label, the image already
+ * contains everything origin/main has — not stale regardless of SHA mismatch.
+ * Without this, a local HEAD ahead of origin/main (unpushed commits or a
+ * locally-merged PR not yet on origin) loops every tick: backwards diff
+ * `label..origin/main -- container/` is non-empty, rebuild stamps the same
+ * label, repeat.
  */
 async function checkStaleness(): Promise<StalenessCheck> {
   const [toSha, imageCommit] = await Promise.all([git('rev-parse', 'origin/main'), imageCommitLabel()]);
   if (!imageCommit) return { stale: true, reason: 'no image or missing nanoclaw.commit label' };
   if (imageCommit === toSha) return { stale: false, reason: `image at HEAD (${short(imageCommit)})` };
+  try {
+    await git('merge-base', '--is-ancestor', toSha, imageCommit);
+    return {
+      stale: false,
+      reason: `image (${short(imageCommit)}) already includes origin/main (${short(toSha)})`,
+    };
+  } catch {
+    /* origin/main has commits the image lacks — fall through to diff check */
+  }
   let changed: string;
   try {
     changed = await git('diff', '--name-only', imageCommit, toSha, '--', 'container/');
@@ -151,15 +167,20 @@ async function tick(): Promise<void> {
 
     log.info('Container image stale — rebuilding', { reason: check.reason });
     const result = await pullAndBuild();
-    // Post-pull HEAD always equals the origin/main SHA we already fetched.
     const headSha = await git('rev-parse', 'HEAD').catch(() => '');
-    const message = result.ok
-      ? `✅ Container image rebuilt${headSha ? ` (HEAD ${short(headSha)})` : ''}`
-      : `❌ Container rebuild failed: ${result.detail}`;
-    log.info('Container rebuild result', { ok: result.ok, detail: result.detail });
-    if (notify) {
+    log.info('Container rebuild result', {
+      ok: result.ok,
+      detail: result.detail,
+      head: short(headSha),
+    });
+    // Notify only on failure. Successful auto-rebuilds are routine: the operator
+    // already knows about their own commits, and the previous "✅ Container image
+    // rebuilt (HEAD <sha>)" notification is mostly noise. Failures are surprising
+    // and need attention (every new spawn would otherwise inherit the broken or
+    // stale image).
+    if (!result.ok && notify) {
       try {
-        await notify(message);
+        await notify(`❌ Container rebuild failed: ${result.detail}`);
       } catch (err) {
         log.warn('Container-rebuild watcher notify failed', { err });
       }
