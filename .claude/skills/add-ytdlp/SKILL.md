@@ -92,9 +92,8 @@ For each group that should get video-download capability, merge into `groups/<fo
       "args": ["run", "/app/node_modules/@kevinwatt/yt-dlp-mcp/lib/index.mjs"],
       "env": {
         "YTDLP_DOWNLOADS_DIR": "/workspace/agent/tmp",
-        "SSL_CERT_FILE": "/tmp/onecli-combined-ca.pem",
-        "REQUESTS_CA_BUNDLE": "/tmp/onecli-combined-ca.pem",
-        "CURL_CA_BUNDLE": "/tmp/onecli-combined-ca.pem"
+        "NO_PROXY": "*",
+        "no_proxy": "*"
       }
     }
   }
@@ -103,16 +102,15 @@ For each group that should get video-download capability, merge into `groups/<fo
 
 `YTDLP_DOWNLOADS_DIR` redirects downloads from the package's default `~/Downloads` (which doesn't exist in the container) to the existing session tmp path, swept periodically by `mcp__nanoclaw__send_file` consumers.
 
-The three `*_CA_*` vars point yt-dlp at OneCLI's combined CA bundle so it trusts the gateway's self-signed cert when traffic is intercepted. OneCLI sets `SSL_CERT_FILE` at the container level, but the MCP SDK's stdio transport strips most env vars when spawning MCP server children (only `HOME, LOGNAME, PATH, SHELL, TERM, USER` propagate by default) — so we re-inject them explicitly here. Without these, yt-dlp fails with `CERTIFICATE_VERIFY_FAILED` against the OneCLI-injected cert, even on plain YouTube. yt-dlp's network paths look at different vars (`SSL_CERT_FILE` for stdlib `ssl`, `REQUESTS_CA_BUNDLE` for `requests`/urllib3, `CURL_CA_BUNDLE` for any curl fallback), so all three are set. The bundle file is mounted by OneCLI at `/tmp/onecli-combined-ca.pem`.
+`NO_PROXY=*` makes yt-dlp bypass OneCLI's HTTPS_PROXY for every host. Without it, OneCLI intercepts YouTube traffic with its self-signed CA, and yt-dlp rejects the cert because its standalone PyInstaller binary uses certifi's *bundled* CA store — which lives inside the binary and ignores `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` / `CURL_CA_BUNDLE`. There's no env-var path to teach this binary to trust OneCLI's CA; only `--ca-certificate` (CLI flag, which the MCP wrapper doesn't expose) or `--no-check-certificate` would work. Bypassing the proxy is the right call anyway: yt-dlp is fetching public video from YouTube/Vimeo/etc., not a credentialed API, so there's nothing for OneCLI to inject. Both upper and lower case are set because Python's stdlib checks `NO_PROXY` while some libraries check `no_proxy`.
 
-Optional env overrides (see [package config docs](https://github.com/kevinwatt/yt-dlp-mcp/blob/main/docs/configuration.md)) — keep the three CA-bundle vars from the block above:
+Optional env overrides (see [package config docs](https://github.com/kevinwatt/yt-dlp-mcp/blob/main/docs/configuration.md)) — keep the proxy-bypass vars from the block above:
 
 ```jsonc
 "env": {
   "YTDLP_DOWNLOADS_DIR": "/workspace/agent/tmp",
-  "SSL_CERT_FILE": "/tmp/onecli-combined-ca.pem",
-  "REQUESTS_CA_BUNDLE": "/tmp/onecli-combined-ca.pem",
-  "CURL_CA_BUNDLE": "/tmp/onecli-combined-ca.pem",
+  "NO_PROXY": "*",
+  "no_proxy": "*",
   "YTDLP_DEFAULT_RESOLUTION": "1080p",      // 480p | 720p | 1080p | best (default 720p)
   "YTDLP_DEFAULT_SUBTITLE_LANG": "en"        // default subtitle language
 }
@@ -143,7 +141,7 @@ Common signals:
 - `Cannot find module '@kevinwatt/yt-dlp-mcp'` → `bun.lock` wasn't updated, or the image was built before the lockfile change. Re-run `bun add` then rebuild.
 - Agent says "I don't have download tools" → group's `container.json` is missing the `mcpServers["yt-dlp"]` entry, or the host wasn't restarted.
 - Download succeeds but `mcp__nanoclaw__send_file` fails to find the file → check `YTDLP_DOWNLOADS_DIR` matches what `send_file` is given. Default `/workspace/agent/tmp` is the safe choice.
-- `CERTIFICATE_VERIFY_FAILED` / `SSL: certificate verify failed` (even on plain YouTube URLs) → the three `*_CA_*` env vars in Phase 4 weren't applied. OneCLI's gateway is intercepting HTTPS with its own CA, but the MCP SDK strips `SSL_CERT_FILE` when spawning the MCP child. Re-check the `env` block has all three CA-bundle entries pointing at `/tmp/onecli-combined-ca.pem`.
+- `CERTIFICATE_VERIFY_FAILED` / `SSL: certificate verify failed` (even on plain YouTube URLs) → `NO_PROXY=*` from Phase 4 isn't in the env. OneCLI's gateway is intercepting HTTPS with its self-signed CA, and the standalone yt-dlp binary uses certifi's bundled CA store (inside the PyInstaller binary, *not* the system store), so it has no way to trust OneCLI's CA. The fix is to bypass the proxy entirely, not to teach yt-dlp the cert. Re-check the `env` block has both `NO_PROXY` and `no_proxy` set to `*`.
 
 ## Removal
 
