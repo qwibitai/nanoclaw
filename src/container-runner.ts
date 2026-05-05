@@ -373,10 +373,7 @@ export interface ResolvedAnthropicAuth {
  * matching `resolveScopedEnv`. Folder names that match `^\d+$` collide
  * with the rotation suffix and per-group resolution is skipped for them.
  */
-export function resolveAnthropicAuth(
-  folder: string,
-  env: NodeJS.ProcessEnv = process.env,
-): ResolvedAnthropicAuth {
+export function resolveAnthropicAuth(folder: string, env: NodeJS.ProcessEnv = process.env): ResolvedAnthropicAuth {
   const oauth = resolveScopedRotationSet('CLAUDE_CODE_OAUTH_TOKEN', folder, env);
   const apiKey = resolveScopedRotationSet('ANTHROPIC_API_KEY', folder, env);
   return {

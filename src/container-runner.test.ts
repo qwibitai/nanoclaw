@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  dockerResourceLimitArgs,
-  resolveAnthropicAuth,
-  resolveProviderName,
-} from './container-runner.js';
+import { dockerResourceLimitArgs, resolveAnthropicAuth, resolveProviderName } from './container-runner.js';
 
 describe('resolveProviderName', () => {
   it('prefers session over group and container.json', () => {
@@ -119,7 +115,7 @@ describe('resolveAnthropicAuth', () => {
 
   it('hyphens in folder name normalise to underscores', () => {
     const env = {
-      'CLAUDE_CODE_OAUTH_TOKEN_MADISON_REED': 'mr-oauth',
+      CLAUDE_CODE_OAUTH_TOKEN_MADISON_REED: 'mr-oauth',
     };
     expect(resolveAnthropicAuth('madison-reed', env).oauthPrimary).toBe('mr-oauth');
     expect(resolveAnthropicAuth('Madison-Reed', env).oauthPrimary).toBe('mr-oauth');
