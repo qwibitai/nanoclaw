@@ -12,6 +12,7 @@ import {
   CLAIM_STUCK_MS,
   _resetStuckProcessingRowsForTesting,
   decideStuckAction,
+  parseSqliteUtc,
 } from './host-sweep.js';
 import type { Session } from './types.js';
 
@@ -290,5 +291,46 @@ describe('resetStuckProcessingRows — orphan claim cleanup', () => {
     expect(getProcessingClaims(outDb)).toEqual([]);
     const row = inDb.prepare('SELECT tries FROM messages_in WHERE id = ?').get('m-2') as { tries: number };
     expect(row.tries).toBe(1); // not bumped, the skip path held
+  });
+});
+
+describe('parseSqliteUtc', () => {
+  // Regression: SQLite TIMESTAMP strings have no zone marker, but Date.parse
+  // treats those as local time. On non-UTC hosts this made every claim look
+  // (TZ offset) hours stale and tripped kill-claim on freshly-claimed messages.
+  // The helper appends "Z" only when no marker is present, so parsing is
+  // always anchored to UTC regardless of host timezone.
+
+  const utcMs = Date.parse('2026-04-20T12:00:00.000Z');
+
+  it('treats a SQLite-style timestamp (no zone) as UTC', () => {
+    expect(parseSqliteUtc('2026-04-20 12:00:00')).toBe(utcMs);
+    expect(parseSqliteUtc('2026-04-20T12:00:00')).toBe(utcMs);
+    expect(parseSqliteUtc('2026-04-20T12:00:00.000')).toBe(utcMs);
+  });
+
+  it('preserves an explicit Z marker', () => {
+    expect(parseSqliteUtc('2026-04-20T12:00:00.000Z')).toBe(utcMs);
+    expect(parseSqliteUtc('2026-04-20T12:00:00z')).toBe(utcMs);
+  });
+
+  it('preserves an explicit numeric offset', () => {
+    // 14:00+02:00 == 12:00 UTC
+    expect(parseSqliteUtc('2026-04-20T14:00:00+02:00')).toBe(utcMs);
+    expect(parseSqliteUtc('2026-04-20T14:00:00+0200')).toBe(utcMs);
+    // 07:00-05:00 == 12:00 UTC
+    expect(parseSqliteUtc('2026-04-20T07:00:00-05:00')).toBe(utcMs);
+  });
+
+  it('returns NaN for unparseable input', () => {
+    expect(Number.isNaN(parseSqliteUtc('not a date'))).toBe(true);
+  });
+
+  it('does not drift across host timezones for SQLite-style input', () => {
+    // The helper itself is timezone-independent because it forces UTC parsing.
+    // (Verifying the regex branch — without the helper, `Date.parse` of the
+    // bare string returns different values depending on the host TZ.)
+    const bare = '2026-04-20T12:00:00';
+    expect(parseSqliteUtc(bare)).toBe(Date.parse(bare + 'Z'));
   });
 });

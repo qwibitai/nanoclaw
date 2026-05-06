@@ -57,7 +57,7 @@ groups: () => import('./groups.js'),
 ### 5. Install the adapter packages (pinned)
 
 ```bash
-pnpm install @whiskeysockets/baileys@6.17.16 qrcode@1.5.4 @types/qrcode@1.5.6 pino@9.6.0
+pnpm install @whiskeysockets/baileys@7.0.0-rc.9 qrcode@1.5.4 @types/qrcode@1.5.6 pino@9.6.0
 ```
 
 ### 6. Build

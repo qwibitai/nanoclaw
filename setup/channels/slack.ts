@@ -25,7 +25,10 @@ import * as p from '@clack/prompts';
 import k from 'kleur';
 
 import * as setupLog from '../logs.js';
-import { confirmThenOpen, formatNoteLink } from '../lib/browser.js';
+import { BACK_TO_CHANNEL_SELECTION, type ChannelFlowResult } from '../lib/back-nav.js';
+import { brightSelect } from '../lib/bright-select.js';
+import { formatNoteLink, openUrl } from '../lib/browser.js';
+import { isHeadless } from '../platform.js';
 import { askOperatorRole } from '../lib/role-prompt.js';
 import { ensureAnswer, fail, runQuietChild } from '../lib/runner.js';
 import { readEnvKey } from '../environment.js';
@@ -42,8 +45,9 @@ interface WorkspaceInfo {
   botUserId: string;
 }
 
-export async function runSlackChannel(displayName: string): Promise<void> {
-  await walkThroughAppCreation();
+export async function runSlackChannel(displayName: string): Promise<ChannelFlowResult> {
+  const intro = await walkThroughAppCreation();
+  if (intro === 'back') return BACK_TO_CHANNEL_SELECTION;
 
   const token = await collectBotToken();
   const signingSecret = await collectSigningSecret();
@@ -121,7 +125,7 @@ export async function runSlackChannel(displayName: string): Promise<void> {
   showPostInstallChecklist(info);
 }
 
-async function walkThroughAppCreation(): Promise<void> {
+async function walkThroughAppCreation(): Promise<'continue' | 'back'> {
   note(
     [
       "You'll create a Slack app that the assistant talks through.",
@@ -140,7 +144,20 @@ async function walkThroughAppCreation(): Promise<void> {
     ].filter((line): line is string => line !== null).join('\n'),
     'Create a Slack app',
   );
-  await confirmThenOpen(SLACK_APPS_URL, 'Press Enter to open Slack app settings');
+
+  // Back-aware gate replacing the old `confirmThenOpen` "Press Enter to open
+  // Slack app settings" so users can bail out of Slack before we open the
+  // browser or ask for tokens.
+  const choice = ensureAnswer(await brightSelect<'open' | 'back'>({
+    message: 'Open Slack app settings in your browser?',
+    options: [
+      { value: 'open', label: 'Open Slack app settings' },
+      { value: 'back', label: '← Back to channel selection' },
+    ],
+    initialValue: 'open',
+  }));
+  if (choice === 'back') return 'back';
+  if (!isHeadless()) openUrl(SLACK_APPS_URL);
 
   ensureAnswer(
     await p.confirm({
@@ -148,6 +165,7 @@ async function walkThroughAppCreation(): Promise<void> {
       initialValue: true,
     }),
   );
+  return 'continue';
 }
 
 async function collectBotToken(): Promise<string> {

@@ -450,7 +450,7 @@ ONECLI_OK=false
 ONECLI_URL_FROM_ENV=$(grep '^ONECLI_URL=' .env 2>/dev/null | head -1 | sed 's/^ONECLI_URL=//')
 ONECLI_URL_CHECK="${ONECLI_URL_FROM_ENV:-http://127.0.0.1:10254}"
 
-if curl -sf "${ONECLI_URL_CHECK}/health" >/dev/null 2>&1; then
+if curl -sf "${ONECLI_URL_CHECK}/api/health" >/dev/null 2>&1; then
   step_ok "OneCLI running at $(dim "$ONECLI_URL_CHECK")"
   ONECLI_OK=true
   log "OneCLI: running at $ONECLI_URL_CHECK"

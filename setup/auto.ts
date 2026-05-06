@@ -29,6 +29,7 @@ import path from 'path';
 import * as p from '@clack/prompts';
 import k from 'kleur';
 
+import { BACK_TO_CHANNEL_SELECTION } from './lib/back-nav.js';
 import { runDiscordChannel } from './channels/discord.js';
 import { runIMessageChannel } from './channels/imessage.js';
 import { runSignalChannel } from './channels/signal.js';
@@ -440,35 +441,45 @@ async function main(): Promise<void> {
   let channelChoice: ChannelChoice = 'skip';
 
   if (!skip.has('channel')) {
-    channelChoice = await askChannelChoice();
-    if (channelChoice !== 'skip' && channelChoice !== 'other') {
-      await resolveDisplayName();
-    }
-    if (channelChoice === 'telegram') {
-      await runTelegramChannel(displayName!);
-    } else if (channelChoice === 'discord') {
-      await runDiscordChannel(displayName!);
-    } else if (channelChoice === 'whatsapp') {
-      await runWhatsAppChannel(displayName!);
-    } else if (channelChoice === 'signal') {
-      await runSignalChannel(displayName!);
-    } else if (channelChoice === 'teams') {
-      await runTeamsChannel(displayName!);
-    } else if (channelChoice === 'slack') {
-      await runSlackChannel(displayName!);
-    } else if (channelChoice === 'imessage') {
-      await runIMessageChannel(displayName!);
-    } else if (channelChoice === 'other') {
-      await askOtherChannelName();
-    } else {
-      p.log.info(
-        brandBody(
-          wrapForGutter(
-            'No messaging app for now. You can add one later (like Telegram, Discord, WhatsApp, Teams, Slack, or iMessage).',
-            4,
+    // Loop so a channel sub-flow can return BACK_TO_CHANNEL_SELECTION on
+    // its first prompt and bounce the user back to the chooser without
+    // restarting setup. Channels not yet wired with the back option just
+    // return void and the loop exits after one pass.
+    let backed = true;
+    while (backed) {
+      backed = false;
+      channelChoice = await askChannelChoice();
+      if (channelChoice !== 'skip' && channelChoice !== 'other') {
+        await resolveDisplayName();
+      }
+      let result: void | typeof BACK_TO_CHANNEL_SELECTION;
+      if (channelChoice === 'telegram') {
+        result = await runTelegramChannel(displayName!);
+      } else if (channelChoice === 'discord') {
+        result = await runDiscordChannel(displayName!);
+      } else if (channelChoice === 'whatsapp') {
+        result = await runWhatsAppChannel(displayName!);
+      } else if (channelChoice === 'signal') {
+        result = await runSignalChannel(displayName!);
+      } else if (channelChoice === 'teams') {
+        result = await runTeamsChannel(displayName!);
+      } else if (channelChoice === 'slack') {
+        result = await runSlackChannel(displayName!);
+      } else if (channelChoice === 'imessage') {
+        result = await runIMessageChannel(displayName!);
+      } else if (channelChoice === 'other') {
+        await askOtherChannelName();
+      } else {
+        p.log.info(
+          brandBody(
+            wrapForGutter(
+              'No messaging app for now. You can add one later (like Telegram, Discord, WhatsApp, Teams, Slack, or iMessage).',
+              4,
+            ),
           ),
-        ),
-      );
+        );
+      }
+      if (result === BACK_TO_CHANNEL_SELECTION) backed = true;
     }
   }
 

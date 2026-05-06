@@ -21,7 +21,10 @@ import * as p from '@clack/prompts';
 import k from 'kleur';
 
 import * as setupLog from '../logs.js';
-import { confirmThenOpen, formatNoteLink } from '../lib/browser.js';
+import { isHeadless } from '../platform.js';
+import { BACK_TO_CHANNEL_SELECTION, type ChannelFlowResult } from '../lib/back-nav.js';
+import { confirmThenOpen, formatNoteLink, openUrl } from '../lib/browser.js';
+import { brightSelect } from '../lib/bright-select.js';
 import { askOperatorRole } from '../lib/role-prompt.js';
 import {
   type Block,
@@ -38,8 +41,10 @@ import { accentGreen, brandBold, fitToWidth, fmtDuration, note } from '../lib/th
 
 const DEFAULT_AGENT_NAME = 'Nano';
 
-export async function runTelegramChannel(displayName: string): Promise<void> {
-  const token = await collectTelegramToken();
+export async function runTelegramChannel(displayName: string): Promise<ChannelFlowResult> {
+  const tokenOrBack = await collectTelegramToken();
+  if (tokenOrBack === 'back') return BACK_TO_CHANNEL_SELECTION;
+  const token = tokenOrBack;
   const botUsername = await validateTelegramToken(token);
 
   // Deep-link the user into the bot's chat so they're on the right screen
@@ -48,14 +53,37 @@ export async function runTelegramChannel(displayName: string): Promise<void> {
   // installed, or the bot's web profile if not. tg://resolve?domain= is
   // more direct but silently fails when the scheme isn't registered.
   const botUrl = `https://t.me/${botUsername}`;
-  note(
-    [
+  // Two card variants — auto-open fires only on GUI, so headless users
+  // need full self-serve instructions inside the card itself, while GUI
+  // users get a leaner status line plus the auto-open + a single
+  // combined dim fallback line (URL + mobile alternative) on the
+  // confirm prompt below.
+  if (isHeadless()) {
+    note(
+      [
+        `Open @${botUsername} in Telegram now — the pairing code is coming next, and that's where you'll send it.`,
+        '',
+        `Get started: ${botUrl}`,
+        '',
+        `Don't have Telegram installed here? Open it on any device and search for @${botUsername}`,
+      ].join('\n'),
+      'Open Telegram',
+    );
+  } else {
+    note(
       `Opening @${botUsername} in Telegram so it's ready when the pairing code shows up.`,
-      formatNoteLink(botUrl),
-    ].filter((line): line is string => line !== null).join('\n'),
-    'Open Telegram',
-  );
-  await confirmThenOpen(botUrl, 'Press Enter to open Telegram');
+      'Open Telegram',
+    );
+    ensureAnswer(
+      await p.confirm({
+        message: `Press Enter to open Telegram (must be installed here)\n${k.dim(
+          `If browser does not appear, please visit: ${botUrl} — or search for @${botUsername} in Telegram`,
+        )}`,
+        initialValue: true,
+      }),
+    );
+    openUrl(botUrl);
+  }
 
   const install = await runQuietChild(
     'telegram-install',
@@ -131,17 +159,24 @@ export async function runTelegramChannel(displayName: string): Promise<void> {
   }
 }
 
-async function collectTelegramToken(): Promise<string> {
+async function collectTelegramToken(): Promise<string | 'back'> {
   const existing = readEnvKey('TELEGRAM_BOT_TOKEN');
   if (existing && /^[0-9]+:[A-Za-z0-9_-]{35,}$/.test(existing)) {
-    const reuse = ensureAnswer(await p.confirm({
+    const choice = ensureAnswer(await brightSelect<'yes' | 'no' | 'back'>({
       message: `Found an existing Telegram bot token (${existing.slice(0, 8)}…). Use it?`,
-      initialValue: true,
+      options: [
+        { value: 'yes', label: 'Yes, use the existing token' },
+        { value: 'no', label: 'No, paste a new one' },
+        { value: 'back', label: '← Back to channel selection' },
+      ],
+      initialValue: 'yes',
     }));
-    if (reuse) {
+    if (choice === 'back') return 'back';
+    if (choice === 'yes') {
       setupLog.userInput('telegram_token', 'reused-existing');
       return existing;
     }
+    // 'no' falls through to the paste flow below
   }
 
   note(
@@ -158,6 +193,19 @@ async function collectTelegramToken(): Promise<string> {
     ].join('\n'),
     'Set up your Telegram bot',
   );
+
+  // Back-aware gate before the password prompt — `p.password` doesn't
+  // accept extra options, so we offer Back as a separate brightSelect
+  // immediately after the BotFather instructions and before the paste.
+  const proceed = ensureAnswer(await brightSelect<'continue' | 'back'>({
+    message: 'Ready to paste your bot token?',
+    options: [
+      { value: 'continue', label: 'Yes, paste it on the next prompt' },
+      { value: 'back', label: '← Back to channel selection' },
+    ],
+    initialValue: 'continue',
+  }));
+  if (proceed === 'back') return 'back';
 
   const answer = ensureAnswer(
     await p.password({

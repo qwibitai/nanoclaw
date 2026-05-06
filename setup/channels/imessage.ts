@@ -33,6 +33,7 @@ import * as p from '@clack/prompts';
 import k from 'kleur';
 
 import * as setupLog from '../logs.js';
+import { BACK_TO_CHANNEL_SELECTION, type ChannelFlowResult } from '../lib/back-nav.js';
 import { brightSelect } from '../lib/bright-select.js';
 import { askOperatorRole } from '../lib/role-prompt.js';
 import { ensureAnswer, fail, runQuietChild } from '../lib/runner.js';
@@ -48,10 +49,11 @@ interface RemoteCreds {
   apiKey: string;
 }
 
-export async function runIMessageChannel(displayName: string): Promise<void> {
+export async function runIMessageChannel(displayName: string): Promise<ChannelFlowResult> {
   const isMac = os.platform() === 'darwin';
 
   const mode = await askMode(isMac);
+  if (mode === 'back') return BACK_TO_CHANNEL_SELECTION;
   let remoteCreds: RemoteCreds | null = null;
 
   if (mode === 'local') {
@@ -139,34 +141,38 @@ export async function runIMessageChannel(displayName: string): Promise<void> {
   }
 }
 
-async function askMode(isMac: boolean): Promise<Mode> {
+async function askMode(isMac: boolean): Promise<Mode | 'back'> {
+  const baseOptions = isMac
+    ? [
+        {
+          value: 'local' as const,
+          label: 'Local (this Mac)',
+          hint: "uses this machine's iMessage account",
+        },
+        {
+          value: 'remote' as const,
+          label: 'Remote (Photon API)',
+          hint: 'the bot lives on another server',
+        },
+      ]
+    : [
+        {
+          value: 'remote' as const,
+          label: 'Remote (Photon API)',
+          hint: 'only option off macOS',
+        },
+      ];
   const choice = ensureAnswer(
-    await brightSelect<Mode>({
+    await brightSelect<Mode | 'back'>({
       message: 'How should iMessage run?',
       initialValue: isMac ? 'local' : 'remote',
-      options: isMac
-        ? [
-            {
-              value: 'local',
-              label: 'Local (this Mac)',
-              hint: "uses this machine's iMessage account",
-            },
-            {
-              value: 'remote',
-              label: 'Remote (Photon API)',
-              hint: 'the bot lives on another server',
-            },
-          ]
-        : [
-            {
-              value: 'remote',
-              label: 'Remote (Photon API)',
-              hint: 'only option off macOS',
-            },
-          ],
+      options: [
+        ...baseOptions,
+        { value: 'back', label: '← Back to channel selection' },
+      ],
     }),
   );
-  setupLog.userInput('imessage_mode', String(choice));
+  if (choice !== 'back') setupLog.userInput('imessage_mode', String(choice));
   return choice;
 }
 

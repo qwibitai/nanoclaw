@@ -30,6 +30,7 @@ import path from 'path';
 import * as p from '@clack/prompts';
 import k from 'kleur';
 
+import { BACK_TO_CHANNEL_SELECTION, type ChannelFlowResult } from '../lib/back-nav.js';
 import { brightSelect } from '../lib/bright-select.js';
 import { confirmThenOpen } from '../lib/browser.js';
 import {
@@ -57,18 +58,24 @@ interface Collected {
   agentName?: string;
 }
 
-export async function runTeamsChannel(_displayName: string): Promise<void> {
+export async function runTeamsChannel(_displayName: string): Promise<ChannelFlowResult> {
   const collected: Collected = {};
   const completed: string[] = [];
 
   const existingAppId = readEnvKey('TEAMS_APP_ID');
   const existingPassword = readEnvKey('TEAMS_APP_PASSWORD');
   if (existingAppId && existingPassword) {
-    const reuse = ensureAnswer(await p.confirm({
+    const choice = ensureAnswer(await brightSelect<'yes' | 'no' | 'back'>({
       message: `Found existing Teams credentials (App ID: ${existingAppId.slice(0, 8)}…). Use them?`,
-      initialValue: true,
+      options: [
+        { value: 'yes', label: 'Yes, use the existing credentials' },
+        { value: 'no', label: "No, set up new ones" },
+        { value: 'back', label: '← Back to channel selection' },
+      ],
+      initialValue: 'yes',
     }));
-    if (reuse) {
+    if (choice === 'back') return BACK_TO_CHANNEL_SELECTION;
+    if (choice === 'yes') {
       collected.appId = existingAppId;
       collected.appPassword = existingPassword;
       collected.appType = (readEnvKey('TEAMS_APP_TYPE') as 'SingleTenant' | 'MultiTenant') || 'MultiTenant';
@@ -85,7 +92,8 @@ export async function runTeamsChannel(_displayName: string): Promise<void> {
 
   printIntro();
 
-  await confirmPrereqs({ collected, completed });
+  const prereqsResult = await confirmPrereqs({ collected, completed });
+  if (prereqsResult === 'back') return BACK_TO_CHANNEL_SELECTION;
   await stepPublicUrl({ collected, completed });
   await stepAppRegistration({ collected, completed });
   await stepClientSecret({ collected, completed });
@@ -116,7 +124,7 @@ function printIntro(): void {
   );
 }
 
-async function confirmPrereqs(args: { collected: Collected; completed: string[] }): Promise<void> {
+async function confirmPrereqs(args: { collected: Collected; completed: string[] }): Promise<'continue' | 'back'> {
   note(
     [
       'Before we start, confirm you have:',
@@ -131,13 +139,36 @@ async function confirmPrereqs(args: { collected: Collected; completed: string[] 
     'Prereqs',
   );
 
-  await stepGate({
-    stepName: 'teams-prereqs',
-    stepDescription: 'confirming they have the right Microsoft 365 tenant and tunnel',
-    reshow: () => confirmPrereqs(args),
-    args,
-  });
+  // Back-aware variant of stepGate — Back is only offered on the very first
+  // step of the Teams flow so users can bail out before any state is taken.
+  while (true) {
+    const choice = ensureAnswer(
+      await brightSelect<'done' | 'help' | 'reshow' | 'back'>({
+        message: 'How did that go?',
+        options: [
+          { value: 'done', label: "Done — let's continue" },
+          { value: 'help', label: 'Stuck — hand me off to Claude' },
+          { value: 'reshow', label: 'Show me the steps again' },
+          { value: 'back', label: '← Back to channel selection' },
+        ],
+      }),
+    );
+    if (choice === 'back') return 'back';
+    if (choice === 'done') break;
+    if (choice === 'help') {
+      await offerHandoff({
+        step: 'teams-prereqs',
+        stepDescription: 'confirming they have the right Microsoft 365 tenant and tunnel',
+        args,
+      });
+      continue;
+    }
+    if (choice === 'reshow') {
+      return confirmPrereqs(args);
+    }
+  }
   args.completed.push('Prereqs confirmed.');
+  return 'continue';
 }
 
 // ─── step: public URL ──────────────────────────────────────────────────
