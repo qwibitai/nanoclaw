@@ -142,7 +142,7 @@ async function walkThroughAppCreation(): Promise<'continue' | 'back'> {
       '  5. Install to Workspace → copy the "Bot User OAuth Token" (xoxb-…)',
       formatNoteLink(SLACK_APPS_URL),
     ].filter((line): line is string => line !== null).join('\n'),
-    'Create a Slack app',
+    'Create a Slack app — part 1 of 2',
   );
 
   // Back-aware gate replacing the old `confirmThenOpen` "Press Enter to open
@@ -433,6 +433,6 @@ function showPostInstallChecklist(info: WorkspaceInfo): void {
       ].join('\n'),
       6,
     ),
-    'Finish setting up Slack',
+    'Finish setting up Slack — part 2 of 2',
   );
 }
