@@ -105,13 +105,17 @@ export function markCompleted(ids: string[]): void {
   })();
 }
 
-/** Mark a single message as failed — writes to processing_ack in outbound.db. */
-export function markFailed(id: string): void {
-  getOutboundDb()
-    .prepare(
-      "INSERT OR REPLACE INTO processing_ack (message_id, status, status_changed) VALUES (?, 'failed', datetime('now'))",
-    )
-    .run(id);
+/** Mark messages as failed — updates processing_ack in outbound.db. */
+export function markFailed(ids: string[] | string): void {
+  const list = typeof ids === 'string' ? [ids] : ids;
+  if (list.length === 0) return;
+  const db = getOutboundDb();
+  const stmt = db.prepare(
+    "INSERT OR REPLACE INTO processing_ack (message_id, status, status_changed) VALUES (?, 'failed', datetime('now'))",
+  );
+  db.transaction(() => {
+    for (const id of list) stmt.run(id);
+  })();
 }
 
 /** Get a message by ID (read from inbound.db). */

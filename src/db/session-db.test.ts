@@ -10,7 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { migrateMessagesInTable } from './session-db.js';
+import { migrateMessagesInTable, syncProcessingAcks } from './session-db.js';
 
 const TEST_DIR = '/tmp/nanoclaw-session-db-test';
 const DB_PATH = path.join(TEST_DIR, 'inbound.db');
@@ -54,5 +54,97 @@ describe('migrateMessagesInTable', () => {
     };
     expect(row.series_id).toBe('legacy-1');
     db.close();
+  });
+});
+
+describe('syncProcessingAcks', () => {
+  function makeDbs(): { inDb: Database.Database; outDb: Database.Database } {
+    const inDb = new Database(':memory:');
+    inDb.exec(`
+      CREATE TABLE messages_in (
+        id             TEXT PRIMARY KEY,
+        seq            INTEGER UNIQUE,
+        kind           TEXT NOT NULL,
+        timestamp      TEXT NOT NULL,
+        status         TEXT DEFAULT 'pending',
+        process_after  TEXT,
+        recurrence     TEXT,
+        series_id      TEXT,
+        tries          INTEGER DEFAULT 0,
+        trigger        INTEGER NOT NULL DEFAULT 1,
+        platform_id    TEXT,
+        channel_type   TEXT,
+        thread_id      TEXT,
+        content        TEXT NOT NULL
+      );
+    `);
+    const outDb = new Database(':memory:');
+    outDb.exec(`
+      CREATE TABLE processing_ack (
+        message_id     TEXT PRIMARY KEY,
+        status         TEXT NOT NULL,
+        status_changed TEXT NOT NULL
+      );
+    `);
+    return { inDb, outDb };
+  }
+
+  it("propagates 'failed' processing_ack as 'failed' on messages_in (not 'completed')", () => {
+    const { inDb, outDb } = makeDbs();
+    inDb
+      .prepare(
+        "INSERT INTO messages_in (id, kind, timestamp, status, content) VALUES ('m1','task',datetime('now'),'pending','{}')",
+      )
+      .run();
+    outDb
+      .prepare("INSERT INTO processing_ack (message_id, status, status_changed) VALUES ('m1','failed',datetime('now'))")
+      .run();
+
+    syncProcessingAcks(inDb, outDb);
+
+    const row = inDb.prepare('SELECT status FROM messages_in WHERE id = ?').get('m1') as { status: string };
+    expect(row.status).toBe('failed');
+    inDb.close();
+    outDb.close();
+  });
+
+  it("propagates 'completed' processing_ack as 'completed'", () => {
+    const { inDb, outDb } = makeDbs();
+    inDb
+      .prepare(
+        "INSERT INTO messages_in (id, kind, timestamp, status, content) VALUES ('m1','task',datetime('now'),'pending','{}')",
+      )
+      .run();
+    outDb
+      .prepare(
+        "INSERT INTO processing_ack (message_id, status, status_changed) VALUES ('m1','completed',datetime('now'))",
+      )
+      .run();
+
+    syncProcessingAcks(inDb, outDb);
+
+    const row = inDb.prepare('SELECT status FROM messages_in WHERE id = ?').get('m1') as { status: string };
+    expect(row.status).toBe('completed');
+    inDb.close();
+    outDb.close();
+  });
+
+  it("does not downgrade an already-completed row to 'failed' on a stale ack", () => {
+    const { inDb, outDb } = makeDbs();
+    inDb
+      .prepare(
+        "INSERT INTO messages_in (id, kind, timestamp, status, content) VALUES ('m1','task',datetime('now'),'completed','{}')",
+      )
+      .run();
+    outDb
+      .prepare("INSERT INTO processing_ack (message_id, status, status_changed) VALUES ('m1','failed',datetime('now'))")
+      .run();
+
+    syncProcessingAcks(inDb, outDb);
+
+    const row = inDb.prepare('SELECT status FROM messages_in WHERE id = ?').get('m1') as { status: string };
+    expect(row.status).toBe('completed');
+    inDb.close();
+    outDb.close();
   });
 });

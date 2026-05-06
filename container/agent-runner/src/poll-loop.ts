@@ -1,5 +1,5 @@
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
-import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
+import { getPendingMessages, markProcessing, markCompleted, markFailed, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
 import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import {
@@ -33,6 +33,13 @@ export interface PollLoopConfig {
   systemContext?: {
     instructions?: string;
   };
+  /**
+   * Optional stop signal. When the signal aborts, the loop exits at the
+   * next iteration boundary. Used by tests to halt the loop deterministically
+   * after assertions complete; production callers omit this and let the
+   * container process lifecycle stop the loop.
+   */
+  stopSignal?: AbortSignal;
 }
 
 /**
@@ -63,6 +70,10 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
   let pollCount = 0;
   while (true) {
+    if (config.stopSignal?.aborted) {
+      log('Stop signal received — exiting poll loop');
+      return;
+    }
     // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
     const messages = getPendingMessages().filter((m) => m.kind !== 'system');
     pollCount++;
@@ -170,13 +181,16 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // Process the query while concurrently polling for new messages
     const skippedSet = new Set(skipped);
     const processingIds = ids.filter((id) => !commandIds.includes(id) && !skippedSet.has(id));
+    let outcome: QueryResult | null = null;
+    let threwException = false;
     try {
-      const result = await processQuery(query, routing, processingIds, config.providerName);
-      if (result.continuation && result.continuation !== continuation) {
-        continuation = result.continuation;
+      outcome = await processQuery(query, routing, processingIds, config.providerName);
+      if (outcome.continuation && outcome.continuation !== continuation) {
+        continuation = outcome.continuation;
         setContinuation(config.providerName, continuation);
       }
     } catch (err) {
+      threwException = true;
       const errMsg = err instanceof Error ? err.message : String(err);
       log(`Query error: ${errMsg}`);
 
@@ -198,12 +212,32 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         thread_id: routing.threadId,
         content: JSON.stringify({ text: `Error: ${errMsg}` }),
       });
+      markFailed(processingIds);
+      log(`Failed ${processingIds.length} message(s) — threw: ${errMsg}`);
+      continue;
     }
 
-    // Ensure completed even if processQuery ended without a result event
-    // (e.g. stream closed unexpectedly).
-    markCompleted(processingIds);
-    log(`Completed ${ids.length} message(s)`);
+    // No throw: did the SDK actually report a success result, or did the
+    // stream end silently (the v2 lie-by-omission bug — task ack 'completed'
+    // with zero output)? processQuery already handled the in-stream
+    // success/error-subtype branch (markCompleted vs markFailed). Here we
+    // catch the "no terminal result event ever arrived" case.
+    if (!outcome.sawTerminalResult) {
+      const reason = outcome.lastErrorMessage
+        ? `SDK stream ended without terminal result (last signal: ${outcome.lastErrorMessage})`
+        : 'SDK stream ended without terminal result';
+      log(`Failing ${processingIds.length} message(s): ${reason}`);
+      writeMessageOut({
+        id: generateId(),
+        kind: 'chat',
+        platform_id: routing.platformId,
+        channel_type: routing.channelType,
+        thread_id: routing.threadId,
+        content: JSON.stringify({ text: `⚠️ Task did not complete: ${reason}.` }),
+      });
+      markFailed(processingIds);
+    }
+    log(`Turn done — ${ids.length} message(s) ${threwException ? 'failed' : outcome.sawTerminalResult ? 'completed' : 'failed-silent'}`);
   }
 }
 
@@ -243,6 +277,31 @@ function formatMessagesWithCommands(messages: MessageInRow[], nativeSlashCommand
 
 interface QueryResult {
   continuation?: string;
+  /**
+   * True when the SDK emitted a terminal `result` event whose `subtype`
+   * is treated as success (success | undefined | null). False when the
+   * stream ended without one — i.e. the silent-failure mode where the
+   * v2 runner used to mark tasks `completed` with zero output. The
+   * caller (runPollLoop) writes a user-visible failure DM in that case.
+   */
+  sawTerminalResult: boolean;
+  /** Most recent in-stream error/quota signal (used in the failure DM). */
+  lastErrorMessage?: string;
+}
+
+/**
+ * SDK `result` subtype taxonomy:
+ *   - undefined  → synthetic mid-turn signal (e.g. compact_boundary). NOT
+ *                  terminal; the real terminal result arrives later.
+ *   - 'error_*'  → terminal failure (max turns, execution error, etc.)
+ *   - other      → terminal success ('success', or any future label)
+ *
+ * Treating unknown subtypes as success is fail-open: we'd rather miss a
+ * future error subtype than scream-and-DM-a-channel for every harmless
+ * SDK addition. Failure is the explicit case.
+ */
+function isFailureSubtype(subtype: string | null | undefined): boolean {
+  return typeof subtype === 'string' && subtype.startsWith('error_');
 }
 
 async function processQuery(
@@ -253,6 +312,8 @@ async function processQuery(
 ): Promise<QueryResult> {
   let queryContinuation: string | undefined;
   let done = false;
+  let sawTerminalResult = false;
+  let lastErrorMessage: string | undefined;
 
   // Concurrent polling: push follow-ups into the active query as they arrive.
   // We do NOT force-end the stream on silence — keeping the query open avoids
@@ -356,16 +417,46 @@ async function processQuery(
         // Claude session with no prior context.
         setContinuation(providerName, event.continuation);
       } else if (event.type === 'result') {
-        // A result — with or without text — means the turn is done. Mark
-        // the initial batch completed now so the host sweep doesn't see
-        // stale 'processing' claims while the query stays open for
-        // follow-up pushes. The agent may have responded via MCP
-        // (send_message) mid-turn, or the message may not need a response
-        // at all — either way the turn is finished.
+        // Synthetic mid-turn results (compact_boundary, etc.) have no
+        // subtype — dispatch the text but DO NOT mark the turn done; the
+        // real terminal result event still arrives later.
+        if (event.subtype === undefined) {
+          if (event.text) dispatchResultText(event.text, routing);
+          continue;
+        }
+
+        if (isFailureSubtype(event.subtype)) {
+          // Surface the failure to the user instead of silently marking
+          // the message completed (the v2 lie-by-omission this fix targets).
+          lastErrorMessage = event.subtype ?? undefined;
+          log(`SDK terminal result is failure: ${event.subtype}`);
+          markFailed(initialBatchIds);
+          writeMessageOut({
+            id: generateId(),
+            kind: 'chat',
+            platform_id: routing.platformId,
+            channel_type: routing.channelType,
+            thread_id: routing.threadId,
+            content: JSON.stringify({
+              text: `⚠️ Task did not complete: ${event.subtype}${event.text ? ` — ${event.text}` : ''}.`,
+            }),
+          });
+          sawTerminalResult = true;
+          continue;
+        }
+
+        // Success path — mark the initial batch completed now so the host
+        // sweep doesn't see stale 'processing' claims while the query
+        // stays open for follow-up pushes. The agent may have responded
+        // via MCP mid-turn, or the message may not need a response at all
+        // — either way the turn is finished.
         markCompleted(initialBatchIds);
+        sawTerminalResult = true;
         if (event.text) {
           dispatchResultText(event.text, routing);
         }
+      } else if (event.type === 'error') {
+        lastErrorMessage = `${event.message}${event.classification ? ` (${event.classification})` : ''}`;
       }
     }
   } finally {
@@ -373,7 +464,7 @@ async function processQuery(
     clearInterval(pollHandle);
   }
 
-  return { continuation: queryContinuation };
+  return { continuation: queryContinuation, sawTerminalResult, lastErrorMessage };
 }
 
 function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {

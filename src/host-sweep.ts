@@ -42,6 +42,8 @@ import {
   syncProcessingAcks,
   type ContainerState,
 } from './db/session-db.js';
+import { getMessagingGroup } from './db/messaging-groups.js';
+import { getDeliveryAdapter } from './delivery.js';
 import { log } from './log.js';
 import { openInboundDb, openOutboundDb, openOutboundDbRw, inboundDbPath, heartbeatPath } from './session-manager.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
@@ -59,6 +61,17 @@ export function parseSqliteUtc(s: string): number {
 }
 
 const SWEEP_INTERVAL_MS = 60_000;
+/**
+ * Look-back window for silent-task detection. A `kind='task'` row that
+ * went to status='completed' inside this window AND wrote zero
+ * messages_out rows in the same window is treated as a silent failure
+ * (the v2 lie-by-omission bug). The runner's own markFailed path
+ * (poll-loop.ts) is the primary fix; this is the host-side belt-and-
+ * braces that catches anything the runner missed.
+ */
+const SILENT_TASK_WINDOW_MIN = 15;
+/** Per-process dedup so we don't DM the same silent-task multiple sweeps in a row. */
+const notifiedSilentTasks = new Set<string>();
 // Absolute idle ceiling for a running container. If the heartbeat file hasn't
 // been touched in this long, the container is either stuck or doing genuinely
 // nothing — kill and restart on the next inbound.
@@ -200,7 +213,17 @@ async function sweepSession(session: Session): Promise<void> {
       resetStuckProcessingRows(inDb, outDb, session, 'container not running');
     }
 
-    // 5. Recurrence fanout for completed recurring tasks.
+    // 5. Silent-task detection. Catches the v2 lie-by-omission failure
+    // mode where a scheduled task was marked completed but produced zero
+    // outputs. The runner-side fix in poll-loop.ts already handles the
+    // common cases (markFailed + write a chat); this scan is the
+    // belt-and-braces that catches anything that bypassed it (e.g. an
+    // SDK event shape we don't yet recognise).
+    if (outDb) {
+      await detectAndNotifySilentTasks(inDb, outDb, session);
+    }
+
+    // 6. Recurrence fanout for completed recurring tasks.
     // MODULE-HOOK:scheduling-recurrence:start
     const { handleRecurrence } = await import('./modules/scheduling/recurrence.js');
     await handleRecurrence(inDb, session);
@@ -325,4 +348,112 @@ function resetStuckProcessingRows(
   } finally {
     if (ownsDb) useDb?.close();
   }
+}
+
+/**
+ * Scan for `kind='task'` rows that went to status='completed' or 'failed'
+ * inside the look-back window AND produced zero messages_out within that
+ * same window. DM the session's originating channel so an operator can
+ * see the failure. Per-process dedup via `notifiedSilentTasks` so we
+ * don't re-DM on every sweep tick.
+ */
+async function detectAndNotifySilentTasks(
+  inDb: Database.Database,
+  outDb: Database.Database,
+  session: Session,
+): Promise<void> {
+  const cutoff = new Date(Date.now() - SILENT_TASK_WINDOW_MIN * 60_000).toISOString();
+
+  type Row = { id: string; status: string; timestamp: string };
+  const recentTasks = inDb
+    .prepare(
+      `SELECT id, status, timestamp
+         FROM messages_in
+        WHERE kind = 'task'
+          AND status IN ('completed','failed')
+          AND timestamp >= ?`,
+    )
+    .all(cutoff) as Row[];
+
+  if (recentTasks.length === 0) return;
+
+  const countOut = outDb.prepare(
+    `SELECT COUNT(*) AS n
+       FROM messages_out
+      WHERE timestamp >= ?
+        AND timestamp <= datetime(?, '+15 minutes')
+        AND kind != 'system'`,
+  );
+
+  for (const row of recentTasks) {
+    if (notifiedSilentTasks.has(row.id)) continue;
+    const result = countOut.get(row.timestamp, row.timestamp) as { n: number };
+    if (result.n > 0) continue;
+
+    // Silent task confirmed. DM the channel.
+    notifiedSilentTasks.add(row.id);
+    log.warn('Silent task detected — completed/failed with zero output', {
+      sessionId: session.id,
+      messageId: row.id,
+      status: row.status,
+      taskTimestamp: row.timestamp,
+    });
+    await dmChannelForSilentTask(session, row.id, row.status, row.timestamp);
+  }
+
+  // Bound the dedup set: drop ids whose timestamp is older than the window.
+  // Keeps the set from growing unboundedly across host uptime.
+  if (notifiedSilentTasks.size > 1000) {
+    const stillRelevant = new Set<string>(recentTasks.map((r) => r.id));
+    for (const id of notifiedSilentTasks) {
+      if (!stillRelevant.has(id)) notifiedSilentTasks.delete(id);
+    }
+  }
+}
+
+async function dmChannelForSilentTask(
+  session: Session,
+  messageId: string,
+  ackStatus: string,
+  taskTimestamp: string,
+): Promise<void> {
+  const adapter = getDeliveryAdapter();
+  if (!adapter) {
+    log.warn('No delivery adapter — cannot DM silent-task notification', { messageId });
+    return;
+  }
+
+  if (!session.messaging_group_id) {
+    log.warn('Session has no messaging group — cannot DM silent-task notification', {
+      messageId,
+      sessionId: session.id,
+    });
+    return;
+  }
+  const mg = getMessagingGroup(session.messaging_group_id);
+  if (!mg) {
+    log.warn('Session messaging group not found — cannot DM silent-task notification', {
+      messageId,
+      messagingGroupId: session.messaging_group_id,
+    });
+    return;
+  }
+
+  const text =
+    `⚠️ Scheduled task did not produce any output and was marked ${ackStatus}.\n` +
+    `Task: ${messageId}\nFired: ${taskTimestamp}`;
+
+  try {
+    await adapter.deliver(mg.channel_type, mg.platform_id, null, 'chat', JSON.stringify({ text }));
+  } catch (err) {
+    log.error('Failed to deliver silent-task notification', {
+      messageId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** Test-only: reset the in-memory dedup set. */
+export function _resetSilentTaskNotifyDedup(): void {
+  notifiedSilentTasks.clear();
 }
