@@ -1074,7 +1074,7 @@ const addTask: McpToolDefinition = {
   tool: {
     name: 'baget_add_task',
     description:
-      'Add a task to the current open batch. Use when the founder says "add a task to ship the pricing page", "we need to do X", "make sure to Y". Pick the right agent role from the topic (developer for code/site, marketing for campaigns, analyst for research/data, design for visuals, ops for infra/legal/business, chief-of-staff for strategy/planning). RUNS IMMEDIATELY — credits only deduct when the batch actually launches.',
+      'Add a task to the current open batch. Use when the founder says "add a task to ship the pricing page", "we need to do X", "make sure to Y". Pick the right agent role from the topic (developer for code/site, marketing for campaigns, analyst for research/data, design for visuals, ops for infra/legal/business, chief-of-staff for strategy/planning). RUNS IMMEDIATELY — credits only deduct when the batch actually launches. RESPONSE includes `[taskId=<uuid>]` — REMEMBER this UUID; if the founder immediately says "run it" / "kick it off" / "start it" you pass that exact taskId to baget_run_task. STRIP `[taskId=…]` from your reply to the founder (it\'s an internal handle, not user-facing).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1223,7 +1223,7 @@ const runTask: McpToolDefinition = {
   tool: {
     name: 'baget_run_task',
     description:
-      'Run ONE specific task right now — same as the founder tapping the per-task "Run" button on the dashboard. PREFER THIS over baget_launch_batch when the founder refers to a single task ("can you run THIS task", "run the competitor research one", "kick off task X"). Use baget_launch_batch only when the founder explicitly asks for "the batch", "all tasks", "everything queued". Call list_recent_activity FIRST to find the taskId. APPROVAL-GATED: first call returns the per-task cost preview ("X credits, you have Y remaining"); second call with confirmed: true actually enqueues.',
+      'Run ONE specific task right now — same as the founder tapping the per-task "Run" button on the dashboard. PREFER THIS over baget_launch_batch when the founder refers to a single task ("can you run THIS task", "run the competitor research one", "kick off task X"). Use baget_launch_batch only when the founder explicitly asks for "the batch", "all tasks", "everything queued". WHERE TO GET taskId: (a) the `[taskId=<uuid>]` suffix from the most recent baget_add_task response (use this when the founder JUST asked to add the task and now wants to run it — no extra calls needed), or (b) baget_get_company_overview which returns `tasks: [{ id, title, agentRole, status }]`. DO NOT use baget_list_recent_activity — that returns activity_log row IDs which are NOT task IDs. APPROVAL-GATED: first call returns the per-task cost preview ("X credits, you have Y remaining"); second call with confirmed: true actually enqueues.',
     inputSchema: {
       type: 'object',
       properties: {
