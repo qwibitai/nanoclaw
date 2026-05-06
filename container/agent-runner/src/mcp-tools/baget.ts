@@ -238,6 +238,31 @@ async function dispatchDirect(args: { action: string; payload: Record<string, un
  *     setup/baget-template/CLAUDE.md (look for "approval card").
  *   - Phase 4: per-channel rich UI via adapter capabilities.
  */
+// Sam 2026-05-06 S-10 retest: tapping ✅ Approve produced
+// "Error: run-task execute failed: approval-required". Root cause:
+// PR #462 (apps/web) added a 3-step approval flow:
+//   1. POST /approval/preview  → returns { cost, approval: { requestId, expiresAt } }
+//   2. POST /approval/confirm  → returns { approvalToken } (mints a JWT proof)
+//   3. POST /approval/execute  → REQUIRES `approvalToken` in body, else 403 approval-required
+// The fork's dispatchApproval was only doing 1 and 3, dropping the
+// requestId from the preview response and skipping confirm. Every
+// approval-gated action (run-task, launch-batch, edit-document,
+// reveal-prospect, send-campaign) was therefore unrunnable end-to-end.
+//
+// Cache keyed by `companyId|action|JSON(payload)`. The LLM is
+// instructed to pass the IDENTICAL payload on confirmed:true, so
+// the cache hits. TTL is 5 min (matches the approval-request
+// expiry); cleanup happens lazily on lookup. Process-local Map is
+// fine — the agent-runner is single-process per company.
+interface PendingApproval {
+  requestId: string;
+  expiresAtMs: number;
+}
+const pendingApprovals = new Map<string, PendingApproval>();
+function approvalCacheKey(companyId: string, action: string, payload: Record<string, unknown>): string {
+  return `${companyId}|${action}|${JSON.stringify(payload)}`;
+}
+
 async function dispatchApproval(args: {
   action: string;
   payload: Record<string, unknown>;
@@ -247,17 +272,32 @@ async function dispatchApproval(args: {
   const ctx = requireCompanyId();
   if (!ctx.ok) return fail(ctx.error);
 
+  const cacheKey = approvalCacheKey(ctx.companyId, args.action, args.payload);
+
   if (!args.confirmed) {
     // Cost preview — show the founder what they'd be approving.
+    // Capture the `approval.requestId` from the response so we can
+    // confirm + execute on the next call (confirmed:true).
     const preview = await bagetFetch<{
       ok: boolean;
       cost: { amount: number; remaining: number; tasksRemaining: number; disabledReason?: string };
+      approval?: { required: boolean; requestId: string; expiresAt: string };
     }>({
       method: 'POST',
       path: `/api/companies/${ctx.companyId}/approval/preview`,
       body: { action: args.action, payload: args.payload },
     });
     if (!preview.ok) return fail(`${args.action} preview failed: ${preview.error}`);
+
+    // Cache the requestId (when present) for the confirmed:true
+    // re-entry. Pre-#462 deployments don't return `approval` and
+    // we'll fall through to the legacy path on confirm without it.
+    if (preview.data.approval?.requestId) {
+      pendingApprovals.set(cacheKey, {
+        requestId: preview.data.approval.requestId,
+        expiresAtMs: new Date(preview.data.approval.expiresAt).getTime(),
+      });
+    }
 
     const cost = preview.data.cost;
     if (cost.disabledReason) {
@@ -373,12 +413,53 @@ async function dispatchApproval(args: {
     );
   }
 
-  // Founder confirmed — actually execute.
+  // Founder confirmed — actually execute. Per PR #462's hardening,
+  // /approval/execute requires an `approvalToken` minted by
+  // /approval/confirm against the requestId we captured during the
+  // preview call. If the cache miss / expired, ask the agent to
+  // re-request approval (the LLM will paraphrase to the founder).
+  const cached = pendingApprovals.get(cacheKey);
+  if (!cached) {
+    return fail(
+      `${args.action} execute failed: approval-not-cached — call this tool with confirmed:false first to mint a fresh approval request, then re-confirm`,
+    );
+  }
+  if (cached.expiresAtMs < Date.now()) {
+    pendingApprovals.delete(cacheKey);
+    return fail(
+      `${args.action} execute failed: approval-expired — call this tool with confirmed:false to mint a fresh request`,
+    );
+  }
+
+  // Step 2: confirm the request, get an approvalToken JWT.
+  const confirmResp = await bagetFetch<{
+    ok: boolean;
+    approvalToken?: string;
+    expiresAt?: string;
+    status?: 'rejected';
+  }>({
+    method: 'POST',
+    path: `/api/companies/${ctx.companyId}/approval/confirm`,
+    body: { requestId: cached.requestId, decision: 'approve' },
+  });
+  if (!confirmResp.ok) {
+    pendingApprovals.delete(cacheKey);
+    return fail(`${args.action} confirm failed: ${confirmResp.error}`);
+  }
+  const approvalToken = confirmResp.data.approvalToken;
+  if (!approvalToken) {
+    pendingApprovals.delete(cacheKey);
+    return fail(`${args.action} confirm failed: no approvalToken in response`);
+  }
+
+  // Step 3: execute with the proof token.
   const result = await bagetFetch<{ ok: boolean; messageForFounder?: string }>({
     method: 'POST',
     path: `/api/companies/${ctx.companyId}/approval/execute`,
-    body: { action: args.action, payload: args.payload },
+    body: { action: args.action, payload: args.payload, approvalToken },
   });
+  // Always invalidate the cache after attempt — token is single-use.
+  pendingApprovals.delete(cacheKey);
   if (!result.ok) return fail(`${args.action} execute failed: ${result.error}`);
   return ok(result.data.messageForFounder ?? `${args.action} done.`);
 }
