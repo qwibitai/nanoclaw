@@ -29,6 +29,7 @@
 import type Database from 'better-sqlite3';
 import fs from 'fs';
 
+import { maybeRunDailyBackup } from './backup/scheduler.js';
 import { getActiveSessions } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import {
@@ -131,6 +132,11 @@ export function stopHostSweep(): void {
 
 async function sweep(): Promise<void> {
   if (!running) return;
+
+  // Daily backup runs at the top of the tick. The scheduler's own throttle
+  // makes this cheap when the day's window is already covered (no DB reads,
+  // no archive work) — at most one config check + one marker-file stat.
+  await maybeRunDailyBackup();
 
   try {
     const sessions = getActiveSessions();

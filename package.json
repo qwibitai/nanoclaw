@@ -21,7 +21,10 @@
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "backup": "tsx scripts/backup.ts",
+    "backup:status": "tsx scripts/backup-status.ts",
+    "restore": "tsx scripts/restore.ts"
   },
   "dependencies": {
     "@clack/core": "^1.2.0",
@@ -30,7 +33,8 @@
     "better-sqlite3": "11.10.0",
     "chat": "^4.24.0",
     "cron-parser": "5.5.0",
-    "kleur": "^4.1.5"
+    "kleur": "^4.1.5",
+    "tar": "^7.5.13"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
@@ -48,5 +52,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "optionalDependencies": {
+    "@aws-sdk/client-s3": "^3.683.0",
+    "@aws-sdk/lib-storage": "^3.683.0"
   }
 }

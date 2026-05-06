@@ -6,7 +6,28 @@ import { getContainerImageBase, getDefaultContainerImage, getInstallSlug } from 
 import { isValidTimezone } from './timezone.js';
 
 // Read config values from .env (falls back to process.env).
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'ONECLI_URL', 'ONECLI_API_KEY', 'TZ']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'ONECLI_URL',
+  'ONECLI_API_KEY',
+  'TZ',
+  'BACKUP_ENABLED',
+  'BACKUP_BACKENDS',
+  'BACKUP_LOCAL_DIR',
+  'BACKUP_HOUR',
+  'BACKUP_S3_BUCKET',
+  'BACKUP_S3_PREFIX',
+  'BACKUP_S3_REGION',
+  'BACKUP_S3_SSE',
+  'BACKUP_S3_ACCESS_KEY_ID',
+  'BACKUP_S3_SECRET_ACCESS_KEY',
+  'BACKUP_S3_SESSION_TOKEN',
+]);
+
+function envValue(key: string): string | undefined {
+  return process.env[key] || envConfig[key];
+}
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_HAS_OWN_NUMBER =
@@ -66,3 +87,34 @@ function resolveConfigTimezone(): string {
   return 'UTC';
 }
 export const TIMEZONE = resolveConfigTimezone();
+
+// ── Backup configuration ──────────────────────────────────────────────────
+
+export const BACKUP_ENABLED = (envValue('BACKUP_ENABLED') ?? 'true') !== 'false';
+
+const rawBackends = (envValue('BACKUP_BACKENDS') ?? 'local')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+export const BACKUP_BACKENDS: ReadonlyArray<'local' | 's3'> = rawBackends.filter(
+  (b): b is 'local' | 's3' => b === 'local' || b === 's3',
+);
+
+export const BACKUP_LOCAL_DIR =
+  envValue('BACKUP_LOCAL_DIR') || path.join(HOME_DIR, 'Backups', 'nanoclaw', INSTALL_SLUG);
+
+const parsedBackupHour = parseInt(envValue('BACKUP_HOUR') ?? '4', 10);
+export const BACKUP_HOUR =
+  Number.isFinite(parsedBackupHour) && parsedBackupHour >= 0 && parsedBackupHour <= 23 ? parsedBackupHour : 4;
+
+export const BACKUP_S3_BUCKET = envValue('BACKUP_S3_BUCKET');
+export const BACKUP_S3_PREFIX = envValue('BACKUP_S3_PREFIX') || INSTALL_SLUG;
+export const BACKUP_S3_REGION = envValue('BACKUP_S3_REGION');
+export const BACKUP_S3_SSE = envValue('BACKUP_S3_SSE') ?? 'AES256';
+export const BACKUP_S3_ACCESS_KEY_ID = envValue('BACKUP_S3_ACCESS_KEY_ID');
+export const BACKUP_S3_SECRET_ACCESS_KEY = envValue('BACKUP_S3_SECRET_ACCESS_KEY');
+export const BACKUP_S3_SESSION_TOKEN = envValue('BACKUP_S3_SESSION_TOKEN');
+
+// Marker file lives outside DATA_DIR so a project restore doesn't roll the
+// backup clock back and force an immediate redundant backup.
+export const BACKUP_STATUS_FILE = path.join(HOME_DIR, '.config', 'nanoclaw', 'backup-status.json');
