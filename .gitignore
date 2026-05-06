@@ -25,6 +25,13 @@ groups/global/*
 # Temp files
 .tmp-*
 
+# Personal source artifacts (one-off prompt/knowledge bundles uploaded
+# during agent setup — extracted into groups/<agent>/ and skills/
+# at install time, then no longer needed in tree)
+*-system-prompt.pdf
+*-system-prompt.md
+*-knowledge.zip
+
 # OS
 .DS_Store
 
