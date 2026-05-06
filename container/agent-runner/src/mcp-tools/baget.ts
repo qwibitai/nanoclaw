@@ -102,6 +102,24 @@ function getChannelToken(): string | null {
   return process.env.BAGET_CHANNEL_TOKEN ?? null;
 }
 
+/**
+ * Host-callback token for `/approval/confirm` — separate from the
+ * per-(user, company) channel token because confirm is a privileged
+ * "the founder DID tap approve" assertion that the apps/web side
+ * gates with a shared secret. PR #462 (apps/web) added the
+ * `BAGET_CHANNEL_APPROVAL_CALLBACK_TOKEN` requirement; the fork
+ * picks it up here so dispatchApproval(confirmed:true) can mint
+ * the approvalToken JWT it then passes to /approval/execute.
+ *
+ * Sam 2026-05-06 staging smoke: dispatchApproval was using the
+ * per-company channel token for confirm and the route threw
+ * `BAGET_CHANNEL_APPROVAL_CALLBACK_TOKEN is not set` (caught by
+ * the empty catch → 500 → "There was an issue running that task").
+ */
+function getApprovalCallbackToken(): string | null {
+  return process.env.BAGET_APPROVAL_CALLBACK_TOKEN ?? null;
+}
+
 function getCompanyId(): string | null {
   return process.env.BAGET_COMPANY_ID ?? null;
 }
@@ -120,6 +138,13 @@ interface BagetFetchArgs {
    * lambda). Caller sets `timeoutMs` to give themselves enough budget.
    */
   timeoutMs?: number;
+  /**
+   * Override the bearer token. Defaults to the channel token (per-
+   * (user, company) bearer minted at pair-time). Set to
+   * `'approval-callback'` for `/approval/confirm` which requires the
+   * shared `BAGET_APPROVAL_CALLBACK_TOKEN` host secret instead.
+   */
+  authToken?: 'channel' | 'approval-callback';
 }
 
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
@@ -137,13 +162,19 @@ interface BagetFetchErr {
 }
 
 async function bagetFetch<T = unknown>(args: BagetFetchArgs): Promise<BagetFetchOk<T> | BagetFetchErr> {
-  const token = getChannelToken();
+  const tokenKind = args.authToken ?? 'channel';
+  const token =
+    tokenKind === 'approval-callback'
+      ? getApprovalCallbackToken()
+      : getChannelToken();
   if (!token) {
     return {
       ok: false,
       status: 0,
       error:
-        'BAGET_CHANNEL_TOKEN missing. Container is not authenticated to baget.ai. Re-pair the channel from the Baget dashboard.',
+        tokenKind === 'approval-callback'
+          ? 'BAGET_APPROVAL_CALLBACK_TOKEN missing. The fork can\'t authenticate /approval/confirm without it. Set it on Railway baget-channel staging/prod env to the same value as Vercel\'s BAGET_CHANNEL_APPROVAL_CALLBACK_TOKEN.'
+          : 'BAGET_CHANNEL_TOKEN missing. Container is not authenticated to baget.ai. Re-pair the channel from the Baget dashboard.',
     };
   }
 
@@ -479,6 +510,9 @@ async function dispatchApproval(args: {
   }
 
   // Step 2: confirm the request, get an approvalToken JWT.
+  // /approval/confirm uses a SHARED host-callback secret (not the
+  // per-(user, company) channel token) — see getApprovalCallbackToken
+  // for the rationale.
   const confirmResp = await bagetFetch<{
     ok: boolean;
     approvalToken?: string;
@@ -488,6 +522,7 @@ async function dispatchApproval(args: {
     method: 'POST',
     path: `/api/companies/${ctx.companyId}/approval/confirm`,
     body: { requestId: cached.requestId, decision: 'approve' },
+    authToken: 'approval-callback',
   });
   if (!confirmResp.ok) {
     pendingApprovals.delete(cacheKey);
