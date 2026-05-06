@@ -1219,11 +1219,44 @@ const resumeAd: McpToolDefinition = {
 
 // ── WRITE tools (approval-gated) ─────────────────────────────────────────────
 
+const runTask: McpToolDefinition = {
+  tool: {
+    name: 'baget_run_task',
+    description:
+      'Run ONE specific task right now — same as the founder tapping the per-task "Run" button on the dashboard. PREFER THIS over baget_launch_batch when the founder refers to a single task ("can you run THIS task", "run the competitor research one", "kick off task X"). Use baget_launch_batch only when the founder explicitly asks for "the batch", "all tasks", "everything queued". Call list_recent_activity FIRST to find the taskId. APPROVAL-GATED: first call returns the per-task cost preview ("X credits, you have Y remaining"); second call with confirmed: true actually enqueues.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          format: 'uuid',
+          description: 'The UUID of the task to run. Get this from list_recent_activity or the founder\'s explicit reference.',
+        },
+        confirmed: {
+          type: 'boolean',
+          description:
+            'Set true ONLY after the founder has explicitly confirmed (e.g., "yes", "go ahead", "approve"). On the first call, omit or pass false to get the cost preview.',
+        },
+      },
+      required: ['taskId'],
+      additionalProperties: false,
+    },
+  },
+  async handler(args) {
+    return dispatchApproval({
+      action: 'run-task',
+      payload: { taskId: String(args.taskId) },
+      confirmed: args.confirmed === true,
+      summary: 'Run this task — enqueues it now and the assigned specialist starts working.',
+    });
+  },
+};
+
 const launchBatch: McpToolDefinition = {
   tool: {
     name: 'baget_launch_batch',
     description:
-      'Launch the current backlog batch — same as the founder tapping "Run All" on the dashboard. APPROVAL-GATED: first call returns cost preview ("X credits, ~Y tasks"); second call (with confirmed: true) actually launches. Show the cost to the founder verbatim, ask them to confirm, then re-call.',
+      'Launch the ENTIRE backlog batch — same as the founder tapping "Run All" on the dashboard. Queues EVERY backlog task for the current batch. ONLY use when the founder explicitly asks for "the batch", "all tasks", "run everything", "kick off the batch". For a single task, use baget_run_task INSTEAD. APPROVAL-GATED: first call returns cost preview ("X credits, ~Y tasks"); second call (with confirmed: true) actually launches. Show the cost to the founder verbatim, ask them to confirm, then re-call.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1356,11 +1389,12 @@ registerTools([
   resumeAd,
   // Write — approval-gated
   launchBatch,
+  runTask,
   editDocument,
   revealProspect,
   sendCampaign,
 ]);
 
 log(
-  'baget MCP tools registered: 6 read + 1 file-transfer + 1 generate + 12 direct write + 4 approval-gated = 24 total',
+  'baget MCP tools registered: 6 read + 1 file-transfer + 1 generate + 12 direct write + 5 approval-gated = 25 total',
 );
