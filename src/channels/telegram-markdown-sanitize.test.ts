@@ -46,6 +46,17 @@ describe('sanitizeTelegramLegacyMarkdown', () => {
     );
   });
 
+  it('preserves underscores inside bare URLs (OAuth params, etc.)', () => {
+    const url =
+      'https://backend.composio.dev/api/v3/auth/dash/oauth2/authorize?response_type=code&client_id=abc&code_challenge=xyz&code_challenge_method=S256&scope=openid+offline_access';
+    expect(sanitizeTelegramLegacyMarkdown(`Abre: ${url}`)).toBe(`Abre: ${url}`);
+  });
+
+  it('preserves URL underscores even when wrapped in markdown link syntax', () => {
+    const url = 'https://example.com/path?key_one=a&key_two=b';
+    expect(sanitizeTelegramLegacyMarkdown(`See [link](${url}) here`)).toBe(`See link (${url}) here`);
+  });
+
   it('handles the real failing message that blocked Caio in the DM', () => {
     const input =
       'Sure! What do you want to mount, and where should it appear inside the container?\n\n' +
