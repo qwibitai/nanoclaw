@@ -57,6 +57,11 @@
  *     - baget_reject_pending
  *     - baget_pause_ad
  *     - baget_resume_ad
+ *     - baget_run_single_task   (Tier 1)
+ *     - baget_retry_task        (Tier 1)
+ *     - baget_edit_task         (Tier 1)
+ *     - baget_reject_draft_email (Tier 1)
+ *     - baget_edit_short_pitch  (Tier 1)
  *
  *   WRITE — approval-gated (founder must tap ✅ on the channel UI;
  *   action runs only after approval):
@@ -64,6 +69,7 @@
  *     - baget_edit_document
  *     - baget_reveal_prospect
  *     - baget_send_campaign
+ *     - baget_approve_draft_email (Tier 1)
  *
  * For approval-gated tools, the wrapper:
  *   1. Calls /approval/preview to compute cost + render context
@@ -1360,6 +1366,208 @@ const sendCampaign: McpToolDefinition = {
   },
 };
 
+// ── Tier 1 WRITE tools (direct) ──────────────────────────────────────────────
+
+const runSingleTask: McpToolDefinition = {
+  tool: {
+    name: 'baget_run_single_task',
+    description:
+      'Run ONE specific backlog task right now WITHOUT an approval card — immediate, no credit preview step. Use when the task cost is already known and the founder just wants to kick it off quickly: "just run it", "go ahead and start that task", "run task X now". Credits still deduct on completion via the standard ledger. Call list_recent_activity FIRST to find the taskId. Contrast: baget_run_task shows a credit preview first; baget_run_single_task skips that and fires immediately.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          format: 'uuid',
+          description: "UUID of the backlog task to run. Resolve via baget_list_recent_activity.",
+        },
+      },
+      required: ['taskId'],
+      additionalProperties: false,
+    },
+  },
+  async handler(args) {
+    return dispatchDirect({
+      action: 'run-single-task',
+      payload: { taskId: String(args.taskId) },
+      fallbackMessage: 'Task queued.',
+    });
+  },
+};
+
+const retryTask: McpToolDefinition = {
+  tool: {
+    name: 'baget_retry_task',
+    description:
+      'Retry a task that FAILED with status="error" — resets it to backlog and immediately re-enqueues it. Use when the founder says "retry that task", "try X again", "the Y task failed, redo it". Only works on tasks with status="error"; tasks in other statuses will return a clear error message. Rolls back to "error" automatically if the queue is unavailable. RUNS IMMEDIATELY (free — credits only deduct on successful completion). Call list_recent_activity FIRST to find the taskId.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          format: 'uuid',
+          description: 'UUID of the failed task. Resolve via list_recent_activity.',
+        },
+      },
+      required: ['taskId'],
+      additionalProperties: false,
+    },
+  },
+  async handler(args) {
+    return dispatchDirect({
+      action: 'retry-task',
+      payload: { taskId: String(args.taskId) },
+      fallbackMessage: 'Task retried.',
+    });
+  },
+};
+
+const editTask: McpToolDefinition = {
+  tool: {
+    name: 'baget_edit_task',
+    description:
+      'Edit the title and/or description of a backlog or parked task. Use when the founder wants to refine what a task does: "rename the task to X", "update the task description to say Y", "change the task title". Only works on tasks in status="backlog" or status="parked"; running or completed tasks cannot be edited. At least one of title or description must be provided. RUNS IMMEDIATELY (free). Call list_recent_activity FIRST to find the taskId.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          format: 'uuid',
+          description: 'UUID of the task to edit.',
+        },
+        title: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description: 'New title for the task. Optional — omit if only updating the description.',
+        },
+        description: {
+          type: 'string',
+          maxLength: 4000,
+          description: 'New description / context for the task. Optional — omit if only updating the title.',
+        },
+      },
+      required: ['taskId'],
+      additionalProperties: false,
+    },
+  },
+  async handler(args) {
+    if (args.title === undefined && args.description === undefined) {
+      return fail('At least one of title or description must be provided.');
+    }
+    return dispatchDirect({
+      action: 'edit-task',
+      payload: {
+        taskId: String(args.taskId),
+        ...(args.title !== undefined ? { title: String(args.title) } : {}),
+        ...(args.description !== undefined ? { description: String(args.description) } : {}),
+      },
+      fallbackMessage: 'Task updated.',
+    });
+  },
+};
+
+const rejectDraftEmail: McpToolDefinition = {
+  tool: {
+    name: 'baget_reject_draft_email',
+    description:
+      'Reject a pending draft outbound email — marks it as rejected so it will NOT be sent. Use when the founder says "don\'t send that email", "reject the draft to X", "decline the email to lead@corp.com", "this email looks wrong". Optionally include a rejection reason to help the marketing agent improve the next draft. RUNS IMMEDIATELY (free). Call list_recent_activity or the dashboard to find the emailId.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        emailId: {
+          type: 'string',
+          format: 'uuid',
+          description: 'UUID of the draft email to reject.',
+        },
+        reason: {
+          type: 'string',
+          maxLength: 500,
+          description:
+            'Optional reason for rejection — passed to the marketing agent so it can improve the next draft.',
+        },
+      },
+      required: ['emailId'],
+      additionalProperties: false,
+    },
+  },
+  async handler(args) {
+    return dispatchDirect({
+      action: 'reject-draft-email',
+      payload: {
+        emailId: String(args.emailId),
+        ...(args.reason !== undefined ? { reason: String(args.reason) } : {}),
+      },
+      fallbackMessage: 'Email draft rejected.',
+    });
+  },
+};
+
+const editShortPitch: McpToolDefinition = {
+  tool: {
+    name: 'baget_edit_short_pitch',
+    description:
+      "Update the company's one-liner short pitch — the 1–2 sentence summary of what the company does that appears on the company profile and in some agent prompts. Use when the founder says \"update our description\", \"change our short pitch to X\", \"we should say we do Y instead\", \"rewrite the company summary\". Trimmed to 280 characters silently. RUNS IMMEDIATELY (free).",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        shortPitch: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 280,
+          description: "The new short pitch (1–280 chars). Keep it crisp: what the company does + who it's for.",
+        },
+      },
+      required: ['shortPitch'],
+      additionalProperties: false,
+    },
+  },
+  async handler(args) {
+    return dispatchDirect({
+      action: 'edit-short-pitch',
+      payload: { shortPitch: String(args.shortPitch) },
+      fallbackMessage: 'Short pitch updated.',
+    });
+  },
+};
+
+// ── Tier 1 WRITE tools (approval-gated) ──────────────────────────────────────
+
+const approveDraftEmail: McpToolDefinition = {
+  tool: {
+    name: 'baget_approve_draft_email',
+    description:
+      'Approve and SEND a pending draft outbound email — the reverse of baget_reject_draft_email. Use when the founder says "send that email", "approve the draft to X", "go ahead and send the outreach to lead@corp.com", "looks good, send it". APPROVAL-GATED: the cost preview shows the recipient + subject so the founder sees what they\'re approving before it leaves the outbox. No baget credit cost (Resend bills per email separately). The atomic claim prevents double-send even if the founder taps twice. Call list_recent_activity or the dashboard to find the emailId.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        emailId: {
+          type: 'string',
+          format: 'uuid',
+          description: 'UUID of the draft email to approve and send.',
+        },
+        confirmed: {
+          type: 'boolean',
+          description:
+            'Set true ONLY after the founder has explicitly confirmed. On the first call, omit or pass false to get the preview card.',
+        },
+      },
+      required: ['emailId'],
+      additionalProperties: false,
+    },
+  },
+  async handler(args) {
+    const emailId = String(args.emailId ?? '').trim();
+    if (!emailId) return fail('emailId is required');
+    return dispatchApproval({
+      action: 'approve-draft-email',
+      payload: { emailId },
+      confirmed: args.confirmed === true,
+      summary: `Send the draft email (id: ${emailId.slice(0, 8)}…). No baget credit charge — Resend bills per email separately.`,
+    });
+  },
+};
+
 // ── Register ─────────────────────────────────────────────────────────────────
 
 registerTools([
@@ -1387,14 +1595,22 @@ registerTools([
   rejectPending,
   pauseAd,
   resumeAd,
+  // Tier 1 — direct
+  runSingleTask,
+  retryTask,
+  editTask,
+  rejectDraftEmail,
+  editShortPitch,
   // Write — approval-gated
   launchBatch,
   runTask,
   editDocument,
   revealProspect,
   sendCampaign,
+  // Tier 1 — approval-gated
+  approveDraftEmail,
 ]);
 
 log(
-  'baget MCP tools registered: 6 read + 1 file-transfer + 1 generate + 12 direct write + 5 approval-gated = 25 total',
+  'baget MCP tools registered: 6 read + 1 file-transfer + 1 generate + 17 direct write + 6 approval-gated = 31 total',
 );
