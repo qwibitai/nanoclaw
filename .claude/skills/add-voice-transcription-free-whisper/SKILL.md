@@ -11,11 +11,15 @@ Check whether transcription is already working:
 
 ```bash
 ffmpeg -version >/dev/null 2>&1 && echo "ffmpeg OK" || echo "ffmpeg MISSING"
-${WHISPER_BIN:-whisper-cli} --version 2>/dev/null && echo "whisper OK" || echo "whisper MISSING"
+{ ${WHISPER_BIN:-whisper-cli} --version 2>/dev/null || ${WHISPER_BIN:-whisper} --help 2>/dev/null; } \
+  && echo "whisper OK" || echo "whisper MISSING"
 ls data/models/ggml-*.bin 2>/dev/null || echo "no model found"
 ```
 
-If all three are OK, transcription is already set up. Skip to Environment Variables.
+The second check tries `whisper-cli` first (whisper.cpp), then `whisper` (openai-whisper). If `WHISPER_BIN` is set it uses that directly.
+
+If ffmpeg and whisper are both OK, transcription is already set up. Skip to Environment Variables.
+(No model file is needed for openai-whisper — it manages its own cache under `~/.cache/whisper/`.)
 
 ---
 
