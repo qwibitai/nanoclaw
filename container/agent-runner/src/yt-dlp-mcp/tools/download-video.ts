@@ -9,10 +9,18 @@ const RESOLUTION_HEIGHT: Record<string, number | undefined> = {
   best: undefined,
 };
 
+const CODEC_VFILTER: Record<string, string> = {
+  h264: '[vcodec~="^avc1"]',
+  h265: '[vcodec~="^(hev1|hvc1)"]',
+  av1: '[vcodec~="^av01"]',
+  vp9: '[vcodec~="^(vp9|vp09)"]',
+  any: '',
+};
+
 export const downloadVideoTool: Tool = {
   name: 'ytdlp_download_video',
   description:
-    'Download a video. First attempt: mp4 (merged with m4a audio). Fallback on failure: best quality available in any container. Returns the saved file path; chain with mcp__nanoclaw__send_file to deliver.',
+    'Download a video. First attempt: mp4 with the requested codec (default H.264 for broad playback compatibility). Fallback on failure: best quality available in any container/codec. Returns the saved file path; chain with mcp__nanoclaw__send_file to deliver.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -21,6 +29,12 @@ export const downloadVideoTool: Tool = {
         type: 'string',
         enum: ['480p', '720p', '1080p', 'best'],
         description: 'Max height. Default best.',
+      },
+      codec: {
+        type: 'string',
+        enum: ['h264', 'h265', 'av1', 'vp9', 'any'],
+        description:
+          'Preferred video codec. Default h264 (avc1) — widest playback compatibility (QuickTime, iOS, WhatsApp, etc.). Use "any" to skip codec filtering.',
       },
       outputDir: {
         type: 'string',
@@ -47,22 +61,27 @@ export async function downloadVideoHandler(args: Record<string, unknown>): Promi
   if (!(resolution in RESOLUTION_HEIGHT)) {
     return fail(`Unsupported resolution: ${resolution}. Use 480p | 720p | 1080p | best.`);
   }
+  const codec = String(args.codec ?? 'h264');
+  if (!(codec in CODEC_VFILTER)) {
+    return fail(`Unsupported codec: ${codec}. Use h264 | h265 | av1 | vp9 | any.`);
+  }
   const outputDir = String(args.outputDir ?? process.env.YTDLP_DOWNLOADS_DIR ?? '/tmp');
   const trim = parseTrim(args.trim);
   if (trim && 'error' in trim) return fail(trim.error);
 
   const height = RESOLUTION_HEIGHT[resolution];
   const heightFilter = height ? `[height<=${height}]` : '';
-  const mp4Format = `bv*[ext=mp4]${heightFilter}+ba[ext=m4a]/b[ext=mp4]${heightFilter}`;
+  const codecFilter = CODEC_VFILTER[codec];
+  const mp4Format = `bv*[ext=mp4]${codecFilter}${heightFilter}+ba[ext=m4a]/b[ext=mp4]${codecFilter}${heightFilter}`;
   const fallbackFormat = height ? `bv*${heightFilter}+ba/b${heightFilter}` : 'bv*+ba/b';
 
   // First attempt: mp4 container.
   const mp4 = await runDownload(url, mp4Format, outputDir, true, trim ?? undefined);
   if (mp4.ok) {
-    return okJson({ path: mp4.path, format: 'mp4', container: extOf(mp4.path), fallback: false });
+    return okJson({ path: mp4.path, format: 'mp4', codec, container: extOf(mp4.path), fallback: false });
   }
 
-  // Fallback: best quality, any container.
+  // Fallback: best quality, any container/codec.
   const best = await runDownload(url, fallbackFormat, outputDir, false, trim ?? undefined);
   if (best.ok) {
     return okJson({
