@@ -235,7 +235,16 @@ export async function runIteration(args: {
   // we can't deliver. Cursor stays put. Bug #4 diagnostic logs:
   // surface the precise reason for skip so a "loop running but never
   // delivers" report has a definitive trace in container logs.
-  if (routing.channel_type !== 'telegram' || !routing.platform_id) {
+  //
+  // 2026-05-06 Bug #4 root cause: the Baget Telegram adapter registers
+  // under `channel_type: 'baget-telegram'` (BAGET_TELEGRAM_CHANNEL_TYPE
+  // in src/channels/baget-telegram-bind.ts), NOT plain `'telegram'`.
+  // The original guard `!== 'telegram'` ALWAYS skipped — which is why
+  // the completion ping never fired even after the worker redeploy
+  // landed. Accept both values.
+  const isTelegramChannel =
+    routing.channel_type === 'telegram' || routing.channel_type === 'baget-telegram';
+  if (!isTelegramChannel || !routing.platform_id) {
     log(
       `Skip iteration: routing not ready (channel_type=${routing.channel_type ?? 'null'}, platform_id=${routing.platform_id ?? 'null'}). Will retry next tick.`,
     );

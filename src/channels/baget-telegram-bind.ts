@@ -232,6 +232,24 @@ function emitTelegramDeliveryFailure(payload: {
   });
 }
 
+/**
+ * Telegram inline keyboard markup. We model the minimum subset we
+ * actually use: a 2D array of buttons, each with `text` (label) and
+ * `callback_data` (≤ 64 bytes string returned to us in the
+ * callback_query update). Other reply_markup variants (force_reply,
+ * keyboard, etc.) aren't currently exposed via this path.
+ *
+ * Phase 4 v0.1 (Bug #19/Sam request 2026-05-06): the channel's
+ * approval cards now ship with `[✅ Approve] [❌ Cancel]` buttons
+ * instead of asking the founder to type "yes" / "go". The button
+ * layer is purely a UX shortcut — taps synthesize the same text into
+ * the agent's inbound queue and the existing approval-flow logic
+ * runs unchanged from there.
+ */
+export interface TelegramReplyMarkup {
+  inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+}
+
 export async function sendBagetBotMessage(args: {
   botToken: string;
   apiBaseUrl?: string;
@@ -239,6 +257,9 @@ export async function sendBagetBotMessage(args: {
   chatId: number | string;
   text: string;
   agentGroupId: string | null;
+  /** Optional inline-keyboard / reply markup. Forwarded verbatim to
+   *  Telegram's sendMessage `reply_markup` field. */
+  replyMarkup?: TelegramReplyMarkup;
 }): Promise<BagetTelegramSendResult> {
   const apiBase = args.apiBaseUrl ?? 'https://api.telegram.org';
   const fetchFn = args.fetchImpl ?? fetch;
@@ -247,7 +268,11 @@ export async function sendBagetBotMessage(args: {
     const resp = await fetchFn(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: args.chatId, text: args.text }),
+      body: JSON.stringify({
+        chat_id: args.chatId,
+        text: args.text,
+        ...(args.replyMarkup ? { reply_markup: args.replyMarkup } : {}),
+      }),
     });
     const json = (await resp.json().catch(() => null)) as {
       ok?: boolean;

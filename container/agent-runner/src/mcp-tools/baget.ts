@@ -270,6 +270,87 @@ async function dispatchApproval(args: {
       );
     }
 
+    // Phase 4 v0.1: send the approval card DIRECTLY as a Telegram
+    // message with inline-keyboard buttons, bypassing the LLM's
+    // outbound rendering. Architecture rationale:
+    //
+    //   - Buttons are a UX shortcut for typing yes/no. The host's
+    //     callback_query handler (in src/channels/baget-telegram.ts)
+    //     synthesizes the tap as a normal "yes" / "cancel" inbound
+    //     so the existing dispatchApproval(confirmed:true) re-entry
+    //     path runs unchanged.
+    //   - Since the LLM doesn't know about reply_markup formatting,
+    //     and our prompt-shaping has been brittle, we just write the
+    //     outbound row directly here.
+    //   - Falls back to the legacy text-only flow when we can't
+    //     resolve a Telegram destination (no session_routing yet,
+    //     `to` resolution misses, etc.).
+    //
+    // callback_data schema: `appr:yes` / `appr:no`. No card_id —
+    // the LLM keeps the payload in its conversation context, and
+    // the callback_query just synthesizes a text "yes"/"cancel" the
+    // model already knows how to interpret.
+    const routing = resolveRouting(undefined);
+    // Codex P1 on PR #40: the Baget Telegram adapter registers as
+    // `baget-telegram` (`BAGET_TELEGRAM_CHANNEL_TYPE` in
+    // src/channels/baget-telegram-bind.ts), so the host's
+    // session_routing carries `channel_type: 'baget-telegram'`. A
+    // bare `=== 'telegram'` guard never matches, so the direct-write
+    // branch never ran, so approval-card buttons never reached the
+    // founder. Accept both: 'telegram' (generic / non-Baget nanoclaw
+    // deployments) AND 'baget-telegram' (every Baget founder pairing).
+    const isTelegramChannel =
+      'channel_type' in routing &&
+      (routing.channel_type === 'telegram' || routing.channel_type === 'baget-telegram');
+    if (isTelegramChannel && routing.platform_id) {
+      const costLine =
+        cost.amount > 0
+          ? `Cost: ${cost.amount} credits. You have ${cost.remaining} remaining.`
+          : 'Included in your plan — no extra credit charge.';
+      const cardText = `${args.summary.trim()}\n\n${costLine}`;
+      const replyMarkup = {
+        inline_keyboard: [
+          [
+            { text: '✅ Approve', callback_data: 'appr:yes' },
+            { text: '❌ Cancel', callback_data: 'appr:no' },
+          ],
+        ],
+      };
+      try {
+        writeMessageOut({
+          id: generateId(),
+          kind: 'chat',
+          platform_id: routing.platform_id,
+          channel_type: routing.channel_type,
+          thread_id: routing.thread_id,
+          content: JSON.stringify({ text: cardText, replyMarkup }),
+        });
+        // Tell the LLM the card has been delivered — DO NOT render
+        // a second text message. Wrap the instruction in a clear
+        // status the persona-handler can recognise.
+        return ok(
+          JSON.stringify({
+            status: 'approval-card-delivered',
+            summary: args.summary,
+            cost: {
+              amount: cost.amount,
+              remaining: cost.remaining,
+              tasksRemaining: cost.tasksRemaining,
+            },
+            note: 'The approval card has been sent to the founder via Telegram with [✅ Approve] / [❌ Cancel] inline buttons. DO NOT write any additional text reply — return immediately and await the founder\'s tap. When the founder taps a button, the host synthesizes a "yes" or "cancel" message into your inbound queue; on "yes" you call this tool again with `confirmed: true` and the IDENTICAL payload. On "cancel" / "no", acknowledge briefly ("Got it — cancelled.") and move on.',
+          }),
+        );
+      } catch (err) {
+        // If the direct outbound write failed, fall through to the
+        // legacy text-only flow below so the founder still sees a
+        // confirmation prompt.
+        // eslint-disable-next-line no-console
+        console.error('[baget] dispatchApproval direct-write failed; falling back to text', err);
+      }
+    }
+
+    // Legacy fallback — text-only flow when we can't deliver
+    // buttons (no telegram routing yet, etc.).
     return ok(
       JSON.stringify({
         status: 'approval-pending',

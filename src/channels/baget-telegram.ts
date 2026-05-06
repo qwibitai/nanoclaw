@@ -64,6 +64,7 @@ import {
   sendBagetBotMessage,
   sendBagetBotPhoto,
   sendBagetTelegramWelcome,
+  type TelegramReplyMarkup,
 } from './baget-telegram-bind.js';
 import {
   downloadTelegramAttachment,
@@ -129,10 +130,21 @@ interface UpdateMessage extends TelegramMessage {
   date: number;
 }
 
+interface TelegramCallbackQuery {
+  id: string;
+  from: { id: number; username?: string; first_name?: string };
+  message?: {
+    message_id?: number;
+    chat: { id: number };
+  };
+  data?: string;
+}
+
 interface TelegramUpdate {
   update_id: number;
   message?: UpdateMessage;
   edited_message?: UpdateMessage;
+  callback_query?: TelegramCallbackQuery;
 }
 
 function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
@@ -398,6 +410,18 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       });
     }
     if (!fresh) return;
+
+    // Phase 4 v0.1: callback_query updates fire when the founder taps
+    // an inline-keyboard button on an approval card. We treat them as
+    // a UX shortcut for typing the same word — synthesize a plain
+    // inbound text message ("yes" / "cancel") so the existing
+    // approval-flow LLM logic runs unchanged. ALSO ACK the
+    // callback_query within 5s (Telegram timeout) so the button's
+    // loading spinner clears.
+    if (update.callback_query) {
+      await handleCallbackQuery(update.callback_query);
+      return;
+    }
 
     const isEdit = !update.message && !!update.edited_message;
     const msg = update.message ?? update.edited_message;
@@ -740,6 +764,12 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     // count as a bogus founder-facing event).
     const text = rawText !== null && rawText.length > 0 ? rawText : null;
     const attachments = message.attachments ?? [];
+    // Phase 4 v0.1: pull an inline_keyboard reply_markup off the
+    // outbound content if the channel-side dispatchApproval emitted
+    // one. Forwarded verbatim into Telegram's sendMessage call.
+    // Falls through to a plain text message when null (every legacy
+    // path).
+    const replyMarkup = extractReplyMarkup(message) ?? undefined;
     // Drop entirely empty messages. Same contract as before media support
     // landed: nothing to render → return undefined.
     if (text === null && attachments.length === 0) return undefined;
@@ -830,7 +860,13 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     }
 
     if (text !== null) {
-      const messageId = await sendBotMessage(chatId, prefixed!, agentGroupId, resolvedBotToken);
+      const messageId = await sendBotMessage(
+        chatId,
+        prefixed!,
+        agentGroupId,
+        resolvedBotToken,
+        replyMarkup,
+      );
       if (messageId !== undefined) lastMessageId = messageId;
     }
 
@@ -854,6 +890,7 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
     text: string,
     agentGroupId: string | null,
     botToken: string = cfg.botToken,
+    replyMarkup?: TelegramReplyMarkup,
   ): Promise<string | undefined> {
     const result = await sendBagetBotMessage({
       botToken,
@@ -862,8 +899,133 @@ function buildAdapter(cfg: BagetTelegramConfig): ChannelAdapter {
       chatId,
       text,
       agentGroupId,
+      ...(replyMarkup ? { replyMarkup } : {}),
     });
     return result.ok ? result.messageId : undefined;
+  }
+
+  /**
+   * ACK a callback_query so Telegram clears the button's loading
+   * spinner. MUST be called within 5s of the update arriving or the
+   * tap appears stuck on the founder's screen. Best-effort — a
+   * Telegram outage just means the spinner sticks; we don't fail the
+   * synthesized inbound on this. `text` shows as a transient toast
+   * over the chat (max 200 chars per Telegram); pass empty string
+   * for a silent ACK.
+   */
+  async function answerCallbackQuery(
+    callbackQueryId: string,
+    botToken: string,
+    text: string = '',
+  ): Promise<void> {
+    const url = `${apiBase}/bot${botToken}/answerCallbackQuery`;
+    try {
+      await fetchFn(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          callback_query_id: callbackQueryId,
+          ...(text ? { text } : {}),
+        }),
+      });
+    } catch (err) {
+      log.warn('Baget telegram: answerCallbackQuery failed (founder will see stuck spinner)', {
+        err,
+        callbackQueryId,
+      });
+    }
+  }
+
+  /**
+   * Phase 4 v0.1 — turn an inline-keyboard tap into a synthesized
+   * text inbound message. `callback_data` schema: `appr:yes` /
+   * `appr:no` (the bare-minimum design — the LLM still owns the
+   * payload context, so we don't need to round-trip a card_id here).
+   *
+   * Concretely:
+   *   1. Parse + validate the callback_data shape — drop unknown.
+   *   2. Resolve the bot token (per-pool, falls back to global).
+   *   3. ACK with a tiny toast so the spinner clears.
+   *   4. Synthesize an inbound message with text = "yes" / "cancel"
+   *      and route it through `setup.onInbound` exactly like a
+   *      typed message would. The agent loop's existing approval
+   *      logic does the rest (call dispatchApproval(confirmed:true)
+   *      on yes, acknowledge cancel on no).
+   *
+   * Edit-original-message-to-remove-buttons is deliberately deferred
+   * to v0.2 — the synthesized text reply already gives the founder
+   * a clear "received" signal.
+   */
+  async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<void> {
+    if (typeof cb.data !== 'string') return;
+    const m = /^appr:(yes|no)$/.exec(cb.data);
+    if (!m) {
+      log.warn('Baget telegram: unrecognized callback_data — ignoring', { data: cb.data });
+      return;
+    }
+    const decision = m[1] as 'yes' | 'no';
+    const chatId = cb.message?.chat.id;
+    if (typeof chatId !== 'number') {
+      log.warn('Baget telegram: callback_query without chat — ignoring', { id: cb.id });
+      return;
+    }
+    const platformId = platformIdFor(chatId);
+    const mg = getMessagingGroupByPlatform(BAGET_TELEGRAM_CHANNEL_TYPE, platformId);
+    const wired = mg ? getMessagingGroupAgents(mg.id) : [];
+
+    // SECURITY: refuse to act on a callback when the chat is in a
+    // multi-bind state. Same check as `deliver()` at line 787 — a chat
+    // with > 1 wired agent_group could let a tap on agent_group A's
+    // approval card synthesize a "yes" inbound for agent_group B's
+    // session, executing whatever pending action B had pending.
+    // Single-bind is enforced by the /start handler's UNIQUE constraint;
+    // this is the second-line check. Per Gemini Security HIGH on PR #40.
+    if (wired.length > 1) {
+      log.error('Baget telegram: refusing callback — chat has >1 wired agent_group', {
+        platformId,
+        mgId: mg?.id,
+        count: wired.length,
+        callbackQueryId: cb.id,
+      });
+      return;
+    }
+    const agentGroupId = wired.length === 1 ? (wired[0]?.agent_group_id ?? null) : null;
+    const resolvedBotToken =
+      (agentGroupId && getBotPoolEntryByAgentGroup(agentGroupId)?.bot_token_value) || cfg.botToken;
+
+    const ackToast = decision === 'yes' ? '✅ Confirming…' : '❌ Cancelled';
+    await answerCallbackQuery(cb.id, resolvedBotToken, ackToast);
+
+    if (!setup) {
+      log.warn('Baget telegram: callback_query before setup() — dropping', { id: cb.id });
+      return;
+    }
+    const synthText = decision === 'yes' ? 'yes' : 'cancel';
+    const senderId = cb.from
+      ? `telegram:${cb.from.id}`
+      : 'telegram:unknown';
+    const sender = cb.from
+      ? cb.from.username
+        ? `@${cb.from.username}`
+        : cb.from.first_name || `tg:${cb.from.id}`
+      : 'unknown';
+    const inbound: InboundMessage = {
+      id: `tg-cb-${cb.id}`,
+      kind: 'chat',
+      timestamp: new Date().toISOString(),
+      content: { text: synthText, sender, senderId },
+      isMention: true,
+      isGroup: false,
+    };
+    try {
+      await setup.onInbound(platformId, null, inbound);
+    } catch (err) {
+      log.error('Baget telegram: onInbound (callback synth) threw', {
+        err,
+        callbackQueryId: cb.id,
+        decision,
+      });
+    }
   }
 
   async function setTyping(platformId: string, _threadId: string | null): Promise<void> {
@@ -1081,6 +1243,45 @@ function extractText(message: OutboundMessage): string | null {
     return content.text;
   }
   return null;
+}
+
+/**
+ * Extract a Telegram inline-keyboard `reply_markup` from the outbound
+ * message content. Phase 4 v0.1: the channel-side dispatchApproval
+ * tool writes outbound messages with `{ text, replyMarkup }` so the
+ * approval card ships as `[✅ Approve] [❌ Cancel]` instead of asking
+ * the founder to type "yes" / "go".
+ *
+ * Validates only the minimum shape Telegram needs — a 2D array of
+ * objects with string `text` + string `callback_data`. Anything else
+ * returns null so the message ships as plain text (safe degrade).
+ */
+function extractReplyMarkup(message: OutboundMessage): TelegramReplyMarkup | null {
+  const content = message.content as Record<string, unknown> | string | undefined;
+  if (!content || typeof content !== 'object') return null;
+  const raw = (content as Record<string, unknown>).replyMarkup;
+  if (!raw || typeof raw !== 'object') return null;
+  const ik = (raw as Record<string, unknown>).inline_keyboard;
+  if (!Array.isArray(ik)) return null;
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+  for (const row of ik) {
+    if (!Array.isArray(row)) return null;
+    const buttons: Array<{ text: string; callback_data: string }> = [];
+    for (const btn of row) {
+      if (!btn || typeof btn !== 'object') return null;
+      const text = (btn as Record<string, unknown>).text;
+      const cbData = (btn as Record<string, unknown>).callback_data;
+      if (typeof text !== 'string' || typeof cbData !== 'string') return null;
+      // Telegram caps callback_data at 64 bytes UTF-8. Reject longer
+      // values rather than silently truncate (we'd lose state).
+      if (Buffer.byteLength(cbData, 'utf8') > 64) return null;
+      buttons.push({ text, callback_data: cbData });
+    }
+    if (buttons.length === 0) return null;
+    rows.push(buttons);
+  }
+  if (rows.length === 0) return null;
+  return { inline_keyboard: rows };
 }
 
 /**

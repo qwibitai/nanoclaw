@@ -206,6 +206,36 @@ describe('runIteration', () => {
     expect(next).toBe('2026-05-05T00:00:00.000Z');
   });
 
+  it('runs on the production-shape channel_type "baget-telegram" (Bug #4 root cause guard)', async () => {
+    // 2026-05-06: the real Baget Telegram adapter publishes
+    // channel_type='baget-telegram' (BAGET_TELEGRAM_CHANNEL_TYPE), not
+    // plain 'telegram'. The earlier `=== 'telegram'` guard ALWAYS
+    // skipped on production routing, which is why no completion ping
+    // ever fired despite worker enrichment + endpoint flag both being
+    // green. Make sure the loop now runs on the production value.
+    fetchResponder = () =>
+      new Response(
+        JSON.stringify({
+          events: [makeEvent({ createdAt: '2026-05-05T09:00:00.000Z' })],
+          cursor: '2026-05-05T09:00:00.000Z',
+        }),
+        { status: 200 },
+      );
+
+    const next = await runIteration({
+      cursorIso: '2026-05-05T08:00:00.000Z',
+      routing: { channel_type: 'baget-telegram', platform_id: 'baget-telegram:42', thread_id: null },
+      env: ENV,
+      fetchImpl: globalThis.fetch,
+    });
+
+    expect(next).toBe('2026-05-05T09:00:00.000Z');
+    const rows = getOutboundDb()
+      .prepare('SELECT COUNT(*) AS n FROM messages_out')
+      .get() as { n: number };
+    expect(rows.n).toBe(1);
+  });
+
   it('writes one outbound message per event and advances cursor', async () => {
     fetchResponder = () =>
       new Response(
