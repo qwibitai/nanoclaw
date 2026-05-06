@@ -489,6 +489,20 @@ async function spawnSingleProcessRunner(
     });
   }
 
+  // Sam 2026-05-06 staging smoke: dispatchApproval(confirmed:true)
+  // failed with "BAGET_APPROVAL_CALLBACK_TOKEN missing" even though
+  // the var WAS set in Railway env on this service. Root cause: the
+  // explicit-allowlist spawn-env above intentionally drops anything
+  // not named, and PR #48 (which introduced the new token) didn't
+  // add it to the allowlist. Fix: forward the host's
+  // BAGET_APPROVAL_CALLBACK_TOKEN into the runner's env so the MCP
+  // tool's `getApprovalCallbackToken()` reads it. Same allowlist
+  // posture as channel-token: only set when present, never logged.
+  if (process.env.BAGET_APPROVAL_CALLBACK_TOKEN) {
+    childEnv.BAGET_APPROVAL_CALLBACK_TOKEN =
+      process.env.BAGET_APPROVAL_CALLBACK_TOKEN;
+  }
+
   // Clear any orphan heartbeat — same reason as the docker branch.
   fs.rmSync(heartbeatPath(agentGroup.id, session.id), { force: true });
 
