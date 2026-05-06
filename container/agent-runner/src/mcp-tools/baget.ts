@@ -455,7 +455,7 @@ async function dispatchApproval(args: {
               remaining: cost.remaining,
               tasksRemaining: cost.tasksRemaining,
             },
-            note: 'The approval card has been sent to the founder via Telegram with [✅ Approve] / [❌ Cancel] inline buttons. DO NOT write any additional text reply — return immediately and await the founder\'s tap. When the founder taps a button, the host synthesizes a "yes" or "cancel" message into your inbound queue; on "yes" you call this tool again with `confirmed: true` and the IDENTICAL payload. On "cancel" / "no", acknowledge briefly ("Got it — cancelled.") and move on.',
+            note: 'The approval card has been sent to the founder via Telegram with [✅ Approve] / [❌ Cancel] inline buttons. The card IS the message — return immediately without writing additional text and await the founder\'s tap. When the founder taps a button, the host synthesizes a "yes" or "cancel" message into your inbound queue; on "yes" you call this tool again with `confirmed: true` and the IDENTICAL payload. On "cancel" / "no", acknowledge briefly ("Got it — cancelled.") and move on.',
           }),
         );
       } catch (err) {
@@ -479,13 +479,9 @@ async function dispatchApproval(args: {
           tasksRemaining: cost.tasksRemaining,
         },
         note: [
-          'Tell the founder the summary + cost in PLAIN TEXT.',
-          'Ask them to confirm by REPLYING WITH A WORD — "yes" / "go" / "approve" — or "no" / "cancel".',
-          'DO NOT say "tap", "press", "click", "✅", or any phrasing that implies a button — there is no button on this surface, the founder confirms by typing a word.',
-          'You may set `confirmed: true` ONLY when the founder\'s NEXT message is a clear standalone confirmation word (yes / yeah / yep / go / ok / okay / approve / approved / confirmed / sure / do it). A REPEAT of the original action request (e.g. "launch the next batch" sent twice, "set direction to X" sent twice) is NOT a confirmation — treat it as the founder asking again, not approving the prior pending card. If you are unsure, ask explicitly: "To confirm, reply \'yes\' or \'go\'." Never auto-confirm on a duplicate or paraphrase of the original request.',
-          'Cost shape semantics — `amount` is the credits this single action will deduct; `remaining` is the founder\'s total credit balance; `tasksRemaining` is HOW MANY TASKS OF THIS COST THE BALANCE CAN AFFORD (a budget headroom number), NOT the count of tasks this action will run. Do NOT say "this includes N tasks" or "queues N tasks" — that misreads `tasksRemaining`. Phrase it as "you have headroom for ~N more tasks of this size" or just omit it.',
-          'When `amount === 0`, the action is INCLUDED in the founder\'s plan at no incremental credit charge — it is not a bug. Phrase it as "this is included in your plan" or "no extra credit charge — this is part of your plan", NOT as "will cost 0 credits" (that reads like a broken counter). Strategy / Chief-of-Staff / Ops tasks at junior+ seniority are the typical 0-amount path.',
-          'On their confirmation, call this same tool with `confirmed: true` and the IDENTICAL payload.',
+          'Reply in plain text with the summary + cost, and ask the founder to confirm by typing a word ("yes" / "go" / "approve" or "no" / "cancel"). Do NOT say "tap", "press", or "✅" — there is no button here.',
+          'Set `confirmed: true` ONLY on a standalone confirmation word in the NEXT message. A repeat of the original request is NOT a confirmation — ask "To confirm, reply \'yes\' or \'go\'." Then re-call this tool with the IDENTICAL payload.',
+          '`amount` is the credit deduction for this action; `remaining` is the founder\'s balance; `tasksRemaining` is budget headroom (how many MORE tasks of this size fit) — do not phrase it as "queues N tasks". When `amount === 0` say "included in your plan", not "0 credits".',
         ].join(' '),
       }),
     );
@@ -1269,7 +1265,7 @@ const parkTask: McpToolDefinition = {
   tool: {
     name: 'baget_park_task',
     description:
-      'Park a task — moves a backlog task out of the active batch so the worker won\'t pick it up. Use when the founder says "X is no longer a priority", "drop the Y task", "park Z". Call list_recent_batches FIRST to find the matching taskId. RUNS IMMEDIATELY (free).',
+      'Park a task — moves a backlog task out of the active batch so the worker won\'t pick it up. Use when the founder says "X is no longer a priority", "drop the Y task", "park Z". Resolve the taskId from `baget_get_company_overview` (returns `tasks[]` for the open batch). RUNS IMMEDIATELY (free).',
     inputSchema: {
       type: 'object',
       properties: {
