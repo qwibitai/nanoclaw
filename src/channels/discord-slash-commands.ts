@@ -17,10 +17,9 @@
  * container-rebuild watcher picks up the PR on merge and rebuilds the
  * image automatically.
  */
-import { execFile, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { promisify } from 'util';
 
 import {
   Client,
@@ -35,9 +34,8 @@ import {
 import { REPO_ROOT } from '../config.js';
 import { startContainerRebuildWatcher, stopContainerRebuildWatcher } from '../container-rebuild-watcher.js';
 import { log } from '../log.js';
+import { runPluginUpdates } from '../plugin-updater.js';
 import { routeInbound } from '../router.js';
-
-const execFileAsync = promisify(execFile);
 
 const COMMANDS = [
   { name: 'deploy', description: 'Pull, build, and restart NanoClaw v2 from main' },
@@ -48,8 +46,6 @@ const COMMANDS = [
 const DEPLOY_SCRIPT = path.resolve(REPO_ROOT, 'scripts', 'deploy.sh');
 const DEPLOY_LOG = path.resolve(REPO_ROOT, 'logs', 'deploy.log');
 const DEPLOY_STATUS = path.resolve(REPO_ROOT, 'logs', 'deploy-status.json');
-const PLUGINS_UPDATE_SCRIPT = path.resolve(process.env.HOME ?? '/home/ubuntu', 'scripts', 'nanoclaw-plugins-update.sh');
-
 let client: Client | null = null;
 
 async function registerCommands(botToken: string, clientId: string, guildId: string): Promise<void> {
@@ -224,21 +220,24 @@ async function handleDeploy(interaction: ChatInputCommandInteraction): Promise<v
 
 async function handleUpdatePlugins(interaction: ChatInputCommandInteraction): Promise<void> {
   await interaction.reply({ content: 'Running git pull on all ~/plugins…' });
-  if (!fs.existsSync(PLUGINS_UPDATE_SCRIPT)) {
-    await interaction.followUp({
-      content: `Plugins update script missing at ${PLUGINS_UPDATE_SCRIPT}`,
-    });
-    return;
-  }
   try {
-    const { stdout } = await execFileAsync('bash', [PLUGINS_UPDATE_SCRIPT], { timeout: 120_000 });
-    const MAX = 1900; // Discord msg limit minus fence
-    const body = stdout.trim().slice(0, MAX);
-    await interaction.followUp({ content: `\`\`\`\n${body || '(no output)'}\n\`\`\`` });
+    const results = await runPluginUpdates();
+    if (results.length === 0) {
+      await interaction.followUp({ content: 'No plugins found in ~/plugins.' });
+      return;
+    }
+    const lines = results.map((r) => {
+      if (r.error) return `✗ ${r.plugin}: ${r.error}`;
+      return r.changed ? `↑ ${r.plugin}: updated` : `· ${r.plugin}: up to date`;
+    });
+    const changedCount = results.filter((r) => r.changed).length;
+    const errCount = results.filter((r) => r.error).length;
+    const summary = `${changedCount} updated, ${errCount} failed, ${results.length - changedCount - errCount} up to date`;
+    const body = [summary, '', ...lines].join('\n').slice(0, 1900);
+    await interaction.followUp({ content: `\`\`\`\n${body}\n\`\`\`` });
   } catch (err) {
-    const e = err as { stdout?: string; stderr?: string };
-    const raw = e.stdout?.trim() || e.stderr?.trim() || String(err);
-    await interaction.followUp({ content: `Plugin update failed:\n\`\`\`\n${raw.slice(0, 1800)}\n\`\`\`` });
+    const msg = err instanceof Error ? err.message : String(err);
+    await interaction.followUp({ content: `Plugin update failed: ${msg.slice(0, 1800)}` });
   }
 }
 

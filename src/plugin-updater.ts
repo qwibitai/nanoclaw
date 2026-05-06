@@ -41,7 +41,7 @@ export interface PluginUpdaterDeps {
   notify?: (platformId: string, text: string) => Promise<void>;
 }
 
-interface UpdateResult {
+export interface UpdateResult {
   plugin: string;
   changed: boolean;
   error?: string;
@@ -66,11 +66,16 @@ async function updatePlugin(pluginPath: string, name: string): Promise<UpdateRes
   }
 }
 
-async function runOnce(deps: PluginUpdaterDeps): Promise<void> {
+/**
+ * Pull every `~/plugins/<name>` and return per-plugin results. No
+ * notification side effect — callers (the hourly cron and the
+ * /update-plugins slash command) decide what to do with the output.
+ */
+export async function runPluginUpdates(): Promise<UpdateResult[]> {
   const pluginsRoot = path.join(os.homedir(), 'plugins');
   if (!fs.existsSync(pluginsRoot)) {
     log.debug('Plugin updater: ~/plugins missing, skipping');
-    return;
+    return [];
   }
 
   let entries: string[];
@@ -78,7 +83,7 @@ async function runOnce(deps: PluginUpdaterDeps): Promise<void> {
     entries = fs.readdirSync(pluginsRoot);
   } catch (err) {
     log.warn('Plugin updater: failed to read ~/plugins', { err });
-    return;
+    return [];
   }
 
   const repos = entries.filter((name) => {
@@ -90,11 +95,14 @@ async function runOnce(deps: PluginUpdaterDeps): Promise<void> {
     }
   });
 
-  if (repos.length === 0) return;
+  if (repos.length === 0) return [];
 
   log.info('Plugin updater: scanning', { count: repos.length });
-  const results = await Promise.all(repos.map((name) => updatePlugin(path.join(pluginsRoot, name), name)));
+  return Promise.all(repos.map((name) => updatePlugin(path.join(pluginsRoot, name), name)));
+}
 
+async function runOnce(deps: PluginUpdaterDeps): Promise<void> {
+  const results = await runPluginUpdates();
   const changed = results.filter((r) => r.changed);
   if (changed.length === 0) return;
 
