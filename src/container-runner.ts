@@ -503,6 +503,24 @@ async function spawnSingleProcessRunner(
       process.env.BAGET_APPROVAL_CALLBACK_TOKEN;
   }
 
+  // Sam 2026-05-06 staging smoke (continued): the channel-completion
+  // polling loop logged "Env not configured (need BAGET_API_BASE_URL,
+  // BAGET_CHANNEL_TOKEN, BAGET_COMPANY_ID, BAGET_PUBLIC_APP_URL);
+  // loop disabled." Same allowlist gap — `BAGET_API_BASE_URL`
+  // (the apps/web base, e.g. https://stg-app.baget.ai) and
+  // `BAGET_PUBLIC_APP_URL` (the dashboard URL the runner embeds in
+  // completion ping links) were never forwarded. The poll-loop
+  // (`container/agent-runner/src/channel-completion-loop.ts:89-92`)
+  // reads both directly from process.env and short-circuits silently
+  // when either is missing — no founder gets pinged when their tasks
+  // finish. Forward both with the same allowlist posture.
+  if (process.env.BAGET_API_BASE_URL) {
+    childEnv.BAGET_API_BASE_URL = process.env.BAGET_API_BASE_URL;
+  }
+  if (process.env.BAGET_PUBLIC_APP_URL) {
+    childEnv.BAGET_PUBLIC_APP_URL = process.env.BAGET_PUBLIC_APP_URL;
+  }
+
   // Clear any orphan heartbeat — same reason as the docker branch.
   fs.rmSync(heartbeatPath(agentGroup.id, session.id), { force: true });
 
