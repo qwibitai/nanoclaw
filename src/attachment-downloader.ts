@@ -89,7 +89,15 @@ export function persistInboundAttachments(
         continue;
       }
       fs.mkdirSync(baseDir, { recursive: true });
-      const filename = sanitizeSegment(raw.name || raw.filename || 'file', 'file');
+      // Content-hash the filename to disambiguate same-named attachments
+      // (Slack/Discord paste every clipboard image as "image.png"). Prior fix
+      // 50556f7 lived in the pre-Phase-2.6 download path that 8f913c6 replaced
+      // with this function; the dedup didn't migrate over.
+      const sha = createHash('sha256').update(buffer).digest('hex').slice(0, 8);
+      const rawName = sanitizeSegment(raw.name || raw.filename || 'file', 'file');
+      const ext = path.extname(rawName);
+      const base = ext ? rawName.slice(0, -ext.length) : rawName;
+      const filename = `${base}-${sha}${ext}`;
       const absPath = path.join(baseDir, filename);
       fs.writeFileSync(absPath, buffer);
 
@@ -111,9 +119,8 @@ export function persistInboundAttachments(
             if (isNonSymlinkChain(groupRoot, 'sources', 'inbox')) {
               const sourcesInbox = path.join(groupRoot, 'sources', 'inbox');
               fs.mkdirSync(sourcesInbox, { recursive: true });
-              const sha = createHash('sha256').update(buffer).digest('hex').slice(0, 8);
-              const ext = path.extname(filename) || '.bin';
-              const finalName = `attachment-${sha}${ext}`;
+              const mirrorExt = ext || '.bin';
+              const finalName = `attachment-${sha}${mirrorExt}`;
               const finalPath = path.join(sourcesInbox, finalName);
               // Codex F11 round 4 (2026-05-05): the prior tmpPath was
               // `<finalName>.tmp` — fully predictable from attacker-supplied
