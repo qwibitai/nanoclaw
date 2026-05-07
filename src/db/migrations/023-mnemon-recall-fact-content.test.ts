@@ -22,7 +22,11 @@ describe('023-mnemon-recall-fact-content', () => {
     runMnemonIngestMigrations(db);
     runMnemonRecallFactContentMigration(db);
 
-    const cols = db.prepare(`PRAGMA table_info(recall_outcomes)`).all() as { name: string; dflt_value: string | null; notnull: number }[];
+    const cols = db.prepare(`PRAGMA table_info(recall_outcomes)`).all() as {
+      name: string;
+      dflt_value: string | null;
+      notnull: number;
+    }[];
     const fce = cols.find((c) => c.name === 'fact_content_excerpt');
     expect(fce).toBeDefined();
     expect(fce!.notnull).toBe(1);
@@ -35,7 +39,9 @@ describe('023-mnemon-recall-fact-content', () => {
     runMnemonRecallFactContentMigration(db);
     runMnemonRecallFactContentMigration(db);
 
-    const versions = db.prepare(`SELECT name FROM schema_version WHERE name = 'mnemon-recall-fact-content-v1'`).all() as { name: string }[];
+    const versions = db
+      .prepare(`SELECT name FROM schema_version WHERE name = 'mnemon-recall-fact-content-v1'`)
+      .all() as { name: string }[];
     expect(versions.length).toBe(1);
   });
 
@@ -51,7 +57,11 @@ describe('023-mnemon-recall-fact-content', () => {
 
     runMnemonRecallFactContentMigration(db);
 
-    const rows = db.prepare(`SELECT recall_event_id, fact_id, fact_content_excerpt FROM recall_outcomes`).all() as { recall_event_id: string; fact_id: string; fact_content_excerpt: string }[];
+    const rows = db.prepare(`SELECT recall_event_id, fact_id, fact_content_excerpt FROM recall_outcomes`).all() as {
+      recall_event_id: string;
+      fact_id: string;
+      fact_content_excerpt: string;
+    }[];
     expect(rows.length).toBe(1);
     expect(rows[0]!.fact_content_excerpt).toBe('');
   });
@@ -61,7 +71,9 @@ describe('023-mnemon-recall-fact-content', () => {
     runMnemonIngestMigrations(db);
     runMnemonRecallFactContentMigration(db);
 
-    const row = db.prepare(`SELECT version, name FROM schema_version WHERE name = 'mnemon-recall-fact-content-v1'`).get() as { version: number; name: string } | undefined;
+    const row = db
+      .prepare(`SELECT version, name FROM schema_version WHERE name = 'mnemon-recall-fact-content-v1'`)
+      .get() as { version: number; name: string } | undefined;
     expect(row).toBeDefined();
     expect(row!.name).toBe('mnemon-recall-fact-content-v1');
   });
