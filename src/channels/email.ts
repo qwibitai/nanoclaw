@@ -638,33 +638,71 @@ class EmailChannelAdapter implements ChannelAdapter {
     // UI won't connect the messages on their side.
     const body = threadMessages.length ? `${text}\n\n${renderThreadContext(threadMessages)}` : text;
 
+    // Stage outbound file attachments to a temp dir so gog --attach can pick
+    // them up by path. OutboundFile carries data + filename in-memory; gog
+    // takes filesystem paths. Cleaned up in the finally below regardless of
+    // send success/failure.
+    const stagedFiles: string[] = [];
+    let stagingDir: string | null = null;
+    if (message.files && message.files.length > 0) {
+      stagingDir = path.join(DATA_DIR, 'tmp', `email-out-${threadId}-${Date.now()}`);
+      try {
+        fs.mkdirSync(stagingDir, { recursive: true });
+        for (let i = 0; i < message.files.length; i++) {
+          const f = message.files[i];
+          const safeName = isSafeAttachmentName(f.filename) ? f.filename : `attachment-${i}`;
+          const full = path.join(stagingDir, safeName);
+          fs.writeFileSync(full, f.data);
+          stagedFiles.push(full);
+        }
+      } catch (err) {
+        log.warn('Email deliver: failed to stage attachments — sending without', {
+          account: acct.address,
+          err,
+        });
+      }
+    }
+
     try {
-      await this.runGog(
-        [
-          '-a',
-          acct.address,
-          'gmail',
-          'send',
-          '--thread-id',
-          threadId,
-          '--to',
-          recipient,
-          '--subject',
-          subject,
-          '--body-file',
-          '-',
-        ],
-        { stdin: body },
-      );
+      const args = [
+        '-a',
+        acct.address,
+        'gmail',
+        'send',
+        '--thread-id',
+        threadId,
+        '--to',
+        recipient,
+        '--subject',
+        subject,
+        '--body-file',
+        '-',
+      ];
+      // gog accepts --attach repeated for multiple files. Single
+      // comma-separated form is also documented but per-flag is unambiguous
+      // when filenames contain commas.
+      for (const fp of stagedFiles) {
+        args.push('--attach', fp);
+      }
+      await this.runGog(args, { stdin: body });
       log.info('Email reply sent', {
         account: acct.address,
         recipient,
         threadId,
         pilotMode: acct.pilotMode,
         threadMessages: threadMessages.length,
+        attachments: stagedFiles.length,
       });
     } catch (err) {
       log.error('Email deliver failed', { account: acct.address, recipient, threadId, err });
+    } finally {
+      if (stagingDir) {
+        try {
+          fs.rmSync(stagingDir, { recursive: true, force: true });
+        } catch (err) {
+          log.warn('Email deliver: staged-attachments cleanup failed', { stagingDir, err });
+        }
+      }
     }
     return undefined;
   }
@@ -836,7 +874,11 @@ class EmailChannelAdapter implements ChannelAdapter {
         subject,
         botAccount: acct.address,
         ...(attachmentRefs.length > 0
-          ? { attachments: attachmentRefs.filter((a) => a.localPath).map((a) => ({ path: path.join(DATA_DIR, a.localPath!), contentType: a.contentType, name: a.name })) }
+          ? {
+              attachments: attachmentRefs
+                .filter((a) => a.localPath)
+                .map((a) => ({ path: path.join(DATA_DIR, a.localPath!), contentType: a.contentType, name: a.name })),
+            }
           : {}),
         // Useful for the agent's persona to know how the message was routed.
         // E.g. calendar-watch can tell whether it received a calendar invite
@@ -958,10 +1000,7 @@ class EmailChannelAdapter implements ChannelAdapter {
 
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
-      const safeBase =
-        p.filename && isSafeAttachmentName(p.filename)
-          ? p.filename
-          : `attachment-${i}`;
+      const safeBase = p.filename && isSafeAttachmentName(p.filename) ? p.filename : `attachment-${i}`;
       const fileName = `email-${message.id}-${i}-${safeBase}`;
       const ref: { name: string; contentType: string; size?: number; localPath?: string } = {
         name: p.filename,
@@ -970,11 +1009,16 @@ class EmailChannelAdapter implements ChannelAdapter {
       };
       try {
         await this.runGog([
-          '-a', acct.address,
-          'gmail', 'attachment',
-          message.id, p.attachmentId,
-          '--out', outDir,
-          '--name', fileName,
+          '-a',
+          acct.address,
+          'gmail',
+          'attachment',
+          message.id,
+          p.attachmentId,
+          '--out',
+          outDir,
+          '--name',
+          fileName,
         ]);
         ref.localPath = `attachments/${fileName}`;
         log.info('Email attachment downloaded', {
