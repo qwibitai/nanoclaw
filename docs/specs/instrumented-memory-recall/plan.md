@@ -10,7 +10,7 @@
 | | |
 |-|-|
 | Task groups | 5 |
-| Total tasks | 21 |
+| Total tasks | 20 |
 | File conflicts | None (resolved) |
 | Waived review findings | 0 (cycle-3 MUST-FIX evaporated by simplification per D35-D40; SHOULD-FIX retained as inline ASSERT lines) |
 
@@ -34,7 +34,7 @@ Group A (Schema + Config + .gitignore)
     │       │
     │       ├──> Group E (Eval harness + docs)
     │       │
-    ├──> Group C (Daemon: judge-client + judge + spearman + health + sweep wiring)
+    ├──> Group C (Daemon: judge-client + judge + health + sweep wiring)
     │       │
     │       └──> Group E (final docs reflect daemon behavior)
     │
@@ -72,8 +72,6 @@ Group A unblocks B, C, D. Groups B, C, D run in parallel after A. Group E runs l
 | `src/index.ts` | B | B5 | MODIFY |
 | `src/memory-daemon/recall-judge/judge-client.ts` | C | C1 | CREATE |
 | `src/memory-daemon/recall-judge/judge-client.test.ts` | C | C1 | CREATE |
-| `src/memory-daemon/recall-judge/spearman.ts` | C | C2 | CREATE |
-| `src/memory-daemon/recall-judge/spearman.test.ts` | C | C2 | CREATE |
 | `src/memory-daemon/recall-judge/judge.ts` | C | C3 | CREATE |
 | `src/memory-daemon/recall-judge/judge.test.ts` | C | C3 | CREATE |
 | `src/memory-daemon/health.ts` | C | C4 | MODIFY |
@@ -953,88 +951,6 @@ test_throws_on_non_json_response:
 
 ---
 
-### Task C2: Create Spearman ρ helper (diagnostic only)
-
-**File:** `src/memory-daemon/recall-judge/spearman.ts`
-**Operation:** CREATE
-**Test file:** `src/memory-daemon/recall-judge/spearman.test.ts`
-
-**Approach:**
-Pure-function Spearman rank correlation with Fisher-z 95% CI. Used only as a diagnostic in `health.ts` (Task C4 surfaces `diagnostic_spearman_rho` and `diagnostic_spearman_rho_ci_lower`); does NOT gate any decision (per cycle-3 simplification — sampling cutover removed). ~60-80 LOC including tied-rank correction and Fisher transformation.
-
-**Interface / signature:**
-```typescript
-export interface SpearmanResult {
-  rho: number;             // -1..1
-  ciLower95: number;       // -1..1, Fisher-z transformed
-  ciUpper95: number;       // -1..1
-  n: number;               // sample size after NaN/null filtering
-}
-
-export function computeSpearman(
-  x: Array<number | null>,
-  y: Array<number | null>
-): SpearmanResult | null;
-//   Returns null if N < 3 (insufficient sample) or arrays are different lengths.
-//   Pairs with NaN/null in either array are filtered out before computation.
-//   Tied-rank correction applied (mean of tied ranks).
-```
-
-ASSERT: returns null when N < 3 (insufficient sample for any correlation).
-ASSERT: returns null when input arrays have different lengths.
-ASSERT: tied-rank correction applied (multiple equal values get the mean of their would-be ranks).
-ASSERT: Fisher transformation: `r_z = atanh(rho)`, `CI_z = r_z ± 1.96/sqrt(N-3)`, `CI_r = tanh(CI_z)`.
-ASSERT: NaN/null pairs filtered before ranking — does NOT corrupt with imputation.
-ASSERT: pure function — no side effects, no IO.
-
-**Test cases:**
-```
-test_perfect_positive_correlation:
-  Setup:    x=[1,2,3,4,5], y=[10,20,30,40,50]
-  Action:   computeSpearman(x, y)
-  Assert:   rho ≈ 1.0 (within 1e-9)
-            n === 5
-
-test_perfect_negative_correlation:
-  Setup:    x=[1,2,3,4,5], y=[50,40,30,20,10]
-  Action:   computeSpearman(x, y)
-  Assert:   rho ≈ -1.0
-
-test_tied_rank_correction:
-  Setup:    x=[1,2,2,3,4], y=[10,20,20,30,40]  // ties in both arrays
-  Action:   computeSpearman(x, y)
-  Assert:   rho ≈ 1.0 (perfect correlation despite ties)
-
-test_filters_nulls:
-  Setup:    x=[1, null, 3, 4, 5], y=[10, 20, null, 40, 50]
-  Action:   computeSpearman(x, y)
-  Assert:   n === 3 (pairs with null filtered)
-            rho computed from indices [0, 3, 4] only
-
-test_returns_null_on_short_input:
-  Setup:    x=[1,2], y=[1,2]
-  Action:   computeSpearman(x, y)
-  Assert:   returns null
-
-test_fisher_ci_bounds:
-  Setup:    x and y producing known rho (use stats reference data — e.g., 50 paired uniform samples)
-  Action:   computeSpearman(x, y)
-  Assert:   ciLower95 and ciUpper95 are within ±0.05 of expected Fisher CI for that N
-```
-
-**Acceptance criteria:**
-- [ ] Pure function — no IO, no side effects
-- [ ] Returns null when N<3 or array lengths mismatch
-- [ ] Tied-rank correction applied
-- [ ] Fisher CI computed correctly (verify against reference data)
-- [ ] NaN/null pairs filtered, not imputed
-- [ ] All 6 test cases pass
-- [ ] No new dependencies added
-
-**Pre-conditions:** None.
-
----
-
 ### Task C3: Create daemon judge sweep processor
 
 **File:** `src/memory-daemon/recall-judge/judge.ts`
@@ -1152,7 +1068,7 @@ test_ambiguity_uses_thread_index:
 - [ ] All 9 test cases pass
 - [ ] Test seams `setJudgeProcessorDbForTest`, `setArchiveDbForTest` exported
 
-**Pre-conditions:** A1 schema, C1 judge-client, A2 daemon_state migration applied (for nightly task interaction). C2 spearman.ts NOT a hard dependency for this task (used only by C4 health).
+**Pre-conditions:** A1 schema, C1 judge-client, A2 daemon_state migration applied (for nightly task interaction).
 
 ---
 
@@ -1174,8 +1090,6 @@ interface PerGroupState {
     useful_fact_rate_7d: number;         // % of returned facts scoring ≥1, 0..1
     load_bearing_event_rate_7d: number;  // % of events with ≥1 score=2 fact, 0..1
     rank_distribution_7d: { score_0: number; score_1: number; score_2: number };
-    diagnostic_spearman_rho: number | null;
-    diagnostic_spearman_rho_ci_lower: number | null;
     judge_failure_rate_24h: number;
     ambiguous_correlation_rate_24h: number;
     judged_count_total: number;
@@ -1197,7 +1111,6 @@ ASSERT: `recall_quality` block is a new sibling of existing fields (NOT replacin
 ASSERT: aggregation queries use `recall_outcomes` table directly (no caching layer).
 ASSERT: `mergeHostOllamaStatus` is best-effort — file missing is normal (host hasn't started OR memory disabled), NOT an error.
 ASSERT: `mergeHostOllamaStatus` does NOT write to `data/.host-ollama-status.json` (host-only owner per D36).
-ASSERT: `diagnostic_spearman_rho` uses `computeSpearman` (C2) on the last 200 judged events for the group; null if N<3.
 ASSERT: SQL uses SQLite-correct syntax for time windows (`datetime('now', '-24 hours')`, `datetime('now', '-7 days')`).
 
 **Test cases:**
@@ -1227,11 +1140,6 @@ test_rank_distribution:
   Action:   recorder.flush()
   Assert:   rank_distribution_7d === { score_0: 0.3, score_1: 0.5, score_2: 0.2 }
 
-test_diagnostic_spearman_null_on_low_n:
-  Setup:    only 2 judged outcomes
-  Action:   recorder.flush()
-  Assert:   diagnostic_spearman_rho === null
-
 test_merge_host_ollama_status:
   Setup:    write {"ok":true,"checkedAt":"2026-05-07T00:00:00Z","endpoint":"x"} to test path
   Action:   recorder.mergeHostOllamaStatus(); recorder.flush()
@@ -1245,13 +1153,13 @@ test_merge_host_ollama_missing_is_noop:
 ```
 
 **Acceptance criteria:**
-- [ ] All 10 new `recall_quality` fields present in flushed JSON
+- [ ] All 8 new `recall_quality` fields present in flushed JSON
 - [ ] All existing fields preserved (no key removal, no key rename)
 - [ ] `mergeHostOllamaStatus` reads `data/.host-ollama-status.json` (best-effort, no-op on missing)
-- [ ] All 8 test cases pass
+- [ ] All 7 test cases pass
 - [ ] Existing health.ts tests still pass (regression)
 
-**Pre-conditions:** A1 schema, C2 spearman.ts.
+**Pre-conditions:** A1 schema.
 
 ---
 
@@ -1834,7 +1742,7 @@ ASSERT: file references (paths, env vars) match Group A-D implementations exactl
 | **Rejected: feedback_enabled=false complexity (D37 supersedes D30)** | REJECTED | A4 ASSERT (default true); B3 ASSERT (host writes pending rows on every recall when feedback_enabled true; no disabled-row semantics) |
 | **Rejected: Adversarial fact fixtures (D40 supersedes D23)** | REJECTED | E1 acceptance (no adversarial fixture requirement); C1 ASSERT (one untrusted-data preamble line, NOT heavy injection scaffolding) |
 | **Rejected: Cross-group consent / cross_group_recall_log table (cycle-3 simplification)** | REJECTED | A1 schema does NOT include cross_group_recall_log; D3 fan-out has no audit-log writes |
-| **Rejected: Spearman diagnostic gating any HARD action (D19 / cycle-3)** | REJECTED | C4 ASSERT (diagnostic_spearman_rho is informational only — no gating); no sampling cutover code anywhere |
+| **Rejected: Spearman diagnostic in health.json (Active MVP CUT)** | REJECTED | No `spearman.ts` module; no `diagnostic_spearman_rho` field in C4 PerGroupState; no sampling cutover code anywhere. Operators compute Spearman ρ from raw `recall_outcomes` rows when curious. |
 | **Rejected: Automatic recall rerank by historical judge score (D39)** | REJECTED | D3 fan-out uses RRF only (input from current mnemon recall) — does NOT consult recall_outcomes for boosting; no per-fact usefulness boost |
 | **Rejected: GC suggestions / importance recalibration tools (D39)** | REJECTED | E group has no GC tool; no importance recalibration script; operators query `recall_outcomes` manually if curious |
 | A1 (judge prompt low grade-inflation) | UNVALIDATED ASSUMPTION | E2 acceptance (validated via 20-turn manual review documented in E3 runbook) |
