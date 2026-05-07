@@ -249,10 +249,14 @@ describe('LineChannelAdapter inbound webhook', () => {
     expect(setup.inbound[0]!.platformId).toBe('line:group:C42');
     expect(setup.inbound[0]!.message.isGroup).toBe(true);
 
-    expect(setup.metadata.some((m) => m.platformId === 'line:group:C42' && m.name === 'JapanAI Startup' && m.isGroup === true)).toBe(true);
+    expect(
+      setup.metadata.some(
+        (m) => m.platformId === 'line:group:C42' && m.name === 'JapanAI Startup' && m.isGroup === true,
+      ),
+    ).toBe(true);
   });
 
-  it('drops non-text messages silently', async () => {
+  it('renders sticker messages as text placeholders', async () => {
     const setup = makeSetupSpy();
     await spinUp(setup.config);
 
@@ -262,7 +266,29 @@ describe('LineChannelAdapter inbound webhook', () => {
           type: 'message',
           source: { type: 'user', userId: 'U1' },
           timestamp: 1700000000000,
-          message: { id: 'sticker1', type: 'sticker' },
+          message: { id: 'sticker1', type: 'sticker', packageId: '11537', stickerId: '52002734' },
+        },
+      ],
+    };
+    const body = JSON.stringify(event);
+    const res = await postWebhook(port, body, sign(body));
+    expect(res.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(setup.inbound).toHaveLength(1);
+    expect(setup.inbound[0].message.content.text).toBe('[Sticker: 11537:52002734]');
+  });
+
+  it('drops unknown message types silently', async () => {
+    const setup = makeSetupSpy();
+    await spinUp(setup.config);
+
+    const event = {
+      events: [
+        {
+          type: 'message',
+          source: { type: 'user', userId: 'U1' },
+          timestamp: 1700000000000,
+          message: { id: 'unknown1', type: 'imagemap' },
         },
       ],
     };

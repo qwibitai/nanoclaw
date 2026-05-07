@@ -30,11 +30,14 @@
  *   LINE_WEBHOOK_PATH — request path (default '/webhook')
  */
 import crypto from 'crypto';
+import fs from 'fs';
 import http from 'http';
+import path from 'path';
 
+import { ASSISTANT_NAME, DATA_DIR } from '../config.js';
+import { isSafeAttachmentName } from '../attachment-safety.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
-import { ASSISTANT_NAME } from '../config.js';
 import type { ChannelAdapter, ChannelSetup, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 
@@ -42,6 +45,11 @@ const DEFAULT_PORT = 10280;
 const DEFAULT_PATH = '/webhook';
 const MAX_MESSAGE_CHARS = 5000;
 const LINE_API_BASE = 'https://api.line.me';
+// Binary content for image/video/audio/file messages lives on a separate
+// host (api-data.line.me, not api.line.me). Same access token, same auth
+// header, but the API base differs — this caught the v1 adapter the first
+// time it shipped.
+const LINE_DATA_API_BASE = 'https://api-data.line.me';
 
 interface LineEventSource {
   type: 'user' | 'group' | 'room';
@@ -54,6 +62,21 @@ interface LineMessage {
   id: string;
   type: string;
   text?: string;
+  // For type='file'. Image/video/audio don't carry a filename — LINE
+  // generates one server-side and we synthesize a name on download.
+  fileName?: string;
+  fileSize?: number;
+  // For image/video. 'line' = stored on LINE servers, fetch via the
+  // content API. 'external' = host-provided URL (originalContentUrl).
+  contentProvider?: { type: 'line' | 'external'; originalContentUrl?: string };
+  // Sticker
+  packageId?: string;
+  stickerId?: string;
+  // Location
+  title?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 interface LineEvent {
@@ -119,6 +142,7 @@ interface LineAdapterConfig {
   port: number;
   path: string;
   apiBase?: string; // override for tests
+  dataApiBase?: string; // override for tests (api-data.line.me)
 }
 
 class LineChannelAdapter implements ChannelAdapter {
@@ -169,9 +193,7 @@ class LineChannelAdapter implements ChannelAdapter {
     const chunks = splitForLineLimit(text);
     let lastId: string | undefined;
     for (const chunk of chunks) {
-      const resp = (await this.pushMessage(parsed.id, chunk)) as
-        | { sentMessages?: Array<{ id: string }> }
-        | null;
+      const resp = (await this.pushMessage(parsed.id, chunk)) as { sentMessages?: Array<{ id: string }> } | null;
       lastId = resp?.sentMessages?.[0]?.id ?? lastId;
     }
     return lastId;
@@ -249,7 +271,11 @@ class LineChannelAdapter implements ChannelAdapter {
 
   private async processEvent(event: LineEvent): Promise<void> {
     if (event.type !== 'message' || !event.message) return;
-    if (event.message.type !== 'text' || !event.message.text) return; // Text-only for now
+
+    // Render the message into (text, attachments, isAttachmentOnly). For
+    // unknown / unsupported types renderMessage returns null and we drop.
+    const rendered = await this.renderMessage(event.message);
+    if (!rendered) return;
 
     const platformId = platformIdForSource(event.source);
     if (!platformId) {
@@ -274,14 +300,20 @@ class LineChannelAdapter implements ChannelAdapter {
     // catches both that case (the bot's display-name normally appears
     // as "@jibot" in the rendered text) and explicit "jibot" mentions.
     // Without this, attentive LINE groups never engage because
-    // mention-sticky requires isMention=true.
-    const text = event.message.text || '';
-    const botMentionedInGroup =
-      isGroup && new RegExp(`(?:^|\\W)@?${ASSISTANT_NAME}(?:$|\\W)`, 'i').test(text);
+    // mention-sticky requires isMention=true. Attachments without text
+    // (e.g. a bare image drop in a DM) still need to engage; in groups
+    // the user has to either @-mention the bot or include its name in
+    // the caption to trigger.
+    const botMentionedInGroup = isGroup && new RegExp(`(?:^|\\W)@?${ASSISTANT_NAME}(?:$|\\W)`, 'i').test(rendered.text);
     this.setupConfig?.onInbound(platformId, null, {
       id: event.message.id,
       kind: 'chat',
-      content: { text: event.message.text, sender: senderName, senderId: senderUserId ?? null },
+      content: {
+        text: rendered.text,
+        sender: senderName,
+        senderId: senderUserId ?? null,
+        ...(rendered.attachments.length > 0 ? { attachments: rendered.attachments } : {}),
+      },
       timestamp,
       isGroup,
       // DMs are by definition addressed to the bot — same convention as the
@@ -292,10 +324,111 @@ class LineChannelAdapter implements ChannelAdapter {
     });
   }
 
+  /**
+   * Render an inbound LINE message into the text + attachments shape the
+   * router expects. Mirrors signal.ts: image/video/audio/file get downloaded
+   * to disk and surfaced as `[Image: <path>]` / `[File: <name> at <path>]`
+   * lines plus structured attachments[] entries; sticker and location get
+   * text placeholders so the agent at least knows something arrived.
+   *
+   * Returns null when the message type is one we can't render meaningfully
+   * (so the caller can drop it instead of routing silence).
+   *
+   * Failure to download a binary doesn't drop the message: we surface the
+   * placeholder with an error note so the agent can ask the user to resend.
+   */
+  private async renderMessage(
+    msg: LineMessage,
+  ): Promise<{ text: string; attachments: Array<{ path: string; contentType: string }> } | null> {
+    const attachments: Array<{ path: string; contentType: string }> = [];
+
+    if (msg.type === 'text') {
+      if (!msg.text) return null;
+      return { text: msg.text, attachments };
+    }
+
+    if (msg.type === 'image' || msg.type === 'video' || msg.type === 'audio' || msg.type === 'file') {
+      const ext = msg.type === 'image' ? '.jpg' : msg.type === 'video' ? '.mp4' : msg.type === 'audio' ? '.m4a' : '';
+      // For 'file', LINE supplies the original filename. Sanitize it via
+      // isSafeAttachmentName before letting it land on disk; if it fails
+      // (path traversal, control chars, etc.) fall back to the message id.
+      const proposedName =
+        msg.type === 'file' && msg.fileName && isSafeAttachmentName(msg.fileName)
+          ? `${msg.id}-${msg.fileName}`
+          : `${msg.id}${ext}`;
+      const localPath = path.join(DATA_DIR, 'attachments', `line-${proposedName}`);
+      const ok = await this.downloadContent(msg, localPath);
+      const label = msg.fileName ?? `${msg.type}-${msg.id}`;
+      if (!ok) {
+        // Couldn't download — tell the agent so it can ask for a resend.
+        return { text: `[${msg.type === 'image' ? 'Image' : 'File'}: ${label} — download failed]`, attachments };
+      }
+      const contentType =
+        msg.type === 'image' ? 'image/jpeg'
+        : msg.type === 'video' ? 'video/mp4'
+        : msg.type === 'audio' ? 'audio/m4a'
+        : 'application/octet-stream';
+      attachments.push({ path: localPath, contentType });
+      const line = msg.type === 'image' ? `[Image: ${localPath}]` : `[File: ${label} at ${localPath}]`;
+      return { text: line, attachments };
+    }
+
+    if (msg.type === 'sticker') {
+      // Stickers don't carry text. The package+sticker id pair is opaque
+      // but unique; agents that care can look up the sticker library.
+      return { text: `[Sticker: ${msg.packageId ?? '?'}:${msg.stickerId ?? '?'}]`, attachments };
+    }
+
+    if (msg.type === 'location') {
+      const parts: string[] = [];
+      if (msg.title) parts.push(msg.title);
+      if (msg.address) parts.push(msg.address);
+      if (typeof msg.latitude === 'number' && typeof msg.longitude === 'number') {
+        parts.push(`(${msg.latitude}, ${msg.longitude})`);
+      }
+      return { text: `[Location: ${parts.join(' — ') || 'no details'}]`, attachments };
+    }
+
+    log.warn('LINE: unsupported message type', { type: msg.type, id: msg.id });
+    return null;
+  }
+
+  /** Download a LINE binary message to localPath. Returns true on success. */
+  private async downloadContent(msg: LineMessage, localPath: string): Promise<boolean> {
+    try {
+      // Honor 'external' contentProvider if present — those binaries live
+      // outside LINE and we just GET the URL directly. Common case is
+      // 'line' which we fetch via /v2/bot/message/{id}/content with auth.
+      let url: string;
+      let headers: Record<string, string> | undefined;
+      if (msg.contentProvider?.type === 'external' && msg.contentProvider.originalContentUrl) {
+        url = msg.contentProvider.originalContentUrl;
+      } else {
+        url = `${this.cfg.dataApiBase ?? LINE_DATA_API_BASE}/v2/bot/message/${encodeURIComponent(msg.id)}/content`;
+        headers = { Authorization: `Bearer ${this.cfg.accessToken}` };
+      }
+      const res = await fetch(url, { method: 'GET', headers });
+      if (!res.ok) {
+        log.warn('LINE content fetch failed', { id: msg.id, type: msg.type, status: res.status });
+        return false;
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      fs.mkdirSync(path.dirname(localPath), { recursive: true });
+      fs.writeFileSync(localPath, buf);
+      log.info('LINE attachment downloaded', { id: msg.id, type: msg.type, path: localPath, bytes: buf.length });
+      return true;
+    } catch (err) {
+      log.warn('LINE content download error', { id: msg.id, type: msg.type, err });
+      return false;
+    }
+  }
+
   private async publishGroupName(source: LineEventSource): Promise<void> {
     if (!this.setupConfig) return;
     if (source.type === 'group' && source.groupId) {
-      const summary = await this.apiGetJson<{ groupName?: string }>(`/v2/bot/group/${encodeURIComponent(source.groupId)}/summary`);
+      const summary = await this.apiGetJson<{ groupName?: string }>(
+        `/v2/bot/group/${encodeURIComponent(source.groupId)}/summary`,
+      );
       this.setupConfig.onMetadata(`line:group:${source.groupId}`, summary?.groupName ?? undefined, true);
     } else if (source.type === 'room' && source.roomId) {
       // LINE rooms have no name endpoint — pass id through.
@@ -309,9 +442,13 @@ class LineChannelAdapter implements ChannelAdapter {
 
     let profile: LineProfile | null = null;
     if (source.type === 'group' && source.groupId) {
-      profile = await this.apiGetJson<LineProfile>(`/v2/bot/group/${encodeURIComponent(source.groupId)}/member/${encodeURIComponent(userId)}`);
+      profile = await this.apiGetJson<LineProfile>(
+        `/v2/bot/group/${encodeURIComponent(source.groupId)}/member/${encodeURIComponent(userId)}`,
+      );
     } else if (source.type === 'room' && source.roomId) {
-      profile = await this.apiGetJson<LineProfile>(`/v2/bot/room/${encodeURIComponent(source.roomId)}/member/${encodeURIComponent(userId)}`);
+      profile = await this.apiGetJson<LineProfile>(
+        `/v2/bot/room/${encodeURIComponent(source.roomId)}/member/${encodeURIComponent(userId)}`,
+      );
     } else {
       profile = await this.apiGetJson<LineProfile>(`/v2/bot/profile/${encodeURIComponent(userId)}`);
     }
@@ -374,7 +511,12 @@ export { LineChannelAdapter };
 
 registerChannelAdapter('line', {
   factory: () => {
-    const env = readEnvFile(['LINE_CHANNEL_ACCESS_TOKEN', 'LINE_CHANNEL_SECRET', 'LINE_WEBHOOK_PORT', 'LINE_WEBHOOK_PATH']);
+    const env = readEnvFile([
+      'LINE_CHANNEL_ACCESS_TOKEN',
+      'LINE_CHANNEL_SECRET',
+      'LINE_WEBHOOK_PORT',
+      'LINE_WEBHOOK_PATH',
+    ]);
     if (!env.LINE_CHANNEL_ACCESS_TOKEN || !env.LINE_CHANNEL_SECRET) return null;
     const port = env.LINE_WEBHOOK_PORT ? parseInt(env.LINE_WEBHOOK_PORT, 10) : DEFAULT_PORT;
     return new LineChannelAdapter({
