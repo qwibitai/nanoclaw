@@ -5,7 +5,7 @@ import path from 'path';
 import { describe, it, expect } from 'bun:test';
 
 import { createProvider } from './factory.js';
-import { CodexProvider, resolveClaudeImports } from './codex.js';
+import { CodexProvider, composeAvailableSkills, resolveClaudeImports } from './codex.js';
 
 describe('createProvider (codex)', () => {
   it('returns CodexProvider for codex', () => {
@@ -76,5 +76,72 @@ describe('resolveClaudeImports', () => {
     const dir = scratchDir();
     const resolved = resolveClaudeImports('email @someone for details', dir);
     expect(resolved).toBe('email @someone for details');
+  });
+});
+
+describe('composeAvailableSkills', () => {
+  function makeSkillsDir(skills: { name: string; frontmatter?: string; body?: string }[]): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-'));
+    for (const s of skills) {
+      const skillDir = path.join(dir, s.name);
+      fs.mkdirSync(skillDir, { recursive: true });
+      const body = s.body ?? '# Body';
+      const content = s.frontmatter ? `---\n${s.frontmatter}\n---\n${body}` : body;
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), content);
+    }
+    return dir;
+  }
+
+  it('returns undefined when no skills dir exists', () => {
+    expect(composeAvailableSkills(path.join(os.tmpdir(), 'definitely-not-here-' + Date.now()))).toBeUndefined();
+  });
+
+  it('lists each skill with name + description from frontmatter', () => {
+    const dir = makeSkillsDir([
+      { name: 'make-website', frontmatter: 'name: make-website\ndescription: Build and publish a website.' },
+      { name: 'wiki', frontmatter: 'name: wiki\ndescription: Maintain a persistent wiki.' },
+    ]);
+    const out = composeAvailableSkills(dir)!;
+    expect(out).toContain('# Available skills');
+    expect(out).toContain('**make-website** — Build and publish a website.');
+    expect(out).toContain('**wiki** — Maintain a persistent wiki.');
+    expect(out).toContain('/app/skills/<name>/SKILL.md');
+  });
+
+  it('skips a skill without a description', () => {
+    const dir = makeSkillsDir([
+      { name: 'good', frontmatter: 'name: good\ndescription: Has one.' },
+      { name: 'no-desc', frontmatter: 'name: no-desc' },
+      { name: 'no-frontmatter' },
+    ]);
+    const out = composeAvailableSkills(dir)!;
+    expect(out).toContain('**good**');
+    expect(out).not.toContain('no-desc');
+    expect(out).not.toContain('no-frontmatter');
+  });
+
+  it('falls back to directory name when frontmatter omits the name field', () => {
+    const dir = makeSkillsDir([{ name: 'fallback', frontmatter: 'description: Has description but no name field.' }]);
+    const out = composeAvailableSkills(dir)!;
+    expect(out).toContain('**fallback** — Has description but no name field.');
+  });
+
+  it('returns undefined when no skills have descriptions', () => {
+    const dir = makeSkillsDir([{ name: 'naked', body: '# Just a body' }]);
+    expect(composeAvailableSkills(dir)).toBeUndefined();
+  });
+
+  it('sorts skills deterministically (alphabetical by directory name)', () => {
+    const dir = makeSkillsDir([
+      { name: 'zulu', frontmatter: 'name: zulu\ndescription: Z.' },
+      { name: 'alpha', frontmatter: 'name: alpha\ndescription: A.' },
+      { name: 'mike', frontmatter: 'name: mike\ndescription: M.' },
+    ]);
+    const out = composeAvailableSkills(dir)!;
+    const aIdx = out.indexOf('**alpha**');
+    const mIdx = out.indexOf('**mike**');
+    const zIdx = out.indexOf('**zulu**');
+    expect(aIdx).toBeLessThan(mIdx);
+    expect(mIdx).toBeLessThan(zIdx);
   });
 });
