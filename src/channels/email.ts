@@ -285,12 +285,14 @@ export function preroute(input: PrerouteInput): PrerouteDecision {
     return { kind: 'route', platformId: 'email:cal', reason: 'calendar' };
   }
 
-  // 3. Workstream — `#ws:<name>` in subject. Lower-cased and slugged so
-  //    `#ws:GMC` and `#ws:gmc` collapse to one platformId.
-  const wsMatch = /(?:^|\s)#ws:([A-Za-z0-9_-]+)/.exec(input.subject || '');
-  if (wsMatch) {
-    const wsName = wsMatch[1]!.toLowerCase();
-    return { kind: 'route', platformId: `email:ws:${wsName}`, reason: 'workstream' };
+  // 3. Workstream — any subject containing `#ws:<name>` routes to the single
+  //    `email:ws-dispatch` channel, which is wired to the `email-dispatch`
+  //    agent. The agent reads the tag from the subject at runtime and
+  //    routes from there (workstream-routes.json maps tag -> destination).
+  //    Centralizing on one platformId means we don't need a wiring per tag,
+  //    so a new `#ws:foo` works without any DB write.
+  if (/(?:^|\s)#ws:[A-Za-z0-9_-]+/.test(input.subject || '')) {
+    return { kind: 'route', platformId: 'email:ws-dispatch', reason: 'workstream' };
   }
 
   // 4. Default — pass through.

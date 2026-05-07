@@ -224,14 +224,16 @@ describe('preroute', () => {
     expect(r.kind === 'route' && r.platformId).toBe('email:cal');
   });
 
-  it('routes #ws:<name> to email:ws:<name> (lower-cased)', () => {
+  it('routes any #ws-tagged subject to the single email:ws-dispatch channel', () => {
+    // Centralized: the agent (email-dispatch) reads the tag from the subject
+    // at runtime, so we don't need a per-tag wiring.
     const r = preroute({ ...base, subject: 'Fwd: GMC update #ws:GMC' });
-    expect(r).toEqual({ kind: 'route', platformId: 'email:ws:gmc', reason: 'workstream' });
+    expect(r).toEqual({ kind: 'route', platformId: 'email:ws-dispatch', reason: 'workstream' });
   });
 
-  it('handles #ws tag with hyphen and underscore in the name', () => {
+  it('matches #ws tag regardless of name (still goes to ws-dispatch)', () => {
     const r = preroute({ ...base, subject: 'Fwd: x #ws:jp-ai_agent' });
-    expect(r.kind === 'route' && r.platformId).toBe('email:ws:jp-ai_agent');
+    expect(r.kind === 'route' && r.platformId).toBe('email:ws-dispatch');
   });
 
   it('passes through to default platformId when no filter matches', () => {
