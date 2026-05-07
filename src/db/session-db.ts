@@ -154,16 +154,24 @@ export function getMessageForRetry(
 }
 
 export function syncProcessingAcks(inDb: Database.Database, outDb: Database.Database): void {
-  const completed = outDb
-    .prepare("SELECT message_id FROM processing_ack WHERE status IN ('completed', 'failed')")
-    .all() as Array<{ message_id: string }>;
+  const acks = outDb
+    .prepare("SELECT message_id, status FROM processing_ack WHERE status IN ('completed', 'failed')")
+    .all() as Array<{ message_id: string; status: 'completed' | 'failed' }>;
 
-  if (completed.length === 0) return;
+  if (acks.length === 0) return;
 
-  const updateStmt = inDb.prepare("UPDATE messages_in SET status = 'completed' WHERE id = ? AND status != 'completed'");
+  // Propagate the actual ack status. Pre-fix this collapsed 'failed' →
+  // 'completed', erasing the runner's signal that a turn errored out and
+  // leaving operators thinking silent-failure days were healthy.
+  const setCompleted = inDb.prepare(
+    "UPDATE messages_in SET status = 'completed' WHERE id = ? AND status NOT IN ('completed','failed')",
+  );
+  const setFailed = inDb.prepare(
+    "UPDATE messages_in SET status = 'failed' WHERE id = ? AND status NOT IN ('completed','failed')",
+  );
   inDb.transaction(() => {
-    for (const { message_id } of completed) {
-      updateStmt.run(message_id);
+    for (const { message_id, status } of acks) {
+      (status === 'failed' ? setFailed : setCompleted).run(message_id);
     }
   })();
 }

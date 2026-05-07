@@ -30,15 +30,17 @@ export class MockProvider implements AgentProvider {
         yield { type: 'activity' };
         yield { type: 'init', continuation: `mock-session-${Date.now()}` };
 
-        // Process initial prompt
+        // Process initial prompt — emit a terminal success result so the
+        // poll-loop's silent-failure detector does not treat this as a
+        // dropped turn (subtype undefined would mean synthetic mid-turn).
         yield { type: 'activity' };
-        yield { type: 'result', text: responseFactory(input.prompt) };
+        yield { type: 'result', text: responseFactory(input.prompt), subtype: 'success' };
 
         // Process any pushed follow-ups
         while (!ended && !aborted) {
           if (pending.length > 0) {
             const msg = pending.shift()!;
-            yield { type: 'result', text: responseFactory(msg) };
+            yield { type: 'result', text: responseFactory(msg), subtype: 'success' };
             continue;
           }
           // Wait for push() or end()
@@ -51,7 +53,7 @@ export class MockProvider implements AgentProvider {
         // Drain remaining
         while (pending.length > 0) {
           const msg = pending.shift()!;
-          yield { type: 'result', text: responseFactory(msg) };
+          yield { type: 'result', text: responseFactory(msg), subtype: 'success' };
         }
       },
     };

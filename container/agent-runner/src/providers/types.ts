@@ -71,7 +71,14 @@ export interface AgentQuery {
 
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
-  | { type: 'result'; text: string | null }
+  /**
+   * `subtype` carries the provider's outcome label: 'success' for a clean
+   * turn, 'error_max_turns' / 'error_during_execution' / etc. for failures.
+   * `undefined` means a synthetic mid-turn signal (e.g. compact_boundary)
+   * that should NOT be treated as the turn's terminal result. The poll-loop
+   * uses this to distinguish a clean completion from a silent SDK failure.
+   */
+  | { type: 'result'; text: string | null; subtype?: string | null }
   | { type: 'error'; message: string; retryable: boolean; classification?: string }
   | { type: 'progress'; message: string }
   /**
