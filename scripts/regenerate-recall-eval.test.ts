@@ -65,6 +65,33 @@ describe('synthesizeQueryForFact default backend config', () => {
   });
 });
 
+describe('C16 same-provider rejection', () => {
+  const origJudge = process.env.MEMORY_RECALL_JUDGE_BACKEND;
+  const origSynth = process.env.MEMORY_RECALL_EVAL_SYNTHESIZER_BACKEND;
+
+  afterEach(() => {
+    if (origJudge !== undefined) process.env.MEMORY_RECALL_JUDGE_BACKEND = origJudge;
+    else delete process.env.MEMORY_RECALL_JUDGE_BACKEND;
+    if (origSynth !== undefined) process.env.MEMORY_RECALL_EVAL_SYNTHESIZER_BACKEND = origSynth;
+    else delete process.env.MEMORY_RECALL_EVAL_SYNTHESIZER_BACKEND;
+    _resetEvalSynthesizerBackendForTest();
+  });
+
+  it('throws when synth and judge providers match', async () => {
+    process.env.MEMORY_RECALL_JUDGE_BACKEND = 'anthropic:haiku-4-5:default';
+    process.env.MEMORY_RECALL_EVAL_SYNTHESIZER_BACKEND = 'anthropic:haiku-4-5:default';
+    _resetEvalSynthesizerBackendForTest();
+    await expect(synthesizeQueryForFact('a fact')).rejects.toThrow(/C16 violation/);
+  });
+
+  it('passes when synth differs from judge', async () => {
+    process.env.MEMORY_RECALL_JUDGE_BACKEND = 'anthropic:haiku-4-5:default';
+    process.env.MEMORY_RECALL_EVAL_SYNTHESIZER_BACKEND = 'codex:gpt-5.5:medium';
+    setEvalSynthesizerBackendForTest(async () => 'ok');
+    await expect(synthesizeQueryForFact('a fact')).resolves.toBe('ok');
+  });
+});
+
 describe('saveEvalSet / loadEvalSet', () => {
   let tmpFile: string;
 

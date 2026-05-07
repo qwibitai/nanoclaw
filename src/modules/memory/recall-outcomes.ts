@@ -4,33 +4,16 @@
  */
 import type Database from 'better-sqlite3';
 import { log } from '../../log.js';
+import { openMnemonIngestDb, runMnemonIngestMigrations } from '../../db/migrations/019-mnemon-ingest-db.js';
+import { JUDGE_PROMPT_VERSION } from '../../memory-daemon/recall-judge/judge-client.js';
 
-// JUDGE_PROMPT_VERSION is owned by Group C (src/memory-daemon/recall-judge/judge-client.ts).
-// Import it from there so version bumps cascade automatically. If C1 hasn't
-// been created yet, TypeScript will catch the missing module at typecheck time.
-let _judgePromptVersion: string | null = null;
-
-async function getJudgePromptVersion(): Promise<string> {
-  if (_judgePromptVersion !== null) return _judgePromptVersion;
-  try {
-    const mod = await import('../../memory-daemon/recall-judge/judge-client.js');
-    _judgePromptVersion = (mod as { JUDGE_PROMPT_VERSION?: string }).JUDGE_PROMPT_VERSION ?? 'v1';
-  } catch {
-    _judgePromptVersion = 'v1';
-  }
-  return _judgePromptVersion;
-}
-
-// Synchronous version used internally — populated lazily on first insert.
-// We use a module-level preload so tests that inject a DB get the version synced.
-let _judgePromptVersionSync: string = 'v1';
-void getJudgePromptVersion().then((v) => {
-  _judgePromptVersionSync = v;
-});
-
-// Test seam — override the sync version for unit tests.
+// Test seam — override the version for unit tests.
+let _judgePromptVersionForTest: string | null = null;
 export function _setJudgePromptVersionForTest(v: string): void {
-  _judgePromptVersionSync = v;
+  _judgePromptVersionForTest = v;
+}
+function activeJudgePromptVersion(): string {
+  return _judgePromptVersionForTest ?? JUDGE_PROMPT_VERSION;
 }
 
 export interface PendingOutcomeInput {
@@ -42,6 +25,7 @@ export interface PendingOutcomeInput {
   triggerThreadId: string | null;
   triggerSentAt: string;
   triggerSenderId: string | null;
+  factContentExcerpt: string;
 }
 
 let _db: Database.Database | null = null;
@@ -55,19 +39,15 @@ let _prodDb: Database.Database | null = null;
 function getDb(): Database.Database | null {
   if (_db !== null) return _db;
   if (_prodDb !== null) return _prodDb;
-  // Production path: open the ingest DB synchronously. We can't use dynamic
-  // import here because insertPendingOutcomes is synchronous. The production
-  // caller (recall-injection.ts) is in the same process and has already
-  // imported 019 migrations, so they're in the module cache.
+  // Production path: open the ingest DB synchronously via the static import.
+  // The migrations are append-only and idempotent.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const m =
-      require('../../db/migrations/019-mnemon-ingest-db.js') as typeof import('../../db/migrations/019-mnemon-ingest-db.js');
-    const db = m.openMnemonIngestDb();
-    m.runMnemonIngestMigrations(db);
+    const db = openMnemonIngestDb();
+    runMnemonIngestMigrations(db);
     _prodDb = db;
     return _prodDb;
-  } catch {
+  } catch (err) {
+    log.warn('recall-outcomes: failed to open ingest DB', { err });
     return null;
   }
 }
@@ -87,7 +67,7 @@ export function insertPendingOutcomes(rows: PendingOutcomeInput[]): { inserted: 
   }
 
   const now = new Date().toISOString();
-  const version = _judgePromptVersionSync;
+  const version = activeJudgePromptVersion();
 
   try {
     const stmt = db.prepare(`
@@ -95,12 +75,14 @@ export function insertPendingOutcomes(rows: PendingOutcomeInput[]): { inserted: 
         recall_event_id, fact_id, judge_prompt_version, agent_group_id,
         query_strategy, embedding_sim, trigger_thread_id, trigger_sent_at,
         trigger_sender_id, judge_score, judge_method, judge_model,
-        judge_evidence, response_excerpt_sha, created_at, judged_at
+        judge_evidence, response_excerpt_sha, created_at, judged_at,
+        fact_content_excerpt
       ) VALUES (
         ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, NULL, 'pending', NULL,
-        NULL, NULL, ?, NULL
+        NULL, NULL, ?, NULL,
+        ?
       )
     `);
 
@@ -117,6 +99,7 @@ export function insertPendingOutcomes(rows: PendingOutcomeInput[]): { inserted: 
           row.triggerSentAt,
           row.triggerSenderId,
           now,
+          row.factContentExcerpt.slice(0, 500),
         );
       }
     })();

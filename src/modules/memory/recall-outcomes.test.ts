@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMnemonIngestMigrations, openMnemonIngestDb } from '../../db/migrations/019-mnemon-ingest-db.js';
+import { runMnemonIngestMigrations } from '../../db/migrations/019-mnemon-ingest-db.js';
 import { insertPendingOutcomes, setIngestDbForTest, type PendingOutcomeInput } from './recall-outcomes.js';
 
 function makeRow(overrides: Partial<PendingOutcomeInput> = {}): PendingOutcomeInput {
@@ -13,6 +13,7 @@ function makeRow(overrides: Partial<PendingOutcomeInput> = {}): PendingOutcomeIn
     triggerThreadId: null,
     triggerSentAt: '2026-05-07T12:00:00Z',
     triggerSenderId: null,
+    factContentExcerpt: 'sample fact content',
     ...overrides,
   };
 }

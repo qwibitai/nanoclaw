@@ -5,9 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveRecallScope, clearScopeCacheForTest, setGroupsDirForTest } from './scope-resolver.js';
 
-function makeTempGroupsDir(
-  groups: Array<{ folder: string; agentGroupId?: string; memoryEnabled?: boolean }>,
-): string {
+function makeTempGroupsDir(groups: Array<{ folder: string; agentGroupId?: string; memoryEnabled?: boolean }>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-resolver-test-'));
   for (const g of groups) {
     const groupDir = path.join(dir, g.folder);
@@ -62,9 +60,7 @@ describe('resolveRecallScope', () => {
   });
 
   it('test_array_resolves_folder_names', () => {
-    tmpDir = makeTempGroupsDir([
-      { folder: 'axie-dev', agentGroupId: 'ag-axie-dev-123', memoryEnabled: true },
-    ]);
+    tmpDir = makeTempGroupsDir([{ folder: 'axie-dev', agentGroupId: 'ag-axie-dev-123', memoryEnabled: true }]);
     setGroupsDirForTest(tmpDir);
 
     const result = resolveRecallScope('g1', ['axie-dev']);
@@ -86,9 +82,7 @@ describe('resolveRecallScope', () => {
   });
 
   it('test_cache_amortizes_fs_reads', () => {
-    tmpDir = makeTempGroupsDir([
-      { folder: 'group-a', agentGroupId: 'g1', memoryEnabled: true },
-    ]);
+    tmpDir = makeTempGroupsDir([{ folder: 'group-a', agentGroupId: 'g1', memoryEnabled: true }]);
     setGroupsDirForTest(tmpDir);
 
     const readSpy = vi.spyOn(fs, 'readFileSync');
@@ -107,9 +101,7 @@ describe('resolveRecallScope', () => {
   });
 
   it('test_dedupes_calling_group', () => {
-    tmpDir = makeTempGroupsDir([
-      { folder: 'group-a', agentGroupId: 'g1', memoryEnabled: true },
-    ]);
+    tmpDir = makeTempGroupsDir([{ folder: 'group-a', agentGroupId: 'g1', memoryEnabled: true }]);
     setGroupsDirForTest(tmpDir);
 
     const result = resolveRecallScope('g1', 'all-groups');

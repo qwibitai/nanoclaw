@@ -10,7 +10,7 @@ import { MnemonStore } from './mnemon-impl.js';
 import { computeQueryFactCosines } from './cheap-signal.js';
 import { insertPendingOutcomes } from './recall-outcomes.js';
 import { extractFocusedQuery } from './query-extractor.js';
-import { isFeedbackEnabled, getQueryStrategy, type MemoryConfig } from '../../container-config.js';
+import { isFeedbackEnabled, getQueryStrategy, getRecallScope, type MemoryConfig } from '../../container-config.js';
 
 let store: MnemonStore = new MnemonStore();
 export function setStoreForTest(s: MnemonStore): void {
@@ -544,13 +544,16 @@ export async function maybeInjectRecall(params: {
     // Resolve MemoryConfig fields (cached at 60s TTL per §1.7 design).
     let queryStrategy: 'raw' | 'heuristic' | 'llm';
     let feedbackEnabled: boolean;
+    let recallScope: 'self' | 'all-groups' | string[];
     if (memoryConfigOverride !== undefined) {
       queryStrategy = getQueryStrategy(memoryConfigOverride);
       feedbackEnabled = isFeedbackEnabled(memoryConfigOverride);
+      recallScope = getRecallScope(memoryConfigOverride);
     } else {
       const cfg = getMemoryConfigForGroup(agentGroupId);
       queryStrategy = cfg.queryStrategy;
       feedbackEnabled = cfg.feedbackEnabled;
+      recallScope = getRecallScope(cfg.memoryConfig);
     }
 
     let priorUserTexts: string[] = [];
@@ -589,6 +592,7 @@ export async function maybeInjectRecall(params: {
     });
     const result = await store.recall(agentGroupId, queryText, {
       timeoutMs: 3000,
+      recallScope,
     });
     log.info('recall-injection: mnemon returned', {
       agentGroupId,
@@ -646,6 +650,7 @@ export async function maybeInjectRecall(params: {
         triggerThreadId,
         triggerSentAt,
         triggerSenderId,
+        factContentExcerpt: (f.content ?? '').slice(0, 500),
       }));
 
       const outResult = insertPendingOutcomes(outcomeRows);

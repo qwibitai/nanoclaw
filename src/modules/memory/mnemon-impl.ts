@@ -207,12 +207,21 @@ export class MnemonStore implements MemoryStore {
   async recall(
     agentGroupId: string,
     query: string,
-    opts: { limit?: number; timeoutMs?: number; signal?: AbortSignal } = {},
+    opts: {
+      limit?: number;
+      timeoutMs?: number;
+      signal?: AbortSignal;
+      recallScope?: 'self' | 'all-groups' | string[];
+    } = {},
   ): Promise<RecallResult> {
     const start = Date.now();
     const { limit = 10 } = opts;
 
-    const scope = getRecallScope(this.memoryConfig);
+    // Per-call recallScope override takes precedence over the constructor-injected
+    // memoryConfig — production callers (recall-injection.ts) resolve config from
+    // their cached MemoryConfig and pass it explicitly, since the singleton
+    // MnemonStore is created without config (E4 fix).
+    const scope = opts.recallScope ?? getRecallScope(this.memoryConfig);
     const groupIds = resolveRecallScope(agentGroupId, scope);
 
     // Single-store fast path: scope='self' or resolved to just the calling group.
@@ -227,9 +236,7 @@ export class MnemonStore implements MemoryStore {
         const storeController = new AbortController();
         const storeTimeout = setTimeout(() => storeController.abort(), FAN_OUT_STORE_TIMEOUT_MS);
         // Forward outer cancellation into this store's signal.
-        const storeSignal = opts.signal
-          ? anySignal([opts.signal, storeController.signal])
-          : storeController.signal;
+        const storeSignal = opts.signal ? anySignal([opts.signal, storeController.signal]) : storeController.signal;
 
         try {
           const result = await this.recallSingleStore(groupId, query, {

@@ -124,7 +124,13 @@ async function main(): Promise<void> {
   registerSecretsFromEnv();
 
   // 0c. Non-blocking Ollama startup check — writes data/.host-ollama-status.json.
-  runStartupOllamaCheck().then((s) => { log.info('host-ollama-status', { ok: s.ok, endpoint: s.endpoint, error: s.error }); }).catch(() => { /* never throws */ });
+  runStartupOllamaCheck()
+    .then((s) => {
+      log.info('host-ollama-status', { ok: s.ok, endpoint: s.endpoint, error: s.error });
+    })
+    .catch(() => {
+      /* never throws */
+    });
 
   // 1. Init central DB
   const dbPath = path.join(DATA_DIR, 'v2.db');

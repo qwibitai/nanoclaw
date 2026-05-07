@@ -253,21 +253,23 @@ export async function runSweep(
     const utcHour = nowUtc.getUTCHours();
     const todayUtc = nowUtc.toISOString().slice(0, 10); // YYYY-MM-DD
 
-    const lastNightlyRow = ingestDb
-      .prepare(`SELECT value FROM daemon_state WHERE key = 'lastNightlyAt'`)
-      .get() as { value: string } | undefined;
+    const lastNightlyRow = ingestDb.prepare(`SELECT value FROM daemon_state WHERE key = 'lastNightlyAt'`).get() as
+      | { value: string }
+      | undefined;
     const lastNightlyAt = lastNightlyRow?.value ?? null;
 
     if (utcHour >= 4 && lastNightlyAt !== todayUtc) {
       try {
-        ingestDb.prepare(`DELETE FROM recall_outcomes WHERE created_at < ?`).run(
-          new Date(Date.now() - 90 * 24 * 3_600_000).toISOString(),
-        );
+        ingestDb
+          .prepare(`DELETE FROM recall_outcomes WHERE created_at < ?`)
+          .run(new Date(Date.now() - 90 * 24 * 3_600_000).toISOString());
         const nowIso = nowUtc.toISOString();
-        ingestDb.prepare(
-          `INSERT INTO daemon_state (key, value, updated_at) VALUES ('lastNightlyAt', ?, ?)
+        ingestDb
+          .prepare(
+            `INSERT INTO daemon_state (key, value, updated_at) VALUES ('lastNightlyAt', ?, ?)
            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-        ).run(todayUtc, nowIso);
+          )
+          .run(todayUtc, nowIso);
         console.log(`[memory-daemon] nightly tasks complete (${todayUtc})`);
       } catch (err) {
         console.error('[memory-daemon] nightly task error:', err);

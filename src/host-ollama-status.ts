@@ -40,7 +40,11 @@ function writeStatusFile(status: HostOllamaStatus): void {
   } catch (err) {
     log.warn('host-ollama-status: failed to write status file', { filePath, err });
     // Clean up tmp if rename failed.
-    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {
+      /* ignore */
+    }
   }
 }
 

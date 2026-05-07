@@ -41,13 +41,7 @@ describe('mergeAndRerank', () => {
     const b = { id: 'factB', content: 'B' };
     const c = { id: 'factC', content: 'C' };
 
-    const result = mergeAndRerank(
-      [
-        makeStore('s1', [a, b]),
-        makeStore('s2', [b, c]),
-      ],
-      10,
-    );
+    const result = mergeAndRerank([makeStore('s1', [a, b]), makeStore('s2', [b, c])], 10);
 
     // factB ranks first: 1/61 + 1/62 ≈ 0.0325
     // factA second: 1/61 ≈ 0.0164
@@ -62,13 +56,7 @@ describe('mergeAndRerank', () => {
     const x = { id: 'X', content: 'content X' };
     const y = { id: 'Y', content: 'content Y' };
 
-    const result = mergeAndRerank(
-      [
-        makeStore('s1', [x, y]),
-        makeStore('s2', [y, x]),
-      ],
-      10,
-    );
+    const result = mergeAndRerank([makeStore('s1', [x, y]), makeStore('s2', [y, x])], 10);
 
     const ids = result.map((f) => f.id);
     expect(ids.filter((id) => id === 'X')).toHaveLength(1);
@@ -134,10 +122,7 @@ describe('mergeAndRerank', () => {
     const withDate = { id: 'dated', content: 'dated', createdAt: new Date().toISOString() };
     const withoutDate = { id: 'nodated', content: 'nodated' };
 
-    const result = mergeAndRerank(
-      [makeStore('s1', [withDate]), makeStore('s2', [withoutDate])],
-      10,
-    );
+    const result = mergeAndRerank([makeStore('s1', [withDate]), makeStore('s2', [withoutDate])], 10);
 
     const dated = result.find((f) => f.id === 'dated')!;
     const nodated = result.find((f) => f.id === 'nodated')!;

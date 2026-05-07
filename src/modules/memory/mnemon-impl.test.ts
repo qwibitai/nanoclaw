@@ -254,9 +254,7 @@ describe('MnemonStore', () => {
 });
 
 // Helper: build a temp groups dir with N groups that each have agentGroupId and memory.enabled=true.
-function makeTempGroupsDir(
-  groups: Array<{ folder: string; agentGroupId: string; memoryEnabled?: boolean }>,
-): string {
+function makeTempGroupsDir(groups: Array<{ folder: string; agentGroupId: string; memoryEnabled?: boolean }>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mnemon-impl-fanout-test-'));
   for (const g of groups) {
     const groupDir = path.join(dir, g.folder);

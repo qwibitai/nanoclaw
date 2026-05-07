@@ -70,6 +70,17 @@ async function callSynthesizerBackend(factContent: string, opts?: { signal?: Abo
   const cfgStr = process.env.MEMORY_RECALL_EVAL_SYNTHESIZER_BACKEND;
   const cfg = cfgStr ? parseBackendConfig(cfgStr) : EVAL_SYNTHESIZER_DEFAULT_BACKEND;
 
+  // C16 enforcement: synth provider MUST differ from judge provider. Otherwise
+  // judge/synth share training data and the eval gate is biased toward the
+  // judge's preferences rather than measuring real recall quality.
+  const judgeBackendStr = process.env.MEMORY_RECALL_JUDGE_BACKEND ?? 'anthropic:haiku-4-5:default';
+  const judgeProvider = parseBackendConfig(judgeBackendStr).provider;
+  if (cfg.provider === judgeProvider) {
+    throw new Error(
+      `C16 violation: MEMORY_RECALL_EVAL_SYNTHESIZER_BACKEND provider '${cfg.provider}' must differ from MEMORY_RECALL_JUDGE_BACKEND provider '${judgeProvider}'. Cross-provider eval split is a hard constraint.`,
+    );
+  }
+
   if (cfg.provider === 'anthropic') {
     return callAnthropicSynthesizer(cfg, factContent, opts);
   } else if (cfg.provider === 'codex') {

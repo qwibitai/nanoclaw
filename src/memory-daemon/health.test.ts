@@ -109,7 +109,13 @@ describe('health recorder recall_quality block (C4)', () => {
       const db = makeIngestDb();
       // 9 judged outcomes in one event, 1 pending (no judged_at)
       for (let i = 0; i < 9; i++) {
-        insertJudgedOutcome(db, { recallEventId: `ev-j${i}`, factId: 'f1', agentGroupId: 'ag-1', judgeScore: 1, createdHoursAgo: 2 });
+        insertJudgedOutcome(db, {
+          recallEventId: `ev-j${i}`,
+          factId: 'f1',
+          agentGroupId: 'ag-1',
+          judgeScore: 1,
+          createdHoursAgo: 2,
+        });
       }
       // 1 pending (no judged_at) — createdHoursAgo = 2 so it's in the 24h window
       db.prepare(
@@ -162,9 +168,12 @@ describe('health recorder recall_quality block (C4)', () => {
     try {
       const db = makeIngestDb();
       // 30 score=0, 50 score=1, 20 score=2
-      for (let i = 0; i < 30; i++) insertJudgedOutcome(db, { recallEventId: `e0-${i}`, factId: 'f1', agentGroupId: 'ag-1', judgeScore: 0 });
-      for (let i = 0; i < 50; i++) insertJudgedOutcome(db, { recallEventId: `e1-${i}`, factId: 'f1', agentGroupId: 'ag-1', judgeScore: 1 });
-      for (let i = 0; i < 20; i++) insertJudgedOutcome(db, { recallEventId: `e2-${i}`, factId: 'f1', agentGroupId: 'ag-1', judgeScore: 2 });
+      for (let i = 0; i < 30; i++)
+        insertJudgedOutcome(db, { recallEventId: `e0-${i}`, factId: 'f1', agentGroupId: 'ag-1', judgeScore: 0 });
+      for (let i = 0; i < 50; i++)
+        insertJudgedOutcome(db, { recallEventId: `e1-${i}`, factId: 'f1', agentGroupId: 'ag-1', judgeScore: 1 });
+      for (let i = 0; i < 20; i++)
+        insertJudgedOutcome(db, { recallEventId: `e2-${i}`, factId: 'f1', agentGroupId: 'ag-1', judgeScore: 2 });
 
       const hr = new HealthRecorder();
       hr.setIngestDbForTest(db);
@@ -172,7 +181,8 @@ describe('health recorder recall_quality block (C4)', () => {
       await hr.flush(healthPath);
 
       const parsed = JSON.parse(fs.readFileSync(healthPath, 'utf8'));
-      const dist = (parsed.groups['ag-1'].recall_quality as { rank_distribution_7d: Record<string, number> }).rank_distribution_7d;
+      const dist = (parsed.groups['ag-1'].recall_quality as { rank_distribution_7d: Record<string, number> })
+        .rank_distribution_7d;
       expect(dist.score_0).toBeCloseTo(0.3, 5);
       expect(dist.score_1).toBeCloseTo(0.5, 5);
       expect(dist.score_2).toBeCloseTo(0.2, 5);
@@ -186,7 +196,11 @@ describe('health recorder recall_quality block (C4)', () => {
     const healthPath = path.join(tmpDir, 'memory-health.json');
     const statusPath = path.join(tmpDir, 'ollama-status.json');
     try {
-      fs.writeFileSync(statusPath, JSON.stringify({ ok: true, checkedAt: '2026-05-07T00:00:00Z', endpoint: 'http://127.0.0.1:11434' }), 'utf8');
+      fs.writeFileSync(
+        statusPath,
+        JSON.stringify({ ok: true, checkedAt: '2026-05-07T00:00:00Z', endpoint: 'http://127.0.0.1:11434' }),
+        'utf8',
+      );
 
       const hr = new HealthRecorder();
       hr.setOllamaStatusFilePathForTest(statusPath);

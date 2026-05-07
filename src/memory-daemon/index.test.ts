@@ -441,7 +441,11 @@ describe('runSweep C5 wiring', () => {
 
   it('test_judge_processor_called_for_feedback_enabled_group', async () => {
     const judgeStub = vi.spyOn(judgeModule, 'processPendingJudgments').mockResolvedValue({
-      processed: 0, ambiguous: 0, judged: 0, retried: 0, failed: 0,
+      processed: 0,
+      ambiguous: 0,
+      judged: 0,
+      retried: 0,
+      failed: 0,
     });
 
     // Mock discoverMemoryGroups to return one feedback-enabled group
@@ -455,9 +459,11 @@ describe('runSweep C5 wiring', () => {
 
     // Patch discoverMemoryGroups to return a stub group
     const { discoverMemoryGroups: orig } = await import('./index.js');
-    const discoverSpy = vi.spyOn({ discoverMemoryGroups: orig }, 'discoverMemoryGroups').mockReturnValue([
-      { agentGroupId: 'ag-fb', folder: 'fb', sourcesBasePath: '/tmp', enabled: true, feedbackEnabled: true },
-    ]);
+    const discoverSpy = vi
+      .spyOn({ discoverMemoryGroups: orig }, 'discoverMemoryGroups')
+      .mockReturnValue([
+        { agentGroupId: 'ag-fb', folder: 'fb', sourcesBasePath: '/tmp', enabled: true, feedbackEnabled: true },
+      ]);
 
     // Actually, better approach: directly test by calling runSweep with mocked dependencies
     // The discover is called inside runSweep — we need to mock the fs calls
@@ -480,7 +486,9 @@ describe('runSweep C5 wiring', () => {
 
     // Set lastNightlyAt to yesterday
     const yesterday = '2026-05-06';
-    db.prepare(`INSERT INTO daemon_state (key, value, updated_at) VALUES ('lastNightlyAt', ?, datetime('now'))`).run(yesterday);
+    db.prepare(`INSERT INTO daemon_state (key, value, updated_at) VALUES ('lastNightlyAt', ?, datetime('now'))`).run(
+      yesterday,
+    );
 
     // Insert a recall_outcome older than 90 days
     const oldDate = new Date(Date.now() - 91 * 24 * 3_600_000).toISOString();
@@ -506,15 +514,28 @@ describe('runSweep C5 wiring', () => {
 
     // Stub processPendingJudgments
     vi.spyOn(judgeModule, 'processPendingJudgments').mockResolvedValue({
-      processed: 0, ambiguous: 0, judged: 0, retried: 0, failed: 0,
+      processed: 0,
+      ambiguous: 0,
+      judged: 0,
+      retried: 0,
+      failed: 0,
     });
 
-    await runSweep(ingester as unknown as import('./index.js').DiscoveredGroup extends never ? never : Parameters<typeof runSweep>[0], hr, store as unknown as Parameters<typeof runSweep>[2], db);
+    await runSweep(
+      ingester as unknown as import('./index.js').DiscoveredGroup extends never
+        ? never
+        : Parameters<typeof runSweep>[0],
+      hr,
+      store as unknown as Parameters<typeof runSweep>[2],
+      db,
+    );
 
     const countAfter = (db.prepare('SELECT COUNT(*) AS n FROM recall_outcomes').get() as { n: number }).n;
     expect(countAfter).toBe(0); // old row deleted
 
-    const lastNightly = (db.prepare(`SELECT value FROM daemon_state WHERE key='lastNightlyAt'`).get() as { value: string } | undefined)?.value;
+    const lastNightly = (
+      db.prepare(`SELECT value FROM daemon_state WHERE key='lastNightlyAt'`).get() as { value: string } | undefined
+    )?.value;
     expect(lastNightly).toBe('2026-05-07');
 
     vi.useRealTimers();
@@ -524,7 +545,9 @@ describe('runSweep C5 wiring', () => {
     const db = makeTestIngestDb();
 
     const yesterday = '2026-05-06';
-    db.prepare(`INSERT INTO daemon_state (key, value, updated_at) VALUES ('lastNightlyAt', ?, datetime('now'))`).run(yesterday);
+    db.prepare(`INSERT INTO daemon_state (key, value, updated_at) VALUES ('lastNightlyAt', ?, datetime('now'))`).run(
+      yesterday,
+    );
 
     const oldDate = new Date(Date.now() - 91 * 24 * 3_600_000).toISOString();
     db.prepare(
@@ -539,17 +562,28 @@ describe('runSweep C5 wiring', () => {
     hr.setIngestDbForTest(db);
     vi.spyOn(fs, 'readdirSync').mockImplementation((() => []) as unknown as typeof fs.readdirSync);
     vi.spyOn(judgeModule, 'processPendingJudgments').mockResolvedValue({
-      processed: 0, ambiguous: 0, judged: 0, retried: 0, failed: 0,
+      processed: 0,
+      ambiguous: 0,
+      judged: 0,
+      retried: 0,
+      failed: 0,
     });
 
     const store = makeNullStore();
     const ingester = makeNullIngester();
-    await runSweep(ingester as unknown as Parameters<typeof runSweep>[0], hr, store as unknown as Parameters<typeof runSweep>[2], db);
+    await runSweep(
+      ingester as unknown as Parameters<typeof runSweep>[0],
+      hr,
+      store as unknown as Parameters<typeof runSweep>[2],
+      db,
+    );
 
     const countAfter = (db.prepare('SELECT COUNT(*) AS n FROM recall_outcomes').get() as { n: number }).n;
     expect(countAfter).toBe(1); // not deleted
 
-    const lastNightly = (db.prepare(`SELECT value FROM daemon_state WHERE key='lastNightlyAt'`).get() as { value: string } | undefined)?.value;
+    const lastNightly = (
+      db.prepare(`SELECT value FROM daemon_state WHERE key='lastNightlyAt'`).get() as { value: string } | undefined
+    )?.value;
     expect(lastNightly).toBe(yesterday); // unchanged
 
     vi.useRealTimers();
@@ -560,7 +594,9 @@ describe('runSweep C5 wiring', () => {
 
     // Already ran today
     const today = '2026-05-07';
-    db.prepare(`INSERT INTO daemon_state (key, value, updated_at) VALUES ('lastNightlyAt', ?, datetime('now'))`).run(today);
+    db.prepare(`INSERT INTO daemon_state (key, value, updated_at) VALUES ('lastNightlyAt', ?, datetime('now'))`).run(
+      today,
+    );
 
     vi.setSystemTime(new Date('2026-05-07T20:00:00Z'));
 
@@ -568,18 +604,34 @@ describe('runSweep C5 wiring', () => {
     hr.setIngestDbForTest(db);
     vi.spyOn(fs, 'readdirSync').mockImplementation((() => []) as unknown as typeof fs.readdirSync);
     vi.spyOn(judgeModule, 'processPendingJudgments').mockResolvedValue({
-      processed: 0, ambiguous: 0, judged: 0, retried: 0, failed: 0,
+      processed: 0,
+      ambiguous: 0,
+      judged: 0,
+      retried: 0,
+      failed: 0,
     });
 
     const store = makeNullStore();
     const ingester = makeNullIngester();
 
     // Run twice
-    await runSweep(ingester as unknown as Parameters<typeof runSweep>[0], hr, store as unknown as Parameters<typeof runSweep>[2], db);
-    await runSweep(ingester as unknown as Parameters<typeof runSweep>[0], hr, store as unknown as Parameters<typeof runSweep>[2], db);
+    await runSweep(
+      ingester as unknown as Parameters<typeof runSweep>[0],
+      hr,
+      store as unknown as Parameters<typeof runSweep>[2],
+      db,
+    );
+    await runSweep(
+      ingester as unknown as Parameters<typeof runSweep>[0],
+      hr,
+      store as unknown as Parameters<typeof runSweep>[2],
+      db,
+    );
 
     // Still today's date
-    const lastNightly = (db.prepare(`SELECT value FROM daemon_state WHERE key='lastNightlyAt'`).get() as { value: string } | undefined)?.value;
+    const lastNightly = (
+      db.prepare(`SELECT value FROM daemon_state WHERE key='lastNightlyAt'`).get() as { value: string } | undefined
+    )?.value;
     expect(lastNightly).toBe(today);
 
     vi.useRealTimers();
@@ -591,13 +643,22 @@ describe('runSweep C5 wiring', () => {
 
     vi.spyOn(fs, 'readdirSync').mockImplementation((() => []) as unknown as typeof fs.readdirSync);
     vi.spyOn(judgeModule, 'processPendingJudgments').mockResolvedValue({
-      processed: 0, ambiguous: 0, judged: 0, retried: 0, failed: 0,
+      processed: 0,
+      ambiguous: 0,
+      judged: 0,
+      retried: 0,
+      failed: 0,
     });
 
     const db = makeTestIngestDb();
     const store = makeNullStore();
     const ingester = makeNullIngester();
-    await runSweep(ingester as unknown as Parameters<typeof runSweep>[0], hr, store as unknown as Parameters<typeof runSweep>[2], db);
+    await runSweep(
+      ingester as unknown as Parameters<typeof runSweep>[0],
+      hr,
+      store as unknown as Parameters<typeof runSweep>[2],
+      db,
+    );
 
     expect(mergeSpy).toHaveBeenCalledTimes(1);
   });

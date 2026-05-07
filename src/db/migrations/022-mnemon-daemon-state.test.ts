@@ -33,26 +33,22 @@ describe('migration 022: mnemon-daemon-state', () => {
     runMnemonIngestMigrations(db);
     runMnemonDaemonStateMigration(db);
 
-    const row = db
-      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='daemon_state'`)
-      .get() as { name: string } | undefined;
+    const row = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='daemon_state'`).get() as
+      | { name: string }
+      | undefined;
     expect(row?.name).toBe('daemon_state');
 
-    const versionRow = db
-      .prepare(`SELECT name FROM schema_version WHERE name='mnemon-daemon-state-v1'`)
-      .get() as { name: string } | undefined;
+    const versionRow = db.prepare(`SELECT name FROM schema_version WHERE name='mnemon-daemon-state-v1'`).get() as
+      | { name: string }
+      | undefined;
     expect(versionRow?.name).toBe('mnemon-daemon-state-v1');
 
     // Verify can insert and select
     const now = new Date().toISOString();
-    db.prepare(`INSERT INTO daemon_state (key, value, updated_at) VALUES (?, ?, ?)`).run(
-      'lastNightlyAt',
-      now,
-      now,
-    );
-    const inserted = db
-      .prepare(`SELECT key, value FROM daemon_state WHERE key=?`)
-      .get('lastNightlyAt') as { key: string; value: string } | undefined;
+    db.prepare(`INSERT INTO daemon_state (key, value, updated_at) VALUES (?, ?, ?)`).run('lastNightlyAt', now, now);
+    const inserted = db.prepare(`SELECT key, value FROM daemon_state WHERE key=?`).get('lastNightlyAt') as
+      | { key: string; value: string }
+      | undefined;
     expect(inserted?.key).toBe('lastNightlyAt');
     expect(inserted?.value).toBe(now);
   });
@@ -64,9 +60,7 @@ describe('migration 022: mnemon-daemon-state', () => {
     expect(() => runMnemonDaemonStateMigration(db)).not.toThrow();
 
     const count = (
-      db
-        .prepare(`SELECT COUNT(*) AS c FROM schema_version WHERE name='mnemon-daemon-state-v1'`)
-        .get() as { c: number }
+      db.prepare(`SELECT COUNT(*) AS c FROM schema_version WHERE name='mnemon-daemon-state-v1'`).get() as { c: number }
     ).c;
     expect(count).toBe(1);
   });
@@ -78,9 +72,9 @@ describe('migration 022: mnemon-daemon-state', () => {
     // intentionally do NOT run runMnemonRecallFeedbackMigration
     expect(() => runMnemonDaemonStateMigration(db)).not.toThrow();
 
-    const row = db
-      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='daemon_state'`)
-      .get() as { name: string } | undefined;
+    const row = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='daemon_state'`).get() as
+      | { name: string }
+      | undefined;
     expect(row?.name).toBe('daemon_state');
   });
 
@@ -89,7 +83,7 @@ describe('migration 022: mnemon-daemon-state', () => {
     runMnemonIngestMigrations(db);
     runMnemonDaemonStateMigration(db);
 
-    const cols = (db.prepare(`PRAGMA table_info(daemon_state)`).all() as { name: string; pk: number; notnull: number }[]);
+    const cols = db.prepare(`PRAGMA table_info(daemon_state)`).all() as { name: string; pk: number; notnull: number }[];
     const colMap = Object.fromEntries(cols.map((c) => [c.name, c]));
 
     expect(colMap).toHaveProperty('key');

@@ -9,7 +9,7 @@ import Database from 'better-sqlite3';
 import { openMnemonIngestDb } from '../../db/migrations/019-mnemon-ingest-db.js';
 import { DATA_DIR } from '../../config.js';
 import { callJudge, JUDGE_PROMPT_VERSION, JUDGE_SYSTEM_PROMPT, JudgeParseError } from './judge-client.js';
-import { recordOrIncrementFailure } from '../dead-letters.js';
+import { recordOrIncrementFailure, deleteAfterSuccess } from '../dead-letters.js';
 
 export interface JudgeProcessorOpts {
   agentGroupId: string;
@@ -70,6 +70,7 @@ interface RecallOutcomeRow {
   response_excerpt_sha: string | null;
   created_at: string;
   judged_at: string | null;
+  fact_content_excerpt: string;
 }
 
 function sha256(s: string): string {
@@ -114,9 +115,33 @@ export async function processPendingJudgments(opts: JudgeProcessorOpts): Promise
     byEvent.set(row.recall_event_id, rows);
   }
 
+  // Snapshot dead-letter retry state once per sweep — avoids N round-trips.
+  const deadLetterRetry = new Map<string, string | null>(); // event_id → next_retry_at (ISO) or null
+  const dlRows = db
+    .prepare(
+      `SELECT item_key, next_retry_at FROM dead_letters
+       WHERE agent_group_id = ? AND item_type = 'recall-judge' AND poisoned_at IS NULL`,
+    )
+    .all(agentGroupId) as Array<{ item_key: string; next_retry_at: string | null }>;
+  for (const dlRow of dlRows) {
+    // item_key is `recall-judge:<event_id>`
+    const eventId = dlRow.item_key.startsWith('recall-judge:')
+      ? dlRow.item_key.slice('recall-judge:'.length)
+      : dlRow.item_key;
+    deadLetterRetry.set(eventId, dlRow.next_retry_at);
+  }
+
   for (const [recallEventId, eventRows] of byEvent) {
     result.processed++;
     const representative = eventRows[0]!;
+
+    // E3: Honor dead-letter backoff. If a prior failure recorded a future
+    // next_retry_at, skip this event until the window elapses. The dead-letter
+    // backoff schedule (60s/300s/900s) lives in dead-letters.ts; we just gate on it.
+    const nextRetryAt = deadLetterRetry.get(recallEventId);
+    if (nextRetryAt && nextRetryAt > new Date().toISOString()) {
+      continue;
+    }
 
     // 3. Ambiguity check: if multiple events in same (agent_group_id, trigger_thread_id)
     //    within ±60s of this event's trigger_sent_at, mark ambiguous and skip
@@ -208,7 +233,10 @@ export async function processPendingJudgments(opts: JudgeProcessorOpts): Promise
           .get(agentGroupId, threadId, representative.trigger_sent_at) as { text: string } | undefined)
       : undefined;
 
-    const candidateFacts = eventRows.map((r) => ({ fact_id: r.fact_id, content: '' }));
+    const candidateFacts = eventRows.map((r) => ({
+      fact_id: r.fact_id,
+      content: r.fact_content_excerpt ?? '',
+    }));
     const knownFactIds = new Set(eventRows.map((r) => r.fact_id));
 
     const userPayload = JSON.stringify({
@@ -276,6 +304,12 @@ export async function processPendingJudgments(opts: JudgeProcessorOpts): Promise
         );
       }
     })();
+
+    // E3: Clear any prior dead-letter row for this event after success — otherwise
+    // success-after-retry leaves stale failure_count/next_retry_at telemetry behind.
+    if (deadLetterRetry.has(recallEventId)) {
+      deleteAfterSuccess(deadLetterKey, agentGroupId);
+    }
 
     result.judged++;
   }
