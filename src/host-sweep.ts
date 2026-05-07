@@ -45,6 +45,8 @@ import {
 import { log } from './log.js';
 import { openInboundDb, openOutboundDb, openOutboundDbRw, inboundDbPath, heartbeatPath } from './session-manager.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
+import { getMessagingGroup } from './db/messaging-groups.js';
+import { getDeliveryAdapter } from './delivery.js';
 import type { Session } from './types.js';
 
 /**
@@ -61,8 +63,11 @@ export function parseSqliteUtc(s: string): number {
 const SWEEP_INTERVAL_MS = 60_000;
 // Absolute idle ceiling for a running container. If the heartbeat file hasn't
 // been touched in this long, the container is either stuck or doing genuinely
-// nothing — kill and restart on the next inbound.
-export const ABSOLUTE_CEILING_MS = 30 * 60 * 1000;
+// nothing — kill and restart on the next inbound. Bumped from 30 → 90 min
+// after a real "go fix the send_message tool" task in joi-dm got SIGKILL'd
+// mid-investigation (see notifyCeilingKill below for the user-facing fix).
+// Long-running bash tools can still extend this further via declaredBashMs.
+export const ABSOLUTE_CEILING_MS = 90 * 60 * 1000;
 // Stuck tolerance window applied per 'processing' claim — "did we see any
 // signs of life since this message was claimed?"
 export const CLAIM_STUCK_MS = 60 * 1000;
@@ -248,6 +253,7 @@ function enforceRunningContainerSla(
     });
     killContainer(session.id, 'absolute-ceiling');
     resetStuckProcessingRows(inDb, outDb, session, 'absolute-ceiling');
+    void notifyCeilingKill(session, decision.ceilingMs);
     return;
   }
 
@@ -324,5 +330,45 @@ function resetStuckProcessingRows(
     log.warn('Failed to clear orphan processing claims', { sessionId: session.id, err });
   } finally {
     if (ownsDb) useDb?.close();
+  }
+}
+
+/**
+ * Tell the user, on whichever channel the session was tied to, that we just
+ * stopped their in-progress request because it ran past the absolute ceiling.
+ *
+ * Without this the user sees silence — the agent never gets to emit a "I had
+ * to stop" message because we SIGKILL'd it mid-turn. We can't write to
+ * outbound.db (single-writer invariant) and the container is dead anyway, so
+ * we go straight through the live ChannelDeliveryAdapter, same path normal
+ * outbound takes.
+ *
+ * Best-effort: log and continue if anything fails. A missed notification is
+ * worse-than-silent because the user might think the agent is still working,
+ * but it's still better than blocking the sweep on a flaky adapter.
+ */
+async function notifyCeilingKill(session: Session, ceilingMs: number): Promise<void> {
+  if (!session.messaging_group_id) return;
+  const adapter = getDeliveryAdapter();
+  if (!adapter) return;
+  const mg = getMessagingGroup(session.messaging_group_id);
+  if (!mg) return;
+
+  const minutes = Math.round(ceilingMs / 60_000);
+  const text =
+    `I had to stop working on your last message — it ran past ${minutes} minutes ` +
+    `without progress and I SIGKILL'd myself. Send a follow-up if you'd like me ` +
+    `to pick it back up; I'll have a fresh start.`;
+  const content = JSON.stringify({ text });
+
+  try {
+    await adapter.deliver(mg.channel_type, mg.platform_id, session.thread_id, 'chat', content);
+    log.info('Ceiling-kill notification sent', {
+      sessionId: session.id,
+      channelType: mg.channel_type,
+      platformId: mg.platform_id,
+    });
+  } catch (err) {
+    log.warn('Ceiling-kill notification failed', { sessionId: session.id, err });
   }
 }
