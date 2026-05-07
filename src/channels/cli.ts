@@ -15,8 +15,21 @@
  *                             "platformId": "discord:@me:149...",
  *                             "threadId": null} }         # route to a specific mg
  *     { "text": "...", "to": {...}, "reply_to": {...} }   # + redirect replies
+ *     { "deliver": {"channelType": "whatsapp",
+ *                    "platformId": "12036340…@g.us",
+ *                    "threadId": null,
+ *                    "text": "outbound text"} }            # raw outbound: skip
+ *                                                          # the agent loop and call
+ *                                                          # the channel adapter's
+ *                                                          # deliver() directly. Used
+ *                                                          # by scripts/send-message.py
+ *                                                          # for WhatsApp (and any
+ *                                                          # other adapter whose
+ *                                                          # session lives here).
  *   Server → client:
- *     { "text": "agent reply" }
+ *     { "text": "agent reply" }                            # chat / `to` paths
+ *     { "ok": true,  "messageId": "..." }                  # deliver path success
+ *     { "ok": false, "error":   "..." }                    # deliver path failure
  *
  * The `to` and `reply_to` addressing is how admin transports (the bootstrap
  * script) inject messages targeting any wired channel. `reply_to` is a
@@ -40,7 +53,7 @@ import path from 'path';
 import { DATA_DIR } from '../config.js';
 import { log } from '../log.js';
 import type { ChannelAdapter, ChannelSetup, DeliveryAddress, InboundEvent, OutboundMessage } from './adapter.js';
-import { registerChannelAdapter } from './channel-registry.js';
+import { getChannelAdapter, registerChannelAdapter } from './channel-registry.js';
 
 const PLATFORM_ID = 'local';
 
@@ -164,7 +177,7 @@ function createAdapter(): ChannelAdapter {
         const line = buffer.slice(0, idx).trim();
         buffer = buffer.slice(idx + 1);
         if (!line) continue;
-        void handleLine(line, config, claimChatSlot);
+        void handleLine(line, socket, config, claimChatSlot);
       }
     });
 
@@ -178,13 +191,14 @@ function createAdapter(): ChannelAdapter {
     });
   }
 
-  async function handleLine(line: string, config: ChannelSetup, claimChatSlot: () => void): Promise<void> {
+  async function handleLine(line: string, socket: net.Socket, config: ChannelSetup, claimChatSlot: () => void): Promise<void> {
     let payload: {
       text?: unknown;
       to?: unknown;
       reply_to?: unknown;
       sender?: unknown;
       senderId?: unknown;
+      deliver?: unknown;
     };
     try {
       payload = JSON.parse(line);
@@ -192,10 +206,65 @@ function createAdapter(): ChannelAdapter {
       log.warn('CLI: ignoring non-JSON line from client', { line });
       return;
     }
+    // Outbound 'deliver' opcode — bypass the agent loop and call a wired channel
+    // adapter's deliver() directly. Used by scripts/send-message.py for any
+    // channel whose session lives in this daemon (WhatsApp via Baileys, etc.).
+    // Replies with a single JSON line and closes the per-line response cycle;
+    // does NOT claim the chat slot.
+    if (payload.deliver && typeof payload.deliver === 'object') {
+      const d = payload.deliver as Record<string, unknown>;
+      const channelType = typeof d.channelType === 'string' ? d.channelType : null;
+      const platformId = typeof d.platformId === 'string' ? d.platformId : null;
+      const threadId =
+        d.threadId === null || d.threadId === undefined
+          ? null
+          : typeof d.threadId === 'string'
+            ? d.threadId
+            : null;
+      const text = typeof d.text === 'string' ? d.text : null;
+
+      if (!channelType || !platformId || text === null) {
+        replyDeliver(false, undefined,
+          'deliver opcode requires {channelType, platformId, text}');
+        return;
+      }
+      const adapter = getChannelAdapter(channelType);
+      if (!adapter) {
+        replyDeliver(false, undefined,
+          `no active channel adapter for channelType=${channelType}`);
+        return;
+      }
+      const message: OutboundMessage = {
+        kind: 'chat',
+        content: { text },
+      };
+      try {
+        const messageId = await adapter.deliver(platformId, threadId, message);
+        replyDeliver(true, messageId, undefined);
+      } catch (err) {
+        log.error('CLI: deliver opcode threw', { channelType, platformId, err });
+        replyDeliver(false, undefined,
+          err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
     if (typeof payload.text !== 'string' || payload.text.length === 0) return;
 
     const to = parseAddress(payload.to);
     const replyTo = parseAddress(payload.reply_to);
+
+    function replyDeliver(success: boolean, messageId?: string,
+                           errMsg?: string): void {
+      try {
+        const reply: Record<string, unknown> = { ok: success };
+        if (messageId !== undefined) reply.messageId = messageId;
+        if (errMsg !== undefined) reply.error = errMsg;
+        socket.write(JSON.stringify(reply) + '\n');
+      } catch (writeErr) {
+        log.warn('CLI: failed to write deliver reply', { writeErr });
+      }
+    }
 
     if (to) {
       // Routed message — admin transport. Build a full InboundEvent targeting

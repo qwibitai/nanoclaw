@@ -15,9 +15,10 @@ Commands:
     init                                   Auto-discover from v2.db + groups dir
 
 Supported channels for `send`:
-    discord, slack, telegram, line, email
-Not yet supported (need v2 daemon outbound port through chat-sdk):
-    whatsapp, signal
+    discord, slack, telegram, line, email   → direct REST API
+    signal                                   → direct TCP JSON-RPC to signal-cli (port 7583)
+    whatsapp                                 → via NanoClaw daemon's `cli.sock` 'deliver' opcode
+                                               (Baileys session lives in the daemon)
 
 Migration history:
     Pre-2026-05-08: dropped JSON files into ~/nanoclaw/data/ipc/<group>/messages/.
@@ -31,6 +32,7 @@ import json
 import mimetypes
 import os
 import re
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -47,6 +49,9 @@ REGISTRY_PATH = NANOCLAW / "data" / "recipients.json"
 DB_PATH = NANOCLAW / "data" / "v2.db"
 ENV_PATH = NANOCLAW / "data" / "env" / "env"
 GROUPS_DIR = NANOCLAW / "groups"
+CLI_SOCK = NANOCLAW / "data" / "cli.sock"
+SIGNAL_RPC_HOST = "127.0.0.1"
+SIGNAL_RPC_PORT = 7583
 
 
 # ── Output helpers ───────────────────────────────────────────────────────
@@ -459,12 +464,192 @@ def _send_email_via_jid(jid: str, text: str, key: str, channel: str) -> None:
     )
 
 
-# ── Channel: deferred (WhatsApp / Signal) ────────────────────────────────
+# ── Channel: Signal (direct via signal-cli TCP JSON-RPC) ─────────────────
+def _signal_rpc(method: str, params: dict, timeout: float = 30.0) -> dict:
+    """Send a JSON-RPC 2.0 call to signal-cli's TCP daemon (port 7583).
+
+    signal-cli's `--tcp` mode exposes a newline-delimited JSON-RPC socket;
+    the v2 NanoClaw daemon talks to the same port (see src/channels/signal.ts).
+    We open a fresh connection per call rather than holding the socket open,
+    because the daemon's long-lived connection multiplexes inbound + outbound
+    and we don't want to fight it for read framing.
+    """
+    rpc_id = uuid.uuid4().hex[:12]
+    payload = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": rpc_id}) + "\n"
+    try:
+        sock = socket.create_connection((SIGNAL_RPC_HOST, SIGNAL_RPC_PORT), timeout=5.0)
+    except (ConnectionRefusedError, OSError) as e:
+        fail(
+            f"signal-cli daemon not reachable at {SIGNAL_RPC_HOST}:{SIGNAL_RPC_PORT} ({e}). "
+            f"Is the NanoClaw service running? Check `launchctl list | grep com.jibot.nanoclaw`."
+        )
+    sock.settimeout(timeout)
+    try:
+        sock.sendall(payload.encode("utf-8"))
+        # Read newline-delimited responses; daemon may interleave notifications
+        # (jsonrpc messages without `id`); skip those until we see our reply.
+        buf = b""
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                fail("signal-cli closed the socket before responding")
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(msg, dict) and msg.get("id") == rpc_id:
+                    return msg
+                # else: notification or unrelated reply; keep reading
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def _send_signal(jid: str, text: str, key: str, channel: str) -> None:
+    """JID formats observed in recipients.json:
+        sig:+PHONE              → DM by phone (e.g. sig:+819048411965)
+        sig:UUID                → DM by ACI/PNI uuid
+        sig:group:KEY=          → group (KEY is base64; may contain '+/=')
+    """
+    if not jid.startswith("sig:"):
+        fail(f"Invalid Signal JID {jid!r} (expected sig:...)")
+    target = jid[len("sig:"):]
+    params: dict = {"message": text}
+    account = load_env().get("SIGNAL_ACCOUNT")
+    if account:
+        params["account"] = account
+    if target.startswith("group:"):
+        params["groupId"] = target[len("group:"):]
+    elif target:
+        params["recipient"] = [target]
+    else:
+        fail(f"Invalid Signal JID {jid!r}: empty target after 'sig:' prefix")
+
+    reply = _signal_rpc("send", params)
+    if isinstance(reply, dict) and "error" in reply:
+        err_obj = reply["error"]
+        msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
+        fail(f"signal-cli send failed: {msg}")
+    result = reply.get("result") if isinstance(reply, dict) else None
+    timestamp = result.get("timestamp") if isinstance(result, dict) else None
+    sig_target = (
+        ("group:" + params["groupId"]) if "groupId" in params
+        else params["recipient"][0]
+    )
+    ok({
+        "status": "sent",
+        "recipient": key,
+        "jid": jid,
+        "channel": channel,
+        "method": "signal-cli-jsonrpc",
+        "signal_target": sig_target,
+        "signal_timestamp": timestamp,
+        "preview": text[:120] + ("…" if len(text) > 120 else ""),
+    })
+
+
+# ── Channel: daemon-mediated outbound (WhatsApp + future channels) ───────
+def _send_via_daemon(channel_type: str, platform_id: str, text: str,
+                     thread_id: str | None = None) -> dict:
+    """Send through the NanoClaw daemon's `cli.sock` 'deliver' opcode.
+
+    The daemon (see src/channels/cli.ts) accepts a JSON line of the form:
+        {"deliver": {"channelType": "...", "platformId": "...",
+                      "threadId": ..., "text": "..."}}
+    and replies with a JSON line:
+        {"ok": true, "messageId": "..."}        on success
+        {"ok": false, "error": "..."}          on failure
+
+    Used for channels whose outbound session lives in the daemon (WhatsApp's
+    Baileys websocket, future iMessage, etc.) where a separate REST or TCP
+    client cannot reach the same conversation.
+    """
+    if not CLI_SOCK.exists():
+        fail(
+            f"NanoClaw cli.sock not found at {CLI_SOCK}. Daemon is not running. "
+            f"Try `launchctl kickstart -k gui/$(id -u)/com.jibot.nanoclaw`."
+        )
+    payload = json.dumps({
+        "deliver": {
+            "channelType": channel_type,
+            "platformId": platform_id,
+            "threadId": thread_id,
+            "text": text,
+        }
+    }) + "\n"
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(30.0)
+        sock.connect(str(CLI_SOCK))
+    except (FileNotFoundError, ConnectionRefusedError, OSError) as e:
+        fail(f"Could not connect to {CLI_SOCK}: {e}")
+    try:
+        sock.sendall(payload.encode("utf-8"))
+        buf = b""
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+            if b"\n" in buf:
+                line, _ = buf.split(b"\n", 1)
+                line = line.strip()
+                if line:
+                    try:
+                        return json.loads(line)
+                    except json.JSONDecodeError:
+                        fail(f"Daemon returned non-JSON reply: {line[:200]!r}")
+        if buf.strip():
+            try:
+                return json.loads(buf.strip())
+            except json.JSONDecodeError:
+                fail(f"Daemon returned non-JSON reply: {buf[:200]!r}")
+        fail(
+            "Daemon closed the socket without replying — opcode may not be wired up. "
+            "Ensure ~/nanoclaw was rebuilt + restarted after the cli.ts change."
+        )
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def _send_whatsapp(jid: str, text: str, key: str, channel: str) -> None:
+    """JID format: bare WhatsApp jid, e.g. '120363406306168518@g.us' (group)
+    or '<phone>@s.whatsapp.net' (DM). Routed through the daemon because the
+    Baileys websocket session lives there — there is no public REST API.
+    """
+    if not jid:
+        fail(f"Empty WhatsApp JID for {key!r}")
+    reply = _send_via_daemon("whatsapp", jid, text)
+    if not (isinstance(reply, dict) and reply.get("ok")):
+        fail(f"WhatsApp daemon-deliver failed: {reply}")
+    ok({
+        "status": "sent",
+        "recipient": key,
+        "jid": jid,
+        "channel": channel,
+        "method": "nanoclaw-cli-deliver",
+        "whatsapp_message_id": reply.get("messageId"),
+        "preview": text[:120] + ("…" if len(text) > 120 else ""),
+    })
+
+
+# ── Channel: not yet supported ───────────────────────────────────────────
 def _unsupported_v2(jid: str, text: str, key: str, channel: str) -> None:
     fail(
-        f"Channel {channel!r} (jid={jid!r}) is not yet supported by send-message.py "
-        f"in the v2 architecture. WhatsApp/Signal need the daemon's chat-sdk "
-        f"session to dispatch — file an issue or use the platform's own tooling."
+        f"Channel {channel!r} (jid={jid!r}) is not yet supported by send-message.py. "
+        f"Either the channel is unknown to the v2 daemon, or no outbound path has "
+        f"been wired (file an issue or extend send-message.py)."
     )
 
 
@@ -474,8 +659,8 @@ CHANNEL_SENDERS = {
     "telegram": _send_telegram,
     "line": _send_line,
     "email": _send_email_via_jid,
-    "whatsapp": _unsupported_v2,
-    "signal": _unsupported_v2,
+    "signal": _send_signal,
+    "whatsapp": _send_whatsapp,
     "unknown": _unsupported_v2,
 }
 
