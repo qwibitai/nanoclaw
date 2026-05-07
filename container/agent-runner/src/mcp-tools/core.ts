@@ -12,6 +12,7 @@ import path from 'path';
 import { findByName, getAllDestinations } from '../destinations.js';
 import { getMessageIdBySeq, getRoutingBySeq, writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting } from '../db/session-routing.js';
+import { setTurnSendInvoked } from '../db/session-state.js';
 import { registerTools } from './server.js';
 import type { McpToolDefinition } from './types.js';
 
@@ -126,6 +127,7 @@ export const sendMessage: McpToolDefinition = {
       content: JSON.stringify({ text }),
     });
 
+    setTurnSendInvoked();
     log(`send_message: #${seq} → ${routing.resolvedName}`);
     return ok(`Message sent to ${routing.resolvedName} (id: ${seq})`);
   },
@@ -172,6 +174,7 @@ export const sendFile: McpToolDefinition = {
       content: JSON.stringify({ text: (args.text as string) || '', files: [filename] }),
     });
 
+    setTurnSendInvoked();
     log(`send_file: ${id} → ${routing.resolvedName} (${filename})`);
     return ok(`File sent to ${routing.resolvedName} (id: ${id}, filename: ${filename})`);
   },

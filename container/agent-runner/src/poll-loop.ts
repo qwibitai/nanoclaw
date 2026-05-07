@@ -6,6 +6,8 @@ import {
   clearContinuation,
   migrateLegacyContinuation,
   setContinuation,
+  getTurnSendInvoked,
+  clearTurnSendInvoked,
 } from './db/session-state.js';
 import { formatMessages, extractRouting, categorizeMessage, isClearCommand, isRunnerCommand, stripInternalTags, type RoutingContext } from './formatter.js';
 import type { AgentProvider, AgentQuery, ProviderEvent } from './providers/types.js';
@@ -92,6 +94,9 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     const ids = messages.map((m) => m.id);
     markProcessing(ids);
+
+    // Reset the per-turn send flag so a fresh turn starts clean.
+    clearTurnSendInvoked();
 
     const routing = extractRouting(messages);
 
@@ -363,8 +368,17 @@ async function processQuery(
         // (send_message) mid-turn, or the message may not need a response
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
+        // Duplicate suppression: if send_message or send_file already delivered
+        // a reply this turn, the SDK still surfaces the agent's closing text as
+        // a Result. Sending it would produce a second message. Log it but skip
+        // delivery. add_reaction does NOT set this flag — reaction + closing
+        // summary is a valid reply path.
         if (event.text) {
-          dispatchResultText(event.text, routing);
+          if (getTurnSendInvoked()) {
+            log(`Suppressing result text (send already fired this turn): ${event.text.slice(0, 200)}`);
+          } else {
+            dispatchResultText(event.text, routing);
+          }
         }
       }
     }
