@@ -197,6 +197,14 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # restart
 systemctl --user start|stop|restart nanoclaw
 ```
 
+## Module System (host)
+
+The host (`src/`) is ESM (`"type": "module"` in `package.json`). Never use CommonJS `require()` in `.ts` files. Use static `import` at the top of the file. If a circular import forces dynamic load, use `await import('./mod.js')` (ESM dynamic), not `require('./mod.js')`.
+
+The `// eslint-disable-next-line @typescript-eslint/no-require-imports` comment is a red flag in this codebase — runtime `require` is undefined in built ESM, so a `require()` call typechecks cleanly under `tsc` (because the types resolve via `@types/node`) and then fails silently at runtime when the function is executed and `require` is undefined. The function returns `null` or throws inside a try/catch and the bug never surfaces in tests that don't exercise the runtime path.
+
+The agent-runner (`container/agent-runner/`) is a separate package tree on Bun and has its own conventions; this rule applies to the host only.
+
 ## Troubleshooting
 
 Check these first when something goes wrong:
