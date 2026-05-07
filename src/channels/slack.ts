@@ -38,7 +38,8 @@ export class SlackChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private userNameCache = new Map<string, string>();
-  private thinkingMessages = new Map<string, string>();
+  /** Track the latest inbound (non-bot, non-self) message ts per channel for reaction-based ack */
+  private lastInboundTs = new Map<string, string>();
 
   private opts: SlackChannelOpts;
 
@@ -127,6 +128,11 @@ export class SlackChannel implements Channel {
         }
       }
 
+      // Track latest non-bot, non-self message for reaction-based typing indicator
+      if (!isFromMe && !isBotMessage) {
+        this.lastInboundTs.set(jid, msg.ts);
+      }
+
       this.opts.onMessage(jid, {
         id: msg.ts,
         chat_jid: jid,
@@ -145,7 +151,7 @@ export class SlackChannel implements Channel {
       });
 
       // Show thinking indicator for non-self messages (including other bots)
-      if (!isFromMe && !this.thinkingMessages.has(jid)) {
+      if (!isFromMe) {
         const group = groups[jid];
         const willTrigger =
           !group.requiresTrigger ||
@@ -233,33 +239,32 @@ export class SlackChannel implements Channel {
     await this.app.stop();
   }
 
+  // Slack has no native typing indicator API for bots.
+  // Instead, add/remove a 👀 reaction on the latest inbound (human) message
+  // so the sender gets instant visual feedback that the bot saw it.
+  // No-op if no human message has been tracked for the jid yet.
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
+    const ts = this.lastInboundTs.get(jid);
+    if (!ts) return;
     const channelId = jid.replace(/^slack:/, '');
-    if (!this.connected) return;
-
     try {
       if (isTyping) {
-        if (this.thinkingMessages.has(jid)) return;
-        const result = await this.app.client.chat.postMessage({
+        await this.app.client.reactions.add({
           channel: channelId,
-          text: ':brain: Thinking...',
+          timestamp: ts,
+          name: 'eyes',
         });
-        if (result.ts) {
-          this.thinkingMessages.set(jid, result.ts);
-        }
       } else {
-        const ts = this.thinkingMessages.get(jid);
-        if (ts) {
-          await this.app.client.chat.delete({ channel: channelId, ts });
-          this.thinkingMessages.delete(jid);
-        }
+        await this.app.client.reactions.remove({
+          channel: channelId,
+          timestamp: ts,
+          name: 'eyes',
+        });
+        this.lastInboundTs.delete(jid);
       }
     } catch (err) {
-      logger.debug(
-        { jid, isTyping, err },
-        'Failed to manage thinking indicator',
-      );
-      this.thinkingMessages.delete(jid);
+      // Ignore already_reacted / not_reacted — reaction state is best-effort
+      logger.debug({ jid, isTyping, err }, 'Slack typing reaction failed (non-fatal)');
     }
   }
 

@@ -45,6 +45,10 @@ vi.mock('@slack/bolt', () => ({
       chat: {
         postMessage: vi.fn().mockResolvedValue(undefined),
       },
+      reactions: {
+        add: vi.fn().mockResolvedValue(undefined),
+        remove: vi.fn().mockResolvedValue(undefined),
+      },
       conversations: {
         list: vi.fn().mockResolvedValue({
           channels: [],
@@ -766,25 +770,81 @@ describe('SlackChannel', () => {
     });
   });
 
-  // --- setTyping ---
+  // --- setTyping (reaction-based) ---
 
   describe('setTyping', () => {
-    it('resolves without error (no-op)', async () => {
+    it('no-ops when no inbound message tracked for jid', async () => {
       const opts = createTestOpts();
       const channel = new SlackChannel(opts);
+      await channel.connect();
 
-      // Should not throw — Slack has no bot typing indicator API
-      await expect(
-        channel.setTyping('slack:C0123456789', true),
-      ).resolves.toBeUndefined();
+      await channel.setTyping('slack:C0123456789', true);
+      expect(currentApp().client.reactions.add).not.toHaveBeenCalled();
     });
 
-    it('accepts false without error', async () => {
+    it('adds eyes reaction on true after a human message arrives', async () => {
       const opts = createTestOpts();
       const channel = new SlackChannel(opts);
+      await channel.connect();
 
+      await triggerMessageEvent(
+        createMessageEvent({
+          channel: 'C0123456789',
+          ts: '1234567890.123456',
+          text: 'hello',
+          user: 'U_HUMAN',
+        }),
+      );
+
+      await channel.setTyping('slack:C0123456789', true);
+      expect(currentApp().client.reactions.add).toHaveBeenCalledWith({
+        channel: 'C0123456789',
+        timestamp: '1234567890.123456',
+        name: 'eyes',
+      });
+    });
+
+    it('removes eyes reaction on false', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await triggerMessageEvent(
+        createMessageEvent({
+          channel: 'C0123456789',
+          ts: '1234567890.123456',
+          text: 'hello',
+          user: 'U_HUMAN',
+        }),
+      );
+
+      await channel.setTyping('slack:C0123456789', false);
+      expect(currentApp().client.reactions.remove).toHaveBeenCalledWith({
+        channel: 'C0123456789',
+        timestamp: '1234567890.123456',
+        name: 'eyes',
+      });
+    });
+
+    it('ignores reaction API errors gracefully', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await triggerMessageEvent(
+        createMessageEvent({
+          channel: 'C0123456789',
+          ts: '1234567890.123456',
+          text: 'hello',
+          user: 'U_HUMAN',
+        }),
+      );
+
+      currentApp().client.reactions.add.mockRejectedValueOnce(
+        new Error('already_reacted'),
+      );
       await expect(
-        channel.setTyping('slack:C0123456789', false),
+        channel.setTyping('slack:C0123456789', true),
       ).resolves.toBeUndefined();
     });
   });
