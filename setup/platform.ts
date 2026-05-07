@@ -73,7 +73,9 @@ export function openBrowser(url: string): boolean {
       // WSL without wslview: try cmd.exe
       if (isWSL()) {
         try {
-          execSync(`cmd.exe /c start "" ${JSON.stringify(url)}`, { stdio: 'ignore' });
+          execSync(`cmd.exe /c start "" ${JSON.stringify(url)}`, {
+            stdio: 'ignore',
+          });
           return true;
         } catch {
           // cmd.exe not available

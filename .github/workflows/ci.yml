@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.12
+      - run: pnpm install --frozen-lockfile
+      - name: Install agent-runner deps (Bun)
+        working-directory: container/agent-runner
+        run: bun install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm run format:check
+
+      - name: Typecheck host
+        run: pnpm exec tsc --noEmit
+
+      - name: Typecheck container
+        run: pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit
+
+      - name: Host tests
+        run: pnpm exec vitest run
+
+      - name: Container tests
+        working-directory: container/agent-runner
+        run: bun test

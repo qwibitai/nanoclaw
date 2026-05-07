@@ -1,0 +1,40 @@
+name: Label PR
+
+# SECURITY: this workflow runs with write access to the base repo on fork PRs,
+# because `pull_request_target` executes in the context of the base branch.
+# Keep it metadata-only — do NOT add actions/checkout or any step that
+# executes PR-supplied content (install scripts, build commands, etc.).
+# See https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/
+on:
+  pull_request_target:
+    types: [opened, edited]
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.pull_request.body || '';
+            const labels = [];
+
+            if (body.includes('[x] **Feature skill**'))       { labels.push('PR: Skill'); labels.push('PR: Feature'); }
+            else if (body.includes('[x] **Utility skill**'))   labels.push('PR: Skill');
+            else if (body.includes('[x] **Operational/container skill**')) labels.push('PR: Skill');
+            else if (body.includes('[x] **Fix**'))             labels.push('PR: Fix');
+            else if (body.includes('[x] **Simplification**'))  labels.push('PR: Refactor');
+            else if (body.includes('[x] **Documentation**'))   labels.push('PR: Docs');
+
+            if (body.includes('contributing-guide: v1')) labels.push('follows-guidelines');
+
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                labels,
+              });
+            }

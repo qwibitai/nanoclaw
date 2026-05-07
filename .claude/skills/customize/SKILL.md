@@ -10,9 +10,9 @@ This skill helps users add capabilities or modify behavior. Use AskUserQuestion 
 ## Workflow
 
 1. **Understand the request** - Ask clarifying questions
-2. **Plan the changes** - Identify files to modify
-3. **Implement** - Make changes directly to the code
-4. **Test guidance** - Tell user how to verify
+3. **Plan the changes** - Identify files to modify. If a skill exists for the request (e.g., `/add-telegram` for adding Telegram), invoke it instead of implementing manually.
+4. **Implement** - Make changes directly to the code
+5. **Test guidance** - Tell user how to verify
 
 ## Key Files
 
@@ -91,7 +91,7 @@ Implementation:
 Always tell the user:
 ```bash
 # Rebuild and restart
-npm run build
+pnpm run build
 # macOS:
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist

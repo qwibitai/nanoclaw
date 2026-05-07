@@ -8,12 +8,8 @@
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import pino from 'pino';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
-  transport: { target: 'pino-pretty', options: { colorize: true } }
-});
+import { logger } from '../../../src/logger.js';
 
 interface SkillResult {
   success: boolean;
@@ -26,7 +22,7 @@ async function runScript(script: string, args: object): Promise<SkillResult> {
   const scriptPath = path.join(process.cwd(), '.claude', 'skills', 'x-integration', 'scripts', `${script}.ts`);
 
   return new Promise((resolve) => {
-    const proc = spawn('npx', ['tsx', scriptPath], {
+    const proc = spawn('pnpm', ['exec', 'tsx', scriptPath], {
       cwd: process.cwd(),
       env: { ...process.env, NANOCLAW_ROOT: process.cwd() },
       stdio: ['pipe', 'pipe', 'pipe']

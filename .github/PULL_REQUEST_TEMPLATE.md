@@ -1,14 +1,18 @@
+<!-- contributing-guide: v1 -->
 ## Type of Change
 
-- [ ] **Skill** - adds a new skill in `.claude/skills/`
+- [ ] **Feature skill** - adds a channel or integration (source code changes + SKILL.md)
+- [ ] **Utility skill** - adds a standalone tool (code files in `.claude/skills/<name>/`, no source changes)
+- [ ] **Operational/container skill** - adds a workflow or agent skill (SKILL.md only, no source changes)
 - [ ] **Fix** - bug fix or security fix to source code
 - [ ] **Simplification** - reduces or simplifies source code
+- [ ] **Documentation** - docs, README, or CONTRIBUTING changes only
 
 ## Description
 
 
 ## For Skills
 
-- [ ] I have not made any changes to source code
-- [ ] My skill contains instructions for Claude to follow (not pre-built code)
+- [ ] SKILL.md contains instructions, not inline code (code goes in separate files)
+- [ ] SKILL.md is under 500 lines
 - [ ] I tested this skill on a fresh clone

@@ -9,10 +9,33 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+<<<<<<<< HEAD:_legacy/v1.2.49/src/mount-security.ts
 import { MOUNT_ALLOWLIST_PATH } from './config.js';
 import { logger } from './logger.js';
 import { AdditionalMount, AllowedRoot, MountAllowlist } from './types.js';
 
+========
+import { MOUNT_ALLOWLIST_PATH } from '../../config.js';
+import { log } from '../../log.js';
+
+export interface AdditionalMount {
+  hostPath: string;
+  containerPath?: string;
+  readonly?: boolean;
+}
+
+export interface MountAllowlist {
+  allowedRoots: AllowedRoot[];
+  blockedPatterns: string[];
+}
+
+export interface AllowedRoot {
+  path: string;
+  allowReadWrite: boolean;
+  description?: string;
+}
+
+>>>>>>>> upstream/main:src/modules/mount-security/index.ts
 // Cache the allowlist in memory - only reloads on process restart
 let cachedAllowlist: MountAllowlist | null = null;
 let allowlistLoadError: string | null = null;
@@ -59,10 +82,13 @@ export function loadMountAllowlist(): MountAllowlist | null {
     if (!fs.existsSync(MOUNT_ALLOWLIST_PATH)) {
       // Do NOT cache this as an error — file may be created later without restart.
       // Only parse/structural errors are permanently cached.
+<<<<<<<< HEAD:_legacy/v1.2.49/src/mount-security.ts
       logger.warn(
+========
+      log.warn(
+        'Mount allowlist not found - additional mounts will be BLOCKED. Create the file to enable additional mounts.',
+>>>>>>>> upstream/main:src/modules/mount-security/index.ts
         { path: MOUNT_ALLOWLIST_PATH },
-        'Mount allowlist not found - additional mounts will be BLOCKED. ' +
-          'Create the file to enable additional mounts.',
       );
       return null;
     }
@@ -79,36 +105,24 @@ export function loadMountAllowlist(): MountAllowlist | null {
       throw new Error('blockedPatterns must be an array');
     }
 
-    if (typeof allowlist.nonMainReadOnly !== 'boolean') {
-      throw new Error('nonMainReadOnly must be a boolean');
-    }
-
     // Merge with default blocked patterns
-    const mergedBlockedPatterns = [
-      ...new Set([...DEFAULT_BLOCKED_PATTERNS, ...allowlist.blockedPatterns]),
-    ];
+    const mergedBlockedPatterns = [...new Set([...DEFAULT_BLOCKED_PATTERNS, ...allowlist.blockedPatterns])];
     allowlist.blockedPatterns = mergedBlockedPatterns;
 
     cachedAllowlist = allowlist;
-    logger.info(
-      {
-        path: MOUNT_ALLOWLIST_PATH,
-        allowedRoots: allowlist.allowedRoots.length,
-        blockedPatterns: allowlist.blockedPatterns.length,
-      },
-      'Mount allowlist loaded successfully',
-    );
+    log.info('Mount allowlist loaded successfully', {
+      path: MOUNT_ALLOWLIST_PATH,
+      allowedRoots: allowlist.allowedRoots.length,
+      blockedPatterns: allowlist.blockedPatterns.length,
+    });
 
     return cachedAllowlist;
   } catch (err) {
     allowlistLoadError = err instanceof Error ? err.message : String(err);
-    logger.error(
-      {
-        path: MOUNT_ALLOWLIST_PATH,
-        error: allowlistLoadError,
-      },
-      'Failed to load mount allowlist - additional mounts will be BLOCKED',
-    );
+    log.error('Failed to load mount allowlist - additional mounts will be BLOCKED', {
+      path: MOUNT_ALLOWLIST_PATH,
+      error: allowlistLoadError,
+    });
     return null;
   }
 }
@@ -142,10 +156,7 @@ function getRealPath(p: string): string | null {
 /**
  * Check if a path matches any blocked pattern
  */
-function matchesBlockedPattern(
-  realPath: string,
-  blockedPatterns: string[],
-): string | null {
+function matchesBlockedPattern(realPath: string, blockedPatterns: string[]): string | null {
   const pathParts = realPath.split(path.sep);
 
   for (const pattern of blockedPatterns) {
@@ -168,10 +179,7 @@ function matchesBlockedPattern(
 /**
  * Check if a real path is under an allowed root
  */
-function findAllowedRoot(
-  realPath: string,
-  allowedRoots: AllowedRoot[],
-): AllowedRoot | null {
+function findAllowedRoot(realPath: string, allowedRoots: AllowedRoot[]): AllowedRoot | null {
   for (const root of allowedRoots) {
     const expandedRoot = expandPath(root.path);
     const realRoot = getRealPath(expandedRoot);
@@ -230,10 +238,7 @@ export interface MountValidationResult {
  * Validate a single additional mount against the allowlist.
  * Returns validation result with reason.
  */
-export function validateMount(
-  mount: AdditionalMount,
-  isMain: boolean,
-): MountValidationResult {
+export function validateMount(mount: AdditionalMount): MountValidationResult {
   const allowlist = loadMountAllowlist();
 
   // If no allowlist, block all additional mounts
@@ -267,10 +272,7 @@ export function validateMount(
   }
 
   // Check against blocked patterns
-  const blockedMatch = matchesBlockedPattern(
-    realPath,
-    allowlist.blockedPatterns,
-  );
+  const blockedMatch = matchesBlockedPattern(realPath, allowlist.blockedPatterns);
   if (blockedMatch !== null) {
     return {
       allowed: false,
@@ -289,32 +291,19 @@ export function validateMount(
     };
   }
 
-  // Determine effective readonly status
+  // Determine effective readonly status.
+  // RW is only granted if the mount explicitly requests it AND the allowed
+  // root permits it. Otherwise it's forced read-only.
   const requestedReadWrite = mount.readonly === false;
-  let effectiveReadonly = true; // Default to readonly
+  let effectiveReadonly = true;
 
   if (requestedReadWrite) {
-    if (!isMain && allowlist.nonMainReadOnly) {
-      // Non-main groups forced to read-only
-      effectiveReadonly = true;
-      logger.info(
-        {
-          mount: mount.hostPath,
-        },
-        'Mount forced to read-only for non-main group',
-      );
-    } else if (!allowedRoot.allowReadWrite) {
-      // Root doesn't allow read-write
-      effectiveReadonly = true;
-      logger.info(
-        {
-          mount: mount.hostPath,
-          root: allowedRoot.path,
-        },
-        'Mount forced to read-only - root does not allow read-write',
-      );
+    if (!allowedRoot.allowReadWrite) {
+      log.info('Mount forced to read-only - root does not allow read-write', {
+        mount: mount.hostPath,
+        root: allowedRoot.path,
+      });
     } else {
-      // Read-write allowed
       effectiveReadonly = false;
     }
   }
@@ -336,7 +325,6 @@ export function validateMount(
 export function validateAdditionalMounts(
   mounts: AdditionalMount[],
   groupName: string,
-  isMain: boolean,
 ): Array<{
   hostPath: string;
   containerPath: string;
@@ -349,7 +337,7 @@ export function validateAdditionalMounts(
   }> = [];
 
   for (const mount of mounts) {
-    const result = validateMount(mount, isMain);
+    const result = validateMount(mount);
 
     if (result.allowed) {
       validatedMounts.push({
@@ -358,26 +346,20 @@ export function validateAdditionalMounts(
         readonly: result.effectiveReadonly!,
       });
 
-      logger.debug(
-        {
-          group: groupName,
-          hostPath: result.realHostPath,
-          containerPath: result.resolvedContainerPath,
-          readonly: result.effectiveReadonly,
-          reason: result.reason,
-        },
-        'Mount validated successfully',
-      );
+      log.debug('Mount validated successfully', {
+        group: groupName,
+        hostPath: result.realHostPath,
+        containerPath: result.resolvedContainerPath,
+        readonly: result.effectiveReadonly,
+        reason: result.reason,
+      });
     } else {
-      logger.warn(
-        {
-          group: groupName,
-          requestedPath: mount.hostPath,
-          containerPath: mount.containerPath,
-          reason: result.reason,
-        },
-        'Additional mount REJECTED',
-      );
+      log.warn('Additional mount REJECTED', {
+        group: groupName,
+        requestedPath: mount.hostPath,
+        containerPath: mount.containerPath,
+        reason: result.reason,
+      });
     }
   }
 
@@ -412,7 +394,6 @@ export function generateAllowlistTemplate(): string {
       'secret',
       'token',
     ],
-    nonMainReadOnly: true,
   };
 
   return JSON.stringify(template, null, 2);
