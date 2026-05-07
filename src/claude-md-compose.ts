@@ -120,6 +120,13 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
   for (const name of [...desired.keys()].sort()) {
     imports.push(`@./.claude-fragments/${name}`);
   }
+  // Explicitly import the per-group persona file. Claude Code's auto-memory
+  // is supposed to pick it up automatically (CLAUDE_CODE_DISABLE_AUTO_MEMORY=0),
+  // but in the SDK / agent-runner context it doesn't fire reliably — the
+  // agent emits an off-persona reply on the first turn, then later globs
+  // and discovers the file. Importing it here makes persona loading
+  // deterministic and turn-1 correct.
+  imports.push('@./CLAUDE.local.md');
   const body = [COMPOSED_HEADER, ...imports, ''].join('\n');
   writeAtomic(path.join(groupDir, 'CLAUDE.md'), body);
 

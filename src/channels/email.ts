@@ -675,7 +675,14 @@ class EmailChannelAdapter implements ChannelAdapter {
     }
 
     const subject = headers.get('subject') ?? '(no subject)';
-    const text = extractBodyText(latest.payload);
+    const bodyText = extractBodyText(latest.payload);
+    // Prepend RFC-5322-style headers so the agent sees the email as an
+    // email — Subject + From + To above the body. The chat formatter on
+    // the agent side only renders `text` and `sender`, so anything in
+    // `content.subject` would otherwise be dropped before the LLM ever
+    // sees it. The dispatcher persona reads `#ws:<tag>` from the
+    // Subject line; without this, the tag is invisible to it.
+    const text = `Subject: ${subject}\nFrom: ${fromName ? `${fromName} <${fromAddress}>` : fromAddress}\nTo: ${acct.address}\n\n${bodyText}`;
     const timestamp = latest.internalDate
       ? new Date(parseInt(latest.internalDate, 10)).toISOString()
       : new Date().toISOString();
