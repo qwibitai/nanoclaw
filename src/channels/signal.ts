@@ -8,16 +8,17 @@
  * Ported from v1 — see v1 source for commit history.
  */
 import { execFileSync, execSync, spawn } from 'node:child_process';
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { ChannelAdapter, ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
+import { isSafeAttachmentName } from '../attachment-safety.js';
+import { ASSISTANT_NAME, DATA_DIR } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
-import { ASSISTANT_NAME } from '../config.js';
 
 // ---------------------------------------------------------------------------
 // Signal CLI daemon management
@@ -354,6 +355,46 @@ function mentionsBotByName(text: string): boolean {
  * dataMessage.mentions[] has an entry with `uuid === botUuid`, that's a
  * platform-confirmed bot mention regardless of the surrounding text.
  */
+/** Best-guess extension from a MIME type. Falls back to the supplied default
+ *  when the contentType is missing or doesn't follow image/<ext> shape.
+ *  Used to give Signal-downloaded blobs (which signal-cli names by content-id
+ *  with no extension) a useful suffix on the host-mounted copy. */
+function inferExtension(contentType: string | undefined, fallback: string): string {
+  if (!contentType) return fallback;
+  const m = /^[a-z]+\/([a-zA-Z0-9.+-]+)$/.exec(contentType);
+  if (!m) return fallback;
+  // Rough mime-to-extension map. Skipping a full mime-db dep for the common cases.
+  const known: Record<string, string> = {
+    jpeg: '.jpg', jpg: '.jpg', png: '.png', gif: '.gif', webp: '.webp',
+    'svg+xml': '.svg', heic: '.heic', heif: '.heif',
+    mp4: '.mp4', quicktime: '.mov', webm: '.webm',
+    mpeg: '.mp3', 'x-m4a': '.m4a', wav: '.wav', ogg: '.ogg',
+  };
+  const ext = known[m[1].toLowerCase()];
+  return ext ?? `.${m[1].toLowerCase()}`;
+}
+
+/** Copy a signal-cli attachment into the host-mounted attachments dir so the
+ *  container can read it via /workspace/attachments. Idempotent — if the
+ *  destination already exists (re-process or signal-cli replay) we skip the
+ *  copy. Failures are logged + signaled via the boolean so the caller can
+ *  drop the attachment from the inbound rather than emit a path that won't
+ *  resolve inside the container. */
+function stageAttachment(srcPath: string, dstDir: string, dstName: string): boolean {
+  const dstPath = join(dstDir, dstName);
+  try {
+    if (!existsSync(srcPath)) {
+      log.warn('Signal: source attachment missing', { srcPath });
+      return false;
+    }
+    if (!existsSync(dstPath)) copyFileSync(srcPath, dstPath);
+    return true;
+  } catch (err) {
+    log.warn('Signal: failed to stage attachment', { srcPath, dstName, err });
+    return false;
+  }
+}
+
 function loadBotUuid(signalDataDir: string, account: string): string | undefined {
   // signal-cli's accounts.json lives one level down inside `data/`, not at
   // the data-dir root. Path verified live on jibotmac 2026-05-06:
@@ -366,7 +407,9 @@ function loadBotUuid(signalDataDir: string, account: string): string | undefined
     return entry?.uuid;
   } catch (err) {
     log.warn('Signal: could not read accounts.json — native @-mention detection disabled', {
-      accountsPath, account, err: (err as Error).message,
+      accountsPath,
+      account,
+      err: (err as Error).message,
     });
     return undefined;
   }
@@ -392,9 +435,7 @@ function resolveMentions(text: string, mentions?: SignalMention[], botUuid?: str
     // a Signal native @-mention picker resolves to "@+817085315049" and
     // the agent treats it as "user pinged a phone number, not me".
     const isBotSelfMention = !!botUuid && m.uuid === botUuid;
-    const name = isBotSelfMention
-      ? ASSISTANT_NAME
-      : (m.name || m.number || (m.uuid ? m.uuid.slice(0, 8) : 'someone'));
+    const name = isBotSelfMention ? ASSISTANT_NAME : m.name || m.number || (m.uuid ? m.uuid.slice(0, 8) : 'someone');
     if (start < cursor) continue;
     result += text.slice(cursor, start) + `@${name}`;
     cursor = start + length;
@@ -651,11 +692,10 @@ export function createSignalAdapter(config: {
     // PDFs/zips/etc. — without this, non-image file attachments hit the
     // early return below and get silently dropped, even when paired with
     // text. (Wikipedia Editing Workshop, 2026-05-07.)
-    const otherAttachments = dataMessage.attachments?.filter((a) =>
-      !!a.id &&
-      !a.contentType?.startsWith('audio/') &&
-      !a.contentType?.startsWith('image/'),
-    ) ?? [];
+    const otherAttachments =
+      dataMessage.attachments?.filter(
+        (a) => !!a.id && !a.contentType?.startsWith('audio/') && !a.contentType?.startsWith('image/'),
+      ) ?? [];
     const hasVoice = !text && !!audioAttachment;
 
     if (!text && !hasVoice && imageAttachments.length === 0 && otherAttachments.length === 0) return;
@@ -713,29 +753,47 @@ export function createSignalAdapter(config: {
       }
     }
 
-    // Image attachments — emit `[Image: <path>]` lines so the agent's Read
-    // tool can pick them up, and surface the structured `attachments` array
-    // for consumers that prefer that shape. Without this, vision-capable
-    // models never see images sent over Signal.
-    const attachmentRefs: Array<{ path: string; contentType: string }> = [];
+    // Attachments — copy from signal-cli's host-only attachments dir into
+    // ${DATA_DIR}/attachments/ so the per-session container (which has
+    // /workspace/attachments mounted but NOT signal-cli's home) can actually
+    // open the file. Emit the container-visible path in the [Image: ...] /
+    // [File: ...] lines so the agent's Read tool gets a path it can use.
+    //
+    // Without the copy: lines pointed at /Users/<host>/.local/share/signal-cli/
+    // attachments/<id> and the agent reported "I don't have access to that
+    // file" — the bytes were on disk but on the wrong side of a mount.
+    const hostAttachDir = join(DATA_DIR, 'attachments');
+    mkdirSync(hostAttachDir, { recursive: true });
+    const attachmentRefs: Array<{ path: string; contentType: string; name?: string }> = [];
+
     for (const img of imageAttachments) {
-      const imagePath = join(config.signalDataDir, 'attachments', img.id!);
-      const imageLine = `[Image: ${imagePath}]`;
-      content = content ? `${content}\n${imageLine}` : imageLine;
-      attachmentRefs.push({ path: imagePath, contentType: img.contentType || 'image/jpeg' });
+      const srcPath = join(config.signalDataDir, 'attachments', img.id!);
+      const ext = inferExtension(img.contentType, '.jpg');
+      const dstName = `signal-${img.id!}${ext}`;
+      const ok = stageAttachment(srcPath, hostAttachDir, dstName);
+      if (!ok) continue;
+      const containerPath = `/workspace/attachments/${dstName}`;
+      content = content ? `${content}\n[Image: ${containerPath}]` : `[Image: ${containerPath}]`;
+      attachmentRefs.push({ path: containerPath, contentType: img.contentType || 'image/jpeg' });
     }
-    // Non-image / non-audio attachments — markdown/text/PDF/etc. Emit a
-    // [File: <name> at <path>] line so the agent's Read tool can pick them
-    // up, and surface the structured attachments array for downstream
-    // consumers. signal-cli stores the file at signalDataDir/attachments/<id>;
-    // the original filename (if signal-cli surfaces it) goes in the label.
+
     for (const att of otherAttachments) {
-      const filePath = join(config.signalDataDir, 'attachments', att.id!);
+      const srcPath = join(config.signalDataDir, 'attachments', att.id!);
+      const safeName =
+        att.filename && isSafeAttachmentName(att.filename) ? att.filename : att.id!;
+      const dstName = `signal-${att.id!}-${safeName}`;
+      const ok = stageAttachment(srcPath, hostAttachDir, dstName);
+      if (!ok) continue;
+      const containerPath = `/workspace/attachments/${dstName}`;
       const label = att.filename ?? att.id!;
       const ctSuffix = att.contentType ? ` (${att.contentType})` : '';
-      const fileLine = `[File: ${label} at ${filePath}${ctSuffix}]`;
+      const fileLine = `[File: ${label} at ${containerPath}${ctSuffix}]`;
       content = content ? `${content}\n${fileLine}` : fileLine;
-      attachmentRefs.push({ path: filePath, contentType: att.contentType || 'application/octet-stream' });
+      attachmentRefs.push({
+        path: containerPath,
+        contentType: att.contentType || 'application/octet-stream',
+        name: att.filename,
+      });
     }
 
     const msg: InboundMessage = {
@@ -761,10 +819,7 @@ export function createSignalAdapter(config: {
       // "jibot ..." or "@jibot" still engages, restoring 1.x's
       // attentive-channel behavior. Case-insensitive, word-boundary so
       // "jibote" or "jibot.app" don't trigger.
-      isMention:
-        !isGroup ||
-        mentionsBotByUuid(botUuid, dataMessage.mentions) ||
-        mentionsBotByName(text),
+      isMention: !isGroup || mentionsBotByUuid(botUuid, dataMessage.mentions) || mentionsBotByName(text),
       isGroup,
     };
     await setup.onInbound(platformId, null, msg);

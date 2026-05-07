@@ -803,10 +803,14 @@ class EmailChannelAdapter implements ChannelAdapter {
     // the body text plus a "[attachment download failed]" line for each
     // file we couldn't pull, so it can ask the user to resend.
     const attachmentRefs = await this.downloadEmailAttachments(acct, latest);
+    // Container-visible paths: DATA_DIR/attachments mounts to
+    // /workspace/attachments per container-runner.ts. Emitting the host
+    // absolute path would put a string in the agent's view that its Read
+    // tool cannot open from inside the container.
     const attachmentLines = attachmentRefs
       .map((a) =>
         a.localPath
-          ? `[File: ${a.name} at ${path.join(DATA_DIR, a.localPath)} (${a.contentType})]`
+          ? `[File: ${a.name} at /workspace/${a.localPath} (${a.contentType})]`
           : `[File: ${a.name} — download failed]`,
       )
       .join('\n');
@@ -877,7 +881,7 @@ class EmailChannelAdapter implements ChannelAdapter {
           ? {
               attachments: attachmentRefs
                 .filter((a) => a.localPath)
-                .map((a) => ({ path: path.join(DATA_DIR, a.localPath!), contentType: a.contentType, name: a.name })),
+                .map((a) => ({ path: `/workspace/${a.localPath!}`, contentType: a.contentType, name: a.name })),
             }
           : {}),
         // Useful for the agent's persona to know how the message was routed.

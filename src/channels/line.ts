@@ -356,20 +356,30 @@ class LineChannelAdapter implements ChannelAdapter {
         msg.type === 'file' && msg.fileName && isSafeAttachmentName(msg.fileName)
           ? `${msg.id}-${msg.fileName}`
           : `${msg.id}${ext}`;
-      const localPath = path.join(DATA_DIR, 'attachments', `line-${proposedName}`);
-      const ok = await this.downloadContent(msg, localPath);
+      const dstName = `line-${proposedName}`;
+      const hostPath = path.join(DATA_DIR, 'attachments', dstName);
+      const ok = await this.downloadContent(msg, hostPath);
       const label = msg.fileName ?? `${msg.type}-${msg.id}`;
       if (!ok) {
         // Couldn't download — tell the agent so it can ask for a resend.
         return { text: `[${msg.type === 'image' ? 'Image' : 'File'}: ${label} — download failed]`, attachments };
       }
       const contentType =
-        msg.type === 'image' ? 'image/jpeg'
-        : msg.type === 'video' ? 'video/mp4'
-        : msg.type === 'audio' ? 'audio/m4a'
-        : 'application/octet-stream';
-      attachments.push({ path: localPath, contentType });
-      const line = msg.type === 'image' ? `[Image: ${localPath}]` : `[File: ${label} at ${localPath}]`;
+        msg.type === 'image'
+          ? 'image/jpeg'
+          : msg.type === 'video'
+            ? 'video/mp4'
+            : msg.type === 'audio'
+              ? 'audio/m4a'
+              : 'application/octet-stream';
+      // Container path: /workspace/attachments/<name>. Emitting the host
+      // absolute path here would render correctly in the inbound JSON but
+      // the agent inside the container can't read /Users/<host>/... — see
+      // container-runner.ts where DATA_DIR/attachments mounts to
+      // /workspace/attachments.
+      const containerPath = `/workspace/attachments/${dstName}`;
+      attachments.push({ path: containerPath, contentType });
+      const line = msg.type === 'image' ? `[Image: ${containerPath}]` : `[File: ${label} at ${containerPath}]`;
       return { text: line, attachments };
     }
 

@@ -338,6 +338,17 @@ describe('SignalAdapter', () => {
     });
 
     it('forwards image attachments as [Image: <path>] plus structured attachments array', async () => {
+      // Stage a real source file at signalDataDir/attachments/<id> so the
+      // adapter's stageAttachment helper can copyFileSync it into
+      // ${DATA_DIR}/attachments/. Without this, the helper bails (source
+      // missing) and the attachment is dropped — the test would assert on
+      // an emission that never happened.
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const srcDir = '/tmp/signal-cli-test-data/attachments';
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(path.join(srcDir, 'att123abc'), Buffer.from('fake image bytes'));
+
       const adapter = createAdapter();
       const cfg = createMockSetup();
       await adapter.setup(cfg);
@@ -357,7 +368,12 @@ describe('SignalAdapter', () => {
         null,
         expect.objectContaining({
           content: expect.objectContaining({
-            text: expect.stringMatching(/^\[Image: .+att123abc\]$/),
+            // New container-visible path: /workspace/attachments/signal-<id><ext>.
+            // The host-side copy lands in ${DATA_DIR}/attachments/, but that
+            // directory is bind-mounted into every session container at
+            // /workspace/attachments — so the agent's Read tool sees the
+            // emitted path and can open the file.
+            text: expect.stringMatching(/^\[Image: \/workspace\/attachments\/signal-att123abc\.jpg\]$/),
             attachments: [expect.objectContaining({ contentType: 'image/jpeg' })],
           }),
         }),
@@ -599,9 +615,7 @@ describe('SignalAdapter', () => {
       );
       expect((sendCalls[0].params as Record<string, unknown>).attachments).toBeUndefined();
       // Second call: attachment, no message
-      expect(sendCalls[1].params).toEqual(
-        expect.objectContaining({ recipient: ['+15555550123'] }),
-      );
+      expect(sendCalls[1].params).toEqual(expect.objectContaining({ recipient: ['+15555550123'] }));
       const attachments = (sendCalls[1].params as Record<string, unknown>).attachments as string[];
       expect(attachments).toHaveLength(1);
 

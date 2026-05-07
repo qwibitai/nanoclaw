@@ -20,7 +20,13 @@ import {
   TIMEZONE,
 } from './config.js';
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
-import { CONTAINER_RUNTIME_BIN, assertSeccompProfileExists, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import {
+  CONTAINER_RUNTIME_BIN,
+  assertSeccompProfileExists,
+  hostGatewayArgs,
+  readonlyMountArgs,
+  stopContainer,
+} from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
@@ -298,6 +304,19 @@ function buildMounts(
   if (fs.existsSync(globalDir)) {
     mounts.push({ hostPath: globalDir, containerPath: '/workspace/global', readonly: true });
   }
+
+  // Inbound attachment store — shared across all sessions, read-only. Channel
+  // adapters (signal/line/email/whatsapp/etc.) drop downloaded attachments
+  // into ${DATA_DIR}/attachments/ and emit container-visible paths under
+  // /workspace/attachments/<filename>. Without this mount, [File: ... at
+  // <abs-host-path>] lines emitted by the adapters refer to paths the
+  // container can't read — and the agent says "I don't have access to that
+  // file" when in fact the bytes are sitting on disk one mount away.
+  const attachDir = path.join(DATA_DIR, 'attachments');
+  // mkdirSync is idempotent — first-ever message ensures the dir exists so
+  // docker doesn't error on the bind mount.
+  fs.mkdirSync(attachDir, { recursive: true });
+  mounts.push({ hostPath: attachDir, containerPath: '/workspace/attachments', readonly: true });
 
   // Shared CLAUDE.md — read-only, imported by the composed entry point via
   // the `.claude-shared.md` symlink inside the group dir.
