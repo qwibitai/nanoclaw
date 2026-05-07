@@ -217,7 +217,18 @@ async function makeCodexJudgeBackend(cfg: BackendConfig): Promise<JudgeBackend> 
     const timeoutMs = callOpts?.timeoutMs ?? 30_000;
     const outFile = join(tmpdir(), `judge-codex-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
 
-    const args = ['--yolo', '--ephemeral', '--output-last-message', outFile, '--model', cfg.model];
+    // E8 fix: codex CLI requires the `exec` subcommand before flags. The
+    // classifier backend (memory-daemon/backends/codex.ts) follows the same
+    // shape; without it codex prints help and exits non-zero.
+    const args = [
+      'exec',
+      '--yolo',
+      '--ephemeral',
+      '--output-last-message',
+      outFile,
+      '--model',
+      cfg.model,
+    ];
     if (effortFlag) args.push('--config', `model_reasoning_effort=${effortFlag}`);
 
     const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;

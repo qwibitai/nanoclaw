@@ -115,6 +115,11 @@ export async function processPendingJudgments(opts: JudgeProcessorOpts): Promise
     byEvent.set(row.recall_event_id, rows);
   }
 
+  // E6 helper: track events terminally marked ambiguous so subsequent loop
+  // iterations don't re-process them. We populate this when the ambiguity
+  // check in one event's processing also marks its peer(s).
+  const ambiguousEventIds = new Set<string>();
+
   // Snapshot dead-letter retry state once per sweep — avoids N round-trips.
   const deadLetterRetry = new Map<string, string | null>(); // event_id → next_retry_at (ISO) or null
   const dlRows = db
@@ -144,9 +149,14 @@ export async function processPendingJudgments(opts: JudgeProcessorOpts): Promise
     }
 
     // 3. Ambiguity check: if multiple events in same (agent_group_id, trigger_thread_id)
-    //    within ±60s of this event's trigger_sent_at, mark ambiguous and skip
+    //    within ±60s of this event's trigger_sent_at, mark ALL of them ambiguous and skip.
+    //    E6 fix: previously we only marked the current event, which let the
+    //    second overlapping event slip through (the original first event was no
+    //    longer "pending" by the time the loop hit it, so the size-check failed
+    //    and judge ran). Now we mark every overlapping event terminally in one
+    //    transaction and remember them so the rest of the loop skips them too.
     const threadId = representative.trigger_thread_id;
-    if (threadId) {
+    if (threadId && !ambiguousEventIds.has(recallEventId)) {
       // Compute ISO8601 window bounds in JS so SQLite receives normalized strings.
       // trigger_sent_at is stored as ISO8601 (YYYY-MM-DDTHH:MM:SS.sssZ). Comparing
       // directly as strings is valid since ISO8601 is lexicographically sortable.
@@ -167,17 +177,29 @@ export async function processPendingJudgments(opts: JudgeProcessorOpts): Promise
 
       const distinctEventIds = new Set(overlapRows.map((r) => r.recall_event_id));
       if (distinctEventIds.size > 1) {
-        // Mark all rows in this event as ambiguous
+        const nowIso = new Date().toISOString();
         db.transaction(() => {
-          db.prepare(
+          const stmt = db.prepare(
             `UPDATE recall_outcomes
              SET judge_method = 'ambiguous-correlation', judged_at = ?
              WHERE agent_group_id = ? AND recall_event_id = ? AND judged_at IS NULL`,
-          ).run(new Date().toISOString(), agentGroupId, recallEventId);
+          );
+          for (const eid of distinctEventIds) {
+            stmt.run(nowIso, agentGroupId, eid);
+            ambiguousEventIds.add(eid);
+            if (eid !== recallEventId && byEvent.has(eid)) {
+              // We'll skip these when the loop reaches them.
+              result.ambiguous++;
+            }
+          }
         })();
-        result.ambiguous++;
+        result.ambiguous++; // for the current event
         continue;
       }
+    }
+    if (ambiguousEventIds.has(recallEventId)) {
+      // Already marked terminally by an earlier overlapping event in this sweep.
+      continue;
     }
 
     // 4. Look up agent response from archive.db
@@ -278,9 +300,17 @@ export async function processPendingJudgments(opts: JudgeProcessorOpts): Promise
       continue;
     }
 
-    // 7. Write scores in single transaction
+    // 7. Write scores in single transaction.
+    // E7 fix: require complete coverage of every fact_id we sent to the judge.
+    // If the LLM omits any fact (validation drop, model truncation, prompt
+    // injection bypassing one fact, etc.), we mark the omitted facts terminally
+    // as judge-failed instead of leaving them pending. Otherwise the partial
+    // index keeps re-fetching them every sweep, repeating cost without bound.
     const responseExcerptSha = sha256(responseExcerpt);
     const judgeModel = process.env.MEMORY_RECALL_JUDGE_BACKEND ?? 'anthropic:haiku-4-5:default';
+
+    const scoredIds = new Set(judgeOutput.scores.map((s) => s.fact_id));
+    const omittedIds = [...knownFactIds].filter((id) => !scoredIds.has(id));
 
     const nowIso = new Date().toISOString();
     db.transaction(() => {
@@ -302,6 +332,17 @@ export async function processPendingJudgments(opts: JudgeProcessorOpts): Promise
           score.fact_id,
           JUDGE_PROMPT_VERSION,
         );
+      }
+      if (omittedIds.length > 0) {
+        const omitStmt = db.prepare(
+          `UPDATE recall_outcomes
+           SET judge_method = 'judge-failed', judged_at = ?
+           WHERE agent_group_id = ? AND recall_event_id = ? AND fact_id = ?
+             AND judge_prompt_version = ? AND judged_at IS NULL`,
+        );
+        for (const factId of omittedIds) {
+          omitStmt.run(nowIso, agentGroupId, recallEventId, factId, JUDGE_PROMPT_VERSION);
+        }
       }
     })();
 
