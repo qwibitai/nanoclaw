@@ -646,9 +646,19 @@ export function createSignalAdapter(config: {
 
     const audioAttachment = dataMessage.attachments?.find((a) => a.contentType?.startsWith('audio/') && a.id);
     const imageAttachments = dataMessage.attachments?.filter((a) => a.contentType?.startsWith('image/') && a.id) ?? [];
+    // Anything that isn't audio (handled via transcription) or image (handled
+    // via [Image: <path>] lines for vision models). Catches text/markdown/
+    // PDFs/zips/etc. — without this, non-image file attachments hit the
+    // early return below and get silently dropped, even when paired with
+    // text. (Wikipedia Editing Workshop, 2026-05-07.)
+    const otherAttachments = dataMessage.attachments?.filter((a) =>
+      !!a.id &&
+      !a.contentType?.startsWith('audio/') &&
+      !a.contentType?.startsWith('image/'),
+    ) ?? [];
     const hasVoice = !text && !!audioAttachment;
 
-    if (!text && !hasVoice && imageAttachments.length === 0) return;
+    if (!text && !hasVoice && imageAttachments.length === 0 && otherAttachments.length === 0) return;
 
     const sender = (envelope.sourceNumber ?? envelope.sourceUuid ?? envelope.source ?? '').trim();
     if (!sender) return;
@@ -713,6 +723,19 @@ export function createSignalAdapter(config: {
       const imageLine = `[Image: ${imagePath}]`;
       content = content ? `${content}\n${imageLine}` : imageLine;
       attachmentRefs.push({ path: imagePath, contentType: img.contentType || 'image/jpeg' });
+    }
+    // Non-image / non-audio attachments — markdown/text/PDF/etc. Emit a
+    // [File: <name> at <path>] line so the agent's Read tool can pick them
+    // up, and surface the structured attachments array for downstream
+    // consumers. signal-cli stores the file at signalDataDir/attachments/<id>;
+    // the original filename (if signal-cli surfaces it) goes in the label.
+    for (const att of otherAttachments) {
+      const filePath = join(config.signalDataDir, 'attachments', att.id!);
+      const label = att.filename ?? att.id!;
+      const ctSuffix = att.contentType ? ` (${att.contentType})` : '';
+      const fileLine = `[File: ${label} at ${filePath}${ctSuffix}]`;
+      content = content ? `${content}\n${fileLine}` : fileLine;
+      attachmentRefs.push({ path: filePath, contentType: att.contentType || 'application/octet-stream' });
     }
 
     const msg: InboundMessage = {
