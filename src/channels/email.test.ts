@@ -83,8 +83,7 @@ describe('parseFromHeader', () => {
 describe('decodeBase64Url', () => {
   it('decodes URL-safe base64', () => {
     // "Hello, world!" with `-` and `_` substitutions exercised.
-    const data = Buffer.from('Hello, world!', 'utf-8').toString('base64')
-      .replace(/\+/g, '-').replace(/\//g, '_');
+    const data = Buffer.from('Hello, world!', 'utf-8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
     expect(decodeBase64Url(data)).toBe('Hello, world!');
   });
 });
@@ -185,7 +184,8 @@ describe('preroute', () => {
   it('promotions short-circuits even when #cal is in the subject', () => {
     // Without the ordering, a promo email with `#cal` would survive.
     const r = preroute({
-      ...base, subject: 'Buy now! #cal special',
+      ...base,
+      subject: 'Buy now! #cal special',
       labels: ['CATEGORY_PROMOTIONS'],
     });
     expect(r.kind).toBe('drop');
@@ -256,13 +256,12 @@ describe('payloadHasCalendarPart', () => {
     expect(payloadHasCalendarPart({ mimeType: 'text/calendar' })).toBe(true);
   });
   it('finds text/calendar nested inside multipart', () => {
-    expect(payloadHasCalendarPart({
-      mimeType: 'multipart/mixed',
-      parts: [
-        { mimeType: 'text/plain' },
-        { mimeType: 'text/calendar; method=REQUEST' },
-      ],
-    })).toBe(true);
+    expect(
+      payloadHasCalendarPart({
+        mimeType: 'multipart/mixed',
+        parts: [{ mimeType: 'text/plain' }, { mimeType: 'text/calendar; method=REQUEST' }],
+      }),
+    ).toBe(true);
   });
   it('returns false for non-calendar payloads', () => {
     expect(payloadHasCalendarPart({ mimeType: 'text/plain' })).toBe(false);
@@ -367,7 +366,12 @@ describe('sidecar state', () => {
 
   it('saveAccountState then loadAccountState round-trips', () => {
     const file = path.join(tmpDir, 'rt.json');
-    const s = { threads: new Map([['t1', 'm1'], ['t2', 'm2']]) };
+    const s = {
+      threads: new Map([
+        ['t1', 'm1'],
+        ['t2', 'm2'],
+      ]),
+    };
     saveAccountState(file, s);
     const loaded = loadAccountState(file);
     expect(loaded.threads.get('t1')).toBe('m1');

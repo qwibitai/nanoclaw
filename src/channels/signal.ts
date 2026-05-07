@@ -365,10 +365,21 @@ function inferExtension(contentType: string | undefined, fallback: string): stri
   if (!m) return fallback;
   // Rough mime-to-extension map. Skipping a full mime-db dep for the common cases.
   const known: Record<string, string> = {
-    jpeg: '.jpg', jpg: '.jpg', png: '.png', gif: '.gif', webp: '.webp',
-    'svg+xml': '.svg', heic: '.heic', heif: '.heif',
-    mp4: '.mp4', quicktime: '.mov', webm: '.webm',
-    mpeg: '.mp3', 'x-m4a': '.m4a', wav: '.wav', ogg: '.ogg',
+    jpeg: '.jpg',
+    jpg: '.jpg',
+    png: '.png',
+    gif: '.gif',
+    webp: '.webp',
+    'svg+xml': '.svg',
+    heic: '.heic',
+    heif: '.heif',
+    mp4: '.mp4',
+    quicktime: '.mov',
+    webm: '.webm',
+    mpeg: '.mp3',
+    'x-m4a': '.m4a',
+    wav: '.wav',
+    ogg: '.ogg',
   };
   const ext = known[m[1].toLowerCase()];
   return ext ?? `.${m[1].toLowerCase()}`;
@@ -779,8 +790,7 @@ export function createSignalAdapter(config: {
 
     for (const att of otherAttachments) {
       const srcPath = join(config.signalDataDir, 'attachments', att.id!);
-      const safeName =
-        att.filename && isSafeAttachmentName(att.filename) ? att.filename : att.id!;
+      const safeName = att.filename && isSafeAttachmentName(att.filename) ? att.filename : att.id!;
       const dstName = `signal-${att.id!}-${safeName}`;
       const ok = stageAttachment(srcPath, hostAttachDir, dstName);
       if (!ok) continue;

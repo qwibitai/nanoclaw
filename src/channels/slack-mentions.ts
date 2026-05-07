@@ -144,11 +144,7 @@ function escapeRegex(s: string): string {
  * deployments so a name like "Mark" doesn't get rewritten to a userId
  * that only exists in a different workspace.
  */
-export function compactSlackMentions(
-  text: string,
-  indexPath: string = DEFAULT_INDEX_PATH,
-  namespace?: string,
-): string {
+export function compactSlackMentions(text: string, indexPath: string = DEFAULT_INDEX_PATH, namespace?: string): string {
   if (!text || !text.includes('@')) return text;
   const aliases = loadAliases(indexPath, namespace);
   if (aliases.length === 0) return text;

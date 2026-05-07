@@ -33,11 +33,7 @@ const cache = new Map<string, string>(); // lowercased-name → userId
  * `global_name` (display name) and `username` (the @handle) — agents may
  * use either when writing replies.
  */
-export function recordDiscordIdentity(
-  userId: string | undefined,
-  fullName?: string,
-  userName?: string,
-): void {
+export function recordDiscordIdentity(userId: string | undefined, fullName?: string, userName?: string): void {
   if (!userId) return;
   for (const candidate of [fullName, userName]) {
     if (!candidate) continue;

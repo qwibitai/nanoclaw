@@ -47,11 +47,7 @@ export interface BackfillerConfig {
   /** Channel type label used only in log lines. */
   channelType: string;
   setupConfig: ChannelSetup;
-  messageToInbound: (
-    message: ChatMessage,
-    isMention: boolean,
-    isGroup?: boolean,
-  ) => Promise<InboundMessage>;
+  messageToInbound: (message: ChatMessage, isMention: boolean, isGroup?: boolean) => Promise<InboundMessage>;
 }
 
 export interface Backfiller {
@@ -71,12 +67,7 @@ export interface Backfiller {
    *                       call. Filtered out so the live handler
    *                       dispatches it without a duplicate.
    */
-  onThreadActivity(
-    threadId: string,
-    channelId: string,
-    isGroup: boolean,
-    liveMessageId: string,
-  ): Promise<void>;
+  onThreadActivity(threadId: string, channelId: string, isGroup: boolean, liveMessageId: string): Promise<void>;
 }
 
 export function createBackfiller(config: BackfillerConfig): Backfiller {
@@ -174,9 +165,7 @@ export function createBackfiller(config: BackfillerConfig): Backfiller {
 
     // Defensive: filter out the live message (always present in the
     // first page) and any of the bot's own messages that snuck in.
-    const filtered = toInject.filter(
-      (m) => m.author?.userId !== botUserId && m.id !== liveMessageId,
-    );
+    const filtered = toInject.filter((m) => m.author?.userId !== botUserId && m.id !== liveMessageId);
 
     if (filtered.length === 0) {
       log.debug('Backfill nothing to inject after filter', {

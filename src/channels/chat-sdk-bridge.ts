@@ -188,10 +188,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
             // sanitizer rejects path traversal / control-char filenames; on
             // rejection we fall back to a synthesized name so we still write
             // something rather than dropping silently.
-            const safeName =
-              att.name && isSafeAttachmentName(att.name)
-                ? att.name
-                : `${att.type ?? 'file'}-${i}`;
+            const safeName = att.name && isSafeAttachmentName(att.name) ? att.name : `${att.type ?? 'file'}-${i}`;
             const fileName = `${channelTypePrefix}-${message.id}-${i}-${safeName}`;
             const relPath = `attachments/${fileName}`;
             const absPath = path.join(DATA_DIR, relPath);

@@ -25,13 +25,7 @@ vi.mock('../../router.js', () => ({
 }));
 
 import fs from 'fs';
-import {
-  detectBareUrl,
-  intakeUrl,
-  resetIntakeApiKeyCache,
-  formatIntakeReply,
-  urlIntakeFilter,
-} from './index.js';
+import { detectBareUrl, intakeUrl, resetIntakeApiKeyCache, formatIntakeReply, urlIntakeFilter } from './index.js';
 import { getDeliveryAdapter } from '../../delivery.js';
 
 const CREDS_WITH_INTAKE = `
@@ -147,9 +141,7 @@ describe('formatIntakeReply', () => {
     ).toBe('Filed [research]: Some article\n→ agents/curator/extractions/foo.md');
   });
   it('omits classification when missing', () => {
-    expect(formatIntakeReply({ title: 'Some article', file_path: 'p.md' })).toBe(
-      'Filed: Some article\n→ p.md',
-    );
+    expect(formatIntakeReply({ title: 'Some article', file_path: 'p.md' })).toBe('Filed: Some article\n→ p.md');
   });
   it('omits file_path when missing', () => {
     expect(formatIntakeReply({ title: 't', classification: 'c' })).toBe('Filed [c]: t');
@@ -158,9 +150,7 @@ describe('formatIntakeReply', () => {
     expect(formatIntakeReply({ classification: 'c' })).toBe('Filed [c]: (untitled)');
   });
   it('formats an error response', () => {
-    expect(formatIntakeReply({ error: 'sprite down' })).toBe(
-      "Couldn't auto-file URL: sprite down",
-    );
+    expect(formatIntakeReply({ error: 'sprite down' })).toBe("Couldn't auto-file URL: sprite down");
   });
   it('truncates long error messages', () => {
     const long = 'x'.repeat(300);
@@ -180,9 +170,7 @@ describe('intakeUrl', () => {
     const out = await intakeUrl('https://x.com/article');
     expect(out).toEqual({ status: 'filed', title: 't', file_path: 'p.md' });
     expect(captured?.opts.path).toBe('/intake');
-    expect((captured?.opts.headers as Record<string, unknown>)?.['X-API-Key']).toBe(
-      'intake-secret-abc',
-    );
+    expect((captured?.opts.headers as Record<string, unknown>)?.['X-API-Key']).toBe('intake-secret-abc');
     expect(JSON.parse(captured!.body)).toEqual({ url: 'https://x.com/article' });
   });
 
@@ -222,7 +210,11 @@ describe('intakeUrl', () => {
 });
 
 describe('urlIntakeFilter', () => {
-  function evt(text: string, channelType = 'sig', platformId = '+12025550100'): {
+  function evt(
+    text: string,
+    channelType = 'sig',
+    platformId = '+12025550100',
+  ): {
     channelType: string;
     platformId: string;
     threadId: null;
@@ -271,9 +263,17 @@ describe('urlIntakeFilter', () => {
       statusCode: 200,
       body: JSON.stringify({ title: 'A title', classification: 'note', file_path: 'a.md' }),
     };
-    const deliver = vi.fn<
-      (channelType: string, platformId: string, threadId: string | null, kind: string, content: string) => Promise<string>
-    >().mockResolvedValue('msg-1');
+    const deliver = vi
+      .fn<
+        (
+          channelType: string,
+          platformId: string,
+          threadId: string | null,
+          kind: string,
+          content: string,
+        ) => Promise<string>
+      >()
+      .mockResolvedValue('msg-1');
     (getDeliveryAdapter as ReturnType<typeof vi.fn>).mockReturnValue({ deliver });
 
     const consumed = await urlIntakeFilter(evt('https://x.com/abc'));
@@ -303,9 +303,17 @@ describe('urlIntakeFilter', () => {
   it('still consumes when sprite errors — replies with error message', async () => {
     process.env.INTAKE_ENABLED_PLATFORM_IDS = 'sig:+12025550100';
     mockResponse = { statusCode: 500, body: 'broken' };
-    const deliver = vi.fn<
-      (channelType: string, platformId: string, threadId: string | null, kind: string, content: string) => Promise<string>
-    >().mockResolvedValue('msg-1');
+    const deliver = vi
+      .fn<
+        (
+          channelType: string,
+          platformId: string,
+          threadId: string | null,
+          kind: string,
+          content: string,
+        ) => Promise<string>
+      >()
+      .mockResolvedValue('msg-1');
     (getDeliveryAdapter as ReturnType<typeof vi.fn>).mockReturnValue({ deliver });
     expect(await urlIntakeFilter(evt('https://x.com'))).toBe(true);
     expect(deliver).toHaveBeenCalledTimes(1);

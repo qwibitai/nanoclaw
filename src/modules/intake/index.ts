@@ -129,12 +129,7 @@ interface HttpResult {
   body: string;
 }
 
-function postJson(
-  pathSuffix: string,
-  bodyObj: unknown,
-  apiKey: string,
-  timeoutMs: number,
-): Promise<HttpResult> {
+function postJson(pathSuffix: string, bodyObj: unknown, apiKey: string, timeoutMs: number): Promise<HttpResult> {
   return new Promise((resolve, reject) => {
     const u = new URL(SPRITE_URL + pathSuffix);
     const body = JSON.stringify(bodyObj);
