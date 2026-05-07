@@ -24,12 +24,19 @@ describe('sanitizeTelegramLegacyMarkdown', () => {
     expect(sanitizeTelegramLegacyMarkdown(input)).toBe(input);
   });
 
-  it('strips formatting chars on odd delimiter count (unbalanced *)', () => {
-    expect(sanitizeTelegramLegacyMarkdown('a * b *c*')).toBe('a  b c');
+  it('escapes formatting chars on odd delimiter count (unbalanced *)', () => {
+    expect(sanitizeTelegramLegacyMarkdown('a * b *c*')).toBe('a \\* b \\*c\\*');
   });
 
-  it('strips formatting chars on odd delimiter count (unbalanced _)', () => {
-    expect(sanitizeTelegramLegacyMarkdown('file_name has _one italic_')).toBe('filename has one italic');
+  it('escapes formatting chars on odd delimiter count (unbalanced _)', () => {
+    expect(sanitizeTelegramLegacyMarkdown('file_name has _one italic_')).toBe('file\\_name has \\_one italic\\_');
+  });
+
+  it('preserves underscores in URL slugs (regression: `group_name` was being stripped to `groupname`)', () => {
+    const input = '**http://example.com/group_name/page/**';
+    const out = sanitizeTelegramLegacyMarkdown(input);
+    expect(out).toContain('group\\_name');
+    expect(out).not.toContain('groupname');
   });
 
   it('strips brackets when unbalanced', () => {

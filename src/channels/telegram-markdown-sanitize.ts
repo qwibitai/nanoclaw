@@ -36,11 +36,15 @@ export function sanitizeTelegramLegacyMarkdown(input: string): string {
   text = text.replace(/\*\*([^*\n]+?)\*\*/g, '*$1*');
   text = text.replace(/__([^_\n]+?)__/g, '_$1_');
 
+  // When delimiters are unbalanced, Telegram's legacy parser would reject the
+  // message. Escape stray chars rather than stripping them — stripping silently
+  // mangles URLs that contain `_` (e.g. a path like `/group_name/site/` becomes
+  // `/groupname/site/` after delivery, which 404s when the user clicks).
+  // `\_` and `\*` render as literal in Telegram's legacy Markdown.
   const starCount = (text.match(/\*/g) ?? []).length;
   const underCount = (text.match(/_/g) ?? []).length;
-  if (starCount % 2 !== 0 || underCount % 2 !== 0) {
-    text = text.replace(/[*_]/g, '');
-  }
+  if (starCount % 2 !== 0) text = text.replace(/\*/g, '\\*');
+  if (underCount % 2 !== 0) text = text.replace(/_/g, '\\_');
 
   const openBrackets = (text.match(/\[/g) ?? []).length;
   const closeBrackets = (text.match(/\]/g) ?? []).length;
