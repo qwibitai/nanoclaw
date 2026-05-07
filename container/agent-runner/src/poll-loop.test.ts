@@ -421,6 +421,39 @@ describe('routing', () => {
     expect(routing.channelType).toBe('slack');
     expect(routing.threadId).toBe('slack:C123:home-thread');
   });
+
+  it('task in batch dominates routing — chat-row thread does not hijack', () => {
+    // A scheduled task fires while an older chat row from a thread is still
+    // pending in the batch (host hadn't synced processing_ack yet, or the
+    // container restarted and clearStaleProcessingAcks wiped its claim, and
+    // the prior turn's outbound didn't set in_reply_to so respondedIds didn't
+    // catch the chat). Without task-row priority, extractRouting picks the
+    // older chat row as `first` and the task's reply lands in that thread
+    // instead of the channel root.
+    //
+    // Real-world manifestation: 2026-05-07, illyse Slack agent — every */15
+    // task fired into the originating thread instead of #agents-xzo root.
+    const db = getInboundDb();
+    db.prepare(
+      `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content)
+       VALUES ('chat-old', 2, 'chat-sdk', datetime('now', '-1 hour'), 'pending',
+               'slack:C0AJA89MN2E', 'slack-illysium',
+               'slack:C0AJA89MN2E:1778100372.246009',
+               '{"text":"original user request that opened the thread"}')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content)
+       VALUES ('task-new', 4, 'task', datetime('now'), 'pending',
+               'slack:C0AJA89MN2E', 'slack-illysium', NULL,
+               '{"prompt":"poll inbox"}')`,
+    ).run();
+
+    const messages = getPendingMessages();
+    const routing = extractRouting(messages);
+    expect(routing.inReplyTo).toBe('task-new');
+    expect(routing.threadId).toBeNull();
+    expect(routing.platformId).toBe('slack:C0AJA89MN2E');
+  });
 });
 
 describe('mock provider', () => {

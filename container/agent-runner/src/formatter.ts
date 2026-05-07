@@ -125,7 +125,16 @@ export function extractRouting(messages: MessageInRow[]): RoutingContext {
   // messages (id `recall-<targetId>`) are inserted before their paired inbound
   // message and would otherwise hijack `inReplyTo`, making outbound replies
   // attach to `recall-X` instead of the real user message X.
-  const first = messages.find((m) => m.kind !== 'system') ?? messages[0];
+  //
+  // Task rows take priority over chat rows: scheduled tasks fire on a clock,
+  // not in response to a conversation, so the task is always the wake reason
+  // for any batch it appears in. Without this, a task firing while an older
+  // chat row is still pending in the batch (e.g. host hadn't synced
+  // processing_ack yet, or container restart wiped processing claims) would
+  // route the task's response into the chat's thread instead of the channel
+  // root the host stamped the task with.
+  const taskRow = messages.find((m) => m.kind === 'task');
+  const first = taskRow ?? messages.find((m) => m.kind !== 'system') ?? messages[0];
   const sessionRouting = getSessionRouting();
   // Quiet-status mode: any task in the batch carrying `quietStatus: true`
   // in its content JSON suppresses streaming status writes for the turn.
