@@ -1,0 +1,121 @@
+name: Bug report
+description: Something isn't working as expected
+labels: ["Type: Bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search [open issues](https://github.com/qwibitai/nanoclaw/issues) and [PRs](https://github.com/qwibitai/nanoclaw/pulls) before filing — this may already be tracked.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One paragraph. What went wrong?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps from a clean state.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: error-log
+    attributes:
+      label: Error log excerpt
+      description: Paste the relevant lines from `logs/nanoclaw.error.log`. Redact credentials and phone numbers.
+      render: shell
+
+  - type: checkboxes
+    id: messages-out
+    attributes:
+      label: Delivery check
+      options:
+        - label: "Agent produced no visible response (nothing in `messages_out` — check with `pnpm exec tsx scripts/q.ts <outbound.db> 'SELECT * FROM messages_out'`)"
+
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Channel
+      options:
+        - WhatsApp
+        - Telegram
+        - iMessage
+        - Discord
+        - Slack
+        - Signal
+        - CLI
+        - A2A (agent-to-agent)
+        - Other / multiple
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - claude
+        - opencode
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: container-runtime
+    attributes:
+      label: Container runtime
+      options:
+        - Docker
+        - Apple containers
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: NanoClaw version or commit
+      placeholder: "e.g. v1.4.2 or abc1234"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Host OS
+      options:
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: ai-assist
+    attributes:
+      label: " "
+      options:
+        - label: This report was drafted with AI help. I've verified the reproduction steps myself.

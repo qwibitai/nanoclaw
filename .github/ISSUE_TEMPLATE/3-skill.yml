@@ -1,0 +1,55 @@
+name: Skill submission / review request
+description: Share a skill you've built or request feedback before opening a PR
+labels: ["Type: Skill"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this to share a skill draft or get early feedback before opening a PR. For community-built skills not intended for the main repo, use **Type: Community Skill** instead.
+
+  - type: input
+    id: skill-name
+    attributes:
+      label: Skill name
+      placeholder: "e.g. /add-rss-reader"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: skill-type
+    attributes:
+      label: Skill type
+      options:
+        - "Channel/provider install (branch-based, source code + SKILL.md)"
+        - "Utility skill (self-contained files in .claude/skills/<name>/)"
+        - "Operational/container skill (SKILL.md only, no workspace changes)"
+        - "Container skill (lives in container/skills/, SKILL.md only)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What it does
+      description: What does this skill enable? Who needs it?
+    validations:
+      required: true
+
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing
+      description: How did you test it? On which channels / runtimes?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: SKILL.md contains instructions, not inline code
+        - label: SKILL.md is under 500 lines
+        - label: Tested on a fresh clone
+        - label: No source code changes (or clearly marked as a channel/provider install)
+        - label: REMOVE.md exists (for reversible installs)
