@@ -59,6 +59,8 @@ import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { isSafeAttachmentName } from '../attachment-safety.js';
+import { DATA_DIR } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
 import type { ChannelAdapter, ChannelSetup, OutboundMessage } from './adapter.js';
@@ -92,7 +94,10 @@ export function parseSimpleEnvFile(content: string): Record<string, string> {
     const eq = trimmed.indexOf('=');
     if (eq === -1) continue;
     let value = trimmed.slice(eq + 1).trim();
-    if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+    ) {
       value = value.slice(1, -1);
     }
     out[trimmed.slice(0, eq).trim()] = value;
@@ -137,13 +142,28 @@ export function decodeBase64Url(data: string): string {
   return Buffer.from(base64, 'base64').toString('utf-8');
 }
 
-interface GmailHeader { name: string; value: string }
-interface GmailBody { data?: string; size?: number }
+interface GmailHeader {
+  name: string;
+  value: string;
+}
+interface GmailBody {
+  data?: string;
+  size?: number;
+  // Set on parts that carry an attachment. Pair with `gog gmail attachment
+  // <msgId> <attachmentId>` (or Gmail Users.Messages.Attachments.Get) to
+  // pull the bytes — they're not inlined in `data` for non-trivial sizes.
+  attachmentId?: string;
+}
 interface GmailPayload {
   mimeType?: string;
   headers?: GmailHeader[];
   body?: GmailBody;
   parts?: GmailPayload[];
+  // Present on attachment parts (set by Gmail when MIME has a filename
+  // disposition). Empty string for non-attachment parts. Used by the
+  // attachment walker to filter "is this an attachment we want to surface
+  // to the agent" vs "is this the text body".
+  filename?: string;
 }
 
 /** Extract a plain-text body from a Gmail Users.Messages.Get payload, preferring text/plain. */
@@ -162,6 +182,31 @@ export function extractBodyText(payload: GmailPayload | undefined): string {
     if (sub) return sub;
   }
   return '';
+}
+
+/** Walk a payload tree and collect every part that carries a downloadable
+ *  attachment (filename + body.attachmentId). Inline images and bare body
+ *  parts are skipped — only "real" attachments the user explicitly attached.
+ *  Order: depth-first; matches the order Gmail surfaces them in the UI.
+ */
+export function collectAttachmentParts(
+  payload: GmailPayload | undefined,
+): Array<{ filename: string; mimeType: string; attachmentId: string; size?: number }> {
+  const out: Array<{ filename: string; mimeType: string; attachmentId: string; size?: number }> = [];
+  function walk(p: GmailPayload | undefined): void {
+    if (!p) return;
+    if (p.filename && p.body?.attachmentId) {
+      out.push({
+        filename: p.filename,
+        mimeType: p.mimeType ?? 'application/octet-stream',
+        attachmentId: p.body.attachmentId,
+        size: p.body.size,
+      });
+    }
+    for (const child of p.parts ?? []) walk(child);
+  }
+  walk(payload);
+  return out;
 }
 
 /** Best-effort tag stripping for the html-only fallback. Not a real HTML parser. */
@@ -214,8 +259,7 @@ export function renderThreadContext(messages: GmailMessage[]): string {
     const m = messages[i]!;
     const headers = headersToMap(m.payload?.headers);
     const from = headers.get('from') ?? '(unknown)';
-    const date = headers.get('date') ??
-      (m.internalDate ? new Date(parseInt(m.internalDate, 10)).toISOString() : '');
+    const date = headers.get('date') ?? (m.internalDate ? new Date(parseInt(m.internalDate, 10)).toISOString() : '');
     const subject = headers.get('subject') ?? '';
     const body = extractBodyText(m.payload).trim();
     if (i > 0) blocks.push('----------');
@@ -242,16 +286,18 @@ export function headersToMap(headers: GmailHeader[] | undefined): Map<string, st
 // router primitives needed.
 
 const CALENDAR_SUBJECT_PREFIXES = [
-  'invitation:', 'updated invitation:', 'accepted:', 'declined:',
-  'tentative:', 'cancelled:', 'canceled:', 'changed:',
+  'invitation:',
+  'updated invitation:',
+  'accepted:',
+  'declined:',
+  'tentative:',
+  'cancelled:',
+  'canceled:',
+  'changed:',
 ];
-const CALENDAR_SENDER_PATTERNS = [
-  /^calendar-noreply@google\.com$/i,
-];
+const CALENDAR_SENDER_PATTERNS = [/^calendar-noreply@google\.com$/i];
 
-export type PrerouteDecision =
-  | { kind: 'drop'; reason: string }
-  | { kind: 'route'; platformId: string; reason: string };
+export type PrerouteDecision = { kind: 'drop'; reason: string } | { kind: 'route'; platformId: string; reason: string };
 
 export interface PrerouteInput {
   /** Original "passthrough" platformId, e.g. email:jibot@ito.com:joi@ito.com. */
@@ -369,7 +415,10 @@ export function saveAccountState(filePath: string, state: EmailAccountState): vo
  * record. Exposed for tests (and reused by the factory).
  */
 export function resolveAccountsFromEnv(env: Record<string, string>): EmailAccount[] {
-  const list = (env.EMAIL_ACCOUNTS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const list = (env.EMAIL_ACCOUNTS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   const out: EmailAccount[] = [];
   for (const address of list) {
     const slug = addressToEnvSlug(address);
@@ -587,13 +636,24 @@ class EmailChannelAdapter implements ChannelAdapter {
     // conversational context — especially important in pilot mode where the
     // reviewer isn't on the original thread at all and Gmail's own threading
     // UI won't connect the messages on their side.
-    const body = threadMessages.length
-      ? `${text}\n\n${renderThreadContext(threadMessages)}`
-      : text;
+    const body = threadMessages.length ? `${text}\n\n${renderThreadContext(threadMessages)}` : text;
 
     try {
       await this.runGog(
-        ['-a', acct.address, 'gmail', 'send', '--thread-id', threadId, '--to', recipient, '--subject', subject, '--body-file', '-'],
+        [
+          '-a',
+          acct.address,
+          'gmail',
+          'send',
+          '--thread-id',
+          threadId,
+          '--to',
+          recipient,
+          '--subject',
+          subject,
+          '--body-file',
+          '-',
+        ],
         { stdin: body },
       );
       log.info('Email reply sent', {
@@ -628,8 +688,14 @@ class EmailChannelAdapter implements ChannelAdapter {
       let stdout: string;
       try {
         stdout = await this.runGog([
-          '-a', acct.address, 'gmail', 'search', query,
-          '--max', String(SEARCH_MAX_RESULTS), '-j',
+          '-a',
+          acct.address,
+          'gmail',
+          'search',
+          query,
+          '--max',
+          String(SEARCH_MAX_RESULTS),
+          '-j',
         ]);
       } catch (err) {
         log.error('Email search failed', { account: acct.address, err });
@@ -691,13 +757,32 @@ class EmailChannelAdapter implements ChannelAdapter {
 
     const subject = headers.get('subject') ?? '(no subject)';
     const bodyText = extractBodyText(latest.payload);
+
+    // Pull any attachments off the latest message — earlier messages in the
+    // thread are historical context, but the agent's reply is to `latest`
+    // and that's where the new attachments live. Failures (gog timeout,
+    // Gmail token issues) are logged and swallowed: the agent still gets
+    // the body text plus a "[attachment download failed]" line for each
+    // file we couldn't pull, so it can ask the user to resend.
+    const attachmentRefs = await this.downloadEmailAttachments(acct, latest);
+    const attachmentLines = attachmentRefs
+      .map((a) =>
+        a.localPath
+          ? `[File: ${a.name} at ${path.join(DATA_DIR, a.localPath)} (${a.contentType})]`
+          : `[File: ${a.name} — download failed]`,
+      )
+      .join('\n');
+
     // Prepend RFC-5322-style headers so the agent sees the email as an
     // email — Subject + From + To above the body. The chat formatter on
     // the agent side only renders `text` and `sender`, so anything in
     // `content.subject` would otherwise be dropped before the LLM ever
     // sees it. The dispatcher persona reads `#ws:<tag>` from the
     // Subject line; without this, the tag is invisible to it.
-    const text = `Subject: ${subject}\nFrom: ${fromName ? `${fromName} <${fromAddress}>` : fromAddress}\nTo: ${acct.address}\n\n${bodyText}`;
+    const headerBlock = `Subject: ${subject}\nFrom: ${fromName ? `${fromName} <${fromAddress}>` : fromAddress}\nTo: ${acct.address}`;
+    const text = attachmentLines
+      ? `${headerBlock}\n\n${bodyText}\n\n${attachmentLines}`
+      : `${headerBlock}\n\n${bodyText}`;
     const timestamp = latest.internalDate
       ? new Date(parseInt(latest.internalDate, 10)).toISOString()
       : new Date().toISOString();
@@ -716,7 +801,11 @@ class EmailChannelAdapter implements ChannelAdapter {
 
     if (decision.kind === 'drop') {
       log.info('Email pre-router dropped thread', {
-        account: acct.address, threadId, reason: decision.reason, fromAddress, subject,
+        account: acct.address,
+        threadId,
+        reason: decision.reason,
+        fromAddress,
+        subject,
       });
       this.recordProcessed(acct.address, threadId, latest.id);
       await this.markProcessed(acct, threadId).catch((err) =>
@@ -728,7 +817,11 @@ class EmailChannelAdapter implements ChannelAdapter {
     const platformId = decision.platformId;
     if (decision.reason !== 'default') {
       log.info('Email pre-router routed thread', {
-        account: acct.address, threadId, reason: decision.reason, platformId, subject,
+        account: acct.address,
+        threadId,
+        reason: decision.reason,
+        platformId,
+        subject,
       });
     }
     const displayName = fromName ?? fromAddress;
@@ -742,6 +835,9 @@ class EmailChannelAdapter implements ChannelAdapter {
         senderId: fromAddress,
         subject,
         botAccount: acct.address,
+        ...(attachmentRefs.length > 0
+          ? { attachments: attachmentRefs.filter((a) => a.localPath).map((a) => ({ path: path.join(DATA_DIR, a.localPath!), contentType: a.contentType, name: a.name })) }
+          : {}),
         // Useful for the agent's persona to know how the message was routed.
         // E.g. calendar-watch can tell whether it received a calendar invite
         // (`reason: calendar`) vs. a manually #cal-tagged note.
@@ -759,7 +855,9 @@ class EmailChannelAdapter implements ChannelAdapter {
     this.recordProcessed(acct.address, threadId, latest.id);
     await this.markProcessed(acct, threadId).catch((err) =>
       log.debug('Email mark-processed failed (best-effort, sidecar still tracks)', {
-        account: acct.address, threadId, err,
+        account: acct.address,
+        threadId,
+        err,
       }),
     );
   }
@@ -780,9 +878,16 @@ class EmailChannelAdapter implements ChannelAdapter {
   private async markProcessed(acct: EmailAccount, threadId: string): Promise<void> {
     if (!acct.canModifyLabels) return; // sidecar handles dedup
     await this.runGog([
-      '-a', acct.address, 'gmail', 'thread', 'modify', threadId,
-      '--add', this.cfg.processedLabel,
-      '--remove', 'INBOX',
+      '-a',
+      acct.address,
+      'gmail',
+      'thread',
+      'modify',
+      threadId,
+      '--add',
+      this.cfg.processedLabel,
+      '--remove',
+      'INBOX',
     ]);
   }
 
@@ -793,9 +898,7 @@ class EmailChannelAdapter implements ChannelAdapter {
    * is the one that owns the thread. The original sender comes from the
    * latest message's From header. Returns null if no account matches.
    */
-  private async findAccountForThread(
-    threadId: string,
-  ): Promise<{ account: EmailAccount; fromAddress: string } | null> {
+  private async findAccountForThread(threadId: string): Promise<{ account: EmailAccount; fromAddress: string } | null> {
     for (const acct of this.cfg.accounts) {
       try {
         const stdout = await this.runGog(['-a', acct.address, 'gmail', 'thread', 'get', threadId, '-j']);
@@ -835,6 +938,65 @@ class EmailChannelAdapter implements ChannelAdapter {
 
   // ── gog process plumbing ─────────────────────────────────────────────────
 
+  /**
+   * Walk the message's payload, download every attachment via gog, and
+   * return rich entries (with localPath relative to DATA_DIR) for each.
+   * Best-effort: download failures yield entries with localPath=undefined
+   * so the caller can still surface them as "[File: name — download failed]"
+   * to the agent rather than dropping the existence of the file silently.
+   */
+  private async downloadEmailAttachments(
+    acct: EmailAccount,
+    message: GmailMessage,
+  ): Promise<Array<{ name: string; contentType: string; size?: number; localPath?: string }>> {
+    const parts = collectAttachmentParts(message.payload);
+    if (parts.length === 0) return [];
+
+    const outDir = path.join(DATA_DIR, 'attachments');
+    fs.mkdirSync(outDir, { recursive: true });
+    const refs: Array<{ name: string; contentType: string; size?: number; localPath?: string }> = [];
+
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const safeBase =
+        p.filename && isSafeAttachmentName(p.filename)
+          ? p.filename
+          : `attachment-${i}`;
+      const fileName = `email-${message.id}-${i}-${safeBase}`;
+      const ref: { name: string; contentType: string; size?: number; localPath?: string } = {
+        name: p.filename,
+        contentType: p.mimeType,
+        size: p.size,
+      };
+      try {
+        await this.runGog([
+          '-a', acct.address,
+          'gmail', 'attachment',
+          message.id, p.attachmentId,
+          '--out', outDir,
+          '--name', fileName,
+        ]);
+        ref.localPath = `attachments/${fileName}`;
+        log.info('Email attachment downloaded', {
+          account: acct.address,
+          messageId: message.id,
+          name: p.filename,
+          size: p.size,
+          path: ref.localPath,
+        });
+      } catch (err) {
+        log.warn('Email attachment download failed', {
+          account: acct.address,
+          messageId: message.id,
+          name: p.filename,
+          err,
+        });
+      }
+      refs.push(ref);
+    }
+    return refs;
+  }
+
   private runGog(args: string[]): Promise<string>;
   private runGog(args: string[], opts: { stdin: string }): Promise<string>;
   private async runGog(args: string[], opts: { stdin?: string } = {}): Promise<string> {
@@ -861,9 +1023,16 @@ class EmailChannelAdapter implements ChannelAdapter {
         child.kill('SIGTERM');
         reject(new Error(`gog timeout after ${GOG_TIMEOUT_MS}ms: ${args.join(' ')}`));
       }, GOG_TIMEOUT_MS);
-      child.stdout?.on('data', (d: Buffer) => { stdout += d.toString('utf-8'); });
-      child.stderr?.on('data', (d: Buffer) => { stderr += d.toString('utf-8'); });
-      child.once('error', (err) => { clearTimeout(timer); reject(err); });
+      child.stdout?.on('data', (d: Buffer) => {
+        stdout += d.toString('utf-8');
+      });
+      child.stderr?.on('data', (d: Buffer) => {
+        stderr += d.toString('utf-8');
+      });
+      child.once('error', (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
       child.once('close', (code) => {
         clearTimeout(timer);
         if (code === 0) resolve(stdout);
@@ -895,7 +1064,10 @@ registerChannelAdapter('email', {
       'EMAIL_PROCESSED_LABEL',
       'EMAIL_GOG_BIN',
     ]);
-    const accountList = (baseEnv.EMAIL_ACCOUNTS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    const accountList = (baseEnv.EMAIL_ACCOUNTS ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     if (accountList.length === 0) return null;
 
     // Second pass: now that we know the account list, ask for per-account keys.
@@ -923,9 +1095,8 @@ registerChannelAdapter('email', {
     }
 
     const pollIntervalSec = fullEnv.EMAIL_POLL_INTERVAL_SEC ? parseInt(fullEnv.EMAIL_POLL_INTERVAL_SEC, 10) : 0;
-    const pollIntervalMs = Number.isFinite(pollIntervalSec) && pollIntervalSec > 0
-      ? pollIntervalSec * 1000
-      : POLL_INTERVAL_MS_DEFAULT;
+    const pollIntervalMs =
+      Number.isFinite(pollIntervalSec) && pollIntervalSec > 0 ? pollIntervalSec * 1000 : POLL_INTERVAL_MS_DEFAULT;
     const processedLabel = fullEnv.EMAIL_PROCESSED_LABEL || PROCESSED_LABEL_DEFAULT;
 
     // Load gog keyring password into a private env bag (kept off process.env
