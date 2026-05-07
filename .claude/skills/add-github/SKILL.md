@@ -155,7 +155,7 @@ Write `src/channels/github.ts` with this content instead:
 ```typescript
 /**
  * GitHub channel adapter — polling-based.
- * Polls GitHub REST API for new issue/PR comments on a configurable interval.
+ * Polls GitHub REST API for new issue/PR comments and inline PR review comments on a configurable interval.
  * No inbound webhook required — the machine only makes outbound API calls.
  *
  * Env vars:
@@ -194,6 +194,16 @@ interface GitHubComment {
   html_url: string;
   /** e.g. "https://api.github.com/repos/owner/repo/issues/42" */
   issue_url: string;
+}
+
+interface GitHubReviewComment {
+  id: number;
+  body: string;
+  user: { login: string };
+  created_at: string;
+  html_url: string;
+  /** e.g. "https://api.github.com/repos/owner/repo/pulls/42" */
+  pull_request_url: string;
 }
 
 interface GitHubIssue {
@@ -314,6 +324,24 @@ function createAdapter(token: string, botUsername: string, repos: string[], inte
     return res.json() as Promise<GitHubComment[]>;
   }
 
+  async function fetchReviewComments(repo: string, since: string): Promise<GitHubReviewComment[]> {
+    const url =
+      `https://api.github.com/repos/${repo}/pulls/comments` +
+      `?since=${encodeURIComponent(since)}&sort=created&direction=asc&per_page=100`;
+    const res = await fetch(url, { headers });
+    if (res.status === 304) return [];
+    if (!res.ok) {
+      const rateLimit = res.headers.get('x-ratelimit-remaining');
+      const rateLimitReset = res.headers.get('x-ratelimit-reset');
+      const retryAfter = res.headers.get('retry-after');
+      const body = await res.text();
+      throw new Error(
+        `${res.status} rateRemaining=${rateLimit} resetAt=${rateLimitReset} retryAfter=${retryAfter} body=${body}`,
+      );
+    }
+    return res.json() as Promise<GitHubReviewComment[]>;
+  }
+
   async function pollRepo(repo: string): Promise<void> {
     // Refresh trigger-issue cache before processing comments. Failures use
     // the stale/empty cache — comment processing still runs.
@@ -325,42 +353,75 @@ function createAdapter(token: string, botUsername: string, repos: string[], inte
 
     // On first poll, look back 24h to avoid processing ancient history.
     const since = state[repo] ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const comments = await fetchComments(repo, since);
+
+    const [issueResult, reviewResult] = await Promise.allSettled([
+      fetchComments(repo, since),
+      fetchReviewComments(repo, since),
+    ]);
 
     const platformId = `github:${repo}`;
     let newest = since;
+    const botLower = botUsername.toLowerCase();
 
-    for (const comment of comments) {
-      // Skip own comments to avoid loops.
-      if (comment.user.login.toLowerCase() === botUsername.toLowerCase()) continue;
+    if (issueResult.status === 'rejected') {
+      log.error('GitHub: fetchComments failed', { repo, err: issueResult.reason });
+    } else {
+      for (const comment of issueResult.value) {
+        if (comment.user.login.toLowerCase() === botLower) continue;
 
-      const match = /\/issues\/(\d+)$/.exec(comment.issue_url);
-      if (!match) continue;
-      const threadId = match[1];
+        const match = /\/issues\/(\d+)$/.exec(comment.issue_url);
+        if (!match) continue;
+        const threadId = match[1];
 
-      const isTriggered = triggerIssues.get(repo)?.has(Number(threadId)) ?? false;
-      const hasMentionText = comment.body.toLowerCase().includes(`@${botUsername.toLowerCase()}`);
-      const isMention = isTriggered || hasMentionText;
+        const isTriggered = triggerIssues.get(repo)?.has(Number(threadId)) ?? false;
+        const hasMentionText = comment.body.toLowerCase().includes(`@${botLower}`);
+        const isMention = isTriggered || hasMentionText;
 
-      channelSetup!.onInbound(platformId, threadId, {
-        id: `gh-${comment.id}`,
-        kind: 'chat',
-        content: {
-          text: comment.body,
-          sender: comment.user.login,
-          url: comment.html_url,
-        },
-        timestamp: comment.created_at,
-        isMention,
-        isGroup: true,
-      });
+        channelSetup!.onInbound(platformId, threadId, {
+          id: `gh-${comment.id}`,
+          kind: 'chat',
+          content: { text: comment.body, sender: comment.user.login, url: comment.html_url },
+          timestamp: comment.created_at,
+          isMention,
+          isGroup: true,
+        });
 
-      // Use numeric comparison — ISO string comparison fails when GitHub's
-      // second-precision timestamps ("...10Z") compare against our
-      // millisecond-precision watermarks ("...10.001Z") because "Z" > "."
-      // in ASCII, incorrectly making the comment appear "newer".
-      if (new Date(comment.created_at).getTime() > new Date(newest).getTime()) {
-        newest = comment.created_at;
+        // Use numeric comparison — ISO string comparison fails when GitHub's
+        // second-precision timestamps ("...10Z") compare against our
+        // millisecond-precision watermarks ("...10.001Z") because "Z" > "."
+        // in ASCII, incorrectly making the comment appear "newer".
+        if (new Date(comment.created_at).getTime() > new Date(newest).getTime()) {
+          newest = comment.created_at;
+        }
+      }
+    }
+
+    if (reviewResult.status === 'rejected') {
+      log.error('GitHub: fetchReviewComments failed', { repo, err: reviewResult.reason });
+    } else {
+      for (const comment of reviewResult.value) {
+        if (comment.user.login.toLowerCase() === botLower) continue;
+
+        const match = /\/pulls\/(\d+)$/.exec(comment.pull_request_url);
+        if (!match) continue;
+        const threadId = match[1];
+
+        const isTriggered = triggerIssues.get(repo)?.has(Number(threadId)) ?? false;
+        const hasMentionText = comment.body.toLowerCase().includes(`@${botLower}`);
+        const isMention = isTriggered || hasMentionText;
+
+        channelSetup!.onInbound(platformId, threadId, {
+          id: `gh-review-${comment.id}`,
+          kind: 'chat',
+          content: { text: comment.body, sender: comment.user.login, url: comment.html_url },
+          timestamp: comment.created_at,
+          isMention,
+          isGroup: true,
+        });
+
+        if (new Date(comment.created_at).getTime() > new Date(newest).getTime()) {
+          newest = comment.created_at;
+        }
       }
     }
 
