@@ -4,7 +4,9 @@
  *
  * Used by Discord, Slack, and other Chat SDK-supported platforms.
  */
+import fs from 'fs';
 import http from 'http';
+import path from 'path';
 
 import {
   Chat,
@@ -18,6 +20,8 @@ import {
   type ConcurrencyStrategy,
   type Message as ChatMessage,
 } from 'chat';
+import { isSafeAttachmentName } from '../attachment-safety.js';
+import { DATA_DIR } from '../config.js';
 import { log } from '../log.js';
 import { SqliteStateAdapter } from '../state-sqlite.js';
 import { registerWebhookAdapter } from '../webhook-server.js';
@@ -154,10 +158,18 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const serialized = message.toJSON() as Record<string, any>;
 
-    // Download attachment data before serialization loses fetchData()
+    // Download attachment data before serialization loses fetchData(). Each
+    // attachment lands two ways: base64 in `data` (vision-capable models can
+    // ingest images straight from the message JSON) AND on disk at
+    // `attachments/<channel>-<msgId>-<i>-<safeName>` with `localPath` set, so
+    // the agent's Read tool can open non-image files (PDFs, .md, .txt, docs)
+    // through /workspace. Without the disk copy, non-image attachments
+    // arrived as metadata-only entries the agent had no way to actually open.
     if (message.attachments && message.attachments.length > 0) {
+      const channelTypePrefix = config.channelType ?? adapter.name;
       const enriched = [];
-      for (const att of message.attachments) {
+      for (let i = 0; i < message.attachments.length; i++) {
+        const att = message.attachments[i];
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const entry: Record<string, any> = {
           type: att.type,
@@ -171,6 +183,29 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           try {
             const buffer = await att.fetchData();
             entry.data = buffer.toString('base64');
+
+            // Materialize to disk so non-image files become Read-able. The
+            // sanitizer rejects path traversal / control-char filenames; on
+            // rejection we fall back to a synthesized name so we still write
+            // something rather than dropping silently.
+            const safeName =
+              att.name && isSafeAttachmentName(att.name)
+                ? att.name
+                : `${att.type ?? 'file'}-${i}`;
+            const fileName = `${channelTypePrefix}-${message.id}-${i}-${safeName}`;
+            const relPath = `attachments/${fileName}`;
+            const absPath = path.join(DATA_DIR, relPath);
+            try {
+              fs.mkdirSync(path.dirname(absPath), { recursive: true });
+              fs.writeFileSync(absPath, buffer);
+              entry.localPath = relPath;
+            } catch (err) {
+              log.warn('Failed to write attachment to disk', {
+                channel: channelTypePrefix,
+                messageId: message.id,
+                err,
+              });
+            }
           } catch (err) {
             log.warn('Failed to download attachment', { type: att.type, err });
           }

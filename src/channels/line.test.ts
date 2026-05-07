@@ -275,7 +275,7 @@ describe('LineChannelAdapter inbound webhook', () => {
     expect(res.status).toBe(200);
     await new Promise((r) => setTimeout(r, 30));
     expect(setup.inbound).toHaveLength(1);
-    expect(setup.inbound[0].message.content.text).toBe('[Sticker: 11537:52002734]');
+    expect((setup.inbound[0].message.content as { text: string }).text).toBe('[Sticker: 11537:52002734]');
   });
 
   it('drops unknown message types silently', async () => {
