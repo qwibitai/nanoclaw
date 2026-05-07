@@ -1,20 +1,30 @@
 #!/usr/bin/env python3
-"""send-message.py - Send messages through NanoClaw IPC.
+"""send-message.py — send messages through NanoClaw recipients (v2-ready).
+
+After the v2 cutover, the v1 file-IPC pattern (drop a JSON into
+data/ipc/<group>/messages/) is no longer drained by the daemon. This script
+now talks directly to each platform's REST API using credentials from
+data/env/env, keeping recipients.json as the alias→jid registry.
 
 Commands:
-    send  "<recipient>" "<message>"  - Send a message to a recipient
-    email "<to>" "<subject>" "<body>" - Send email via gog CLI
-    resolve "<query>"                - Fuzzy search recipients
-    list                             - List all known recipients
-    init                             - Auto-discover recipients from DB/groups
+    send  <recipient> <message>           Send a text message
+    send-file <recipient> <path> [caption] [--as name]   Attach a file
+    email <to> <subject> <body>           Send email via gog CLI
+    resolve <query>                        Fuzzy search recipients
+    list                                   List all known recipients
+    init                                   Auto-discover from v2.db + groups dir
 
-Uses <nanoclaw-merge>/data/recipients.json as the recipient registry —
-ported from 1.x (~/nanoclaw/data/recipients.json) on 2026-05-06 so the
-476 hand-curated alias entries survive the eventual removal of the 1.x
-checkout. The remaining 1.x paths (IPC_BASE, DB_PATH, GROUPS_DIR) are
-left pointing at ~/nanoclaw because the IPC + DB shapes changed in 2.0;
-those code paths need a separate port before this script does anything
-beyond `resolve` / `list`.
+Supported channels for `send`:
+    discord, slack, telegram, line, email
+Not yet supported (need v2 daemon outbound port through chat-sdk):
+    whatsapp, signal
+
+Migration history:
+    Pre-2026-05-08: dropped JSON files into ~/nanoclaw/data/ipc/<group>/messages/.
+                    Worked under v1.2.x; broken under v2 (daemon does not drain
+                    that directory).
+    2026-05-08:     rewritten to call platform REST APIs directly. Keeps the
+                    same recipients.json registry and the same CLI surface.
 """
 
 import json
@@ -24,37 +34,68 @@ import re
 import sqlite3
 import subprocess
 import sys
-import time
+import urllib.error
+import urllib.request
 import uuid
 from pathlib import Path
+from typing import NoReturn
 
-# Paths
+# ── Paths (v2) ───────────────────────────────────────────────────────────
 HOME = Path.home()
 NANOCLAW = HOME / "nanoclaw"
-NANOCLAW_MERGE = HOME / "nanoclaw-merge"
-REGISTRY_PATH = NANOCLAW_MERGE / "data" / "recipients.json"
-IPC_BASE = NANOCLAW / "data" / "ipc"
-DEFAULT_IPC_GROUP = "joi-dm"
-DB_PATH = NANOCLAW / "store" / "messages.db"
+REGISTRY_PATH = NANOCLAW / "data" / "recipients.json"
+DB_PATH = NANOCLAW / "data" / "v2.db"
+ENV_PATH = NANOCLAW / "data" / "env" / "env"
 GROUPS_DIR = NANOCLAW / "groups"
 
 
-def err(msg):
+# ── Output helpers ───────────────────────────────────────────────────────
+def err(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
-def ok(data):
-    print(json.dumps(data, indent=2))
+def ok(data: dict) -> NoReturn:
+    print(json.dumps(data, indent=2, ensure_ascii=False))
     sys.exit(0)
 
 
-def fail(msg):
+def fail(msg: str) -> NoReturn:
     err(f"ERROR: {msg}")
     sys.exit(1)
 
 
-def load_registry():
-    """Load recipients.json, return dict or empty structure."""
+# ── Environment loader ───────────────────────────────────────────────────
+_ENV_CACHE: dict | None = None
+
+
+def load_env() -> dict:
+    """Parse ~/nanoclaw/data/env/env into a dict (cached)."""
+    global _ENV_CACHE
+    if _ENV_CACHE is not None:
+        return _ENV_CACHE
+    env: dict = {}
+    if ENV_PATH.exists():
+        for raw in ENV_PATH.read_text().splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+                val = val[1:-1]
+            env[key.strip()] = val
+    _ENV_CACHE = env
+    return env
+
+
+def env_or_fail(name: str) -> str:
+    val = load_env().get(name)
+    if not val:
+        fail(f"Missing env var {name} in {ENV_PATH}")
+    return val
+
+
+# ── Registry ─────────────────────────────────────────────────────────────
+def load_registry() -> dict:
     if REGISTRY_PATH.exists():
         try:
             with open(REGISTRY_PATH) as f:
@@ -65,458 +106,659 @@ def load_registry():
     return {}
 
 
-def save_registry(recipients):
-    """Write recipients.json."""
+def save_registry(recipients: dict) -> None:
     REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(REGISTRY_PATH, "w") as f:
-        json.dump({"recipients": recipients}, f, indent=2)
+        json.dump({"recipients": recipients}, f, indent=2, ensure_ascii=False)
         f.write("\n")
 
 
-def resolve_ipc_group(key, entry):
-    """Determine the correct IPC group directory for a recipient.
-
-    Resolution order:
-    1. Explicit ipc_group field in recipient entry
-    2. Recipient key matches an existing IPC directory name
-    3. Fallback to joi-dm (correct for Signal DMs)
-
-    Warns if a non-Signal message would route through joi-dm, since
-    joi-dm only has Signal connections and will silently drop other channels.
-    """
-    # 1. Explicit override
-    ipc_group = entry.get("ipc_group")
-    if ipc_group:
-        ipc_dir = IPC_BASE / ipc_group / "messages"
-        if not ipc_dir.parent.exists():
-            err(f"Warning: ipc_group '{ipc_group}' directory does not exist, creating it")
-            ipc_dir.mkdir(parents=True, exist_ok=True)
-        return ipc_group
-
-    # 2. Recipient key matches an IPC directory
-    if (IPC_BASE / key).is_dir():
-        return key
-
-    # 3. Fallback to joi-dm with safety warning for non-Signal
-    channel = entry.get("channel", "unknown")
-    if channel != "signal":
-        err(f"Warning: routing {channel} message through joi-dm (Signal-only group).")
-        err(f"  This message may be silently dropped by NanoClaw.")
-        err(f"  Fix: add 'ipc_group' to the '{key}' entry in recipients.json")
-        err(f"  Available IPC groups: {', '.join(sorted(d.name for d in IPC_BASE.iterdir() if d.is_dir()))}")
-    return DEFAULT_IPC_GROUP
+# ── HTTP helper ──────────────────────────────────────────────────────────
+def _http_json(
+    url: str,
+    payload: dict | None,
+    headers: dict | None = None,
+    method: str = "POST",
+    timeout: int = 15,
+):
+    """POST/GET JSON. Returns (status, parsed_body_or_text)."""
+    body_bytes = None
+    hdrs = {"User-Agent": "jibot/send-message.py"}
+    if headers:
+        hdrs.update(headers)
+    if payload is not None:
+        body_bytes = json.dumps(payload).encode("utf-8")
+        hdrs.setdefault("Content-Type", "application/json")
+    req = urllib.request.Request(url, data=body_bytes, method=method, headers=hdrs)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            try:
+                return resp.status, json.loads(raw)
+            except json.JSONDecodeError:
+                return resp.status, raw
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        try:
+            return e.code, json.loads(raw)
+        except json.JSONDecodeError:
+            return e.code, raw
 
 
-def resolve_recipient(query, recipients):
-    """Resolve a query to a recipient entry. Returns (key, entry) or (None, None).
-
-    Resolution order:
-    1. Exact match on name (case-insensitive)
-    2. Exact match on alias (case-insensitive)
-    3. Substring match on name/aliases
-    4. Fallback: scan DB chats table
-    """
+# ── Recipient resolution ─────────────────────────────────────────────────
+def resolve_recipient(query: str, recipients: dict):
+    """Return (key, entry) or (None, None). Three-tier match."""
     q = query.lower().strip()
-
-    # 1. Exact name match
-    for key, entry in recipients.items():
-        if key.lower() == q:
-            return key, entry
-
-    # 2. Exact alias match
-    for key, entry in recipients.items():
-        aliases = [a.lower() for a in entry.get("aliases", [])]
-        if q in aliases:
-            return key, entry
-
-    # 3. Substring match on name/aliases
+    # 1. exact key
+    for k, v in recipients.items():
+        if k.lower() == q:
+            return k, v
+    # 2. exact alias
+    for k, v in recipients.items():
+        if q in [a.lower() for a in v.get("aliases", [])]:
+            return k, v
+    # 3. substring on key/aliases/description
     matches = []
-    for key, entry in recipients.items():
-        searchable = [key.lower()] + [a.lower() for a in entry.get("aliases", [])]
-        if entry.get("description"):
-            searchable.append(entry["description"].lower())
-        for s in searchable:
-            if q in s:
-                matches.append((key, entry))
-                break
-
+    for k, v in recipients.items():
+        hay = [k.lower()] + [a.lower() for a in v.get("aliases", [])]
+        if v.get("description"):
+            hay.append(v["description"].lower())
+        if any(q in s for s in hay):
+            matches.append((k, v))
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        # Return first match but warn
-        err(f"Multiple matches for {query}: {[m[0] for m in matches]}")
+        err(f"Multiple matches for {query!r}: {[m[0] for m in matches]}")
         err(f"Using first match: {matches[0][0]}")
         return matches[0]
-
-    # 4. Fallback: scan DB
-    if DB_PATH.exists():
-        try:
-            conn = sqlite3.connect(str(DB_PATH))
-            cursor = conn.execute(
-                "SELECT jid, name, channel, is_group FROM chats WHERE LOWER(name) LIKE ?",
-                (f"%{q}%",),
-            )
-            rows = cursor.fetchall()
-            conn.close()
-            if len(rows) == 1:
-                jid, name, channel, is_group = rows[0]
-                entry = {
-                    "jid": jid,
-                    "aliases": [],
-                    "channel": channel or "unknown",
-                    "type": "group" if is_group else "dm",
-                    "description": f"Auto-resolved from DB: {name}",
-                }
-                return name or jid, entry
-            if len(rows) > 1:
-                err(f"Multiple DB matches for {query}:")
-                for jid, name, channel, is_group in rows:
-                    err(f"  {name or jid} ({channel}, {'group' if is_group else 'dm'})")
-                return None, None
-        except sqlite3.Error as e:
-            err(f"DB lookup failed: {e}")
-
     return None, None
 
 
-def cmd_send(args):
-    """send "<recipient>" "<message>" """
+# ── Channel: Discord ─────────────────────────────────────────────────────
+def _discord_open_dm(token: str, user_id: str) -> str:
+    """Open a DM channel with a Discord user. Returns channel_id."""
+    status, body = _http_json(
+        "https://discord.com/api/v10/users/@me/channels",
+        {"recipient_id": user_id},
+        headers={"Authorization": f"Bot {token}"},
+    )
+    if status != 200 or not isinstance(body, dict) or "id" not in body:
+        fail(f"Discord DM open failed (status={status}): {body}")
+    return body["id"]
+
+
+def _discord_resolve_channel(jid: str) -> str:
+    """Map a v1-style 'dc:...' jid to a Discord channel_id, opening a DM if needed."""
+    parts = jid.split(":")
+    if len(parts) < 3 or parts[0] != "dc":
+        fail(
+            f"Invalid Discord JID {jid!r} (expected dc:GUILD:CHANNEL or dc:dm:USER_ID)"
+        )
+    if parts[1] == "dm":
+        token = env_or_fail("DISCORD_BOT_TOKEN")
+        return _discord_open_dm(token, parts[2])
+    return parts[2]
+
+
+def _send_discord(jid: str, text: str, key: str, channel: str) -> None:
+    token = env_or_fail("DISCORD_BOT_TOKEN")
+    channel_id = _discord_resolve_channel(jid)
+    status, body = _http_json(
+        f"https://discord.com/api/v10/channels/{channel_id}/messages",
+        {"content": text},
+        headers={"Authorization": f"Bot {token}"},
+    )
+    if status != 200:
+        fail(f"Discord send failed (status={status}): {body}")
+    msg_id = body.get("id") if isinstance(body, dict) else None
+    ok(
+        {
+            "status": "sent",
+            "recipient": key,
+            "jid": jid,
+            "channel": channel,
+            "method": "discord-rest",
+            "discord_channel_id": channel_id,
+            "discord_message_id": msg_id,
+            "preview": text[:120] + ("…" if len(text) > 120 else ""),
+        }
+    )
+
+
+def _send_discord_file(
+    jid: str, abs_path: str, filename: str, caption: str | None, key: str, channel: str
+) -> None:
+    token = env_or_fail("DISCORD_BOT_TOKEN")
+    channel_id = _discord_resolve_channel(jid)
+    mime, _ = mimetypes.guess_type(filename)
+    mime = mime or "application/octet-stream"
+    with open(abs_path, "rb") as f:
+        file_bytes = f.read()
+
+    boundary = "----jbnd" + uuid.uuid4().hex
+    payload_json = json.dumps(
+        {
+            "content": caption or "",
+            "attachments": [{"id": 0, "filename": filename}],
+        }
+    ).encode("utf-8")
+
+    parts: list[bytes] = []
+    parts.append(f"--{boundary}\r\n".encode())
+    parts.append(b'Content-Disposition: form-data; name="payload_json"\r\n')
+    parts.append(b"Content-Type: application/json\r\n\r\n")
+    parts.append(payload_json + b"\r\n")
+    parts.append(f"--{boundary}\r\n".encode())
+    parts.append(
+        f'Content-Disposition: form-data; name="files[0]"; filename="{filename}"\r\n'.encode()
+    )
+    parts.append(f"Content-Type: {mime}\r\n\r\n".encode())
+    parts.append(file_bytes + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    body = b"".join(parts)
+
+    req = urllib.request.Request(
+        f"https://discord.com/api/v10/channels/{channel_id}/messages",
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bot {token}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "User-Agent": "jibot/send-message.py",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            resp_body = json.loads(resp.read().decode("utf-8", errors="replace"))
+        ok(
+            {
+                "status": "sent",
+                "recipient": key,
+                "jid": jid,
+                "channel": channel,
+                "method": "discord-rest-attachment",
+                "discord_channel_id": channel_id,
+                "discord_message_id": resp_body.get("id"),
+                "filename": filename,
+                "mime": mime,
+            }
+        )
+    except urllib.error.HTTPError as e:
+        b = e.read().decode("utf-8", errors="replace")
+        fail(f"Discord file send failed (status={e.code}): {b}")
+
+
+# ── Channel: Slack (multi-tenant) ────────────────────────────────────────
+def _slack_token_for_namespace(namespace: str) -> str | None:
+    """Pick the right Slack bot token. SLACK_BOT_TOKEN is the default
+    workspace; SLACK_2/3/4_BOT_TOKEN are paired with SLACK_N_NAMESPACE
+    markers in data/env/env.
+    """
+    env = load_env()
+    if not namespace or namespace in ("default", "henkaku"):
+        return env.get("SLACK_BOT_TOKEN")
+    for n in range(2, 10):
+        ns = env.get(f"SLACK_{n}_NAMESPACE")
+        if ns == namespace:
+            return env.get(f"SLACK_{n}_BOT_TOKEN")
+    return None
+
+
+def _send_slack(jid: str, text: str, key: str, channel: str) -> None:
+    """JID formats observed in recipients.json:
+    slack:CHANNEL_ID                         → default workspace channel/user
+    slack:USER_ID                             → default workspace DM (target starts with U)
+    slack:NAMESPACE:USER_ID                   → namespaced DM
+    slack:NAMESPACE:channel:CHANNEL_ID        → namespaced channel
+    """
+    parts = jid.split(":")
+    if len(parts) < 2 or parts[0] != "slack":
+        fail(f"Invalid Slack JID {jid!r}")
+
+    namespace = "default"
+    target = ""
+    if len(parts) == 2:
+        target = parts[1]
+    elif len(parts) == 3:
+        namespace, target = parts[1], parts[2]
+    elif len(parts) >= 4:
+        namespace, target = parts[1], parts[3]
+    else:
+        fail(f"Invalid Slack JID {jid!r}")
+
+    token = _slack_token_for_namespace(namespace)
+    if not token:
+        fail(f"No Slack token found for namespace={namespace!r}. Check {ENV_PATH}.")
+
+    # If target is a user (Slack user IDs start with 'U' or 'W'), open a DM first.
+    if target and target[0] in ("U", "W"):
+        status, body = _http_json(
+            "https://slack.com/api/conversations.open",
+            {"users": target},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        if status != 200 or not (isinstance(body, dict) and body.get("ok")):
+            fail(f"Slack conversations.open failed: {body}")
+        target = body["channel"]["id"]
+
+    status, body = _http_json(
+        "https://slack.com/api/chat.postMessage",
+        {"channel": target, "text": text},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if status != 200 or not (isinstance(body, dict) and body.get("ok")):
+        fail(f"Slack chat.postMessage failed (status={status}): {body}")
+    ok(
+        {
+            "status": "sent",
+            "recipient": key,
+            "jid": jid,
+            "channel": channel,
+            "method": "slack-rest",
+            "slack_namespace": namespace,
+            "slack_channel": target,
+            "slack_ts": body.get("ts"),
+            "preview": text[:120] + ("…" if len(text) > 120 else ""),
+        }
+    )
+
+
+# ── Channel: Telegram ────────────────────────────────────────────────────
+def _send_telegram(jid: str, text: str, key: str, channel: str) -> None:
+    token = env_or_fail("TELEGRAM_BOT_TOKEN")
+    parts = jid.split(":", 1)
+    if len(parts) != 2 or parts[0] != "tg":
+        fail(f"Invalid Telegram JID {jid!r} (expected tg:CHAT_ID)")
+    chat_id = parts[1]
+    status, body = _http_json(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        {"chat_id": chat_id, "text": text},
+    )
+    if status != 200 or not (isinstance(body, dict) and body.get("ok")):
+        fail(f"Telegram sendMessage failed (status={status}): {body}")
+    ok(
+        {
+            "status": "sent",
+            "recipient": key,
+            "jid": jid,
+            "channel": channel,
+            "method": "telegram-rest",
+            "telegram_message_id": body.get("result", {}).get("message_id"),
+            "preview": text[:120] + ("…" if len(text) > 120 else ""),
+        }
+    )
+
+
+# ── Channel: LINE ────────────────────────────────────────────────────────
+def _send_line(jid: str, text: str, key: str, channel: str) -> None:
+    token = env_or_fail("LINE_CHANNEL_ACCESS_TOKEN")
+    parts = jid.split(":", 1)
+    if len(parts) != 2 or parts[0] != "line":
+        fail(f"Invalid LINE JID {jid!r}")
+    target = parts[1]
+    if target == "dm":
+        fail(
+            "LINE 'dm' placeholder JIDs are not sendable. Use the explicit user/group ID."
+        )
+    status, body = _http_json(
+        "https://api.line.me/v2/bot/message/push",
+        {"to": target, "messages": [{"type": "text", "text": text}]},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if status != 200:
+        fail(f"LINE push failed (status={status}): {body}")
+    ok(
+        {
+            "status": "sent",
+            "recipient": key,
+            "jid": jid,
+            "channel": channel,
+            "method": "line-rest",
+            "preview": text[:120] + ("…" if len(text) > 120 else ""),
+        }
+    )
+
+
+# ── Channel: Email (via gog) ─────────────────────────────────────────────
+def _send_email_via_jid(jid: str, text: str, key: str, channel: str) -> None:
+    parts = jid.split(":", 1)
+    if len(parts) != 2 or parts[0] != "email":
+        fail(f"Invalid Email JID {jid!r}")
+    to = parts[1]
+    cmd = [
+        "gog",
+        "gmail",
+        "send",
+        "-a",
+        "jibot@ito.com",
+        "--to",
+        to,
+        "--subject",
+        "(no subject)",
+        "--body",
+        text,
+        "--force",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except FileNotFoundError:
+        fail("gog not found on PATH")
+    except subprocess.TimeoutExpired:
+        fail("gog send timed out after 30s")
+    if result.returncode != 0:
+        fail(f"gog gmail send failed: {result.stderr.strip()}")
+    ok(
+        {
+            "status": "sent",
+            "recipient": key,
+            "jid": jid,
+            "channel": channel,
+            "method": "gog",
+            "preview": text[:120] + ("…" if len(text) > 120 else ""),
+        }
+    )
+
+
+# ── Channel: deferred (WhatsApp / Signal) ────────────────────────────────
+def _unsupported_v2(jid: str, text: str, key: str, channel: str) -> None:
+    fail(
+        f"Channel {channel!r} (jid={jid!r}) is not yet supported by send-message.py "
+        f"in the v2 architecture. WhatsApp/Signal need the daemon's chat-sdk "
+        f"session to dispatch — file an issue or use the platform's own tooling."
+    )
+
+
+CHANNEL_SENDERS = {
+    "discord": _send_discord,
+    "slack": _send_slack,
+    "telegram": _send_telegram,
+    "line": _send_line,
+    "email": _send_email_via_jid,
+    "whatsapp": _unsupported_v2,
+    "signal": _unsupported_v2,
+    "unknown": _unsupported_v2,
+}
+
+
+# ── v2.db helpers ────────────────────────────────────────────────────────
+def _v2_to_v1_jid(channel_type: str, platform_id: str) -> str:
+    """Map v2 messaging_groups.platform_id → v1-style JID prefix used in
+    recipients.json so existing aliases keep working with the same shape."""
+    if channel_type == "discord" and platform_id.startswith("discord:"):
+        return "dc:" + platform_id[len("discord:") :]
+    if (
+        channel_type
+        and channel_type.startswith("slack")
+        and platform_id.startswith("slack:")
+    ):
+        return platform_id  # slack: prefix already canonical
+    if channel_type == "telegram" and platform_id.startswith("telegram:"):
+        return "tg:" + platform_id[len("telegram:") :]
+    if channel_type == "line" and platform_id.startswith("line:group:"):
+        return "line:" + platform_id[len("line:group:") :]
+    if channel_type == "signal" and platform_id.startswith("group:"):
+        return "sig:" + platform_id
+    return platform_id
+
+
+# ── Commands ─────────────────────────────────────────────────────────────
+def cmd_send(args: list[str]) -> None:
     if len(args) < 2:
         fail("Usage: send <recipient> <message>")
-
     query, message = args[0], args[1]
     recipients = load_registry()
     key, entry = resolve_recipient(query, recipients)
-
     if not entry:
-        fail(f"No recipient found for {query}. Try: resolve \"{query}\"")
-
-    jid = entry["jid"]
+        fail(f"No recipient found for {query!r}. Try: resolve {query!r}")
     channel = entry.get("channel", "unknown")
-
-    # Route to correct IPC group
-    ipc_group = resolve_ipc_group(key, entry)
-    ipc_dir = IPC_BASE / ipc_group / "messages"
-    ipc_dir.mkdir(parents=True, exist_ok=True)
-
-    msg_id = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
-    msg_file = ipc_dir / f"{msg_id}.json"
-
-    ipc_msg = {
-        "type": "message",
-        "chatJid": jid,
-        "text": message,
-    }
-
-    with open(msg_file, "w") as f:
-        json.dump(ipc_msg, f, indent=2)
-        f.write("\n")
-
-    ok({
-        "status": "sent",
-        "recipient": key,
-        "jid": jid,
-        "channel": channel,
-        "ipc_group": ipc_group,
-        "ipc_file": str(msg_file),
-        "message_preview": message[:100] + ("..." if len(message) > 100 else ""),
-    })
+    sender = CHANNEL_SENDERS.get(channel, _unsupported_v2)
+    sender(jid=entry["jid"], text=message, key=key, channel=channel)
 
 
-def cmd_email(args):
-    """email "<to>" "<subject>" "<body>" """
-    if len(args) < 3:
-        fail("Usage: email <to> <subject> <body>")
-
-    to, subject, body = args[0], args[1], args[2]
-
-    cmd = [
-        "gog", "gmail", "send",
-        "-a", "jibot@ito.com",
-        "--to", to,
-        "--subject", subject,
-        "--body", body,
-        "--force",
-    ]
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode == 0:
-            ok({
-                "status": "sent",
-                "to": to,
-                "subject": subject,
-                "method": "gog",
-                "stdout": result.stdout.strip(),
-            })
-        else:
-            err(f"gog send failed (exit {result.returncode}): {result.stderr.strip()}")
-            fail(f"Email send failed. Manual command:\n  gog gmail send -a jibot@ito.com --to {to} --subject \"{subject}\" --body \"{body}\"")
-    except FileNotFoundError:
-        fail(f"gog not found. Manual command:\n  gog gmail send -a jibot@ito.com --to {to} --subject \"{subject}\" --body \"{body}\"")
-    except subprocess.TimeoutExpired:
-        fail("gog send timed out after 30s")
-
-
-def cmd_resolve(args):
-    """resolve "<query>" - show matching recipients."""
-    if not args:
-        fail("Usage: resolve <query>")
-
-    query = args[0]
-    q = query.lower().strip()
-    recipients = load_registry()
-    matches = []
-
-    for key, entry in recipients.items():
-        searchable = [key.lower()] + [a.lower() for a in entry.get("aliases", [])]
-        if entry.get("description"):
-            searchable.append(entry["description"].lower())
-        for s in searchable:
-            if q in s:
-                ipc_group = resolve_ipc_group(key, entry)
-                matches.append({
-                    "name": key,
-                    "jid": entry["jid"],
-                    "channel": entry.get("channel", "unknown"),
-                    "type": entry.get("type", "unknown"),
-                    "ipc_group": ipc_group,
-                    "aliases": entry.get("aliases", []),
-                    "description": entry.get("description", ""),
-                })
-                break
-
-    # Also check DB
-    db_matches = []
-    if DB_PATH.exists():
-        try:
-            conn = sqlite3.connect(str(DB_PATH))
-            cursor = conn.execute(
-                "SELECT jid, name, channel, is_group FROM chats WHERE LOWER(name) LIKE ?",
-                (f"%{q}%",),
-            )
-            for jid, name, channel, is_group in cursor.fetchall():
-                # Skip if already in registry matches
-                if not any(m["jid"] == jid for m in matches):
-                    db_matches.append({
-                        "name": name or jid,
-                        "jid": jid,
-                        "channel": channel or "unknown",
-                        "type": "group" if is_group else "dm",
-                        "source": "database",
-                    })
-            conn.close()
-        except sqlite3.Error:
-            pass
-
-    ok({
-        "query": query,
-        "registry_matches": matches,
-        "db_matches": db_matches,
-        "total": len(matches) + len(db_matches),
-    })
-
-
-def cmd_list(args):
-    """list - show all known recipients."""
-    recipients = load_registry()
-    entries = []
-    for key, entry in sorted(recipients.items()):
-        ipc_group = resolve_ipc_group(key, entry)
-        entries.append({
-            "name": key,
-            "jid": entry["jid"],
-            "channel": entry.get("channel", "unknown"),
-            "type": entry.get("type", "unknown"),
-            "ipc_group": ipc_group,
-            "aliases": entry.get("aliases", []),
-            "description": entry.get("description", ""),
-        })
-
-    ok({
-        "count": len(entries),
-        "recipients": entries,
-    })
-
-
-def cmd_init(args):
-    """init - auto-discover recipients from DB and group folders."""
-    recipients = load_registry()
-    added = []
-    existing_jids = {e["jid"] for e in recipients.values()}
-
-    # 1. Scan DB chats table
-    if DB_PATH.exists():
-        try:
-            conn = sqlite3.connect(str(DB_PATH))
-            cursor = conn.execute("SELECT jid, name, channel, is_group FROM chats")
-            for jid, name, channel, is_group in cursor.fetchall():
-                if jid in existing_jids:
-                    continue
-                if not name:
-                    continue
-                # Generate key: lowercase, spaces to hyphens, strip non-alphanum
-                key = re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-"))
-                key = re.sub(r"-+", "-", key).strip("-")
-                if not key:
-                    key = re.sub(r"[^a-z0-9-]", "", jid.lower().replace(":", "-"))
-                # Avoid duplicates
-                if key in recipients:
-                    key = f"{key}-{channel or 'unknown'}"
-                if key in recipients:
-                    continue
-
-                entry = {
-                    "jid": jid,
-                    "aliases": [],
-                    "channel": channel or "unknown",
-                    "type": "group" if is_group else "dm",
-                    "description": f"Auto-discovered: {name}",
-                }
-                recipients[key] = entry
-                existing_jids.add(jid)
-                added.append({"key": key, "source": "database", "jid": jid})
-            conn.close()
-        except sqlite3.Error as e:
-            err(f"DB scan error: {e}")
-
-    # 2. Scan group folders
-    if GROUPS_DIR.exists():
-        for group_dir in sorted(GROUPS_DIR.iterdir()):
-            if not group_dir.is_dir():
-                continue
-            folder_name = group_dir.name
-            # Skip template/global dirs
-            if folder_name in ("global",) or folder_name.startswith("gidc-template"):
-                continue
-            # Check if already tracked by folder name
-            if folder_name in recipients:
-                continue
-
-            description = f"Group folder: {folder_name}"
-            claude_md = group_dir / "CLAUDE.md"
-            if claude_md.exists():
-                try:
-                    first_line = claude_md.read_text().strip().split("\n")[0]
-                    # Strip markdown heading prefix
-                    first_line = re.sub(r"^#+\s*", "", first_line).strip()
-                    if first_line:
-                        description = first_line
-                except IOError:
-                    pass
-
-            entry = {
-                "jid": f"group:{folder_name}",
-                "aliases": [],
-                "channel": "unknown",
-                "type": "group",
-                "description": description,
-            }
-            recipients[folder_name] = entry
-            added.append({"key": folder_name, "source": "groups_folder", "description": description})
-
-    save_registry(recipients)
-
-    ok({
-        "status": "init_complete",
-        "total_recipients": len(recipients),
-        "newly_added": len(added),
-        "added": added,
-    })
-
-
-def cmd_send_file(args):
-    """send-file "<recipient>" "<file-path>" ["<caption>"] [--as "<name>"]
-
-    Sends a local file as a document attachment through any channel that
-    implements sendFile (WhatsApp, Slack). The caption is optional.
-    --as overrides the display filename; the default is basename of the path.
-    """
-    # Parse --as option out of args first
-    filename_override = None
-    positional = []
+def cmd_send_file(args: list[str]) -> None:
+    """Currently Discord-only. Slack files.upload v2 + others can be added."""
+    filename_override: str | None = None
+    pos: list[str] = []
     i = 0
     while i < len(args):
         if args[i] == "--as" and i + 1 < len(args):
             filename_override = args[i + 1]
             i += 2
         else:
-            positional.append(args[i])
+            pos.append(args[i])
             i += 1
-
-    if len(positional) < 2:
+    if len(pos) < 2:
         fail("Usage: send-file <recipient> <file-path> [<caption>] [--as <name>]")
+    query = pos[0]
+    file_path_str = pos[1]
+    caption = pos[2] if len(pos) > 2 else None
 
-    query = positional[0]
-    file_path_str = positional[1]
-    caption = positional[2] if len(positional) > 2 else None
-
-    # Validate file exists and is readable
     if not os.path.isfile(file_path_str):
         fail(f"File not found or not a regular file: {file_path_str}")
     if not os.access(file_path_str, os.R_OK):
         fail(f"File is not readable: {file_path_str}")
-
     abs_path = os.path.abspath(file_path_str)
     filename = filename_override or os.path.basename(abs_path)
 
-    # Infer mimetype from display filename; fall back to octet-stream
-    mime_type, _ = mimetypes.guess_type(filename)
-    mimetype = mime_type or "application/octet-stream"
-
-    # Resolve recipient
     recipients = load_registry()
     key, entry = resolve_recipient(query, recipients)
     if not entry:
-        fail(f"No recipient found for {query}. Try: resolve \"{query}\"")
-
-    jid = entry["jid"]
+        fail(f"No recipient found for {query!r}")
     channel = entry.get("channel", "unknown")
-
-    # Route to correct IPC group
-    ipc_group = resolve_ipc_group(key, entry)
-    ipc_dir = IPC_BASE / ipc_group / "messages"
-    ipc_dir.mkdir(parents=True, exist_ok=True)
-
-    msg_id = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
-    msg_file = ipc_dir / f"{msg_id}.json"
-
-    ipc_msg = {
-        "type": "file",
-        "chatJid": jid,
-        "filePath": abs_path,
-        "filename": filename,
-        "mimetype": mimetype,
-    }
-    if caption:
-        ipc_msg["caption"] = caption
-
-    with open(msg_file, "w") as f:
-        json.dump(ipc_msg, f, indent=2)
-        f.write("\n")
-
-    result = {
-        "status": "sent",
-        "recipient": key,
-        "jid": jid,
-        "channel": channel,
-        "ipc_group": ipc_group,
-        "ipc_file": str(msg_file),
-        "filename": filename,
-        "mimetype": mimetype,
-    }
-    if caption:
-        result["caption_preview"] = caption[:100] + ("..." if len(caption) > 100 else "")
-
-    ok(result)
+    if channel != "discord":
+        fail(
+            f"send-file currently only supports discord (got {channel!r}). "
+            f"Slack files.upload + others can be added; file an issue."
+        )
+    _send_discord_file(entry["jid"], abs_path, filename, caption, key, channel)
 
 
-def main():
+def cmd_email(args: list[str]) -> None:
+    if len(args) < 3:
+        fail("Usage: email <to> <subject> <body>")
+    to, subject, body = args[0], args[1], args[2]
+    cmd = [
+        "gog",
+        "gmail",
+        "send",
+        "-a",
+        "jibot@ito.com",
+        "--to",
+        to,
+        "--subject",
+        subject,
+        "--body",
+        body,
+        "--force",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except FileNotFoundError:
+        fail("gog not found on PATH")
+    except subprocess.TimeoutExpired:
+        fail("gog send timed out after 30s")
+    if result.returncode != 0:
+        err(f"gog send failed (exit {result.returncode}): {result.stderr.strip()}")
+        fail("Email send failed.")
+    ok(
+        {
+            "status": "sent",
+            "to": to,
+            "subject": subject,
+            "method": "gog",
+            "stdout": result.stdout.strip(),
+        }
+    )
+
+
+def cmd_resolve(args: list[str]) -> None:
+    if not args:
+        fail("Usage: resolve <query>")
+    query = args[0]
+    q = query.lower().strip()
+    recipients = load_registry()
+    matches: list[dict] = []
+    for k, v in recipients.items():
+        hay = [k.lower()] + [a.lower() for a in v.get("aliases", [])]
+        if v.get("description"):
+            hay.append(v["description"].lower())
+        if any(q in s for s in hay):
+            matches.append(
+                {
+                    "name": k,
+                    "jid": v["jid"],
+                    "channel": v.get("channel", "unknown"),
+                    "type": v.get("type", "unknown"),
+                    "aliases": v.get("aliases", []),
+                    "description": v.get("description", ""),
+                }
+            )
+
+    db_matches: list[dict] = []
+    if DB_PATH.exists():
+        try:
+            conn = sqlite3.connect(str(DB_PATH))
+            cursor = conn.execute(
+                "SELECT id, channel_type, platform_id, name, is_group "
+                "FROM messaging_groups WHERE LOWER(COALESCE(name, '')) LIKE ?",
+                (f"%{q}%",),
+            )
+            for mg_id, ch, pid, nm, ig in cursor.fetchall():
+                v1_jid = _v2_to_v1_jid(ch or "", pid or "")
+                if any(m["jid"] == v1_jid for m in matches):
+                    continue
+                db_matches.append(
+                    {
+                        "name": nm or mg_id,
+                        "jid": v1_jid,
+                        "channel": ch or "unknown",
+                        "type": "group" if ig else "dm",
+                        "source": "v2.db",
+                    }
+                )
+            conn.close()
+        except sqlite3.Error as e:
+            err(f"v2.db lookup failed: {e}")
+
+    ok(
+        {
+            "query": query,
+            "registry_matches": matches,
+            "db_matches": db_matches,
+            "total": len(matches) + len(db_matches),
+        }
+    )
+
+
+def cmd_list(args: list[str]) -> None:
+    recipients = load_registry()
+    entries = []
+    for k, v in sorted(recipients.items()):
+        entries.append(
+            {
+                "name": k,
+                "jid": v["jid"],
+                "channel": v.get("channel", "unknown"),
+                "type": v.get("type", "unknown"),
+                "aliases": v.get("aliases", []),
+                "description": v.get("description", ""),
+            }
+        )
+    ok({"count": len(entries), "recipients": entries})
+
+
+def cmd_init(args: list[str]) -> None:
+    """Auto-discover from v2.db messaging_groups + groups dir.
+
+    v1's `chats` table is gone; v2 has `messaging_groups` with a slightly
+    different jid prefix scheme. We translate back to v1-style prefixes so
+    new entries match the format of the existing 476 hand-curated entries.
+    """
+    recipients = load_registry()
+    added: list[dict] = []
+    existing_jids = {e.get("jid", "") for e in recipients.values()}
+
+    if DB_PATH.exists():
+        try:
+            conn = sqlite3.connect(str(DB_PATH))
+            cursor = conn.execute(
+                "SELECT id, channel_type, platform_id, name, is_group FROM messaging_groups"
+            )
+            for mg_id, ch, pid, nm, ig in cursor.fetchall():
+                v1_jid = _v2_to_v1_jid(ch or "", pid or "")
+                if v1_jid in existing_jids:
+                    continue
+                if not nm:
+                    continue
+                key = re.sub(r"[^a-z0-9-]", "", nm.lower().replace(" ", "-"))
+                key = re.sub(r"-+", "-", key).strip("-")
+                if not key:
+                    key = re.sub(r"[^a-z0-9-]", "", v1_jid.lower().replace(":", "-"))
+                if key in recipients:
+                    key = f"{key}-{ch or 'unknown'}"
+                if key in recipients:
+                    continue
+                entry = {
+                    "jid": v1_jid,
+                    "aliases": [],
+                    "channel": ch or "unknown",
+                    "type": "group" if ig else "dm",
+                    "description": f"Auto-discovered: {nm}",
+                }
+                recipients[key] = entry
+                existing_jids.add(v1_jid)
+                added.append({"key": key, "source": "v2.db", "jid": v1_jid})
+            conn.close()
+        except sqlite3.Error as e:
+            err(f"v2.db scan error: {e}")
+
+    if GROUPS_DIR.exists():
+        for g in sorted(GROUPS_DIR.iterdir()):
+            if not g.is_dir():
+                continue
+            folder = g.name
+            if folder in ("global",) or folder.startswith("gidc-template"):
+                continue
+            if folder in recipients:
+                continue
+            description = f"Group folder: {folder}"
+            cm = g / "CLAUDE.md"
+            if cm.exists():
+                try:
+                    first = cm.read_text().strip().split("\n")[0]
+                    first = re.sub(r"^#+\s*", "", first).strip()
+                    if first:
+                        description = first
+                except IOError:
+                    pass
+            entry = {
+                "jid": f"group:{folder}",
+                "aliases": [],
+                "channel": "unknown",
+                "type": "group",
+                "description": description,
+            }
+            recipients[folder] = entry
+            added.append(
+                {"key": folder, "source": "groups_folder", "description": description}
+            )
+
+    save_registry(recipients)
+    ok(
+        {
+            "status": "init_complete",
+            "total_recipients": len(recipients),
+            "newly_added": len(added),
+            "added": added,
+        }
+    )
+
+
+def main() -> None:
     if len(sys.argv) < 2:
         err("Usage: send-message.py <command> [args...]")
         err("Commands: send, send-file, email, resolve, list, init")
         sys.exit(1)
-
     command = sys.argv[1].lower()
     args = sys.argv[2:]
 
@@ -528,15 +770,15 @@ def main():
         "list": cmd_list,
         "init": cmd_init,
     }
-
     if command not in commands:
-        cmds = ", ".join(commands)
-        fail(f"Unknown command: {command}. Use: {cmds}")
+        fail(f"Unknown command: {command}. Use: {', '.join(commands)}")
 
     try:
         commands[command](args)
+    except SystemExit:
+        raise
     except Exception as e:
-        fail(f"Unexpected error: {e}")
+        fail(f"Unexpected error: {type(e).__name__}: {e}")
 
 
 if __name__ == "__main__":
