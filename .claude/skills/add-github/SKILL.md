@@ -166,6 +166,15 @@ Write `src/channels/github.ts` with this content instead:
  *
  * platformId  = "github:owner/repo"
  * threadId    = issue or PR number (string)
+ *
+ * Trigger rules (isMention = true for any of the following):
+ *   - Any comment that @-mentions the bot
+ *   - Any comment on an issue/PR opened by the bot
+ *   - Any comment on an issue/PR where the bot is an assignee
+ *   - Any comment on an open PR where the bot was requested to review
+ *
+ * Pair with engage_mode='mention-sticky' so follow-up comments in a thread
+ * that the bot has already engaged keep firing without requiring a re-mention.
  */
 
 import fs from 'fs';
@@ -185,6 +194,15 @@ interface GitHubComment {
   html_url: string;
   /** e.g. "https://api.github.com/repos/owner/repo/issues/42" */
   issue_url: string;
+}
+
+interface GitHubIssue {
+  number: number;
+}
+
+interface GitHubPR {
+  number: number;
+  requested_reviewers: { login: string }[];
 }
 
 type PollState = Record<string, string>; // repo -> ISO timestamp of last seen comment
@@ -216,16 +234,16 @@ function extractText(message: OutboundMessage): string | null {
   return null;
 }
 
-function createAdapter(
-  token: string,
-  botUsername: string,
-  repos: string[],
-  intervalMs: number,
-): ChannelAdapter {
+function createAdapter(token: string, botUsername: string, repos: string[], intervalMs: number): ChannelAdapter {
   let channelSetup: ChannelSetup | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let connected = false;
   const state = loadState();
+
+  // Per-repo cache: issue/PR numbers where the bot should auto-engage
+  // (opened by bot, assigned to bot, or bot is a requested reviewer).
+  // Refreshed on every poll cycle.
+  const triggerIssues = new Map<string, Set<number>>();
 
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -233,17 +251,78 @@ function createAdapter(
     'X-GitHub-Api-Version': '2022-11-28',
   };
 
+  async function fetchJson<T>(url: string): Promise<T | null> {
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      log.warn('GitHub: API request failed', { url, status: res.status });
+      return null;
+    }
+    return res.json() as Promise<T>;
+  }
+
+  async function fetchTriggerIssues(repo: string): Promise<Set<number>> {
+    const numbers = new Set<number>();
+    const botLower = botUsername.toLowerCase();
+
+    const [opened, assigned, prs] = await Promise.allSettled([
+      // Issues/PRs opened by the bot
+      fetchJson<GitHubIssue[]>(
+        `https://api.github.com/repos/${repo}/issues?creator=${encodeURIComponent(botUsername)}&state=all&per_page=100&sort=updated&direction=desc`,
+      ),
+      // Issues/PRs assigned to the bot
+      fetchJson<GitHubIssue[]>(
+        `https://api.github.com/repos/${repo}/issues?assignee=${encodeURIComponent(botUsername)}&state=all&per_page=100&sort=updated&direction=desc`,
+      ),
+      // Open PRs where the bot was requested to review
+      fetchJson<GitHubPR[]>(
+        `https://api.github.com/repos/${repo}/pulls?state=open&per_page=100`,
+      ),
+    ]);
+
+    if (opened.status === 'fulfilled' && opened.value) {
+      for (const i of opened.value) numbers.add(i.number);
+    }
+    if (assigned.status === 'fulfilled' && assigned.value) {
+      for (const i of assigned.value) numbers.add(i.number);
+    }
+    if (prs.status === 'fulfilled' && prs.value) {
+      for (const pr of prs.value) {
+        if (pr.requested_reviewers.some((r) => r.login.toLowerCase() === botLower)) {
+          numbers.add(pr.number);
+        }
+      }
+    }
+
+    return numbers;
+  }
+
   async function fetchComments(repo: string, since: string): Promise<GitHubComment[]> {
     const url =
       `https://api.github.com/repos/${repo}/issues/comments` +
       `?since=${encodeURIComponent(since)}&sort=created&direction=asc&per_page=100`;
     const res = await fetch(url, { headers });
     if (res.status === 304) return [];
-    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    if (!res.ok) {
+      const rateLimit = res.headers.get('x-ratelimit-remaining');
+      const rateLimitReset = res.headers.get('x-ratelimit-reset');
+      const retryAfter = res.headers.get('retry-after');
+      const body = await res.text();
+      throw new Error(
+        `${res.status} rateRemaining=${rateLimit} resetAt=${rateLimitReset} retryAfter=${retryAfter} body=${body}`,
+      );
+    }
     return res.json() as Promise<GitHubComment[]>;
   }
 
   async function pollRepo(repo: string): Promise<void> {
+    // Refresh trigger-issue cache before processing comments. Failures use
+    // the stale/empty cache — comment processing still runs.
+    try {
+      triggerIssues.set(repo, await fetchTriggerIssues(repo));
+    } catch (err) {
+      log.warn('GitHub: failed to refresh trigger-issues cache', { repo, err });
+    }
+
     // On first poll, look back 24h to avoid processing ancient history.
     const since = state[repo] ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const comments = await fetchComments(repo, since);
@@ -259,14 +338,16 @@ function createAdapter(
       if (!match) continue;
       const threadId = match[1];
 
-      const isMention = comment.body.toLowerCase().includes(`@${botUsername.toLowerCase()}`);
+      const isTriggered = triggerIssues.get(repo)?.has(Number(threadId)) ?? false;
+      const hasMentionText = comment.body.toLowerCase().includes(`@${botUsername.toLowerCase()}`);
+      const isMention = isTriggered || hasMentionText;
 
       channelSetup!.onInbound(platformId, threadId, {
         id: `gh-${comment.id}`,
         kind: 'chat',
         content: {
           text: comment.body,
-          author: comment.user.login,
+          sender: comment.user.login,
           url: comment.html_url,
         },
         timestamp: comment.created_at,
@@ -274,12 +355,22 @@ function createAdapter(
         isGroup: true,
       });
 
-      if (comment.created_at > newest) newest = comment.created_at;
+      // Use numeric comparison — ISO string comparison fails when GitHub's
+      // second-precision timestamps ("...10Z") compare against our
+      // millisecond-precision watermarks ("...10.001Z") because "Z" > "."
+      // in ASCII, incorrectly making the comment appear "newer".
+      if (new Date(comment.created_at).getTime() > new Date(newest).getTime()) {
+        newest = comment.created_at;
+      }
     }
 
-    if (newest !== since) {
-      // Advance by 1ms so the next poll's `since` doesn't re-fetch this comment.
-      state[repo] = new Date(new Date(newest).getTime() + 1).toISOString();
+    const newestMs = new Date(newest).getTime();
+    const sinceMs = new Date(since).getTime();
+    if (newestMs > sinceMs) {
+      // Advance by 1s (not 1ms) to stay safely past GitHub's second-precision
+      // created_at timestamps; adding 1ms keeps us within the same second and
+      // GitHub may re-return the same comment on subsequent polls.
+      state[repo] = new Date(newestMs + 1000).toISOString();
       saveState(state);
     }
   }
@@ -303,11 +394,8 @@ function createAdapter(
       channelSetup = config;
       connected = true;
       poll().catch((err) => log.error('GitHub: initial poll failed', { err }));
-      timer = setInterval(
-        () => poll().catch((err) => log.error('GitHub: poll failed', { err })),
-        intervalMs,
-      );
-      log.info('GitHub polling adapter started', { repos, intervalMs });
+      timer = setInterval(() => poll().catch((err) => log.error('GitHub: poll failed', { err })), intervalMs);
+      log.info('GitHub polling adapter started', { repos, intervalMs, botUsername });
     },
 
     async teardown(): Promise<void> {
@@ -320,11 +408,7 @@ function createAdapter(
 
     isConnected: () => connected,
 
-    async deliver(
-      platformId: string,
-      threadId: string | null,
-      message: OutboundMessage,
-    ): Promise<string | undefined> {
+    async deliver(platformId: string, threadId: string | null, message: OutboundMessage): Promise<string | undefined> {
       if (!threadId) return;
       const repo = platformId.replace(/^github:/, '');
       const body = extractText(message);
@@ -356,12 +440,7 @@ function createAdapter(
 
 registerChannelAdapter('github', {
   factory: () => {
-    const env = readEnvFile([
-      'GITHUB_TOKEN',
-      'GITHUB_BOT_USERNAME',
-      'GITHUB_REPOS',
-      'GITHUB_POLL_INTERVAL_MS',
-    ]);
+    const env = readEnvFile(['GITHUB_TOKEN', 'GITHUB_BOT_USERNAME', 'GITHUB_REPOS', 'GITHUB_POLL_INTERVAL_MS']);
     if (!env.GITHUB_TOKEN) return null;
     const repos = (env.GITHUB_REPOS ?? '')
       .split(',')
@@ -448,12 +527,13 @@ onecli secrets create \
   --header-name "Authorization" \
   --value-format "Bearer {value}"
 
-# git over HTTPS (uses Basic auth: base64(username:token))
-BASIC=$(echo -n "your-bot-username:github_pat_..." | base64 -w0)
+# git over HTTPS — GitHub's git endpoint requires Basic auth (not Bearer).
+# Store the base64-encoded credential as the value so the proxy injects a valid Basic header.
+GIT_BASIC=$(echo -n "x-oauth-basic:github_pat_..." | base64 -w0)
 onecli secrets create \
   --name "GitHub PAT (git)" \
   --type generic \
-  --value "$BASIC" \
+  --value "$GIT_BASIC" \
   --host-pattern "github.com" \
   --header-name "Authorization" \
   --value-format "Basic {value}"
@@ -482,9 +562,36 @@ onecli agents set-secrets --id <agent-id> --secret-ids "$MERGED"
 onecli agents secrets --id <agent-id>
 ```
 
-The OneCLI credential proxy intercepts HTTPS traffic from the container and injects the right `Authorization` header before the request reaches GitHub — so `git`, `gh`, and direct API calls all work without any credential helper configuration.
+The OneCLI credential proxy intercepts HTTPS traffic from the container and injects the right `Authorization` header before the request reaches GitHub — so `git`, `gh`, and direct API calls all work without any credential helper or token in the container environment.
 
-### 3. Add gh CLI to the container image
+### 3. Configure the agent's settings.json
+
+OneCLI injects `SSL_CERT_FILE` for Node/Python/Deno, but git uses a separate env var for its CA bundle. Without `GIT_SSL_CAINFO`, git rejects the OneCLI MITM certificate and HTTPS operations fail.
+
+Add these to `data/v2-sessions/<agent-group-id>/.claude-shared/settings.json` under `"env"`:
+
+```json
+"GIT_SSL_CAINFO": "/tmp/onecli-combined-ca.pem",
+"GIT_TERMINAL_PROMPT": "0",
+"GIT_CONFIG_COUNT": "1",
+"GIT_CONFIG_KEY_0": "credential.helper",
+"GIT_CONFIG_VALUE_0": "",
+"GH_TOKEN": "ghp_onecli_proxy_replaces_this"
+```
+
+**Why the two secrets use different auth formats**:
+- `api.github.com` — GitHub's REST API accepts `Authorization: Bearer TOKEN`. Used by `gh` CLI.
+- `github.com` — GitHub's git smart HTTP protocol responds with `WWW-Authenticate: Basic` and only accepts `Authorization: Basic base64(username:token)`. This is true for both classic and fine-grained PATs. Bearer is rejected for git HTTPS operations.
+
+OneCLI's proxy injects credentials proactively (confirmed: `injections_applied=1` in gateway logs even when git sends no auth header). No placeholder headers needed in the container for git — the proxy handles it. The `credential.helper=""` config prevents git from trying to send its own conflicting Basic auth after getting a 401.
+
+**Why `GH_TOKEN` is still needed**: `gh` checks auth state locally before making HTTP requests and refuses to run without a configured token. The proxy still replaces the placeholder with the real API token at the network layer.
+
+- `GIT_SSL_CAINFO` — git uses its own CA env var (not `SSL_CERT_FILE`); without this, git rejects the OneCLI MITM certificate
+- `GIT_TERMINAL_PROMPT=0` — prevents git from hanging on a password prompt if auth fails
+- `credential.helper=""` — disables any credential helper so git doesn't interfere with the proxy's Basic injection
+
+### 4. Add gh CLI to the container image
 
 In `container/Dockerfile`, add a `GH_VERSION` ARG and install step (after the mnemon block):
 
@@ -517,11 +624,25 @@ INSERT INTO messaging_groups (id, channel_type, platform_id, name, is_group, unk
 VALUES ('mg-github-myrepo', 'github', 'github:owner/repo', 'owner/repo', 1, '<policy>', datetime('now'));
 
 -- Wire to agent group (per-thread so each PR/issue gets its own session)
-INSERT INTO messaging_group_agents (id, messaging_group_id, agent_group_id, session_mode, priority, engage_mode, created_at)
-VALUES ('mga-github-myrepo', 'mg-github-myrepo', '<your-agent-group-id>', 'per-thread', 10, 'mention', datetime('now'));
+INSERT INTO messaging_group_agents (id, messaging_group_id, agent_group_id, session_mode, priority, engage_mode, sender_scope, created_at)
+VALUES ('mga-github-myrepo', 'mg-github-myrepo', '<your-agent-group-id>', 'per-thread', 10, 'mention-sticky', 'all', datetime('now'));
 ```
 
-`engage_mode: 'mention'` means the agent responds only when `@bot-username` appears in a comment.
+`engage_mode: 'mention-sticky'` — the agent responds to @-mentions and bot-owned issues, then keeps engaging for follow-up comments in the same thread without a re-mention.
+
+`sender_scope: 'all'` — required because GitHub commenters are not registered users in the NanoClaw DB. Without this the router silently drops all inbound comments.
+
+### Multi-channel agent groups
+
+If this agent already participates in other channels (Signal, Telegram, etc.), you must also register GitHub as a named destination so the agent can route replies back to the correct channel:
+
+```sql
+-- Add GitHub as a named destination (one row per repo)
+INSERT INTO agent_destinations (agent_group_id, local_name, target_type, target_id, created_at)
+VALUES ('<your-agent-group-id>', 'github-myrepo', 'channel', 'mg-github-myrepo', datetime('now'));
+```
+
+Without this row the agent will see `from="unknown:github:..."` in its destinations list and may reply to the wrong channel (e.g. a Signal DM) instead of the GitHub issue.
 
 ### Adding members (strict mode only)
 
