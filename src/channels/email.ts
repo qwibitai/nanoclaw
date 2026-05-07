@@ -508,6 +508,16 @@ class EmailChannelAdapter implements ChannelAdapter {
   }
 
   async deliver(platformId: string, threadId: string | null, message: OutboundMessage): Promise<string | undefined> {
+    // Internal dispatch platformIds — `email:ws-dispatch`, `email:cal` —
+    // are pseudo-channels: the inbound flow uses them as routing markers,
+    // not actual mailboxes with correspondents to reply to. Anything an
+    // agent emits there should be silently dropped. The work product is
+    // the intake file the agent writes; macazbd's log is the only
+    // back-channel jibot needs.
+    if (platformId === 'email:ws-dispatch' || platformId === 'email:cal' || /^email:ws:/.test(platformId)) {
+      log.debug('Email deliver: dropping outbound on internal dispatch channel', { platformId });
+      return undefined;
+    }
     if (!threadId) {
       log.warn('Email deliver: missing threadId; cannot reply without a thread', { platformId });
       return undefined;
