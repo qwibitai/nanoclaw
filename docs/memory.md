@@ -374,6 +374,8 @@ Key fields:
 | `judged_count_total` | Lifetime total judged rows. |
 | `judge_retry_p50_24h` | Median retry count from `dead_letters` for judge events. >1 means the daemon is struggling to find agent responses. |
 
+> **Known limitation:** `recall_quality` metrics are best-effort under heavy concurrency. Chained same-thread overlaps within ~110s (3+ recalls where consecutive pairs are within 60s but the outer pair isn't) may produce slightly noisy judge scores; the diagnostic stays useful for trend-watching but the absolute numbers under that pattern are not precision-grade.
+
 Also check `ollamaCheckHost` at the top level — written by the host at startup:
 
 ```bash
