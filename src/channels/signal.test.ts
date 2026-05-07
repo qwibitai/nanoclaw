@@ -48,6 +48,11 @@ function createFakeSocket(): EventEmitter & {
       /* ignore */
     }
   });
+  // Production calls sock.setKeepAlive(true, 15000) inside the connect
+  // callback to detect silent half-closes — without this stub, the call
+  // throws TypeError on the EventEmitter mock and the connect Promise
+  // never resolves, hanging every signal test for 5s.
+  sock.setKeepAlive = vi.fn();
   return sock;
 }
 

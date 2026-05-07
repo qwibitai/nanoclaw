@@ -117,6 +117,16 @@ class SignalTcpClient {
     this.onClose = handlers?.onClose ?? null;
     return new Promise((resolve, reject) => {
       const sock = createConnection(this.port, this.host, () => {
+        // Enable TCP keepalive at the OS level so half-closed sockets
+        // (peer crashed without FIN, network blip leaving zombie state)
+        // surface as 'close' events within ~30–90s instead of sitting
+        // silent forever. 2026-05-08: hit two cases of nanoclaw believing
+        // it was connected to signal-cli for 6+ hours while signal-cli
+        // had restarted underneath it — every Signal message during the
+        // window was lost. setKeepAlive(true, 15000) starts probes after
+        // 15s of idle, which the kernel converts into the platform's
+        // standard probe cadence.
+        sock.setKeepAlive(true, 15_000);
         this.socket = sock;
         resolve();
       });
@@ -640,6 +650,19 @@ export function createSignalAdapter(config: {
     log.info('Signal: native @-mention detection enabled', { botUuid: botUuid.slice(0, 8) + '…' });
   }
 
+  // Auto-reconnect state. We hit two cases on 2026-05-08 where the TCP
+  // socket to signal-cli silently died (kernel didn't surface the FIN,
+  // application-level keepalive disabled) and the channel sat dead for
+  // 6+ hours, dropping every Signal message during the window. The
+  // backoff schedule is 5s, 10s, 20s, 40s, 60s (capped). teardown()
+  // sets `teardownInProgress` to make pending retries no-ops so a
+  // service restart isn't fighting its own auto-reconnect.
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttempt = 0;
+  let teardownInProgress = false;
+  const RECONNECT_BASE_MS = 5_000;
+  const RECONNECT_CAP_MS = 60_000;
+
   // -- inbound handling --
 
   function handleNotification(method: string, params: unknown): void {
@@ -963,6 +986,96 @@ export function createSignalAdapter(config: {
     return false;
   }
 
+  /**
+   * Open a fresh TCP connection to signal-cli, wire up the inbound handler
+   * and the reconnect-on-close hook, and re-issue the profile / typing
+   * configuration RPCs.
+   *
+   * Called once from setup() and again from each scheduled reconnect.
+   * Throws on connection failure so the caller can decide whether to
+   * propagate (initial setup) or schedule another retry (reconnect path).
+   */
+  async function connectAndInitialize(): Promise<void> {
+    tcp = new SignalTcpClient(config.tcpHost, config.tcpPort);
+    await tcp.connect({
+      onNotification: handleNotification,
+      onClose: () => {
+        if (!connected) return;
+        connected = false;
+        log.warn('Signal channel lost TCP connection to signal-cli daemon', {
+          account: config.account,
+          host: config.tcpHost,
+          port: config.tcpPort,
+        });
+        scheduleReconnect();
+      },
+    });
+
+    try {
+      await tcp.rpc('updateProfile', {
+        name: 'NanoClaw',
+        account: config.account,
+      });
+    } catch {
+      log.debug('Signal: could not set profile name');
+    }
+
+    try {
+      await tcp.rpc('updateConfiguration', {
+        typingIndicators: true,
+        account: config.account,
+      });
+    } catch {
+      log.debug('Signal: could not enable typing indicators');
+    }
+
+    connected = true;
+    log.info('Signal channel connected', {
+      account: config.account,
+      host: config.tcpHost,
+      port: config.tcpPort,
+    });
+  }
+
+  /**
+   * Schedule a reconnect attempt with exponential backoff. Idempotent: if
+   * a retry is already pending we leave it alone. teardown() will clear
+   * the timer and flip teardownInProgress so this becomes a no-op.
+   */
+  function scheduleReconnect(): void {
+    if (teardownInProgress) return;
+    if (reconnectTimer) return;
+    const backoffMs = Math.min(RECONNECT_BASE_MS * 2 ** reconnectAttempt, RECONNECT_CAP_MS);
+    reconnectAttempt += 1;
+    log.info('Signal channel scheduling reconnect', {
+      attempt: reconnectAttempt,
+      backoffMs,
+    });
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      void attemptReconnect();
+    }, backoffMs);
+  }
+
+  async function attemptReconnect(): Promise<void> {
+    if (teardownInProgress) return;
+    try {
+      const ok = await signalTcpCheck(config.tcpHost, config.tcpPort);
+      if (!ok) {
+        log.warn('Signal channel reconnect: signal-cli not reachable, will retry');
+        scheduleReconnect();
+        return;
+      }
+      tcp?.close();
+      tcp = null;
+      await connectAndInitialize();
+      reconnectAttempt = 0;
+    } catch (err) {
+      log.error('Signal channel reconnect failed', { err });
+      scheduleReconnect();
+    }
+  }
+
   // -- adapter --
 
   const adapter: ChannelAdapter = {
@@ -991,51 +1104,15 @@ export function createSignalAdapter(config: {
         }
       }
 
-      tcp = new SignalTcpClient(config.tcpHost, config.tcpPort);
-      await tcp.connect({
-        onNotification: handleNotification,
-        // Signal the adapter that the daemon dropped us. No auto-reconnect yet
-        // — subsequent deliver/setTyping calls short-circuit on `connected`
-        // and log rather than throw into the retry loop. Operators see this in
-        // logs/nanoclaw.log and can restart the service.
-        onClose: () => {
-          if (!connected) return;
-          connected = false;
-          log.warn('Signal channel lost TCP connection to signal-cli daemon', {
-            account: config.account,
-            host: config.tcpHost,
-            port: config.tcpPort,
-          });
-        },
-      });
-
-      try {
-        await tcp.rpc('updateProfile', {
-          name: 'NanoClaw',
-          account: config.account,
-        });
-      } catch {
-        log.debug('Signal: could not set profile name');
-      }
-
-      try {
-        await tcp.rpc('updateConfiguration', {
-          typingIndicators: true,
-          account: config.account,
-        });
-      } catch {
-        log.debug('Signal: could not enable typing indicators');
-      }
-
-      connected = true;
-      log.info('Signal channel connected', {
-        account: config.account,
-        host: config.tcpHost,
-        port: config.tcpPort,
-      });
+      await connectAndInitialize();
     },
 
     async teardown(): Promise<void> {
+      teardownInProgress = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       connected = false;
       tcp?.close();
       tcp = null;
