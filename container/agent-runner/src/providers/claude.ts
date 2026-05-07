@@ -5,7 +5,15 @@ import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import { registerProvider } from './provider-registry.js';
-import type { AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
+import type {
+  AgentProvider,
+  AgentQuery,
+  ErrorSubstitution,
+  McpServerConfig,
+  ProviderEvent,
+  ProviderOptions,
+  QueryInput,
+} from './types.js';
 
 function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
@@ -250,8 +258,27 @@ const CLAUDE_CODE_AUTO_COMPACT_WINDOW = process.env.CLAUDE_CODE_AUTO_COMPACT_WIN
  */
 const STALE_SESSION_RE = /no conversation found|ENOENT.*\.jsonl|session.*not found/i;
 
+/**
+ * Provider-specific output substitutions. Each rule is a `(test, replace)`
+ * pair; the first match wins. The poll-loop applies these to result text
+ * and to error text before delivery so users see actionable host-aware
+ * messages instead of raw CLI banners they can't act on from chat.
+ */
+const ERROR_SUBSTITUTIONS: readonly ErrorSubstitution[] = [
+  {
+    name: 'auth-required',
+    // Anchored to start-of-string with the specific `·` separator (U+00B7)
+    // the CLI emits, so an agent that quotes the phrase verbatim mid-sentence
+    // in a normal reply doesn't trip the rule.
+    test: /^(Not logged in|Invalid API key)\s*·\s*Please run \/login/,
+    replace:
+      "I can't reach my Anthropic credentials right now. The operator running NanoClaw needs to re-run setup, or run `claude` in the project directory on the machine I'm running on.",
+  },
+];
+
 export class ClaudeProvider implements AgentProvider {
   readonly supportsNativeSlashCommands = true;
+  readonly errorSubstitutions = ERROR_SUBSTITUTIONS;
 
   private assistantName?: string;
   private mcpServers: Record<string, McpServerConfig>;

@@ -14,6 +14,33 @@ export interface AgentProvider {
    * (missing transcript, unknown session, etc.) and should be cleared.
    */
   isSessionInvalid(err: unknown): boolean;
+
+  /**
+   * Provider-specific (test, replace) pairs applied to result text and
+   * error text before delivery to the user. Iterated in declaration
+   * order; the first rule whose `test` matches wins, and its `replace`
+   * is sent verbatim. If no rule matches, the original text passes
+   * through unchanged — there is no fallback.
+   *
+   * Use this to swap raw SDK/CLI banners that the user can't act on
+   * (e.g. "Please run /login" — they're not on the host) for actionable
+   * messages naming the operator's actual remediation path.
+   */
+  errorSubstitutions?: readonly ErrorSubstitution[];
+}
+
+/**
+ * A single rule for swapping raw provider output with a user-facing
+ * message. Each rule is a `(test, replace)` pair plus a short `name`
+ * used only for logging when the rule fires.
+ */
+export interface ErrorSubstitution {
+  /** Short identifier for logs — e.g. "auth-required", "rate-limited". */
+  name: string;
+  /** Regex tested against the error/result text. First match wins. */
+  test: RegExp;
+  /** User-facing replacement when `test` matches. */
+  replace: string;
 }
 
 /**
