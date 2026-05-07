@@ -267,6 +267,32 @@ class EchoCache {
     return true;
   }
 
+  /**
+   * Reaction-shaped echo entries. Keyed on `(platformId, emoji,
+   * targetSentTimestamp)` rather than text — text-keying would either collide
+   * with a real message or never match because reactions have no text body.
+   */
+  private reactionKey(platformId: string, emoji: string, targetTimestamp: number): string {
+    return `${platformId}\x00reaction\x00${emoji}\x00${targetTimestamp}`;
+  }
+
+  rememberReaction(platformId: string, emoji: string, targetTimestamp: number): void {
+    this.entries.set(this.reactionKey(platformId, emoji, targetTimestamp), Date.now());
+    this.cleanup();
+  }
+
+  isEchoReaction(platformId: string, emoji: string, targetTimestamp: number): boolean {
+    const key = this.reactionKey(platformId, emoji, targetTimestamp);
+    const ts = this.entries.get(key);
+    if (!ts) return false;
+    if (Date.now() - ts > ECHO_TTL_MS) {
+      this.entries.delete(key);
+      return false;
+    }
+    this.entries.delete(key);
+    return true;
+  }
+
   private cleanup(): void {
     const now = Date.now();
     for (const [key, ts] of this.entries) {
@@ -296,6 +322,15 @@ interface SignalMention {
   name?: string;
 }
 
+interface SignalReaction {
+  emoji?: string;
+  targetAuthor?: string;
+  targetAuthorNumber?: string;
+  targetAuthorUuid?: string;
+  targetSentTimestamp?: number;
+  isRemove?: boolean;
+}
+
 interface SignalDataMessage {
   timestamp?: number;
   message?: string;
@@ -303,6 +338,7 @@ interface SignalDataMessage {
   groupInfo?: { groupId?: string; groupName?: string; type?: string };
   groupV2?: { id?: string };
   quote?: SignalQuote;
+  reaction?: SignalReaction;
   attachments?: Array<{
     id?: string;
     contentType?: string;
@@ -434,6 +470,109 @@ function chunkText(text: string, limit: number): string[] {
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 // ---------------------------------------------------------------------------
+// Emoji shortcode → unicode
+//
+// The agent-runner's `add_reaction` MCP tool documents emoji as shortcode
+// names (`thumbs_up`, `heart`, `white_check_mark`). signal-cli's sendReaction
+// expects the literal unicode character. Chat SDK handles this internally for
+// chat-sdk channels; native adapters need to do it themselves.
+//
+// Coverage focuses on the shortcodes the tool's instructions mention plus the
+// most commonly-used reactions. Unknown shortcodes fall back to 👍 with a
+// warning so the agent's intent ("react to acknowledge") still goes through
+// rather than the call quietly dropping.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_EMOJI = '👍';
+
+const EMOJI_SHORTCODES: Record<string, string> = {
+  thumbs_up: '👍',
+  '+1': '👍',
+  thumbsup: '👍',
+  thumbs_down: '👎',
+  '-1': '👎',
+  thumbsdown: '👎',
+  heart: '❤️',
+  red_heart: '❤️',
+  white_check_mark: '✅',
+  check: '✅',
+  check_mark: '✅',
+  x: '❌',
+  cross_mark: '❌',
+  no_entry: '⛔',
+  warning: '⚠️',
+  eyes: '👀',
+  fire: '🔥',
+  hundred: '💯',
+  '100': '💯',
+  pray: '🙏',
+  raised_hands: '🙌',
+  clap: '👏',
+  ok_hand: '👌',
+  joy: '😂',
+  laughing: '😂',
+  smile: '😄',
+  smiley: '😃',
+  grin: '😁',
+  wink: '😉',
+  thinking: '🤔',
+  thinking_face: '🤔',
+  cry: '😢',
+  sob: '😭',
+  rage: '😡',
+  angry: '😠',
+  sweat_smile: '😅',
+  shrug: '🤷',
+  party: '🎉',
+  tada: '🎉',
+  rocket: '🚀',
+  star: '⭐',
+  sparkles: '✨',
+  bulb: '💡',
+  zap: '⚡',
+  bell: '🔔',
+  question: '❓',
+  exclamation: '❗',
+  wave: '👋',
+  point_up: '☝️',
+  point_right: '👉',
+  muscle: '💪',
+  brain: '🧠',
+  robot: '🤖',
+  see_no_evil: '🙈',
+  hear_no_evil: '🙉',
+  speak_no_evil: '🙊',
+};
+
+/**
+ * Resolve an agent-supplied emoji argument to a single unicode emoji.
+ *
+ * Inputs in priority order:
+ *   1. Already-unicode (anything that doesn't match `[a-z0-9_+-]+` ASCII) → pass through
+ *   2. Known shortcode in EMOJI_SHORTCODES → mapped unicode
+ *   3. Anything else → DEFAULT_EMOJI + warning
+ *
+ * Strips a leading/trailing colon so `:thumbs_up:` works alongside `thumbs_up`.
+ */
+function emojiToUnicode(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) return DEFAULT_EMOJI;
+  const stripped = trimmed.replace(/^:|:$/g, '');
+  // ASCII-only shortcode pattern — anything containing non-ASCII is assumed
+  // to already be a unicode emoji (or grapheme cluster).
+  if (/^[a-z0-9_+-]+$/i.test(stripped)) {
+    const mapped = EMOJI_SHORTCODES[stripped.toLowerCase()];
+    if (mapped) return mapped;
+    log.warn('Signal: unknown emoji shortcode, falling back to default', {
+      shortcode: stripped,
+      fallback: DEFAULT_EMOJI,
+    });
+    return DEFAULT_EMOJI;
+  }
+  return trimmed;
+}
+
+// ---------------------------------------------------------------------------
 // Signal text styles — convert Markdown to Signal's offset-based formatting
 // ---------------------------------------------------------------------------
 
@@ -551,6 +690,25 @@ export function createSignalAdapter(config: {
     // Sync messages (sent from another device)
     const syncSent = envelope.syncMessage?.sentMessage;
     if (syncSent) {
+      // Reaction sync — drop if it's our own outbound reaction echoing back.
+      // (Reactions sent from another linked device with a non-self destination
+      // are also our outbound and likewise skipped — they aren't a separate
+      // user event the agent needs to see.)
+      if (syncSent.reaction) {
+        const groupId = syncSent.groupV2?.id ?? syncSent.groupInfo?.groupId;
+        const dest = (syncSent.destinationNumber ?? syncSent.destination ?? '').trim();
+        const platformId = groupId ? `group:${groupId}` : dest;
+        const r = syncSent.reaction;
+        if (
+          platformId &&
+          r.emoji &&
+          r.targetSentTimestamp &&
+          echoCache.isEchoReaction(platformId, r.emoji, r.targetSentTimestamp)
+        ) {
+          log.debug('Signal: skipping echoed reaction', { platformId, emoji: r.emoji });
+        }
+        return;
+      }
       const dest = (syncSent.destinationNumber ?? syncSent.destination ?? '').trim();
       // "Note to Self" — destination is our own account
       if (dest === config.account) {
@@ -563,7 +721,10 @@ export function createSignalAdapter(config: {
         setup.onMetadata(platformId, 'Note to Self', false);
 
         const msg: InboundMessage = {
-          id: String(syncSent.timestamp ?? Date.now()),
+          // Encode the sender into the id so a later add_reaction can recover
+          // the targetAuthor. The router suffixes `:<agent-group-id>` for
+          // fan-out uniqueness; sendReaction takes the second `:`-component.
+          id: `${syncSent.timestamp ?? Date.now()}:${config.account}`,
           kind: 'chat',
           content: {
             text,
@@ -584,6 +745,14 @@ export function createSignalAdapter(config: {
 
     const dataMessage = envelope.dataMessage;
     if (!dataMessage) return;
+
+    // Reaction event — handle before text/voice/attachment processing so a
+    // dataMessage that carries both `reaction` and `message` (rare) is treated
+    // as the reaction it is, not as a text message from the same envelope.
+    if (dataMessage.reaction) {
+      await handleInboundReaction(envelope, dataMessage.reaction);
+      return;
+    }
 
     const rawText = (dataMessage.message ?? '').trim();
     const text = rawText ? resolveMentions(rawText, dataMessage.mentions) : '';
@@ -660,7 +829,9 @@ export function createSignalAdapter(config: {
     }
 
     const msg: InboundMessage = {
-      id: String(dataMessage.timestamp ?? Date.now()),
+      // Encode the sender so sendReaction can recover targetAuthor — see
+      // syncSent path above for the full rationale.
+      id: `${dataMessage.timestamp ?? Date.now()}:${sender}`,
       kind: 'chat',
       content: {
         text: content,
@@ -675,6 +846,77 @@ export function createSignalAdapter(config: {
     await setup.onInbound(platformId, null, msg);
 
     log.info('Signal message received', { platformId, sender: senderName });
+  }
+
+  /**
+   * Translate a Signal reaction event into an InboundMessage. The structured
+   * `reaction` object mirrors Chat SDK's `ReactionEvent` shape (emoji,
+   * isAdded, targetMessageId) so the eventual chat-sdk-bridge implementation
+   * can reuse the same `messages_in.content` schema. The synthesized `text`
+   * field keeps the existing agent-runner formatter rendering something
+   * meaningful with no formatter changes.
+   */
+  async function handleInboundReaction(envelope: SignalEnvelope, reaction: SignalReaction): Promise<void> {
+    if (!setup) return;
+    if (!reaction.emoji || !reaction.targetSentTimestamp) {
+      log.debug('Signal: ignoring reaction with missing emoji or targetSentTimestamp', { reaction });
+      return;
+    }
+
+    const sender = (envelope.sourceNumber ?? envelope.sourceUuid ?? envelope.source ?? '').trim();
+    if (!sender) return;
+    const senderName = (envelope.sourceName?.trim() || sender).trim();
+
+    const dataMessage = envelope.dataMessage!;
+    const groupInfo = dataMessage.groupInfo;
+    const groupId = dataMessage.groupV2?.id ?? groupInfo?.groupId;
+    const isGroup = Boolean(groupId);
+    const platformId = isGroup ? `group:${groupId}` : sender;
+
+    if (echoCache.isEchoReaction(platformId, reaction.emoji, reaction.targetSentTimestamp)) {
+      log.debug('Signal: skipping echoed reaction', { platformId, emoji: reaction.emoji });
+      return;
+    }
+
+    const isAdded = !reaction.isRemove;
+    const targetAuthor =
+      reaction.targetAuthor || reaction.targetAuthorUuid || reaction.targetAuthorNumber || '';
+    const targetMessageId = `${reaction.targetSentTimestamp}:${targetAuthor}`;
+    const marker = isAdded ? '➕' : '➖';
+    const text = `[reacted ${marker} ${reaction.emoji} to message]`;
+    const timestamp = dataMessage.timestamp
+      ? new Date(dataMessage.timestamp).toISOString()
+      : new Date().toISOString();
+
+    const chatName = groupInfo?.groupName ?? (isGroup ? `Group ${groupId?.slice(0, 8)}` : senderName);
+    setup.onMetadata(platformId, chatName, isGroup);
+
+    const msg: InboundMessage = {
+      // Encode sender so reactions stay reactable — same rationale as the
+      // text path. The reaction's own timestamp keeps the row distinct from
+      // the original message it reacted to.
+      id: `${dataMessage.timestamp ?? Date.now()}:${sender}`,
+      kind: 'chat',
+      content: {
+        text,
+        sender,
+        senderId: `signal:${sender}`,
+        senderName,
+        reaction: {
+          emoji: reaction.emoji,
+          isAdded,
+          targetMessageId,
+        },
+      },
+      timestamp,
+    };
+    await setup.onInbound(platformId, null, msg);
+    log.info('Signal reaction received', {
+      platformId,
+      sender: senderName,
+      emoji: reaction.emoji,
+      isAdded,
+    });
   }
 
   /**
@@ -701,13 +943,21 @@ export function createSignalAdapter(config: {
 
   // -- send helpers --
 
-  async function sendText(platformId: string, text: string): Promise<void> {
-    if (!connected || !tcp) return;
+  /**
+   * Send `text` as one or more Signal messages, returning the timestamp of
+   * the first chunk's send response (so callers can record it as the
+   * platform message id). The first chunk is the head of the reply, which
+   * is what later edits / reactions / replies want to target.
+   */
+  async function sendText(platformId: string, text: string): Promise<number | null> {
+    if (!connected || !tcp) return null;
 
     echoCache.remember(platformId, text);
 
     const MAX_CHUNK = 4000;
     const chunks = text.length <= MAX_CHUNK ? [text] : chunkText(text, MAX_CHUNK);
+
+    let firstTimestamp: number | null = null;
 
     for (const chunk of chunks) {
       try {
@@ -724,17 +974,22 @@ export function createSignalAdapter(config: {
           params.recipient = [platformId];
         }
 
+        let result: unknown;
         try {
-          await tcp.rpc('send', params);
+          result = await tcp.rpc('send', params);
         } catch (styledErr) {
           if (textStyles.length > 0) {
             log.debug('Signal: textStyle rejected, retrying with markup');
             delete params.textStyle;
             params.message = chunk;
-            await tcp.rpc('send', params);
+            result = await tcp.rpc('send', params);
           } else {
             throw styledErr;
           }
+        }
+        if (firstTimestamp === null && result && typeof result === 'object') {
+          const ts = (result as Record<string, unknown>).timestamp;
+          if (typeof ts === 'number') firstTimestamp = ts;
         }
       } catch (err) {
         log.error('Signal: send failed', { platformId, err });
@@ -742,6 +997,7 @@ export function createSignalAdapter(config: {
     }
 
     log.info('Signal message sent', { platformId, length: text.length });
+    return firstTimestamp;
   }
 
   /**
@@ -786,6 +1042,76 @@ export function createSignalAdapter(config: {
           /* best-effort cleanup */
         }
       }
+    }
+  }
+
+  /**
+   * Send a reaction via signal-cli's `sendReaction` JSON-RPC. The encoded
+   * `messageId` carries both the target timestamp and the target author —
+   * see the inbound `id` and outbound `deliver()` return value, both of which
+   * use the same `<timestamp>:<authorIdent>` format. Legacy ids without a
+   * suffix default targetAuthor to our own account (covers reactions on the
+   * agent's own outbound from before this encoding was introduced).
+   */
+  async function sendReaction(
+    platformId: string,
+    encodedMessageId: string,
+    rawEmoji: string,
+    remove: boolean,
+  ): Promise<string | undefined> {
+    if (!connected || !tcp) return undefined;
+
+    // messageId encoding (see handleEnvelope and deliver):
+    //   - `<ts>`                      — legacy / no-author fallback
+    //   - `<ts>:<author>`             — outbound reply (deliver())
+    //   - `<ts>:<author>:<ag-id>`     — inbound message after the router's
+    //                                   per-agent fan-out suffix in router.ts
+    //                                   `messageIdForAgent`
+    // Author is always the SECOND `:`-segment when present; trailing
+    // segments (e.g. agent-group id) are dropped. Without an author segment,
+    // fall back to our own account so reactions on the agent's own outbound
+    // still resolve.
+    const parts = encodedMessageId.split(':');
+    const tsRaw = parts[0];
+    const targetAuthor = parts[1] && parts[1].length > 0 ? parts[1] : config.account;
+    const targetTimestamp = Number(tsRaw);
+    if (!Number.isFinite(targetTimestamp) || targetTimestamp <= 0) {
+      log.error('Signal: sendReaction got unparseable messageId', { encodedMessageId });
+      return undefined;
+    }
+    if (!targetAuthor) {
+      log.error('Signal: sendReaction missing targetAuthor', { encodedMessageId });
+      return undefined;
+    }
+
+    const emoji = emojiToUnicode(rawEmoji);
+
+    const params: Record<string, unknown> = {
+      emoji,
+      targetAuthor,
+      targetTimestamp,
+    };
+    if (config.account) params.account = config.account;
+    if (remove) params.remove = true;
+    if (platformId.startsWith('group:')) {
+      params.groupId = platformId.slice('group:'.length);
+    } else {
+      params.recipient = [platformId];
+    }
+
+    echoCache.rememberReaction(platformId, emoji, targetTimestamp);
+
+    try {
+      const result = await tcp.rpc('sendReaction', params);
+      log.info('Signal reaction sent', { platformId, emoji, targetTimestamp, remove });
+      if (result && typeof result === 'object') {
+        const ts = (result as Record<string, unknown>).timestamp;
+        if (typeof ts === 'number') return `${ts}:${config.account}`;
+      }
+      return undefined;
+    } catch (err) {
+      log.error('Signal: sendReaction failed', { platformId, emoji, targetTimestamp, err });
+      return undefined;
     }
   }
 
@@ -893,6 +1219,19 @@ export function createSignalAdapter(config: {
 
     async deliver(platformId: string, _threadId: string | null, message: OutboundMessage): Promise<string | undefined> {
       const content = message.content as Record<string, unknown> | string | undefined;
+
+      // Reaction operation — mirrors the chat-sdk-bridge contour so an agent
+      // calling `add_reaction` works the same on Signal as on Discord/Slack.
+      if (
+        content &&
+        typeof content === 'object' &&
+        content.operation === 'reaction' &&
+        typeof content.messageId === 'string' &&
+        typeof content.emoji === 'string'
+      ) {
+        return await sendReaction(platformId, content.messageId, content.emoji, content.remove === true);
+      }
+
       let text: string | null = null;
       if (typeof content === 'string') {
         text = content;
@@ -905,8 +1244,15 @@ export function createSignalAdapter(config: {
       // Send accompanying text first so it lands above the attachment(s) in
       // the recipient's chat. Both branches no-op cleanly if their input is
       // empty, so any combination of (text, files) works.
-      if (text) await sendText(platformId, text);
+      let sentTimestamp: number | null = null;
+      if (text) sentTimestamp = await sendText(platformId, text);
       if (files.length > 0) await sendAttachments(platformId, files);
+      // Return the head-of-reply id so the host can record it in
+      // delivered.platform_message_id. The encoded form `<ts>:<account>`
+      // round-trips through `add_reaction` / future edit support to the
+      // sendReaction helper, which decodes it back into targetTimestamp +
+      // targetAuthor.
+      if (sentTimestamp !== null) return `${sentTimestamp}:${config.account}`;
       return undefined;
     },
 
