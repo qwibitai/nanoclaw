@@ -1,0 +1,592 @@
+feature: instrumented-memory-recall
+created_by: /team-brief
+last_updated_by: /team-plan
+
+constraints:
+  - id: C1
+    type: HARD
+    text: "Daemon is the sole writer to mnemon stores. No agent-write paths introduced."
+    source: brief
+    verified: true
+    affects_groups: []
+  - id: C2
+    type: HARD
+    text: "Recall remains pre-turn host-injected via kind=system trigger=0 row in inbound.db. No mid-turn agent-pulled recall path in this feature."
+    source: brief
+    verified: true
+    affects_groups: []
+  - id: C3
+    type: HARD
+    text: "Per-group store isolation preserved by default. Cross-group reads are explicit opt-in via recall_scope config; no implicit fan-out."
+    source: brief
+    verified: true
+    affects_groups: []
+  - id: C4
+    type: HARD
+    text: "Measurement before optimization. Query improvement (R2) and cross-group scope (R3) cannot ship until feedback loop (R1) is live and producing scores."
+    source: brief
+    verified: true
+    affects_groups: []
+  - id: C5
+    type: HARD
+    text: "Strategy C (LLM query extraction) must never break recall. On any extractor failure path, fall back through Strategy B then Strategy A."
+    source: brief
+    verified: true
+    affects_groups: []
+  - id: C6
+    type: HARD
+    text: "Cross-group fan-out must respect existing per-store mount narrowing. Daemon cannot mount additional stores into containers; fan-out happens host-side and only merged results cross the trust boundary."
+    source: brief
+    verified: true
+    affects_groups: []
+  - id: C7
+    type: HARD
+    text: "Supply-chain hygiene preserved: pnpm minimumReleaseAge: 4320 retained; no minimumReleaseAgeExclude additions; no new onlyBuiltDependencies entries."
+    source: CLAUDE.md
+    verified: true
+    affects_groups: []
+  - id: C8
+    type: HARD
+    text: "Quality gates preserved: host typecheck (tsc), container typecheck (bun run typecheck), vitest on host, bun:test in container."
+    source: CLAUDE.md
+    verified: true
+    affects_groups: []
+  - id: C9
+    type: SOFT
+    text: "LLM judge cost remains under ~$10/month at current ~11-group volume. Sampling is for signal quality, not cost."
+    source: brief
+    verified: false
+    affects_groups: []
+  - id: C10
+    type: SOFT
+    text: "Eval-harness fact-pair set is stable across A/B comparisons. Manual regeneration only; no auto-regen on corpus drift."
+    source: brief
+    verified: false
+    affects_groups: []
+  - id: C11
+    type: HARD
+    superseded_by: C11_v2
+    text: "[SUPERSEDED — see C11_v2 for current statement] Original framing claimed daemon-only writer to mnemon-ingest.db. Cycle 1 review found this was already false in existing code (mnemon-impl.ts:265 host writes idempotency_keys); C11_v2 restates the actual invariant as row-level multi-writer."
+    source: design
+    verified: true
+    affects_groups: []
+  - id: C12
+    type: HARD
+    text: "Schema migrations follow append-only 019-mnemon-ingest-db.ts pattern (named applied row, idempotent block, transactional)."
+    source: design
+    verified: true
+    affects_groups: []
+  - id: C13
+    type: HARD
+    text: "memory-health.json schema is operator-readable; field additions must preserve existing keys (operator runbooks parse specific JSON keys)."
+    source: design
+    verified: true
+    affects_groups: []
+  - id: C14
+    type: HARD
+    text: "LLM judge backend MUST reuse classifier-client.ts <provider>:<model>:<effort> pattern with new env var MEMORY_RECALL_JUDGE_BACKEND, lazy load, parse-throw-loud."
+    source: design
+    verified: true
+    affects_groups: []
+  - id: C15
+    type: HARD
+    text: "Null-byte sanitization on judge and extractor prompts (codex backend rejects \\0 via child_process.spawn)."
+    source: design
+    verified: true
+    affects_groups: []
+  - id: C16
+    type: HARD
+    text: "Eval synthesizer and judge MUST come from different model providers (Anthropic vs OpenAI/Codex), not just different sizes within one provider. Restated 2026-05-06 cycle 1 review — Sonnet vs Haiku share Anthropic priors and produce correlated errors per SIGIR'25 finding (Balog/Metzler/Qin)."
+    source: review
+    verified: true
+    affects_groups: []
+  - id: C11_v2
+    type: HARD
+    text: "Single-writer-per-DB-file invariant — at the row level. Multiple processes may write the same DB iff each row has at most one ever-writer. SQLite WAL handles cross-process visibility. Existing precedent: mnemon-impl.ts:265 already writes idempotency_keys rows from the host. Restated 2026-05-06 cycle 1 review — original C11 framing was per-file, which Option C technically violated; restatement aligns with how the codebase actually operates."
+    source: review
+    verified: true
+    affects_groups: []
+
+decisions:
+  - id: D1
+    stage: brief
+    description: "Acceptance criteria — coverage and correlation thresholds for the feedback loop"
+    chosen: "Coverage ≥95% of recall events judged within 24h; Spearman ρ ≥ 0.5 between embedding-cosine and LLM judge on 200-event calibration"
+    rejected:
+      - option: "Coverage ≥80%, Pearson r ≥ 0.6"
+        reason: "20% blind spot too large for an optimization substrate; Pearson is wrong tool for ordinal-vs-continuous correlation, Spearman is correct"
+    constraint_refs: [C4]
+    affects_groups: []
+  - id: D2
+    stage: brief
+    description: "Acceptance criteria — Strategy C ship gates"
+    chosen: "Dual gate: eval-set lifts ≥10pp absolute on '≥1 load-bearing fact returned' AND live A/B lifts mean judge score ≥0.3 on 0-2 scale over 7 days across ≥3 groups, with no useful_fact_rate regression >5pp on either gate"
+    rejected:
+      - option: "Eval-only gate"
+        reason: "Eval can be gamed by strategies that match synthesized queries; live signal needed"
+      - option: "Live-only gate"
+        reason: "Slow and noisy; eval provides cheaper pre-flight"
+      - option: "Coverage-only metric (no precision complement)"
+        reason: "Rewards over-returning; useful_fact_rate complement prevents shipping a noisier strategy"
+    constraint_refs: [C4]
+    affects_groups: []
+  - id: D3
+    stage: brief
+    description: "Cross-group scope (R3) failure path"
+    chosen: "Circuit breaker — auto-revert to self on 7 consecutive days of regression ≥0.2 below self baseline, plus loud health.json entry. No auto-flip-back; operator re-enables manually."
+    rejected:
+      - option: "Pure auto-revert with no health entry"
+        reason: "Operator never learns recall scope was reverted"
+      - option: "Operator-decides only"
+        reason: "Persistent regression silently degrades the affected group until operator happens to look"
+    constraint_refs: [C3]
+    affects_groups: []
+  - id: D4
+    stage: brief
+    description: "Strategy C extractor failure mode"
+    chosen: "Three-tier fallback: LLM extractor (800ms timeout) → Strategy B heuristic → Strategy A current behavior"
+    rejected:
+      - option: "Single fallback to Strategy A"
+        reason: "Loses the cheap-but-better Strategy B option"
+      - option: "Skip recall on extractor failure"
+        reason: "Extractor is best-effort improvement; recall must never break because of it"
+    constraint_refs: [C5]
+    affects_groups: []
+  - id: D5
+    stage: brief
+    description: "LLM judge backend"
+    chosen: "Reuse classifier drop-in mechanism (memory-daemon-backend.conf). Default Anthropic Haiku 4.5. Operator can switch via existing systemd drop-in."
+    rejected:
+      - option: "Hardcoded backend"
+        reason: "Operators already have classifier-backend flexibility; judge should match the pattern"
+      - option: "New separate backend config"
+        reason: "Redundant operator surface; existing pattern works"
+    constraint_refs: []
+    affects_groups: []
+  - id: D6
+    stage: brief
+    description: "Sampling strategy"
+    chosen: "Per-group calibration: always-on for first 200 events; drop to 1-in-5 once Spearman ρ ≥ 0.5 holds for that group; stay always-on if correlation never passes threshold"
+    rejected:
+      - option: "Always-on globally"
+        reason: "Wastes calls once cheap signal proven; cost is fine but unnecessary"
+      - option: "1-in-5 from day one"
+        reason: "Cannot calibrate cheap signal without ground truth; would lock in noise"
+      - option: "Global (cross-group) calibration"
+        reason: "Per-group correlation may differ; per-group calibration is more conservative — design may revisit"
+    constraint_refs: [C9]
+    affects_groups: []
+  - id: D7
+    stage: brief
+    description: "Per-group rollback for feedback loop"
+    chosen: "New memory.feedback_enabled boolean field in groups/<g>/container.json (defaults true when memory enabled). Disabling stops new judging; existing rows preserved."
+    rejected:
+      - option: "Daemon-wide on/off only"
+        reason: "Per-group disable matches existing memory enable/disable pattern; needed for surgical rollback"
+    constraint_refs: []
+    affects_groups: []
+  - id: D8
+    stage: brief
+    description: "Eval-set freshness policy"
+    chosen: "Manual regeneration only (quarterly cadence + scripts/regenerate-recall-eval.ts). No auto-regen."
+    rejected:
+      - option: "Auto-regen on >20% fact-corpus change"
+        reason: "Breaks A/B comparability; unstable eval-set destroys before/after measurement"
+      - option: "Continuous regen"
+        reason: "Same as above, worse"
+    constraint_refs: [C10]
+    affects_groups: []
+  - id: D9
+    stage: brief
+    description: "recall_outcomes retention"
+    chosen: "90-day rolling window; daemon prunes nightly. Aggregated metrics in memory-health.json persist indefinitely."
+    rejected:
+      - option: "Indefinite per-event retention"
+        reason: "Per-event rows are diagnostic; cumulative growth not justified"
+      - option: "30-day window"
+        reason: "Too short for quarterly reviews"
+    constraint_refs: []
+    affects_groups: []
+  - id: D10
+    stage: brief
+    description: "Rollout sequencing"
+    chosen: "Feedback loop ships to all 11 enabled groups simultaneously (read-only against agent behavior). Strategy C ships behind per-group memory.query_strategy flag, defaulting to 'raw'. Cross-group scope ships only the mechanism; no group's scope flipped by the feature."
+    rejected:
+      - option: "Pilot feedback loop on subset first"
+        reason: "Read-only on agent behavior; no incremental risk from broad rollout; broader pool gives better calibration data"
+      - option: "Auto-flip Strategy C to llm after eval gate passes"
+        reason: "Live A/B must follow eval gate; per-group manual flip preserves A/B integrity"
+    constraint_refs: [C4]
+    affects_groups: []
+  - id: D11
+    stage: brief
+    description: "Skipped: agent-pulled MCP recall tool"
+    chosen: "Defer until measured signal shows daemon injection is missing context the agent could fetch on demand"
+    rejected:
+      - option: "Build MCP recall tool now"
+        reason: "Bash already exposes mnemon read path; MCP wrapper is overhead with no measured benefit"
+    constraint_refs: []
+    affects_groups: []
+  - id: D12
+    stage: brief
+    description: "Skipped: upstream global store mount"
+    chosen: "Cross-group recall_scope replaces this; do not propose during design"
+    rejected:
+      - option: "Mount ~/.mnemon/data/global/ ro into every group"
+        reason: "Wrong shape for one-person multi-channel; curation problem; cross-group scope is more flexible model"
+    constraint_refs: [C3]
+    affects_groups: []
+
+  - id: D13
+    stage: design
+    description: "Architecture choice — where the judge runs and how cheap vs expensive signals split"
+    chosen: "Option C: hybrid — host-inline cheap signal (embedding cosine at recall-injection time, ~30-80ms) + daemon async expensive signal (LLM judge on 60s sweep)"
+    rejected:
+      - option: "Option A: pure daemon-side processing of both signals"
+        reason: "Computes embedding cosine in daemon when host already had query+facts in hand at recall time — redundant Ollama call"
+      - option: "Option B: host-inline judge at delivery time"
+        reason: "Violates C11 single-writer-per-DB invariant on mnemon-ingest.db; adds judge logic to delivery hot path against codebase pattern of keeping delivery thin"
+    constraint_refs: [C1, C2, C11]
+    affects_groups: []
+  - id: D14
+    stage: design
+    description: "Judge prompt structure"
+    chosen: "0/1/2 ordinal scale per fact, evidence sentence required, 'topic overlap is not evidence' anti-confabulation rule, agent-response-before-facts ordering, 'may or may not have used' framing to mitigate self-fulfilling prophecy"
+    rejected:
+      - option: "0-1 binary scale"
+        reason: "Too coarse — cannot distinguish partial use from load-bearing use, which is the key sampling signal"
+      - option: "5-point scale"
+        reason: "LLM judge consistency degrades sharply on >3-point ordinals (well-documented in eval literature); ordinal scales beyond 3 invite middle-bias"
+      - option: "JSON scores without evidence field"
+        reason: "Lets the judge bluff with no anchor; evidence sentence forces specific citation"
+    constraint_refs: []
+    affects_groups: []
+  - id: D15
+    stage: design
+    superseded_by: D19
+    description: "[SUPERSEDED in cycle 1 review by D19 — original entry preserved for audit trail] Eval synthesizer / judge model split"
+    chosen: "Synthesizer = Sonnet 4.6 (different model class), Judge = Haiku 4.5"
+    rejected:
+      - option: "Same model for synth and judge (e.g., both Haiku)"
+        reason: "Correlated errors invalidate eval — judge inflates scores on the kind of queries the synth produces"
+      - option: "Hand-curated eval only (no LLM synth)"
+        reason: "Doesn't scale; ~50 entries × 11 groups = 550 entries to write manually — synth+review is 10x faster"
+    constraint_refs: [C16]
+    affects_groups: []
+  - id: D16
+    stage: design
+    superseded_by: D24
+    description: "[SUPERSEDED in cycle 1 review by D24 — original entry preserved for audit trail] Cross-store rerank algorithm"
+    chosen: "Z-score normalize within each store (mnemon scores not comparable across stores), linear recency boost (0.1 weight, 90-day decay), dedupe by fact_id, global top-N"
+    rejected:
+      - option: "Raw-score top-N from union"
+        reason: "Mnemon scores aren't comparable across stores — different fact corpora produce different score distributions"
+      - option: "Per-store quota (e.g., top-3 per store)"
+        reason: "Artificial; doesn't reflect actual relevance — would force inclusion of weak hits over strong ones"
+      - option: "Learned reranker"
+        reason: "Premature; ship the simple version, observe whether a learned reranker is justified"
+    constraint_refs: []
+    affects_groups: []
+  - id: D17
+    stage: design
+    superseded_by: D26
+    description: "[SUPERSEDED in cycle 1 review by D26 — original entry preserved for audit trail] Cross-store fan-out concurrency model"
+    chosen: "Parallel Promise.all with 1500ms per-store timeout; partial results returned (failed stores contribute empty)"
+    rejected:
+      - option: "Sequential per-store calls"
+        reason: "22+ seconds across 11 stores — blows the 3000ms recall budget"
+      - option: "Cached/short-circuit (stop after first store returns enough)"
+        reason: "Introduces ranking bias toward whichever store responds first; defeats the rerank step"
+    constraint_refs: [C6]
+    affects_groups: []
+  - id: D18
+    stage: design
+    description: "Daemon grace period before first judge attempt"
+    chosen: "60s grace from recall-injection time before judge processor will pick up the row"
+    rejected:
+      - option: "30s"
+        reason: "Common task tools (build, test, MCP-tool calls) take >30s; judge would fire before agent response landed"
+      - option: "5min"
+        reason: "Health.json coverage_24h lag becomes operator-noticeable; turns dead-letter unnecessarily"
+    constraint_refs: []
+    affects_groups: []
+
+  - id: D19
+    stage: design
+    description: "Cycle 1 review M3 — calibration architecture (user chose path 1)"
+    chosen: "Drop sampling cutover entirely; judge is always-on. Cheap signal kept as diagnostic only. Health.json exposes rank distribution + diagnostic Spearman ρ but no HARD action depends on calibrated mean."
+    rejected:
+      - option: "M3 path 2: ongoing oracle slice with isotonic calibration"
+        reason: "Adds new operator surface (DM-based labeling); user chose to defer until cost/scale justifies it"
+      - option: "M3 path 3: keep Spearman cutover but only for operator-facing dashboard metrics"
+        reason: "Middle path with more code; user chose simpler path 1"
+    constraint_refs: [C4, C9]
+    affects_groups: []
+  - id: D20
+    stage: design
+    superseded_by: D35
+    description: "[SUPERSEDED in cycle 3 simplification by D35 — auto-revert mechanism cut entirely; operator manually flips on health.json signal] Cycle 1 review M4 — circuit breaker mechanism (user chose path 2)"
+    chosen: "DM-approval-gated revert via existing pickApprover/pickApprovalDelivery infrastructure. Daemon detects regression (rank-based score_2_rate dropping ≥30% relative below baseline for 7 consecutive days), requests operator approval. Daemon mutates container.json ONLY in response to approve."
+    rejected:
+      - option: "M4 path 1: drop auto-revert entirely; alert-only"
+        reason: "Loses circuit-breaker intent from brief R3.3"
+      - option: "M4 path 3: auto-revert but only under M3 path 2"
+        reason: "Off the table since user chose M3 path 1"
+    constraint_refs: [C3]
+    affects_groups: []
+  - id: D21
+    stage: design
+    description: "Cycle 1 review M6 — two-phase write fate-sharing"
+    chosen: "Path 1 (reorder writes) + C11 restatement. Host writes recall_outcomes pending rows AFTER inbound.db insert succeeds. C11 restated as row-level multi-writer invariant."
+    rejected:
+      - option: "M6 path 2: outbox via archive.db"
+        reason: "Infeasible — archive.db only captures inbound/outbound chat messages, not host-injected system rows. My original path 2 description was wrong; pivoted to path 1 + restate C11 to match existing precedent at mnemon-impl.ts:265 (host-side idempotency_keys writes)."
+      - option: "Daemon scans session inbound.db files"
+        reason: "Devolves Option C back into Option A from original design comparison; defeats the data-local cheap signal advantage"
+    constraint_refs: [C11_v2]
+    affects_groups: []
+  - id: D22
+    stage: design
+    description: "Cycle 1 review M1 — archive correlation key"
+    chosen: "Persist trigger metadata (thread_id, sent_at, sender_id) to recall_outcomes pending row. Daemon correlates via (agent_group_id, trigger_thread_id, sent_at > trigger_sent_at) on archive.db. Ambiguity check: if multiple recall events in same thread+window, all marked judge_method='ambiguous-correlation' and skipped."
+    rejected:
+      - option: "Carry recall_event_id through to outbound message in archive.db"
+        reason: "Requires schema change to outbound message format and delivery code; heavier than persisting trigger metadata to outcomes table"
+    constraint_refs: []
+    affects_groups: []
+  - id: D23
+    stage: design
+    description: "Cycle 1 review M7 — judge prompt injection hardening"
+    chosen: "JSON-structured fact text in prompt; explicit anti-injection language; strict parser dropping unmatched fact_ids; adversarial fact fixtures in eval-set requiring 100% score-0 result; user message included with explicit untrusted boundary."
+    rejected:
+      - option: "Markdown-formatted fact list (original design)"
+        reason: "Markdown boundary is text-level; JSON boundary is structural and harder to inject"
+      - option: "No adversarial fixtures"
+        reason: "Prompt validity claim needs tested-not-asserted evidence"
+    constraint_refs: [C15]
+    affects_groups: []
+  - id: D24
+    stage: design
+    description: "Cycle 1 review S1 — cross-store rerank algorithm"
+    chosen: "Reciprocal Rank Fusion (k=60) replaces z-score normalization. Recency boost preserved as post-RRF score multiplier."
+    rejected:
+      - option: "Z-score within-store + linear recency (D16 original)"
+        reason: "RRF is industry default since Cormack 2009 (Elastic + OpenSearch); z-score is parameter-fragile and assumes Gaussian distributions. Reviewer B's Pinecone 2023 source showed z-score + parameter-tuned weight is the worst combination from the literature."
+    constraint_refs: []
+    affects_groups: []
+  - id: D25
+    stage: design
+    description: "Cycle 1 review S11 — backend env var split"
+    chosen: "Two env vars: MEMORY_RECALL_JUDGE_BACKEND and MEMORY_RECALL_QUERY_EXTRACTOR_BACKEND. Cache-sharing when values match."
+    rejected:
+      - option: "Single env var for both"
+        reason: "Couples cost/quality tuning of two unrelated functions; operator can't independently tune"
+    constraint_refs: []
+    affects_groups: []
+  - id: D26
+    stage: design
+    description: "Cycle 1 review S2 — cross-store fan-out concurrency"
+    chosen: "FAN_OUT_CONCURRENCY=4; AbortController per store to actually cancel mnemon child processes on timeout. Load test fixture required before R3 ships."
+    rejected:
+      - option: "Unbounded parallel (Promise.all over all stores)"
+        reason: "Ollama embed serves sequentially per model — past ~4 concurrent calls the queue is the bottleneck; no benefit"
+      - option: "Promise.race without abort"
+        reason: "Slow stores accumulate background work after timeout, saturating mnemon/Ollama resources"
+    constraint_refs: []
+    affects_groups: []
+  - id: D27
+    stage: design
+    superseded_by: D35
+    description: "[SUPERSEDED in cycle 3 simplification by D35 — daemonRequestApproval wrapper not needed since auto-revert is cut] Cycle 2 review M2-1 — daemon approval primitive wrapper"
+    chosen: "Add daemonRequestApproval(opts) wrapper to src/modules/approvals/primitive.ts. Resolves session via getSessionsByAgentGroup; persists pending state with idempotency key (agent_group_id, action, baseline_window_id) to dedupe across nightly triggers; expires after 7 days; suppresses notifyAgent failure-fallback. Approval handler reads agentGroupId from payload (not ctx.session) for safety."
+    rejected:
+      - option: "Reuse existing requestApproval directly"
+        reason: "Requires Session parameter daemon doesn't have; notifyAgent fallback would crash on synthetic session"
+      - option: "Bypass approval primitive entirely; daemon writes directly to a 'pending operator decisions' table that the operator queries via slash command"
+        reason: "Reinvents existing infrastructure; operator wouldn't be notified proactively"
+    constraint_refs: [C3]
+    affects_groups: []
+  - id: D28
+    stage: design
+    description: "Cycle 2 review M2-2 — host-side Ollama endpoint env var"
+    chosen: "New env var HOST_OLLAMA_ENDPOINT defaulting to http://127.0.0.1:11434. Distinct from container's MNEMON_EMBED_ENDPOINT=http://host.docker.internal:11434 because Docker DNS doesn't resolve from host."
+    rejected:
+      - option: "Reuse MNEMON_EMBED_ENDPOINT for host"
+        reason: "Container value (host.docker.internal) doesn't resolve from host process; would break every cheap-signal call"
+    constraint_refs: []
+    affects_groups: []
+  - id: D29
+    stage: design
+    superseded_by: D36
+    description: "[SUPERSEDED in cycle 3 simplification by D36 — host writes to a separate file (data/.host-ollama-status.json), daemon merges into memory-health.json. Resolves M3-2 cross-process race introduced by original D29.] Cycle 2 review M2-4 — host-side Ollama prereq check location"
+    chosen: "Path A: add lightweight Ollama health check to src/index.ts startup; logs warn-level on failure; non-blocking; records to memory-health.json.ollamaCheckHost."
+    rejected:
+      - option: "Path B: drop fail-loud claim entirely"
+        reason: "Loses operator visibility into cold-Ollama window"
+      - option: "Reuse verify-memory-prereqs.sh from host startup"
+        reason: "Script is daemon-side per src/memory-daemon/index.ts:237; running from host adds bash dep and tighter coupling than needed"
+    constraint_refs: []
+    affects_groups: []
+  - id: D30
+    stage: design
+    superseded_by: D37
+    description: "[SUPERSEDED in cycle 3 simplification by D37 — default true. The default-false path created M3-6 backlog spike issue that the simplified MVP avoids by accepting the bounded cost ($3-15/month) and judging from day 1.] Cycle 2 review S2-1 — feedback_enabled default"
+    chosen: "Default false on first release. After 30-day stable operation, change default to true in follow-up PR."
+    rejected:
+      - option: "Default true (original cycle 1 design)"
+        reason: "Existing memory-enabled groups (11 active) would start emitting LLM judge calls without explicit operator opt-in; loses 'before' baseline measurement"
+    constraint_refs: []
+    affects_groups: []
+  - id: D31
+    stage: design
+    description: "Cycle 2 review S2-4 — migration split"
+    chosen: "Two migrations: mnemon-recall-feedback-v1 (feature-specific tables) + mnemon-daemon-state-v1 (general-purpose key-value). Checked in together but separately named for future audit clarity."
+    rejected:
+      - option: "Single migration mnemon-recall-outcomes-v1 with all 4 tables"
+        reason: "Name too narrow; couples general-purpose daemon_state to a feature; future readers grep'ing for daemon-state would miss it"
+    constraint_refs: [C12]
+    affects_groups: []
+  - id: D32
+    stage: design
+    superseded_by: D38
+    description: "[SUPERSEDED in cycle 3 simplification by D38 — operational guardrails removed. Cost is $3-15/month at current scale; queue caps and daily limits create more failure modes (M3-4 queue cap doesn't cap, M3-5 fairness starvation) than they prevent. Defer until cost actually pressures.] Cycle 2 review S2-2 — operational guardrails for always-on judge"
+    chosen: "Per-group queue cap (10000); per-sweep limit (100 judges/group); MEMORY_RECALL_JUDGE_DAILY_LIMIT env var (unbounded by default); existing per-group feedback_enabled=false kill switch."
+    rejected:
+      - option: "No guardrails (rely on dead-letter)"
+        reason: "Cost spike on volume surge, judge backend outage flooding dead-letters, daemon starvation between groups"
+    constraint_refs: [C9]
+    affects_groups: []
+  - id: D33
+    stage: design
+    description: "Cycle 2 review S2-3 — RRF recency multiplier kill-switch"
+    chosen: "MEMORY_RECALL_RRF_RECENCY_BOOST env var (default 0.1, range 0.0-1.0). Setting to 0 disables recency for diagnostic isolation of RRF vs recency contribution."
+    rejected:
+      - option: "Hard-coded 0.1"
+        reason: "Operator can't diagnose 'is the regression from recency or from RRF itself' without code change"
+    constraint_refs: []
+    affects_groups: []
+  - id: D34
+    stage: design
+    description: "Cycle 2 review S2-6 — judge temperature"
+    chosen: "temperature=0 for both judge and query extractor backend calls. Pin in judge-client.ts and query-extractor.ts."
+    rejected:
+      - option: "Default backend temperature"
+        reason: "Industry guidance for ordinal-scoring judges — pin temperature low for variance reduction"
+    constraint_refs: []
+    affects_groups: []
+  - id: D35
+    stage: design
+    description: "Cycle 3 simplification — drop auto-revert circuit breaker entirely (supersedes D20, D27)"
+    chosen: "Daemon writes recall_quality.scope_quality_regression entry to memory-health.json on rank-distribution regression vs self baseline. Operator manually flips recall_scope back to self if they care. No daemon-mutates-config flow. No daemonRequestApproval wrapper. No DM-approval gate. Brief R3.3 'circuit-breaker' becomes 'regression alert + manual flip.'"
+    rejected:
+      - option: "Keep DM-approval-gated revert (D20)"
+        reason: "Single operator (Dave); manual flip on health.json signal is cheaper than daemonRequestApproval + payload injection + idempotency keys + supersession across nightly triggers infrastructure (M3-1, M3-3 evaporated by this cut)"
+    constraint_refs: [C3]
+    affects_groups: []
+  - id: D36
+    stage: design
+    description: "Cycle 3 simplification — host-side Ollama status via separate file, daemon merges (supersedes D29; resolves M3-2)"
+    chosen: "Host writes data/.host-ollama-status.json (host-owned, daemon read-only). Daemon reads and merges into memory-health.json on each sweep before its atomic flush. Single-writer-per-file invariant preserved on both files."
+    rejected:
+      - option: "Host writes ollamaCheckHost field directly to memory-health.json (D29)"
+        reason: "Cross-process write race with daemon's atomic-rewrite of the same file (M3-2)"
+    constraint_refs: [C13]
+    affects_groups: []
+  - id: D37
+    stage: design
+    description: "Cycle 3 simplification — feedback_enabled defaults true (supersedes D30; resolves M3-6)"
+    chosen: "Default true when memory.enabled is true. Cost is bounded ($3-15/month at current scale); operators who want opt-out can flip to false. Avoids the M3-6 backlog-spike-on-flip semantics that default-false created."
+    rejected:
+      - option: "Default false on first release with disabled-row-semantics (D30)"
+        reason: "Created M3-6: pending rows accumulate when disabled but never get judged; flipping to true triggers spike of unjudged backlog. Required new disabled-row schema + feedback_enabled_at timestamp filtering — complexity not justified at this scale"
+    constraint_refs: []
+    affects_groups: []
+  - id: D38
+    stage: design
+    description: "Cycle 3 simplification — drop operational guardrails (supersedes D32; resolves M3-4, M3-5)"
+    chosen: "No queue caps, no daily limits, no per-group budget allocation. Cost is bounded; volume isn't a real pressure. Existing per-group feedback_enabled=false is the only kill switch needed. Existing dead-letter pattern handles judge backend outages."
+    rejected:
+      - option: "Per-group queue cap (10000) + per-sweep limit (100) + daily limit env var (D32)"
+        reason: "M3-4: queue cap at daemon doesn't actually cap because host is the writer of pending rows. M3-5: daily limit can starve quiet groups under noisy-group volume. Each guardrail created its own failure modes; deferring until volume actually pressures"
+    constraint_refs: [C9]
+    affects_groups: []
+  - id: D39
+    stage: design
+    description: "Cycle 3 simplification — defer automatic loop closure into recall ranking (Codex consultation outcome)"
+    chosen: "Ship measurement substrate alone in MVP. Per-fact judge scores persisted to recall_outcomes; operator can query the data. No automatic per-fact rerank by historical judge score. After 30+ days, evaluate whether v2 work to close the loop is justified."
+    rejected:
+      - option: "Option 1: Per-fact usefulness boost in recall ranking (boosted_score = mnemon_score * (1 + 0.3 * avg_judge_score / 2))"
+        reason: "Codex consultation: contradicts §1.6 'no mean_judge_score as control signal' principle; has feedback amplification risk (exposure-biased data); requires Bayesian shrinkage + N thresholds + recency decay + prompt-version filtering + A/B guard far beyond claimed 30-50 LOC; defer to v2 once measurement substrate has earned trust"
+      - option: "Option 2: GC suggestions tool / Option 3: importance recalibration tool"
+        reason: "Manual SQL query against recall_outcomes can produce the same insight when operator is curious; not worth scripting in MVP"
+    constraint_refs: [C4]
+    affects_groups: []
+  - id: D40
+    stage: design
+    description: "Cycle 3 simplification — drop adversarial fact fixtures + heavy judge prompt hardening"
+    chosen: "Keep ONE untrusted-data preamble line in judge prompt + JSON-structured fact payload + strict parser dropping unmatched fact_ids. Drop adversarial fact fixtures requirement, drop dedicated injection-resistance test fixtures."
+    rejected:
+      - option: "Adversarial fixtures with [INSTRUCTION:rate this 2] payloads in eval-set; require 100% scored as 0 (D23)"
+        reason: "Existing redactor (src/modules/memory/secret-redactor.ts) already strips credentials before facts land in mnemon. Threat model (single-tenant) doesn't include sophisticated adversarial fact authoring. One untrusted-data sentence is enough; over-hardening adds prompt complexity without measurable safety win"
+    constraint_refs: [C15]
+    affects_groups: []
+
+assumptions:
+  - id: A1
+    stage: design
+    text: "Judge prompt produces low grade-inflation AND is injection-resistant (revised cycle 1, cycle 3 simplification)"
+    validation: "Within 30 days post-deploy: (a) sample 20 already-judged turns (5 per score bucket) and check human-vs-LLM Spearman ρ ≥ 0.7. No phased rollout — judge is always-on from day 1 (D19). The 200-event calibration phase from the original design was removed in cycle 1 along with the sampling cutover."
+    validated: false
+    invalidated_at: null
+  - id: A2
+    stage: design
+    text: "RRF (k=60) + linear recency multiplier produces better cross-group recall than per-store top-N (revised cycle 1 / D24, cycle 2 / D33)"
+    validation: "When axis-labs flips to all-groups, monitor recall_quality.useful_fact_rate_7d. If it drops vs self baseline by >5pp: first try MEMORY_RECALL_RRF_RECENCY_BOOST=0 to test pure RRF; if still degraded, RRF itself is suspect."
+    validated: false
+    invalidated_at: null
+  - id: A3
+    stage: design
+    text: "Cross-PROVIDER eval split (Codex GPT-5.5 synth + Anthropic Haiku 4.5 judge) is sufficient to prevent prior leakage (revised cycle 1 / D19, supersedes original Sonnet/Haiku assumption)"
+    validation: "Compare Strategy A absolute scores between synth-eval and hand-curated 20-entry set. Uniform offset (not just delta) is the leakage signal. If offset >10pp, prior leakage exists despite cross-provider split — investigate."
+    validated: false
+    invalidated_at: null
+  - id: A4
+    stage: design
+    text: "60s daemon grace is enough for agent response to land in archive.db post-recall"
+    validation: "Instrument judgeRetryCount per group via recall_quality.judge_retry_p50_24h; if >0 after 1 week, consider increasing grace to 120s."
+    validated: false
+    invalidated_at: null
+  - id: A5
+    stage: design
+    text: "Per-group volume produces enough events for stable rank-distribution baselines (cycle 3 simplification: feedback_enabled defaults true, so volume ramps from day 1)"
+    validation: "Track judged_count_total per group; surface baseline_n in health.json so operator knows when baseline is statistically thin."
+    validated: false
+    invalidated_at: null
+  - id: A7
+    stage: design
+    text: "Measurement substrate alone (no automatic loop closure) is sufficient MVP value; closing the loop into recall ranking is a v2 enhancement (cycle 3 + Codex consultation)"
+    validation: "After 30+ days of recall_outcomes data, evaluate whether automatic per-fact judge-score reranking would clearly improve recall quality vs the static mnemon score. Operator manual analysis of recall_outcomes determines whether v2 work is justified."
+    validated: false
+    invalidated_at: null
+
+waivers: []
+
+review_cycles:
+  - iteration: 1
+    must_fix_count: 7
+    should_fix_count: 14
+    wont_fix_count: 5
+    completed_at: 2026-05-06T16:50:00Z
+  - iteration: 2
+    must_fix_count: 4
+    should_fix_count: 8
+    wont_fix_count: 2
+    completed_at: 2026-05-07T01:00:00Z
+  - iteration: 3
+    must_fix_count: 7
+    should_fix_count: 5
+    wont_fix_count: 2
+    completed_at: 2026-05-07T01:30:00Z
+    notes: "Cap reached. 3/7 MUST-FIX involve equally-grounded path choices (M3-4 queue cap location, M3-5 daily limit fairness, M3-6 feedback_enabled semantics) requiring user input. Reviewer B not run cycle 3 (procedural gap)."
+
+auto_qa_cycles: []
