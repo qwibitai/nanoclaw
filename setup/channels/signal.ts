@@ -33,6 +33,8 @@ import k from 'kleur';
 
 import * as setupLog from '../logs.js';
 import { getLaunchdLabel, getSystemdUnit } from '../../src/install-slug.js';
+import { BACK_TO_CHANNEL_SELECTION, type ChannelFlowResult } from '../lib/back-nav.js';
+import { brightSelect } from '../lib/bright-select.js';
 import {
   type Block,
   type StepResult,
@@ -48,7 +50,33 @@ import { accentGreen, fmtDuration, note } from '../lib/theme.js';
 
 const DEFAULT_AGENT_NAME = 'Nano';
 
-export async function runSignalChannel(displayName: string): Promise<void> {
+export async function runSignalChannel(displayName: string): Promise<ChannelFlowResult> {
+  note(
+    [
+      "NanoClaw links to Signal as a *secondary* device on your existing",
+      "phone — no new number needed. Your assistant will send and receive",
+      "messages as the number on that phone.",
+      '',
+      "Here's what's about to happen — no input needed for any of it:",
+      '',
+      '  1. Set up signal-cli (auto-installs if missing)',
+      '  2. Install the Signal adapter',
+      '  3. Show a QR code — scan it from Signal → Settings → Linked Devices',
+      '  4. Wire your assistant and send a welcome message',
+    ].join('\n'),
+    'Set up Signal',
+  );
+
+  const proceed = ensureAnswer(await brightSelect<'continue' | 'back'>({
+    message: 'Ready to set up Signal?',
+    options: [
+      { value: 'continue', label: 'Continue' },
+      { value: 'back', label: '← Back to channel selection' },
+    ],
+    initialValue: 'continue',
+  }));
+  if (proceed === 'back') return BACK_TO_CHANNEL_SELECTION;
+
   await ensureSignalCli();
 
   const install = await runQuietChild(
@@ -134,42 +162,74 @@ export async function runSignalChannel(displayName: string): Promise<void> {
 
 async function ensureSignalCli(): Promise<void> {
   const cli = process.env.SIGNAL_CLI_PATH || 'signal-cli';
-  const probe = spawnSync(cli, ['--version'], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  if (!probe.error && probe.status === 0) return;
+  const probeFor = (): boolean => {
+    const r = spawnSync(cli, ['--version'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return !r.error && r.status === 0;
+  };
+  if (probeFor()) return;
 
+  note(
+    [
+      "NanoClaw talks to Signal through signal-cli, which isn't installed yet.",
+      "We'll install it for you now — about 30 seconds, one-time only.",
+      '',
+      process.platform === 'darwin'
+        ? "On this Mac we'll use Homebrew (no admin password needed)."
+        : "On Linux we'll grab the native release binary (no Java needed) and install it to ~/.local/bin.",
+    ].join('\n'),
+    'Setting up signal-cli',
+  );
+
+  const install = await runQuietChild(
+    'install-signal-cli',
+    'bash',
+    ['setup/install-signal-cli.sh'],
+    {
+      running: 'Installing signal-cli…',
+      done: 'signal-cli installed.',
+    },
+  );
+
+  if (install.ok && probeFor()) return;
+
+  const reason = install.terminal?.fields.ERROR;
   if (process.platform === 'darwin') {
     note(
       [
-        "NanoClaw talks to Signal through signal-cli, which isn't installed yet.",
+        "We couldn't install signal-cli automatically.",
+        reason === 'homebrew_not_installed'
+          ? '  Reason: Homebrew is not installed.'
+          : `  Reason: ${reason ?? 'unknown'}.`,
         '',
-        'The quickest way on macOS is Homebrew:',
+        'You can install it manually:',
         '',
         k.cyan('  brew install signal-cli'),
         '',
-        "Install it in another terminal, then re-run setup.",
+        'Then re-run setup.',
       ].join('\n'),
-      'signal-cli not found',
+      "Couldn't install signal-cli",
     );
   } else {
     note(
       [
-        "NanoClaw talks to Signal through signal-cli, which isn't installed yet.",
+        "We couldn't install signal-cli automatically.",
+        `  Reason: ${reason ?? 'unknown'}.`,
         '',
-        'Grab the latest release from GitHub:',
+        'You can install it manually from GitHub:',
         '',
         k.cyan('  https://github.com/AsamK/signal-cli/releases'),
         '',
-        "Install it, make sure `signal-cli --version` works, then re-run setup.",
+        'Then re-run setup.',
       ].join('\n'),
-      'signal-cli not found',
+      "Couldn't install signal-cli",
     );
   }
   await fail(
-    'signal-install',
-    'signal-cli is required but not installed.',
-    'Install it and re-run setup.',
+    'install-signal-cli',
+    'signal-cli is required but the auto-install failed.',
+    'Install it manually and re-run setup.',
   );
 }
 

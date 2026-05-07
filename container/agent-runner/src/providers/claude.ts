@@ -135,6 +135,13 @@ const SDK_DISALLOWED_TOOLS = [
 // `disallowedTools` above for explicit blocks. v1 reached the same
 // conclusion (src/agent-runner/index.ts:1056-1077 comment).
 
+// MCP server names are sanitized by the SDK when forming tool prefixes:
+// any character outside [A-Za-z0-9_-] becomes '_'. Mirror that here so our
+// allowlist patterns match what the SDK actually exposes.
+function mcpAllowPattern(serverName: string): string {
+  return `mcp__${serverName.replace(/[^a-zA-Z0-9_-]/g, '_')}__*`;
+}
+
 interface SDKUserMessage {
   type: 'user';
   message: { role: 'user'; content: string };
@@ -761,6 +768,16 @@ function discoverPlugins(): SdkPluginConfig[] {
   return plugins;
 }
 
+/**
+ * Claude Code auto-compacts context at this window (tokens). Kept here so
+ * the generic bootstrap doesn't need to know about Claude-specific env vars.
+ *
+ * Operator override: set CLAUDE_CODE_AUTO_COMPACT_WINDOW in the host env to
+ * raise or lower the threshold without editing source — useful when running
+ * with a 1M-context model variant or when emergency-tuning a deployment.
+ */
+const CLAUDE_CODE_AUTO_COMPACT_WINDOW = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW || '165000';
+
 // ── Provider ──
 
 /**
@@ -815,7 +832,7 @@ export class ClaudeProvider implements AgentProvider {
     this.assistantName = options.assistantName;
     this.mcpServers = options.mcpServers ?? {};
     this.additionalDirectories = options.additionalDirectories;
-    this.env = filterSdkEnv({ ...(options.env ?? {}) });
+    this.env = filterSdkEnv({ ...(options.env ?? {}), CLAUDE_CODE_AUTO_COMPACT_WINDOW });
     this.stickyConfig = claudeConfigSchema.parse(options.providerConfig ?? {});
     this.fallbackKeys = Object.entries(this.env)
       .filter(([k, v]) => ANTHROPIC_FALLBACK_RE.test(k) && typeof v === 'string' && v.length > 0)
@@ -1044,7 +1061,7 @@ export class ClaudeProvider implements AgentProvider {
         } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'compact_boundary') {
           const meta = (message as { compact_metadata?: { pre_tokens?: number } }).compact_metadata;
           const detail = meta?.pre_tokens ? ` (${meta.pre_tokens.toLocaleString()} tokens compacted)` : '';
-          yield { type: 'result', text: `Context compacted${detail}.` };
+          yield { type: 'compacted', text: `Context compacted${detail}.` };
         } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
           const tn = message as { summary?: string; status?: string };
           const summary = tn.summary || 'Task notification';

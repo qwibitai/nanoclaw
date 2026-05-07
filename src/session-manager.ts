@@ -32,6 +32,7 @@ import {
   openInboundDb as openInboundDbRaw,
   openOutboundDb as openOutboundDbRaw,
   openOutboundDbWritable,
+  openOutboundDbRw as openOutboundDbRwRaw,
   upsertSessionRouting,
   insertMessage,
   migrateMessagesInTable,
@@ -520,6 +521,11 @@ export function openInboundDb(agentGroupId: string, sessionId: string): Database
 /** Open the outbound DB for a session (host reads only). */
 export function openOutboundDb(agentGroupId: string, sessionId: string): Database.Database {
   return openOutboundDbRaw(outboundDbPath(agentGroupId, sessionId));
+}
+
+/** Open the outbound DB for a session with write access. Only safe to call when no container is running. */
+export function openOutboundDbRw(agentGroupId: string, sessionId: string): Database.Database {
+  return openOutboundDbRwRaw(outboundDbPath(agentGroupId, sessionId));
 }
 
 /**

@@ -8,7 +8,7 @@
  * processing_ack. The host reads processing_ack to sync message lifecycle.
  */
 import { getConfig } from '../config.js';
-import { openInboundDb, closeInboundDb, getOutboundDb } from './connection.js';
+import { openInboundDb, getOutboundDb } from './connection.js';
 
 export interface MessageInRow {
   id: string;
@@ -113,7 +113,7 @@ export function getPendingMessages(): MessageInRow[] {
       .filter((m) => !ackedIds.has(m.id) && !respondedIds.has(m.id) && !isOrphanRecall(m))
       .reverse();
   } finally {
-    closeInboundDb(inbound);
+    inbound.close();
   }
 }
 
@@ -156,7 +156,7 @@ export function getMessageIn(id: string): MessageInRow | undefined {
   try {
     return inbound.prepare('SELECT * FROM messages_in WHERE id = ?').get(id) as MessageInRow | undefined;
   } finally {
-    closeInboundDb(inbound);
+    inbound.close();
   }
 }
 
@@ -181,7 +181,7 @@ export function findQuestionResponse(questionId: string): MessageInRow | undefin
 
     return response;
   } finally {
-    closeInboundDb(inbound);
+    inbound.close();
   }
 }
 

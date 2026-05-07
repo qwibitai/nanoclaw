@@ -1,7 +1,7 @@
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
-import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
+import { getInboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import {
   clearContinuation,
   migrateLegacyContinuation,
@@ -18,6 +18,7 @@ import {
   extractRouting,
   categorizeMessage,
   isClearCommand,
+  isRunnerCommand,
   stripInternalTags,
   type RoutingContext,
 } from './formatter.js';
@@ -484,18 +485,40 @@ async function processQuery(
   let done = false;
 
   // Concurrent polling: push follow-ups into the active query as they arrive.
-  // We do NOT force-end the stream on silence — keeping the query open is
-  // strictly cheaper than close+reopen (no cold prompt cache, no reconnect).
+  // We do NOT force-end the stream on silence — keeping the query open avoids
+  // re-spawning the SDK subprocess (~few seconds) and re-loading the .jsonl
+  // transcript on every turn. The Anthropic prompt cache is server-side with
+  // a 5-min TTL keyed on prefix hash, so stream lifecycle does NOT affect
+  // cache lifetime — close+reopen within 5 min still gets cache hits.
   // Stream liveness is decided host-side via the heartbeat file + processing
   // claim age (see src/host-sweep.ts); if something is truly stuck, the host
   // will kill the container and messages get reset to pending.
   let pollInFlight = false;
+  // Slash commands push the active stream toward end-of-turn so the outer loop
+  // can dispatch them through the canonical command path. Once we've decided to
+  // end, gate further polling so we don't reclaim the rows mid-teardown.
+  let endedForCommand = false;
   const pollHandle = setInterval(() => {
-    if (done || pollInFlight) return;
+    if (done || pollInFlight || endedForCommand) return;
     pollInFlight = true;
 
     void (async () => {
       try {
+        const allPending = getPendingMessages();
+
+        // Slash commands need a fresh query: /clear resets the SDK's resume
+        // id (fixed at sdkQuery() time); admin/passthrough commands (/compact,
+        // /cost, …) only dispatch when they're the first input of a query —
+        // pushed mid-stream they arrive as plain text and the SDK never runs
+        // them. End the stream and leave the rows pending; the outer loop
+        // handles them via the canonical command path + formatMessagesWithCommands.
+        if (allPending.some((m) => isRunnerCommand(m))) {
+          log('Pending slash command — ending stream so outer loop can process');
+          endedForCommand = true;
+          query.end();
+          return;
+        }
+
         // Filtering on thread_id here caused deadlocks when the initial batch
         // and follow-ups had mismatched thread_ids (e.g. a host-generated welcome
         // trigger with null thread vs a Discord DM reply); per-thread sessions
@@ -504,8 +527,9 @@ async function processQuery(
         // Admission rules live in selectInTurnFollowUps so they can be unit-
         // tested. Defers (returns []) when no admissible trigger=1 row is
         // present in the snapshot; otherwise admits accumulated trigger=0
-        // chat context plus paired recall_context. See helper for details.
-        const allPending = getPendingMessages();
+        // chat context plus paired recall_context. The helper also drops
+        // system rows except recall_context, replacing the older `kind !==
+        // 'system'` filter from upstream's poll-loop.
         const candidates = selectInTurnFollowUps(allPending);
         if (candidates.length === 0) return;
 
@@ -601,6 +625,23 @@ async function processQuery(
         if (event.text) {
           dispatchResultText(event.text, routing);
         }
+      } else if (event.type === 'compacted') {
+        // The SDK auto-compacted the conversation. After compaction the
+        // model often drops the learned `<message to="…">` wrapping
+        // discipline (the destinations are still in the system prompt,
+        // but the behavioral pattern is summarized away). Inject a
+        // reminder back into the live query so the next turn re-anchors
+        // on the destination model. Only do this when there's >1
+        // destination — single-destination groups have a fallback that
+        // works without wrapping. See qwibitai/nanoclaw#2325.
+        const destinations = getAllDestinations();
+        if (destinations.length > 1) {
+          const names = destinations.map((d) => d.name).join(', ');
+          query.push(
+            `[system] Context was just compacted. Reminder: you have ${destinations.length} destinations (${names}). ` +
+              `Use <message to="name"> blocks to address them. Bare text goes to the scratchpad fallback only.`,
+          );
+        }
       }
     }
   } finally {
@@ -645,20 +686,19 @@ function handleEvent(event: ProviderEvent, routing: RoutingContext): void {
         content: JSON.stringify({ text: event.message }),
       });
       break;
+    case 'compacted':
+      log(`Compacted: ${event.text}`);
+      break;
   }
 }
 
 /**
  * Parse the agent's final text for <message to="name">...</message> blocks
  * and dispatch each one to its resolved destination. Text outside of blocks
- * (including <internal>...</internal>) is normally scratchpad — logged but
- * not sent.
+ * (including <internal>...</internal>) is scratchpad — logged but not sent.
  *
- * Single-destination shortcut: if the agent has exactly one configured
- * destination AND the output contains zero <message> blocks, the entire
- * cleaned text (with <internal> tags stripped) is sent to that destination.
- * This preserves the simple case of one user on one channel — the agent
- * doesn't need to know about wrapping syntax at all.
+ * The agent must always wrap output in <message to="name">...</message>
+ * blocks, even with a single destination. Bare text is scratchpad only.
  */
 function dispatchResultText(text: string, routing: RoutingContext): void {
   const MESSAGE_RE = /<message\s+to="([^"]+)"\s*>([\s\S]*?)<\/message>/g;
@@ -691,30 +731,6 @@ function dispatchResultText(text: string, routing: RoutingContext): void {
 
   const scratchpad = stripInternalTags(scratchpadParts.join(''));
 
-  // Single-destination shortcut: the agent wrote plain text — send to
-  // the session's originating channel (from session_routing) if available,
-  // otherwise fall back to the single destination.
-  if (sent === 0 && scratchpad) {
-    if (routing.channelType && routing.platformId) {
-      // Reply to the channel/thread the message came from
-      writeMessageOut({
-        id: generateId(),
-        in_reply_to: routing.inReplyTo,
-        kind: 'chat',
-        platform_id: routing.platformId,
-        channel_type: routing.channelType,
-        thread_id: routing.threadId,
-        content: JSON.stringify({ text: scratchpad }),
-      });
-      return;
-    }
-    const all = getAllDestinations();
-    if (all.length === 1) {
-      sendToDestination(all[0], scratchpad, routing);
-      return;
-    }
-  }
-
   if (scratchpad) {
     log(`[scratchpad] ${scratchpad.slice(0, 500)}${scratchpad.length > 500 ? '…' : ''}`);
   }
@@ -727,18 +743,44 @@ function dispatchResultText(text: string, routing: RoutingContext): void {
 function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {
   const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
   const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
-  // Inherit thread_id from the inbound routing context so replies land in the
-  // same thread the conversation is in. For non-threaded adapters the router
-  // strips thread_id at ingest, so this will already be null.
+  // Resolve thread_id per-destination from the most recent inbound message
+  // that came from this same channel+platform. In agent-shared sessions,
+  // different destinations have different thread contexts — using a single
+  // routing.threadId would stamp one channel's thread onto another.
+  const destRouting = resolveDestinationThread(channelType, platformId);
   writeMessageOut({
     id: generateId(),
-    in_reply_to: routing.inReplyTo,
+    in_reply_to: destRouting?.inReplyTo ?? routing.inReplyTo,
     kind: 'chat',
     platform_id: platformId,
     channel_type: channelType,
-    thread_id: routing.threadId,
+    thread_id: destRouting?.threadId ?? null,
     content: JSON.stringify({ text: body }),
   });
+}
+
+/**
+ * Find the thread_id and message id from the most recent inbound message
+ * matching the given channel+platform. Returns null if no match found.
+ */
+function resolveDestinationThread(
+  channelType: string,
+  platformId: string,
+): { threadId: string | null; inReplyTo: string | null } | null {
+  try {
+    const db = getInboundDb();
+    const row = db
+      .prepare(
+        `SELECT thread_id, id FROM messages_in
+         WHERE channel_type = ? AND platform_id = ?
+         ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(channelType, platformId) as { thread_id: string | null; id: string } | undefined;
+    if (row) return { threadId: row.thread_id, inReplyTo: row.id };
+  } catch (err) {
+    log(`resolveDestinationThread error: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return null;
 }
 
 function sleep(ms: number): Promise<void> {

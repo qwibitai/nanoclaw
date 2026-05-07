@@ -14,8 +14,8 @@
  *                          "Terminal Agent".
  *   NANOCLAW_SKIP          comma-separated step names to skip
  *                          (environment|container|onecli|auth|mounts|
- *                           service|cli-agent|timezone|channel|verify|
- *                           first-chat)
+ *                           service|cli-agent|timezone|channel|
+ *                           verify|first-chat)
  *
  * Timezone is auto-detected after the CLI agent step. UTC resolves are
  * confirmed with the user, and free-text replies fall through to a
@@ -29,6 +29,7 @@ import path from 'path';
 import * as p from '@clack/prompts';
 import k from 'kleur';
 
+import { BACK_TO_CHANNEL_SELECTION } from './lib/back-nav.js';
 import { runDiscordChannel } from './channels/discord.js';
 import { runIMessageChannel } from './channels/imessage.js';
 import { runSignalChannel } from './channels/signal.js';
@@ -60,7 +61,7 @@ import { isValidTimezone } from '../src/timezone.js';
 const CLI_AGENT_NAME = 'Terminal Agent';
 const RUN_START = Date.now();
 
-type ChannelChoice = 'telegram' | 'discord' | 'whatsapp' | 'signal' | 'teams' | 'slack' | 'imessage' | 'skip';
+type ChannelChoice = 'telegram' | 'discord' | 'whatsapp' | 'signal' | 'teams' | 'slack' | 'imessage' | 'other' | 'skip';
 
 async function main(): Promise<void> {
   // Make sure ~/.local/bin is on PATH for every child process we spawn.
@@ -434,35 +435,51 @@ async function main(): Promise<void> {
     await runTimezoneStep();
   }
 
+  // v1 → v2 migration is handled by `bash migrate-v2.sh`, not the setup flow.
+  // Users migrating from v1 run that script before (or instead of) setup.
+
   let channelChoice: ChannelChoice = 'skip';
+
   if (!skip.has('channel')) {
-    channelChoice = await askChannelChoice();
-    if (channelChoice !== 'skip') {
-      await resolveDisplayName();
-    }
-    if (channelChoice === 'telegram') {
-      await runTelegramChannel(displayName!);
-    } else if (channelChoice === 'discord') {
-      await runDiscordChannel(displayName!);
-    } else if (channelChoice === 'whatsapp') {
-      await runWhatsAppChannel(displayName!);
-    } else if (channelChoice === 'signal') {
-      await runSignalChannel(displayName!);
-    } else if (channelChoice === 'teams') {
-      await runTeamsChannel(displayName!);
-    } else if (channelChoice === 'slack') {
-      await runSlackChannel(displayName!);
-    } else if (channelChoice === 'imessage') {
-      await runIMessageChannel(displayName!);
-    } else {
-      p.log.info(
-        brandBody(
-          wrapForGutter(
-            'No messaging app for now. You can add one later (like Telegram, Discord, WhatsApp, Teams, Slack, or iMessage).',
-            4,
+    // Loop so a channel sub-flow can return BACK_TO_CHANNEL_SELECTION on
+    // its first prompt and bounce the user back to the chooser without
+    // restarting setup. Channels not yet wired with the back option just
+    // return void and the loop exits after one pass.
+    let backed = true;
+    while (backed) {
+      backed = false;
+      channelChoice = await askChannelChoice();
+      if (channelChoice !== 'skip' && channelChoice !== 'other') {
+        await resolveDisplayName();
+      }
+      let result: void | typeof BACK_TO_CHANNEL_SELECTION = undefined;
+      if (channelChoice === 'telegram') {
+        result = await runTelegramChannel(displayName!);
+      } else if (channelChoice === 'discord') {
+        result = await runDiscordChannel(displayName!);
+      } else if (channelChoice === 'whatsapp') {
+        result = await runWhatsAppChannel(displayName!);
+      } else if (channelChoice === 'signal') {
+        result = await runSignalChannel(displayName!);
+      } else if (channelChoice === 'teams') {
+        result = await runTeamsChannel(displayName!);
+      } else if (channelChoice === 'slack') {
+        result = await runSlackChannel(displayName!);
+      } else if (channelChoice === 'imessage') {
+        result = await runIMessageChannel(displayName!);
+      } else if (channelChoice === 'other') {
+        result = await askOtherChannelName();
+      } else {
+        p.log.info(
+          brandBody(
+            wrapForGutter(
+              'No messaging app for now. You can add one later (like Telegram, Discord, WhatsApp, Teams, Slack, or iMessage).',
+              4,
+            ),
           ),
-        ),
-      );
+        );
+      }
+      if (result === BACK_TO_CHANNEL_SELECTION) backed = true;
     }
   }
 
@@ -491,14 +508,6 @@ async function main(): Promise<void> {
             6,
           ),
         );
-      } else {
-        const agentPing = res.terminal?.fields.AGENT_PING;
-        if (agentPing && agentPing !== 'ok' && agentPing !== 'skipped') {
-          notes.push(
-            "• Your assistant didn't reply to a test message. " +
-              'Check `logs/nanoclaw.log` for clues, then try `pnpm run chat hi`.',
-          );
-        }
       }
       if (!res.terminal?.fields.CONFIGURED_CHANNELS) {
         notes.push(
@@ -518,7 +527,6 @@ async function main(): Promise<void> {
         unresolved_count: notes.length,
         service_running: res.terminal?.fields.SERVICE === 'running',
         has_credentials: res.terminal?.fields.CREDENTIALS === 'configured',
-        agent_responds: res.terminal?.fields.AGENT_PING === 'ok',
       });
       await offerClaudeAssist({
         stepName: 'verify',
@@ -777,15 +785,25 @@ async function runPasteAuth(method: 'oauth' | 'api'): Promise<void> {
       message: `Paste your ${label}`,
       clearOnError: true,
       validate: (v) => {
-        if (!v || !v.trim()) return 'Required';
-        if (!v.trim().startsWith(prefix)) {
+        // Strip any internal whitespace so a line-wrapped paste that did
+        // survive into clack can still validate. The mid-token-newline
+        // case where clack only sees the first line is caught by the
+        // shape check below.
+        const cleaned = (v ?? '').replace(/\s+/g, '');
+        if (!cleaned) return 'Required';
+        if (!cleaned.startsWith(prefix)) {
           return `Should start with ${prefix}…`;
+        }
+        if (method === 'oauth' && !/^sk-ant-oat[A-Za-z0-9_-]{80,500}AA$/.test(cleaned)) {
+          return cleaned.length < 90
+            ? 'Token looks truncated — line breaks in the paste can cut it off. Widen your terminal so the token fits on one line, then paste again.'
+            : "Token shape doesn't look right (expected sk-ant-oat…AA).";
         }
         return undefined;
       },
     }),
   );
-  const token = (answer as string).trim();
+  const token = (answer as string).replace(/\s+/g, '');
 
   const res = await runQuietChild(
     'auth',
@@ -1071,6 +1089,7 @@ async function askChannelChoice(): Promise<ChannelChoice> {
           hint: 'needs public URL',
         },
         { value: 'teams', label: 'Yes, connect Microsoft Teams', hint: 'complex setup' },
+        { value: 'other', label: 'Other…', hint: 'install via /add-<name> after setup' },
         { value: 'skip', label: 'Skip for now', hint: "I'll just use the terminal" },
       ],
     }),
@@ -1078,6 +1097,42 @@ async function askChannelChoice(): Promise<ChannelChoice> {
   setupLog.userInput('channel_choice', String(choice));
   phEmit('channel_chosen', { channel: String(choice) });
   return choice;
+}
+
+async function askOtherChannelName(): Promise<void | typeof BACK_TO_CHANNEL_SELECTION> {
+  const action = ensureAnswer(
+    await brightSelect<'type' | 'back'>({
+      message: 'Which channel would you like to install?',
+      options: [
+        {
+          value: 'type',
+          label: 'Type the channel name',
+          hint: 'e.g. matrix, github, linear, webex',
+        },
+        { value: 'back', label: '← Back to channel selection' },
+      ],
+      initialValue: 'type',
+    }),
+  );
+  if (action === 'back') return BACK_TO_CHANNEL_SELECTION;
+
+  const answer = ensureAnswer(
+    await p.text({
+      message: 'Channel name',
+      placeholder: 'e.g. matrix, github, linear, webex',
+    }),
+  );
+  const name = (answer as string).trim().toLowerCase().replace(/^\/?(add-)?/, '');
+  setupLog.userInput('other_channel', name);
+  phEmit('channel_other_named', { channel: name });
+  p.log.info(
+    brandBody(
+      wrapForGutter(
+        `No bash installer for ${k.bold(name)} — open Claude Code after setup and run ${k.bold(`/add-${name}`)} to install it.`,
+        4,
+      ),
+    ),
+  );
 }
 
 // ─── interactive / env helpers ─────────────────────────────────────────

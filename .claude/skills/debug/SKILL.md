@@ -279,7 +279,7 @@ rm -rf data/sessions/
 rm -rf data/sessions/{groupFolder}/.claude/
 
 # Also clear the session ID from NanoClaw's tracking (stored in SQLite)
-sqlite3 store/messages.db "DELETE FROM sessions WHERE group_folder = '{groupFolder}'"
+pnpm exec tsx scripts/q.ts store/messages.db "DELETE FROM sessions WHERE group_folder = '{groupFolder}'"
 ```
 
 To verify session resumption is working, check the logs for the same session ID across messages:

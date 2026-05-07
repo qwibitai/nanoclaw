@@ -137,6 +137,83 @@ write_header
 # NANOCLAW_BOOTSTRAPPED=1 and skips re-printing the wordmark.
 cat "$PROJECT_ROOT/assets/setup-splash.txt"
 
+# ─── pre-flight: minimum hardware specs ────────────────────────────────
+# NanoClaw runs an agent container per session. Below this threshold the
+# host + container + agent will struggle (OOM under load). Soft warn — the
+# user can override.
+
+# RAM floor is set below 4 GB because "4 GB" VMs typically report 3700–3900 MB
+# after kernel reserves (e.g. Hetzner CX21 ≈ 3814, AWS t3.medium ≈ 3800).
+MIN_MEM_MB=3700
+
+detect_mem_mb() {
+  case "$(uname -s)" in
+    Linux)
+      awk '/^MemTotal:/ {printf "%d", $2 / 1024}' /proc/meminfo 2>/dev/null
+      ;;
+    Darwin)
+      local bytes
+      bytes=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
+      echo $(( bytes / 1024 / 1024 ))
+      ;;
+  esac
+}
+
+MEM_MB=$(detect_mem_mb)
+: "${MEM_MB:=0}"
+
+LOW_MEM=false
+[ "$MEM_MB" -gt 0 ] && [ "$MEM_MB" -lt "$MIN_MEM_MB" ] && LOW_MEM=true
+
+if [ "$LOW_MEM" = true ]; then
+  printf '  %s\n' "$(red 'Warning: this machine likely cannot run NanoClaw.')"
+  printf '  %s\n' "$(dim 'NanoClaw recommends a 4 GB+ RAM machine. Below this, the host + agent')"
+  printf '  %s\n' "$(dim 'container will run out of memory under most workloads. A stronger')"
+  printf '  %s\n' "$(dim 'machine is strongly recommended.')"
+  printf '  %s\n' "$(dim "  · Detected RAM: ${MEM_MB} MB")"
+  printf '\n'
+  read -r -p "  $(bold 'Try anyway?') [y/N] " SPECS_ANS </dev/tty
+
+  case "${SPECS_ANS:-N}" in
+    [Yy]*)
+      ph_event setup_low_specs_continued mem_mb="$MEM_MB" low_mem="$LOW_MEM"
+      printf '\n'
+      ;;
+    *)
+      ph_event setup_low_specs_aborted mem_mb="$MEM_MB" low_mem="$LOW_MEM"
+      printf '\n  %s\n\n' "$(dim 'Aborted. Re-run after upgrading the host.')"
+      exit 1
+      ;;
+  esac
+fi
+
+# ─── pre-flight: Google Cloud VM warning (Linux) ──────────────────────
+# NanoClaw is known to not run reliably on Google Compute Engine instances.
+# Warn early — before the root check or bootstrap spinner — so users can
+# switch providers before sinking time into setup. Detection uses DMI
+# (no network round-trip), which on GCE reports "Google" / "Google
+# Compute Engine".
+if [ "$(uname -s)" = "Linux" ] \
+  && { grep -qi 'Google' /sys/class/dmi/id/product_name 2>/dev/null \
+    || grep -qi 'Google' /sys/class/dmi/id/sys_vendor   2>/dev/null; }; then
+  printf '  %s\n' "$(red 'Warning: Google Cloud VM detected.')"
+  printf '  %s\n' "$(dim 'Google blocks sudo commands, so NanoClaw is unlikely to run successfully on this VM.')"
+  printf '  %s\n\n' "$(dim 'If you want to run NanoClaw successfully, switch to a different provider (Hetzner, Hostinger, exe.dev and others..).')"
+  read -r -p "  $(bold 'Try anyway?') [y/N] " GCE_ANS </dev/tty
+
+  case "${GCE_ANS:-N}" in
+    [Yy]*)
+      ph_event setup_gce_continued
+      printf '\n'
+      ;;
+    *)
+      ph_event setup_gce_aborted
+      printf '\n  %s\n\n' "$(dim 'Aborted. Re-run on a non-GCE host to continue.')"
+      exit 1
+      ;;
+  esac
+fi
+
 # ─── pre-flight: root user warning (Linux) ────────────────────────────
 if [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" -eq 0 ]; then
   printf '  %s\n' \

@@ -1555,22 +1555,22 @@ async function buildContainerArgs(
   // interfere with openlimits / custom-proxy auth. In the BASE_URL path,
   // ANTHROPIC_API_KEY (+ _N fallbacks) forwarded directly by the
   // env-forwarding block above provide auth without OneCLI.
+  //
+  // When OneCLI IS the path: gateway failure is treated as transient and
+  // throws — the caller (router/host-sweep) catches, leaves the inbound
+  // message pending, and the next sweep tick retries. Spawning a container
+  // with no credentials would only mask the misconfiguration.
   if (process.env.ANTHROPIC_BASE_URL) {
     log.info('Skipping OneCLI gateway — ANTHROPIC_BASE_URL set, using direct proxy', { containerName });
   } else {
-    try {
-      if (agentIdentifier) {
-        await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
-      }
-      const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
-      if (onecliApplied) {
-        log.info('OneCLI gateway applied', { containerName });
-      } else {
-        log.warn('OneCLI gateway not applied — container will have no credentials', { containerName });
-      }
-    } catch (err) {
-      log.warn('OneCLI gateway error — container will have no credentials', { containerName, err });
+    if (agentIdentifier) {
+      await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
     }
+    const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
+    if (!onecliApplied) {
+      throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
+    }
+    log.info('OneCLI gateway applied', { containerName });
 
     // CA bundle env vars for bundled-CA clients. OneCLI's SDK sets
     // SSL_CERT_FILE / NODE_EXTRA_CA_CERTS / DENO_CERT, but each tool below
