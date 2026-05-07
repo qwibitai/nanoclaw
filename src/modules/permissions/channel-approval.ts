@@ -104,18 +104,38 @@ function buildApprovalOptions(agentGroups: AgentGroup[]): RawOption[] {
   return options;
 }
 
+/**
+ * Build the body of an approval card. For most channels the chat-message
+ * itself carries no extra fields worth surfacing — sender + channel name is
+ * enough. Email is the exception: the platform_id is an opaque address and
+ * the operator needs the *subject* (and ideally a short body preview) to
+ * make a yes/no call. So we pass the raw message content through and pull
+ * subject/body out when the inbound came from email.
+ */
 function buildQuestionText(
   isGroup: boolean,
   senderName: string | undefined,
   channelName: string | null,
   channelType: string,
+  contentExtras?: { subject?: string; bodyPreview?: string },
 ): string {
   const who = senderName ?? 'Someone';
+
+  // Email-channel detail block: subject + body preview. Operators have told
+  // us a bare card without subject is unhelpful.
+  let extra = '';
+  if (channelType === 'email' && (contentExtras?.subject || contentExtras?.bodyPreview)) {
+    const lines: string[] = [];
+    if (contentExtras.subject) lines.push(`Subject: ${contentExtras.subject}`);
+    if (contentExtras.bodyPreview) lines.push(`\n${contentExtras.bodyPreview}`);
+    extra = `\n\n${lines.join('\n')}`;
+  }
+
   if (isGroup) {
     const where = channelName ? `${channelName} on ${channelType}` : `a ${channelType} channel`;
-    return `${who} mentioned your bot in ${where}. How would you like to handle this channel?`;
+    return `${who} mentioned your bot in ${where}. How would you like to handle this channel?${extra}`;
   }
-  return `${who} sent your bot a DM on ${channelType}. How would you like to handle it?`;
+  return `${who} sent your bot a DM on ${channelType}. How would you like to handle it?${extra}`;
 }
 
 // ── Main flow ──
@@ -184,16 +204,34 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
   const isGroup = event.message?.isGroup ?? originMg?.is_group === 1;
 
   let senderName: string | undefined;
+  let subject: string | undefined;
+  let bodyPreview: string | undefined;
   try {
     const parsed = JSON.parse(event.message.content) as Record<string, unknown>;
     senderName = (parsed.senderName ?? parsed.sender) as string | undefined;
+    if (typeof parsed.subject === 'string') subject = parsed.subject;
+    if (typeof parsed.text === 'string') {
+      // Trim aggressive whitespace and clip to ~280 chars — enough for the
+      // operator to recognize the intent without bloating the card.
+      const clean = parsed.text.replace(/\s+/g, ' ').trim();
+      bodyPreview = clean.length > 280 ? clean.slice(0, 277) + '…' : clean;
+    }
   } catch {
     // non-critical
   }
 
   const channelName = originMg?.name ?? null;
-  const title = isGroup ? '📣 Bot mentioned in new channel' : '💬 New direct message';
-  const question = buildQuestionText(isGroup, senderName, channelName, originChannelType);
+  // Channel-type-specific titles: an email approval card with the email-tag
+  // emoji is a stronger visual cue than the generic DM emoji.
+  let title: string;
+  if (originChannelType === 'email') {
+    title = '📧 New email — wire to an agent?';
+  } else if (isGroup) {
+    title = '📣 Bot mentioned in new channel';
+  } else {
+    title = '💬 New direct message';
+  }
+  const question = buildQuestionText(isGroup, senderName, channelName, originChannelType, { subject, bodyPreview });
   const options = normalizeOptions(buildApprovalOptions(agentGroups));
 
   createPendingChannelApproval({
