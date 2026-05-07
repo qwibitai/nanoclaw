@@ -84,25 +84,37 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 # Most stable first, most frequently bumped last. Bumping claude-code
 # (the most common change) only invalidates one layer.
 #
-# only-built-dependencies gates pnpm's supply-chain policy:
-#   - agent-browser has a postinstall build step.
-#   - @anthropic-ai/claude-code's postinstall downloads the native Claude
-#     binary (linux-arm64 variant on our image). Without the allowlist
-#     the SDK fails at spawn time with "native binary not found".
+# .npmrc settings:
+#   only-built-dependencies — supply-chain allowlist for postinstall scripts.
+#   link-mode=copy          — pnpm v11 default symlinks the global package
+#                              dir back into the read-only CAS store, which
+#                              breaks claude-code's install.cjs (it tries to
+#                              unlinkSync the placeholder bin/claude.exe and
+#                              hits EACCES). Copy mode makes the global tree
+#                              independently writable.
 ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
+ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"
 RUN corepack enable
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     echo "only-built-dependencies[]=agent-browser" > /root/.npmrc && \
     echo "only-built-dependencies[]=@anthropic-ai/claude-code" >> /root/.npmrc && \
+    echo "link-mode=copy" >> /root/.npmrc && \
     pnpm install -g "vercel@${VERCEL_VERSION}"
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "agent-browser@${AGENT_BROWSER_VERSION}"
 
+# pnpm v11 does not run postinstall scripts on `install -g` even with the
+# only-built-dependencies allowlist, so claude-code's bin/claude.exe stays
+# as the placeholder stub. Run install.cjs manually to swap in the real
+# native binary, then sanity-check with --version so a broken image fails
+# the build instead of failing at agent runtime.
 RUN --mount=type=cache,target=/root/.cache/pnpm \
-    pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+    pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && \
+    CC_DIR=$(dirname "$(find -L /pnpm/global/v11 -name install.cjs -path '*@anthropic-ai/claude-code/install.cjs' | head -1)") && \
+    cd "$CC_DIR" && node install.cjs && \
+    /pnpm/bin/claude --version
 
 # ---- Entrypoint --------------------------------------------------------------
 COPY entrypoint.sh /app/entrypoint.sh
