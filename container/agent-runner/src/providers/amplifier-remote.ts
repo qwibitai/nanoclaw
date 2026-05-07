@@ -204,7 +204,17 @@ async function executePrompt(cfg: AmplifierdConfig, sessionId: string, prompt: s
   return data.response;
 }
 
-const STALE_SESSION_RE = /\b404\b|session.*not.*found/i;
+// Conditions where the cached continuation can't be reused and we should
+// drop it for a fresh session:
+//   404 / "session not found" — daemon restarted, daily cleanup, hot-replace
+//   409 / "already executing" — the prior turn never returned (host
+//                               killed the container mid-call, network
+//                               drop, etc.) and amplifierd has no cancel
+//                               primitive we can use, so the session is
+//                               effectively wedged. Surfaced 2026-05-07
+//                               as a hung joi-dm container that left a
+//                               leaked session behind.
+const STALE_SESSION_RE = /\b404\b|\b409\b|session.*not.*found|already executing/i;
 
 function isStaleSessionError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);

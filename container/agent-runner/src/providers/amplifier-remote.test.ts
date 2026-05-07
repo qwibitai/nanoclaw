@@ -134,6 +134,13 @@ describe('AmplifierRemoteProvider', () => {
       expect(__test.isStaleSessionError(new Error('Session Not Found'))).toBe(true);
       expect(__test.isStaleSessionError(new Error('amplifierd: session_not_found'))).toBe(true);
     });
+    it('matches HTTP 409 "already executing" — leaked session from a prior killed turn', () => {
+      expect(
+        __test.isStaleSessionError(
+          new Error("amplifierd 409 on executePrompt: Session 'abc-123' is already executing"),
+        ),
+      ).toBe(true);
+    });
     it('does not match unrelated errors', () => {
       expect(__test.isStaleSessionError(new Error('connection refused'))).toBe(false);
       expect(__test.isStaleSessionError(new Error('amplifierd 500: internal'))).toBe(false);
