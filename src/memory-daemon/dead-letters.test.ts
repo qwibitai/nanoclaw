@@ -132,4 +132,25 @@ describe('dead-letters', () => {
     expect(remaining[0].agent_group_id).toBe('ag-2');
     expect(remaining[0].last_error).toBe('err-2');
   });
+
+  it('test_recall_judge_item_type_round_trips', () => {
+    // Verify 'recall-judge' is accepted as a valid DeadLetterItemType and
+    // stored/retrieved correctly (the type union was extended in C3).
+    const result = recordOrIncrementFailure({
+      itemType: 'recall-judge',
+      itemKey: 'recall-judge:evt-abc',
+      agentGroupId: 'ag-1',
+      error: 'No archive response',
+    });
+
+    expect(result.poisoned).toBe(false);
+    expect(result.failureCount).toBe(1);
+
+    const row = db
+      .prepare(`SELECT item_type, item_key FROM dead_letters WHERE item_key = ?`)
+      .get('recall-judge:evt-abc') as { item_type: string; item_key: string } | undefined;
+    expect(row).toBeDefined();
+    expect(row!.item_type).toBe('recall-judge');
+    expect(row!.item_key).toBe('recall-judge:evt-abc');
+  });
 });

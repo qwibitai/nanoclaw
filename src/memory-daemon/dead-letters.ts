@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
 import { openMnemonIngestDb } from '../db/migrations/019-mnemon-ingest-db.js';
 
-export type DeadLetterItemType = 'turn-pair' | 'source-file';
+export type DeadLetterItemType = 'turn-pair' | 'source-file' | 'recall-judge';
 
 export interface DeadLetterRow {
   id: string;

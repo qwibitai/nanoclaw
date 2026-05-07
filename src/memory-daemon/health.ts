@@ -1,6 +1,9 @@
 import fs from 'fs';
 import path from 'path';
+import Database from 'better-sqlite3';
 import { DATA_DIR } from '../config.js';
+
+const HOST_OLLAMA_STATUS_FILE = path.join(DATA_DIR, '.host-ollama-status.json');
 
 const HEALTH_FILE = path.join(DATA_DIR, 'memory-health.json');
 
@@ -9,6 +12,17 @@ interface LatencyBucket {
   '1-3': number;
   '4-5': number;
   '6+': number;
+}
+
+interface RecallQualityState {
+  coverage_24h: number;
+  useful_fact_rate_7d: number;
+  load_bearing_event_rate_7d: number;
+  rank_distribution_7d: { score_0: number; score_1: number; score_2: number };
+  judge_failure_rate_24h: number;
+  ambiguous_correlation_rate_24h: number;
+  judged_count_total: number;
+  judge_retry_p50_24h: number;
 }
 
 interface PerGroupState {
@@ -74,7 +88,7 @@ function buildTopKDistribution(results: number[]): LatencyBucket {
   return dist;
 }
 
-function buildGroupJson(state: PerGroupState): Record<string, unknown> {
+function buildGroupJson(state: PerGroupState, recallQuality?: RecallQualityState): Record<string, unknown> {
   const sorted = [...state.recallLatencies].sort((a, b) => a - b);
   const totalRecall = state.recallResults.length;
   const emptyRecalls = state.recallResults.filter((r) => r === 0).length;
@@ -103,6 +117,7 @@ function buildGroupJson(state: PerGroupState): Record<string, unknown> {
     factsDroppedLowImportance24h: state.factsDroppedLowImportance24h,
     pairsAllLowImportance24h: state.pairsAllLowImportance24h,
     classifierFalsePositiveSignal24h: state.classifierFalsePositiveSignal24h,
+    recall_quality: recallQuality ?? null,
   };
 }
 
@@ -117,6 +132,162 @@ export class HealthRecorder {
   private prereqVerification: { ok: boolean; checks: object } | null = null;
   private lastSweepAt: string | null = null;
   private memoryEnabledCheckFailures = new Map<string, MemoryEnabledCheckFailureEntry>();
+  private _ingestDb: Database.Database | null = null;
+  private _ollamaCheckHost: unknown = undefined;
+  private _ollamaStatusFilePath: string | null = null;
+
+  /** Test-only seam: inject an in-memory DB for recall_quality queries. */
+  setIngestDbForTest(db: Database.Database | null): void {
+    this._ingestDb = db;
+  }
+
+  /** Test-only seam: override the host-ollama-status file path. */
+  setOllamaStatusFilePathForTest(p: string | null): void {
+    this._ollamaStatusFilePath = p;
+  }
+
+  private getIngestDb(): Database.Database | null {
+    return this._ingestDb;
+  }
+
+  private computeRecallQuality(agentGroupId: string): RecallQualityState {
+    const db = this.getIngestDb();
+    if (!db) {
+      return {
+        coverage_24h: 0,
+        useful_fact_rate_7d: 0,
+        load_bearing_event_rate_7d: 0,
+        rank_distribution_7d: { score_0: 0, score_1: 0, score_2: 0 },
+        judge_failure_rate_24h: 0,
+        ambiguous_correlation_rate_24h: 0,
+        judged_count_total: 0,
+        judge_retry_p50_24h: 0,
+      };
+    }
+
+    // Use JS-computed ISO8601 window bounds (SQLite datetime('now') produces
+    // space-separated format that doesn't compare correctly with JS ISO8601 timestamps).
+    const now24h = new Date(Date.now() - 24 * 3_600_000).toISOString();
+    const now7d = new Date(Date.now() - 7 * 24 * 3_600_000).toISOString();
+
+    // coverage_24h: % of recall events (judged + pending) that have judged_at set
+    const coverageRow = db
+      .prepare(
+        `SELECT
+           COUNT(DISTINCT CASE WHEN judged_at IS NOT NULL THEN recall_event_id END) AS judged_events,
+           COUNT(DISTINCT recall_event_id) AS total_events
+         FROM recall_outcomes
+         WHERE agent_group_id = ? AND created_at >= ?`,
+      )
+      .get(agentGroupId, now24h) as { judged_events: number; total_events: number };
+    const coverage_24h = coverageRow.total_events > 0 ? coverageRow.judged_events / coverageRow.total_events : 0;
+
+    // useful_fact_rate_7d: % facts with judge_score >= 1 of all judged facts in 7d
+    const usefulRow = db
+      .prepare(
+        `SELECT
+           COUNT(CASE WHEN judge_score >= 1 THEN 1 END) AS useful,
+           COUNT(*) AS total
+         FROM recall_outcomes
+         WHERE agent_group_id = ? AND judged_at IS NOT NULL AND created_at >= ?`,
+      )
+      .get(agentGroupId, now7d) as { useful: number; total: number };
+    const useful_fact_rate_7d = usefulRow.total > 0 ? usefulRow.useful / usefulRow.total : 0;
+
+    // load_bearing_event_rate_7d: % events with at least one score=2 fact
+    const loadBearingRow = db
+      .prepare(
+        `SELECT
+           COUNT(DISTINCT CASE WHEN judge_score = 2 THEN recall_event_id END) AS lb_events,
+           COUNT(DISTINCT recall_event_id) AS total_events
+         FROM recall_outcomes
+         WHERE agent_group_id = ? AND judged_at IS NOT NULL AND created_at >= ?`,
+      )
+      .get(agentGroupId, now7d) as { lb_events: number; total_events: number };
+    const load_bearing_event_rate_7d =
+      loadBearingRow.total_events > 0 ? loadBearingRow.lb_events / loadBearingRow.total_events : 0;
+
+    // rank_distribution_7d: distribution of scores as fractions
+    const distRow = db
+      .prepare(
+        `SELECT
+           COUNT(CASE WHEN judge_score = 0 THEN 1 END) AS score_0,
+           COUNT(CASE WHEN judge_score = 1 THEN 1 END) AS score_1,
+           COUNT(CASE WHEN judge_score = 2 THEN 1 END) AS score_2,
+           COUNT(*) AS total
+         FROM recall_outcomes
+         WHERE agent_group_id = ? AND judged_at IS NOT NULL AND created_at >= ?`,
+      )
+      .get(agentGroupId, now7d) as { score_0: number; score_1: number; score_2: number; total: number };
+    const distTotal = distRow.total || 1;
+    const rank_distribution_7d = {
+      score_0: distRow.score_0 / distTotal,
+      score_1: distRow.score_1 / distTotal,
+      score_2: distRow.score_2 / distTotal,
+    };
+
+    // judge_failure_rate_24h: % judged rows with judge_method='judge-failed'
+    const failureRow = db
+      .prepare(
+        `SELECT
+           COUNT(CASE WHEN judge_method = 'judge-failed' THEN 1 END) AS failed,
+           COUNT(*) AS total
+         FROM recall_outcomes
+         WHERE agent_group_id = ? AND judged_at IS NOT NULL AND judged_at >= ?`,
+      )
+      .get(agentGroupId, now24h) as { failed: number; total: number };
+    const judge_failure_rate_24h = failureRow.total > 0 ? failureRow.failed / failureRow.total : 0;
+
+    // ambiguous_correlation_rate_24h: % judged rows with judge_method='ambiguous-correlation'
+    const ambigRow = db
+      .prepare(
+        `SELECT
+           COUNT(CASE WHEN judge_method = 'ambiguous-correlation' THEN 1 END) AS ambiguous,
+           COUNT(*) AS total
+         FROM recall_outcomes
+         WHERE agent_group_id = ? AND judged_at IS NOT NULL AND judged_at >= ?`,
+      )
+      .get(agentGroupId, now24h) as { ambiguous: number; total: number };
+    const ambiguous_correlation_rate_24h = ambigRow.total > 0 ? ambigRow.ambiguous / ambigRow.total : 0;
+
+    // judged_count_total: all-time judged rows
+    const totalRow = db
+      .prepare(
+        `SELECT COUNT(*) AS total FROM recall_outcomes
+         WHERE agent_group_id = ? AND judged_at IS NOT NULL`,
+      )
+      .get(agentGroupId) as { total: number };
+    const judged_count_total = totalRow.total;
+
+    // judge_retry_p50_24h: median failure_count from dead_letters for recall-judge in last 24h
+    const retryRows = db
+      .prepare(
+        `SELECT failure_count FROM dead_letters
+         WHERE agent_group_id = ? AND item_type = 'recall-judge'
+           AND last_attempted_at >= ?
+         ORDER BY failure_count`,
+      )
+      .all(agentGroupId, now24h) as Array<{ failure_count: number }>;
+    let judge_retry_p50_24h = 0;
+    if (retryRows.length > 0) {
+      const mid = Math.floor(retryRows.length / 2);
+      judge_retry_p50_24h =
+        retryRows.length % 2 === 1
+          ? retryRows[mid]!.failure_count
+          : (retryRows[mid - 1]!.failure_count + retryRows[mid]!.failure_count) / 2;
+    }
+
+    return {
+      coverage_24h,
+      useful_fact_rate_7d,
+      load_bearing_event_rate_7d,
+      rank_distribution_7d,
+      judge_failure_rate_24h,
+      ambiguous_correlation_rate_24h,
+      judged_count_total,
+      judge_retry_p50_24h,
+    };
+  }
 
   private group(agentGroupId: string): PerGroupState {
     if (!this.groups.has(agentGroupId)) {
@@ -234,6 +405,16 @@ export class HealthRecorder {
     }
   }
 
+  async mergeHostOllamaStatus(): Promise<void> {
+    const statusPath = this._ollamaStatusFilePath ?? HOST_OLLAMA_STATUS_FILE;
+    try {
+      const raw = fs.readFileSync(statusPath, 'utf8');
+      this._ollamaCheckHost = JSON.parse(raw) as unknown;
+    } catch {
+      // File missing or malformed — normal when host hasn't started or memory is disabled
+    }
+  }
+
   setPrereqVerification(ok: boolean, checks: object): void {
     this.prereqVerification = { ok, checks };
   }
@@ -244,7 +425,8 @@ export class HealthRecorder {
 
     const groupsJson: Record<string, unknown> = {};
     for (const [agentGroupId, state] of this.groups) {
-      groupsJson[agentGroupId] = buildGroupJson(state);
+      const recallQuality = this.computeRecallQuality(agentGroupId);
+      groupsJson[agentGroupId] = buildGroupJson(state, recallQuality);
     }
 
     const memoryEnabledCheckFailuresJson: Record<string, MemoryEnabledCheckFailureEntry> = {};
@@ -252,12 +434,15 @@ export class HealthRecorder {
       memoryEnabledCheckFailuresJson[agentGroupId] = entry;
     }
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       lastSweepAt: this.lastSweepAt,
       prereqVerification: this.prereqVerification,
       groups: groupsJson,
       memoryEnabledCheckFailures: memoryEnabledCheckFailuresJson,
     };
+    if (this._ollamaCheckHost !== undefined) {
+      payload.ollamaCheckHost = this._ollamaCheckHost;
+    }
 
     const json = JSON.stringify(payload, null, 2);
     const tmpPath = `${outputPath}.tmp`;
