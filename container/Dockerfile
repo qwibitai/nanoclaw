@@ -104,6 +104,23 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
+# ---- Vendored axios proxy patch ----------------------------------------------
+# OneCLI's gateway (port 10255) only accepts CONNECT-tunneled HTTPS. axios's
+# built-in HTTPS_PROXY support sends absolute-form HTTP that OneCLI rejects
+# with 400, blocking auth injection for axios-based MCP servers (e.g. the
+# official @notionhq/notion-mcp-server). The preload below monkey-patches
+# axios.defaults.httpsAgent with HttpsProxyAgent at startup, restoring proper
+# CONNECT tunneling. Activated per-MCP-server via
+#   "env": { "NODE_OPTIONS": "--require /app/vendor/axios-onecli-proxy.cjs" }
+# in container.json. Pin exactly — supply-chain policy.
+RUN mkdir -p /app/vendor && cd /app/vendor && \
+    echo '{"private":true,"dependencies":{"https-proxy-agent":"7.0.6"}}' > package.json && \
+    npm install --no-audit --no-fund --silent && \
+    chmod -R a+rX /app/vendor
+
+COPY axios-onecli-proxy.cjs /app/vendor/axios-onecli-proxy.cjs
+RUN chmod a+r /app/vendor/axios-onecli-proxy.cjs
+
 # ---- Entrypoint --------------------------------------------------------------
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
