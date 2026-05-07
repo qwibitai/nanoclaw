@@ -38,6 +38,25 @@ vi.mock('../../log.js', () => ({
   log: { warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
+// Mock cheap-signal and recall-outcomes so they don't access real DBs/Ollama.
+vi.mock('./cheap-signal.js', () => ({
+  computeQueryFactCosines: vi.fn().mockResolvedValue(new Map()),
+  setEmbedderForTest: vi.fn(),
+  _resetEmbedderForTest: vi.fn(),
+}));
+
+vi.mock('./recall-outcomes.js', () => ({
+  insertPendingOutcomes: vi.fn().mockReturnValue({ inserted: 0, failed: false }),
+  setIngestDbForTest: vi.fn(),
+}));
+
+vi.mock('./query-extractor.js', () => ({
+  extractFocusedQuery: vi.fn().mockResolvedValue('extracted query'),
+  setQueryExtractorBackendForTest: vi.fn(),
+  _resetQueryExtractorBackendForTest: vi.fn(),
+  clearCacheForTest: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -209,5 +228,228 @@ describe('maybeInjectRecall', () => {
 
     expect(insertMessage).not.toHaveBeenCalled();
     expect(healthFn).toHaveBeenCalledOnce();
+  });
+
+  // ---------------------------------------------------------------------------
+  // B4 new test cases
+  // ---------------------------------------------------------------------------
+
+  it('test_strategy_llm_falls_through_on_extractor_error', async () => {
+    const { insertMessage } = await import('../../db/session-db.js');
+    const { extractFocusedQuery } = await import('./query-extractor.js');
+    const { insertPendingOutcomes } = await import('./recall-outcomes.js');
+
+    vi.mocked(extractFocusedQuery).mockRejectedValue(new Error('extractor error'));
+
+    setMemoryEnabledOverride(() => true);
+    const instanceRecall = vi.fn().mockResolvedValue({
+      facts: [{ id: 'f1', content: 'Fact', category: 'fact', importance: 3, entities: [], score: 0.9, createdAt: '' }],
+      totalAvailable: 1,
+      latencyMs: 50,
+      fromCache: false,
+    });
+    setStoreForTest({ recall: instanceRecall } as never);
+
+    const msg = makeMsg({ id: 'msg-llm-err' });
+    await maybeInjectRecall({
+      agentGroupId: 'ag-llm',
+      sessionId: 'sess-1',
+      inboundMessage: msg,
+      routing: makeRouting(),
+      memoryConfigOverride: { enabled: true, query_strategy: 'llm' },
+    });
+
+    expect(insertMessage).toHaveBeenCalledOnce();
+    const call = vi.mocked(insertPendingOutcomes).mock.calls[0];
+    expect(call).toBeDefined();
+    // Strategy should have fallen through from llm to heuristic (or raw)
+    const rows = call[0] as Array<{ queryStrategy: string }>;
+    expect(rows[0].queryStrategy).not.toBe('llm');
+  });
+
+  it('test_strategy_llm_falls_through_on_extractor_timeout', async () => {
+    const { insertMessage } = await import('../../db/session-db.js');
+    const { extractFocusedQuery } = await import('./query-extractor.js');
+    const { insertPendingOutcomes } = await import('./recall-outcomes.js');
+
+    // Simulate a rejection (timeout would cause this)
+    vi.mocked(extractFocusedQuery).mockRejectedValue(new Error('timeout'));
+
+    setMemoryEnabledOverride(() => true);
+    const instanceRecall = vi.fn().mockResolvedValue({
+      facts: [{ id: 'f1', content: 'Fact', category: 'fact', importance: 3, entities: [], score: 0.9, createdAt: '' }],
+      totalAvailable: 1,
+      latencyMs: 50,
+      fromCache: false,
+    });
+    setStoreForTest({ recall: instanceRecall } as never);
+
+    await maybeInjectRecall({
+      agentGroupId: 'ag-llm-timeout',
+      sessionId: 'sess-1',
+      inboundMessage: makeMsg({ id: 'msg-timeout' }),
+      routing: makeRouting(),
+      memoryConfigOverride: { enabled: true, query_strategy: 'llm' },
+    });
+
+    expect(insertMessage).toHaveBeenCalledOnce();
+    const call = vi.mocked(insertPendingOutcomes).mock.calls[0];
+    const rows = call[0] as Array<{ queryStrategy: string }>;
+    expect(rows[0].queryStrategy).not.toBe('llm');
+  });
+
+  it('test_outcomes_written_after_system_row', async () => {
+    const { insertMessage } = await import('../../db/session-db.js');
+    const { insertPendingOutcomes } = await import('./recall-outcomes.js');
+
+    const callOrder: string[] = [];
+    vi.mocked(insertMessage).mockImplementation(() => {
+      callOrder.push('insertMessage');
+      return undefined as never;
+    });
+    vi.mocked(insertPendingOutcomes).mockImplementation(() => {
+      callOrder.push('insertPendingOutcomes');
+      return { inserted: 1, failed: false };
+    });
+
+    setMemoryEnabledOverride(() => true);
+    const instanceRecall = vi.fn().mockResolvedValue({
+      facts: [{ id: 'f1', content: 'Fact', category: 'fact', importance: 3, entities: [], score: 0.9, createdAt: '' }],
+      totalAvailable: 1,
+      latencyMs: 50,
+      fromCache: false,
+    });
+    setStoreForTest({ recall: instanceRecall } as never);
+
+    await maybeInjectRecall({
+      agentGroupId: 'ag-order',
+      sessionId: 'sess-1',
+      inboundMessage: makeMsg({ id: 'msg-order' }),
+      routing: makeRouting(),
+    });
+
+    expect(callOrder[0]).toBe('insertMessage');
+    expect(callOrder[1]).toBe('insertPendingOutcomes');
+  });
+
+  it('test_outcomes_failure_does_not_break_recall', async () => {
+    const { insertMessage } = await import('../../db/session-db.js');
+    const { insertPendingOutcomes } = await import('./recall-outcomes.js');
+
+    vi.mocked(insertPendingOutcomes).mockReturnValue({ inserted: 0, failed: true });
+
+    setMemoryEnabledOverride(() => true);
+    const instanceRecall = vi.fn().mockResolvedValue({
+      facts: [{ id: 'f1', content: 'Fact', category: 'fact', importance: 3, entities: [], score: 0.9, createdAt: '' }],
+      totalAvailable: 1,
+      latencyMs: 50,
+      fromCache: false,
+    });
+    setStoreForTest({ recall: instanceRecall } as never);
+
+    // Should not throw.
+    await expect(
+      maybeInjectRecall({
+        agentGroupId: 'ag-outcomes-fail',
+        sessionId: 'sess-1',
+        inboundMessage: makeMsg({ id: 'msg-outcomes-fail' }),
+        routing: makeRouting(),
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(insertMessage).toHaveBeenCalledOnce();
+  });
+
+  it('test_trigger_metadata_persisted', async () => {
+    const { insertPendingOutcomes } = await import('./recall-outcomes.js');
+
+    setMemoryEnabledOverride(() => true);
+    const instanceRecall = vi.fn().mockResolvedValue({
+      facts: [{ id: 'f1', content: 'Fact', category: 'fact', importance: 3, entities: [], score: 0.9, createdAt: '' }],
+      totalAvailable: 1,
+      latencyMs: 50,
+      fromCache: false,
+    });
+    setStoreForTest({ recall: instanceRecall } as never);
+
+    const msg = makeMsg({
+      id: 'msg-meta',
+      threadId: 't1',
+      timestamp: '2026-05-07T12:00:00Z',
+      platformId: 'u1',
+    });
+
+    await maybeInjectRecall({
+      agentGroupId: 'ag-meta',
+      sessionId: 'sess-1',
+      inboundMessage: msg,
+      routing: { channelType: 'slack', platformId: 'P1', threadId: 't1' },
+    });
+
+    const call = vi.mocked(insertPendingOutcomes).mock.calls[0];
+    expect(call).toBeDefined();
+    const rows = call[0] as Array<{ triggerThreadId: string; triggerSentAt: string; triggerSenderId: string }>;
+    expect(rows[0].triggerThreadId).toBe('t1');
+    expect(rows[0].triggerSentAt).toBe('2026-05-07T12:00:00Z');
+    expect(rows[0].triggerSenderId).toBe('u1');
+  });
+
+  it('test_query_strategy_records_actual_not_configured', async () => {
+    const { extractFocusedQuery } = await import('./query-extractor.js');
+    const { insertPendingOutcomes } = await import('./recall-outcomes.js');
+
+    vi.mocked(extractFocusedQuery).mockRejectedValue(new Error('extractor fail'));
+
+    setMemoryEnabledOverride(() => true);
+    const instanceRecall = vi.fn().mockResolvedValue({
+      facts: [{ id: 'f1', content: 'Fact', category: 'fact', importance: 3, entities: [], score: 0.9, createdAt: '' }],
+      totalAvailable: 1,
+      latencyMs: 50,
+      fromCache: false,
+    });
+    setStoreForTest({ recall: instanceRecall } as never);
+
+    await maybeInjectRecall({
+      agentGroupId: 'ag-strategy',
+      sessionId: 'sess-1',
+      inboundMessage: makeMsg({ id: 'msg-strategy' }),
+      routing: makeRouting(),
+      memoryConfigOverride: { enabled: true, query_strategy: 'llm' },
+    });
+
+    const call = vi.mocked(insertPendingOutcomes).mock.calls[0];
+    const rows = call[0] as Array<{ queryStrategy: string }>;
+    // Configured 'llm' but extractor failed → actual should be 'heuristic' or 'raw'
+    expect(rows[0].queryStrategy).not.toBe('llm');
+  });
+
+  it('test_feedback_disabled_skips_outcomes_but_writes_system_row', async () => {
+    const { insertMessage } = await import('../../db/session-db.js');
+    const { insertPendingOutcomes } = await import('./recall-outcomes.js');
+    const { computeQueryFactCosines } = await import('./cheap-signal.js');
+
+    setMemoryEnabledOverride(() => true);
+    const instanceRecall = vi.fn().mockResolvedValue({
+      facts: [{ id: 'f1', content: 'Fact', category: 'fact', importance: 3, entities: [], score: 0.9, createdAt: '' }],
+      totalAvailable: 1,
+      latencyMs: 50,
+      fromCache: false,
+    });
+    setStoreForTest({ recall: instanceRecall } as never);
+
+    await maybeInjectRecall({
+      agentGroupId: 'ag-feedback-off',
+      sessionId: 'sess-1',
+      inboundMessage: makeMsg({ id: 'msg-feedback-off' }),
+      routing: makeRouting(),
+      memoryConfigOverride: { enabled: true, feedback_enabled: false },
+    });
+
+    // System row still written — recall proceeds normally.
+    expect(insertMessage).toHaveBeenCalledOnce();
+    // No outcomes rows — feedback disabled.
+    expect(insertPendingOutcomes).not.toHaveBeenCalled();
+    // No cosines computed — skip the whole block.
+    expect(computeQueryFactCosines).not.toHaveBeenCalled();
   });
 });

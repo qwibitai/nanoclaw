@@ -36,6 +36,7 @@ import { restoreRemoteControl } from './remote-control.js';
 import { startDiscordSlashCommands, stopDiscordSlashCommands } from './channels/discord-slash-commands.js';
 import { routeInbound } from './router.js';
 import { log } from './log.js';
+import { runStartupOllamaCheck } from './host-ollama-status.js';
 
 // Response + shutdown registries live in response-registry.ts to break the
 // circular import cycle: src/index.ts imports src/modules/index.js for side
@@ -121,6 +122,9 @@ async function main(): Promise<void> {
 
   // 0b. Register secret values from .env for outbound scrubbing.
   registerSecretsFromEnv();
+
+  // 0c. Non-blocking Ollama startup check — writes data/.host-ollama-status.json.
+  runStartupOllamaCheck().then((s) => { log.info('host-ollama-status', { ok: s.ok, endpoint: s.endpoint, error: s.error }); }).catch(() => { /* never throws */ });
 
   // 1. Init central DB
   const dbPath = path.join(DATA_DIR, 'v2.db');
