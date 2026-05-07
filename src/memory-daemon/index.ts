@@ -6,9 +6,10 @@ import { HealthRecorder } from './health.js';
 import { setDeadLettersDb, getDueRetries, deleteAfterSuccess } from './dead-letters.js';
 import { runChatStreamSweep, setIngestDb } from './classifier.js';
 import { SourceIngester, setIngestDb as setSourceIngestDb, isNonSymlinkChain } from './source-ingest.js';
-import { readContainerConfig } from '../container-config.js';
+import { readContainerConfig, isFeedbackEnabled } from '../container-config.js';
 import { GROUPS_DIR, CC_PROJECTS_DIR, CC_MEMORY_MARKER } from '../config.js';
 import type { MemoryStore } from '../modules/memory/store.js';
+import { processPendingJudgments } from './recall-judge/judge.js';
 
 const SWEEP_INTERVAL_MS = 60_000;
 
@@ -21,6 +22,7 @@ export interface DiscoveredGroup {
   // inbox / processed paths from this base.
   sourcesBasePath: string;
   enabled: boolean;
+  feedbackEnabled: boolean;
 }
 
 // Exported for unit tests. Production code calls it from runSweep below.
@@ -80,6 +82,7 @@ export function discoverMemoryGroups(health?: HealthRecorder): DiscoveredGroup[]
       folder: entry,
       sourcesBasePath: fullPath,
       enabled: config.memory?.enabled === true,
+      feedbackEnabled: isFeedbackEnabled(config.memory),
     });
   }
 
@@ -153,13 +156,19 @@ export function discoverMemoryGroups(health?: HealthRecorder): DiscoveredGroup[]
       folder: entry,
       sourcesBasePath: projectPath,
       enabled: true,
+      feedbackEnabled: true, // CC groups default feedback=true
     });
   }
 
   return groups;
 }
 
-async function runSweep(ingester: SourceIngester, health: HealthRecorder, store: MemoryStore): Promise<void> {
+export async function runSweep(
+  ingester: SourceIngester,
+  health: HealthRecorder,
+  store: MemoryStore,
+  ingestDb?: import('better-sqlite3').Database,
+): Promise<void> {
   const allGroups = discoverMemoryGroups(health);
   const enabledGroups = allGroups.filter((g) => g.enabled);
 
@@ -228,6 +237,49 @@ async function runSweep(ingester: SourceIngester, health: HealthRecorder, store:
     }
   }
 
+  // Judge processor: score pending recall outcomes for feedback-enabled groups
+  for (const group of enabledGroups) {
+    if (!group.feedbackEnabled) continue;
+    try {
+      await processPendingJudgments({ agentGroupId: group.agentGroupId });
+    } catch (err) {
+      console.error(`[memory-daemon] judge processor error for ${group.agentGroupId}:`, err);
+    }
+  }
+
+  // Nightly task: run once per UTC day at ≥ 4am
+  if (ingestDb) {
+    const nowUtc = new Date();
+    const utcHour = nowUtc.getUTCHours();
+    const todayUtc = nowUtc.toISOString().slice(0, 10); // YYYY-MM-DD
+
+    const lastNightlyRow = ingestDb.prepare(`SELECT value FROM daemon_state WHERE key = 'lastNightlyAt'`).get() as
+      | { value: string }
+      | undefined;
+    const lastNightlyAt = lastNightlyRow?.value ?? null;
+
+    if (utcHour >= 4 && lastNightlyAt !== todayUtc) {
+      try {
+        ingestDb
+          .prepare(`DELETE FROM recall_outcomes WHERE created_at < ?`)
+          .run(new Date(Date.now() - 90 * 24 * 3_600_000).toISOString());
+        const nowIso = nowUtc.toISOString();
+        ingestDb
+          .prepare(
+            `INSERT INTO daemon_state (key, value, updated_at) VALUES ('lastNightlyAt', ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+          )
+          .run(todayUtc, nowIso);
+        console.log(`[memory-daemon] nightly tasks complete (${todayUtc})`);
+      } catch (err) {
+        console.error('[memory-daemon] nightly task error:', err);
+      }
+    }
+  }
+
+  // Merge host Ollama status before flush
+  await health.mergeHostOllamaStatus();
+
   await health.flush();
 }
 
@@ -253,6 +305,7 @@ async function main(): Promise<void> {
   setDeadLettersDb(db);
 
   const health = new HealthRecorder();
+  health.setIngestDbForTest(db); // wire production DB for recall_quality queries
 
   // Lazy import MnemonStore (Group A)
   const { MnemonStore } = await import('../modules/memory/mnemon-impl.js');
@@ -274,7 +327,7 @@ async function main(): Promise<void> {
     while (!shutdownRequested) {
       inFlight = true;
       try {
-        await runSweep(ingester, health, store);
+        await runSweep(ingester, health, store, db);
       } catch (err) {
         console.error('[memory-daemon] sweep error:', err);
       } finally {

@@ -1,5 +1,8 @@
 import Database from 'better-sqlite3';
 import { EventEmitter } from 'events';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FactInput } from './store.js';
@@ -12,6 +15,7 @@ vi.mock('child_process', () => ({
 import { spawn } from 'child_process';
 import { MnemonStore, setMnemonStoreIngestDb } from './mnemon-impl.js';
 import { runMnemonIngestMigrations } from '../../db/migrations/019-mnemon-ingest-db.js';
+import { clearScopeCacheForTest, setGroupsDirForTest } from './scope-resolver.js';
 
 const mockSpawn = vi.mocked(spawn);
 
@@ -247,4 +251,256 @@ describe('MnemonStore', () => {
     expect(result.action).toBe('added');
     expect(mockSpawn).toHaveBeenCalledTimes(1);
   });
+});
+
+// Helper: build a temp groups dir with N groups that each have agentGroupId and memory.enabled=true.
+function makeTempGroupsDir(groups: Array<{ folder: string; agentGroupId: string; memoryEnabled?: boolean }>): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mnemon-impl-fanout-test-'));
+  for (const g of groups) {
+    const groupDir = path.join(dir, g.folder);
+    fs.mkdirSync(groupDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(groupDir, 'container.json'),
+      JSON.stringify({ agentGroupId: g.agentGroupId, memory: { enabled: g.memoryEnabled ?? true } }),
+    );
+  }
+  return dir;
+}
+
+function makeRecallResult(facts: Array<{ id: string; content: string }>): string {
+  return JSON.stringify({
+    results: facts.map((f) => ({
+      insight: { id: f.id, content: f.content, category: 'fact', importance: 3, entities: [] },
+      score: 0.9,
+    })),
+    meta: { anchor_count: facts.length },
+  });
+}
+
+describe('MnemonStore fan-out (D3)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    clearScopeCacheForTest();
+    setGroupsDirForTest(null);
+    setMnemonStoreIngestDb(null);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    clearScopeCacheForTest();
+    setGroupsDirForTest(null);
+    setMnemonStoreIngestDb(null);
+    vi.restoreAllMocks();
+    if (tmpDir) {
+      try {
+        fs.rmSync(tmpDir, { recursive: true });
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+  });
+
+  it('test_self_scope_single_store_path', async () => {
+    // scope='self' (default) → single-store path, pMap NOT invoked.
+    const store = new MnemonStore({ enabled: true, recall_scope: 'self' });
+    const child = makeChildMock({ stdout: makeRecallResult([{ id: 'f1', content: 'c1' }]) });
+    mockSpawn.mockReturnValue(child as unknown as ReturnType<typeof spawn>);
+
+    const result = await store.recall('g1', 'test query');
+
+    expect(result.facts).toHaveLength(1);
+    expect(result.facts[0].id).toBe('f1');
+    // Only one spawn call (single-store path)
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('test_all_groups_fans_out_with_concurrency_4', async () => {
+    // Set up 6 groups in tempdir
+    tmpDir = makeTempGroupsDir(
+      Array.from({ length: 6 }, (_, i) => ({ folder: `group-${i}`, agentGroupId: `ag-${i}` })),
+    );
+    setGroupsDirForTest(tmpDir);
+
+    const store = new MnemonStore({ enabled: true, recall_scope: 'all-groups' });
+
+    // Track max concurrent spawns
+    let concurrent = 0;
+    let maxConcurrent = 0;
+
+    mockSpawn.mockImplementation(() => {
+      concurrent++;
+      if (concurrent > maxConcurrent) maxConcurrent = concurrent;
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+        kill: ReturnType<typeof vi.fn>;
+      };
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = vi.fn();
+      // Simulate async completion
+      setTimeout(() => {
+        child.stdout.emit('data', Buffer.from(makeRecallResult([{ id: `fact-${concurrent}`, content: 'c' }])));
+        child.emit('close', 0);
+        concurrent--;
+      }, 10);
+      return child as unknown as ReturnType<typeof spawn>;
+    });
+
+    const result = await store.recall('ag-0', 'query');
+
+    expect(maxConcurrent).toBeLessThanOrEqual(4);
+    expect(mockSpawn).toHaveBeenCalledTimes(6);
+    expect(result.facts.length).toBeGreaterThan(0);
+  }, 5000);
+
+  it('test_per_store_timeout_aborts_child', async () => {
+    tmpDir = makeTempGroupsDir([
+      { folder: 'g1', agentGroupId: 'ag-1' },
+      { folder: 'g2', agentGroupId: 'ag-2' },
+    ]);
+    setGroupsDirForTest(tmpDir);
+
+    const store = new MnemonStore({ enabled: true, recall_scope: 'all-groups' });
+
+    let abortCalled = false;
+
+    // First store never exits (will be aborted by timeout)
+    const slowChild = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+      kill: ReturnType<typeof vi.fn>;
+    };
+    slowChild.stdout = new EventEmitter();
+    slowChild.stderr = new EventEmitter();
+    slowChild.kill = vi.fn((signal?: string) => {
+      abortCalled = true;
+      setImmediate(() => slowChild.emit('close', 1));
+    });
+
+    // Second store responds quickly with one fact
+    const fastChild = makeChildMock({ stdout: makeRecallResult([{ id: 'fast-fact', content: 'fast' }]) });
+
+    mockSpawn
+      .mockReturnValueOnce(slowChild as unknown as ReturnType<typeof spawn>)
+      .mockReturnValueOnce(fastChild as unknown as ReturnType<typeof spawn>);
+
+    const startTime = Date.now();
+    const result = await store.recall('ag-1', 'query');
+    const elapsed = Date.now() - startTime;
+
+    // Slow store got killed
+    expect(abortCalled).toBe(true);
+    // Completed within ~2x the per-store timeout (1500ms * 2 = 3000ms)
+    expect(elapsed).toBeLessThan(3500);
+    // Fast store still contributed
+    expect(result.facts.some((f) => f.id === 'fast-fact')).toBe(true);
+  }, 5000);
+
+  it('test_partial_failure_tolerance', async () => {
+    tmpDir = makeTempGroupsDir([
+      { folder: 'g1', agentGroupId: 'ag-1' },
+      { folder: 'g2', agentGroupId: 'ag-2' },
+      { folder: 'g3', agentGroupId: 'ag-3' },
+    ]);
+    setGroupsDirForTest(tmpDir);
+
+    const store = new MnemonStore({ enabled: true, recall_scope: 'all-groups' });
+
+    const goodChild1 = makeChildMock({ stdout: makeRecallResult([{ id: 'good-1', content: 'c1' }]) });
+    const goodChild2 = makeChildMock({ stdout: makeRecallResult([{ id: 'good-2', content: 'c2' }]) });
+    const badChild = makeChildMock({ throwError: true }); // will fail
+
+    mockSpawn
+      .mockReturnValueOnce(goodChild1 as unknown as ReturnType<typeof spawn>)
+      .mockReturnValueOnce(badChild as unknown as ReturnType<typeof spawn>)
+      .mockReturnValueOnce(goodChild2 as unknown as ReturnType<typeof spawn>);
+
+    const result = await store.recall('ag-1', 'query');
+
+    // 2 successful stores still contributed
+    expect(result.facts.length).toBeGreaterThan(0);
+    const ids = result.facts.map((f) => f.id);
+    expect(ids).toContain('good-1');
+    expect(ids).toContain('good-2');
+  }, 5000);
+
+  it('test_merge_via_rrf', async () => {
+    tmpDir = makeTempGroupsDir([
+      { folder: 'g1', agentGroupId: 'ag-1' },
+      { folder: 'g2', agentGroupId: 'ag-2' },
+    ]);
+    setGroupsDirForTest(tmpDir);
+
+    const store = new MnemonStore({ enabled: true, recall_scope: 'all-groups' });
+
+    // Both stores return fact with same id 'shared-fact'
+    const store1Result = makeRecallResult([
+      { id: 'shared-fact', content: 'shared content' },
+      { id: 'unique-1', content: 'unique to store 1' },
+    ]);
+    const store2Result = makeRecallResult([
+      { id: 'shared-fact', content: 'shared content' },
+      { id: 'unique-2', content: 'unique to store 2' },
+    ]);
+
+    const child1 = makeChildMock({ stdout: store1Result });
+    const child2 = makeChildMock({ stdout: store2Result });
+    mockSpawn
+      .mockReturnValueOnce(child1 as unknown as ReturnType<typeof spawn>)
+      .mockReturnValueOnce(child2 as unknown as ReturnType<typeof spawn>);
+
+    const result = await store.recall('ag-1', 'query', { limit: 10 });
+
+    // shared-fact appears only once (RRF dedup)
+    const sharedFacts = result.facts.filter((f) => f.id === 'shared-fact');
+    expect(sharedFacts).toHaveLength(1);
+    // shared-fact should rank first (contributed to both stores → higher RRF score)
+    expect(result.facts[0].id).toBe('shared-fact');
+  }, 5000);
+
+  it('test_outer_signal_propagation', async () => {
+    tmpDir = makeTempGroupsDir([
+      { folder: 'g1', agentGroupId: 'ag-1' },
+      { folder: 'g2', agentGroupId: 'ag-2' },
+    ]);
+    setGroupsDirForTest(tmpDir);
+
+    const store = new MnemonStore({ enabled: true, recall_scope: 'all-groups' });
+
+    const killCalls: string[] = [];
+
+    const makeNeverExitChild = (label: string) => {
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+        kill: ReturnType<typeof vi.fn>;
+      };
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = vi.fn((signal?: string) => {
+        killCalls.push(`${label}:${signal ?? 'default'}`);
+        setImmediate(() => child.emit('close', 1));
+      });
+      return child;
+    };
+
+    const child1 = makeNeverExitChild('c1');
+    const child2 = makeNeverExitChild('c2');
+    mockSpawn
+      .mockReturnValueOnce(child1 as unknown as ReturnType<typeof spawn>)
+      .mockReturnValueOnce(child2 as unknown as ReturnType<typeof spawn>);
+
+    const outerController = new AbortController();
+    const recallPromise = store.recall('ag-1', 'query', { signal: outerController.signal });
+
+    // Abort the outer signal after a short delay
+    setTimeout(() => outerController.abort(), 50);
+
+    await recallPromise;
+
+    // Both children should have been killed (signal propagated)
+    expect(killCalls.length).toBeGreaterThan(0);
+  }, 5000);
 });

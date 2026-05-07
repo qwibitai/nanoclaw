@@ -56,6 +56,22 @@ export interface AdditionalMountConfig {
 
 export interface MemoryConfig {
   enabled: boolean;
+  feedback_enabled?: boolean;
+  query_strategy?: 'raw' | 'heuristic' | 'llm';
+  recall_scope?: 'self' | 'all-groups' | string[];
+}
+
+export function isFeedbackEnabled(cfg: MemoryConfig | undefined): boolean {
+  if (!cfg?.enabled) return false;
+  return cfg.feedback_enabled !== false;
+}
+
+export function getQueryStrategy(cfg: MemoryConfig | undefined): 'raw' | 'heuristic' | 'llm' {
+  return cfg?.query_strategy ?? 'raw';
+}
+
+export function getRecallScope(cfg: MemoryConfig | undefined): 'self' | 'all-groups' | string[] {
+  return cfg?.recall_scope ?? 'self';
 }
 
 export interface ContainerConfig {

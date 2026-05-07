@@ -6,6 +6,10 @@ import type Database from 'better-sqlite3';
 import type { FactInput, MemoryStore, RecallResult, RecalledFact, RememberResult } from './store.js';
 import { redactSecrets } from './secret-redactor.js';
 import { openMnemonIngestDb, runMnemonIngestMigrations } from '../../db/migrations/019-mnemon-ingest-db.js';
+import type { MemoryConfig } from '../../container-config.js';
+import { getRecallScope } from '../../container-config.js';
+import { resolveRecallScope } from './scope-resolver.js';
+import { mergeAndRerank } from './rrf.js';
 
 interface RedactionRecorder {
   recordRedaction(agentGroupId: string, reason: string): void;
@@ -48,6 +52,22 @@ const MNEMON_BIN = path.join(homedir(), '.local', 'bin', 'mnemon');
 // reveal window. If mnemon ever moves to a long-lived daemon, this can drop.
 const DEFAULT_TIMEOUT_MS = 3000;
 const SIGKILL_GRACE_MS = 500;
+const FAN_OUT_CONCURRENCY = 4;
+const FAN_OUT_STORE_TIMEOUT_MS = 1500;
+
+async function pMap<T, R>(items: T[], mapper: (item: T) => Promise<R>, concurrency: number): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  const queue = items.map((item, idx) => ({ item, idx }));
+  const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
+    while (queue.length > 0) {
+      const next = queue.shift();
+      if (!next) break;
+      results[next.idx] = await mapper(next.item);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 interface MnemonRecallResult {
   results?: Array<{
@@ -115,10 +135,21 @@ function spawnMnemon(args: string[], signal?: AbortSignal): Promise<{ stdout: st
 }
 
 export class MnemonStore implements MemoryStore {
-  async recall(
+  private memoryConfig: MemoryConfig | undefined;
+
+  constructor(memoryConfig?: MemoryConfig) {
+    this.memoryConfig = memoryConfig;
+  }
+
+  /** For tests: update the memory config on an existing instance. */
+  setMemoryConfigForTest(cfg: MemoryConfig | undefined): void {
+    this.memoryConfig = cfg;
+  }
+
+  private async recallSingleStore(
     agentGroupId: string,
     query: string,
-    opts: { limit?: number; timeoutMs?: number; signal?: AbortSignal } = {},
+    opts: { limit?: number; timeoutMs?: number; signal?: AbortSignal },
   ): Promise<RecallResult> {
     const start = Date.now();
     const { limit = 10, timeoutMs = DEFAULT_TIMEOUT_MS } = opts;
@@ -171,6 +202,88 @@ export class MnemonStore implements MemoryStore {
       clearTimeout(timeout);
       return empty();
     }
+  }
+
+  async recall(
+    agentGroupId: string,
+    query: string,
+    opts: {
+      limit?: number;
+      timeoutMs?: number;
+      signal?: AbortSignal;
+      recallScope?: 'self' | 'all-groups' | string[];
+    } = {},
+  ): Promise<RecallResult> {
+    const start = Date.now();
+    const { limit = 10 } = opts;
+
+    // Per-call recallScope override takes precedence over the constructor-injected
+    // memoryConfig — production callers (recall-injection.ts) resolve config from
+    // their cached MemoryConfig and pass it explicitly, since the singleton
+    // MnemonStore is created without config (E4 fix).
+    const scope = opts.recallScope ?? getRecallScope(this.memoryConfig);
+    const groupIds = resolveRecallScope(agentGroupId, scope);
+
+    // Single-store fast path: scope='self' or resolved to just the calling group.
+    if (groupIds.length <= 1) {
+      return this.recallSingleStore(agentGroupId, query, opts);
+    }
+
+    // Multi-store fan-out path.
+    const perStoreResults = await pMap(
+      groupIds,
+      async (groupId) => {
+        const storeController = new AbortController();
+        const storeTimeout = setTimeout(() => storeController.abort(), FAN_OUT_STORE_TIMEOUT_MS);
+        // Forward outer cancellation into this store's signal.
+        const storeSignal = opts.signal ? anySignal([opts.signal, storeController.signal]) : storeController.signal;
+
+        try {
+          const result = await this.recallSingleStore(groupId, query, {
+            limit,
+            timeoutMs: FAN_OUT_STORE_TIMEOUT_MS,
+            signal: storeSignal,
+          });
+          clearTimeout(storeTimeout);
+          return {
+            storeId: groupId,
+            facts: result.facts.map((f) => ({
+              id: f.id,
+              content: f.content,
+              category: f.category,
+              importance: f.importance,
+              entities: f.entities,
+              score: f.score,
+              createdAt: f.createdAt,
+            })),
+            failed: false,
+          };
+        } catch {
+          clearTimeout(storeTimeout);
+          return { storeId: groupId, facts: [], failed: true };
+        }
+      },
+      FAN_OUT_CONCURRENCY,
+    );
+
+    const merged = mergeAndRerank(perStoreResults, limit);
+
+    const facts: RecalledFact[] = merged.map((f) => ({
+      id: f.id,
+      content: f.content,
+      category: (f.category ?? 'fact') as FactInput['category'],
+      importance: f.importance ?? 3,
+      entities: f.entities ?? [],
+      score: f.score,
+      createdAt: f.createdAt ?? '',
+    }));
+
+    return {
+      facts,
+      totalAvailable: facts.length,
+      latencyMs: Date.now() - start,
+      fromCache: false,
+    };
   }
 
   async remember(

@@ -2,6 +2,9 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { DATA_DIR } from '../../config.js';
+import { runMnemonRecallFeedbackMigration } from './021-mnemon-recall-feedback.js';
+import { runMnemonDaemonStateMigration } from './022-mnemon-daemon-state.js';
+import { runMnemonRecallFactContentMigration } from './023-mnemon-recall-fact-content.js';
 
 export const MNEMON_INGEST_DB_PATH = path.join(DATA_DIR, 'mnemon-ingest.db');
 
@@ -148,4 +151,8 @@ export function runMnemonIngestMigrations(db: Database.Database): void {
       );
     })();
   }
+
+  runMnemonRecallFeedbackMigration(db);
+  runMnemonDaemonStateMigration(db);
+  runMnemonRecallFactContentMigration(db);
 }
