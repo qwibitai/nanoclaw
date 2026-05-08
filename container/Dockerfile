@@ -111,7 +111,11 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 #     binary (linux-arm64 variant on our image). Without the allowlist
 #     the SDK fails at spawn time with "native binary not found".
 ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
+# pnpm 10 dropped global bins directly under PNPM_HOME; pnpm 11 puts
+# them under PNPM_HOME/bin. Include both so corepack-driven version
+# upgrades don't break global-CLI lookups (vercel, agent-browser,
+# claude-code) at install or runtime.
+ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"
 RUN corepack enable
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
