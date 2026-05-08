@@ -60,8 +60,16 @@ function emptyConfig(): ContainerConfig {
   return {
     mcpServers: {
       'qmd-public': {
-        command: 'socat',
-        args: ['STDIO', 'TCP:host.docker.internal:7333'],
+        // The QMD daemons on the host are wrapped by supergateway with
+        // --outputTransport streamableHttp, exposing MCP-over-HTTP at
+        // host.docker.internal:7333/mcp. supergateway is also the right
+        // tool for the reverse direction — running it inside the container
+        // with --streamableHttp gives Claude Code a clean stdio MCP server
+        // that proxies to the host's HTTP endpoint. We `npx -y` it so the
+        // base image doesn't need supergateway preinstalled (it has node
+        // + npx + internet); the package caches after first run.
+        command: 'npx',
+        args: ['-y', 'supergateway', '--streamableHttp', 'http://host.docker.internal:7333/mcp', '--logLevel', 'none'],
         instructions: 'QMD public index \u2014 mcp__qmd-public__query',
       },
     },
