@@ -310,6 +310,10 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         } catch (retryErr) {
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           log(`Retry after context-too-long also failed: ${retryMsg}`);
+          // The failed retry's `init` event may have re-persisted a
+          // continuation. Clear it again so the next turn starts clean.
+          continuation = undefined;
+          clearContinuation(config.providerName);
         }
       } else if (!recovered && continuation && config.provider.isSessionInvalid(err)) {
         // Stale/corrupt continuation — most often a transcript .jsonl
@@ -345,6 +349,10 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         } catch (retryErr) {
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           log(`Retry after stale-session recovery also failed: ${retryMsg}`);
+          // The failed retry's `init` event may have re-persisted a
+          // continuation. Clear it again so the next turn starts clean.
+          continuation = undefined;
+          clearContinuation(config.providerName);
         }
       }
 

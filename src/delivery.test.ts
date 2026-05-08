@@ -26,7 +26,14 @@ vi.mock('./config.js', async () => {
 
 const TEST_DIR = '/tmp/nanoclaw-test-delivery';
 
-import { initTestDb, closeDb, runMigrations, createAgentGroup, createMessagingGroup, createMessagingGroupAgent } from './db/index.js';
+import {
+  initTestDb,
+  closeDb,
+  runMigrations,
+  createAgentGroup,
+  createMessagingGroup,
+  createMessagingGroupAgent,
+} from './db/index.js';
 import { getDeliveredIds } from './db/session-db.js';
 import { resolveSession, outboundDbPath, openInboundDb } from './session-manager.js';
 import { deliverSessionMessages, setDeliveryAdapter } from './delivery.js';
@@ -339,10 +346,12 @@ describe('deliverSessionMessages — permission check', () => {
 
     // Insert an outbound message targeting mg-2 (discord) — not the origin chat
     const outDb = new Database(outboundDbPath('ag-1', session.id));
-    outDb.prepare(
-      `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
+    outDb
+      .prepare(
+        `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
        VALUES (?, datetime('now'), 'chat', 'discord:456', 'discord', ?)`,
-    ).run('out-unauth', JSON.stringify({ text: 'sneaky' }));
+      )
+      .run('out-unauth', JSON.stringify({ text: 'sneaky' }));
     outDb.close();
 
     const calls: string[] = [];
