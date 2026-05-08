@@ -14,7 +14,7 @@ import { runMigrations } from './db/migrations/index.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
-import { routeInbound } from './router.js';
+import { routeInbound, awaitInboundDrain } from './router.js';
 import { log } from './log.js';
 
 // Response + shutdown registries live in response-registry.ts to break the
@@ -169,6 +169,16 @@ async function main(): Promise<void> {
 /** Graceful shutdown. */
 async function shutdown(signal: string): Promise<void> {
   log.info('Shutdown signal received', { signal });
+  // Drain in-flight inbound routing before tearing anything down. This gives
+  // any agent turn currently processing time to write its outbound reply through
+  // the delivery pipeline before we stop polls and tear down channel adapters.
+  // If polls were stopped first, pending outbound writes could hang forever.
+  //
+  // INBOUND_DRAIN_TIMEOUT_MS defaults to 30 000 ms — long enough for a normal
+  // agent reply (typically 3–15 s), short enough that a hung agent cannot
+  // indefinitely block launchd restart.
+  const drainTimeoutMs = Number(process.env.INBOUND_DRAIN_TIMEOUT_MS ?? 30_000);
+  await awaitInboundDrain(drainTimeoutMs);
   for (const cb of getShutdownCallbacks()) {
     try {
       await cb();
