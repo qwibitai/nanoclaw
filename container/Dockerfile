@@ -277,13 +277,15 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 #     the SDK fails at spawn time with "native binary not found".
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-# Pin pnpm to a known-good 10.x via corepack. Without a pin, corepack resolves
-# whatever's "latest" (currently pnpm 11), which introduced two breaking changes
-# we hit on rebuild: (1) global bin moved to $PNPM_HOME/bin (PATH miss), and
-# (2) `blockExoticSubdeps=true` by default rejects git-resolved subdeps like
-# `tree-sitter-dart` inside `gitnexus`. Pinning preserves the behavior the
-# global-install block below was written against.
-RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+# Pin pnpm to match the host (package.json packageManager). pnpm 11 stopped
+# honoring `only-built-dependencies[]=` in .npmrc for global installs, which
+# silently skips claude-code's native-binary postinstall and agent-browser's
+# bin chmod — the agent then crashes at runtime with "native binary not
+# installed". 10.x also avoids pnpm 11's `blockExoticSubdeps=true` default
+# which rejects git-resolved subdeps like `tree-sitter-dart` inside gitnexus.
+# Keep this in lockstep with package.json's `packageManager`.
+ARG PNPM_VERSION=10.33.0
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     echo "only-built-dependencies[]=agent-browser" > /root/.npmrc && \

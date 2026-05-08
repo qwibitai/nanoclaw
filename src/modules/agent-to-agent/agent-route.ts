@@ -24,10 +24,11 @@ import path from 'path';
 import { isSafeAttachmentName } from '../../attachment-safety.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { getDb } from '../../db/connection.js';
+import { getInboundSourceSessionId, getMostRecentPeerSourceSessionId } from '../../db/session-db.js';
 import { getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
 import { log } from '../../log.js';
-import { resolveSession, sessionDir, writeSessionMessage } from '../../session-manager.js';
+import { openInboundDb, resolveSession, sessionDir, writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { hasDestination } from './db/agent-destinations.js';
 
@@ -102,6 +103,79 @@ export interface RoutableAgentMessage {
   id: string;
   platform_id: string | null;
   content: string;
+  /**
+   * For replies, the id of the inbound message being replied to. The
+   * container's formatter sets this from the first inbound in the batch
+   * (`container/agent-runner/src/formatter.ts`). Used here to route the
+   * reply back to the originating session — see `resolveTargetSession`.
+   */
+  in_reply_to: string | null;
+}
+
+/**
+ * Pick which session of `targetAgentGroupId` should receive this a2a message.
+ *
+ * Three layers, highest-fidelity first:
+ *
+ * 1. **Direct return-path** (in_reply_to lookup): if the message is a reply
+ *    (`in_reply_to` set), open the source agent's inbound DB and read the
+ *    triggering row's `source_session_id`. That column was stamped when the
+ *    original outbound was routed — it's the session that started the
+ *    conversation, and replies should land there even when the target has
+ *    multiple active sessions.
+ *
+ * 2. **Peer-affinity fallback**: if (1) misses (in_reply_to is null or the
+ *    referenced row isn't an a2a inbound), look up the most recent a2a
+ *    inbound *from the target agent group* in source's inbound and use its
+ *    `source_session_id`. The intuition: the last time this peer talked to
+ *    me, which target session was driving? Route the reply there, since
+ *    that's the session most plausibly in active conversation.
+ *
+ * 3. **Newest active session**: legacy heuristic. Used when no prior a2a
+ *    has been recorded with `source_session_id` (e.g. fresh installs,
+ *    pre-migration data).
+ */
+interface SessionFallback {
+  mgId: string | null;
+  threadId: string | null;
+  mode: 'per-thread' | 'agent-shared';
+}
+
+function resolveTargetSession(
+  msg: RoutableAgentMessage,
+  sourceSession: Session,
+  targetAgentGroupId: string,
+  fallback: SessionFallback,
+): Session {
+  const srcDb = openInboundDb(sourceSession.agent_group_id, sourceSession.id);
+  let originSessionId: string | null = null;
+  try {
+    if (msg.in_reply_to) {
+      originSessionId = getInboundSourceSessionId(srcDb, msg.in_reply_to);
+    }
+    if (!originSessionId) {
+      // Peer-affinity fallback — covers the case where the container's
+      // outbound write didn't carry in_reply_to (e.g. legacy MCP send_message
+      // path, container running pre-fix code).
+      originSessionId = getMostRecentPeerSourceSessionId(srcDb, targetAgentGroupId);
+    }
+  } finally {
+    srcDb.close();
+  }
+  if (originSessionId) {
+    const candidate = getSession(originSessionId);
+    if (candidate && candidate.agent_group_id === targetAgentGroupId && candidate.status === 'active') {
+      // Cross-tenant security: only honor return-path if the candidate
+      // session matches the caller's effective messaging-group context.
+      // When fallback.mgId is null (caller is agent-shared or target
+      // isn't wired to caller's mg), accept any active session in the
+      // target group — return-path was already vetted at write time.
+      if (fallback.mgId === null || candidate.messaging_group_id === fallback.mgId) {
+        return candidate;
+      }
+    }
+  }
+  return resolveSession(targetAgentGroupId, fallback.mgId, fallback.threadId, fallback.mode).session;
 }
 
 export async function routeAgentMessage(msg: RoutableAgentMessage, session: Session): Promise<void> {
@@ -160,7 +234,14 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
   const effectiveMgId = inheritMg ? callerMgId : null;
   const effectiveThreadId = inheritMg ? callerThreadId : null;
   const targetMode: 'per-thread' | 'agent-shared' = effectiveMgId ? 'per-thread' : 'agent-shared';
-  const { session: targetSession } = resolveSession(targetAgentGroupId, effectiveMgId, effectiveThreadId, targetMode);
+  // Return-path lookup (in_reply_to → source_session_id) takes precedence
+  // when the candidate session matches the caller's effective mg context;
+  // otherwise we fall through to the threading-aware resolveSession.
+  const targetSession = resolveTargetSession(msg, session, targetAgentGroupId, {
+    mgId: effectiveMgId,
+    threadId: effectiveThreadId,
+    mode: targetMode,
+  });
   const a2aMsgId = `a2a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // If the source message references files (via `send_file`), forward the
@@ -178,6 +259,7 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
     channelType: 'agent',
     threadId: null,
     content: forwardedContent,
+    sourceSessionId: session.id,
   });
   log.info('Agent message routed', {
     from: session.agent_group_id,

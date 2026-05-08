@@ -458,6 +458,76 @@ describe('routing', () => {
   });
 });
 
+describe('origin metadata (from= attribute)', () => {
+  function seedDestination(name: string, channelType: string, platformId: string): void {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES (?, ?, 'channel', ?, ?, NULL)`,
+      )
+      .run(name, name, channelType, platformId);
+  }
+
+  function insertWithRouting(id: string, kind: string, content: object, channelType: string | null, platformId: string | null): void {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
+         VALUES (?, ?, datetime('now'), 'pending', ?, ?, ?)`,
+      )
+      .run(id, kind, platformId, channelType, JSON.stringify(content));
+  }
+
+  it('chat message includes from= when destination matches', () => {
+    seedDestination('discord-main', 'discord', 'chan-1');
+    insertWithRouting('m1', 'chat', { sender: 'Alice', text: 'hi' }, 'discord', 'chan-1');
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).toContain('from="discord-main"');
+  });
+
+  it('chat message falls back to raw routing when no destination matches', () => {
+    insertWithRouting('m1', 'chat', { sender: 'Alice', text: 'hi' }, 'telegram', 'chat-999');
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).toContain('from="unknown:telegram:chat-999"');
+  });
+
+  it('chat message omits from= when routing is null', () => {
+    insertMessage('m1', 'chat', { sender: 'Alice', text: 'hi' });
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).not.toContain('from=');
+  });
+
+  it('task message includes from= when destination matches', () => {
+    seedDestination('slack-ops', 'slack', 'C-OPS');
+    insertWithRouting('t1', 'task', { prompt: 'check status' }, 'slack', 'C-OPS');
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).toContain('<task');
+    expect(prompt).toContain('from="slack-ops"');
+  });
+
+  it('task message omits from= when routing is null', () => {
+    insertMessage('t1', 'task', { prompt: 'check status' });
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).toContain('<task');
+    expect(prompt).not.toContain('from=');
+  });
+
+  it('webhook message includes from= when destination matches', () => {
+    seedDestination('github-ch', 'github', 'repo-1');
+    insertWithRouting('w1', 'webhook', { source: 'github', event: 'push', payload: {} }, 'github', 'repo-1');
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).toContain('<webhook');
+    expect(prompt).toContain('from="github-ch"');
+  });
+
+  it('system message includes from= when destination matches', () => {
+    seedDestination('discord-main', 'discord', 'chan-1');
+    insertWithRouting('s1', 'system', { action: 'test', status: 'ok', result: null }, 'discord', 'chan-1');
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).toContain('<system_response');
+    expect(prompt).toContain('from="discord-main"');
+  });
+});
+
 describe('mock provider', () => {
   it('should produce init + result events', async () => {
     const provider = new MockProvider({}, (prompt) => `Echo: ${prompt}`);

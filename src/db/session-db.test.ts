@@ -10,7 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { migrateMessagesInTable } from './session-db.js';
+import { getInboundSourceSessionId, migrateMessagesInTable } from './session-db.js';
 
 const TEST_DIR = '/tmp/nanoclaw-session-db-test';
 const DB_PATH = path.join(TEST_DIR, 'inbound.db');
@@ -53,6 +53,42 @@ describe('migrateMessagesInTable', () => {
       series_id: string;
     };
     expect(row.series_id).toBe('legacy-1');
+    db.close();
+  });
+
+  it('adds source_session_id on a legacy DB, leaves existing rows NULL, is idempotent', () => {
+    if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
+    fs.mkdirSync(TEST_DIR, { recursive: true });
+
+    const db = new Database(DB_PATH);
+    db.exec(`
+      CREATE TABLE messages_in (
+        id             TEXT PRIMARY KEY,
+        seq            INTEGER UNIQUE,
+        kind           TEXT NOT NULL,
+        timestamp      TEXT NOT NULL,
+        status         TEXT DEFAULT 'pending',
+        process_after  TEXT,
+        recurrence     TEXT,
+        tries          INTEGER DEFAULT 0,
+        platform_id    TEXT,
+        channel_type   TEXT,
+        thread_id      TEXT,
+        content        TEXT NOT NULL
+      );
+    `);
+    db.prepare(
+      "INSERT INTO messages_in (id, seq, kind, timestamp, status, content) VALUES (?, ?, 'chat', datetime('now'), 'pending', '{}')",
+    ).run('legacy-2', 2);
+
+    migrateMessagesInTable(db);
+    migrateMessagesInTable(db); // idempotent
+
+    const cols = (db.prepare("PRAGMA table_info('messages_in')").all() as Array<{ name: string }>).map((c) => c.name);
+    expect(cols).toContain('source_session_id');
+
+    expect(getInboundSourceSessionId(db, 'legacy-2')).toBeNull();
+    expect(getInboundSourceSessionId(db, 'does-not-exist')).toBeNull();
     db.close();
   });
 });

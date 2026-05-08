@@ -259,6 +259,41 @@ Tell the user:
 - To manage secrets: `onecli secrets list`, or open ${ONECLI_URL}
 - To add rate limits or policies: `onecli rules create --help`
 
+## Granting secrets to agents (safe merge)
+
+`set-secrets` **replaces** the agent's entire secret list — it never appends. Always read the current list first and merge before calling it. This pattern is canonical across all skills that assign secrets:
+
+```bash
+AGENT_ID=$(onecli agents list | jq -r '.data[] | select(.identifier=="<agentGroupId>") | .id')
+CURRENT=$(onecli agents secrets --id "$AGENT_ID" | jq -r '[.data[]] | join(",")')
+MERGED=$(printf '%s' "$CURRENT,<new-secret-id>" | tr ',' '\n' | sort -u | paste -sd ',' -)
+onecli agents set-secrets --id "$AGENT_ID" --secret-ids "$MERGED"
+onecli agents secrets --id "$AGENT_ID"
+```
+
+- `<agentGroupId>` — the `agentGroupId` field in `groups/<folder>/container.json`
+- `<new-secret-id>` — the `id` from `onecli secrets list`
+- Multiple new secrets: append them comma-separated before the `printf` step
+
+### git over HTTPS
+
+OneCLI's proxy injects credentials proactively — `injections_applied=1` appears in `docker logs onecli` even when git sends no auth header. However, OneCLI sets `SSL_CERT_FILE` for Node/Python/Deno but not `GIT_SSL_CAINFO`. Without it, git rejects the OneCLI MITM certificate.
+
+**Auth format matters**: GitHub's git smart HTTP protocol (`github.com`) requires `Basic` auth, not `Bearer`. GitHub's REST API (`api.github.com`) accepts `Bearer`. These must be configured as separate secrets with different formats — see `/add-github` for the full setup.
+
+If an agent uses `git` or `gh`, add to `data/v2-sessions/<agent-group-id>/.claude-shared/settings.json`:
+
+```json
+"GIT_SSL_CAINFO": "/tmp/onecli-combined-ca.pem",
+"GIT_TERMINAL_PROMPT": "0",
+"GIT_CONFIG_COUNT": "1",
+"GIT_CONFIG_KEY_0": "credential.helper",
+"GIT_CONFIG_VALUE_0": "",
+"GH_TOKEN": "ghp_onecli_proxy_replaces_this"
+```
+
+**Debugging injection**: `docker logs onecli 2>&1 | grep "github.com"` shows every request with `injections_applied=N` and the HTTP status. If `injections_applied=1` but status is still 401, the injected credential value is wrong or uses the wrong auth format for that endpoint.
+
 ## Troubleshooting
 
 **"OneCLI gateway not reachable" in logs:** The gateway isn't running. Check with `curl -sf ${ONECLI_URL}/health`. Start it with `onecli start` if needed.

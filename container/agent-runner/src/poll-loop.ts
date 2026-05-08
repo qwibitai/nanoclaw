@@ -13,6 +13,7 @@ import {
   setStickyEffort,
   clearStickyEffort,
 } from './db/session-state.js';
+import { clearCurrentInReplyTo, setCurrentInReplyTo } from './current-batch.js';
 import {
   formatMessages,
   extractRouting,
@@ -215,6 +216,9 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // skipped task rows were marked completed by the pre-task block, and
     // we only claimed the rows that actually reach the prompt.
     const processingIds = keptIds;
+    // Publish the batch's in_reply_to so MCP tools (send_message, send_file)
+    // can stamp it on outbound rows — needed for a2a return-path routing.
+    setCurrentInReplyTo(routing.inReplyTo);
     try {
       const result = await processQuery(query, routing, processingIds, config.providerName);
       if (result.continuation && result.continuation !== continuation) {
@@ -355,6 +359,10 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
           content: JSON.stringify({ text: `Error: ${errMsg}` }),
         });
       }
+    } finally {
+      // Always clear the per-batch in_reply_to so MCP tools don't stamp
+      // stale routing on the next turn (a2a return-path safety).
+      clearCurrentInReplyTo();
     }
 
     // Per-turn safety net: checkpoint any uncommitted worktree edits so the
@@ -661,7 +669,9 @@ function handleEvent(event: ProviderEvent, routing: RoutingContext): void {
       log(`Result: ${event.text ? event.text.slice(0, 200) : '(empty)'}`);
       break;
     case 'error':
-      log(`Error: ${event.message} (retryable: ${event.retryable}${event.classification ? `, ${event.classification}` : ''})`);
+      log(
+        `Error: ${event.message} (retryable: ${event.retryable}${event.classification ? `, ${event.classification}` : ''})`,
+      );
       break;
     case 'progress':
       log(`Progress: ${event.message}`);
