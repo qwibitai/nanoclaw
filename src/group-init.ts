@@ -82,6 +82,12 @@ const REQUIRED_SETTINGS: Record<string, unknown> = {
 // Pre-compaction hook (container-side): runs before the SDK auto-compacts so
 // destination/routing reminders survive the compaction window. Reconciled by
 // shape — if the file is missing the hook entry it's restored on next init.
+//
+// Pre-tool-use Bash hook: routes every Bash invocation through `rtk hook claude`
+// (https://github.com/rtk-ai/rtk), which transparently rewrites commands like
+// `git status` into `rtk git status` to compress output before it returns to
+// the SDK. Equivalent to running `rtk init -g` on a normal Claude Code install,
+// but pre-baked so we never need to run that command per container.
 const REQUIRED_HOOKS = {
   PreCompact: [
     {
@@ -89,6 +95,17 @@ const REQUIRED_HOOKS = {
         {
           type: 'command',
           command: 'bun /app/src/compact-instructions.ts',
+        },
+      ],
+    },
+  ],
+  PreToolUse: [
+    {
+      matcher: 'Bash',
+      hooks: [
+        {
+          type: 'command',
+          command: 'rtk hook claude',
         },
       ],
     },
@@ -152,6 +169,17 @@ function ensureRequiredSettings(settingsFile: string): boolean {
   const existingPreCompact = hooks.PreCompact as unknown[] | undefined;
   if (!existingPreCompact || !JSON.stringify(existingPreCompact).includes('compact-instructions.ts')) {
     hooks.PreCompact = JSON.parse(JSON.stringify(REQUIRED_HOOKS.PreCompact));
+    changed = true;
+  }
+  // PreToolUse: present-or-add for the rtk Bash entry. Preserves any other
+  // operator-installed PreToolUse hooks alongside it.
+  const existingPreToolUse = hooks.PreToolUse as unknown[] | undefined;
+  const hasRtkHook = Array.isArray(existingPreToolUse)
+    && JSON.stringify(existingPreToolUse).includes('rtk hook claude');
+  if (!hasRtkHook) {
+    const next = Array.isArray(existingPreToolUse) ? [...existingPreToolUse] : [];
+    next.push(JSON.parse(JSON.stringify(REQUIRED_HOOKS.PreToolUse[0])));
+    hooks.PreToolUse = next;
     changed = true;
   }
   if (changed) {

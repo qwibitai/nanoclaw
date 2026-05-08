@@ -23,6 +23,19 @@
 ARG MCP_TOOLBOX_VERSION=1.1.0
 FROM us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox:${MCP_TOOLBOX_VERSION} AS mcp-toolbox-src
 
+# ---- rtk builder stage -------------------------------------------------------
+# RTK (https://github.com/rtk-ai/rtk) is a Rust binary used as a Bash
+# PreToolUse hook to compress command output (60-90% token savings). Upstream
+# only ships an aarch64-gnu binary built against glibc 2.39 (Ubuntu 24.04),
+# which doesn't run on bookworm's glibc 2.36. We compile from a pinned tag
+# in this builder stage and copy the resulting binary into the final image —
+# Rust toolchain stays in the builder layer, never reaches runtime.
+FROM rust:1-bookworm AS rtk-builder
+ARG RTK_VERSION=0.39.0
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo install --git https://github.com/rtk-ai/rtk --tag "v${RTK_VERSION}" --locked --root /out rtk
+
 FROM node:22-slim
 
 # ---- Build-time arguments ----------------------------------------------------
@@ -219,6 +232,12 @@ COPY hex-wrapper.sh /usr/local/bin/hex-wrapper.sh
 RUN chmod +x /usr/local/bin/hex-wrapper.sh \
     && ln -s /usr/local/bin/hex-wrapper.sh /usr/local/bin/hex \
     && /usr/local/bin/hex-real --version
+
+# rtk binary — built from the pinned tag in the rtk-builder stage at the top
+# of this Dockerfile. We don't use the upstream prebuilt aarch64 release
+# because it requires glibc 2.39 (we're on 2.36).
+COPY --from=rtk-builder /out/bin/rtk /usr/local/bin/rtk
+RUN /usr/local/bin/rtk --version
 
 # Chromium path for agent-browser / Playwright / mmdc consumers
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
