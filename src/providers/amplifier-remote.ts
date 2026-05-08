@@ -27,6 +27,7 @@ const FORWARDED_KEYS = [
   'AMPLIFIERD_WORKING_DIR',
   'AMPLIFIERD_MAX_PROMPT_BYTES',
   'AMPLIFIERD_TIMEOUT_MS',
+  'AMPLIFIERD_ATTACH_PULL_URL',
 ] as const;
 
 function parseCredsFile(content: string): Record<string, string> {

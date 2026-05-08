@@ -304,4 +304,183 @@ describe('AmplifierRemoteProvider', () => {
       expect(provider.isSessionInvalid(new Error('refused'))).toBe(false);
     });
   });
+
+  describe('extractAttachmentBasenames', () => {
+    it('finds basenames from LINE-style markers', () => {
+      expect(
+        __test.extractAttachmentBasenames(
+          '[Image: /workspace/attachments/foo.jpg]\n[File: doc.pdf at /workspace/attachments/doc.pdf]',
+        ),
+      ).toEqual(['foo.jpg', 'doc.pdf']);
+    });
+    it('handles basenames with spaces (LINE preserves original filenames)', () => {
+      expect(
+        __test.extractAttachmentBasenames(
+          '[File: Letter to Banks.pdf at /workspace/attachments/line-612998655787401523-Letter to Banks.pdf]',
+        ),
+      ).toEqual(['line-612998655787401523-Letter to Banks.pdf']);
+    });
+    it('terminates at ] so markers do not bleed into surrounding text', () => {
+      expect(
+        __test.extractAttachmentBasenames(
+          '[Image: /workspace/attachments/a.jpg] please describe',
+        ),
+      ).toEqual(['a.jpg']);
+    });
+    it('dedupes repeated paths', () => {
+      // Use bracketed form since unbracketed greedy-matches to end-of-line.
+      expect(
+        __test.extractAttachmentBasenames(
+          '[Image: /workspace/attachments/x.png]\n[Image: /workspace/attachments/x.png]',
+        ),
+      ).toEqual(['x.png']);
+    });
+    it('returns empty for prompts without attachments', () => {
+      expect(__test.extractAttachmentBasenames('plain text reply')).toEqual([]);
+    });
+  });
+
+  describe('rewriteAttachmentPaths', () => {
+    it('strips the leading slash from every occurrence', () => {
+      expect(
+        __test.rewriteAttachmentPaths(
+          '[File: a.pdf at /workspace/attachments/a.pdf] and again /workspace/attachments/a.pdf',
+        ),
+      ).toBe('[File: a.pdf at workspace/attachments/a.pdf] and again workspace/attachments/a.pdf');
+    });
+    it('leaves prompts without the prefix unchanged', () => {
+      expect(__test.rewriteAttachmentPaths('plain text /etc/passwd')).toBe('plain text /etc/passwd');
+    });
+    it('does not touch /workspace/agent or other /workspace/* paths', () => {
+      expect(__test.rewriteAttachmentPaths('/workspace/agent/notes.md')).toBe(
+        '/workspace/agent/notes.md',
+      );
+    });
+  });
+
+  describe('attachment ferry', () => {
+    const ENV_WITH_PULL = {
+      ...VALID_ENV,
+      AMPLIFIERD_ATTACH_PULL_URL: 'http://host.docker.internal:9091/sync',
+    };
+
+    it('skips puller and leaves prompt unchanged when env unset', async () => {
+      enqueueResponse(200, JSON.stringify({ session_id: 'sess-1' }));
+      enqueueResponse(200, JSON.stringify({ response: 'ok' }));
+
+      const provider = new AmplifierRemoteProvider({ env: VALID_ENV });
+      const q = provider.query({
+        prompt: '[Image: /workspace/attachments/foo.jpg]',
+        cwd: '/workspace',
+      });
+      q.end();
+      await collect(q.events);
+
+      expect(captured).toHaveLength(2);
+      expect(captured[0]!.path).toBe('/sessions');
+      expect(captured[1]!.path).toBe('/sessions/sess-1/execute');
+      // prompt forwarded unchanged
+      expect(JSON.parse(captured[1]!.body).prompt).toBe('[Image: /workspace/attachments/foo.jpg]');
+    });
+
+    it('skips puller when prompt has no attachment paths', async () => {
+      enqueueResponse(200, JSON.stringify({ session_id: 'sess-1' }));
+      enqueueResponse(200, JSON.stringify({ response: 'ok' }));
+
+      const provider = new AmplifierRemoteProvider({ env: ENV_WITH_PULL });
+      const q = provider.query({ prompt: 'just a plain message', cwd: '/workspace' });
+      q.end();
+      await collect(q.events);
+
+      expect(captured).toHaveLength(2);
+      expect(captured.find((c) => c.path === '/sync')).toBeUndefined();
+      // No attachments → no rewrite needed; prompt forwarded as-is.
+      expect(JSON.parse(captured[1]!.body).prompt).toBe('just a plain message');
+    });
+
+    it('POSTs each unique basename, then sends rewritten relative-path prompt', async () => {
+      enqueueResponse(200, '{}'); // puller foo.jpg
+      enqueueResponse(200, '{}'); // puller doc.pdf
+      enqueueResponse(200, JSON.stringify({ session_id: 'sess-1' }));
+      enqueueResponse(200, JSON.stringify({ response: 'ok' }));
+
+      const provider = new AmplifierRemoteProvider({ env: ENV_WITH_PULL });
+      const q = provider.query({
+        prompt:
+          '[Image: /workspace/attachments/foo.jpg]\n[File: doc.pdf at /workspace/attachments/doc.pdf]\n[Image: /workspace/attachments/foo.jpg]',
+        cwd: '/workspace',
+      });
+      q.end();
+      await collect(q.events);
+
+      expect(captured).toHaveLength(4);
+      expect(captured[0]!.path).toBe('/sync');
+      expect(JSON.parse(captured[0]!.body)).toEqual({ file: 'foo.jpg' });
+      expect(captured[1]!.path).toBe('/sync');
+      expect(JSON.parse(captured[1]!.body)).toEqual({ file: 'doc.pdf' });
+      expect(captured[2]!.path).toBe('/sessions');
+      expect(captured[3]!.path).toBe('/sessions/sess-1/execute');
+
+      const sentPrompt = JSON.parse(captured[3]!.body).prompt as string;
+      expect(sentPrompt).toContain('workspace/attachments/foo.jpg');
+      expect(sentPrompt).toContain('workspace/attachments/doc.pdf');
+      expect(sentPrompt).not.toContain('/workspace/attachments/');
+    });
+
+    it('throws (and skips executePrompt) when puller returns 503', async () => {
+      enqueueResponse(503, JSON.stringify({ detail: 'rsync exit 23: ssh: name or service not known' }));
+
+      const provider = new AmplifierRemoteProvider({ env: ENV_WITH_PULL });
+      const q = provider.query({
+        prompt: '[File: x.pdf at /workspace/attachments/x.pdf]',
+        cwd: '/workspace',
+      });
+      q.end();
+
+      const events = await collect(q.events);
+      const errs = events.filter((e) => e.type === 'error');
+      expect(errs).toHaveLength(1);
+      expect((errs[0] as { message: string }).message).toMatch(
+        /attachment ferry failed for "x\.pdf".*503.*rsync exit 23/,
+      );
+      expect(captured).toHaveLength(1);
+      expect(captured[0]!.path).toBe('/sync');
+    });
+
+    it('throws when puller returns 400 (validation rejection)', async () => {
+      enqueueResponse(400, JSON.stringify({ detail: 'invalid basename' }));
+
+      const provider = new AmplifierRemoteProvider({ env: ENV_WITH_PULL });
+      const q = provider.query({
+        prompt: '[File: weird.bin at /workspace/attachments/weird.bin]',
+        cwd: '/workspace',
+      });
+      q.end();
+
+      const events = await collect(q.events);
+      const errs = events.filter((e) => e.type === 'error');
+      expect(errs).toHaveLength(1);
+      expect((errs[0] as { message: string }).message).toMatch(/400.*invalid basename/);
+      expect(captured).toHaveLength(1);
+    });
+
+    it('throws when puller is unreachable (network error)', async () => {
+      enqueueError(new Error('ECONNREFUSED'));
+
+      const provider = new AmplifierRemoteProvider({ env: ENV_WITH_PULL });
+      const q = provider.query({
+        prompt: '[File: x.pdf at /workspace/attachments/x.pdf]',
+        cwd: '/workspace',
+      });
+      q.end();
+
+      const events = await collect(q.events);
+      const errs = events.filter((e) => e.type === 'error');
+      expect(errs).toHaveLength(1);
+      expect((errs[0] as { message: string }).message).toMatch(
+        /attachment ferry failed for "x\.pdf".*ECONNREFUSED/,
+      );
+      expect(captured).toHaveLength(1);
+    });
+  });
 });

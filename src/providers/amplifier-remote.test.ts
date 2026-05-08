@@ -45,7 +45,7 @@ AMPLIFIERD_BASE_URL=http://h:1
   });
 
   describe('FORWARDED_KEYS', () => {
-    it('exposes the six expected env vars', () => {
+    it('exposes the seven expected env vars', () => {
       expect(FORWARDED_KEYS).toEqual([
         'AMPLIFIERD_API_KEY',
         'AMPLIFIERD_BASE_URL',
@@ -53,6 +53,7 @@ AMPLIFIERD_BASE_URL=http://h:1
         'AMPLIFIERD_WORKING_DIR',
         'AMPLIFIERD_MAX_PROMPT_BYTES',
         'AMPLIFIERD_TIMEOUT_MS',
+        'AMPLIFIERD_ATTACH_PULL_URL',
       ]);
     });
   });

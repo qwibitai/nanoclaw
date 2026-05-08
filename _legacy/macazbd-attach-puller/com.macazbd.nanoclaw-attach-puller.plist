@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Install on macazbd as ~/Library/LaunchAgents/com.macazbd.nanoclaw-attach-puller.plist.
+  Edit the absolute paths below for your home dir.
+
+    launchctl load   ~/Library/LaunchAgents/com.macazbd.nanoclaw-attach-puller.plist
+    launchctl unload ~/Library/LaunchAgents/com.macazbd.nanoclaw-attach-puller.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.macazbd.nanoclaw-attach-puller</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>/Users/REPLACE_ME/.local/share/nanoclaw-attach-puller/puller.py</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>JIBOTMAC_SSH_HOST</key>
+    <string>jibotmac</string>
+    <key>JIBOTMAC_ATTACH_DIR</key>
+    <string>nanoclaw/data/attachments</string>
+    <key>ATTACH_DEST</key>
+    <string>/Users/REPLACE_ME/.local/share/nanoclaw-attachments</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/REPLACE_ME/.local/share/nanoclaw-attach-puller/puller.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/REPLACE_ME/.local/share/nanoclaw-attach-puller/puller.err.log</string>
+</dict>
+</plist>
