@@ -5,7 +5,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
 import { isSafeAttachmentName, routeAgentMessage } from './agent-route.js';
 import { createDestination } from './db/agent-destinations.js';
-import { initTestDb, closeDb, runMigrations, createAgentGroup } from '../../db/index.js';
+import { initTestDb, closeDb, runMigrations, createAgentGroup, createMessagingGroup } from '../../db/index.js';
 import { createSession, updateSession } from '../../db/sessions.js';
 import { initSessionFolder, inboundDbPath, sessionDir, writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
@@ -371,6 +371,91 @@ describe('routeAgentMessage return-path', () => {
     const s2Rows = readInbound(A, S2.id);
     expect(s1Rows).toHaveLength(0);
     expect(s2Rows).toHaveLength(1);
+  });
+
+  it('SECURITY: rejects return-path candidate in a foreign messaging group when caller fallback.mgId is null', async () => {
+    // Regression test for the cross-tenant guard inversion found by Codex
+    // post-merge 2026-05-08. Pre-fix the guard read
+    //   `if (fallback.mgId === null || candidate.messaging_group_id === fallback.mgId)`
+    // which short-circuits to TRUE whenever fallback.mgId is null —
+    // accepting ANY candidate, including ones in foreign messaging groups.
+    // The fix is strict equality, so a candidate in mg-foreign is rejected
+    // when caller's fallback.mgId is null (caller agent-shared or target
+    // not wired to caller's mg).
+    //
+    // Setup: A has agent-shared sessions S1/S2 (mg=null) AND a session
+    // SAforeign in mg-foreign. SAforeign sends a forward to B, which
+    // stamps source_session_id = SAforeign.id on B's inbound row. SB
+    // (mg=null) replies via in_reply_to. The pre-fix guard would accept
+    // SAforeign as the return-path candidate — reply would land in a
+    // foreign-mg session, where A's default `send_message` could post
+    // into a chat SB has no authorization to reach. Post-fix the
+    // candidate is rejected and the reply falls through to the
+    // agent-shared resolver, which lands it in S2 (or S1).
+
+    createMessagingGroup({
+      id: 'mg-foreign',
+      channel_type: 'discord',
+      platform_id: 'foreign-chan',
+      name: 'foreign chat',
+      is_group: 1,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+    const SAforeign: Session = {
+      id: 'sess-A-foreign',
+      agent_group_id: A,
+      messaging_group_id: 'mg-foreign',
+      thread_id: null,
+      agent_provider: null,
+      status: 'active',
+      container_status: 'stopped',
+      last_active: null,
+      // Older than S2 (2026-02-01) so that findSessionByAgentGroup picks
+      // S2 (newest agent-shared) on the fallback path — without this, the
+      // pre-existing `findSessionByAgentGroup` gap (no mg=null filter in
+      // agent-shared mode) would return SAforeign anyway, and this test
+      // couldn't isolate the candidate-guard fix. Tracked separately:
+      // resolveSession's agent-shared mode doesn't filter mg=null, so the
+      // candidate-guard fix is partial against the broader cross-tenant
+      // exploit.
+      created_at: '2026-01-15T00:00:00.000Z',
+    };
+    createSession(SAforeign);
+    initSessionFolder(A, SAforeign.id);
+
+    // SAforeign emits an a2a to B. Source_session_id on B's inbound is
+    // SAforeign.id — what the guard will resolve to a candidate in
+    // mg-foreign.
+    await routeAgentMessage(
+      { id: 'msg-from-A-foreign', platform_id: B, content: JSON.stringify({ text: 'hi' }), in_reply_to: null },
+      SAforeign,
+    );
+    const bRows = readInbound(B, SB.id);
+    const yId = bRows[0].id;
+
+    // B replies. SB.mg = null → fallback.mgId = null.
+    // Pre-fix: guard accepts SAforeign → reply lands in mg-foreign.
+    // Post-fix: guard rejects (mg-foreign !== null) → fallback to
+    // resolveSession(A, null, null, 'agent-shared') → S2 (or S1).
+    await routeAgentMessage(
+      { id: 'msg-reply-cross-tenant', platform_id: A, content: JSON.stringify({ text: 'should not land in foreign mg' }), in_reply_to: yId },
+      SB,
+    );
+
+    // Foreign session must NOT have received the reply.
+    const foreignRows = readInbound(A, SAforeign.id);
+    expect(foreignRows.filter((r) => r.id.startsWith('a2a-'))).toHaveLength(0);
+
+    // Reply landed in one of the agent-shared sessions (S1 or S2).
+    const s1Rows = readInbound(A, S1.id);
+    const s2Rows = readInbound(A, S2.id);
+    const replyContent = (rows: typeof s1Rows): string | null => {
+      const row = rows.find((r) => JSON.parse(r.content).text === 'should not land in foreign mg');
+      return row ? row.content : null;
+    };
+    const landedIn = replyContent(s1Rows) ? 'S1' : replyContent(s2Rows) ? 'S2' : null;
+    expect(landedIn).not.toBeNull();
   });
 
   it('self-message is allowed without a destination row', async () => {

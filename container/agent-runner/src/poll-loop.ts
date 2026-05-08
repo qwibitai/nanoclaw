@@ -300,6 +300,8 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
             continuation: undefined,
             cwd: config.cwd,
             systemContext: config.systemContext,
+            model: effectiveModel,
+            effort: effectiveEffort,
           });
           const retryResult = await processQuery(retryQuery, routing, processingIds, config.providerName);
           if (retryResult.continuation) {

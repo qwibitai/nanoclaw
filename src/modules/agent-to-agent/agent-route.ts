@@ -165,12 +165,16 @@ function resolveTargetSession(
   if (originSessionId) {
     const candidate = getSession(originSessionId);
     if (candidate && candidate.agent_group_id === targetAgentGroupId && candidate.status === 'active') {
-      // Cross-tenant security: only honor return-path if the candidate
-      // session matches the caller's effective messaging-group context.
-      // When fallback.mgId is null (caller is agent-shared or target
-      // isn't wired to caller's mg), accept any active session in the
-      // target group — return-path was already vetted at write time.
-      if (fallback.mgId === null || candidate.messaging_group_id === fallback.mgId) {
+      // Cross-tenant security: candidate's mg MUST match the caller's
+      // effective mg context. Strict equality (not `||  null`) — when
+      // fallback.mgId is null (target isn't wired to caller's mg, or
+      // caller is agent-shared), only accept a candidate that is ALSO
+      // in agent-shared mode. Accepting any active candidate when
+      // fallback.mgId is null inverts the gate: the case that's MEANT
+      // to be most restricted (target not wired) would silently route
+      // into a foreign mg's session of the target if return-path
+      // matched one. (Discovered by Codex review post-merge 2026-05-08.)
+      if (candidate.messaging_group_id === fallback.mgId) {
         return candidate;
       }
     }
