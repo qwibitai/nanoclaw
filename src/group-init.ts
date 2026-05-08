@@ -14,6 +14,18 @@ const DEFAULT_SETTINGS_JSON =
         CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
       },
+      hooks: {
+        PreCompact: [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command: 'bun /app/src/compact-instructions.ts',
+              },
+            ],
+          },
+        ],
+      },
     },
     null,
     2,
@@ -71,6 +83,8 @@ export function initGroupFilesystem(group: AgentGroup, opts?: { instructions?: s
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(settingsFile, DEFAULT_SETTINGS_JSON);
     initialized.push('settings.json');
+  } else {
+    ensurePreCompactHook(settingsFile, initialized);
   }
 
   // Skills directory — created empty here; symlinks are synced at spawn
@@ -88,5 +102,34 @@ export function initGroupFilesystem(group: AgentGroup, opts?: { instructions?: s
       id: group.id,
       steps: initialized,
     });
+  }
+}
+
+const PRE_COMPACT_COMMAND = 'bun /app/src/compact-instructions.ts';
+
+/**
+ * Patch an existing settings.json to add the PreCompact hook if missing.
+ * Runs on every group init so pre-existing groups pick up the hook.
+ */
+function ensurePreCompactHook(settingsFile: string, initialized: string[]): void {
+  try {
+    const raw = fs.readFileSync(settingsFile, 'utf-8');
+    const settings = JSON.parse(raw);
+
+    // Check if there's already a PreCompact hook with our command.
+    const existing = settings.hooks?.PreCompact as unknown[] | undefined;
+    if (existing && JSON.stringify(existing).includes(PRE_COMPACT_COMMAND)) return;
+
+    // Add the hook, preserving existing hooks.
+    if (!settings.hooks) settings.hooks = {};
+    if (!settings.hooks.PreCompact) settings.hooks.PreCompact = [];
+    settings.hooks.PreCompact.push({
+      hooks: [{ type: 'command', command: PRE_COMPACT_COMMAND }],
+    });
+
+    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
+    initialized.push('settings.json (added PreCompact hook)');
+  } catch {
+    // Don't break init if settings.json is malformed — it'll use whatever's there.
   }
 }

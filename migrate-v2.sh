@@ -242,8 +242,12 @@ fi
 
 V1_DB="$V1_PATH/store/messages.db"
 
-# Quick schema check — make sure the tables we need exist
-TABLES=$(sqlite3 "$V1_DB" ".tables" 2>/dev/null || true)
+# Quick schema check — make sure the tables we need exist.
+# Uses the in-tree wrapper instead of the sqlite3 CLI: setup.sh (run via
+# phase 0a above) installs Node + better-sqlite3 but NOT the sqlite3 CLI,
+# and #2191 documented how a missing CLI here used to surface as a
+# misleading "registered_groups missing" abort.
+TABLES=$(pnpm exec tsx scripts/q.ts "$V1_DB" "SELECT name FROM sqlite_master WHERE type='table'" 2>/dev/null || true)
 
 if echo "$TABLES" | grep -q "registered_groups"; then
   step_ok "v1 database has registered_groups"
@@ -253,8 +257,8 @@ else
 fi
 
 # Show what we found
-GROUP_COUNT=$(sqlite3 "$V1_DB" "SELECT COUNT(*) FROM registered_groups" 2>/dev/null || echo 0)
-TASK_COUNT=$(sqlite3 "$V1_DB" "SELECT COUNT(*) FROM scheduled_tasks WHERE status='active'" 2>/dev/null || echo 0)
+GROUP_COUNT=$(pnpm exec tsx scripts/q.ts "$V1_DB" "SELECT COUNT(*) FROM registered_groups" 2>/dev/null || echo 0)
+TASK_COUNT=$(pnpm exec tsx scripts/q.ts "$V1_DB" "SELECT COUNT(*) FROM scheduled_tasks WHERE status='active'" 2>/dev/null || echo 0)
 ENV_KEYS=0
 if [ -f "$V1_PATH/.env" ]; then
   ENV_KEYS=$(grep -c '=' "$V1_PATH/.env" 2>/dev/null || echo 0)
@@ -408,20 +412,12 @@ else
     fi
   done
 
-  # 2d. WhatsApp LID resolution. After whatsapp is installed (so Baileys
-  # is on disk) and auth files have been copied (so we can connect with
-  # the migrated identity), boot Baileys briefly to learn LID↔phone
-  # mappings during initial sync, then write paired LID-keyed
-  # messaging_groups. Best-effort: any failure degrades to runtime
-  # approval flow, which the WA adapter's isMention=true on DMs handles.
-  for ch in "${SELECTED_CHANNELS[@]}"; do
-    if [ "$ch" = "whatsapp" ]; then
-      run_step "2d-whatsapp-lids" \
-        "Resolve WhatsApp LIDs for migrated DMs" \
-        "setup/migrate-v2/whatsapp-resolve-lids.ts"
-      break
-    fi
-  done
+  # 2d. (Removed) WhatsApp LID resolution was previously needed because the
+  # v6 adapter couldn't reliably translate LID→phone JIDs, so the migration
+  # pre-created dual messaging_groups rows. With Baileys v7, the adapter
+  # resolves LIDs via extractAddressingContext + signalRepository.lidMapping
+  # on every inbound message, so dual rows are unnecessary and were causing
+  # split sessions.
 fi
 
 echo
@@ -458,7 +454,7 @@ ONECLI_OK=false
 ONECLI_URL_FROM_ENV=$(grep '^ONECLI_URL=' .env 2>/dev/null | head -1 | sed 's/^ONECLI_URL=//')
 ONECLI_URL_CHECK="${ONECLI_URL_FROM_ENV:-http://127.0.0.1:10254}"
 
-if curl -sf "${ONECLI_URL_CHECK}/health" >/dev/null 2>&1; then
+if curl -sf "${ONECLI_URL_CHECK}/api/health" >/dev/null 2>&1; then
   step_ok "OneCLI running at $(dim "$ONECLI_URL_CHECK")"
   ONECLI_OK=true
   log "OneCLI: running at $ONECLI_URL_CHECK"

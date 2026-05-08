@@ -91,7 +91,13 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 #     the SDK fails at spawn time with "native binary not found".
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
+# Pin pnpm to match the host (package.json packageManager). pnpm 11 stopped
+# honoring `only-built-dependencies[]=` in .npmrc for global installs, which
+# silently skips claude-code's native-binary postinstall and agent-browser's
+# bin chmod — the agent then crashes at runtime with "native binary not
+# installed". Keep this in lockstep with package.json's `packageManager`.
+ARG PNPM_VERSION=10.33.0
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     echo "only-built-dependencies[]=agent-browser" > /root/.npmrc && \

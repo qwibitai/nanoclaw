@@ -12,6 +12,8 @@ import {
   CardText,
   Actions,
   Button,
+  LinkButton,
+  type CardChild,
   type Adapter,
   type ConcurrencyStrategy,
   type Message as ChatMessage,
@@ -305,8 +307,14 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         // Start local HTTP server to receive forwarded Gateway events (including interactions)
         const webhookUrl = await startLocalWebhookServer(gatewayAdapter, setupConfig, config.botToken);
 
+        // Exponential backoff capped at 1h. Without this, an unrecoverable
+        // failure (e.g., TokenInvalid) restarts ~10×/sec and Discord's
+        // Cloudflare layer issues a multi-hour IP block. A run that lasts
+        // longer than 5 minutes counts as healthy and resets the counter.
+        let consecutiveFailures = 0;
         const startGateway = () => {
           if (gatewayAbort?.signal.aborted) return;
+          const startedAt = Date.now();
           // Capture the long-running listener promise via waitUntil
           let listenerPromise: Promise<unknown> | undefined;
           gatewayAdapter.startGatewayListener!(
@@ -321,21 +329,30 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           ).then(() => {
             // startGatewayListener resolves immediately with a Response;
             // the actual work is in the listenerPromise passed to waitUntil
-            if (listenerPromise) {
-              listenerPromise
-                .then(() => {
-                  if (!gatewayAbort?.signal.aborted) {
-                    log.info('Gateway listener expired, restarting', { adapter: adapter.name });
-                    startGateway();
-                  }
-                })
-                .catch((err) => {
-                  if (!gatewayAbort?.signal.aborted) {
-                    log.error('Gateway listener error, restarting in 5s', { adapter: adapter.name, err });
-                    setTimeout(startGateway, 5000);
-                  }
+            if (!listenerPromise) return;
+            const reschedule = (err?: unknown) => {
+              if (gatewayAbort?.signal.aborted) return;
+              const ranForMs = Date.now() - startedAt;
+              if (ranForMs > 5 * 60 * 1000) consecutiveFailures = 0;
+              else consecutiveFailures++;
+              const delayMs = Math.min(60 * 60 * 1000, 2 ** consecutiveFailures * 1000);
+              if (err) {
+                log.error('Gateway listener error, retrying', {
+                  adapter: adapter.name,
+                  err,
+                  consecutiveFailures,
+                  delayMs,
                 });
-            }
+              } else {
+                log.info('Gateway listener expired, restarting', {
+                  adapter: adapter.name,
+                  consecutiveFailures,
+                  delayMs,
+                });
+              }
+              setTimeout(startGateway, delayMs);
+            };
+            listenerPromise.then(() => reschedule()).catch(reschedule);
           });
         };
         startGateway();
@@ -396,6 +413,59 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           card,
           fallbackText: `${title}\n\n${question}\nOptions: ${options.map((o) => o.label).join(', ')}`,
         });
+        return result?.id;
+      }
+
+      // Display card (send_card MCP tool) — returns immediately, no callback flow.
+      // Non-URL actions are dropped: send_card's contract is fire-and-forget, so a
+      // callback button would have nowhere to land. URL actions render as link buttons.
+      if (content.type === 'card' && content.card && typeof content.card === 'object') {
+        const cardSpec = content.card as Record<string, unknown>;
+        const title = (cardSpec.title as string) || '';
+        const fallbackText = (content.fallbackText as string) || (cardSpec.description as string) || title || '';
+
+        const cardChildren: CardChild[] = [];
+        if (typeof cardSpec.description === 'string' && cardSpec.description) {
+          cardChildren.push(CardText(cardSpec.description));
+        }
+        if (Array.isArray(cardSpec.children)) {
+          for (const child of cardSpec.children) {
+            if (typeof child === 'string' && child) {
+              cardChildren.push(CardText(child));
+            } else if (
+              child &&
+              typeof child === 'object' &&
+              typeof (child as Record<string, unknown>).text === 'string'
+            ) {
+              cardChildren.push(CardText((child as Record<string, string>).text));
+            }
+          }
+        }
+        if (Array.isArray(cardSpec.actions)) {
+          const linkButtons = (cardSpec.actions as Array<Record<string, unknown>>)
+            .filter((a) => typeof a.url === 'string' && a.url && typeof a.label === 'string' && a.label)
+            .map((a) => {
+              const style = a.style;
+              const safeStyle: 'primary' | 'danger' | 'default' | undefined =
+                style === 'primary' || style === 'danger' || style === 'default' ? style : undefined;
+              return LinkButton({
+                label: a.label as string,
+                url: a.url as string,
+                style: safeStyle,
+              });
+            });
+          if (linkButtons.length > 0) {
+            cardChildren.push(Actions(linkButtons));
+          }
+        }
+
+        if (cardChildren.length === 0 && !title) {
+          log.warn('send_card payload empty, skipping delivery');
+          return;
+        }
+
+        const card = Card({ title, children: cardChildren });
+        const result = await adapter.postMessage(tid, { card, fallbackText });
         return result?.id;
       }
 

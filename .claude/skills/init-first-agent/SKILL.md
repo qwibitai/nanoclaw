@@ -54,7 +54,7 @@ Tell the user:
 Wait for the user's confirmation. Then look up the most recent DM messaging groups:
 
 ```bash
-sqlite3 data/v2.db "SELECT id, platform_id, name, created_at FROM messaging_groups WHERE channel_type='${CHANNEL}' AND is_group=0 ORDER BY created_at DESC LIMIT 5"
+pnpm exec tsx scripts/q.ts data/v2.db "SELECT id, platform_id, name, created_at FROM messaging_groups WHERE channel_type='${CHANNEL}' AND is_group=0 ORDER BY created_at DESC LIMIT 5"
 ```
 
 Show the top rows to the user and confirm which `platform_id` is theirs (usually the most recent). Record as `PLATFORM_ID`. If none appeared, check `logs/nanoclaw.log` for `unknown_sender` drops — the adapter might be rejecting inbound due to connection or permission issues.
@@ -103,7 +103,7 @@ Wait for the user's reply. If they confirm receipt, the skill is done.
 
 If they say it didn't arrive, then diagnose using the DB directly (no waiting loops required — the message either delivered or it didn't):
 
-- `sqlite3 data/v2-sessions/<agent-group-id>/sessions/<session-id>/outbound.db "SELECT id, status, created_at FROM messages_out ORDER BY created_at DESC LIMIT 5"` — check for stuck `pending` rows. Replace `<agent-group-id>` and `<session-id>` with the values from the script's output.
+- `pnpm exec tsx scripts/q.ts data/v2-sessions/<agent-group-id>/sessions/<session-id>/outbound.db "SELECT id, status, created_at FROM messages_out ORDER BY created_at DESC LIMIT 5"` — check for stuck `pending` rows. Replace `<agent-group-id>` and `<session-id>` with the values from the script's output.
 - `grep -E 'Unauthorized channel destination|container.*exited|error' logs/nanoclaw.log | tail -20` — look for ACL rejections or container crashes.
 - `ls data/v2-sessions/<agent-group-id>/sessions/*/outbound.db` — confirm the session exists.
 

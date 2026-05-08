@@ -16,7 +16,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
 # Keep in sync with .claude/skills/add-whatsapp/SKILL.md.
-BAILEYS_VERSION="@whiskeysockets/baileys@6.17.16"
+BAILEYS_VERSION="@whiskeysockets/baileys@7.0.0-rc.9"
 QRCODE_VERSION="qrcode@1.5.4"
 QRCODE_TYPES_VERSION="@types/qrcode@1.5.6"
 PINO_VERSION="pino@9.6.0"

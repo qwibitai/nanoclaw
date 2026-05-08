@@ -27,21 +27,29 @@ const DEFAULT_HEARTBEAT_PATH = '/workspace/.heartbeat';
 let _inbound: Database | null = null;
 let _outbound: Database | null = null;
 let _heartbeatPath: string = DEFAULT_HEARTBEAT_PATH;
+let _testMode = false;
 
 /**
- * Avoid all cached db reads; open inbound.db read-only with mmap and page cache disabled. 
- * 
+ * Avoid all cached db reads; open inbound.db read-only with mmap and page cache disabled.
+ *
  * Use this (not getInboundDb) for readers that need to see host-written rows
  * promptly — e.g. messages_in polling. Caller must .close() the returned
  * connection (try/finally).
  *
  * Needed for mounts where host writes don't reliably invalidate
  * SQLite's caches: virtiofs (Colima, Lima, Podman Machine, Apple
- * Container), NFS. 
- * 
+ * Container), NFS.
+ *
  * Cost is microseconds per query, so safe for universal use.
  */
 export function openInboundDb(): Database {
+  // In test mode return a thin wrapper over the in-memory singleton.
+  // Callers do try/finally { db.close() } — the wrapper no-ops close()
+  // so the singleton survives for the rest of the test.
+  if (_testMode && _inbound) {
+    const db = _inbound;
+    return { prepare: (sql: string) => db.prepare(sql), exec: (sql: string) => db.exec(sql), close: () => {} } as unknown as Database;
+  }
   const db = new Database(DEFAULT_INBOUND_PATH, { readonly: true });
   db.exec('PRAGMA busy_timeout = 5000');
   db.exec('PRAGMA mmap_size = 0');
@@ -170,6 +178,7 @@ export function clearStaleProcessingAcks(): void {
 
 /** For tests — creates in-memory DBs with the session schemas. */
 export function initTestSessionDb(): { inbound: Database; outbound: Database } {
+  _testMode = true;
   _inbound = new Database(':memory:');
   _inbound.exec('PRAGMA foreign_keys = ON');
   _inbound.exec(`
@@ -246,6 +255,7 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
 export function closeSessionDb(): void {
   _inbound?.close();
   _inbound = null;
+  _testMode = false;
   _outbound?.close();
   _outbound = null;
 }

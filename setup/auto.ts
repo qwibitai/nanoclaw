@@ -29,6 +29,7 @@ import path from 'path';
 import * as p from '@clack/prompts';
 import k from 'kleur';
 
+import { BACK_TO_CHANNEL_SELECTION } from './lib/back-nav.js';
 import { runDiscordChannel } from './channels/discord.js';
 import { runIMessageChannel } from './channels/imessage.js';
 import { runSignalChannel } from './channels/signal.js';
@@ -38,7 +39,7 @@ import { runTelegramChannel } from './channels/telegram.js';
 import { runWhatsAppChannel } from './channels/whatsapp.js';
 import { pingCliAgent, type PingResult } from './lib/agent-ping.js';
 import { brightSelect } from './lib/bright-select.js';
-import { offerClaudeAssist } from './lib/claude-assist.js';
+import { offerClaudeOnFailure } from './lib/claude-handoff.js';
 import {
   applyToEnv,
   parseFlags,
@@ -415,7 +416,7 @@ async function main(): Promise<void> {
       } else {
         phEmit('first_chat_failed', { reason: ping });
         renderPingFailureNote(ping);
-        await offerClaudeAssist({
+        await offerClaudeOnFailure({
           stepName: 'cli-agent',
           msg:
             ping === 'socket_error'
@@ -440,35 +441,45 @@ async function main(): Promise<void> {
   let channelChoice: ChannelChoice = 'skip';
 
   if (!skip.has('channel')) {
-    channelChoice = await askChannelChoice();
-    if (channelChoice !== 'skip' && channelChoice !== 'other') {
-      await resolveDisplayName();
-    }
-    if (channelChoice === 'telegram') {
-      await runTelegramChannel(displayName!);
-    } else if (channelChoice === 'discord') {
-      await runDiscordChannel(displayName!);
-    } else if (channelChoice === 'whatsapp') {
-      await runWhatsAppChannel(displayName!);
-    } else if (channelChoice === 'signal') {
-      await runSignalChannel(displayName!);
-    } else if (channelChoice === 'teams') {
-      await runTeamsChannel(displayName!);
-    } else if (channelChoice === 'slack') {
-      await runSlackChannel(displayName!);
-    } else if (channelChoice === 'imessage') {
-      await runIMessageChannel(displayName!);
-    } else if (channelChoice === 'other') {
-      await askOtherChannelName();
-    } else {
-      p.log.info(
-        brandBody(
-          wrapForGutter(
-            'No messaging app for now. You can add one later (like Telegram, Discord, WhatsApp, Teams, Slack, or iMessage).',
-            4,
+    // Loop so a channel sub-flow can return BACK_TO_CHANNEL_SELECTION on
+    // its first prompt and bounce the user back to the chooser without
+    // restarting setup. Channels not yet wired with the back option just
+    // return void and the loop exits after one pass.
+    let backed = true;
+    while (backed) {
+      backed = false;
+      channelChoice = await askChannelChoice();
+      if (channelChoice !== 'skip' && channelChoice !== 'other') {
+        await resolveDisplayName();
+      }
+      let result: void | typeof BACK_TO_CHANNEL_SELECTION;
+      if (channelChoice === 'telegram') {
+        result = await runTelegramChannel(displayName!);
+      } else if (channelChoice === 'discord') {
+        result = await runDiscordChannel(displayName!);
+      } else if (channelChoice === 'whatsapp') {
+        result = await runWhatsAppChannel(displayName!);
+      } else if (channelChoice === 'signal') {
+        result = await runSignalChannel(displayName!);
+      } else if (channelChoice === 'teams') {
+        result = await runTeamsChannel(displayName!);
+      } else if (channelChoice === 'slack') {
+        result = await runSlackChannel(displayName!);
+      } else if (channelChoice === 'imessage') {
+        result = await runIMessageChannel(displayName!);
+      } else if (channelChoice === 'other') {
+        result = await askOtherChannelName();
+      } else {
+        p.log.info(
+          brandBody(
+            wrapForGutter(
+              'No messaging app for now. You can add one later (like Telegram, Discord, WhatsApp, Teams, Slack, or iMessage).',
+              4,
+            ),
           ),
-        ),
-      );
+        );
+      }
+      if (result === BACK_TO_CHANNEL_SELECTION) backed = true;
     }
   }
 
@@ -517,7 +528,7 @@ async function main(): Promise<void> {
         service_running: res.terminal?.fields.SERVICE === 'running',
         has_credentials: res.terminal?.fields.CREDENTIALS === 'configured',
       });
-      await offerClaudeAssist({
+      await offerClaudeOnFailure({
         stepName: 'verify',
         msg: summary || 'Verification completed with unresolved issues.',
         hint: `Terminal block: ${JSON.stringify(res.terminal?.fields ?? {})}`,
@@ -729,11 +740,37 @@ async function runAuthStep(): Promise<void> {
           label: 'Paste an Anthropic API key',
           hint: 'pay-per-use via console.anthropic.com',
         },
+        {
+          value: 'skip',
+          label: "Skip — I'll connect later",
+          hint: 'not recommended — Claude helps debug setup issues',
+        },
       ],
     }),
-  ) as 'subscription' | 'oauth' | 'api';
+  ) as 'subscription' | 'oauth' | 'api' | 'skip';
   setupLog.userInput('auth_method', method);
   phEmit('auth_method_chosen', { method });
+
+  if (method === 'skip') {
+    const confirmed = ensureAnswer(
+      await p.confirm({
+        message:
+          "Skip Claude sign-in? The agent won't be able to run until you connect, and we won't be able to help debug setup errors.",
+        initialValue: false,
+      }),
+    );
+    if (!confirmed) {
+      // Loop back to the auth picker so they can choose a real method.
+      return runAuthStep();
+    }
+    setupLog.step('auth', 'skipped', 0, { REASON: 'user-skipped' });
+    p.log.warn(
+      brandBody(
+        'Claude sign-in skipped. Re-run setup or run `bash nanoclaw.sh` to finish later.',
+      ),
+    );
+    return;
+  }
 
   if (method === 'subscription') {
     await runSubscriptionAuth();
@@ -1088,10 +1125,26 @@ async function askChannelChoice(): Promise<ChannelChoice> {
   return choice;
 }
 
-async function askOtherChannelName(): Promise<void> {
+async function askOtherChannelName(): Promise<void | typeof BACK_TO_CHANNEL_SELECTION> {
+  const action = ensureAnswer(
+    await brightSelect<'type' | 'back'>({
+      message: 'Which channel would you like to install?',
+      options: [
+        {
+          value: 'type',
+          label: 'Type the channel name',
+          hint: 'e.g. matrix, github, linear, webex',
+        },
+        { value: 'back', label: '← Back to channel selection' },
+      ],
+      initialValue: 'type',
+    }),
+  );
+  if (action === 'back') return BACK_TO_CHANNEL_SELECTION;
+
   const answer = ensureAnswer(
     await p.text({
-      message: 'Which channel would you like to install?',
+      message: 'Channel name',
       placeholder: 'e.g. matrix, github, linear, webex',
     }),
   );

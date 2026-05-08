@@ -1,11 +1,25 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Adapter } from 'chat';
+import type { Adapter, AdapterPostableMessage, RawMessage } from 'chat';
 
 import { createChatSdkBridge, splitForLimit } from './chat-sdk-bridge.js';
 
 function stubAdapter(partial: Partial<Adapter>): Adapter {
   return { name: 'stub', ...partial } as unknown as Adapter;
+}
+
+interface PostCall {
+  threadId: string;
+  message: AdapterPostableMessage;
+}
+
+function makePostCapture() {
+  const calls: PostCall[] = [];
+  const postMessage = async (threadId: string, message: AdapterPostableMessage): Promise<RawMessage<unknown>> => {
+    calls.push({ threadId, message });
+    return { id: 'msg-stub', threadId, raw: {} };
+  };
+  return { calls, postMessage };
 }
 
 describe('splitForLimit', () => {
@@ -76,5 +90,118 @@ describe('createChatSdkBridge', () => {
       supportsThreads: true,
     });
     expect(typeof bridge.subscribe).toBe('function');
+  });
+});
+
+describe('createChatSdkBridge.deliver — display cards (send_card)', () => {
+  // The send_card MCP tool writes outbound rows with `{ type: 'card', card, fallbackText }`.
+  // Before this branch existed the bridge silently dropped them: cards have no
+  // `text` / `markdown`, so the trailing fallback `if (text)` was false and the
+  // function returned without calling the adapter. These tests pin the contract
+  // for the dedicated card branch.
+
+  it('renders title, description, and string children, then posts via the adapter', async () => {
+    const { calls, postMessage } = makePostCapture();
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ postMessage }),
+      supportsThreads: false,
+    });
+    const id = await bridge.deliver('telegram:42', null, {
+      kind: 'chat-sdk',
+      content: {
+        type: 'card',
+        card: {
+          title: 'Daily',
+          description: 'Your plate today',
+          children: ['• item one', '• item two'],
+        },
+        fallbackText: 'Daily: your plate',
+      },
+    });
+    expect(id).toBe('msg-stub');
+    expect(calls).toHaveLength(1);
+    const msg = calls[0].message as { card?: unknown; fallbackText?: string };
+    expect(msg.fallbackText).toBe('Daily: your plate');
+    expect(msg.card).toBeDefined();
+  });
+
+  it('drops actions without url (send_card is fire-and-forget; non-URL buttons would have nowhere to land)', async () => {
+    const { calls, postMessage } = makePostCapture();
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ postMessage }),
+      supportsThreads: false,
+    });
+    await bridge.deliver('discord:guild:chan', null, {
+      kind: 'chat-sdk',
+      content: {
+        type: 'card',
+        card: {
+          title: 'Card',
+          description: 'has only label-only actions',
+          actions: [{ label: 'Add' }, { label: 'Skip' }],
+        },
+      },
+    });
+    expect(calls).toHaveLength(1);
+    // Cast through the public Card shape to read the children we set
+    const msg = calls[0].message as { card?: { children?: Array<{ type?: string }> } };
+    const childTypes = (msg.card?.children ?? []).map((c) => c.type);
+    expect(childTypes).not.toContain('actions');
+  });
+
+  it('renders url actions as link buttons inside an Actions row', async () => {
+    const { calls, postMessage } = makePostCapture();
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ postMessage }),
+      supportsThreads: false,
+    });
+    await bridge.deliver('discord:guild:chan', null, {
+      kind: 'chat-sdk',
+      content: {
+        type: 'card',
+        card: {
+          title: 'Docs',
+          actions: [{ label: 'Open', url: 'https://example.com' }, { label: 'No-link' }],
+        },
+      },
+    });
+    const msg = calls[0].message as {
+      card?: { children?: Array<{ type?: string; children?: Array<{ type?: string; url?: string }> }> };
+    };
+    const actionsRow = msg.card?.children?.find((c) => c.type === 'actions');
+    expect(actionsRow).toBeDefined();
+    const buttons = actionsRow?.children ?? [];
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].type).toBe('link-button');
+    expect(buttons[0].url).toBe('https://example.com');
+  });
+
+  it('skips delivery when the card has neither title nor body content', async () => {
+    const { calls, postMessage } = makePostCapture();
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ postMessage }),
+      supportsThreads: false,
+    });
+    const id = await bridge.deliver('telegram:42', null, {
+      kind: 'chat-sdk',
+      content: { type: 'card', card: {} },
+    });
+    expect(id).toBeUndefined();
+    expect(calls).toHaveLength(0);
+  });
+
+  it('falls through to the text branch for non-card chat-sdk payloads (no regression)', async () => {
+    const { calls, postMessage } = makePostCapture();
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ postMessage }),
+      supportsThreads: false,
+    });
+    await bridge.deliver('telegram:42', null, {
+      kind: 'chat-sdk',
+      content: { text: 'plain hello' },
+    });
+    expect(calls).toHaveLength(1);
+    const msg = calls[0].message as { markdown?: string };
+    expect(msg.markdown).toBe('plain hello');
   });
 });

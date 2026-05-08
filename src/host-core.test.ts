@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   initTestDb,
   closeDb,
+  getDb,
   runMigrations,
   createAgentGroup,
   createMessagingGroup,
@@ -19,6 +20,7 @@ import {
 import {
   resolveSession,
   writeSessionMessage,
+  writeSessionRouting,
   initSessionFolder,
   sessionDir,
   inboundDbPath,
@@ -592,6 +594,396 @@ describe('router', () => {
     expect(wakeContainer).not.toHaveBeenCalled();
     // No session should have been created for this agent.
     expect(findSession('mg-1', null)).toBeUndefined();
+  });
+});
+
+describe('routing metadata preservation', () => {
+  beforeEach(() => {
+    createAgentGroup({
+      id: 'ag-1',
+      name: 'Test Agent',
+      folder: 'test-agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+    createMessagingGroup({
+      id: 'mg-1',
+      channel_type: 'discord',
+      platform_id: 'chan-123',
+      name: 'General',
+      is_group: 1,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+    createMessagingGroupAgent({
+      id: 'mga-1',
+      messaging_group_id: 'mg-1',
+      agent_group_id: 'ag-1',
+      engage_mode: 'pattern',
+      engage_pattern: '.',
+      sender_scope: 'all',
+      ignored_message_policy: 'drop',
+      session_mode: 'shared',
+      priority: 0,
+      created_at: now(),
+    });
+  });
+
+  it('routed message carries platformId, channelType, threadId on the messages_in row', async () => {
+    const { routeInbound } = await import('./router.js');
+
+    await routeInbound({
+      channelType: 'discord',
+      platformId: 'chan-123',
+      threadId: 'thread-42',
+      message: { id: 'msg-r1', kind: 'chat', content: JSON.stringify({ sender: 'A', text: 'hi' }), timestamp: now() },
+    });
+
+    const session = findSession('mg-1', null);
+    const db = new Database(inboundDbPath('ag-1', session!.id));
+    const row = db
+      .prepare('SELECT platform_id, channel_type, thread_id FROM messages_in WHERE id LIKE ?')
+      .get('msg-r1%') as {
+      platform_id: string | null;
+      channel_type: string | null;
+      thread_id: string | null;
+    };
+    db.close();
+
+    expect(row.platform_id).toBe('chan-123');
+    expect(row.channel_type).toBe('discord');
+    expect(row.thread_id).toBe('thread-42');
+  });
+
+  it('fan-out gives each agent its own routing, not leaked from sibling', async () => {
+    const { routeInbound } = await import('./router.js');
+
+    createAgentGroup({
+      id: 'ag-2',
+      name: 'Agent Two',
+      folder: 'agent-two',
+      agent_provider: null,
+      created_at: now(),
+    });
+    createMessagingGroupAgent({
+      id: 'mga-2',
+      messaging_group_id: 'mg-1',
+      agent_group_id: 'ag-2',
+      engage_mode: 'pattern',
+      engage_pattern: '.',
+      sender_scope: 'all',
+      ignored_message_policy: 'drop',
+      session_mode: 'shared',
+      priority: 0,
+      created_at: now(),
+    });
+
+    await routeInbound({
+      channelType: 'discord',
+      platformId: 'chan-123',
+      threadId: 'thread-fanout',
+      message: { id: 'msg-fo', kind: 'chat', content: JSON.stringify({ text: 'fan' }), timestamp: now() },
+    });
+
+    // Both agents should have the message with correct routing
+    const { getSessionsByAgentGroup } = await import('./db/sessions.js');
+    for (const agId of ['ag-1', 'ag-2']) {
+      const sessions = getSessionsByAgentGroup(agId);
+      expect(sessions).toHaveLength(1);
+      const db = new Database(inboundDbPath(agId, sessions[0].id));
+      const row = db.prepare('SELECT platform_id, channel_type, thread_id FROM messages_in LIMIT 1').get() as {
+        platform_id: string | null;
+        channel_type: string | null;
+        thread_id: string | null;
+      };
+      db.close();
+      expect(row.platform_id).toBe('chan-123');
+      expect(row.channel_type).toBe('discord');
+      expect(row.thread_id).toBe('thread-fanout');
+    }
+  });
+});
+
+describe('writeSessionRouting', () => {
+  it('populates session_routing from the messaging group', () => {
+    createAgentGroup({
+      id: 'ag-1',
+      name: 'Agent',
+      folder: 'agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+    createMessagingGroup({
+      id: 'mg-1',
+      channel_type: 'telegram',
+      platform_id: 'tg:12345',
+      name: 'Chat',
+      is_group: 0,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    writeSessionRouting('ag-1', session.id);
+
+    const db = new Database(inboundDbPath('ag-1', session.id));
+    const row = db.prepare('SELECT channel_type, platform_id, thread_id FROM session_routing WHERE id = 1').get() as
+      | {
+          channel_type: string | null;
+          platform_id: string | null;
+          thread_id: string | null;
+        }
+      | undefined;
+    db.close();
+
+    expect(row).toBeDefined();
+    expect(row!.channel_type).toBe('telegram');
+    expect(row!.platform_id).toBe('tg:12345');
+    expect(row!.thread_id).toBeNull();
+  });
+
+  it('writes null routing for agent-shared session (no messaging group)', () => {
+    createAgentGroup({
+      id: 'ag-1',
+      name: 'Agent',
+      folder: 'agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+
+    const { session } = resolveSession('ag-1', null, null, 'agent-shared');
+    writeSessionRouting('ag-1', session.id);
+
+    const db = new Database(inboundDbPath('ag-1', session.id));
+    const row = db.prepare('SELECT channel_type, platform_id, thread_id FROM session_routing WHERE id = 1').get() as
+      | {
+          channel_type: string | null;
+          platform_id: string | null;
+          thread_id: string | null;
+        }
+      | undefined;
+    db.close();
+
+    expect(row).toBeDefined();
+    expect(row!.channel_type).toBeNull();
+    expect(row!.platform_id).toBeNull();
+    expect(row!.thread_id).toBeNull();
+  });
+
+  it('includes thread_id from per-thread session', () => {
+    createAgentGroup({
+      id: 'ag-1',
+      name: 'Agent',
+      folder: 'agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+    createMessagingGroup({
+      id: 'mg-1',
+      channel_type: 'discord',
+      platform_id: 'chan-123',
+      name: 'General',
+      is_group: 1,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+
+    const { session } = resolveSession('ag-1', 'mg-1', 'thread-77', 'per-thread');
+    writeSessionRouting('ag-1', session.id);
+
+    const db = new Database(inboundDbPath('ag-1', session.id));
+    const row = db.prepare('SELECT channel_type, platform_id, thread_id FROM session_routing WHERE id = 1').get() as
+      | {
+          channel_type: string | null;
+          platform_id: string | null;
+          thread_id: string | null;
+        }
+      | undefined;
+    db.close();
+
+    expect(row).toBeDefined();
+    expect(row!.channel_type).toBe('discord');
+    expect(row!.platform_id).toBe('chan-123');
+    expect(row!.thread_id).toBe('thread-77');
+  });
+});
+
+describe('agent-shared session resolution', () => {
+  it('resolves to the same session on repeated calls', () => {
+    createAgentGroup({
+      id: 'ag-1',
+      name: 'Agent',
+      folder: 'agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+
+    const { session: s1, created: c1 } = resolveSession('ag-1', null, null, 'agent-shared');
+    const { session: s2, created: c2 } = resolveSession('ag-1', null, null, 'agent-shared');
+
+    expect(c1).toBe(true);
+    expect(c2).toBe(false);
+    expect(s1.id).toBe(s2.id);
+  });
+
+  it('agent-shared session has null messaging_group_id', () => {
+    createAgentGroup({
+      id: 'ag-1',
+      name: 'Agent',
+      folder: 'agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+
+    const { session } = resolveSession('ag-1', null, null, 'agent-shared');
+    expect(session.messaging_group_id).toBeNull();
+  });
+
+});
+
+describe('agent-to-agent routing', () => {
+  beforeEach(() => {
+    createAgentGroup({
+      id: 'ag-pa',
+      name: 'PA',
+      folder: 'pa-agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+    createMessagingGroup({
+      id: 'mg-slack',
+      channel_type: 'slack',
+      platform_id: 'C-GENERAL',
+      name: 'Slack General',
+      is_group: 1,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+    createAgentGroup({
+      id: 'ag-researcher',
+      name: 'Researcher',
+      folder: 'researcher-agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+
+    // Wire bidirectional A2A destinations (table created by runMigrations)
+    const db = getDb();
+    db.prepare(
+      `INSERT OR IGNORE INTO agent_destinations (agent_group_id, local_name, target_type, target_id, created_at)
+       VALUES ('ag-pa', 'researcher', 'agent', 'ag-researcher', ?)`,
+    ).run(now());
+    db.prepare(
+      `INSERT OR IGNORE INTO agent_destinations (agent_group_id, local_name, target_type, target_id, created_at)
+       VALUES ('ag-researcher', 'pa', 'agent', 'ag-pa', ?)`,
+    ).run(now());
+  });
+
+  it('A2A outbound lands in a session for the target agent', async () => {
+    const { routeAgentMessage } = await import('./modules/agent-to-agent/agent-route.js');
+
+    const { session: paSlackSession } = resolveSession('ag-pa', 'mg-slack', null, 'shared');
+
+    await routeAgentMessage(
+      { id: 'out-a2a-1', platform_id: 'ag-researcher', content: JSON.stringify({ text: 'research this' }), in_reply_to: null },
+      paSlackSession,
+    );
+
+    const { getSessionsByAgentGroup } = await import('./db/sessions.js');
+    const researcherSessions = getSessionsByAgentGroup('ag-researcher');
+    expect(researcherSessions.length).toBeGreaterThanOrEqual(1);
+
+    const rDb = new Database(inboundDbPath('ag-researcher', researcherSessions[0].id));
+    const rows = rDb.prepare('SELECT platform_id, channel_type, content FROM messages_in').all() as Array<{
+      platform_id: string | null;
+      channel_type: string | null;
+      content: string;
+    }>;
+    rDb.close();
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].channel_type).toBe('agent');
+    expect(rows[0].platform_id).toBe('ag-pa');
+    expect(JSON.parse(rows[0].content).text).toBe('research this');
+  });
+
+  it('A2A return path routes to originating session, not newest (#2332)', async () => {
+    // PA has Slack session, then gets wired to Discord (newer session).
+    // Researcher responds to PA. With the return-path fix, the reply
+    // routes back to the Slack session (originator) not Discord (newest).
+    const { routeAgentMessage } = await import('./modules/agent-to-agent/agent-route.js');
+
+    const { session: paSlackSession } = resolveSession('ag-pa', 'mg-slack', null, 'shared');
+
+    createMessagingGroup({
+      id: 'mg-discord',
+      channel_type: 'discord',
+      platform_id: 'chan-discord',
+      name: 'Discord',
+      is_group: 0,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+    const { session: paDiscordSession } = resolveSession('ag-pa', 'mg-discord', null, 'shared');
+
+    // PA sends from Slack
+    await routeAgentMessage(
+      { id: 'out-fwd', platform_id: 'ag-researcher', content: JSON.stringify({ text: 'research' }), in_reply_to: null },
+      paSlackSession,
+    );
+
+    // Researcher responds back to PA
+    const { getSessionsByAgentGroup } = await import('./db/sessions.js');
+    const researcherSession = getSessionsByAgentGroup('ag-researcher')[0];
+
+    await routeAgentMessage(
+      { id: 'out-reply', platform_id: 'ag-pa', content: JSON.stringify({ text: 'found it' }), in_reply_to: null },
+      researcherSession,
+    );
+
+    const slackDb = new Database(inboundDbPath('ag-pa', paSlackSession.id));
+    const slackA2a = slackDb.prepare("SELECT * FROM messages_in WHERE channel_type = 'agent'").all();
+    slackDb.close();
+
+    const discordDb = new Database(inboundDbPath('ag-pa', paDiscordSession.id));
+    const discordA2a = discordDb.prepare("SELECT * FROM messages_in WHERE channel_type = 'agent'").all();
+    discordDb.close();
+
+    // Fixed: response lands in Slack (origin) not Discord (newest)
+    expect(slackA2a).toHaveLength(1);
+    expect(discordA2a).toHaveLength(0);
+  });
+
+  it('BUG: A2A-only session gets null session_routing (#2332)', async () => {
+    // Researcher only has an agent-shared session (no channel wiring).
+    // writeSessionRouting writes nulls because messaging_group_id is null.
+    const { routeAgentMessage } = await import('./modules/agent-to-agent/agent-route.js');
+
+    const { session: paSession } = resolveSession('ag-pa', 'mg-slack', null, 'shared');
+    await routeAgentMessage(
+      { id: 'out-1', platform_id: 'ag-researcher', content: JSON.stringify({ text: 'go' }), in_reply_to: null },
+      paSession,
+    );
+
+    const { getSessionsByAgentGroup } = await import('./db/sessions.js');
+    const researcherSessions = getSessionsByAgentGroup('ag-researcher');
+    expect(researcherSessions).toHaveLength(1);
+
+    writeSessionRouting('ag-researcher', researcherSessions[0].id);
+
+    const rDb = new Database(inboundDbPath('ag-researcher', researcherSessions[0].id));
+    const routing = rDb.prepare('SELECT channel_type, platform_id FROM session_routing WHERE id = 1').get() as
+      | {
+          channel_type: string | null;
+          platform_id: string | null;
+        }
+      | undefined;
+    rDb.close();
+
+    // BUG: session_routing is all null — researcher has no default routing
+    expect(routing).toBeDefined();
+    expect(routing!.channel_type).toBeNull();
+    expect(routing!.platform_id).toBeNull();
   });
 });
 

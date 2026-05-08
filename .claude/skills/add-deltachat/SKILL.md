@@ -140,7 +140,7 @@ After accepting, DeltaChat exchanges keys and creates the chat automatically.
 Once the first message arrives the router auto-creates a `messaging_groups` row. Look up the chat ID:
 
 ```bash
-sqlite3 data/v2.db \
+pnpm exec tsx scripts/q.ts data/v2.db \
   "SELECT platform_id, name FROM messaging_groups WHERE channel_type='deltachat' AND is_group=0 ORDER BY created_at DESC LIMIT 5"
 ```
 
@@ -226,7 +226,7 @@ Set `DC_SMTP_SECURITY=1` and `DC_SMTP_PORT=465` in `.env`, then restart.
 1. Check the service is running and the adapter started: `grep "Channel adapter started.*deltachat" logs/nanoclaw.log`
 2. Check connectivity: `grep "DeltaChat: IO started" logs/nanoclaw.log`
 3. Check the sender has been granted access — run `/init-first-agent` to create their user record and wire the chat
-4. Verify the messaging group is wired: `sqlite3 data/v2.db "SELECT mg.platform_id, mga.agent_group_id FROM messaging_groups mg JOIN messaging_group_agents mga ON mg.id = mga.messaging_group_id WHERE mg.channel_type='deltachat'"`
+4. Verify the messaging group is wired: `pnpm exec tsx scripts/q.ts data/v2.db "SELECT mg.platform_id, mga.agent_group_id FROM messaging_groups mg JOIN messaging_group_agents mga ON mg.id = mga.messaging_group_id WHERE mg.channel_type='deltachat'"`
 
 ### Stale lock file after crash
 
@@ -248,7 +248,7 @@ grep "DeltaChat" logs/nanoclaw.error.log | tail -20
 The messaging group exists but may not be wired to an agent group. Run:
 
 ```bash
-sqlite3 data/v2.db "SELECT id, platform_id, name FROM messaging_groups WHERE channel_type='deltachat'"
+pnpm exec tsx scripts/q.ts data/v2.db "SELECT id, platform_id, name FROM messaging_groups WHERE channel_type='deltachat'"
 ```
 
 If the group has no entry in `messaging_group_agents`, wire it with `/manage-channels`.

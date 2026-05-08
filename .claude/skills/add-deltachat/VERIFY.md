@@ -37,7 +37,7 @@ grep "DeltaChat" logs/nanoclaw.error.log | tail -10
 ## 4. Check messaging group was created
 
 ```bash
-sqlite3 data/v2.db \
+pnpm exec tsx scripts/q.ts data/v2.db \
   "SELECT id, platform_id, name FROM messaging_groups WHERE channel_type='deltachat' ORDER BY created_at DESC LIMIT 5"
 ```
 
@@ -48,7 +48,7 @@ If a row appears, the inbound routing is working. If not, the adapter isn't rece
 If the message arrived but the agent didn't respond, the sender may not have access:
 
 ```bash
-sqlite3 data/v2.db "SELECT id, display_name FROM users WHERE id LIKE 'deltachat:%'"
+pnpm exec tsx scripts/q.ts data/v2.db "SELECT id, display_name FROM users WHERE id LIKE 'deltachat:%'"
 ```
 
 Grant access as shown in the SKILL.md "Grant user access" section.

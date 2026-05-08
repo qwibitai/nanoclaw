@@ -82,11 +82,14 @@ For each target agent group, confirm OneCLI will inject Gmail secrets into its c
 onecli agents list
 ```
 
-If that agent's `secretMode` is `all`, you're done — Gmail secrets (identified by OneCLI's Gmail hostPattern) will auto-inject. If it's `selective`, explicitly assign the Gmail secrets:
+If that agent's `secretMode` is `all`, you're done — Gmail secrets (identified by OneCLI's Gmail hostPattern) will auto-inject. If it's `selective`, explicitly assign the Gmail secrets using the safe merge pattern (`set-secrets` replaces the entire list — always read first):
 
 ```bash
-onecli secrets list     # find Gmail secret IDs (OneCLI creates one per connected app)
-onecli agents set-secrets --id <agent-id> --secret-ids <gmail-secret-id>
+GMAIL_IDS=$(onecli secrets list | jq -r '[.data[] | select(.name | test("(?i)gmail")) | .id] | join(",")')
+CURRENT=$(onecli agents secrets --id <agent-id> | jq -r '[.data[]] | join(",")')
+MERGED=$(printf '%s' "$CURRENT,$GMAIL_IDS" | tr ',' '\n' | sort -u | paste -sd ',' -)
+onecli agents set-secrets --id <agent-id> --secret-ids "$MERGED"
+onecli agents secrets --id <agent-id>
 ```
 
 ## Phase 2: Apply Code Changes

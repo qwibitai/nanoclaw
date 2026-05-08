@@ -123,6 +123,15 @@ export const CONFIG: Entry[] = [
     surface: 'flag',
     type: 'string',
   },
+  {
+    key: 'assistMode',
+    envVar: 'NANOCLAW_SETUP_ASSIST_MODE',
+    label: 'Assist mode',
+    help: 'Use non-interactive Claude assist on failure instead of interactive handoff.',
+    surface: 'flag',
+    type: 'boolean',
+    default: false,
+  },
 ];
 
 // ─── name derivation ───────────────────────────────────────────────────

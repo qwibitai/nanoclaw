@@ -30,6 +30,7 @@ import path from 'path';
 import * as p from '@clack/prompts';
 import k from 'kleur';
 
+import { BACK_TO_CHANNEL_SELECTION, type ChannelFlowResult } from '../lib/back-nav.js';
 import { brightSelect } from '../lib/bright-select.js';
 import { confirmThenOpen } from '../lib/browser.js';
 import {
@@ -57,18 +58,24 @@ interface Collected {
   agentName?: string;
 }
 
-export async function runTeamsChannel(_displayName: string): Promise<void> {
+export async function runTeamsChannel(_displayName: string): Promise<ChannelFlowResult> {
   const collected: Collected = {};
   const completed: string[] = [];
 
   const existingAppId = readEnvKey('TEAMS_APP_ID');
   const existingPassword = readEnvKey('TEAMS_APP_PASSWORD');
   if (existingAppId && existingPassword) {
-    const reuse = ensureAnswer(await p.confirm({
+    const choice = ensureAnswer(await brightSelect<'yes' | 'no' | 'back'>({
       message: `Found existing Teams credentials (App ID: ${existingAppId.slice(0, 8)}…). Use them?`,
-      initialValue: true,
+      options: [
+        { value: 'yes', label: 'Yes, use the existing credentials' },
+        { value: 'no', label: "No, set up new ones" },
+        { value: 'back', label: '← Back to channel selection' },
+      ],
+      initialValue: 'yes',
     }));
-    if (reuse) {
+    if (choice === 'back') return BACK_TO_CHANNEL_SELECTION;
+    if (choice === 'yes') {
       collected.appId = existingAppId;
       collected.appPassword = existingPassword;
       collected.appType = (readEnvKey('TEAMS_APP_TYPE') as 'SingleTenant' | 'MultiTenant') || 'MultiTenant';
@@ -85,14 +92,28 @@ export async function runTeamsChannel(_displayName: string): Promise<void> {
 
   printIntro();
 
-  await confirmPrereqs({ collected, completed });
+  const prereqsResult = await confirmPrereqs({ collected, completed });
+  if (prereqsResult === 'back') return BACK_TO_CHANNEL_SELECTION;
   await stepPublicUrl({ collected, completed });
-  await stepAppRegistration({ collected, completed });
-  await stepClientSecret({ collected, completed });
-  await stepAzureBot({ collected, completed });
-  await stepEnableTeamsChannel({ collected, completed });
+  if (await stepAppRegistration({ collected, completed }) === 'back') {
+    return BACK_TO_CHANNEL_SELECTION;
+  }
+  if (await stepClientSecret({ collected, completed }) === 'back') {
+    return BACK_TO_CHANNEL_SELECTION;
+  }
+  if (await stepAzureBot({ collected, completed }) === 'back') {
+    return BACK_TO_CHANNEL_SELECTION;
+  }
+  if (await stepEnableTeamsChannel({ collected, completed }) === 'back') {
+    return BACK_TO_CHANNEL_SELECTION;
+  }
   const manifestResult = await stepGenerateManifest({ collected, completed });
-  await stepSideload({ collected, completed, zipPath: manifestResult.zipPath });
+  if (
+    await stepSideload({ collected, completed, zipPath: manifestResult.zipPath })
+    === 'back'
+  ) {
+    return BACK_TO_CHANNEL_SELECTION;
+  }
 
   await installAdapter(collected);
   completed.push('Adapter installed and service restarted.');
@@ -116,7 +137,7 @@ function printIntro(): void {
   );
 }
 
-async function confirmPrereqs(args: { collected: Collected; completed: string[] }): Promise<void> {
+async function confirmPrereqs(args: { collected: Collected; completed: string[] }): Promise<'continue' | 'back'> {
   note(
     [
       'Before we start, confirm you have:',
@@ -131,13 +152,36 @@ async function confirmPrereqs(args: { collected: Collected; completed: string[] 
     'Prereqs',
   );
 
-  await stepGate({
-    stepName: 'teams-prereqs',
-    stepDescription: 'confirming they have the right Microsoft 365 tenant and tunnel',
-    reshow: () => confirmPrereqs(args),
-    args,
-  });
+  // Back-aware variant of stepGate — Back is only offered on the very first
+  // step of the Teams flow so users can bail out before any state is taken.
+  while (true) {
+    const choice = ensureAnswer(
+      await brightSelect<'done' | 'help' | 'reshow' | 'back'>({
+        message: 'How did that go?',
+        options: [
+          { value: 'done', label: "Done — let's continue" },
+          { value: 'help', label: 'Stuck — hand me off to Claude' },
+          { value: 'reshow', label: 'Show me the steps again' },
+          { value: 'back', label: '← Back to channel selection' },
+        ],
+      }),
+    );
+    if (choice === 'back') return 'back';
+    if (choice === 'done') break;
+    if (choice === 'help') {
+      await offerHandoff({
+        step: 'teams-prereqs',
+        stepDescription: 'confirming they have the right Microsoft 365 tenant and tunnel',
+        args,
+      });
+      continue;
+    }
+    if (choice === 'reshow') {
+      return confirmPrereqs(args);
+    }
+  }
   args.completed.push('Prereqs confirmed.');
+  return 'continue';
 }
 
 // ─── step: public URL ──────────────────────────────────────────────────
@@ -198,7 +242,7 @@ async function stepPublicUrl(args: { collected: Collected; completed: string[] }
 async function stepAppRegistration(args: {
   collected: Collected;
   completed: string[];
-}): Promise<void> {
+}): Promise<'continue' | 'back'> {
   note(
     [
       `1. In ${AZURE_PORTAL_URL}, search "App registrations" → "New registration"`,
@@ -231,15 +275,17 @@ async function stepAppRegistration(args: {
     );
   }
 
-  await stepGate({
+  const gate = await stepGate({
     stepName: 'teams-app-registration',
     stepDescription: 'registering an app in Azure and collecting App ID + tenant type',
     reshow: () => stepAppRegistration(args),
     args,
   });
+  if (gate === 'back') return 'back';
   args.completed.push(
     `App registered: ${args.collected.appId} (${args.collected.appType})`,
   );
+  return 'continue';
 }
 
 async function askAppType(args: {
@@ -282,7 +328,7 @@ async function askAppType(args: {
 async function stepClientSecret(args: {
   collected: Collected;
   completed: string[];
-}): Promise<void> {
+}): Promise<'continue' | 'back'> {
   note(
     [
       `1. In your app registration, open "Certificates & secrets"`,
@@ -325,13 +371,15 @@ async function stepClientSecret(args: {
     break;
   }
 
-  await stepGate({
+  const gate = await stepGate({
     stepName: 'teams-client-secret',
     stepDescription: 'creating and copying the client secret',
     reshow: () => stepClientSecret(args),
     args,
   });
+  if (gate === 'back') return 'back';
   args.completed.push('Client secret captured.');
+  return 'continue';
 }
 
 // ─── step: Azure Bot resource ──────────────────────────────────────────
@@ -339,7 +387,7 @@ async function stepClientSecret(args: {
 async function stepAzureBot(args: {
   collected: Collected;
   completed: string[];
-}): Promise<void> {
+}): Promise<'continue' | 'back'> {
   const endpoint = `${args.collected.publicUrl}/api/webhooks/teams`;
   const tenantFlag =
     args.collected.appType === 'SingleTenant'
@@ -374,14 +422,16 @@ async function stepAzureBot(args: {
     'Step 3 of 6 — Create Azure Bot resource',
   );
 
-  await stepGate({
+  const gate = await stepGate({
     stepName: 'teams-azure-bot',
     stepDescription:
       'creating an Azure Bot resource linked to the app registration and setting the messaging endpoint',
     reshow: () => stepAzureBot(args),
     args,
   });
+  if (gate === 'back') return 'back';
   args.completed.push('Azure Bot created; messaging endpoint configured.');
+  return 'continue';
 }
 
 // ─── step: enable Teams channel ────────────────────────────────────────
@@ -389,7 +439,7 @@ async function stepAzureBot(args: {
 async function stepEnableTeamsChannel(args: {
   collected: Collected;
   completed: string[];
-}): Promise<void> {
+}): Promise<'continue' | 'back'> {
   note(
     [
       '1. Open your Azure Bot resource → Channels',
@@ -400,13 +450,15 @@ async function stepEnableTeamsChannel(args: {
     ].join('\n'),
     'Step 4 of 6 — Enable Teams channel on the bot',
   );
-  await stepGate({
+  const gate = await stepGate({
     stepName: 'teams-enable-channel',
     stepDescription: 'enabling the Microsoft Teams channel on the Azure Bot resource',
     reshow: () => stepEnableTeamsChannel(args),
     args,
   });
+  if (gate === 'back') return 'back';
   args.completed.push('Teams channel enabled on the bot.');
+  return 'continue';
 }
 
 // ─── step: manifest zip ────────────────────────────────────────────────
@@ -459,7 +511,7 @@ async function stepSideload(args: {
   collected: Collected;
   completed: string[];
   zipPath: string;
-}): Promise<void> {
+}): Promise<'continue' | 'back'> {
   note(
     [
       '1. Open Microsoft Teams',
@@ -474,13 +526,15 @@ async function stepSideload(args: {
     ].join('\n'),
     'Step 5 of 6 — Sideload the app into Teams',
   );
-  await stepGate({
+  const gate = await stepGate({
     stepName: 'teams-sideload',
     stepDescription: 'uploading the generated zip into Teams as a custom app',
-    reshow: () => stepSideload(args),
+    reshow: () => stepSideload({ ...args, zipPath: args.zipPath }),
     args,
   });
+  if (gate === 'back') return 'back';
   args.completed.push('App sideloaded into Teams.');
+  return 'continue';
 }
 
 // ─── step: install adapter ─────────────────────────────────────────────
@@ -592,9 +646,9 @@ async function finishWithHandoff(
 async function stepGate(args: {
   stepName: string;
   stepDescription: string;
-  reshow: () => Promise<void> | Promise<unknown>;
+  reshow: () => Promise<'continue' | 'back'>;
   args: { collected: Collected; completed: string[] };
-}): Promise<void> {
+}): Promise<'continue' | 'back'> {
   while (true) {
     const choice = ensureAnswer(
       await brightSelect({
@@ -603,10 +657,12 @@ async function stepGate(args: {
           { value: 'done', label: "Done — let's continue" },
           { value: 'help', label: 'Stuck — hand me off to Claude' },
           { value: 'reshow', label: 'Show me the steps again' },
+          { value: 'back', label: '← Back to channel selection' },
         ],
       }),
     );
-    if (choice === 'done') return;
+    if (choice === 'done') return 'continue';
+    if (choice === 'back') return 'back';
     if (choice === 'help') {
       await offerHandoff({
         step: args.stepName,
@@ -616,8 +672,7 @@ async function stepGate(args: {
       continue;
     }
     if (choice === 'reshow') {
-      await args.reshow();
-      return;
+      return args.reshow();
     }
   }
 }
