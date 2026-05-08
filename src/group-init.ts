@@ -174,8 +174,8 @@ function ensureRequiredSettings(settingsFile: string): boolean {
   // PreToolUse: present-or-add for the rtk Bash entry. Preserves any other
   // operator-installed PreToolUse hooks alongside it.
   const existingPreToolUse = hooks.PreToolUse as unknown[] | undefined;
-  const hasRtkHook = Array.isArray(existingPreToolUse)
-    && JSON.stringify(existingPreToolUse).includes('rtk hook claude');
+  const hasRtkHook =
+    Array.isArray(existingPreToolUse) && JSON.stringify(existingPreToolUse).includes('rtk hook claude');
   if (!hasRtkHook) {
     const next = Array.isArray(existingPreToolUse) ? [...existingPreToolUse] : [];
     next.push(JSON.parse(JSON.stringify(REQUIRED_HOOKS.PreToolUse[0])));
