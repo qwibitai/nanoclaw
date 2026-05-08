@@ -191,7 +191,12 @@ function createAdapter(): ChannelAdapter {
     });
   }
 
-  async function handleLine(line: string, socket: net.Socket, config: ChannelSetup, claimChatSlot: () => void): Promise<void> {
+  async function handleLine(
+    line: string,
+    socket: net.Socket,
+    config: ChannelSetup,
+    claimChatSlot: () => void,
+  ): Promise<void> {
     let payload: {
       text?: unknown;
       to?: unknown;
@@ -216,22 +221,16 @@ function createAdapter(): ChannelAdapter {
       const channelType = typeof d.channelType === 'string' ? d.channelType : null;
       const platformId = typeof d.platformId === 'string' ? d.platformId : null;
       const threadId =
-        d.threadId === null || d.threadId === undefined
-          ? null
-          : typeof d.threadId === 'string'
-            ? d.threadId
-            : null;
+        d.threadId === null || d.threadId === undefined ? null : typeof d.threadId === 'string' ? d.threadId : null;
       const text = typeof d.text === 'string' ? d.text : null;
 
       if (!channelType || !platformId || text === null) {
-        replyDeliver(false, undefined,
-          'deliver opcode requires {channelType, platformId, text}');
+        replyDeliver(false, undefined, 'deliver opcode requires {channelType, platformId, text}');
         return;
       }
       const adapter = getChannelAdapter(channelType);
       if (!adapter) {
-        replyDeliver(false, undefined,
-          `no active channel adapter for channelType=${channelType}`);
+        replyDeliver(false, undefined, `no active channel adapter for channelType=${channelType}`);
         return;
       }
       const message: OutboundMessage = {
@@ -243,8 +242,7 @@ function createAdapter(): ChannelAdapter {
         replyDeliver(true, messageId, undefined);
       } catch (err) {
         log.error('CLI: deliver opcode threw', { channelType, platformId, err });
-        replyDeliver(false, undefined,
-          err instanceof Error ? err.message : String(err));
+        replyDeliver(false, undefined, err instanceof Error ? err.message : String(err));
       }
       return;
     }
@@ -254,8 +252,7 @@ function createAdapter(): ChannelAdapter {
     const to = parseAddress(payload.to);
     const replyTo = parseAddress(payload.reply_to);
 
-    function replyDeliver(success: boolean, messageId?: string,
-                           errMsg?: string): void {
+    function replyDeliver(success: boolean, messageId?: string, errMsg?: string): void {
       try {
         const reply: Record<string, unknown> = { ok: success };
         if (messageId !== undefined) reply.messageId = messageId;
