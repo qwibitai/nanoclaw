@@ -311,11 +311,11 @@ function buildMounts(
   mounts.push({ hostPath: claudeDir, containerPath: '/home/node/.claude', readonly: false });
 
   // Host OAuth credentials — gives the SDK access to the Pro subscription
-  // token and refresh token without needing an API key. Mounted read-only on
-  // top of the .claude-shared directory; the SDK refreshes in-memory.
+  // token and refresh token. Mounted read-write so the SDK can persist
+  // refreshed tokens back to disk and avoid mid-session auth failures.
   const hostCredentials = path.join(process.env.HOME ?? '/root', '.claude', '.credentials.json');
   if (fs.existsSync(hostCredentials)) {
-    mounts.push({ hostPath: hostCredentials, containerPath: '/home/node/.claude/.credentials.json', readonly: true });
+    mounts.push({ hostPath: hostCredentials, containerPath: '/home/node/.claude/.credentials.json', readonly: false });
   }
 
   // Shared agent-runner source — read-only, same code for all groups.
@@ -447,23 +447,6 @@ async function buildContainerArgs(
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Pro subscription auth — read the OAuth access token from the host
-  // credentials file and inject it explicitly. CLAUDE_CODE_OAUTH_TOKEN takes
-  // precedence over ANTHROPIC_API_KEY (which OneCLI may inject as a
-  // placeholder), so this ensures the SDK authenticates via Pro OAuth.
-  const credPath = path.join(process.env.HOME ?? '/root', '.claude', '.credentials.json');
-  if (fs.existsSync(credPath)) {
-    try {
-      const creds = JSON.parse(fs.readFileSync(credPath, 'utf8'));
-      const token = creds?.claudeAiOauth?.accessToken;
-      if (token) {
-        args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${token}`);
-        log.debug('Injecting Pro OAuth token into container');
-      }
-    } catch {
-      log.warn('Failed to read Claude credentials file — falling back to API key auth');
-    }
-  }
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {
@@ -488,10 +471,10 @@ async function buildContainerArgs(
 
   // OneCLI injects ANTHROPIC_API_KEY as part of its proxy setup regardless
   // of whether an Anthropic vault secret exists. When using Pro OAuth
-  // (CLAUDE_CODE_OAUTH_TOKEN already in args), strip the injected key so the
-  // SDK doesn't prefer it over the OAuth token.
-  const hasOauthToken = args.some((a) => a.startsWith('CLAUDE_CODE_OAUTH_TOKEN='));
-  if (hasOauthToken) {
+  // (credentials file mounted), strip the injected key so the SDK reads
+  // from the credentials file instead of treating the placeholder as a real key.
+  const usingProOAuth = fs.existsSync(path.join(process.env.HOME ?? '/root', '.claude', '.credentials.json'));
+  if (usingProOAuth) {
     for (let i = args.length - 2; i >= 0; i--) {
       if (args[i] === '-e' && args[i + 1].startsWith('ANTHROPIC_API_KEY=')) {
         args.splice(i, 2);
@@ -500,9 +483,8 @@ async function buildContainerArgs(
     log.debug('Stripped ANTHROPIC_API_KEY injected by OneCLI (using Pro OAuth)');
 
     // OneCLI proxies all HTTPS via MITM and injects the managed Anthropic API
-    // key as an HTTP header, overriding the OAuth token even after we strip
-    // ANTHROPIC_API_KEY from env. Bypass the proxy for Anthropic endpoints so
-    // the OAuth Bearer token reaches the API unmodified.
+    // key as an HTTP header. Bypass the proxy for Anthropic endpoints so the
+    // OAuth Bearer token from the credentials file reaches the API unmodified.
     const ANTHROPIC_NO_PROXY = 'api.anthropic.com,anthropic.com';
     for (const varName of ['NO_PROXY', 'no_proxy']) {
       const existing = args.findIndex((a, i) => args[i - 1] === '-e' && a.startsWith(`${varName}=`));
