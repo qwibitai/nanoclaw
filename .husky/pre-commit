@@ -1,1 +1,14 @@
-pnpm run format:fix
+#!/usr/bin/env sh
+# Format only the staged .ts files and re-stage them. Replaces the
+# previous `pnpm run format:fix` (which prettier-walked the whole src/
+# tree and didn't re-stage), so contributors no longer leave behind
+# unstaged formatter diffs on files they didn't touch.
+
+set -e
+
+files=$(git diff --cached --name-only --diff-filter=ACMR -z | tr '\0' '\n' | grep -E '\.ts$' || true)
+[ -z "$files" ] && exit 0
+
+# shellcheck disable=SC2086 # word-splitting is intentional here
+echo "$files" | xargs pnpm exec prettier --write --log-level=warn
+echo "$files" | xargs git add
