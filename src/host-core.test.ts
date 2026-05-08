@@ -838,7 +838,6 @@ describe('agent-shared session resolution', () => {
     const { session } = resolveSession('ag-1', null, null, 'agent-shared');
     expect(session.messaging_group_id).toBeNull();
   });
-
 });
 
 describe('agent-to-agent routing', () => {
@@ -885,7 +884,12 @@ describe('agent-to-agent routing', () => {
     const { session: paSlackSession } = resolveSession('ag-pa', 'mg-slack', null, 'shared');
 
     await routeAgentMessage(
-      { id: 'out-a2a-1', platform_id: 'ag-researcher', content: JSON.stringify({ text: 'research this' }) },
+      {
+        id: 'out-a2a-1',
+        platform_id: 'ag-researcher',
+        content: JSON.stringify({ text: 'research this' }),
+        in_reply_to: null,
+      },
       paSlackSession,
     );
 
@@ -928,7 +932,7 @@ describe('agent-to-agent routing', () => {
 
     // PA sends from Slack
     await routeAgentMessage(
-      { id: 'out-fwd', platform_id: 'ag-researcher', content: JSON.stringify({ text: 'research' }) },
+      { id: 'out-fwd', platform_id: 'ag-researcher', content: JSON.stringify({ text: 'research' }), in_reply_to: null },
       paSlackSession,
     );
 
@@ -937,7 +941,7 @@ describe('agent-to-agent routing', () => {
     const researcherSession = getSessionsByAgentGroup('ag-researcher')[0];
 
     await routeAgentMessage(
-      { id: 'out-reply', platform_id: 'ag-pa', content: JSON.stringify({ text: 'found it' }) },
+      { id: 'out-reply', platform_id: 'ag-pa', content: JSON.stringify({ text: 'found it' }), in_reply_to: null },
       researcherSession,
     );
 
@@ -961,7 +965,7 @@ describe('agent-to-agent routing', () => {
 
     const { session: paSession } = resolveSession('ag-pa', 'mg-slack', null, 'shared');
     await routeAgentMessage(
-      { id: 'out-1', platform_id: 'ag-researcher', content: JSON.stringify({ text: 'go' }) },
+      { id: 'out-1', platform_id: 'ag-researcher', content: JSON.stringify({ text: 'go' }), in_reply_to: null },
       paSession,
     );
 

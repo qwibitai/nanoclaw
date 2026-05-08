@@ -285,7 +285,7 @@ describe('routeAgentMessage return-path', () => {
     const inboundId = bRows[0].id;
 
     // Archive S1 — simulates session cleanup or channel disconnect.
-    updateSession(S1.id, { status: 'archived' });
+    updateSession(S1.id, { status: 'closed' });
 
     // B replies. origin points to S1 (archived), should fall through to S2.
     await routeAgentMessage(
