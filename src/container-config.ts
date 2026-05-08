@@ -39,6 +39,12 @@ export interface ContainerConfig {
   skills: string[] | 'all';
   /** Agent provider name (e.g. "claude", "opencode"). Default: "claude". */
   provider?: string;
+  /**
+   * Per-group model override (opaque string). SDK-specific — e.g.
+   * `sonnet[1m]`, `opus[1m]`, `haiku` for Claude; `gpt-5.4-mini` for Codex.
+   * Falls through to the provider's own default when unset.
+   */
+  model?: string;
   /** Agent group display name (used in transcript archiving). */
   groupName?: string;
   /** Assistant display name (used in system prompt / responses). */
@@ -83,6 +89,7 @@ export function readContainerConfig(folder: string): ContainerConfig {
       additionalMounts: raw.additionalMounts ?? [],
       skills: raw.skills ?? 'all',
       provider: raw.provider,
+      model: raw.model,
       groupName: raw.groupName,
       assistantName: raw.assistantName,
       agentGroupId: raw.agentGroupId,

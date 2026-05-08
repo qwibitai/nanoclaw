@@ -5,6 +5,12 @@ export interface AgentGroup {
   name: string;
   folder: string;
   agent_provider: string | null;
+  /**
+   * Optional model override for this agent group. Opaque string passed
+   * through to the provider (e.g. `sonnet[1m]`, `opus[1m]`, `haiku`,
+   * `gpt-5.4-mini`). Null = inherit from container.json or provider default.
+   */
+  model: string | null;
   created_at: string;
 }
 
@@ -105,6 +111,8 @@ export interface Session {
   messaging_group_id: string | null;
   thread_id: string | null;
   agent_provider: string | null;
+  /** Per-session model override; null = inherit from agent_groups.model. */
+  model: string | null;
   status: 'active' | 'closed';
   container_status: 'running' | 'idle' | 'stopped';
   last_active: string | null;

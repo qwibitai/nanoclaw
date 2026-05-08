@@ -65,6 +65,7 @@ describe('agent groups', () => {
     name: 'Test Agent',
     folder: 'test-agent',
     agent_provider: null,
+    model: null,
     created_at: now(),
   });
 
@@ -161,6 +162,7 @@ describe('messaging group agents', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
     createMessagingGroup({
@@ -201,6 +203,7 @@ describe('messaging group agents', () => {
       name: 'Agent2',
       folder: 'agent2',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
     createMessagingGroupAgent({ ...mga(), id: 'mga-2', agent_group_id: 'ag-2', priority: 10 });
@@ -284,6 +287,7 @@ describe('sessions', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
     createMessagingGroup({
@@ -303,6 +307,7 @@ describe('sessions', () => {
     messaging_group_id: 'mg-1',
     thread_id: null,
     agent_provider: null,
+    model: null,
     status: 'active' as const,
     container_status: 'stopped' as const,
     last_active: null,
@@ -378,6 +383,7 @@ describe('pending questions', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
     createSession({
@@ -386,6 +392,7 @@ describe('pending questions', () => {
       messaging_group_id: null,
       thread_id: null,
       agent_provider: null,
+      model: null,
       status: 'active',
       container_status: 'stopped',
       last_active: null,

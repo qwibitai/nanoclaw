@@ -88,6 +88,7 @@ async function main(): Promise<void> {
 
   const provider = createProvider(providerName, {
     assistantName: config.assistantName || undefined,
+    model: config.model,
     mcpServers,
     env: { ...process.env },
     additionalDirectories: additionalDirectories.length > 0 ? additionalDirectories : undefined,

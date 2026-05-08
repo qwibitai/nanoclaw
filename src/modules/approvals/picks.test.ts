@@ -74,6 +74,7 @@ function seedAgentGroup(id: string): void {
     name: id.toUpperCase(),
     folder: id,
     agent_provider: null,
+    model: null,
     created_at: now(),
   });
 }
