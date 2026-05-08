@@ -11,13 +11,53 @@ import { log } from './log.js';
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'docker';
 
-/** CLI args needed for the container to resolve the host gateway. */
-export function hostGatewayArgs(): string[] {
-  // On Linux, host.docker.internal isn't built-in — add it explicitly
-  if (os.platform() === 'linux') {
-    return ['--add-host=host.docker.internal:host-gateway'];
+/**
+ * CLI args mapping `host.docker.internal` for the agent container.
+ *
+ * The default `host-gateway` resolves to the bridge gateway on Linux
+ * (172.17.0.1) and relies on the host's port-forward path back into the
+ * loopback namespace. In rootless Docker setups that path is brittle —
+ * OneCLI binds 127.0.0.1:10255 inside rootlesskit and the bridge gateway
+ * routinely loses its forward across host restarts, leaving the agent
+ * container unable to reach the proxy and the SDK call dies with
+ * ConnectionRefused (the silent-task-failure trigger we shipped runner-
+ * side detection for).
+ *
+ * When OneCLI's own bridge IP is known, pin host.docker.internal to it
+ * directly — the agent container reaches OneCLI as a direct container-
+ * to-container hop on the shared bridge, no rootlesskit involved.
+ *
+ * Falls back to `host-gateway` when OneCLI isn't on the bridge or the
+ * lookup fails (rootful Docker, OneCLI not installed, etc.) so the
+ * default behaviour is unchanged.
+ */
+export function hostGatewayArgs(opts: { onecliBridgeIp?: string | null } = {}): string[] {
+  if (os.platform() !== 'linux') return [];
+  const target = opts.onecliBridgeIp ?? 'host-gateway';
+  return [`--add-host=host.docker.internal:${target}`];
+}
+
+/**
+ * Resolve OneCLI's IP on the default `bridge` Docker network.
+ *
+ * Returns null when:
+ *   - OneCLI isn't running,
+ *   - it's not attached to the bridge network (e.g. only on a
+ *     compose-private network), or
+ *   - `docker inspect` fails for any reason.
+ *
+ * Cheap (<10 ms) and called once per container spawn.
+ */
+export function getOnecliBridgeIp(): string | null {
+  try {
+    const out = execSync(
+      `${CONTAINER_RUNTIME_BIN} inspect onecli --format '{{ index .NetworkSettings.Networks "bridge" "IPAddress" }}'`,
+      { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 5000 },
+    ).trim();
+    return /^\d+\.\d+\.\d+\.\d+$/.test(out) ? out : null;
+  } catch {
+    return null;
   }
-  return [];
 }
 
 /** Returns CLI args for a readonly bind mount. */

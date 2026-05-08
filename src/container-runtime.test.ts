@@ -17,18 +17,32 @@ vi.mock('child_process', () => ({
   execSync: (...args: unknown[]) => mockExecSync(...args),
 }));
 
+// Mock os.platform so we can exercise both Linux and non-Linux branches.
+const mockPlatform: () => NodeJS.Platform = vi.fn(() => 'linux' as NodeJS.Platform);
+vi.mock('os', () => ({
+  default: {
+    get platform() {
+      return mockPlatform;
+    },
+  },
+  platform: () => mockPlatform(),
+}));
+
 import {
   CONTAINER_RUNTIME_BIN,
   readonlyMountArgs,
   stopContainer,
   ensureContainerRuntimeRunning,
   cleanupOrphans,
+  hostGatewayArgs,
+  getOnecliBridgeIp,
 } from './container-runtime.js';
 import { CONTAINER_INSTALL_LABEL } from './config.js';
 import { log } from './log.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(mockPlatform).mockReturnValue('linux');
 });
 
 // --- Pure functions ---
@@ -156,5 +170,51 @@ describe('cleanupOrphans', () => {
       count: 2,
       names: ['nanoclaw-a-1', 'nanoclaw-b-2'],
     });
+  });
+});
+
+describe('hostGatewayArgs', () => {
+  it('returns empty on non-Linux platforms (host.docker.internal is built-in)', () => {
+    vi.mocked(mockPlatform).mockReturnValue('darwin');
+    expect(hostGatewayArgs()).toEqual([]);
+    expect(hostGatewayArgs({ onecliBridgeIp: '172.17.0.2' })).toEqual([]);
+  });
+
+  it('falls back to host-gateway on Linux when no OneCLI IP is provided', () => {
+    expect(hostGatewayArgs()).toEqual(['--add-host=host.docker.internal:host-gateway']);
+    expect(hostGatewayArgs({ onecliBridgeIp: null })).toEqual(['--add-host=host.docker.internal:host-gateway']);
+  });
+
+  it('pins host.docker.internal to the OneCLI bridge IP when provided', () => {
+    expect(hostGatewayArgs({ onecliBridgeIp: '172.17.0.2' })).toEqual(['--add-host=host.docker.internal:172.17.0.2']);
+  });
+});
+
+describe('getOnecliBridgeIp', () => {
+  it('returns the IPv4 address when docker inspect prints one', () => {
+    mockExecSync.mockReturnValueOnce('172.17.0.2\n');
+    expect(getOnecliBridgeIp()).toBe('172.17.0.2');
+    expect(mockExecSync).toHaveBeenCalledWith(
+      expect.stringContaining('inspect onecli'),
+      expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' }),
+    );
+  });
+
+  it('returns null when OneCLI is not on the bridge network (empty inspect output)', () => {
+    mockExecSync.mockReturnValueOnce('\n');
+    expect(getOnecliBridgeIp()).toBeNull();
+  });
+
+  it('returns null when docker inspect emits the literal "<no value>"', () => {
+    // Go template prints "<no value>" when the indexed key is missing.
+    mockExecSync.mockReturnValueOnce('<no value>\n');
+    expect(getOnecliBridgeIp()).toBeNull();
+  });
+
+  it('returns null when docker inspect throws (OneCLI not running)', () => {
+    mockExecSync.mockImplementationOnce(() => {
+      throw new Error('No such container: onecli');
+    });
+    expect(getOnecliBridgeIp()).toBeNull();
   });
 });

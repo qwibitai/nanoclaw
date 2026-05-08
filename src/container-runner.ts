@@ -20,7 +20,13 @@ import {
   TIMEZONE,
 } from './config.js';
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
-import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import {
+  CONTAINER_RUNTIME_BIN,
+  getOnecliBridgeIp,
+  hostGatewayArgs,
+  readonlyMountArgs,
+  stopContainer,
+} from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
@@ -460,8 +466,15 @@ async function buildContainerArgs(
   }
   log.info('OneCLI gateway applied', { containerName });
 
-  // Host gateway
-  args.push(...hostGatewayArgs());
+  // Host gateway. Pin host.docker.internal to OneCLI's bridge IP when we can
+  // resolve it — bypasses rootless Docker's flaky bridge-gateway → loopback
+  // forward (the silent ConnectionRefused trigger). Falls back to host-gateway
+  // when OneCLI isn't on the bridge.
+  const onecliBridgeIp = getOnecliBridgeIp();
+  if (onecliBridgeIp) {
+    log.info('Pinning host.docker.internal to OneCLI bridge IP', { containerName, onecliBridgeIp });
+  }
+  args.push(...hostGatewayArgs({ onecliBridgeIp }));
 
   // User mapping
   const hostUid = process.getuid?.();
