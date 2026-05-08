@@ -92,26 +92,44 @@ function initStubSessionFolder(dataDir: string, agentGroupId: string, sessionId:
   ensureSchema(outboundPath, 'outbound');
 }
 
-async function resolveActiveSession(
+/**
+ * Resolve (or create) the channel-root session for an (agent_group_id,
+ * messaging_group_id) pair. Channel-root means `thread_id IS NULL`; this is
+ * the canonical home for scheduled-task rows (`src/db/sessions.ts:74-83`).
+ *
+ * Concurrency: the lookup-then-insert is racy without protection — two
+ * simultaneous callers can both miss the existing row and both try to
+ * INSERT. The `sessions_channel_root_unique` partial index (migration 024)
+ * makes the second INSERT throw `SQLITE_CONSTRAINT_UNIQUE`, which we catch
+ * and resolve by re-lookup.
+ */
+export async function resolveActiveSession(
   agentGroupId: string,
   messagingGroupId: string,
-  dataDir: string,
+  dataDir: string = DATA_DIR,
 ): Promise<{ id: string }> {
   const existing = findSessionByAgentGroupAndMessagingGroup(agentGroupId, messagingGroupId);
   if (existing) return { id: existing.id };
 
   const sessionId = generateSessionId();
-  createSession({
-    id: sessionId,
-    agent_group_id: agentGroupId,
-    messaging_group_id: messagingGroupId,
-    thread_id: null,
-    agent_provider: null,
-    status: 'active',
-    container_status: 'stopped',
-    last_active: null,
-    created_at: new Date().toISOString(),
-  });
+  try {
+    createSession({
+      id: sessionId,
+      agent_group_id: agentGroupId,
+      messaging_group_id: messagingGroupId,
+      thread_id: null,
+      agent_provider: null,
+      status: 'active',
+      container_status: 'stopped',
+      last_active: null,
+      created_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'SQLITE_CONSTRAINT_UNIQUE') throw err;
+    const winner = findSessionByAgentGroupAndMessagingGroup(agentGroupId, messagingGroupId);
+    if (winner) return { id: winner.id };
+    throw err;
+  }
   initStubSessionFolder(dataDir, agentGroupId, sessionId);
   return { id: sessionId };
 }

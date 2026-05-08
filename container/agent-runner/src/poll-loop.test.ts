@@ -48,7 +48,7 @@ describe('formatter', () => {
     insertMessage('m1', 'task', { prompt: 'Review open PRs' });
     const messages = getPendingMessages();
     const prompt = formatMessages(messages);
-    expect(prompt).toContain('[SCHEDULED TASK]');
+    expect(prompt).toContain('<task');
     expect(prompt).toContain('Review open PRs');
   });
 
@@ -56,15 +56,17 @@ describe('formatter', () => {
     insertMessage('m1', 'webhook', { source: 'github', event: 'push', payload: { ref: 'main' } });
     const messages = getPendingMessages();
     const prompt = formatMessages(messages);
-    expect(prompt).toContain('[WEBHOOK: github/push]');
+    expect(prompt).toContain('<webhook');
+    expect(prompt).toContain('source="github"');
+    expect(prompt).toContain('event="push"');
   });
 
   it('should format system messages', () => {
     insertMessage('m1', 'system', { action: 'register_group', status: 'success', result: { id: 'ag-1' } });
     const messages = getPendingMessages();
     const prompt = formatMessages(messages);
-    expect(prompt).toContain('[SYSTEM RESPONSE]');
-    expect(prompt).toContain('register_group');
+    expect(prompt).toContain('<system_response');
+    expect(prompt).toContain('action="register_group"');
   });
 
   it('should handle mixed kinds', () => {
@@ -73,7 +75,7 @@ describe('formatter', () => {
     const messages = getPendingMessages();
     const prompt = formatMessages(messages);
     expect(prompt).toContain('sender="John"');
-    expect(prompt).toContain('[SYSTEM RESPONSE]');
+    expect(prompt).toContain('<system_response');
   });
 
   it('should escape XML in content', () => {

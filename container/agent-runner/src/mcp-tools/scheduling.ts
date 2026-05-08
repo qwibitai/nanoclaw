@@ -5,7 +5,7 @@
  * Scheduling operations are sent as system actions via messages_out — the host
  * reads them during delivery and applies the changes to inbound.db.
  */
-import { getInboundDb } from '../db/connection.js';
+import { openChannelInboundDb } from '../db/connection.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting } from '../db/session-routing.js';
 import { TIMEZONE, parseZonedToUtc } from '../timezone.js';
@@ -114,47 +114,106 @@ export const listTasks: McpToolDefinition = {
   },
   async handler(args) {
     const status = args.status as string | undefined;
-    const db = getInboundDb();
-    // One row per series — the live (pending or paused) occurrence. Recurring
-    // tasks accumulate one completed row per firing plus one live follow-up;
-    // exposing the whole pile to the agent is noisy and confuses task identity
-    // ("which id do I cancel?"). The series_id is the stable handle.
-    //
-    // SQLite quirk: when MAX(seq) appears in the SELECT list of a GROUP BY
-    // query, the bare columns take values from the row that contains that max
-    // — that's how we pick "the latest live row per series" in one pass.
-    let rows;
-    if (status) {
-      rows = db
-        .prepare(
-          `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
-             FROM messages_in
-            WHERE kind = 'task' AND status = ?
-            GROUP BY series_id
-            ORDER BY process_after ASC`,
-        )
-        .all(status);
-    } else {
-      rows = db
-        .prepare(
-          `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
-             FROM messages_in
-            WHERE kind = 'task' AND status IN ('pending', 'paused')
-            GROUP BY series_id
-            ORDER BY process_after ASC`,
-        )
-        .all();
+    // Tasks live in the channel-root session's inbound.db (mounted RO at
+    // /workspace/channel-inbound.db). When the mount is absent — no
+    // channel-root session yet, or session has no messaging_group_id — there
+    // are no tasks for this scope.
+    const db = openChannelInboundDb();
+    if (!db) return ok('No tasks found.');
+    try {
+      // One row per series — the live (pending or paused) occurrence. Recurring
+      // tasks accumulate one completed row per firing plus one live follow-up;
+      // exposing the whole pile to the agent is noisy and confuses task identity
+      // ("which id do I cancel?"). The series_id is the stable handle.
+      //
+      // SQLite quirk: when MAX(seq) appears in the SELECT list of a GROUP BY
+      // query, the bare columns take values from the row that contains that max
+      // — that's how we pick "the latest live row per series" in one pass.
+      let rows;
+      if (status) {
+        rows = db
+          .prepare(
+            `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
+               FROM messages_in
+              WHERE kind = 'task' AND status = ?
+              GROUP BY series_id
+              ORDER BY process_after ASC`,
+          )
+          .all(status);
+      } else {
+        rows = db
+          .prepare(
+            `SELECT series_id AS id, status, process_after, recurrence, content, MAX(seq) AS _seq
+               FROM messages_in
+              WHERE kind = 'task' AND status IN ('pending', 'paused')
+              GROUP BY series_id
+              ORDER BY process_after ASC`,
+          )
+          .all();
+      }
+
+      if ((rows as unknown[]).length === 0) return ok('No tasks found.');
+
+      const lines = (rows as Array<{ id: string; status: string; process_after: string | null; recurrence: string | null; content: string }>).map((r) => {
+        const content = JSON.parse(r.content);
+        const prompt = (content.prompt as string || '').slice(0, 80);
+        return `- ${r.id} [${r.status}] at=${r.process_after || 'now'} ${r.recurrence ? `recur=${r.recurrence} ` : ''}→ ${prompt}`;
+      });
+
+      return ok(lines.join('\n'));
+    } finally {
+      db.close();
     }
+  },
+};
 
-    if ((rows as unknown[]).length === 0) return ok('No tasks found.');
+export const readTask: McpToolDefinition = {
+  tool: {
+    name: 'read_task',
+    description:
+      `Return the full content of a scheduled task by series id. Use this when you need to read the existing prompt or script before calling update_task with a targeted edit — list_tasks only shows a truncated preview. Returns the live (pending or paused) occurrence.`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: { type: 'string', description: 'Series id from list_tasks' },
+      },
+      required: ['taskId'],
+    },
+  },
+  async handler(args) {
+    const taskId = args.taskId as string;
+    if (!taskId) return err('taskId is required');
+    const db = openChannelInboundDb();
+    if (!db) return err(`task not found: ${taskId} (no scheduled tasks for this channel yet)`);
+    try {
+      const row = db
+        .prepare(
+          `SELECT id, series_id, status, process_after, recurrence, content, MAX(seq) AS _seq
+             FROM messages_in
+            WHERE kind = 'task' AND series_id = ? AND status IN ('pending', 'paused')
+            GROUP BY series_id`,
+        )
+        .get(taskId) as
+        | { id: string; series_id: string; status: string; process_after: string | null; recurrence: string | null; content: string }
+        | undefined;
+      if (!row) return err(`task not found: ${taskId} (no live row for this series)`);
 
-    const lines = (rows as Array<{ id: string; status: string; process_after: string | null; recurrence: string | null; content: string }>).map((r) => {
-      const content = JSON.parse(r.content);
-      const prompt = (content.prompt as string || '').slice(0, 80);
-      return `- ${r.id} [${r.status}] at=${r.process_after || 'now'} ${r.recurrence ? `recur=${r.recurrence} ` : ''}→ ${prompt}`;
-    });
-
-    return ok(lines.join('\n'));
+      const parsed = JSON.parse(row.content) as { prompt?: string; script?: string };
+      const lines = [
+        `id: ${row.series_id}`,
+        `status: ${row.status}`,
+        `process_after: ${row.process_after ?? 'now'}`,
+        `recurrence: ${row.recurrence ?? '(one-shot)'}`,
+        `prompt:`,
+        parsed.prompt ?? '',
+      ];
+      if (parsed.script) {
+        lines.push(`script:`, parsed.script);
+      }
+      return ok(lines.join('\n'));
+    } finally {
+      db.close();
+    }
   },
 };
 
@@ -299,4 +358,4 @@ export const updateTask: McpToolDefinition = {
   },
 };
 
-registerTools([scheduleTask, listTasks, updateTask, cancelTask, pauseTask, resumeTask]);
+registerTools([scheduleTask, listTasks, readTask, updateTask, cancelTask, pauseTask, resumeTask]);

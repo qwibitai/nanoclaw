@@ -19,7 +19,6 @@ import Database from 'better-sqlite3';
 import { DATA_DIR, GROUPS_DIR } from '../src/config.js';
 import { initDb } from '../src/db/connection.js';
 import { openMnemonIngestDb, runMnemonIngestMigrations } from '../src/db/migrations/019-mnemon-ingest-db.js';
-import { findSessionByAgentGroup } from '../src/db/sessions.js';
 import { restartGroupContainers } from './lib/restart-group-containers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -73,52 +72,55 @@ async function main(): Promise<void> {
   atomicWriteJson(containerJsonPath, raw);
   console.log(`[1/3] memory block removed from groups/${folder}/container.json`);
 
-  // Step 2: cancel synthesise scheduled task in the group's session inbound.db
+  // Step 2: cancel synthesise scheduled task wherever it lives.
+  //
+  // Pre-2026-05-08 the synth task could land in either a thread session's
+  // inbound.db (legacy MCP-route) or the channel-root session (correct
+  // route). Post-fix it always lives in the channel-root session for the
+  // (agent, primary MG) pair. To handle both worlds safely without a central
+  // DB lookup, scan every session inbound.db belonging to the agent group
+  // and delete + de-recur on whichever has the series.
   const seriesId = `${SYNTH_SERIES_PREFIX}${agentGroupId}`;
-  const session = findSessionByAgentGroup(agentGroupId);
-  if (session) {
-    const inboundDbPath = path.join(
-      DATA_DIR,
-      'v2-sessions',
-      agentGroupId,
-      session.id,
-      'inbound.db',
-    );
-    if (fs.existsSync(inboundDbPath)) {
+  const groupSessionsDir = path.join(DATA_DIR, 'v2-sessions', agentGroupId);
+  let totalDeleted = 0;
+  let totalCleared = 0;
+  let scanned = 0;
+  if (fs.existsSync(groupSessionsDir)) {
+    for (const sessId of fs.readdirSync(groupSessionsDir)) {
+      const inboundDbPath = path.join(groupSessionsDir, sessId, 'inbound.db');
+      if (!fs.existsSync(inboundDbPath)) continue;
+      scanned += 1;
       const db = new Database(inboundDbPath);
       db.pragma('journal_mode = DELETE');
       db.pragma('busy_timeout = 5000');
       try {
-        // Delete pending/paused synth rows (the active recurring instance).
         const deleted = db
           .prepare(
             "DELETE FROM messages_in WHERE series_id = ? AND status IN ('pending', 'paused') AND kind = 'task'",
           )
           .run(seriesId);
-        // Also clear recurrence on completed/failed rows so the recurrence
-        // handler can't clone a new pending instance from a terminal row
-        // after we've disabled memory (Codex F10). NULL recurrence + status
-        // != pending/paused = task is permanently inert.
+        // Clear recurrence on completed/failed rows so the recurrence handler
+        // can't clone a fresh pending instance from a terminal row.
         const cleared = db
           .prepare(
             "UPDATE messages_in SET recurrence = NULL WHERE series_id = ? AND recurrence IS NOT NULL AND kind = 'task'",
           )
           .run(seriesId);
-        if (deleted.changes > 0 || cleared.changes > 0) {
-          console.log(
-            `[2/3] cancelled synthesise task (seriesId: ${seriesId}): ${deleted.changes} active row(s) deleted, ${cleared.changes} terminal row(s) cleared of recurrence`,
-          );
-        } else {
-          console.log(`[2/3] no synthesise task found for seriesId: ${seriesId} (already cancelled or never scheduled)`);
-        }
+        totalDeleted += deleted.changes;
+        totalCleared += cleared.changes;
       } finally {
         db.close();
       }
-    } else {
-      console.log(`[2/3] inbound.db not found at ${inboundDbPath} — skipping task cancellation`);
     }
+  }
+  if (totalDeleted > 0 || totalCleared > 0) {
+    console.log(
+      `[2/3] cancelled synthesise task (seriesId: ${seriesId}) across ${scanned} session DB(s): ${totalDeleted} active row(s) deleted, ${totalCleared} terminal row(s) cleared of recurrence`,
+    );
   } else {
-    console.log(`[2/3] no active session found for ${agentGroupId} — skipping task cancellation`);
+    console.log(
+      `[2/3] no synthesise task found for seriesId: ${seriesId} across ${scanned} session DB(s) (already cancelled or never scheduled)`,
+    );
   }
 
   // Step 3: remove watermarks rows for this agentGroupId from mnemon-ingest.db

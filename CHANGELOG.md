@@ -4,6 +4,11 @@ All notable changes to NanoClaw will be documented in this file.
 
 For detailed release notes, see the [full changelog on the documentation site](https://docs.nanoclaw.dev/changelog).
 
+## [Unreleased]
+
+- **v1 → v2 migration.** Run `bash migrate-v2.sh` from the v2 checkout. Finds your v1 install (sibling directory or `NANOCLAW_V1_PATH`), merges `.env`, seeds the v2 DB from `registered_groups`, copies group folders (`CLAUDE.md` → `CLAUDE.local.md`), copies session data with conversation continuity, ports scheduled tasks, interactively selects and installs channels (clack multiselect), copies container skills, builds the agent container, and offers a service switchover to test. Hands off to Claude (`/migrate-from-v1`) for owner seeding, access policy, CLAUDE.md cleanup, and fork customization porting. See [docs/migration-dev.md](docs/migration-dev.md) and [docs/v1-to-v2-changes.md](docs/v1-to-v2-changes.md).
+- **Migration fixes.** `1b-db` now resolves Discord DMs as `discord:@me:<id>` (previously skipped any v1 chat that wasn't a guild channel — a blocker for personal-bot installs). `1c-groups` skips symlinks instead of following them (a single broken `.claude-shared.md → /app/CLAUDE.md` no longer aborts the whole copy). When `1b-db` reuses an auto-created `messaging_group` with no wired agents, its `unknown_sender_policy` is now reconciled to the migration's `public` default.
+
 ## [2.0.0] - 2026-04-22
 
 Major version. NanoClaw v2 is a substantial architectural rewrite. Existing forks should run `/migrate-nanoclaw` (clean-base replay of customizations) or `/update-nanoclaw` (selective cherry-pick) before resuming work.

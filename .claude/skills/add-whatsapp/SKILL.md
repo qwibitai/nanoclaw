@@ -57,7 +57,7 @@ groups: () => import('./groups.js'),
 ### 5. Install the adapter packages (pinned)
 
 ```bash
-pnpm install @whiskeysockets/baileys@6.17.16 qrcode@1.5.4 @types/qrcode@1.5.6 pino@9.6.0
+pnpm install @whiskeysockets/baileys@7.0.0-rc.9 qrcode@1.5.4 @types/qrcode@1.5.6 pino@9.6.0
 ```
 
 ### 6. Build
@@ -200,7 +200,7 @@ Otherwise, run `/manage-channels` to wire this channel to an agent group.
 
 - **type**: `whatsapp`
 - **terminology**: WhatsApp calls them "groups" and "chats." A "chat" is a 1:1 DM; a "group" has multiple members.
-- **how-to-find-id**: DMs use `<phone>@s.whatsapp.net` (e.g. `14155551234@s.whatsapp.net`). Groups use `<id>@g.us`. To find your number: `node -e "const c=JSON.parse(require('fs').readFileSync('store/auth/creds.json','utf-8'));console.log(c.me?.id?.split(':')[0]+'@s.whatsapp.net')"`. Groups are auto-discovered — check `sqlite3 data/v2.db "SELECT platform_id, name FROM messaging_groups WHERE channel_type='whatsapp' AND is_group=1"`.
+- **how-to-find-id**: DMs use `<phone>@s.whatsapp.net` (e.g. `14155551234@s.whatsapp.net`). Groups use `<id>@g.us`. To find your number: `node -e "const c=JSON.parse(require('fs').readFileSync('store/auth/creds.json','utf-8'));console.log(c.me?.id?.split(':')[0]+'@s.whatsapp.net')"`. Groups are auto-discovered — check `pnpm exec tsx scripts/q.ts data/v2.db "SELECT platform_id, name FROM messaging_groups WHERE channel_type='whatsapp' AND is_group=1"`.
 - **supports-threads**: no
 - **typical-use**: Interactive chat — direct messages or small groups
 - **default-isolation**: Same agent group if you're the only participant across multiple chats. Separate agent group if different people are in different groups.
@@ -256,7 +256,7 @@ systemctl --user start nanoclaw
 
 1. Auth exists: `test -f store/auth/creds.json`
 2. Connected: `grep "Connected to WhatsApp" logs/nanoclaw.log | tail -1`
-3. Channel wired: `sqlite3 data/v2.db "SELECT mg.platform_id, mg.name FROM messaging_groups mg JOIN messaging_group_agents mga ON mg.id=mga.messaging_group_id WHERE mg.channel_type='whatsapp'"`
+3. Channel wired: `pnpm exec tsx scripts/q.ts data/v2.db "SELECT mg.platform_id, mg.name FROM messaging_groups mg JOIN messaging_group_agents mga ON mg.id=mga.messaging_group_id WHERE mg.channel_type='whatsapp'"`
 4. Service running: `systemctl --user status nanoclaw`
 
 ### "conflict" disconnection

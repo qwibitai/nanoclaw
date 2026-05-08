@@ -23,7 +23,7 @@ import { emit as phEmit } from './diagnostics.js';
 import type { StepResult, SpinnerLabels } from './runner.js';
 import { dumpTranscriptOnFailure, spawnStep, writeStepEntry } from './runner.js';
 import * as setupLog from '../logs.js';
-import { brandBody, fitToWidth } from './theme.js';
+import { brandBody, fitToWidth, fmtDuration } from './theme.js';
 
 const WINDOW_SIZE = 3;
 const SPINNER_FRAMES = ['◒', '◐', '◓', '◑'];
@@ -85,9 +85,8 @@ async function runUnderWindow(
   const redraw = (): void => {
     if (stallPromptActive) return;
     out.write(`\x1b[${WINDOW_SIZE + 1}A`);
-    const elapsed = Math.round((Date.now() - start) / 1000);
     const icon = SPINNER_FRAMES[frameIdx % SPINNER_FRAMES.length];
-    const suffix = ` (${elapsed}s)`;
+    const suffix = ` (${fmtDuration(Date.now() - start)})`;
     const header = fitToWidth(labels.running, suffix);
     out.write(`\x1b[2K${k.cyan(icon)}  ${header}${k.dim(suffix)}\n`);
 
@@ -164,8 +163,7 @@ async function runUnderWindow(
   out.write(SHOW_CURSOR);
   process.off('exit', restoreCursorOnExit);
 
-  const elapsed = Math.round((Date.now() - start) / 1000);
-  const suffix = ` (${elapsed}s)`;
+  const suffix = ` (${fmtDuration(Date.now() - start)})`;
   if (result.ok) {
     const isSkipped = result.terminal?.fields.STATUS === 'skipped';
     const msg = isSkipped && labels.skipped ? labels.skipped : labels.done;

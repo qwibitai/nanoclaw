@@ -35,7 +35,8 @@ export function openOutboundDb(dbPath: string): Database.Database {
 /**
  * Open the outbound DB writable. Normal host path is read-only (the container
  * owns writes); this exists for the narrow pre-wake case where the host emits
- * a deny/flag-confirmation directly to outbound.
+ * a deny/flag-confirmation directly to outbound, and for orphan-claim cleanup
+ * after a container is killed.
  */
 export function openOutboundDbWritable(dbPath: string): Database.Database {
   const db = new Database(dbPath);
@@ -43,6 +44,9 @@ export function openOutboundDbWritable(dbPath: string): Database.Database {
   db.pragma('busy_timeout = 5000');
   return db;
 }
+
+// Alias for the upstream name; both reach the same writable open path.
+export const openOutboundDbRw = openOutboundDbWritable;
 
 export function upsertSessionRouting(
   db: Database.Database,
@@ -190,6 +194,19 @@ export function getProcessingClaims(outDb: Database.Database): ProcessingClaim[]
   return outDb
     .prepare("SELECT message_id, status_changed FROM processing_ack WHERE status = 'processing'")
     .all() as ProcessingClaim[];
+}
+
+/**
+ * Delete orphan 'processing' rows. Called by the host after killing a
+ * container so the leftover claim doesn't trip claim-stuck on the next sweep
+ * tick (which would kill the freshly respawned container before its
+ * agent-runner can run its own startup cleanup).
+ *
+ * Safe because the host only writes to outbound.db when no container is
+ * running (we just killed it). Returns the number of rows deleted.
+ */
+export function deleteOrphanProcessingClaims(outDb: Database.Database): number {
+  return outDb.prepare("DELETE FROM processing_ack WHERE status = 'processing'").run().changes;
 }
 
 export interface ContainerState {

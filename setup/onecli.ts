@@ -115,8 +115,42 @@ function installOnecliCliOnly(): { stdout: string; ok: boolean } {
   return { stdout: upstream.stdout + (upstream.stderr ?? '') + '\n' + fallback.stdout, ok: fallback.ok };
 }
 
+// Remove containers in the "onecli" compose project whose service name isn't
+// in the v2 set. Pre-v2 OneCLI used service "app" (container onecli-app-1);
+// v2 uses "onecli". Compose flags the old container as an orphan but won't
+// stop it without --remove-orphans, leaving port 10254 bound and crashing
+// the new bring-up. Filed upstream; this is the downstream workaround.
+function removeLegacyOnecliContainers(): string {
+  const out: string[] = [];
+  let list = '';
+  try {
+    list = execSync(
+      `docker ps -a --filter "label=com.docker.compose.project=onecli" --format '{{.Names}}|{{.Label "com.docker.compose.service"}}'`,
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] },
+    ).trim();
+  } catch {
+    return '';
+  }
+  if (!list) return '';
+  const v2Services = new Set(['onecli', 'postgres']);
+  for (const line of list.split('\n')) {
+    const [name, service] = line.split('|');
+    if (!name || !service || v2Services.has(service)) continue;
+    out.push(`Removing legacy OneCLI container: ${name} (service=${service})`);
+    try {
+      execSync(`docker rm -f ${JSON.stringify(name)}`, { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err) {
+      out.push(`  rm failed (continuing): ${(err as Error).message}`);
+    }
+  }
+  return out.join('\n');
+}
+
 function installOnecli(): { stdout: string; ok: boolean } {
   let stdout = '';
+
+  const cleanup = removeLegacyOnecliContainers();
+  if (cleanup) stdout += cleanup + '\n';
 
   // Gateway install (docker-compose based, no rate-limit concerns).
   const gw = runInstall('curl -fsSL onecli.sh/install | sh');

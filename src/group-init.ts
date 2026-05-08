@@ -79,7 +79,24 @@ const REQUIRED_SETTINGS: Record<string, unknown> = {
   model: 'opus',
 };
 
-const DEFAULT_SETTINGS_JSON = JSON.stringify({ env: REQUIRED_ENV, ...REQUIRED_SETTINGS }, null, 2) + '\n';
+// Pre-compaction hook (container-side): runs before the SDK auto-compacts so
+// destination/routing reminders survive the compaction window. Reconciled by
+// shape — if the file is missing the hook entry it's restored on next init.
+const REQUIRED_HOOKS = {
+  PreCompact: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: 'bun /app/src/compact-instructions.ts',
+        },
+      ],
+    },
+  ],
+} as const;
+
+const DEFAULT_SETTINGS_JSON =
+  JSON.stringify({ env: REQUIRED_ENV, hooks: REQUIRED_HOOKS, ...REQUIRED_SETTINGS }, null, 2) + '\n';
 
 /**
  * Reconcile an existing settings.json against trunk.
@@ -87,8 +104,9 @@ const DEFAULT_SETTINGS_JSON = JSON.stringify({ env: REQUIRED_ENV, ...REQUIRED_SE
  * For keys in REQUIRED_ENV / REQUIRED_SETTINGS: overwrite to trunk value
  * (so `/update-nanoclaw` pushes model/effort/alias changes out to every
  * existing group without a manual pass). For keys in DEPRECATED_ENV:
- * delete. Anything outside all three lists is user-owned and untouched.
- * Returns true if the file was modified.
+ * delete. The PreCompact hook is restored if missing entirely. Anything
+ * outside these lists is user-owned and untouched. Returns true if the
+ * file was modified.
  */
 function ensureRequiredSettings(settingsFile: string): boolean {
   let settings: Record<string, unknown>;
@@ -120,6 +138,21 @@ function ensureRequiredSettings(settingsFile: string): boolean {
       settings[k] = v;
       changed = true;
     }
+  }
+  // PreCompact hook reconciliation: present-or-add. If the file has other
+  // hooks (e.g. operator-installed Stop, PreToolUse, etc.) we leave them
+  // alone and only ensure PreCompact contains our compact-instructions
+  // command. Don't deep-merge — operators may legitimately swap the command
+  // or add to it.
+  if (!settings.hooks || typeof settings.hooks !== 'object') {
+    settings.hooks = {};
+    changed = true;
+  }
+  const hooks = settings.hooks as Record<string, unknown>;
+  const existingPreCompact = hooks.PreCompact as unknown[] | undefined;
+  if (!existingPreCompact || !JSON.stringify(existingPreCompact).includes('compact-instructions.ts')) {
+    hooks.PreCompact = JSON.parse(JSON.stringify(REQUIRED_HOOKS.PreCompact));
+    changed = true;
   }
   if (changed) {
     fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');

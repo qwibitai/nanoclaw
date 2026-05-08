@@ -244,12 +244,17 @@ describe('formatSystemMessage', () => {
     expect(result).toContain('[Recalled context]\nApollo uses Snowflake');
   });
 
-  it('test_formatSystemMessage_legacy_action_result', () => {
+  it('test_formatSystemMessage_action_result', () => {
     insertMessage('sys2', 'system', { action: 'register_group', status: 'success', result: { id: 'ag-1' } });
     const result = formatMessages(getPendingMessages());
-    expect(result).toMatch(/\[SYSTEM RESPONSE\]/);
-    expect(result).toContain('Action: register_group');
-    expect(result).toContain('Status: success');
+    // Upstream PR #2329 switched from the legacy "[SYSTEM RESPONSE]" prose
+    // form to a structured <system_response> XML element; recall_context
+    // (above) keeps its plain "[Recalled context]" form because the agent
+    // reads it as ambient memory, not a structured response to act on.
+    expect(result).toContain('<system_response');
+    expect(result).toContain('action="register_group"');
+    expect(result).toContain('status="success"');
+    expect(result).toContain('"id":"ag-1"');
   });
 });
 

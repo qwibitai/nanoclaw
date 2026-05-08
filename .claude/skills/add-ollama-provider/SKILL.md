@@ -76,7 +76,7 @@ Then rebuild the container image: `./container/build.sh`
 
 Ask the user (plain text, not AskUserQuestion):
 
-1. **Which agent group?** List available groups: `sqlite3 data/v2.db "SELECT folder, name FROM agent_groups;"`
+1. **Which agent group?** List available groups: `pnpm exec tsx scripts/q.ts data/v2.db "SELECT folder, name FROM agent_groups;"`
 2. **Which Ollama model?** List available: `curl -s http://localhost:11434/api/tags | grep '"name"'`
 3. **Block Anthropic API?** Recommended yes — prevents accidental spend if config drifts.
 
@@ -111,7 +111,7 @@ Read the agent group's shared Claude settings:
 
 ```bash
 # Find the agent group ID
-AG_ID=$(sqlite3 data/v2.db "SELECT id FROM agent_groups WHERE folder='<FOLDER>';")
+AG_ID=$(pnpm exec tsx scripts/q.ts data/v2.db "SELECT id FROM agent_groups WHERE folder='<FOLDER>';")
 SETTINGS=data/v2-sessions/$AG_ID/.claude-shared/settings.json
 ```
 

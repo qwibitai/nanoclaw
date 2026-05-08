@@ -67,6 +67,18 @@ export function isClearCommand(msg: MessageInRow): boolean {
   return text.toLowerCase().startsWith('/clear');
 }
 
+/**
+ * True for any chat that needs the outer loop's command path: /clear plus
+ * admin/passthrough slash commands the SDK can only dispatch when they are
+ * a query's first input. Used by the follow-up poller to bail out and let
+ * the outer loop reopen the query.
+ */
+export function isRunnerCommand(msg: MessageInRow): boolean {
+  if (msg.kind !== 'chat' && msg.kind !== 'chat-sdk') return false;
+  const cat = categorizeMessage(msg).category;
+  return cat === 'admin' || cat === 'passthrough';
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractSenderId(msg: MessageInRow, content: any): string | null {
   const raw: string | null = content?.senderId || content?.author?.userId || null;
@@ -253,43 +265,55 @@ function formatSingleChat(msg: MessageInRow): string {
   const replyPrefix = formatReplyContext(content.replyTo);
   const attachmentsSuffix = formatAttachments(content.attachments);
 
-  // Look up the destination name for the origin (reverse map lookup).
-  // If not found, fall back to a raw channel:platform_id marker so nothing
-  // gets silently dropped — this should only happen if the destination was
-  // removed between when the message was received and when it's being processed.
-  const fromDest = findByRouting(msg.channel_type, msg.platform_id);
-  const fromAttr = fromDest
-    ? ` from="${escapeXml(fromDest.name)}"`
-    : msg.channel_type || msg.platform_id
-      ? ` from="unknown:${escapeXml(msg.channel_type || '')}:${escapeXml(msg.platform_id || '')}"`
-      : '';
+  const fromAttr = originAttr(msg);
 
   return `<message${idAttr}${fromAttr} sender="${escapeXml(sender)}" time="${escapeXml(time)}"${replyAttr}>${replyPrefix}${escapeXml(text)}${attachmentsSuffix}</message>`;
 }
 
+/**
+ * Build a ` from="destination_name"` attribute string from a message's routing
+ * fields. Shared by all formatters so the agent always knows where a message
+ * originated — critical for explicit addressing.
+ */
+function originAttr(msg: MessageInRow): string {
+  const fromDest = findByRouting(msg.channel_type, msg.platform_id);
+  if (fromDest) return ` from="${escapeXml(fromDest.name)}"`;
+  if (msg.channel_type || msg.platform_id) {
+    return ` from="unknown:${escapeXml(msg.channel_type || '')}:${escapeXml(msg.platform_id || '')}"`;
+  }
+  return '';
+}
+
 function formatTaskMessage(msg: MessageInRow): string {
   const content = parseContent(msg.content);
-  const parts = ['[SCHEDULED TASK]'];
+  const from = originAttr(msg);
+  const time = formatLocalTime(msg.timestamp, TIMEZONE);
+  const parts: string[] = [];
   if (content.scriptOutput) {
-    parts.push('', 'Script output:', JSON.stringify(content.scriptOutput, null, 2));
+    parts.push('Script output:', JSON.stringify(content.scriptOutput, null, 2), '');
   }
-  parts.push('', 'Instructions:', content.prompt || '');
-  return parts.join('\n');
+  parts.push('Instructions:', content.prompt || '');
+  return `<task${from} time="${escapeXml(time)}">${parts.join('\n')}</task>`;
 }
 
 function formatWebhookMessage(msg: MessageInRow): string {
   const content = parseContent(msg.content);
   const source = content.source || 'unknown';
   const event = content.event || 'unknown';
-  return `[WEBHOOK: ${source}/${event}]\n\n${JSON.stringify(content.payload || content, null, 2)}`;
+  const from = originAttr(msg);
+  return `<webhook${from} source="${escapeXml(source)}" event="${escapeXml(event)}">${JSON.stringify(content.payload || content, null, 2)}</webhook>`;
 }
 
 function formatSystemMessage(msg: MessageInRow): string {
   const content = parseContent(msg.content);
+  // Mnemon recall context: ambient memory injected by the host before each
+  // user turn. Plain text by design — the agent reads it as background
+  // context, not a structured system response to act on.
   if (content.subtype === 'recall_context') {
     return `[Recalled context]\n${content.text}`;
   }
-  return `[SYSTEM RESPONSE]\n\nAction: ${content.action || 'unknown'}\nStatus: ${content.status || 'unknown'}\nResult: ${JSON.stringify(content.result || null)}`;
+  const from = originAttr(msg);
+  return `<system_response${from} action="${escapeXml(content.action || 'unknown')}" status="${escapeXml(content.status || 'unknown')}">${JSON.stringify(content.result || null)}</system_response>`;
 }
 
 /**

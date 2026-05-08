@@ -31,6 +31,7 @@ import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContaine
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
+import { findSessionByAgentGroupAndMessagingGroup } from './db/sessions.js';
 import { buildArchiveProjection, buildCentralProjection } from './db/per-agent-projections.js';
 import { initGroupFilesystem } from './group-init.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
@@ -632,6 +633,30 @@ function buildMounts(
   const inboundDbFile = path.join(sessDir, 'inbound.db');
   if (fs.existsSync(inboundDbFile)) {
     mounts.push({ hostPath: inboundDbFile, containerPath: '/workspace/inbound.db', readonly: true });
+  }
+
+  // Channel-root inbound.db at /workspace/channel-inbound.db (read-only).
+  // Scheduled tasks live in the channel-root session for this (agent, MG)
+  // pair, not in the calling thread's session. The container's `list_tasks`
+  // MCP tool reads from this mount so any thread can list/inspect tasks
+  // scoped to the channel. Writes still go through the host system-action
+  // path, which routes to the same channel-root inbound.db.
+  //
+  // Always mount when a channel-root session exists, including when the
+  // current session IS the channel-root — duplicate bind-mount of the same
+  // file is harmless and keeps `getChannelInboundDb()` uniform.
+  if (session.messaging_group_id) {
+    const channelSession = findSessionByAgentGroupAndMessagingGroup(agentGroup.id, session.messaging_group_id);
+    if (channelSession) {
+      const channelInboundFile = path.join(sessionDir(agentGroup.id, channelSession.id), 'inbound.db');
+      if (fs.existsSync(channelInboundFile)) {
+        mounts.push({
+          hostPath: channelInboundFile,
+          containerPath: '/workspace/channel-inbound.db',
+          readonly: true,
+        });
+      }
+    }
   }
 
   // Agent group folder at /workspace/agent (RW for working files + CLAUDE.local.md)
@@ -1555,22 +1580,22 @@ async function buildContainerArgs(
   // interfere with openlimits / custom-proxy auth. In the BASE_URL path,
   // ANTHROPIC_API_KEY (+ _N fallbacks) forwarded directly by the
   // env-forwarding block above provide auth without OneCLI.
+  //
+  // When OneCLI IS the path: gateway failure is treated as transient and
+  // throws — the caller (router/host-sweep) catches, leaves the inbound
+  // message pending, and the next sweep tick retries. Spawning a container
+  // with no credentials would only mask the misconfiguration.
   if (process.env.ANTHROPIC_BASE_URL) {
     log.info('Skipping OneCLI gateway — ANTHROPIC_BASE_URL set, using direct proxy', { containerName });
   } else {
-    try {
-      if (agentIdentifier) {
-        await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
-      }
-      const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
-      if (onecliApplied) {
-        log.info('OneCLI gateway applied', { containerName });
-      } else {
-        log.warn('OneCLI gateway not applied — container will have no credentials', { containerName });
-      }
-    } catch (err) {
-      log.warn('OneCLI gateway error — container will have no credentials', { containerName, err });
+    if (agentIdentifier) {
+      await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
     }
+    const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
+    if (!onecliApplied) {
+      throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
+    }
+    log.info('OneCLI gateway applied', { containerName });
 
     // CA bundle env vars for bundled-CA clients. OneCLI's SDK sets
     // SSL_CERT_FILE / NODE_EXTRA_CA_CERTS / DENO_CERT, but each tool below
