@@ -172,11 +172,75 @@ function safeParseContent(raw: string): { text?: string; sender?: string; sender
   }
 }
 
+// ---------------------------------------------------------------------------
+// In-flight tracking — SIGTERM drain
+// ---------------------------------------------------------------------------
+
+/**
+ * Set of Promises for all currently-executing routeInbound calls.
+ *
+ * Maintained by the routeInbound wrapper below. The shutdown handler calls
+ * awaitInboundDrain() to wait for these to settle before tearing down channel
+ * adapters, preventing dropped replies when SIGTERM arrives mid-routing.
+ * See incident 2026-05-09 (Signal joi-dm silence on Joi's third message).
+ */
+const inFlightInbounds = new Set<Promise<void>>();
+
+/**
+ * Wait for all in-flight routeInbound calls to complete, with a timeout.
+ * Used by the shutdown handler to give the agent loop time to finish
+ * writing replies before the process exits. Logs a warning if the timeout
+ * fires; never throws.
+ *
+ * @param timeoutMs  Maximum milliseconds to wait. Default in index.ts is
+ *                   30 000 ms (env var INBOUND_DRAIN_TIMEOUT_MS).
+ */
+export async function awaitInboundDrain(timeoutMs: number): Promise<void> {
+  if (inFlightInbounds.size === 0) return;
+  const startCount = inFlightInbounds.size;
+  log.info('Draining in-flight inbound work', { count: startCount, timeoutMs });
+  const drained = Promise.allSettled([...inFlightInbounds]).then(() => 'drained' as const);
+  const timeout = new Promise<'timeout'>((resolve) => {
+    setTimeout(() => resolve('timeout'), timeoutMs);
+  });
+  const result = await Promise.race([drained, timeout]);
+  if (result === 'timeout') {
+    log.warn('Inbound drain timed out; proceeding with shutdown', {
+      remaining: inFlightInbounds.size,
+      startCount,
+      timeoutMs,
+    });
+  } else {
+    log.info('Inbound drain complete', { drained: startCount });
+  }
+}
+
+/**
+ * Test-only: reset the in-flight tracking set between test cases.
+ * Do NOT call from production code.
+ */
+export function _resetInboundTrackingForTests(): void {
+  inFlightInbounds.clear();
+}
+
 /**
  * Route an inbound message from a channel adapter to the correct session.
  * Creates messaging group + session if they don't exist yet.
+ *
+ * This is the public entry point. It wraps doRouteInbound and registers the
+ * work in inFlightInbounds so the shutdown drain can wait for it to settle.
  */
 export async function routeInbound(event: InboundEvent): Promise<void> {
+  const work = doRouteInbound(event);
+  inFlightInbounds.add(work);
+  try {
+    await work;
+  } finally {
+    inFlightInbounds.delete(work);
+  }
+}
+
+async function doRouteInbound(event: InboundEvent): Promise<void> {
   // Pre-route interceptor — lets modules consume messages before any routing
   // (e.g. free-text replies during multi-step approval flows).
   if (messageInterceptor && (await messageInterceptor(event))) return;
