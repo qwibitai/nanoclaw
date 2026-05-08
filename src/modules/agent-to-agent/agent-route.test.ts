@@ -285,7 +285,7 @@ describe('routeAgentMessage return-path', () => {
     const inboundId = bRows[0].id;
 
     // Archive S1 — simulates session cleanup or channel disconnect.
-    updateSession(S1.id, { status: 'archived' });
+    updateSession(S1.id, { status: 'closed' });
 
     // B replies. origin points to S1 (archived), should fall through to S2.
     await routeAgentMessage(
@@ -328,7 +328,12 @@ describe('routeAgentMessage return-path', () => {
     // B replies to A, but in_reply_to references the C-originated row.
     // Guard rejects (SC belongs to C, not A) → falls through to newest of A.
     await routeAgentMessage(
-      { id: 'msg-reply-tamper', platform_id: A, content: JSON.stringify({ text: 'misdirected' }), in_reply_to: cInboundId },
+      {
+        id: 'msg-reply-tamper',
+        platform_id: A,
+        content: JSON.stringify({ text: 'misdirected' }),
+        in_reply_to: cInboundId,
+      },
       SB,
     );
 
@@ -353,7 +358,12 @@ describe('routeAgentMessage return-path', () => {
     // B replies to A with in_reply_to pointing to the channel message.
     // source_session_id is null → peer-affinity finds nothing → newest of A.
     await routeAgentMessage(
-      { id: 'msg-reply-channel', platform_id: A, content: JSON.stringify({ text: 'response' }), in_reply_to: 'channel-msg-1' },
+      {
+        id: 'msg-reply-channel',
+        platform_id: A,
+        content: JSON.stringify({ text: 'response' }),
+        in_reply_to: 'channel-msg-1',
+      },
       SB,
     );
 

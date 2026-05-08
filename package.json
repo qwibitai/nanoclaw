@@ -24,13 +24,19 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@chat-adapter/discord": "4.27.0",
+    "@chat-adapter/telegram": "4.27.0",
     "@clack/core": "^1.2.0",
     "@clack/prompts": "^1.2.0",
     "@onecli-sh/sdk": "^0.5.0",
+    "@types/qrcode": "1.5.6",
+    "@whiskeysockets/baileys": "7.0.0-rc.9",
     "better-sqlite3": "11.10.0",
-    "chat": "^4.24.0",
+    "chat": "^4.27.0",
     "cron-parser": "5.5.0",
-    "kleur": "^4.1.5"
+    "kleur": "^4.1.5",
+    "pino": "9.6.0",
+    "qrcode": "1.5.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
@@ -40,6 +46,8 @@
     "eslint-plugin-no-catch-all": "^1.1.0",
     "globals": "^15.12.0",
     "husky": "^9.1.7",
+    "node-addon-api": "^8.7.0",
+    "node-gyp": "^12.3.0",
     "prettier": "^3.8.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",

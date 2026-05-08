@@ -4,10 +4,10 @@ import { TIMEZONE, formatLocalTime } from './timezone.js';
 
 /**
  * Command categories for messages starting with '/'.
- * - admin: sender must be in NANOCLAW_ADMIN_USER_IDS
+ * - admin: known Claude Code commands (/compact, /context, /cost, /files, etc.) — pass raw to SDK
  * - filtered: silently drop (mark completed without processing)
- * - passthrough: pass raw to the agent (no XML wrapping)
- * - none: not a command — format normally
+ * - passthrough: (unused — reserved) pass raw to the agent with no XML wrapping
+ * - none: not a recognized command — format normally as chat
  */
 export type CommandCategory = 'admin' | 'filtered' | 'passthrough' | 'none';
 
@@ -52,7 +52,11 @@ export function categorizeMessage(msg: MessageInRow): CommandInfo {
     return { category: 'filtered', command, text, senderId };
   }
 
-  return { category: 'passthrough', command, text, senderId };
+  // Unknown slash command — treat as normal chat so the agent can respond
+  // via <message> blocks. Passing it raw to the SDK caused the SDK to
+  // interpret it as a Claude Code slash command, produce output without
+  // <message> blocks, and silently drop the response.
+  return { category: 'none', command, text, senderId };
 }
 
 /**

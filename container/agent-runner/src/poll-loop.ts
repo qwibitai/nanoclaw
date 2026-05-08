@@ -1,5 +1,5 @@
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
-import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
+import { getPendingMessages, markProcessing, markCompleted, resetToRetryable, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
 import { getInboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import { clearContinuation, migrateLegacyContinuation, setContinuation } from './db/session-state.js';
@@ -17,6 +17,15 @@ import type { AgentProvider, AgentQuery, ProviderEvent } from './providers/types
 
 const POLL_INTERVAL_MS = 1000;
 const ACTIVE_POLL_INTERVAL_MS = 500;
+
+// The Claude Code SDK surfaces auth errors as result text rather than error events.
+const AUTH_ERROR_RE = /Failed to authenticate|authentication_error|Invalid authentication credentials/i;
+
+class CredentialError extends Error {
+  constructor() {
+    super('Credential error — container will exit for respawn with fresh token');
+  }
+}
 
 function log(msg: string): void {
   console.error(`[poll-loop] ${msg}`);
@@ -185,6 +194,22 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         setContinuation(config.providerName, continuation);
       }
     } catch (err) {
+      if (err instanceof CredentialError) {
+        // Auth failure: reset messages so the next container picks them up,
+        // signal the host to respawn immediately, then exit.
+        log('Credential error — resetting messages to retryable and exiting for respawn');
+        resetToRetryable(processingIds);
+        writeMessageOut({
+          id: generateId(),
+          kind: 'system',
+          platform_id: null,
+          channel_type: null,
+          thread_id: null,
+          content: JSON.stringify({ action: 'credential_error' }),
+        });
+        process.exit(1);
+      }
+
       const errMsg = err instanceof Error ? err.message : String(err);
       log(`Query error: ${errMsg}`);
 
@@ -366,6 +391,11 @@ async function processQuery(
         // Claude session with no prior context.
         setContinuation(providerName, event.continuation);
       } else if (event.type === 'result') {
+        // Auth errors surface as result text (not error events). Throw so
+        // the outer catch can reset acks and trigger a respawn.
+        if (event.text && AUTH_ERROR_RE.test(event.text)) {
+          throw new CredentialError();
+        }
         // A result — with or without text — means the turn is done. Mark
         // the initial batch completed now so the host sweep doesn't see
         // stale 'processing' claims while the query stays open for
@@ -476,18 +506,31 @@ function dispatchResultText(text: string, routing: RoutingContext): void {
 function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {
   const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
   const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
-  // Resolve thread_id per-destination from the most recent inbound message
-  // that came from this same channel+platform. In agent-shared sessions,
-  // different destinations have different thread contexts — using a single
-  // routing.threadId would stamp one channel's thread onto another.
-  const destRouting = resolveDestinationThread(channelType, platformId);
+
+  let threadId: string | null;
+  let inReplyTo: string | null;
+
+  if (dest.threadIdOverride !== undefined && dest.threadIdOverride !== null) {
+    // Fixed thread: empty string = post to channel directly (no thread).
+    threadId = dest.threadIdOverride || null;
+    inReplyTo = routing.inReplyTo;
+  } else {
+    // Resolve thread_id per-destination from the most recent inbound message
+    // that came from this same channel+platform. In agent-shared sessions,
+    // different destinations have different thread contexts — using a single
+    // routing.threadId would stamp one channel's thread onto another.
+    const destRouting = resolveDestinationThread(channelType, platformId);
+    threadId = destRouting?.threadId ?? null;
+    inReplyTo = destRouting?.inReplyTo ?? routing.inReplyTo;
+  }
+
   writeMessageOut({
     id: generateId(),
-    in_reply_to: destRouting?.inReplyTo ?? routing.inReplyTo,
+    in_reply_to: inReplyTo,
     kind: 'chat',
     platform_id: platformId,
     channel_type: channelType,
-    thread_id: destRouting?.threadId ?? null,
+    thread_id: threadId,
     content: JSON.stringify({ text: body }),
   });
 }
