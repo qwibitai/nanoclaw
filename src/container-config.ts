@@ -50,10 +50,26 @@ export interface ContainerConfig {
 }
 
 function emptyConfig(): ContainerConfig {
+  // Default profile: read-only jibrain + tools mounts and the public QMD MCP.
+  // Gives every newly auto-created agent group a useful knowledge floor:
+  //   - QMD search over the public jibrain index ("memory" via mcp__qmd-public__query)
+  //   - Direct read-only access to /jibrain and /tools inside the container
+  //   - CLAUDE.local.md auto-memory (handled separately at spawn time)
+  // Channels needing more (confidential domains, RW mounts, extra MCPs) edit
+  // their own container.json after creation; this is the floor, not the ceiling.
   return {
-    mcpServers: {},
+    mcpServers: {
+      'qmd-public': {
+        command: 'socat',
+        args: ['STDIO', 'TCP:host.docker.internal:7333'],
+        instructions: 'QMD public index \u2014 mcp__qmd-public__query',
+      },
+    },
     packages: { apt: [], npm: [] },
-    additionalMounts: [],
+    additionalMounts: [
+      { hostPath: '/Users/jibot/jibrain', containerPath: 'jibrain', readonly: true },
+      { hostPath: '/Users/jibot/tools', containerPath: 'tools', readonly: true },
+    ],
     skills: 'all',
   };
 }
