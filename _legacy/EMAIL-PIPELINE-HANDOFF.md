@@ -185,12 +185,18 @@ Done when:
 
 ## Out of scope for this first PR
 
-- Calendar invite detection (defer to `email-calendar-adapter`
-  port later).
-- Reminder detection.
-- Receipt parsing.
-- Workstream-routing (1.x feature that auto-files mail to the
-  right confidential intake based on `To:` / `Cc:` heuristics).
+- ~~Calendar invite detection (defer to `email-calendar-adapter`
+  port later).~~ — **landed in `2a11229` (2026-05-06)**; pre-router
+  classifies on subject prefixes, `#cal` tag, `calendar-noreply@google.com`
+  sender, and `text/calendar` MIME parts → routes to `email:cal` →
+  `calendar-watch` agent (`groups/calendar-watch/`).
+- ~~Workstream-routing (1.x feature that auto-files mail to the
+  right confidential intake based on `To:` / `Cc:` heuristics).~~ —
+  **landed in `83b123c` (2026-05-06)**; `#ws:<slug>` tags in subject
+  route through `email-dispatch` to per-workstream intake dirs on
+  macazbd.
+- Reminder detection — still deferred.
+- Receipt parsing — still deferred.
 
 The basic chat-style "email comes in, agent responds" flow is the
 target. Everything else can layer in later.
