@@ -165,16 +165,18 @@ function resolveTargetSession(
   if (originSessionId) {
     const candidate = getSession(originSessionId);
     if (candidate && candidate.agent_group_id === targetAgentGroupId && candidate.status === 'active') {
-      // Cross-tenant security: candidate's mg MUST match the caller's
-      // effective mg context. Strict equality (not `||  null`) — when
-      // fallback.mgId is null (target isn't wired to caller's mg, or
-      // caller is agent-shared), only accept a candidate that is ALSO
-      // in agent-shared mode. Accepting any active candidate when
-      // fallback.mgId is null inverts the gate: the case that's MEANT
-      // to be most restricted (target not wired) would silently route
-      // into a foreign mg's session of the target if return-path
-      // matched one. (Discovered by Codex review post-merge 2026-05-08.)
-      if (candidate.messaging_group_id === fallback.mgId) {
+      // Return-path candidate is authenticated by the source_session_id
+      // chain — the host stamps it at write time when an a2a outbound
+      // becomes the recipient's inbound, and getInboundSourceSessionId
+      // only resolves rows in the *caller's* inbound. So a candidate
+      // here means: this caller and that target session previously
+      // communicated. The candidate's mg may differ from the caller's
+      // effective mg (e.g. test #2332: PA.paSlackSession sends to
+      // researcher; researcher's reply must land back in paSlackSession
+      // even though researcher itself is in agent-shared mode and
+      // fallback.mgId is null). The originating-session semantic wins;
+      // any cross-mg context already crossed at the original send.
+      if (fallback.mgId === null || candidate.messaging_group_id === fallback.mgId) {
         return candidate;
       }
     }

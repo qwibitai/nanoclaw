@@ -850,6 +850,72 @@ describe('agent-shared session resolution', () => {
     const { session } = resolveSession('ag-1', null, null, 'agent-shared');
     expect(session.messaging_group_id).toBeNull();
   });
+
+  it('agent-shared FORCES mg=null on creation even when caller passes a non-null mgId', () => {
+    // Cross-tenant safety: when a router (or future caller) passes a real
+    // mg.id alongside sessionMode='agent-shared', the created session must
+    // still be mg=null — otherwise findSessionByAgentGroup's mg=null filter
+    // can't re-find it on subsequent calls AND the session ends up bound
+    // to whichever chat happened to create it first, breaking the
+    // "one session shared across all messaging groups" semantic.
+    createAgentGroup({ id: 'ag-1', name: 'Agent', folder: 'agent', agent_provider: null, created_at: now() });
+    createMessagingGroup({
+      id: 'mg-x',
+      channel_type: 'discord',
+      platform_id: 'chan-x',
+      name: 'X',
+      is_group: 1,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+
+    const { session, created } = resolveSession('ag-1', 'mg-x', null, 'agent-shared');
+    expect(created).toBe(true);
+    expect(session.messaging_group_id).toBeNull();
+
+    // Subsequent calls from a *different* mg should hit the same session,
+    // not a fresh one — that's the whole point of agent-shared.
+    createMessagingGroup({
+      id: 'mg-y',
+      channel_type: 'discord',
+      platform_id: 'chan-y',
+      name: 'Y',
+      is_group: 1,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+    const { session: second, created: created2 } = resolveSession('ag-1', 'mg-y', null, 'agent-shared');
+    expect(created2).toBe(false);
+    expect(second.id).toBe(session.id);
+  });
+
+  it('agent-shared lookup IGNORES mg-bound sessions of the same agent group', () => {
+    // Pre-fix: findSessionByAgentGroup returned the newest active session
+    // regardless of mg, so an existing mg-bound session would be reused
+    // as the "agent-shared" session — leaking a foreign-mg context to a
+    // caller that explicitly asked for agent-shared. Fix: filter mg=null.
+    createAgentGroup({ id: 'ag-1', name: 'Agent', folder: 'agent', agent_provider: null, created_at: now() });
+    createMessagingGroup({
+      id: 'mg-bound',
+      channel_type: 'discord',
+      platform_id: 'chan-b',
+      name: 'B',
+      is_group: 1,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+
+    // Create a per-thread (mg-bound) session FIRST.
+    const { session: bound } = resolveSession('ag-1', 'mg-bound', null, 'shared');
+    expect(bound.messaging_group_id).toBe('mg-bound');
+
+    // Now an agent-shared call should NOT return the mg-bound session —
+    // it should create a fresh mg=null session.
+    const { session: shared, created } = resolveSession('ag-1', null, null, 'agent-shared');
+    expect(created).toBe(true);
+    expect(shared.id).not.toBe(bound.id);
+    expect(shared.messaging_group_id).toBeNull();
+  });
 });
 
 describe('agent-to-agent routing', () => {

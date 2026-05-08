@@ -52,10 +52,18 @@ export function findSessionForAgent(
     .get(agentGroupId, messagingGroupId) as Session | undefined;
 }
 
-/** Find an active session scoped to an agent group (ignoring messaging group). */
+/**
+ * Find the active **agent-shared** session for an agent group — i.e. one
+ * with `messaging_group_id IS NULL`. Agent-shared sessions are created with
+ * mg=null on purpose (see resolveSession's agent-shared branch); this lookup
+ * mirrors that so agent-shared callers don't silently land in an mg-bound
+ * session of the same agent group.
+ */
 export function findSessionByAgentGroup(agentGroupId: string): Session | undefined {
   return getDb()
-    .prepare("SELECT * FROM sessions WHERE agent_group_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1")
+    .prepare(
+      "SELECT * FROM sessions WHERE agent_group_id = ? AND messaging_group_id IS NULL AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+    )
     .get(agentGroupId) as Session | undefined;
 }
 

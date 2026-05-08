@@ -258,10 +258,16 @@ export function resolveSession(
 
   const id = generateId();
   const lookupThreadId = sessionMode === 'per-thread' ? threadId : null;
+  // Agent-shared sessions have no mg binding by definition — they're the
+  // single session shared across all messaging groups for this agent. Force
+  // null on creation so findSessionByAgentGroup's `messaging_group_id IS
+  // NULL` lookup re-finds them on subsequent calls (and so foreign-mg
+  // callers don't accidentally treat them as "their" mg session).
+  const sessionMessagingGroupId = sessionMode === 'agent-shared' ? null : messagingGroupId;
   const session: Session = {
     id,
     agent_group_id: agentGroupId,
-    messaging_group_id: messagingGroupId,
+    messaging_group_id: sessionMessagingGroupId,
     thread_id: lookupThreadId,
     agent_provider: null,
     status: 'active',
@@ -272,7 +278,13 @@ export function resolveSession(
 
   createSession(session);
   initSessionFolder(agentGroupId, id);
-  log.info('Session created', { id, agentGroupId, messagingGroupId, threadId: lookupThreadId, sessionMode });
+  log.info('Session created', {
+    id,
+    agentGroupId,
+    messagingGroupId: sessionMessagingGroupId,
+    threadId: lookupThreadId,
+    sessionMode,
+  });
 
   return { session, created: true };
 }

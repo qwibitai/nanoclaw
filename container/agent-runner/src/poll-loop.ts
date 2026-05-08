@@ -591,6 +591,13 @@ async function processQuery(
           log(`Pre-task script skipped ${skipped.length} follow-up task(s): ${skipped.join(', ')}`);
         }
         const prompt = formatMessages(keep);
+        // Refresh the per-batch in_reply_to so MCP send_message stamps
+        // outbound rows with the follow-up batch's anchor, not the outer
+        // turn's. Without this, an a2a inbound pushed mid-turn has its
+        // reply routed back to the outer-turn source session, which can
+        // be a different session in a different mg.
+        const followUpRouting = extractRouting(keep);
+        setCurrentInReplyTo(followUpRouting.inReplyTo);
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
         query.push(prompt);
         markCompleted(keptIds);
