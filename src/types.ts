@@ -81,6 +81,16 @@ export type EngageMode = 'pattern' | 'mention' | 'mention-sticky';
 export type SenderScope = 'all' | 'known';
 export type IgnoredMessagePolicy = 'drop' | 'accumulate';
 
+/**
+ * Per-wiring channel permission. `read` lets the agent monitor a channel
+ * without replying ("monitor-only"); `write` lets the agent post here but
+ * never receive inbound; `read+write` is the default both-ways wiring.
+ *
+ * Enforced in `src/router.ts` (inbound) and `src/delivery.ts` (outbound).
+ * See migration 014.
+ */
+export type WiringPermission = 'read' | 'write' | 'read+write';
+
 export interface MessagingGroupAgent {
   id: string;
   messaging_group_id: string;
@@ -96,6 +106,7 @@ export interface MessagingGroupAgent {
   ignored_message_policy: IgnoredMessagePolicy;
   session_mode: 'shared' | 'per-thread' | 'agent-shared';
   priority: number;
+  permission: WiringPermission;
   created_at: string;
 }
 

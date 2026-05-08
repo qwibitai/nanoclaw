@@ -12,7 +12,7 @@ import type Database from 'better-sqlite3';
 import { getRunningSessions, getActiveSessions, createPendingQuestion } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
-import { getMessagingGroupByPlatform } from './db/messaging-groups.js';
+import { getMessagingGroupByPlatform, getMessagingGroupAgentByPair } from './db/messaging-groups.js';
 import {
   getDueOutboundMessages,
   getDeliveredIds,
@@ -291,6 +291,26 @@ async function deliverMessage(
     if (!mg) {
       throw new Error(`unknown messaging group for ${msg.channel_type}/${msg.platform_id} (message ${msg.id})`);
     }
+
+    // Channel permission: a wiring with permission='read' is monitor-only,
+    // even when this is the session's origin chat (monitor-only channels
+    // still spawn sessions on inbound, but those sessions cannot reply
+    // into them). Mark the outbound row failed and skip — read-only is
+    // deterministic, so the standard retry path is wrong here. The next
+    // poll filters this row out via the `delivered` table.
+    // See migration 014.
+    const wiring = getMessagingGroupAgentByPair(mg.id, session.agent_group_id);
+    if (wiring && wiring.permission === 'read') {
+      log.warn('Skipping read-only wiring on outbound', {
+        messageId: msg.id,
+        sessionId: session.id,
+        agentGroupId: session.agent_group_id,
+        channel: `${mg.channel_type}/${mg.platform_id}`,
+      });
+      markDeliveryFailed(inDb, msg.id);
+      return;
+    }
+
     const isOriginChat = session.messaging_group_id === mg.id;
     // Guarded: without the agent-to-agent module, `agent_destinations`
     // doesn't exist and we permit all non-origin channel sends (the

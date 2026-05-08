@@ -1,4 +1,4 @@
-import type { MessagingGroup, MessagingGroupAgent } from '../types.js';
+import type { MessagingGroup, MessagingGroupAgent, WiringPermission } from '../types.js';
 // Transitional tier violation: core imports from optional agent-to-agent module.
 // `createMessagingGroupAgent` auto-creates a destination row on wiring — the
 // two concerns are currently bundled. When agent-to-agent isn't installed,
@@ -129,21 +129,27 @@ export function setMessagingGroupDeniedAt(id: string, deniedAt: string | null): 
  * a numeric suffix to break collisions within the agent's namespace. This
  * mirrors the backfill logic in migration 004.
  */
-export function createMessagingGroupAgent(mga: MessagingGroupAgent): void {
+export function createMessagingGroupAgent(
+  mga: Omit<MessagingGroupAgent, 'permission'> & { permission?: WiringPermission },
+): void {
+  // Default the permission column so callers don't have to repeat 'read+write'
+  // at every wiring site. The DB column also has DEFAULT 'read+write' (see
+  // migration 014); we mirror it here for the named-param INSERT below.
+  const row: MessagingGroupAgent = { ...mga, permission: mga.permission ?? 'read+write' };
   getDb()
     .prepare(
       `INSERT INTO messaging_group_agents (
          id, messaging_group_id, agent_group_id,
          engage_mode, engage_pattern, sender_scope, ignored_message_policy,
-         session_mode, priority, created_at
+         session_mode, priority, permission, created_at
        )
        VALUES (
          @id, @messaging_group_id, @agent_group_id,
          @engage_mode, @engage_pattern, @sender_scope, @ignored_message_policy,
-         @session_mode, @priority, @created_at
+         @session_mode, @priority, @permission, @created_at
        )`,
     )
-    .run(mga);
+    .run(row);
 
   // Auto-create an agent_destinations row so delivery's ACL doesn't block
   // outbound messages that target this chat. Guarded: when the agent-to-agent
@@ -216,7 +222,13 @@ export function updateMessagingGroupAgent(
   updates: Partial<
     Pick<
       MessagingGroupAgent,
-      'engage_mode' | 'engage_pattern' | 'sender_scope' | 'ignored_message_policy' | 'session_mode' | 'priority'
+      | 'engage_mode'
+      | 'engage_pattern'
+      | 'sender_scope'
+      | 'ignored_message_policy'
+      | 'session_mode'
+      | 'priority'
+      | 'permission'
     >
   >,
 ): void {
