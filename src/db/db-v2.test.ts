@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   initTestDb,
   closeDb,
+  getDb,
   runMigrations,
   createAgentGroup,
   getAgentGroup,
@@ -426,5 +427,40 @@ describe('pending questions', () => {
     });
     deletePendingQuestion('q-1');
     expect(getPendingQuestion('q-1')).toBeUndefined();
+  });
+});
+
+// -- Migration 014: auto_url_intake column --
+
+describe('migration 014 — auto_url_intake column', () => {
+  it('adds auto_url_intake column to messaging_groups with default 0', () => {
+    const db = getDb();
+    const cols = db.prepare("PRAGMA table_info('messaging_groups')").all() as Array<{
+      name: string;
+      dflt_value: unknown;
+    }>;
+    const col = cols.find((c) => c.name === 'auto_url_intake');
+    expect(col).toBeDefined();
+  });
+
+  it('new messaging_groups row has auto_url_intake = 0 by default', () => {
+    createMessagingGroup({
+      id: 'mg-intake-test',
+      channel_type: 'sig',
+      platform_id: '+19005550100',
+      name: 'intake-test',
+      is_group: 0,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+    const result = getMessagingGroup('mg-intake-test');
+    expect(result).toBeDefined();
+    expect(result!.auto_url_intake).toBe(0);
+  });
+
+  it('runMigrations is idempotent — running twice does not error', () => {
+    const db = getDb();
+    // Migration should already be applied by beforeEach; calling again is a no-op
+    expect(() => runMigrations(db)).not.toThrow();
   });
 });

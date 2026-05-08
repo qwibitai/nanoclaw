@@ -114,6 +114,16 @@ export function setMessagingGroupDeniedAt(id: string, deniedAt: string | null): 
   getDb().prepare('UPDATE messaging_groups SET denied_at = ? WHERE id = ?').run(deniedAt, id);
 }
 
+/**
+ * Toggle per-channel auto URL intake. When on=1 the URL intake module files
+ * bare URLs sent to this channel to the knowledge-intake sprite instead of
+ * dispatching them to an agent. Toggled via the /intake on|off slash command.
+ * See migration 014.
+ */
+export function setMessagingGroupAutoUrlIntake(id: string, on: 0 | 1): void {
+  getDb().prepare('UPDATE messaging_groups SET auto_url_intake = ? WHERE id = ?').run(on, id);
+}
+
 // ── Messaging Group Agents ──
 
 /**

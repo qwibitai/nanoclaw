@@ -24,9 +24,15 @@ vi.mock('../../router.js', () => ({
   setInboundContentFilter: vi.fn(),
 }));
 
+vi.mock('../../db/messaging-groups.js', () => ({
+  getMessagingGroupByPlatform: vi.fn(),
+  setMessagingGroupAutoUrlIntake: vi.fn(),
+}));
+
 import fs from 'fs';
 import { detectBareUrl, intakeUrl, resetIntakeApiKeyCache, formatIntakeReply, urlIntakeFilter } from './index.js';
 import { getDeliveryAdapter } from '../../delivery.js';
+import { getMessagingGroupByPlatform, setMessagingGroupAutoUrlIntake } from '../../db/messaging-groups.js';
 
 const CREDS_WITH_INTAKE = `
 AMPLIFIERD_API_KEY=amp-key
@@ -210,6 +216,20 @@ describe('intakeUrl', () => {
 });
 
 describe('urlIntakeFilter', () => {
+  function mg(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'mg-test',
+      channel_type: 'sig',
+      platform_id: '+12025550100',
+      name: 'Joi DM',
+      is_group: 0,
+      unknown_sender_policy: 'public',
+      auto_url_intake: 0,
+      created_at: '2026-01-01T00:00:00Z',
+      ...overrides,
+    };
+  }
+
   function evt(
     text: string,
     channelType = 'sig',
@@ -232,6 +252,43 @@ describe('urlIntakeFilter', () => {
       },
     };
   }
+
+  // ── isEnabledForEvent behavior (tested via urlIntakeFilter) ──────────────
+
+  it('returns false when DB row missing AND env var unset (dormant)', async () => {
+    (getMessagingGroupByPlatform as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    expect(await urlIntakeFilter(evt('https://x.com'))).toBe(false);
+    expect(captured).toBeNull();
+  });
+
+  it('returns false when DB row has auto_url_intake:0 AND env var unset', async () => {
+    (getMessagingGroupByPlatform as ReturnType<typeof vi.fn>).mockReturnValue(mg({ auto_url_intake: 0 }));
+    expect(await urlIntakeFilter(evt('https://x.com'))).toBe(false);
+    expect(captured).toBeNull();
+  });
+
+  it('returns true (files URL) when DB row has auto_url_intake:1', async () => {
+    (getMessagingGroupByPlatform as ReturnType<typeof vi.fn>).mockReturnValue(mg({ auto_url_intake: 1 }));
+    mockResponse = {
+      statusCode: 200,
+      body: JSON.stringify({ title: 'Test', file_path: 'test.md' }),
+    };
+    expect(await urlIntakeFilter(evt('https://x.com'))).toBe(true);
+    expect(captured?.opts.path).toBe('/intake');
+  });
+
+  it('returns true (files URL) via env var fallback when DB row missing but env allowlist matches', async () => {
+    (getMessagingGroupByPlatform as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    process.env.INTAKE_ENABLED_PLATFORM_IDS = 'sig:+12025550100';
+    mockResponse = {
+      statusCode: 200,
+      body: JSON.stringify({ title: 'Bridge test', file_path: 'b.md' }),
+    };
+    expect(await urlIntakeFilter(evt('https://x.com'))).toBe(true);
+    expect(captured?.opts.path).toBe('/intake');
+  });
+
+  // ── Legacy env-var behavior (unchanged) ──────────────────────────────────
 
   it('returns false when env allowlist is empty (dormant)', async () => {
     expect(await urlIntakeFilter(evt('https://x.com'))).toBe(false);
@@ -319,5 +376,118 @@ describe('urlIntakeFilter', () => {
     expect(deliver).toHaveBeenCalledTimes(1);
     const call = deliver.mock.calls[0]!;
     expect(JSON.parse(call[4]).text).toMatch(/Couldn't auto-file/);
+  });
+
+  // ── /intake on|off slash command ─────────────────────────────────────────
+
+  it('/intake on consumes the message, calls setMessagingGroupAutoUrlIntake(id, 1), and replies', async () => {
+    const row = mg({ auto_url_intake: 0, is_group: 0 });
+    (getMessagingGroupByPlatform as ReturnType<typeof vi.fn>).mockReturnValue(row);
+    const deliver = vi
+      .fn<
+        (
+          channelType: string,
+          platformId: string,
+          threadId: string | null,
+          kind: string,
+          content: string,
+        ) => Promise<string>
+      >()
+      .mockResolvedValue('msg-1');
+    (getDeliveryAdapter as ReturnType<typeof vi.fn>).mockReturnValue({ deliver });
+
+    const consumed = await urlIntakeFilter(evt('/intake on'));
+    expect(consumed).toBe(true);
+    expect(setMessagingGroupAutoUrlIntake).toHaveBeenCalledWith('mg-test', 1);
+    expect(deliver).toHaveBeenCalledTimes(1);
+    const replyBody = JSON.parse(deliver.mock.calls[0]![4]);
+    expect(replyBody.text).toBe('URL intake enabled for this channel.');
+    // Must NOT have filed a URL
+    expect(captured).toBeNull();
+  });
+
+  it('/intake off consumes the message, calls setMessagingGroupAutoUrlIntake(id, 0), and replies', async () => {
+    const row = mg({ auto_url_intake: 1, is_group: 0 });
+    (getMessagingGroupByPlatform as ReturnType<typeof vi.fn>).mockReturnValue(row);
+    const deliver = vi
+      .fn<
+        (
+          channelType: string,
+          platformId: string,
+          threadId: string | null,
+          kind: string,
+          content: string,
+        ) => Promise<string>
+      >()
+      .mockResolvedValue('msg-1');
+    (getDeliveryAdapter as ReturnType<typeof vi.fn>).mockReturnValue({ deliver });
+
+    const consumed = await urlIntakeFilter(evt('/intake off'));
+    expect(consumed).toBe(true);
+    expect(setMessagingGroupAutoUrlIntake).toHaveBeenCalledWith('mg-test', 0);
+    expect(deliver).toHaveBeenCalledTimes(1);
+    const replyBody = JSON.parse(deliver.mock.calls[0]![4]);
+    expect(replyBody.text).toBe('URL intake disabled for this channel.');
+    expect(captured).toBeNull();
+  });
+
+  it('/intake on rejects with admin-required when is_group=1 (cannot verify sender in groups)', async () => {
+    const row = mg({ auto_url_intake: 0, is_group: 1 });
+    (getMessagingGroupByPlatform as ReturnType<typeof vi.fn>).mockReturnValue(row);
+    const deliver = vi
+      .fn<
+        (
+          channelType: string,
+          platformId: string,
+          threadId: string | null,
+          kind: string,
+          content: string,
+        ) => Promise<string>
+      >()
+      .mockResolvedValue('msg-1');
+    (getDeliveryAdapter as ReturnType<typeof vi.fn>).mockReturnValue({ deliver });
+
+    const consumed = await urlIntakeFilter(evt('/intake on'));
+    expect(consumed).toBe(true);
+    // Must NOT have called the setter
+    expect(setMessagingGroupAutoUrlIntake).not.toHaveBeenCalled();
+    // Must have replied with the admin-required message
+    const replyBody = JSON.parse(deliver.mock.calls[0]![4]);
+    expect(replyBody.text).toMatch(/Admin required/i);
+    expect(captured).toBeNull();
+  });
+
+  it('/intake on replies with "no channel registered" when messaging group is missing', async () => {
+    (getMessagingGroupByPlatform as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    const deliver = vi
+      .fn<
+        (
+          channelType: string,
+          platformId: string,
+          threadId: string | null,
+          kind: string,
+          content: string,
+        ) => Promise<string>
+      >()
+      .mockResolvedValue('msg-1');
+    (getDeliveryAdapter as ReturnType<typeof vi.fn>).mockReturnValue({ deliver });
+
+    const consumed = await urlIntakeFilter(evt('/intake on'));
+    expect(consumed).toBe(true);
+    expect(setMessagingGroupAutoUrlIntake).not.toHaveBeenCalled();
+    const replyBody = JSON.parse(deliver.mock.calls[0]![4]);
+    expect(replyBody.text).toMatch(/No channel registered/i);
+  });
+
+  it('/intake on works even when intake is currently disabled (enables it)', async () => {
+    // auto_url_intake = 0 AND no env var → intake is off. /intake on should still work.
+    const row = mg({ auto_url_intake: 0, is_group: 0 });
+    (getMessagingGroupByPlatform as ReturnType<typeof vi.fn>).mockReturnValue(row);
+    const deliver = vi.fn().mockResolvedValue('msg-1');
+    (getDeliveryAdapter as ReturnType<typeof vi.fn>).mockReturnValue({ deliver });
+
+    const consumed = await urlIntakeFilter(evt('/intake on'));
+    expect(consumed).toBe(true);
+    expect(setMessagingGroupAutoUrlIntake).toHaveBeenCalledWith('mg-test', 1);
   });
 });

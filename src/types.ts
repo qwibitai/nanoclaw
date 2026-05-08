@@ -27,6 +27,16 @@ export interface MessagingGroup {
    * the column itself defaults to NULL in SQLite.
    */
   denied_at?: string | null;
+  /**
+   * When 1, bare-URL messages on this channel are silently filed to the
+   * knowledge-intake sprite instead of being dispatched to an agent. Toggled
+   * via the /intake on|off slash command. See migration 014.
+   *
+   * Optional on the TS type so pre-migration-014 callers that build
+   * MessagingGroup objects in code (fixtures, etc.) don't need to update;
+   * the column itself defaults to 0 in SQLite.
+   */
+  auto_url_intake?: number; // 0 | 1
   created_at: string;
 }
 
