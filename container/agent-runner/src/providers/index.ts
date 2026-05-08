@@ -4,3 +4,4 @@
 
 import './claude.js';
 import './mock.js';
+import './opencode.js';

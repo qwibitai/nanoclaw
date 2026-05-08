@@ -18,11 +18,14 @@ import { readEnvFile } from '../env.js';
 import { registerProviderContainerConfig } from './provider-container-registry.js';
 
 registerProviderContainerConfig('claude', () => {
-  const dotenv = readEnvFile(['ANTHROPIC_BASE_URL']);
+  const dotenv = readEnvFile(['ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL']);
   const env: Record<string, string> = {};
   if (dotenv.ANTHROPIC_BASE_URL) {
     env.ANTHROPIC_BASE_URL = dotenv.ANTHROPIC_BASE_URL;
-    env.ANTHROPIC_AUTH_TOKEN = 'placeholder';
+    env.ANTHROPIC_API_KEY = 'placeholder';
+  }
+  if (dotenv.ANTHROPIC_MODEL) {
+    env.ANTHROPIC_MODEL = dotenv.ANTHROPIC_MODEL;
   }
   return { env };
 });
