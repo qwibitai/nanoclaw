@@ -32,6 +32,9 @@ CREATE TABLE messaging_groups (
   unknown_sender_policy TEXT NOT NULL DEFAULT 'strict',
                         -- 'strict' | 'request_approval' | 'public'
   created_at            TEXT NOT NULL,
+  -- 1 = auto-file bare URLs to knowledge-intake sprite (set via /intake on|off).
+  -- Added by migration 014. Default 0 = disabled.
+  auto_url_intake        INTEGER NOT NULL DEFAULT 0,
   UNIQUE(channel_type, platform_id)
 );
 

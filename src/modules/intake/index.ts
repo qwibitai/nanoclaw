@@ -12,12 +12,19 @@
  * Multi-message batches and URLs-with-text fall through to normal agent
  * routing.
  *
- * Per-channel opt-in is via the env var INTAKE_ENABLED_PLATFORM_IDS — a
- * comma-separated list of `<channelType>:<platformId>` keys. When unset,
- * the module is dormant and routing is unaffected. (1.x used a YAML
- * `auto_url_intake: true` field on channel configs; 2.0 has no equivalent
- * channel-config table yet, so an env-var allowlist is the bridge until a
- * proper migration lands. See project.md for the upgrade path.)
+ * Configuration (column-driven model):
+ *   Per-channel opt-in is via `messaging_groups.auto_url_intake = 1`, set
+ *   by the `/intake on` slash command (and cleared by `/intake off`). Added
+ *   by migration 014. When unset (or 0), the module is dormant for that
+ *   channel and routing is unaffected.
+ *
+ *   Transitional bridge (DEPRECATED): the env var INTAKE_ENABLED_PLATFORM_IDS
+ *   (comma-separated `<channelType>:<platformId>` keys) still grants access
+ *   when the DB column is 0/absent. Remove the env-var fallback path after
+ *   ops confirms every active deployment has run migration 014 and any
+ *   desired channels have been toggled via `/intake on`. (1.x used a YAML
+ *   `auto_url_intake: true` field on channel configs; 2.0 migrated to the DB
+ *   column. See project.md for the full upgrade history.)
  *
  * Auth: INTAKE_API_KEY loaded from ~/.config/amplifierd/credentials.env
  * (same file the amplifier-remote provider reads — one extra key).
@@ -35,6 +42,7 @@ import type { InboundEvent } from '../../channels/adapter.js';
 import { getDeliveryAdapter } from '../../delivery.js';
 import { log } from '../../log.js';
 import { setInboundContentFilter } from '../../router.js';
+import { getMessagingGroupByPlatform, setMessagingGroupAutoUrlIntake } from '../../db/messaging-groups.js';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Config
@@ -44,6 +52,13 @@ const SPRITE_URL = process.env.INTAKE_SPRITE_URL || 'https://knowledge-intake-bm
 const DEFAULT_TIMEOUT_MS = 90_000;
 const CREDS_PATH = path.join(os.homedir(), '.config', 'amplifierd', 'credentials.env');
 
+/**
+ * Read the deprecated env-var allowlist.
+ *
+ * @deprecated Use `messaging_groups.auto_url_intake = 1` (via `/intake on`)
+ *   instead. This function and the env var will be removed after migration 014
+ *   has been applied on all deployments and channels have been toggled.
+ */
 function readEnabledPlatforms(): Set<string> {
   const raw = process.env.INTAKE_ENABLED_PLATFORM_IDS;
   if (!raw) return new Set();
@@ -55,10 +70,19 @@ function readEnabledPlatforms(): Set<string> {
   );
 }
 
+/**
+ * Primary: check DB column. Fallback: deprecated env-var allowlist.
+ *
+ * The env-var path is a transitional bridge — remove it (and the
+ * `readEnabledPlatforms` helper) once every deployed instance has run
+ * migration 014 and the relevant channels have been toggled on via
+ * `/intake on`.
+ */
 function isEnabledForEvent(event: InboundEvent): boolean {
-  const enabled = readEnabledPlatforms();
-  if (enabled.size === 0) return false;
-  return enabled.has(`${event.channelType}:${event.platformId}`);
+  const mg = getMessagingGroupByPlatform(event.channelType, event.platformId);
+  if (mg?.auto_url_intake === 1) return true;
+  // Transitional bridge: env var allowlist (deprecated; remove after ops flips columns).
+  return readEnabledPlatforms().has(`${event.channelType}:${event.platformId}`);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -231,6 +255,20 @@ function safeParseContent(raw: string): { text?: string } {
 }
 
 /**
+ * Deliver a text reply back to the originating channel. Silently no-ops when
+ * the delivery adapter is not yet ready (pre-boot races).
+ */
+async function replyText(event: InboundEvent, text: string): Promise<void> {
+  const adapter = getDeliveryAdapter();
+  if (!adapter) return;
+  try {
+    await adapter.deliver(event.channelType, event.platformId, event.threadId, 'chat', JSON.stringify({ text }));
+  } catch (err) {
+    log.error('url-intake: failed to send reply', { err: (err as Error).message });
+  }
+}
+
+/**
  * The filter that the router calls. Returns true → routing stops; false →
  * routing continues. Async work (the sprite POST + the reply send) is
  * awaited inline so the caller knows the message is fully handled before
@@ -242,10 +280,49 @@ export async function urlIntakeFilter(event: InboundEvent): Promise<boolean> {
   // a bare URL the user typed.
   if (event.message.kind !== 'chat') return false;
 
-  if (!isEnabledForEvent(event)) return false;
-
   const parsed = safeParseContent(event.message.content);
   const text = parsed.text;
+
+  // ── /intake on|off slash command ─────────────────────────────────────────
+  // Handled before isEnabledForEvent so the command works even when intake
+  // is currently off (enabling it is the whole point of `/intake on`).
+  if (text) {
+    const intakeCmdMatch = text.match(/^\s*\/intake\s+(on|off)\s*$/i);
+    if (intakeCmdMatch) {
+      const on = intakeCmdMatch[1].toLowerCase() === 'on';
+      const mg = getMessagingGroupByPlatform(event.channelType, event.platformId);
+
+      if (!mg) {
+        await replyText(event, 'No channel registered for /intake toggle.');
+        return true; // consume
+      }
+
+      // Auth: InboundEvent carries no userId — we cannot query user_roles here.
+      // Safe fallback: permit the toggle only on DM channels (is_group=0). In
+      // a 1:1 DM the only sender is the authorised party. Group channels
+      // require an admin role check we cannot perform without a sender identity.
+      // TODO: thread userId through InboundEvent so this can use isAdmin() from
+      // command-gate.ts, enabling group-channel admins to toggle intake too.
+      if (mg.is_group !== 0) {
+        await replyText(event, 'Admin required to toggle URL intake in group channels.');
+        return true; // consume
+      }
+
+      setMessagingGroupAutoUrlIntake(mg.id, on ? 1 : 0);
+      log.info('url-intake: toggled via /intake command', {
+        channelType: event.channelType,
+        platformId: event.platformId,
+        on,
+      });
+      await replyText(event, `URL intake ${on ? 'enabled' : 'disabled'} for this channel.`);
+      return true; // consume
+    }
+  }
+
+  // ── Bare-URL auto-intake ─────────────────────────────────────────────────
+
+  if (!isEnabledForEvent(event)) return false;
+
   if (!text) return false;
 
   const url = detectBareUrl(text);
@@ -258,7 +335,7 @@ export async function urlIntakeFilter(event: InboundEvent): Promise<boolean> {
   });
 
   const response = await intakeUrl(url);
-  const replyText = formatIntakeReply(response);
+  const replyMsg = formatIntakeReply(response);
 
   const adapter = getDeliveryAdapter();
   if (!adapter) {
@@ -275,7 +352,7 @@ export async function urlIntakeFilter(event: InboundEvent): Promise<boolean> {
       event.platformId,
       event.threadId,
       'chat',
-      JSON.stringify({ text: replyText }),
+      JSON.stringify({ text: replyMsg }),
     );
   } catch (err) {
     log.error('url-intake: failed to send confirmation reply', {
