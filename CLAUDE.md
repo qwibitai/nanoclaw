@@ -60,101 +60,57 @@ For ad-hoc queries from skills or scripts, use the in-tree wrapper rather than t
 | File | Purpose |
 |------|---------|
 | `src/index.ts` | Entry point: init DB, migrations, channel adapters, delivery polls, sweep, shutdown |
-| `src/router.ts` | Inbound routing: messaging group → agent group → session → `inbound.db` → wake |
-| `src/delivery.ts` | Polls `outbound.db`, delivers via adapter, handles system actions (schedule, approvals, etc.) |
+| `src/router.ts` | Inbound routing: mg → agent → session → `inbound.db` → wake |
+| `src/delivery.ts` | Polls `outbound.db`, delivers via adapter, handles system actions |
 | `src/host-sweep.ts` | 60s sweep: `processing_ack` sync, stale detection, due-message wake, recurrence |
-| `src/session-manager.ts` | Resolves sessions; opens `inbound.db` / `outbound.db`; manages heartbeat path |
-| `src/container-runner.ts` | Spawns per-agent-group Docker containers with session DB + outbox mounts, OneCLI `ensureAgent` |
-| `src/container-runtime.ts` | Runtime selection (Docker vs Apple containers), orphan cleanup |
-| `src/modules/permissions/access.ts` | `canAccessAgentGroup` — owner / global admin / scoped admin / member resolution against `user_roles` + `agent_group_members` |
-| `src/modules/approvals/primitive.ts` | `pickApprover`, `pickApprovalDelivery`, `requestApproval`, approval-handler registry |
-| `src/command-gate.ts` | Router-side admin command gate — queries `user_roles` directly (no env var, no container-side check) |
+| `src/session-manager.ts` | Resolves sessions; opens `inbound.db`/`outbound.db`; manages heartbeat |
+| `src/container-runner.ts` | Spawns per-agent Docker containers, OneCLI `ensureAgent` |
+| `src/container-runtime.ts` | Runtime selection (Docker vs Apple), orphan cleanup |
+| `src/modules/permissions/access.ts` | `canAccessAgentGroup` resolution against `user_roles` + `agent_group_members` |
+| `src/modules/approvals/primitive.ts` | `pickApprover`, `pickApprovalDelivery`, `requestApproval`, handler registry |
+| `src/command-gate.ts` | Router-side admin command gate (queries `user_roles` directly) |
 | `src/onecli-approvals.ts` | OneCLI credentialed-action approval bridge |
-| `src/user-dm.ts` | Cold-DM resolution + `user_dms` cache |
-| `src/group-init.ts` | Per-agent-group filesystem scaffold (CLAUDE.md, skills, agent-runner-src overlay) |
-| `src/db/` | DB layer — agent_groups, messaging_groups, sessions, user_roles, user_dms, pending_*, migrations |
-| `src/channels/` | Channel adapter infra (registry, Chat SDK bridge); specific channel adapters are skill-installed from the `channels` branch |
-| `src/providers/` | Host-side provider container-config (`claude` baked in; `opencode` etc. installed from the `providers` branch) |
-| `container/agent-runner/src/` | Agent-runner: poll loop, formatter, provider abstraction, MCP tools, destinations |
-| `container/skills/` | Container skills mounted into every agent session (`onecli-gateway`, `welcome`, `self-customize`, `agent-browser`, `slack-formatting`) |
-| `groups/<folder>/` | Per-agent-group filesystem (CLAUDE.md, skills, per-group `agent-runner-src/` overlay) |
-| `scripts/init-first-agent.ts` | Bootstrap the first DM-wired agent (used by `/init-first-agent` skill) |
-| `migrate-v2.sh` + `setup/migrate-v2/` | v1→v2 migration. Standalone script: `bash migrate-v2.sh`. Seeds DB, copies groups/sessions, installs channels, builds container, offers service switchover, then hands off to `/migrate-from-v1` skill for owner setup and CLAUDE.md cleanup. See [docs/migration-dev.md](docs/migration-dev.md). |
+| `src/db/` | Central DB layer + migrations |
+| `src/channels/`, `src/providers/` | Adapter and provider infra (specifics on the `channels`/`providers` branches) |
+| `container/agent-runner/src/` | Agent-runner: poll loop, formatter, provider abstraction, MCP tools |
+| `container/skills/` | Container skills mounted into every session |
+| `groups/<folder>/` | Per-agent-group filesystem (CLAUDE.md, skills, agent-runner overlay) |
 
 ## Channels and Providers (skill-installed)
 
-Trunk does not ship any specific channel adapter or non-default agent provider. The codebase is the registry/infra; the actual adapters and providers live on long-lived sibling branches and get copied in by skills:
-
-- **`channels` branch** — Discord, Slack, Telegram, WhatsApp, Teams, Linear, GitHub, iMessage, Webex, Resend, Matrix, Google Chat, WhatsApp Cloud (+ helpers, tests, channel-specific setup steps). Installed via `/add-<channel>` skills.
-- **`providers` branch** — OpenCode (and any future non-default agent providers). Installed via `/add-opencode`.
-
-Each `/add-<name>` skill is idempotent: `git fetch origin <branch>` → copy module(s) into the standard paths → append a self-registration import to the relevant barrel → `pnpm install <pkg>@<pinned-version>` → build.
+Trunk ships infra only — no specific channel adapter or non-default provider. Adapters live on the long-lived `channels` branch (Discord, Slack, Telegram, WhatsApp, Teams, Linear, GitHub, iMessage, Webex, Resend, Matrix, Google Chat, WhatsApp Cloud), providers on `providers` (OpenCode etc.). Installed by idempotent `/add-<name>` skills.
 
 ## Self-Modification
 
-One tier of agent self-modification today:
-
-1. **`install_packages` / `add_mcp_server`** — changes to the per-agent-group container config only (apt/npm deps, wire an existing MCP server). Single admin approval per request; on approve, the handler in `src/modules/self-mod/apply.ts` rebuilds the image when needed (`install_packages` only) and restarts the container. `container/agent-runner/src/mcp-tools/self-mod.ts`.
-
-A second tier (direct source-level self-edits via a draft/activate flow) is planned but not yet implemented.
+Today: only `install_packages` / `add_mcp_server` (per-agent-group container config changes — single admin approval, rebuilds image when needed). Direct source-level self-edits via draft/activate flow planned, not implemented. See `src/modules/self-mod/apply.ts` and `container/agent-runner/src/mcp-tools/self-mod.ts`.
 
 ## Secrets / Credentials / OneCLI
 
-API keys, OAuth tokens, and auth credentials are managed by the OneCLI gateway. Secrets are injected into per-agent containers at request time — none are passed in env vars or through chat context. The container agent sees this via the `onecli-gateway` container skill (`container/skills/onecli-gateway/SKILL.md`), which teaches it how the proxy works, how to handle auth errors, and to never ask for raw credentials. Host-side wiring: `src/onecli-approvals.ts`, `ensureAgent()` in `container-runner.ts`. Run `onecli --help`.
+Secrets live in the OneCLI gateway, injected into per-agent containers at request time — never passed via env vars or chat. Host-side wiring: `src/onecli-approvals.ts`, `ensureAgent()` in `container-runner.ts`. Container-side: `container/skills/onecli-gateway/SKILL.md`. Use `onecli --help` for commands.
 
 ### Gotcha: auto-created agents start in `selective` secret mode
 
-When the host first spawns a session for a new agent group, `container-runner.ts:385` calls `onecli.ensureAgent({ name, identifier })`. The OneCLI `POST /api/agents` endpoint creates the agent in **`selective`** secret mode — meaning **no secrets are assigned to it by default**, even if the secrets exist in the vault and have host patterns that would otherwise match.
+`container-runner.ts:385` calls `onecli.ensureAgent({...})` and the OneCLI `POST /api/agents` endpoint defaults to **`selective`** mode → no secrets assigned even when matching ones exist in the vault. Symptom: proxy + CA wired correctly, but agent gets `401` from APIs whose credentials *are* in the vault.
 
-Symptom: container starts, the proxy + CA cert are wired correctly, but the agent gets `401 Unauthorized` (or similar) from APIs whose credentials *are* in the vault. The credential just isn't in this agent's allow-list.
-
-The SDK does not expose `setSecretMode` — the only fix is the CLI (or the web UI at `http://127.0.0.1:10254`).
-
-```bash
-# Find the agent (identifier is the agent group id)
-onecli agents list
-
-# Flip to "all" so every vault secret with a matching host pattern gets injected
-onecli agents set-secret-mode --id <agent-id> --mode all
-
-# Or, stay selective and assign specific secrets
-onecli secrets list                                    # find secret ids
-onecli agents set-secrets --id <agent-id> --secret-ids <id1>,<id2>
-
-# Inspect what an agent currently has
-onecli agents secrets --id <agent-id>                  # secrets assigned to this agent
-onecli secrets list                                    # all vault secrets (with host patterns)
-```
-
-If you've just enabled `mode all`, no container restart is needed — the gateway looks up secrets per request, so the next API call from the running container will see the new credentials.
+The SDK doesn't expose `setSecretMode`. Fix via CLI (`onecli agents set-secret-mode --mode all` for matching-pattern injection, or `onecli agents set-secrets --secret-ids <ids>` to stay selective) or the web UI at `http://127.0.0.1:10254`. After enabling `mode all`, no container restart needed — the gateway looks up secrets per request.
 
 ### Requiring approval for credential use
 
-Approval-gating credentialed actions is a **two-sided** flow:
-
-- **Server-side** (OneCLI gateway): decides *when* to hold a request and emit a pending approval. As of `onecli@1.3.0`, the CLI does **not** expose this — `rules create --action` only accepts `block` or `rate_limit`, and `secrets create` has no approval flag. Approval policies must be configured via the OneCLI web UI at `http://127.0.0.1:10254`. If/when the CLI grows an `approve` action, this section needs updating.
-- **Host-side** (nanoclaw): receives pending approvals and routes them to a human. `src/modules/approvals/onecli-approvals.ts` registers a callback via `onecli.configureManualApproval(cb)` (long-polls `GET /api/approvals/pending`). The callback uses `pickApprover` + `pickApprovalDelivery` from `src/modules/approvals/primitive.ts` to DM an approver. Approvers are resolved from the `user_roles` table — preference order: scoped admins for the agent group → global admins → owners. There is no env var like `NANOCLAW_ADMIN_USER_IDS`; roles are persisted in the central DB only.
-
-If approvals are configured server-side but the host callback isn't running (or throws), every credentialed call hangs until the gateway times out. Conversely, if the gateway has no rule asking for approval, the host callback never fires regardless of how it's wired.
+Two-sided flow: **server-side** (OneCLI gateway emits pending approvals — currently UI-only configuration at `http://127.0.0.1:10254`; `onecli rules create --action` accepts only `block`/`rate_limit` as of `onecli@1.3.0`) + **host-side** (`src/modules/approvals/onecli-approvals.ts` long-polls `GET /api/approvals/pending` and DMs an approver from `user_roles` — scoped admins → global admins → owners). If server-side configured but host callback dies, every credentialed call hangs to gateway timeout. If gateway has no rule, host callback never fires.
 
 ## Skills
 
-Four types of skills. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full taxonomy.
-
-- **Channel/provider install skills** — copy the relevant module(s) in from the `channels` or `providers` branch, wire imports, install pinned deps (e.g. `/add-discord`, `/add-slack`, `/add-whatsapp`, `/add-opencode`).
-- **Utility skills** — ship code files alongside `SKILL.md` (e.g. `/claw`).
-- **Operational skills** — instruction-only workflows (`/setup`, `/debug`, `/customize`, `/init-first-agent`, `/manage-channels`, `/init-onecli`, `/update-nanoclaw`).
-- **Container skills** — loaded inside agent containers at runtime (`container/skills/`: `onecli-gateway`, `welcome`, `self-customize`, `agent-browser`, `slack-formatting`).
+Four skill types: channel/provider installers (`/add-<name>`), utility (ship code alongside SKILL.md), operational (instruction-only workflows), and container skills mounted at runtime under `container/skills/`. Full taxonomy: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 | Skill | When to Use |
 |-------|-------------|
 | `/setup` | First-time install, auth, service config |
-| `/init-first-agent` | Bootstrap the first DM-wired agent (channel pick → identity → wire → welcome DM) |
-| `/manage-channels` | Wire channels to agent groups with isolation level decisions |
-| `/customize` | Adding channels, integrations, behavior changes |
+| `/init-first-agent` | Bootstrap first DM-wired agent |
+| `/manage-channels` | Wire channels with isolation level decisions |
+| `/customize` | Add channels, integrations, behavior changes |
 | `/debug` | Container issues, logs, troubleshooting |
 | `/update-nanoclaw` | Bring upstream updates into a customized install |
-| `/init-onecli` | Install OneCLI Agent Vault and migrate `.env` credentials |
+| `/init-onecli` | Install OneCLI Agent Vault, migrate `.env` credentials |
 
 ## Contributing
 
@@ -202,11 +158,7 @@ systemctl --user start|stop|restart nanoclaw
 
 ## Module System (host)
 
-The host (`src/`) is ESM (`"type": "module"` in `package.json`). Never use CommonJS `require()` in `.ts` files. Use static `import` at the top of the file. If a circular import forces dynamic load, use `await import('./mod.js')` (ESM dynamic), not `require('./mod.js')`.
-
-The `// eslint-disable-next-line @typescript-eslint/no-require-imports` comment is a red flag in this codebase — runtime `require` is undefined in built ESM, so a `require()` call typechecks cleanly under `tsc` (because the types resolve via `@types/node`) and then fails silently at runtime when the function is executed and `require` is undefined. The function returns `null` or throws inside a try/catch and the bug never surfaces in tests that don't exercise the runtime path.
-
-The agent-runner (`container/agent-runner/`) is a separate package tree on Bun and has its own conventions; this rule applies to the host only.
+Host (`src/`) is ESM. Never use `require()` — `@typescript-eslint/no-require-imports` disables hide a runtime trap: `require` is undefined in built ESM, so the call typechecks but throws/returns null at runtime. For circular imports use `await import('./mod.js')`. Agent-runner (`container/agent-runner/`) is a separate Bun package tree; this rule is host-only.
 
 ## Troubleshooting
 
@@ -231,21 +183,11 @@ This project uses pnpm with `minimumReleaseAge: 4320` (3 days) in `pnpm-workspac
 
 ## Docs Index
 
-| Doc | Purpose |
-|-----|---------|
-| [docs/architecture.md](docs/architecture.md) | Full architecture writeup |
-| [docs/api-details.md](docs/api-details.md) | Host API + DB schema details |
-| [docs/db.md](docs/db.md) | DB architecture overview: three-DB model, cross-mount rules, readers/writers map |
-| [docs/db-central.md](docs/db-central.md) | Central DB (`data/v2.db`) — every table + migration system |
-| [docs/db-session.md](docs/db-session.md) | Per-session `inbound.db` + `outbound.db` schemas + seq parity |
-| [docs/agent-runner-details.md](docs/agent-runner-details.md) | Agent-runner internals + MCP tool interface |
-| [docs/isolation-model.md](docs/isolation-model.md) | Three-level channel isolation model |
-| [docs/setup-wiring.md](docs/setup-wiring.md) | What's wired, what's open in the setup flow |
-| [docs/architecture-diagram.md](docs/architecture-diagram.md) | Diagram version of the architecture |
-| [docs/build-and-runtime.md](docs/build-and-runtime.md) | Runtime split (Node host + Bun container), lockfiles, image build surface, CI, key invariants |
-| [docs/memory.md](docs/memory.md) | Memory integration — architecture, enable/disable runbooks, operator runbook, troubleshooting, rollback |
-| [docs/v1-to-v2-changes.md](docs/v1-to-v2-changes.md) | v1→v2 architecture diff — vocabulary for where v1 things moved |
-| [docs/migration-dev.md](docs/migration-dev.md) | Migration development guide — testing, debugging, dev loop |
+- **Architecture:** [architecture.md](docs/architecture.md), [architecture-diagram.md](docs/architecture-diagram.md)
+- **DBs:** [db.md](docs/db.md) (overview), [db-central.md](docs/db-central.md), [db-session.md](docs/db-session.md)
+- **Runtime:** [build-and-runtime.md](docs/build-and-runtime.md) (Node host + Bun container), [agent-runner-details.md](docs/agent-runner-details.md)
+- **Behavior:** [api-details.md](docs/api-details.md), [isolation-model.md](docs/isolation-model.md), [setup-wiring.md](docs/setup-wiring.md), [memory.md](docs/memory.md)
+- **Migration:** [v1-to-v2-changes.md](docs/v1-to-v2-changes.md), [migration-dev.md](docs/migration-dev.md)
 
 ## Container Build Cache
 
@@ -267,117 +209,16 @@ The agent container runs on **Bun**; the host runs on **Node** (pnpm). They comm
 
 ## CJK font support
 
-Agent containers ship without CJK fonts by default (~200MB saved). If you notice signals the user works with Chinese/Japanese/Korean content — conversing in CJK, CJK timezone (e.g., `Asia/Tokyo`, `Asia/Shanghai`, `Asia/Seoul`, `Asia/Taipei`, `Asia/Hong_Kong`), system locale hint, or mentions of needing to render CJK in screenshots/PDFs/scraped pages — offer to enable it:
+Off by default (~200MB). On signals the user works with CJK content (CJK conversation, `Asia/Tokyo|Shanghai|Seoul|Taipei|Hong_Kong` timezone, screenshots/PDFs needing CJK render — symptom is "tofu" rectangles), offer to set `INSTALL_CJK_FONTS=true` in `.env` and rebuild. Full runbook: `docs/cjk-fonts.md`.
 
-```bash
-# Ensure .env has INSTALL_CJK_FONTS=true (overwrite or append)
-grep -q '^INSTALL_CJK_FONTS=' .env && sed -i.bak 's/^INSTALL_CJK_FONTS=.*/INSTALL_CJK_FONTS=true/' .env && rm -f .env.bak || echo 'INSTALL_CJK_FONTS=true' >> .env
+## Code intelligence (GitNexus)
 
-# Rebuild and restart so new sessions pick up the new image
-./container/build.sh
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw   # macOS
-# systemctl --user restart nanoclaw                # Linux
-```
+This project is indexed by GitNexus as **nanoclaw-v2**. The MCP tools (`gitnexus_*`) understand the call graph; use them instead of grep/find for impact and refactoring work.
 
-`container/build.sh` reads `INSTALL_CJK_FONTS` from `.env` and passes it through as a Docker build-arg. Without CJK fonts, Chromium-rendered screenshots and PDFs containing CJK text show tofu (empty rectangles) instead of characters.
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
+**MUST do, every code modification:**
+- Run `gitnexus_impact({target, direction: "upstream"})` before editing a function/class — report blast radius, stop on HIGH/CRITICAL.
+- Run `gitnexus_detect_changes()` before committing to verify scope.
+- Use `gitnexus_rename` for cross-file renames (never find-and-replace).
+- After commit, the post-commit hook fires `npx gitnexus analyze --skip-agents-md --embeddings` automatically. `--skip-agents-md` is intentional — it stops the tool from re-bloating CLAUDE.md/AGENTS.md with its 100-line auto-block.
 
-This project is indexed by GitNexus as **nanoclaw-v2**. Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
-
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
-
-## Always Do
-
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
-
-## When Debugging
-
-1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
-2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/nanoclaw-v2/process/{processName}` — trace the full execution flow step by step
-4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
-
-## When Refactoring
-
-- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
-- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
-- After any refactor: run `gitnexus_detect_changes({scope: "all"})` to verify only expected files changed.
-
-## Never Do
-
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Tools Quick Reference
-
-| Tool | When to use | Command |
-|------|-------------|---------|
-| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
-| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
-| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
-| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged"})` |
-| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
-| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
-
-## Impact Risk Levels
-
-| Depth | Meaning | Action |
-|-------|---------|--------|
-| d=1 | WILL BREAK — direct callers/importers | MUST update these |
-| d=2 | LIKELY AFFECTED — indirect deps | Should test |
-| d=3 | MAY NEED TESTING — transitive | Test if critical path |
-
-## Resources
-
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/nanoclaw-v2/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/nanoclaw-v2/clusters` | All functional areas |
-| `gitnexus://repo/nanoclaw-v2/processes` | All execution flows |
-| `gitnexus://repo/nanoclaw-v2/process/{name}` | Step-by-step execution trace |
-
-## Self-Check Before Finishing
-
-Before completing any code modification task, verify:
-1. `gitnexus_impact` was run for all modified symbols
-2. No HIGH/CRITICAL risk warnings were ignored
-3. `gitnexus_detect_changes()` confirms changes match expected scope
-4. All d=1 (WILL BREAK) dependents were updated
-
-## Keeping the Index Fresh
-
-After committing code changes, the GitNexus index becomes stale. Re-run analyze to update it:
-
-```bash
-npx gitnexus analyze
-```
-
-If the index previously included embeddings, preserve them by adding `--embeddings`:
-
-```bash
-npx gitnexus analyze --embeddings
-```
-
-To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
-
-> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
-
-## CLI
-
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-
-<!-- gitnexus:end -->
+For exploring/debugging/refactoring workflows, the rules-with-examples live in `.claude/skills/gitnexus/`. Tools quick-reference: `gitnexus_query` (find by concept), `gitnexus_context` (360° on a symbol), `gitnexus_impact` (blast radius), `gitnexus_detect_changes` (pre-commit scope), `gitnexus_rename` (safe multi-file rename), `gitnexus_cypher` (raw graph queries).
