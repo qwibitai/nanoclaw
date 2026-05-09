@@ -19,7 +19,7 @@ import {
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
-import { readContainerConfig, writeContainerConfig } from './container-config.js';
+import { readContainerConfig, updateContainerConfig } from './container-config.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
@@ -125,7 +125,7 @@ async function spawnContainer(session: Session): Promise<void> {
 
   // Ensure container.json has the agent group identity fields the runner needs.
   // Written at spawn time so the runner can read them from the RO mount.
-  ensureRuntimeFields(containerConfig, agentGroup);
+  await ensureRuntimeFields(containerConfig, agentGroup);
 
   // Resolve the effective provider + any host-side contribution it declares
   // (extra mounts, env passthrough). Computed once and threaded through both
@@ -401,27 +401,30 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
  * Written at spawn time so they're always current even if the DB values
  * change (e.g. group rename). Only writes if values differ to avoid
  * unnecessary file churn.
+ *
+ * Goes through `updateContainerConfig` so this read-modify-write is
+ * serialized against concurrent writers (operator skills editing
+ * container.json, self-mod approval handlers, etc.).
  */
-function ensureRuntimeFields(
+async function ensureRuntimeFields(
   containerConfig: import('./container-config.js').ContainerConfig,
   agentGroup: AgentGroup,
-): void {
-  let dirty = false;
-  if (containerConfig.agentGroupId !== agentGroup.id) {
-    containerConfig.agentGroupId = agentGroup.id;
-    dirty = true;
-  }
-  if (containerConfig.groupName !== agentGroup.name) {
-    containerConfig.groupName = agentGroup.name;
-    dirty = true;
-  }
-  if (containerConfig.assistantName !== agentGroup.name) {
-    containerConfig.assistantName = agentGroup.name;
-    dirty = true;
-  }
-  if (dirty) {
-    writeContainerConfig(agentGroup.folder, containerConfig);
-  }
+): Promise<void> {
+  const dirty =
+    containerConfig.agentGroupId !== agentGroup.id ||
+    containerConfig.groupName !== agentGroup.name ||
+    containerConfig.assistantName !== agentGroup.name;
+  if (!dirty) return;
+
+  const updated = await updateContainerConfig(agentGroup.folder, (cfg) => {
+    cfg.agentGroupId = agentGroup.id;
+    cfg.groupName = agentGroup.name;
+    cfg.assistantName = agentGroup.name;
+  });
+  // Sync the in-memory copy used downstream by the spawn flow.
+  containerConfig.agentGroupId = updated.agentGroupId;
+  containerConfig.groupName = updated.groupName;
+  containerConfig.assistantName = updated.assistantName;
 }
 
 async function buildContainerArgs(
@@ -438,6 +441,20 @@ async function buildContainerArgs(
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Plugin install via SDK headless mode. Gated on `container.json:plugins`
+  // being non-empty so we don't pay the install path on every spawn for
+  // groups that don't use plugins. CLAUDE_CODE_REMOTE forces HTTPS over
+  // the SSH default — without it, github source URLs resolve as
+  // `git@github.com:` and bypass the OneCLI proxy entirely (see plan F7).
+  const hasPlugins =
+    !!containerConfig.plugins &&
+    (Object.keys(containerConfig.plugins.marketplaces ?? {}).length > 0 ||
+      Object.keys(containerConfig.plugins.enabled ?? {}).length > 0);
+  if (hasPlugins) {
+    args.push('-e', 'CLAUDE_CODE_SYNC_PLUGIN_INSTALL=1');
+    args.push('-e', 'CLAUDE_CODE_REMOTE=1');
+  }
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {
@@ -536,9 +553,12 @@ export async function buildAgentGroupImage(agentGroupId: string): Promise<void> 
     fs.unlinkSync(tmpDockerfile);
   }
 
-  // Store the image tag in groups/<folder>/container.json
-  containerConfig.imageTag = imageTag;
-  writeContainerConfig(agentGroup.folder, containerConfig);
+  // Store the image tag in groups/<folder>/container.json. Goes through
+  // updateContainerConfig so concurrent edits (e.g. an operator running
+  // /install-plugin while a build is in progress) don't lose updates.
+  await updateContainerConfig(agentGroup.folder, (cfg) => {
+    cfg.imageTag = imageTag;
+  });
 
   log.info('Per-agent-group image built', { agentGroupId, imageTag });
 }
