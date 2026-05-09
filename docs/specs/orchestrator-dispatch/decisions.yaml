@@ -1,0 +1,213 @@
+feature: orchestrator-dispatch
+created_by: /team-review
+last_updated_by: /team-review
+
+# /team-brief and /team-design were skipped for this feature; the design and
+# review artifacts were authored directly by the user + AI pair. This file is
+# created at /team-review time with constraints lifted from design.md and
+# new HARD constraints surfaced by the review (M4, S3).
+
+constraints:
+  - id: C1
+    type: HARD
+    text: |
+      Synthetic thread_id breaks adapter delivery when messaging_group_id is
+      set. A child session with a channel surface (mg_id non-null) MUST use a
+      real platform thread ID returned by adapter.createThread. Synthetic IDs
+      (e.g. "task-<id>") are valid ONLY when messaging_group_id IS NULL —
+      i.e. internal-only fallback path for non-thread channels.
+    source: design
+    verified: true
+    affects_groups: []  # populated by /team-plan
+
+  - id: C2
+    type: HARD
+    text: |
+      Channel adapter contract has no createThread capability today. MVP
+      cannot ship without adding it. Per M10, the method is optional with
+      a supportsCreateThread capability flag (mirrors existing supportsThreads,
+      setTyping?, deleteMessage? convention) so non-thread adapters compile.
+    source: design
+    verified: true
+    affects_groups: []
+
+  - id: C3
+    type: SOFT
+    text: |
+      Multica's ~400-700MB resident memory is too heavy for the dashboard
+      budget (target ~120MB). Choice to build a custom Vite SPA over Multica
+      is reversible if budget changes.
+    source: design
+    verified: true
+    affects_groups: []
+
+  - id: C4
+    type: HARD
+    text: |
+      Migration 024 partial-UNIQUE index (UNIQUE(agent_group_id,
+      messaging_group_id) WHERE thread_id IS NULL AND messaging_group_id
+      IS NOT NULL) forbids two channel-root sessions per (agent_group,
+      messaging_group). Dispatch must never create a thread_id=NULL child
+      with a non-NULL mg if a channel-root session already exists for that
+      pair. Surfaced by review M4.
+    source: review
+    verified: true
+    affects_groups: []
+
+  - id: C5
+    type: HARD
+    text: |
+      Host is sole inbound writer, container is sole outbound writer. The
+      two-DB invariant from CLAUDE.md. Orchestrator-dispatch must preserve
+      it — child writes outbound system action; host's applyDispatchTask /
+      applyTaskComplete handlers do all inbound writes.
+    source: CLAUDE.md
+    verified: true
+    affects_groups: []
+
+  - id: C6
+    type: HARD
+    text: |
+      One writer per session DB file. Read-only opens from additional
+      readers in the same process are allowed (better-sqlite3 + WAL).
+      Dashboard reads outbound.db, but must not introduce a second writer
+      anywhere.
+    source: CLAUDE.md
+    verified: true
+    affects_groups: []
+
+decisions:
+  - id: D1
+    stage: design
+    description: Use a new orchestrator role + dispatch_task primitive instead of reusing agent-to-agent
+    chosen: |
+      Build a new src/modules/orchestrator-dispatch/ module sitting alongside
+      the existing agent-to-agent module. Tasks dispatched into existing
+      agent groups; each task spawns a per-thread session.
+    rejected:
+      - option: Reuse agent-to-agent (create_agent + routeAgentMessage)
+        reason: |
+          create_agent is a heavyweight per-pair persistent subagent
+          spawning primitive — wrong shape for flat dispatch. routeAgentMessage
+          inherits caller threading, collapsing N children into one session.
+    constraint_refs: [C1, C5]
+    affects_groups: []
+
+  - id: D2
+    stage: design
+    description: Dashboard runtime — custom Vite+React SPA served from existing Node host vs external service
+    chosen: |
+      Custom Vite SPA bundled and served via Node http on 127.0.0.1:7457.
+      No new background services. Reads central + per-session DBs directly
+      via better-sqlite3.
+    rejected:
+      - option: Multica (PostgreSQL + Go backend + Next.js frontend)
+        reason: |
+          400-700MB resident — too heavy. Daemon-based runtime model fights
+          NanoClaw's ephemeral container model. Ripping just Multica's UI
+          requires implementing its Go API contracts in NanoClaw — comparable
+          cost to writing a focused dashboard from scratch.
+      - option: Mission Control
+        reason: Self-labeled alpha; API churn risk on a system we'd depend on.
+      - option: Beads + community web UIs
+        reason: |
+          Beads is per-repo agent memory, not an orchestration ledger. Task
+          state must be durable host data; community UIs vary in maintenance.
+    constraint_refs: [C3]
+    affects_groups: []
+
+  - id: D3
+    stage: design
+    description: Phase 1 (mgId=null children) and Phase 2 (real Slack/Discord subthreads) collapsed into single MVP
+    chosen: |
+      Single 12-day MVP with real subthreads as the default and mgId=null as
+      the fallback path for non-thread channels. Per S12 actually closer to
+      14-16 days on the honest critical path.
+    rejected:
+      - option: Ship Phase 1 first (no channel surface), then Phase 2
+        reason: |
+          User wants Slack-first chat; Phase 1's no-channel-surface model
+          would be discarded after ~9 days for a model that ships 3 days
+          later. Bundling avoids the throwaway work.
+    constraint_refs: [C1, C2]
+    affects_groups: []
+
+  - id: D4
+    stage: design
+    description: No cost/token ticker in the dashboard (UI anti-analytics rule extended)
+    chosen: No top-strip "tokens today / cost today" line. No analytics view.
+    rejected:
+      - option: Single-line dim ticker in top strip
+        reason: |
+          User reviewed and rejected — not relevant to the workflow,
+          OneCLI dashboard or chat queries can answer when needed.
+    constraint_refs: []
+    affects_groups: []
+
+  - id: D5
+    stage: design
+    description: Reverse-signal completion — channel_type vs system action
+    chosen: |
+      Direct-write kind='system' inbound row to parent_session_id (NOT
+      channel_type='agent') so the bypass is surgical and avoids dragging
+      in agent-to-agent ACL/name assumptions. Per M8, two writes per
+      task_complete: one user-visible chat into the child's subthread,
+      one system row into the parent's session.
+    rejected:
+      - option: channel_type='agent' message back to parent
+        reason: |
+          Drags in agent_destinations ACL machinery and the destination-name
+          indirection that the orchestrator pattern is built to avoid.
+    constraint_refs: [C5]
+    affects_groups: []
+
+waivers: []  # populated as user decides which findings to waive
+
+assumptions:
+  - id: A1
+    stage: design
+    text: |
+      The orchestrator-spawned child sessions can chat with the owner
+      directly through Slack/Discord subthreads, leveraging existing
+      NanoClaw thread plumbing.
+    validation: |
+      Slack adapter chat.postMessage with thread_ts works; Discord
+      Message#startThread works. Spike during MVP build before relying.
+    validated: false
+    invalidated_at: null
+
+  - id: A2
+    stage: design
+    text: |
+      Single owner, single host, ≤22 concurrent tasks, ≤11 agent groups
+      is the operational scale envelope. Choices that don't scale further
+      (e.g. blocked_on_task_ids JSON array per S8) are acceptable at this
+      scale.
+    validation: |
+      Use case is 22-item XZO triage — verified by user.
+    validated: true
+    invalidated_at: null
+
+  - id: A3
+    stage: design
+    text: |
+      Slack subthreads are the primary surface for owner-chat-with-child.
+      Non-thread channels (Telegram, iMessage, email) use the fallback
+      path; owner inspects via dashboard only.
+    validation: |
+      User explicitly committed to Slack-first workflow.
+    validated: true
+    invalidated_at: null
+
+review_cycles:
+  - iteration: 1
+    must_fix_count: 10
+    should_fix_count: 14
+    wont_fix_count: 2
+    completed_at: 2026-05-09T03:55:00Z
+
+# Open questions deferred from design (carried forward for /team-plan):
+#   OQ1 (light theme tokens not visually validated)
+#   OQ2 (per-task model/effort) — review S5 lifts this into MUST-have-in-MVP
+#   OQ3 (cancellation surface) — review S9 lifts this into MUST-have-in-MVP
+#   OQ4 (multi-orchestrator coordination) — out of scope, single orchestrator practice
