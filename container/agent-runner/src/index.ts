@@ -27,11 +27,13 @@ import { fileURLToPath } from 'url';
 
 import { loadConfig } from './config.js';
 import { buildSystemPromptAddendum } from './destinations.js';
+import { normalizeMcpEntry, type RawMcpEntry } from './mcp-config.js';
 // Providers barrel — each enabled provider self-registers on import.
 // Provider skills append imports to providers/index.ts.
 import './providers/index.js';
 import { createProvider, type ProviderName } from './providers/factory.js';
 import { runPollLoop } from './poll-loop.js';
+import type { McpServerConfig } from './providers/types.js';
 
 function log(msg: string): void {
   console.error(`[agent-runner] ${msg}`);
@@ -72,8 +74,13 @@ async function main(): Promise<void> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'mcp-tools', 'index.ts');
 
-  // Build MCP servers config: nanoclaw built-in + any from container.json
-  const mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }> = {
+  // Build MCP servers config: nanoclaw built-in + any from container.json.
+  // container.json entries may use either stdio (command/args) or URL-based
+  // transports (type: 'http' | 'sse' | 'streamableHttp', url). normalizeMcpEntry
+  // validates the entry, drops host-only fields (`instructions`), and maps
+  // 'streamableHttp' → SDK 'http'. A bad entry is logged and skipped so one
+  // typo in container.json doesn't take down the runner.
+  const mcpServers: Record<string, McpServerConfig> = {
     nanoclaw: {
       command: 'bun',
       args: ['run', mcpServerPath],
@@ -82,8 +89,14 @@ async function main(): Promise<void> {
   };
 
   for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
-    mcpServers[name] = serverConfig;
-    log(`Additional MCP server: ${name} (${serverConfig.command})`);
+    try {
+      const normalized = normalizeMcpEntry(name, serverConfig as RawMcpEntry);
+      mcpServers[name] = normalized;
+      const transport = 'url' in normalized ? `${normalized.type} ${normalized.url}` : `stdio ${normalized.command}`;
+      log(`Additional MCP server: ${name} (${transport})`);
+    } catch (err) {
+      log(`Skipping invalid MCP server '${name}': ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   const provider = createProvider(providerName, {

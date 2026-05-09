@@ -7,6 +7,8 @@
  */
 import fs from 'fs';
 
+import type { RawMcpEntry } from './mcp-config.js';
+
 const CONFIG_PATH = '/workspace/agent/container.json';
 
 export interface RunnerConfig {
@@ -15,7 +17,9 @@ export interface RunnerConfig {
   groupName: string;
   agentGroupId: string;
   maxMessagesPerPrompt: number;
-  mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
+  /** Raw entries from container.json. Normalized to the SDK shape by
+   *  index.ts via {@link normalizeMcpEntry}. */
+  mcpServers: Record<string, RawMcpEntry>;
 }
 
 const DEFAULT_MAX_MESSAGES = 10;

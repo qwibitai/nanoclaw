@@ -23,7 +23,7 @@ ARG CLAUDE_CODE_VERSION=2.1.116
 ARG AGENT_BROWSER_VERSION=latest
 ARG VERCEL_VERSION=52.2.1
 ARG BUN_VERSION=1.3.12
-ARG SUPERGATEWAY_VERSION=latest
+ARG SUPERGATEWAY_VERSION=3.4.3
 
 # ---- System dependencies -----------------------------------------------------
 # tini: correct PID 1 / signal forwarding so outbound.db writes finalize on
@@ -135,8 +135,15 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 # qmd-public MCP (and qmd-domain-* MCPs). Baking it into the base image
 # eliminates the npx -y fetch on every cold spawn (~5-10s saved per first
 # message in idle channels) and makes the version explicit/pinnable.
+#
+# IMPORTANT: install via `npm`, not `pnpm`. supergateway 3.4.3 ships with
+# `@modelcontextprotocol/sdk@1.29.0` which imports `zod/v4`; pnpm's flat
+# global resolution lands an incompatible `zod@3.x` next to it and the
+# binary crashes at startup with `ERR_PACKAGE_PATH_NOT_EXPORTED`. npm's
+# nested resolution gives supergateway its own zod tree and Just Works
+# (matches what `npx -y supergateway` was doing before this bake-in).
 RUN --mount=type=cache,target=/root/.cache/pnpm \
-    pnpm install -g "supergateway@${SUPERGATEWAY_VERSION}"
+    npm install -g "supergateway@${SUPERGATEWAY_VERSION}"
 
 # ---- Entrypoint --------------------------------------------------------------
 COPY entrypoint.sh /app/entrypoint.sh

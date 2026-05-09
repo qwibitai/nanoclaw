@@ -14,14 +14,84 @@ import path from 'path';
 
 import { GROUPS_DIR } from './config.js';
 
+/**
+ * MCP server entry. Two shapes:
+ *   - Stdio (legacy default): `command` + `args` + `env`. Type may be omitted
+ *     or set to 'stdio'.
+ *   - HTTP-based: `type: 'http' | 'sse' | 'streamableHttp'` + `url` + optional
+ *     `headers`. The Claude Agent SDK natively supports 'http' (MCP Streamable
+ *     HTTP) and 'sse'. We accept 'streamableHttp' as an explicit alias for
+ *     'http' so configs read self-documenting; the agent-runner normalizes it
+ *     to 'http' before handing to the SDK.
+ *
+ * Use {@link parseMcpServerConfig} to normalize+validate raw JSON input. It
+ * fails fast on misconfiguration (both `command` and `url` set, `url` without
+ * a recognized `type`, http/sse/streamableHttp without `url`, etc.).
+ */
 export interface McpServerConfig {
-  command: string;
+  type?: 'stdio' | 'http' | 'sse' | 'streamableHttp';
+  // Stdio fields
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  // HTTP-based fields
+  url?: string;
+  headers?: Record<string, string>;
   // Optional always-in-context guidance. When set, the host writes the
   // content to `.claude-fragments/mcp-<name>.md` at spawn and imports it
   // into the composed CLAUDE.md.
   instructions?: string;
+}
+
+const URL_TRANSPORTS = new Set(['http', 'sse', 'streamableHttp']);
+const ALL_TYPES = new Set(['stdio', 'http', 'sse', 'streamableHttp']);
+
+/**
+ * Validate and normalize a raw MCP server config entry. Throws with a
+ * server-name-prefixed message on any misconfiguration. Pure function — no
+ * disk IO. Called from `readContainerConfig` per entry; bad entries are
+ * dropped (with a console.error) so one typo doesn't take down the host.
+ */
+export function parseMcpServerConfig(name: string, raw: unknown): McpServerConfig {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`mcp[${name}]: config must be an object`);
+  }
+  const r = raw as Record<string, unknown>;
+  const type = r.type as McpServerConfig['type'] | undefined;
+  const command = r.command as string | undefined;
+  const url = r.url as string | undefined;
+
+  if (type !== undefined && !ALL_TYPES.has(type)) {
+    throw new Error(`mcp[${name}]: unknown type '${type}' (expected one of: stdio, http, sse, streamableHttp)`);
+  }
+  if (command && url) {
+    throw new Error(`mcp[${name}]: cannot set both command and url — pick stdio (command) or url-based transport`);
+  }
+  if (url && type === undefined) {
+    throw new Error(`mcp[${name}]: must set type to 'http' | 'sse' | 'streamableHttp' when using url`);
+  }
+  if (url && type === 'stdio') {
+    throw new Error(`mcp[${name}]: type 'stdio' does not accept url`);
+  }
+  if (type && URL_TRANSPORTS.has(type) && !url) {
+    throw new Error(`mcp[${name}]: type '${type}' requires url`);
+  }
+  if ((type === 'stdio' || type === undefined) && !command && !url) {
+    throw new Error(`mcp[${name}]: must set either command (stdio) or url+type (http/sse/streamableHttp)`);
+  }
+  if ((type === 'stdio' || (type === undefined && !url)) && !command) {
+    throw new Error(`mcp[${name}]: type 'stdio' requires command`);
+  }
+
+  const out: McpServerConfig = {};
+  if (type !== undefined) out.type = type;
+  if (command !== undefined) out.command = command;
+  if (r.args !== undefined) out.args = r.args as string[];
+  if (r.env !== undefined) out.env = r.env as Record<string, string>;
+  if (url !== undefined) out.url = url;
+  if (r.headers !== undefined) out.headers = r.headers as Record<string, string>;
+  if (r.instructions !== undefined) out.instructions = r.instructions as string;
+  return out;
 }
 
 export interface AdditionalMountConfig {
@@ -60,16 +130,15 @@ function emptyConfig(): ContainerConfig {
   return {
     mcpServers: {
       'qmd-public': {
-        // The QMD daemons on the host are wrapped by supergateway with
-        // --outputTransport streamableHttp, exposing MCP-over-HTTP at
-        // host.docker.internal:7333/mcp. supergateway is also the right
-        // tool for the reverse direction — running it inside the container
-        // with --streamableHttp gives Claude Code a clean stdio MCP server
-        // that proxies to the host's HTTP endpoint. We `npx -y` it so the
-        // base image doesn't need supergateway preinstalled (it has node
-        // + npx + internet); the package caches after first run.
-        command: 'npx',
-        args: ['-y', 'supergateway', '--streamableHttp', 'http://host.docker.internal:7333/mcp', '--logLevel', 'none'],
+        // The QMD daemons on the host are wrapped by supergateway, exposing
+        // MCP-over-HTTP (Streamable HTTP transport) at
+        // host.docker.internal:7333/mcp. The Claude Agent SDK speaks
+        // streamable-HTTP MCP natively, so the container connects directly
+        // to that URL — no in-container supergateway bridge required.
+        // ('streamableHttp' is normalized to the SDK's 'http' type by the
+        // agent-runner; both spellings refer to MCP's Streamable-HTTP.)
+        type: 'streamableHttp',
+        url: 'http://host.docker.internal:7333/mcp',
         instructions: 'QMD public index \u2014 mcp__qmd-public__query',
       },
     },
@@ -82,8 +151,30 @@ function emptyConfig(): ContainerConfig {
   };
 }
 
+/** Test-only export so tests can assert the default-config shape without
+ *  depending on disk IO. The real `emptyConfig` stays module-private. */
+export const emptyConfigForTest = emptyConfig;
+
 function configPath(folder: string): string {
   return path.join(GROUPS_DIR, folder, 'container.json');
+}
+
+/**
+ * Normalize a raw `mcpServers` map: validate each entry via
+ * {@link parseMcpServerConfig}; drop (with console.error) any entry that
+ * fails validation so a single typo doesn't take down the host.
+ */
+function normalizeMcpServers(raw: unknown): Record<string, McpServerConfig> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, McpServerConfig> = {};
+  for (const [name, entry] of Object.entries(raw as Record<string, unknown>)) {
+    try {
+      out[name] = parseMcpServerConfig(name, entry);
+    } catch (err) {
+      console.error(`[container-config] dropping invalid MCP server: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return out;
 }
 
 /**
@@ -98,7 +189,7 @@ export function readContainerConfig(folder: string): ContainerConfig {
   try {
     const raw = JSON.parse(fs.readFileSync(p, 'utf8')) as Partial<ContainerConfig>;
     return {
-      mcpServers: raw.mcpServers ?? {},
+      mcpServers: normalizeMcpServers(raw.mcpServers),
       packages: {
         apt: raw.packages?.apt ?? [],
         npm: raw.packages?.npm ?? [],

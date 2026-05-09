@@ -157,9 +157,19 @@ function formatWhatsApp(text: string): string {
   return segments.map(({ content, isProtected }) => (isProtected ? content : transformForWhatsApp(content))).join('');
 }
 
-/** Map file extension to Baileys media message type. */
+/**
+ * Map file extension to Baileys media message type.
+ *
+ * Hard invariant: the media payload field (`document`/`image`/`video`/`audio`)
+ * MUST be a `Buffer`. Never `{ url: ... }` — Baileys 6.6.0 deterministically
+ * hangs on `{ document: { url: <local path> } }` (logs "fetched media stream"
+ * and never resolves), and the empirical reason we ship Buffer payloads. The
+ * regression test in `whatsapp.test.ts` enforces this shape.
+ *
+ * Exported for testing.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildMediaMessage(data: Buffer, filename: string, ext: string, caption?: string): any {
+export function buildMediaMessage(data: Buffer, filename: string, ext: string, caption?: string): any {
   const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
   const videoExts = ['.mp4', '.mov', '.avi', '.mkv'];
   const audioExts = ['.mp3', '.ogg', '.m4a', '.wav', '.aac', '.opus'];

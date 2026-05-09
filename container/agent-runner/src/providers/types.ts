@@ -49,11 +49,17 @@ export interface QueryInput {
   };
 }
 
-export interface McpServerConfig {
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-}
+/**
+ * MCP server config as the agent-runner hands it to a provider. Mirrors the
+ * Claude Agent SDK's accepted shapes (stdio, sse, http) — the agent-runner
+ * normalizes container.json's `'streamableHttp'` alias to `'http'` before
+ * constructing this. Providers that don't speak HTTP MCP can ignore non-stdio
+ * entries.
+ */
+export type McpServerConfig =
+  | { type?: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
+  | { type: 'http'; url: string; headers?: Record<string, string> }
+  | { type: 'sse'; url: string; headers?: Record<string, string> };
 
 export interface AgentQuery {
   /** Push a follow-up message into the active query. */
