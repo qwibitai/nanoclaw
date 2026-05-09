@@ -28,7 +28,12 @@ registerDeliveryAction('add_mcp_server', handleAddMcpServer);
 registerDeliveryAction('install_plugin', handleInstallPlugin);
 registerDeliveryAction('uninstall_plugin', handleUninstallPlugin);
 
-registerApprovalHandler('install_packages', applyInstallPackages);
-registerApprovalHandler('add_mcp_server', applyAddMcpServer);
-registerApprovalHandler('install_plugin', applyInstallPlugin);
-registerApprovalHandler('uninstall_plugin', applyUninstallPlugin);
+// Dedupe denial loops on agent-initiated self-mods. Without this flag the
+// response handler never records a denial row on Reject, so the request-side
+// gate has nothing to find and the same approval card wakes the admin again
+// on the next agent retry. Pair with `dedupeDenials: true` in each
+// requestApproval call (src/modules/self-mod/request.ts).
+registerApprovalHandler('install_packages', applyInstallPackages, { dedupeDenials: true });
+registerApprovalHandler('add_mcp_server', applyAddMcpServer, { dedupeDenials: true });
+registerApprovalHandler('install_plugin', applyInstallPlugin, { dedupeDenials: true });
+registerApprovalHandler('uninstall_plugin', applyUninstallPlugin, { dedupeDenials: true });
