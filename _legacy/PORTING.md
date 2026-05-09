@@ -24,7 +24,7 @@ module-based architecture.
 |---|---|---|---|
 | Signal | upstream/channels (full native, 983 lines + 37 tests) | none | mention expansion already covered by upstream's `resolveMentions()` (TCP/JSON-RPC mode includes name in payload) |
 | Telegram | upstream/channels (245 lines + helpers + 41 tests) | `@chat-adapter/telegram@4.27.0` | isDm group-chat fix already covered by `isGroupPlatformId(platformId)` at adapter level |
-| WhatsApp | upstream/channels (777 lines, native Baileys) | Baileys + qrcode + pino | 120s init-query timeout **ported**; `@lid` JID handling obsolete (upstream has full `translateJid()` resolver) |
+| WhatsApp | upstream/channels (777 lines, native Baileys) | Baileys + qrcode + pino | 120s init-query timeout **ported**; `@lid` JID handling obsolete (upstream has full `translateJid()` resolver); **sendFile not yet ported — must use Buffer not URL, see nanoclaw-dou (P2) and `_legacy/v1.2.49/src/channels/whatsapp.ts:326`** |
 | Slack | upstream/channels (30-line bridge stub + ported `slack-mentions.ts`, 110 lines + 16 tests) | `@chat-adapter/slack@4.27.0` | Multi-alias outgoing-mention compaction **ported** via `transformOutboundText`; PDF attachment text extraction **deferred** (no inbound-attachment hook on bridge) |
 | Discord | upstream/channels (38-line bridge stub) | `@chat-adapter/discord@4.27.0` | All 1.x mention/JID fixes either obsolete or pending empirical test post-cutover (SDK may already cover) |
 | LINE | **fresh-authored in this fork** (`src/channels/line.ts`, 310 lines + 21 tests) | none | Reimplemented from scratch for 2.0 — no upstream skill, no `@chat-adapter/line` exists. Platform-ID scheme changed to symmetric `line:user:` / `line:group:` / `line:room:`. |

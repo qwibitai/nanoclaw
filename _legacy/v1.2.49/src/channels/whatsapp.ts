@@ -17,27 +17,32 @@ import {
 
 import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, STORE_DIR } from '../config.js';
 import { resolveGroupIpcPath } from '../group-folder.js';
-import {
-  getLastGroupSync,
-  setLastGroupSync,
-  updateChatName,
-} from '../db.js';
+import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const WA_VERSION_URL = 'https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/baileys-version.json';
+const WA_VERSION_URL =
+  'https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/baileys-version.json';
 const SENDFILE_TIMEOUT_MS = 60_000;
 
 function fetchWaVersion(): Promise<[number, number, number] | undefined> {
   return new Promise((resolve) => {
-    https.get(WA_VERSION_URL, { timeout: 5000 }, (res) => {
-      let data = '';
-      res.on('data', (chunk: string) => { data += chunk; });
-      res.on('end', () => {
-        try { resolve(JSON.parse(data).version); } catch { resolve(undefined); }
-      });
-    }).on('error', () => resolve(undefined));
+    https
+      .get(WA_VERSION_URL, { timeout: 5000 }, (res) => {
+        let data = '';
+        res.on('data', (chunk: string) => {
+          data += chunk;
+        });
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data).version);
+          } catch {
+            resolve(undefined);
+          }
+        });
+      })
+      .on('error', () => resolve(undefined));
   });
 }
 
@@ -99,15 +104,14 @@ export class WhatsAppChannel implements Channel {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        const msg =
-          'WhatsApp authentication required. Run /setup in Claude Code.';
+        const msg = 'WhatsApp authentication required. Run /setup in Claude Code.';
         logger.error(msg);
-        exec(
-          `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
-        );
+        exec(`osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`);
         // Gracefully disable WhatsApp instead of crashing the entire process
         this.connected = false;
-        try { this.sock?.end?.(undefined); } catch {}
+        try {
+          this.sock?.end?.(undefined);
+        } catch {}
         if (onFirstOpen) onFirstOpen(); // unblock startup
         onFirstOpen = undefined;
         return;
@@ -120,7 +124,10 @@ export class WhatsAppChannel implements Channel {
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
         // Unblock startup so other channels can initialize while WA retries
-        if (onFirstOpen) { onFirstOpen(); onFirstOpen = undefined; }
+        if (onFirstOpen) {
+          onFirstOpen();
+          onFirstOpen = undefined;
+        }
 
         if (shouldReconnect) {
           logger.info('Reconnecting...');
@@ -156,21 +163,15 @@ export class WhatsAppChannel implements Channel {
         }
 
         // Flush any messages queued while disconnected
-        this.flushOutgoingQueue().catch((err) =>
-          logger.error({ err }, 'Failed to flush outgoing queue'),
-        );
+        this.flushOutgoingQueue().catch((err) => logger.error({ err }, 'Failed to flush outgoing queue'));
 
         // Sync group metadata on startup (respects 24h cache)
-        this.syncGroupMetadata().catch((err) =>
-          logger.error({ err }, 'Initial group sync failed'),
-        );
+        this.syncGroupMetadata().catch((err) => logger.error({ err }, 'Initial group sync failed'));
         // Set up daily sync timer (only once)
         if (!this.groupSyncTimerStarted) {
           this.groupSyncTimerStarted = true;
           setInterval(() => {
-            this.syncGroupMetadata().catch((err) =>
-              logger.error({ err }, 'Periodic group sync failed'),
-            );
+            this.syncGroupMetadata().catch((err) => logger.error({ err }, 'Periodic group sync failed'));
           }, GROUP_SYNC_INTERVAL_MS);
         }
 
@@ -198,9 +199,7 @@ export class WhatsAppChannel implements Channel {
         const groups = this.opts.registeredGroups();
         logger.info({ rawJid, chatJid, registered: !!groups[chatJid] }, 'WA JID check');
 
-        const timestamp = new Date(
-          Number(msg.messageTimestamp) * 1000,
-        ).toISOString();
+        const timestamp = new Date(Number(msg.messageTimestamp) * 1000).toISOString();
 
         // Always notify about chat metadata for group discovery
         const isGroup = chatJid.endsWith('@g.us');
@@ -214,10 +213,10 @@ export class WhatsAppChannel implements Channel {
           const stripMentionMarks = (s: string) => s.replace(/[\u2068\u2069]/g, '');
           let content = stripMentionMarks(
             msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
-            ''
+              msg.message?.extendedTextMessage?.text ||
+              msg.message?.imageMessage?.caption ||
+              msg.message?.videoMessage?.caption ||
+              '',
           );
 
           // Translate LID mentions to display names.
@@ -227,35 +226,36 @@ export class WhatsAppChannel implements Channel {
           if (this.sock.user?.lid) {
             const selfLidUser = this.sock.user.lid.split(':')[0];
             if (selfLidUser && content.includes('@' + selfLidUser)) {
-              content = content.replace(
-                new RegExp('@' + selfLidUser, 'g'),
-                '@jibot',
-              );
+              content = content.replace(new RegExp('@' + selfLidUser, 'g'), '@jibot');
             }
           }
 
           // Handle media messages: documents, images, video, audio
-          const docMsg = msg.message?.documentMessage ||
-            msg.message?.documentWithCaptionMessage?.message?.documentMessage;
+          const docMsg =
+            msg.message?.documentMessage || msg.message?.documentWithCaptionMessage?.message?.documentMessage;
           const imgMsg = msg.message?.imageMessage;
           const vidMsg = msg.message?.videoMessage;
           const audioMsg = msg.message?.audioMessage;
           const hasMedia = !!(docMsg || imgMsg || vidMsg || audioMsg);
 
           if (hasMedia) {
-            const fileName = (docMsg as any)?.fileName ||
+            const fileName =
+              (docMsg as any)?.fileName ||
               (imgMsg ? 'image.jpg' : vidMsg ? 'video.mp4' : audioMsg ? 'audio.ogg' : 'file');
             const mimeType = (docMsg || imgMsg || vidMsg || audioMsg)?.mimetype || 'application/octet-stream';
-            const caption = (docMsg as any)?.caption ||
+            const caption =
+              (docMsg as any)?.caption ||
               msg.message?.documentWithCaptionMessage?.message?.documentMessage?.caption ||
-              imgMsg?.caption || vidMsg?.caption || '';
+              imgMsg?.caption ||
+              vidMsg?.caption ||
+              '';
 
             if (!content && caption) content = caption;
 
             // Download and save media file for registered groups
             if (groups[chatJid]) {
               try {
-                const buffer = await downloadMediaMessage(msg as WAMessage, 'buffer', {}) as Buffer;
+                const buffer = (await downloadMediaMessage(msg as WAMessage, 'buffer', {})) as Buffer;
                 if (buffer && buffer.length > 0) {
                   const group = groups[chatJid];
                   const ipcPath = resolveGroupIpcPath(group.folder);
@@ -263,9 +263,10 @@ export class WhatsAppChannel implements Channel {
                   fs.mkdirSync(inputDir, { recursive: true });
                   const safeName = `${Date.now()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
                   fs.writeFileSync(path.join(inputDir, safeName), buffer);
-                  const sizeStr = buffer.length > 1024 * 1024
-                    ? `${(buffer.length / (1024 * 1024)).toFixed(1)}MB`
-                    : `${(buffer.length / 1024).toFixed(1)}KB`;
+                  const sizeStr =
+                    buffer.length > 1024 * 1024
+                      ? `${(buffer.length / (1024 * 1024)).toFixed(1)}MB`
+                      : `${(buffer.length / 1024).toFixed(1)}KB`;
                   const annotation = `[Attached: ${fileName} (${mimeType}, ${sizeStr}) \u2014 saved to /workspace/ipc/input/${safeName}]`;
                   content = content ? `${content}\n${annotation}` : annotation;
                   logger.info({ chatJid, filename: safeName, size: buffer.length, mimeType }, 'WA media saved');
@@ -292,9 +293,7 @@ export class WhatsAppChannel implements Channel {
           // since only the bot sends from that number.
           // With shared number, bot messages carry the assistant name prefix
           // (even in DMs/self-chat) so we check for that.
-          const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
-            ? fromMe
-            : content.startsWith(`${ASSISTANT_NAME}:`);
+          const isBotMessage = ASSISTANT_HAS_OWN_NUMBER ? fromMe : content.startsWith(`${ASSISTANT_NAME}:`);
 
           this.opts.onMessage(chatJid, {
             id: msg.key.id || '',
@@ -311,17 +310,19 @@ export class WhatsAppChannel implements Channel {
     });
   }
 
-  async sendFile(
-    jid: string,
-    filePath: string,
-    filename: string,
-    mimetype: string,
-    caption?: string,
-  ): Promise<void> {
+  async sendFile(jid: string, filePath: string, filename: string, mimetype: string, caption?: string): Promise<void> {
     if (!this.connected) {
       throw new Error('WhatsApp disconnected; cannot send file');
     }
     let timer: NodeJS.Timeout;
+    // ⚠️ DO NOT PORT THIS PATTERN AS-IS — see nanoclaw-dou (P2).
+    // `{ document: { url: filePath } }` deterministically hangs Baileys 6.6.0:
+    // sendMessage logs `fetched media stream` and never resolves. Verified on
+    // jibotmac 2026-04-30 across every WhatsApp document send.
+    // When porting sendFile to the v2 channel adapter, use:
+    //   { document: fs.readFileSync(filePath) }              // small files
+    //   { document: { stream: fs.createReadStream(filePath) } }  // large files
+    // The fix lives on origin/fix/sendfile-buffer (commit fbdfe1d) for reference.
     const sendPromise = this.sock.sendMessage(jid, {
       document: { url: filePath },
       fileName: filename,
@@ -330,7 +331,12 @@ export class WhatsAppChannel implements Channel {
     });
     const timeoutPromise = new Promise<never>((_, reject) => {
       timer = setTimeout(
-        () => reject(new Error(`WhatsApp sendFile timed out after ${SENDFILE_TIMEOUT_MS / 1000}s for jid=${jid} filename=${filename}`)),
+        () =>
+          reject(
+            new Error(
+              `WhatsApp sendFile timed out after ${SENDFILE_TIMEOUT_MS / 1000}s for jid=${jid} filename=${filename}`,
+            ),
+          ),
         SENDFILE_TIMEOUT_MS,
       );
     });
@@ -350,13 +356,14 @@ export class WhatsAppChannel implements Channel {
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
     // Skip only when the assistant has its own dedicated phone number.
-    const prefixed = ASSISTANT_HAS_OWN_NUMBER
-      ? text
-      : `${ASSISTANT_NAME}: ${text}`;
+    const prefixed = ASSISTANT_HAS_OWN_NUMBER ? text : `${ASSISTANT_NAME}: ${text}`;
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });
-      logger.info({ jid, length: prefixed.length, queueSize: this.outgoingQueue.length }, 'WA disconnected, message queued');
+      logger.info(
+        { jid, length: prefixed.length, queueSize: this.outgoingQueue.length },
+        'WA disconnected, message queued',
+      );
       return;
     }
     try {

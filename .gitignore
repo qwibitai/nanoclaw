@@ -54,3 +54,8 @@ scripts/telegram-relay/relay.log
 nanoclaw.db
 .env.backup*
 audit/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key

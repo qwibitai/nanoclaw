@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "nanoclaw",
+  "project_id": "2bb8cff5-69e3-4fbb-9cfe-0dfd7d8535e5"
+}
