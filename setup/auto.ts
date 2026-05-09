@@ -51,7 +51,7 @@ import { runWindowedStep } from './lib/windowed-runner.js';
 import { detectRegisteredGroups, detectExistingDisplayName } from './environment.js';
 import { pollHealth } from './onecli.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
-import { claudeCliAvailable, resolveTimezoneViaClaude } from './lib/tz-from-claude.js';
+import { resolveTimezoneViaCli, setupCliAvailable } from './lib/tz-from-cli.js';
 import * as setupLog from './logs.js';
 import { ensureAnswer, fail, runQuietChild, runQuietStep, spawnQuiet } from './lib/runner.js';
 import { emit as phEmit } from './lib/diagnostics.js';
@@ -1029,13 +1029,13 @@ async function runTimezoneStep(): Promise<void> {
 
   let tz: string | null = isValidTimezone(raw) ? raw : null;
   if (!tz) {
-    if (claudeCliAvailable()) {
-      tz = await resolveTimezoneViaClaude(raw);
+    if (setupCliAvailable()) {
+      tz = await resolveTimezoneViaCli(raw);
     } else {
       p.log.warn(
         brandBody(
           wrapForGutter(
-            "That's not a standard IANA zone and I can't call Claude to interpret it here — try again with a zone like `America/New_York` or `Europe/London`.",
+            "That's not a standard IANA zone and I don't have a setup-helper CLI installed to interpret it here — try again with a zone like `America/New_York` or `Europe/London`.",
             4,
           ),
         ),

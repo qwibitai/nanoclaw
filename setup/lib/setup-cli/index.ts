@@ -55,7 +55,7 @@ export function resolveSetupCli(): SetupCli | null {
     // hard-failing; the caller can warn separately.
   }
   for (const cli of BUILTIN_CLIS) {
-    if (adapter.isInstalled()) return cli;
+    if (cli.isInstalled()) return cli;
   }
   return null;
 }

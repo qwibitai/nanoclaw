@@ -60,7 +60,7 @@ export const STEP_FILES: Record<string, string[]> = {
   mounts: ['setup/mounts.ts'],
   service: ['setup/service.ts'],
   'cli-agent': ['setup/cli-agent.ts', 'scripts/init-cli-agent.ts'],
-  timezone: ['setup/timezone.ts', 'setup/lib/tz-from-claude.ts'],
+  timezone: ['setup/timezone.ts', 'setup/lib/tz-from-cli.ts'],
   channel: ['setup/auto.ts'],
   verify: ['setup/verify.ts'],
   // Channel-specific sub-steps:
