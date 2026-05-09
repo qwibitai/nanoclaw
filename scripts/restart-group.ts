@@ -25,7 +25,7 @@ import { execFileSync } from 'child_process';
 
 import { CONTAINER_INSTALL_LABEL } from '../src/config.js';
 import { CONTAINER_RUNTIME_BIN } from '../src/container-runtime.js';
-import { initDb } from '../src/db/connection.js';
+import { initOperatorDb } from './lib/db-init.js';
 import { getAgentGroupByFolder } from '../src/db/agent-groups.js';
 import { getSessionsByAgentGroup } from '../src/db/sessions.js';
 
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  initDb();
+  initOperatorDb();
 
   const group = getAgentGroupByFolder(folder);
   if (!group) {

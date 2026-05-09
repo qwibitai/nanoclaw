@@ -7,7 +7,7 @@
  *
  * Outputs JSON to stdout (the SKILL.md prompts Claude to format it).
  */
-import { initDb } from '../src/db/connection.js';
+import { initOperatorDb } from './lib/db-init.js';
 import { getAgentGroupByFolder } from '../src/db/agent-groups.js';
 import { listMarketplaces } from './lib/plugins-config.js';
 
@@ -17,7 +17,7 @@ if (!folder) {
   process.exit(2);
 }
 
-initDb();
+initOperatorDb();
 if (!getAgentGroupByFolder(folder)) {
   console.error(`No agent group with folder "${folder}"`);
   process.exit(1);

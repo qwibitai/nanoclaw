@@ -23,7 +23,7 @@
 import { spawnSync } from 'child_process';
 import path from 'path';
 
-import { initDb } from '../src/db/connection.js';
+import { initOperatorDb } from './lib/db-init.js';
 import { getAgentGroupByFolder } from '../src/db/agent-groups.js';
 import { addMarketplace } from './lib/plugins-config.js';
 import { parseMarketplaceSource } from './lib/marketplace-source-validator.js';
@@ -35,7 +35,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  initDb();
+  initOperatorDb();
   if (!getAgentGroupByFolder(folder)) {
     console.error(`No agent group with folder "${folder}"`);
     process.exit(1);
