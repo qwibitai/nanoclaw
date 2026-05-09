@@ -89,73 +89,104 @@ The orchestration ledger. Source of truth — task state is durable, not in sess
 ```sql
 CREATE TABLE tasks (
   task_id              TEXT PRIMARY KEY,
-  idempotency_key      TEXT NOT NULL,                            -- closes review (cycle-1 fresh) M13: NOT NULL so UNIQUE actually fires
+  idempotency_key      TEXT NOT NULL,
   parent_session_id    TEXT NOT NULL REFERENCES sessions(id),    -- orchestrator's session
   parent_agent_group_id TEXT NOT NULL REFERENCES agent_groups(id),
-  child_session_id     TEXT REFERENCES sessions(id),             -- null until session resolved
-  child_thread_id      TEXT,                                     -- closes review M1: real platform thread id from createThread; null on internal-only fallback
+  child_session_id     TEXT REFERENCES sessions(id),             -- null until session resolved; bidirectional with sessions.dispatch_task_id (cycle-2 M2-A)
+  child_thread_id      TEXT,                                     -- real platform thread id from adapter.createThread; null on internal-only fallback
+  parent_platform_message_id TEXT,                               -- cycle-2 M2-D: persisted platform-side parent message id, used by reconciler for createThread idempotency
   target_agent_group_id TEXT NOT NULL REFERENCES agent_groups(id),
   title                TEXT NOT NULL,
   prompt               TEXT NOT NULL,
   status               TEXT NOT NULL DEFAULT 'pending',
                        -- pending | dispatched | running | complete | failed | orphaned | cancelled
+                       -- (cycle-2 M2-C: 'dispatched' is set ATOMICALLY by the cap-aware promoter
+                       -- before any side effect, so cap counts include in-flight dispatching tasks
+                       -- and authorize accepts fast completions before heartbeat)
   dispatch_state       TEXT NOT NULL DEFAULT 'pending',
-                       -- pending | creating_thread | thread_created | session_created | prompt_injected | wake_sent | dispatched
-  dispatch_state_updated_at TEXT NOT NULL,                       -- closes M15: updated on every state transition
-  dispatch_retry_count INTEGER NOT NULL DEFAULT 0,               -- closes M15: bounded by reconciler before failing
-  -- Completion finalization fields (closes M3): completion is a state machine, not atomic
-  parent_notified_at    TEXT,                                    -- system row written to parent's session
-  child_summary_posted_at TEXT,                                  -- user-visible summary posted to child subthread (when applicable)
-  dependents_released_at TEXT,                                   -- fan-out to task_dependencies completed
+                       -- pending | creating_thread | thread_created | session_created | prompt_injected | wake_sent | running
+  dispatch_state_updated_at TEXT NOT NULL,
+  dispatch_retry_count INTEGER NOT NULL DEFAULT 0,
+  -- Completion finalization markers (cycle-1 M3 + cycle-2 M2-F refinements):
+  dependents_released_at  TEXT,    -- fan-out to task_dependencies; written FIRST so parent message contains the final list
+  child_summary_posted_at TEXT,    -- user-visible summary posted to child subthread; for internal-only tasks (child_thread_id IS NULL) set to completed_at at terminal-status time (not-applicable marker)
+  parent_notified_at      TEXT,    -- system row written to parent's session; written LAST and contains the final dependents_unblocked list
+  parent_woken_at         TEXT,    -- cycle-2 M2-F: separate marker for wakeContainer(parent), so failed wakes are retried
+  -- Cancellation
+  cancelled_at         TEXT,                                     -- cycle-2 M2-B: set by applyCancelTask alongside status='cancelled'; watchdog hard-kill timer reads this
   -- Other
-  completion_nonce     TEXT NOT NULL,                            -- per-task secret; delivered out-of-band via /workspace/.task-context.json (closes M16)
   deadline             TEXT,                                     -- ISO timestamp; watchdog enforces
-  original_deadline    TEXT,                                     -- closes M11: set at insert, never mutated; watchdog uses for the 4× extension cap
-  model                TEXT,                                     -- closes review S5: optional per-task model override
-  effort               TEXT,                                     -- closes review S5: optional per-task effort override
-  spawned_by_user_id   TEXT REFERENCES users(id),                -- closes S1: populated at dispatch from orchestrator session's most-recent user inbound; watchdog orphan-recovery DM target
+  original_deadline    TEXT,                                     -- set at insert, never mutated. NULL → task_progress deadline_extension_seconds is rejected (cycle-2 M2-I).
+  model                TEXT,
+  effort               TEXT,
+  spawned_by_user_id   TEXT REFERENCES users(id),
   spawned_at           TEXT NOT NULL,
   started_at           TEXT,
   completed_at         TEXT,
   result_summary       TEXT,
   failure_reason       TEXT,
-  UNIQUE(parent_session_id, idempotency_key)                   -- dedup per orchestrator session
+  UNIQUE(parent_session_id, idempotency_key)
 );
 CREATE INDEX idx_tasks_parent ON tasks(parent_session_id, status);
 CREATE INDEX idx_tasks_child  ON tasks(child_session_id);
 CREATE INDEX idx_tasks_status ON tasks(status, deadline);
-CREATE INDEX idx_tasks_dispatch_state ON tasks(dispatch_state, dispatch_state_updated_at) WHERE dispatch_state != 'dispatched';
-CREATE INDEX idx_tasks_finalization ON tasks(status, parent_notified_at, child_summary_posted_at, dependents_released_at)
-  WHERE status IN ('complete','failed') AND (parent_notified_at IS NULL OR child_summary_posted_at IS NULL OR dependents_released_at IS NULL);
+CREATE INDEX idx_tasks_dispatch_state ON tasks(dispatch_state, dispatch_state_updated_at) WHERE dispatch_state != 'running';
+CREATE INDEX idx_tasks_finalization ON tasks(status)
+  WHERE status IN ('complete','failed','cancelled')
+    AND (parent_notified_at IS NULL
+         OR (child_thread_id IS NOT NULL AND child_summary_posted_at IS NULL)
+         OR dependents_released_at IS NULL
+         OR parent_woken_at IS NULL);
 
--- Dependencies as a join table (review cycle-1 S8 / Codex C4); cycle-2 fresh review M14 added DB-level cross-session enforcement.
+-- Bidirectional binding: closes cycle-2 M2-A. sessions.dispatch_task_id makes
+-- dispatched sessions invisible to findSessionByAgentGroup (which adds
+-- AND dispatch_task_id IS NULL to its WHERE) and gives the reconciler a
+-- durable lookup key for createDispatchedSession idempotency.
+ALTER TABLE sessions ADD COLUMN dispatch_task_id TEXT UNIQUE REFERENCES tasks(task_id);
+CREATE INDEX idx_sessions_dispatch_task ON sessions(dispatch_task_id) WHERE dispatch_task_id IS NOT NULL;
+
+-- Dependencies as a join table (cycle-1 S8 / cycle-1 M14 / cycle-2 S2-B trigger).
 CREATE TABLE task_dependencies (
   task_id              TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
-  blocked_on_task_id   TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,  -- closes S2 (FK ON DELETE behavior explicit)
-  parent_session_id    TEXT NOT NULL,                                              -- denormalized for closes M14: cross-session enforcement at DB level
+  blocked_on_task_id   TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  parent_session_id    TEXT NOT NULL,
   PRIMARY KEY (task_id, blocked_on_task_id),
-  -- CHECK enforced via application-level INSERT helper that validates
-  -- task_id.parent_session_id == blocked_on_task_id.parent_session_id == this row's parent_session_id.
-  -- (SQLite cannot reference other tables in CHECK; trigger or insert-helper-only.)
   CHECK (task_id != blocked_on_task_id)
 );
 CREATE INDEX idx_task_deps_blocked_on ON task_dependencies(blocked_on_task_id);
 CREATE INDEX idx_task_deps_parent ON task_dependencies(parent_session_id);
 
--- Insert helper: src/db/task-dependencies.ts:insertTaskDependency() validates same-parent-session and rejects otherwise.
--- Rationale: SQLite trigger could enforce but adds operational complexity; insert-helper validation is the existing project pattern (see src/db/scheduled-tasks.ts).
+-- DB-level enforcement of same-parent-session (cycle-2 S2-B). SQLite cannot reference other tables in CHECK,
+-- but BEFORE INSERT triggers can. This makes the invariant self-defending — any direct INSERT path
+-- (migration backfill, scripts/q.ts ad-hoc, future code) is rejected at the database layer.
+CREATE TRIGGER task_deps_same_parent_session_task
+BEFORE INSERT ON task_dependencies
+WHEN (SELECT parent_session_id FROM tasks WHERE task_id = NEW.task_id) != NEW.parent_session_id
+BEGIN
+  SELECT RAISE(ABORT, 'task_dependencies.task_id parent_session_id mismatch');
+END;
+CREATE TRIGGER task_deps_same_parent_session_blocked
+BEFORE INSERT ON task_dependencies
+WHEN (SELECT parent_session_id FROM tasks WHERE task_id = NEW.blocked_on_task_id) != NEW.parent_session_id
+BEGIN
+  SELECT RAISE(ABORT, 'task_dependencies.blocked_on_task_id parent_session_id mismatch');
+END;
 
--- Roles catalog (closes S5): typed role list with FK from agent_roles
+-- Insert helper still exists in src/db/task-dependencies.ts for ergonomics, but the trigger is the boundary.
+
+-- Roles catalog (cycle-1 S5).
 CREATE TABLE roles_catalog (
   role        TEXT PRIMARY KEY,
   description TEXT
 );
 INSERT INTO roles_catalog (role, description) VALUES
   ('orchestrator', 'Can dispatch tasks to other agent groups via dispatch_task MCP tool');
+-- agent_roles.role TEXT NOT NULL REFERENCES roles_catalog(role) (in migration)
 
--- Update agent_roles with FK
--- (in migration: drop+recreate or ALTER if SQLite version supports it)
--- agent_roles.role TEXT NOT NULL REFERENCES roles_catalog(role)
+-- Retention policy (cycle-2 S2-F): document only, deferred to v2 ops.
+-- Recommended cron purge: tasks WHERE status='complete' AND completed_at < now - 30 days
+--                         tasks WHERE status IN ('failed','cancelled','orphaned') AND completed_at < now - 90 days
+-- (FK ON DELETE CASCADE on task_dependencies handles dep cleanup automatically.)
 ```
 
 ### Dispatch flow
@@ -188,62 +219,80 @@ Multi-step state machine with persisted `dispatch_state` per step. Each transiti
 
 [4] Host INSERTs tasks row with:
       status='pending', dispatch_state='pending', dispatch_state_updated_at=now,
-      original_deadline=deadline, completion_nonce=<random 32-byte hex>,
+      original_deadline=deadline,
       spawned_by_user_id=<orchestrator session's most-recent user inbound>.
-    Populates task_dependencies via insertTaskDependency() helper.
-    Writes /workspace/.task-context.json into the child session dir
-    (the file is created when the session dir is created in step 5b;
-    see "Out-of-band nonce delivery" below) — actually deferred to step 5b.
+    Populates task_dependencies via insertTaskDependency() helper
+    (DB-level trigger enforces same-parent-session — cycle-2 S2-B).
 
-[CAP CHECK — closes M9] Before advancing to step 5, host evaluates:
+    No completion_nonce is generated. Source-session authorization is
+    sufficient because sessions.dispatch_task_id UNIQUE makes the
+    (task_id, child_session_id) binding 1:1 (cycle-2 M2-E simplification).
+
+[CAP CHECK + atomic 'dispatched' transition — cycle-2 M2-C closes M9]
+    Before advancing to step 5, host evaluates within ONE transaction:
       per-orchestrator: COUNT(*) FROM tasks WHERE parent_session_id = ?
                        AND status IN ('dispatched','running')  ≤ 6
       per-target-group: COUNT(*) FROM tasks WHERE target_agent_group_id = ?
-                       AND status IN ('dispatched','running')  ≤ 3 (configurable per agent group)
+                       AND status IN ('dispatched','running')  ≤ 3 (configurable)
+    If both pass: UPDATE tasks SET status='dispatched',
+    dispatch_state='creating_thread' (or 'session_created' for non-thread fallback),
+    dispatch_state_updated_at=now WHERE task_id = ? AND status='pending'.
+    The atomic UPDATE serves as the cap reservation — subsequent dispatches
+    counting `IN ('dispatched','running')` see this row and respect the cap.
     If either cap is at limit, status stays 'pending' — promotion happens
-    via a new watchdog responsibility (see §Watchdog and reconciler).
+    via §Watchdog responsibility 4. Initial dispatch and watchdog promotion
+    BOTH go through this same cap-aware transaction (one code path).
 
-[5] If unblocked AND under cap, advance the state machine. For every
-    transition: UPDATE tasks SET dispatch_state=<next>,
-    dispatch_state_updated_at=now BEFORE attempting the side effect
-    where possible; for steps where the side effect must precede the
-    persist (createThread on Slack/Discord), use a "creating_X" intent
-    state so the reconciler can detect partial completion.
+[5] After atomic promotion to status='dispatched', advance through side
+    effects. For every transition: UPDATE tasks SET dispatch_state=<next>,
+    dispatch_state_updated_at=now BEFORE attempting the next side effect.
+    Where the side effect must precede the persist (Slack/Discord platform
+    posts), use the "creating_X" intent state set in the cap-promotion
+    transaction so the reconciler detects partial completion.
 
-      a. (When phase has thread surface) Persist intent:
-         UPDATE tasks SET dispatch_state='creating_thread', dispatch_state_updated_at=now.
+      a. (When phase has thread surface — dispatch_state='creating_thread')
          Post "Launched task <title>" parent message via deterministic
-         message id `dispatch-parent-${task_id}` (PK-protected via
+         local message id `dispatch-parent-${task_id}` (PK-protected via
          writeSessionMessage's INSERT OR IGNORE).
-         Call adapter.createThread(messagingGroupId, parent_message_id,
-         title, firstMessage). On success: persist
-         UPDATE tasks SET child_thread_id=<real_id>,
+         Call adapter.createThread(messagingGroupId, local_parent_msg, title,
+         firstMessage); the adapter is responsible for posting the platform
+         parent (returning its real id) AND creating the thread, returning
+         { parentPlatformMessageId, threadId }. Persist BOTH:
+         UPDATE tasks SET parent_platform_message_id=<...>, child_thread_id=<...>,
                           dispatch_state='thread_created',
                           dispatch_state_updated_at=now.
          On reconciler retry from 'creating_thread': if
-         child_thread_id IS NOT NULL skip; else check the parent message's
-         thread_ts via adapter.getThreadId(parent_message_id) — if a thread
-         already exists, adopt it; otherwise re-call createThread.
-         (See "Adapter idempotency contract" below.)
+         (parent_platform_message_id IS NOT NULL AND child_thread_id IS NOT NULL)
+         skip; else if parent_platform_message_id IS NOT NULL but child_thread_id
+         IS NULL, call adapter.getThreadId(parentPlatformMessageId) — if it
+         returns a thread id, adopt it; otherwise re-call createThread with
+         skipParentPost=true. Adapter ensures createThread is itself idempotent
+         when parent already exists.
 
-      b. createDispatchedSession(target_agent_group_id, effective_mg_id,
+      b. createDispatchedSession(task_id, target_agent_group_id, effective_mg_id,
          effective_thread_id, session_mode='per-thread')
-         — closes M10: a NEW helper in src/modules/orchestrator-dispatch/
-         that always creates a fresh sessions row, bypassing the
-         standard resolveSession's agent-shared coalescence. Writes
-         /workspace/.task-context.json under the new session's dir
-         containing { task_id, completion_nonce, target_agent_group,
-         deadline }.
+         — closes M10 + cycle-2 M2-A. Insert-or-select on sessions.dispatch_task_id
+         (UNIQUE column added in §Data model). On a fresh task, INSERT new
+         sessions row with dispatch_task_id=task_id; on reconciler retry,
+         SELECT existing row by dispatch_task_id and reuse. The UNIQUE
+         constraint makes this safe under concurrent retries.
          UPDATE tasks SET child_session_id=<id>,
                           dispatch_state='session_created',
                           dispatch_state_updated_at=now.
+         findSessionByAgentGroup adds `AND dispatch_task_id IS NULL` to its
+         WHERE — dispatched sessions are invisible to a2a coalescence,
+         closing the contamination vector A1.
 
       c. writeSessionMessage(child) injects the task prompt as an inbound
-         chat message with a system banner using deterministic
-         message id `dispatch-banner-${task_id}` (PK-protected on retry).
-         The banner does NOT include completion_nonce — closes M16.
-         The banner instructs the agent: "When you finish this task,
-         call task_complete with values from /workspace/.task-context.json."
+         **kind='system' banner** with deterministic message id
+         `dispatch-banner-${task_id}` (PK-protected on retry). The banner
+         contains task_id and target_agent_group only — no nonce, no secret.
+         Formatter renders kind='system' rows in the agent's prompt context
+         but NEVER delivers them to the chat platform (closes the
+         M16-style chat-history exposure for the task_id itself, which
+         while not a secret would still be noise). The banner instructs:
+         "Task <task_id> has been dispatched to you. When you finish, call
+         task_complete with task_id=<...>."
          UPDATE tasks SET dispatch_state='prompt_injected',
                           dispatch_state_updated_at=now,
                           started_at=now.
@@ -251,108 +300,135 @@ Multi-step state machine with persisted `dispatch_state` per step. Each transiti
       d. wakeContainer(child). UPDATE tasks SET dispatch_state='wake_sent',
          dispatch_state_updated_at=now.
 
-      e. On first heartbeat: status='running', dispatch_state='dispatched'.
+      e. On first heartbeat: dispatch_state='running' (status remains
+         'dispatched' until then; cap counts always include 'dispatched').
          If no heartbeat within 30s, reconciler resumes per §Watchdog
-         responsibility 1 (idempotent — child_session_id already exists,
-         banner already PK-protected).
+         responsibility 1.
 ```
 
 The (mg_id, thread_id, mode) tuple in step 5b depends on the phase — see [Phasing](#phasing).
 
-**Out-of-band `completion_nonce` delivery (closes M16):** the nonce is written to `/workspace/.task-context.json` inside the child session's mounted workspace directory by the host (NanoClaw already mounts `data/v2-sessions/<group>/<session>/workspace/` into containers). The dispatch banner instructs the agent to read this file when calling `task_complete`. The nonce never enters the conversation data plane (no chat history, no Slack thread) — extracting it requires filesystem access, not prompt injection.
+**Authorization model (cycle-2 M2-E simplification):** a child session has at most one dispatched task (enforced by `sessions.dispatch_task_id UNIQUE`); a task has exactly one child session (enforced by application logic + the UNIQUE column). The pair (task_id ↔ child_session_id) is the capability. `task_complete` authorization is `task_id = ? AND child_session_id = <source session of outbound row> AND target_agent_group_id = <source agent group>` — no nonce required. The source-session of an outbound row is implicit in the row itself (host knows which session emitted the system action), so a forged claim from a non-dispatched session fails the binding check immediately.
 
-**Adapter idempotency contract (closes M1):** new optional method `getThreadId?(messagingGroupId, parentMessageId): Promise<string | null>` on `ChannelAdapter`. Reconciler calls this before re-attempting `createThread` to detect partial completion. Slack: `conversations.replies` with the parent ts. Discord: `Message#thread`. If the adapter doesn't implement `getThreadId`, the reconciler instead checks `tasks.child_thread_id` and trusts the persisted value if present — at worst it loses one thread to a crash window where the post landed but the DB update didn't, which is logged for owner attention but doesn't duplicate.
+**Adapter idempotency contract (cycle-2 M2-D):** the `ChannelAdapter` interface gains two optional methods:
+- `createThread?(messagingGroupId, localParentMessageId, title, firstMessage, opts?: { skipParentPost?: boolean }): Promise<{ parentPlatformMessageId: string; threadId: string; messageId: string }>` — owns BOTH platform parent post and thread creation; returns durable platform IDs.
+- `getThreadId?(messagingGroupId, parentPlatformMessageId): Promise<string | null>` — for reconciler crash-recovery. Slack semantics: returns threadId if and only if `parent.thread_ts == parent.ts` AND `parent.reply_count > 0` (i.e. a thread genuinely exists). Discord semantics: returns thread id if `Message#thread !== null`. If the adapter returns null, the reconciler re-calls `createThread` with `skipParentPost=true` (parent already posted, just create the thread).
 
 ### Reverse signal
 
-Completion is a state machine, not an atomic operation. The host's `applyTaskComplete` separates **authorize** from **finalize**, and the finalize path persists per-side-effect markers (`parent_notified_at`, `child_summary_posted_at`, `dependents_released_at`) so a host crash mid-finalize is resumable by the watchdog.
+Completion is an idempotent state machine, not an atomic operation. The host's `applyTaskComplete` separates **authorize** from **finalize**. The finalize path persists per-side-effect markers (`dependents_released_at`, `child_summary_posted_at`, `parent_notified_at`, `parent_woken_at`) so a host crash mid-finalize is resumable by the watchdog. The **order of finalize steps is load-bearing** (cycle-2 M2-F closes Codex C6): dependents are computed and released BEFORE the parent system row is written, so the parent message contains the final, accurate `dependents_unblocked` list.
 
-Two writes per completion (closes M8): user-visible chat into the **child's own subthread** so the owner sees closure where they were watching, and a `kind='system'` row into the **parent session** so the orchestrator can fan out dependents.
+Two writes per completion: user-visible chat into the **child's own subthread** so the owner sees closure where they were watching, and a `kind='system'` row into the **parent session** so the orchestrator can fan out dependents.
 
 ```
 [1] Child container writes outbound system action `task_complete` with:
-      task_id:           <from /workspace/.task-context.json>
-      completion_nonce:  <from /workspace/.task-context.json>
+      task_id:           <from the dispatch banner — not a secret, just identification>
       status:            'complete' | 'failed'
       summary:           <markdown summary>
       failure_reason:    <optional>
 
 [2] Host's applyTaskComplete = authorizeChildCompletion() + finalizeTaskCompletion()
 
-      authorizeChildCompletion(outbound_row):  (closes M4 — only called from
-        applyTaskComplete; watchdog/cancel skip this and call finalize directly)
+      authorizeChildCompletion(outbound_row):
+        Cycle-2 M2-E: nonce removed; source-session binding is the capability.
         SELECT * FROM tasks
          WHERE task_id = ?
            AND child_session_id = <source session of outbound row>
            AND target_agent_group_id = <source agent group of outbound row>
-           AND completion_nonce = ?
            AND status IN ('dispatched','running')
-        If row not found, log + drop. Else proceed to finalize.
+        If row not found, log + drop. The (task_id, child_session_id) pair is
+        unforgeable: sessions.dispatch_task_id UNIQUE makes the binding 1:1,
+        and the source session of an outbound row is determined by the host,
+        not declared by the agent.
+        Watchdog/cancel skip authorize and call finalizeTaskCompletion directly
+        with explicit host authority (closes M4).
 
       finalizeTaskCompletion(task_id, status, summary, failure_reason?):
-        Idempotent state machine. Each side effect has a persisted marker.
-        Reconciler retries any side effect whose marker is NULL while
-        the task is in a terminal status.
+        Idempotent state machine. Steps in this exact order; each guarded by
+        a persisted marker.
 
-        a. UPDATE tasks SET status, completed_at, result_summary,
-           failure_reason WHERE task_id = ? AND status IN ('dispatched','running')
-           (PK-protected; second call is a no-op)
+        a. **Set terminal status** (no-op if already set):
+           UPDATE tasks SET status, completed_at, result_summary, failure_reason
+            WHERE task_id = ? AND status IN ('dispatched','running').
 
-        b. **Write 1 (user-visible)** — only if child_thread_id IS NOT NULL
-           (the child has a platform surface):
-             use session-manager.ts:writeOutboundDirect (the existing
-             host-initiated outbound bypass already used for router acks
-             — closes M5; this is the same mechanism, not a new violation
-             of C5 / C6).
-             Deterministic message id `task-complete-${task_id}` so retries
-             don't duplicate. Body = summary markdown.
+        b. **Compute and persist dependent release** (must precede parent
+           notification — closes Codex C6).
+             SELECT t.task_id FROM task_dependencies td JOIN tasks t ON t.task_id = td.task_id
+              WHERE td.blocked_on_task_id = <completed task_id> AND t.status = 'pending';
+           For each, check if all of its dependencies are now complete;
+           collect into the "dependents_unblocked" list. Mark each unblocked
+           task as eligible (no status change yet — they remain 'pending';
+           §Watchdog responsibility 4 promotes per cap budget).
+           UPDATE tasks SET dependents_released_at=now WHERE task_id=?
+                            AND dependents_released_at IS NULL.
+
+        c. **Write 1 (user-visible child summary)** — only if
+           child_thread_id IS NOT NULL (child has a platform surface):
+             use session-manager.ts:writeOutboundDirect (existing host-side
+             bypass for system writes, see C5 in §Constraint Analysis).
+             Deterministic message id `task-complete-${task_id}` (PK-protected).
+             Body = summary markdown.
              UPDATE tasks SET child_summary_posted_at=now WHERE task_id=?
                               AND child_summary_posted_at IS NULL.
+           For internal-only tasks (child_thread_id IS NULL — closes Codex C5):
+             UPDATE tasks SET child_summary_posted_at=completed_at
+              WHERE task_id=? AND child_summary_posted_at IS NULL
+              AND child_thread_id IS NULL.
+           Setting it to completed_at marks "not applicable, finalized" so
+           the watchdog finalization scan doesn't loop on it.
 
-        c. **Write 2 (parent system)** — direct-write a kind='system'
-           inbound row into the orchestrator's session (parent_session_id).
-           Wire format (closes M8 — formatter.ts:307-317 mandates these keys):
+        d. **Write 2 (parent system row)** — now contains the final
+           dependents_unblocked list because step b ran first.
+           Direct-write a kind='system' inbound row to parent_session_id.
+           Wire format (formatter.ts:307-317):
              {
                action: 'task_complete',
-               status: 'complete' | 'failed',
+               status: 'complete' | 'failed' | 'cancelled',
                result: {
                  task_id,
                  target_agent_group: <folder name>,
-                 summary_markdown:   <truncated to 8KB to avoid escaping issues>,
+                 summary_markdown:   <truncated to 8KB>,
                  failure_reason:     <optional>,
                  completed_at:       <ISO 8601>,
-                 dependents_unblocked: [<task_id>, ...]    // populated by step e
+                 dependents_unblocked: [<task_id>, ...]   // accurate from step b
                }
              }
            Deterministic message id `task-complete-system-${task_id}`.
            The orchestrator's CLAUDE.md must instruct: "Look for
-           <system_response action='task_complete'> elements; the result
-           field carries the summary."
+           <system_response action='task_complete'> elements."
            UPDATE tasks SET parent_notified_at=now WHERE task_id=?
                             AND parent_notified_at IS NULL.
 
-        d. Fan out to dependents:
-             SELECT t.task_id, t.parent_session_id
-               FROM task_dependencies td JOIN tasks t ON t.task_id = td.task_id
-              WHERE td.blocked_on_task_id = <completed task_id>
-                AND t.status = 'pending';
-           For each: check if all of its dependencies are now complete; if so,
-           it becomes "eligible." Eligible tasks are NOT directly dispatched;
-           they enter the cap-aware promotion queue handled by the watchdog
-           (§Watchdog responsibility 4). This closes M9's recursive-fan-out cap bypass.
-           UPDATE tasks SET dependents_released_at=now WHERE task_id=?
-                            AND dependents_released_at IS NULL.
-
-        e. wakeContainer(parent) so the orchestrator processes the
-           system_response on its next turn. Best-effort; reconciler
-           re-attempts if it fails.
+        e. **Wake parent** — separate persisted marker (cycle-2 M2-F /
+           closes A6) so a wake failure is retried by the watchdog.
+           wakeContainer(parent_session_id).
+           UPDATE tasks SET parent_woken_at=now WHERE task_id=?
+                            AND parent_woken_at IS NULL.
+           If wake fails (parent stopped, container won't start), leave
+           parent_woken_at NULL; watchdog responsibility 3 retries.
 ```
 
 Completion routing is keyed on `parent_session_id`, not on `parent_agent_group_id`. An orchestrator group can have many sessions concurrently (different chat threads, different users, different times); only the originating session should hear the result.
 
+### Dispatch authorization scope (closes cycle-2 S2-D)
+
+Codex C9 noted that giving an agent group the `orchestrator` role makes any prompt that reaches that group able to dispatch real work — a stale or prompt-injected orchestrator session can fan out to other groups without per-dispatch owner intent. The brief's R13 ("role grant requires owner approval — one-time per orchestrator group") accepts this risk for low-exposure orchestrator sessions, but it shouldn't be the only mode.
+
+New column: `agent_groups.dispatch_approval_mode TEXT NOT NULL DEFAULT 'session-token'`.
+
+| Mode | Behavior | Use case |
+|---|---|---|
+| `'none'` | Role grant alone authorizes any dispatch (current cycle-1 behavior). | Internal orchestrator groups with no chat exposure. |
+| `'session-token'` (default) | Orchestrator must hold a valid **dispatch run token** scoped to `parent_session_id`. Owner approves once at the start of an orchestration run; token covers up to N dispatches with M-minute expiry (defaults: N=30, M=60min). Per-dispatch friction = zero after one approval. | Default for any orchestrator group exposed to chat input. |
+| `'per-dispatch'` | Every `dispatch_task` call surfaces a per-task approval card to the owner. | High-stakes orchestrator groups where every dispatch needs eyes-on. |
+
+`applyDispatchTask` checks the mode and (a) requires no token for `'none'`; (b) validates run token in `parent_session_id` for `'session-token'` (issuing a `request_token` system row to the orchestrator if the token is missing/expired, and blocking the dispatch until the owner approves); (c) opens a per-dispatch approval card via the existing `requestApproval` flow for `'per-dispatch'`.
+
+This is additive — does not change the `agent_roles` model, only adds a per-group policy on top.
+
 ### MCP tools (architecture: always-present, host-authorized)
 
-Closes M2: NanoClaw's container architecture registers MCP tools unconditionally at container boot via `container/agent-runner/src/mcp-tools/index.ts` (verified). There is no per-session mounting hook. The "auto-mounted/auto-unmounted" framing of the prior cycle was architecturally fictional. Resolution: **all three orchestrator-dispatch MCP tools (`dispatch_task`, `task_complete`, `task_progress`, `cancel_task`) are always present in every container; correctness is purely the host-side authorization check.** Tool descriptions set agent expectations; the host is the sole authority.
+Closes M2: NanoClaw's container architecture registers MCP tools unconditionally at container boot via `container/agent-runner/src/mcp-tools/index.ts` (verified). There is no per-session mounting hook. The "auto-mounted/auto-unmounted" framing of the prior cycle was architecturally fictional. Resolution: **all four orchestrator-dispatch MCP tools (`dispatch_task`, `task_complete`, `task_progress`, `cancel_task`) are always present in every container; correctness is purely the host-side authorization check.** Tool descriptions set agent expectations; the host is the sole authority.
 
 #### `task_complete` MCP tool
 
@@ -360,46 +436,48 @@ Closes M2: NanoClaw's container architecture registers MCP tools unconditionally
 // container/agent-runner/src/mcp-tools/task-complete.ts — registered unconditionally
 {
   name: 'task_complete',
-  description: 'Signal completion of a dispatched task this session is working on. Read your task_id and completion_nonce from /workspace/.task-context.json — those values are not in your conversation history (closes M16). Call this once when the task is done (status=complete) or definitively cannot proceed (status=failed). The host validates that this session matches the task; mistaken calls are dropped.',
+  description: 'Signal completion of a dispatched task this session is working on. Read your task_id from the dispatch banner (a system message at the start of your session). Call this once when the task is done (status=complete) or definitively cannot proceed (status=failed). The host validates that this session is bound to this task_id (sessions.dispatch_task_id); calls from non-dispatched sessions are dropped.',
   input_schema: {
     type: 'object',
     properties: {
-      task_id:           { type: 'string', description: 'From /workspace/.task-context.json' },
-      completion_nonce:  { type: 'string', description: 'From /workspace/.task-context.json — authorization token, do not echo' },
-      status:            { type: 'string', enum: ['complete', 'failed'] },
-      summary:           { type: 'string', description: 'Markdown summary of work done. Posted to your subthread for the owner.' },
-      failure_reason:    { type: 'string', description: 'Required when status=failed. One-line first cause (HTTP code + endpoint, exception class + message, exit code + command).' },
+      task_id:        { type: 'string', description: 'From the dispatch banner.' },
+      status:         { type: 'string', enum: ['complete', 'failed'] },
+      summary:        { type: 'string', description: 'Markdown summary of work done. Posted to your subthread for the owner.' },
+      failure_reason: { type: 'string', description: 'Required when status=failed. One-line first cause (HTTP code + endpoint, exception class + message, exit code + command).' },
     },
-    required: ['task_id', 'completion_nonce', 'status', 'summary'],
+    required: ['task_id', 'status', 'summary'],
   },
 }
 ```
 
-The host enforces all gating in `applyTaskComplete` via `authorizeChildCompletion()` (see §Reverse signal). A non-dispatched session calling this tool will fail the auth check and be dropped — the tool's mere presence in the container is not a capability.
+The host enforces all gating in `applyTaskComplete` via `authorizeChildCompletion()` (see §Reverse signal). The (task_id, source-session) binding is the capability — `sessions.dispatch_task_id UNIQUE` makes it 1:1, and the source session of an outbound row is determined by the host. No nonce required (cycle-2 M2-E simplification).
 
 **Fallback detection**: if the child container exits without emitting `task_complete`, host-sweep marks the task `failed` with `failure_reason='child exited without completion signal'`. Catches crashes, agent runaway, and prompt-injection refusals.
 
-#### `task_progress` MCP tool (closes M11)
+#### `task_progress` MCP tool
 
 ```typescript
 // container/agent-runner/src/mcp-tools/task-progress.ts — registered unconditionally
 {
   name: 'task_progress',
-  description: 'Optional. Use to signal progress on a long-running task or to request a deadline extension when you reasonably need more time. Bounded extension: you cannot extend a task past 4× its original deadline.',
+  description: 'Optional. Use to signal progress on a long-running task or to request a deadline extension. Extension is bounded: you cannot extend a task past 4× its original deadline. Tasks dispatched without a deadline (no original_deadline set) cannot be extended.',
   input_schema: {
     type: 'object',
     properties: {
-      task_id:           { type: 'string' },
-      completion_nonce:  { type: 'string' },
-      progress_message:  { type: 'string', description: 'Optional one-line status. Surfaced in dashboard.' },
-      deadline_extension_seconds: { type: 'integer', description: 'Optional. New deadline = max(current_deadline, now + this). Capped at original_deadline × 4.' },
+      task_id:          { type: 'string' },
+      progress_message: { type: 'string', description: 'Optional one-line status. Surfaced in dashboard.' },
+      deadline_extension_seconds: { type: 'integer', description: 'Optional. New deadline = max(current_deadline, now + this). Capped at original_deadline × 4. Rejected with error if original_deadline is NULL.' },
     },
-    required: ['task_id', 'completion_nonce'],
+    required: ['task_id'],
   },
 }
 ```
 
-Host's `applyTaskProgress` shares `authorizeChildCompletion`'s identity check (same nonce, same status range). On extension request, computes new deadline = min(now + requested, original_deadline_epoch + 4 × (original_deadline - spawned_at)); UPDATEs `tasks.deadline`. Emits a `task.progress` SSE event to the dashboard. (Distinct from `task_progress` system-action name; the SSE event uses `task.progress` per dashboard spec.)
+Host's `applyTaskProgress` shares `authorizeChildCompletion`'s session-binding identity check (no nonce). Extension request:
+- If `tasks.original_deadline IS NULL`: reject with error `original_deadline_required` (closes cycle-2 M2-I).
+- Else: compute `max_allowed = original_deadline + 4 × (original_deadline - spawned_at)`; new_deadline = min(now + requested, max_allowed); UPDATEs `tasks.deadline`.
+
+Emits a `task.progress` SSE event to the dashboard. (The dashboard SSE event name `task.progress` is intentionally distinct from any `task_progress` system-action terminology — they're at different layers.)
 
 #### `cancel_task` MCP tool (closes review S9 / cycle-2 M12)
 
@@ -415,14 +493,14 @@ Host's `applyTaskProgress` shares `authorizeChildCompletion`'s identity check (s
 }
 ```
 
-Host's `applyCancelTask` (closes M12 — replaces the broken `scheduling.ts:174` reference with a documented soft+hard pattern):
+Host's `applyCancelTask` (closes cycle-1 M12 + cycle-2 M2-B — soft+hard pattern with `cancelled_at` properly tracked):
 
 1. Validate caller has `orchestrator` role on the calling session's agent_group. (Matches `dispatch_task` gating.)
-2. UPDATE tasks SET status='cancelled' WHERE task_id=? AND status IN ('pending','dispatched','running').
+2. UPDATE tasks SET status='cancelled', cancelled_at=now WHERE task_id=? AND status IN ('pending','dispatched','running'). The `cancelled_at` column (added in §Data model per cycle-2 M2-B) is what the watchdog hard-kill timer reads.
 3. Write a `kind='system'` inbound row into the child's session: `{ action: 'cancel', task_id }`. Wake the child.
 4. Child agent — instructed via dispatch banner: *"If you receive a system action with action='cancel' for your task_id, exit gracefully without calling task_complete."* Best-effort soft cancellation; the agent might still be mid-LLM-call when the system row arrives.
-5. Watchdog enforces hard kill: if `tasks.status='cancelled'` AND `dispatch_state IN ('dispatched','wake_sent')` AND `cancelled_at < now - 120s`, host calls `killContainer(child_session)`. (`killContainer` already exists in `src/container-runner.ts`.)
-6. After kill or graceful exit, `finalizeTaskCompletion` runs with status='cancelled', failure_reason='cancelled by orchestrator'.
+5. Watchdog enforces hard kill: if `tasks.status='cancelled'` AND `dispatch_state IN ('prompt_injected','wake_sent','running')` AND `cancelled_at < now - 120s`, host calls `killContainer(child_session)`. (`killContainer` already exists in `src/container-runner.ts`.)
+6. After kill or graceful exit, `finalizeTaskCompletion(status='cancelled', summary='Task cancelled by orchestrator', failure_reason=null)` runs through the same idempotent state machine as completion. The `cancelled` status is included in finalization-resume index (see `idx_tasks_finalization` in §Data model).
 
 LLM-turn interruption is fundamentally hard in NanoClaw's polling model — there's no signal that stops an in-flight Claude call mid-stream. The 2-minute grace + SIGKILL is the established NanoClaw pattern (see `container-runner.ts:killContainer`). Document the limitation: cancellation is asynchronous-soft within 2 min, hard at 2 min.
 
@@ -465,7 +543,7 @@ Extension to `src/host-sweep.ts`. Single 60s sweep, **five** responsibilities. S
 
 2. **Deadline expiry** (closes M4): scan tasks where `status IN ('dispatched', 'running')` AND `deadline IS NOT NULL` AND `deadline < now`. For each, call `finalizeTaskCompletion(task_id, status='failed', summary='Task exceeded deadline.', failure_reason='timeout')` directly with host authority. **No synthetic `task_complete` outbound** — that would require `completion_nonce` validation which the host doesn't legitimately possess in the watchdog context. The factored authorize/finalize separation makes this clean.
 
-3. **Completion-finalization resume** (closes M3): scan tasks where `status IN ('complete','failed','cancelled')` AND (`parent_notified_at IS NULL` OR `child_summary_posted_at IS NULL` OR `dependents_released_at IS NULL`). For each, re-attempt the missing finalize step. Each step is PK-protected so retries are idempotent.
+3. **Completion-finalization resume** (closes M3 + cycle-2 M2-F): scan tasks where `status IN ('complete','failed','cancelled')` AND (`dependents_released_at IS NULL` OR `(child_thread_id IS NOT NULL AND child_summary_posted_at IS NULL)` OR `parent_notified_at IS NULL` OR `parent_woken_at IS NULL`). Note the `child_thread_id IS NOT NULL` predicate — internal-only tasks have `child_summary_posted_at` set to `completed_at` at terminal-status time (a "not applicable" marker), so they do not loop here. For each remaining row, re-attempt the missing finalize step in the documented order (b → c → d → e per §Reverse signal). Each step is PK-protected and marker-guarded so retries are idempotent.
 
 4. **Cap-aware promotion** (closes M9): scan tasks where `status='pending'` AND all dependencies in `task_dependencies` are complete (`SELECT 1 FROM task_dependencies td JOIN tasks t ON t.task_id = td.blocked_on_task_id WHERE td.task_id = pending.task_id AND t.status != 'complete' LIMIT 1` returns no rows). For each (FIFO by `spawned_at`):
      - per-orchestrator-cap check: `COUNT(*) FROM tasks WHERE parent_session_id = ? AND status IN ('dispatched','running')` ≤ 6
@@ -517,13 +595,16 @@ Per-child git worktree manager. Codex's repo-corruption concern (22 parallel age
 
 Vite + React + TypeScript SPA, bundled and served from the existing Node host on `127.0.0.1:7457`. The host runs a small Node `http` server (closes review M1 — `undici` is a client-only library, the codebase already uses Node `http` in `src/webhook-server.ts:93` and `src/channels/chat-sdk-bridge.ts:841`) with one SSE endpoint, ~8 JSON endpoints, plus a static handler for the built bundle. Reads `data/v2.db` and per-session DBs directly via `better-sqlite3` — no new API service, no separate process.
 
-**Auth (closes M3 + cycle-2 M6/M7)**: three layers, with auth applied to **every** API endpoint (read AND mutating) — closes M6's "read endpoints unauth" gap that would leak transcripts/prompts.
+**Auth (closes M3 + cycle-1 M6/M7 + cycle-2 M2-G)**: three layers with one explicit unauthenticated entry point.
 
 1. Bind the listener to `127.0.0.1` only (not `0.0.0.0`).
-2. Random bearer token generated at host startup, printed once to setup logs and stored at `data/dashboard-token`. The dashboard's first load presents a minimal `/login` page that accepts the token and **sets a cookie** (`HttpOnly`, `Secure=false` since localhost, `SameSite=Strict`, `Domain=127.0.0.1`, `Path=/`). All subsequent API requests AND the SSE endpoint authenticate via this cookie — closes M7 (native `EventSource` cannot send `Authorization` headers but CAN send cookies). The bearer token is also accepted via `Authorization: Bearer <token>` for non-browser clients (curl, scripts).
-3. `Origin` header allowlist (`http://127.0.0.1:7457` only) AND `Host` header allowlist (`127.0.0.1:7457` only) enforced on every request — defeats DNS rebinding. Combined with `SameSite=Strict` cookie, satisfies OWASP CSRF prevention defense-in-depth (T1 source: OWASP CSRF cheat sheet, surfaced by Reviewer B).
+2. Random bearer token generated at host startup, printed once to setup logs and stored at `data/dashboard-token`. The bearer token is the entry to the auth model.
+3. **Single unauthenticated endpoint**: `POST /api/login` accepts `{ token }`; on match, returns 204 with a `Set-Cookie` header issuing a session cookie (`HttpOnly`, `Secure=false` since localhost, `SameSite=Strict`, `Domain=127.0.0.1`, `Path=/`). On mismatch, returns 401. **No other endpoint is unauthenticated** beyond static asset serving (the SPA bundle JS/CSS — no data exposed). Closes cycle-2 M2-G's missing login exception.
+4. **All other API endpoints AND the SSE endpoint** require either the session cookie OR an `Authorization: Bearer <token>` header. The bearer is accepted for non-browser clients (curl, scripts); browsers use the cookie set at login. Native `EventSource` carries the cookie automatically — closes cycle-1 M7.
+5. **`Origin` header allowlist** (`http://127.0.0.1:7457` only) enforced on **mutating methods** (POST/PUT/PATCH/DELETE) — closes cycle-2 M2-G's SSE handling (browsers may omit Origin on same-origin GET, so requiring it on GET/SSE breaks legitimate flows).
+6. **`Host` header allowlist** (`127.0.0.1:7457` only) enforced on **every** request — defeats DNS rebinding.
 
-Static asset serving (the SPA bundle) is the only unauthenticated surface, because no data is exposed there.
+Combined with `SameSite=Strict` cookie, this satisfies OWASP CSRF prevention defense-in-depth (T1 source: OWASP CSRF cheat sheet).
 
 UI/UX specification: see [`./ui-design.md`](./ui-design.md) (separate file, generated via /impeccable design pass and hardened by a /jony-ive audit).
 

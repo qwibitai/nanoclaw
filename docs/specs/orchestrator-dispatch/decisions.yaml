@@ -436,6 +436,77 @@ auto_judgments:
       weakens_safety_invariant: false
     recorded_at: 2026-05-09T16:38:00Z
 
+  # ---- Cycle 2 judgments ----
+
+  - stage: Review
+    iteration: 2
+    decision: |
+      Drop completion_nonce entirely (cycle-2 M2-E). Authorization is
+      source-session binding only: the (task_id, child_session_id) pair
+      is the capability, made unforgeable by sessions.dispatch_task_id
+      UNIQUE. Removes the nonce from /workspace/.task-context.json,
+      /workspace itself (file no longer needed), the tasks schema, and
+      the task_complete + task_progress MCP tool inputs.
+    alternatives_considered:
+      - "Keep nonce, fix /workspace tampering with read-only nested mount (cycle-1 partial fix, cycle-2 A9 finding)."
+      - "Drop nonce entirely — the binding is sufficient, simpler, fewer surfaces (chosen)."
+    grounding:
+      - "Codex C4 surfaced the simplification: 'If only one dispatched task can exist per child session, task_complete should not need a secret at all.'"
+      - "design.md §Data model: sessions.dispatch_task_id UNIQUE makes (task_id, child_session_id) 1:1 — surfaced by Reviewer A's M2-A resolution"
+      - "container/agent-runner/src/formatter.ts surfaced by Reviewer A: outbound rows carry an implicit source-session that the host knows; the agent cannot forge this in the row metadata"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false  # supersedes cycle-1 A1 judgment which assumed nonce was load-bearing
+    recorded_at: 2026-05-09T17:00:00Z
+
+  - stage: Review
+    iteration: 2
+    decision: |
+      Default agent_groups.dispatch_approval_mode = 'session-token' for
+      orchestrator-roled groups (closes cycle-2 S2-D). Owner approves
+      once per orchestration run; token covers N dispatches with M-min
+      expiry. 'none' available for internal groups, 'per-dispatch' for
+      high-stakes groups.
+    alternatives_considered:
+      - "'per-dispatch' as the default — heavy operationally; brief R13 accepts the orchestrator role as one-time approval"
+      - "'none' as the default — accepts the cycle-2 C9 prompt-injection risk on chat-exposed orchestrator groups"
+      - "'session-token' as the default — bounded run token balances UX and risk (chosen)"
+    grounding:
+      - "Codex C9 surfaced the gap and recommended 'owner-approved dispatch run token scoped to parent_session_id, expiry, max-task-count'"
+      - "brief.md R13: role grant is owner-approved (one-time per orchestrator group). Run token preserves this — owner approves the run, token expires"
+      - "src/modules/approvals/ existing approval flow surfaced by Reviewer A: established codebase convention for owner approval requests"
+    scope_check:
+      adds_user_facing_capability: false  # all orchestrator dispatch is already user-facing per R6/R13; this hardens enforcement
+      changes_external_behavior: true  # default mode for new orchestrator groups now requires run-token approval; breaking change for any orchestrator group already deployed without one — mitigated because no orchestrator groups exist yet (pre-build)
+      changes_hard_constraint: false
+      weakens_safety_invariant: false  # strengthens it
+    recorded_at: 2026-05-09T17:01:00Z
+
+  - stage: Review
+    iteration: 2
+    decision: |
+      Reorder finalize steps: dependents_released_at FIRST (compute &
+      persist), child_summary_posted_at SECOND (write to child
+      subthread), parent_notified_at THIRD (parent system row contains
+      final dependents_unblocked list), parent_woken_at FOURTH (separate
+      marker for retry). Closes cycle-2 M2-F (Codex C5+C6 + A6 merged).
+    alternatives_considered:
+      - "Keep original ordering (dependents fan-out last) — cycle-2 C6 shows orchestrator gets permanently incomplete dependents_unblocked list"
+      - "Reorder so dependents are computed first, parent message contains accurate list (chosen)"
+      - "Add parent_woken_at as a separate marker (chosen) — without it, failed wakes have no retry signal"
+    grounding:
+      - "Codex C6 + Reviewer A A6 cite the exact ordering bug: deterministic parent message id + parent_notified_at suppresses rewrites, so an incomplete dependents_unblocked list becomes permanent"
+      - "design.md §Reverse signal authorize/finalize separation pattern — established by cycle-1 M3 resolution; cycle-2 just refines the order"
+      - "tasks schema added parent_woken_at column to support the retry — straightforward extension of the existing finalize-marker pattern"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false  # contents of parent system message unchanged in shape; now correctly populated
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T17:02:00Z
+
 review_cycles:
   - iteration: 1
     must_fix_count: 16
@@ -448,6 +519,21 @@ review_cycles:
       C (Codex adversarial, xhigh). Surfaced 16 MUST-FIX (architecture/security gaps in the
       cycle-1 spec-text fixes), 8 SHOULD-FIX, 2 WON'T-FIX. /team-auto attempting revision
       pass per Stage A revision table; if MUST resolves, cycle 2 will validate.
+
+  - iteration: 2
+    must_fix_count: 9
+    should_fix_count: 8
+    wont_fix_count: 2
+    completed_at: 2026-05-09T17:00:00Z
+    note: |
+      Cycle 2 against cycle-1-revision-pass design. 16 cycle-1 MUST-FIX confirmed
+      addressed; 9 NEW cycle-2 MUST-FIX surfaced from the cycle-1 revisions
+      themselves. Reviewer B confirmed conformance high, drift LOW. Key cycle-2
+      finding: Codex C4 surfaced that completion_nonce is unnecessary — the
+      source-session binding alone is sufficient authorization once
+      sessions.dispatch_task_id UNIQUE makes the binding 1:1. Simplification:
+      drop the nonce + /workspace/.task-context.json mechanism entirely.
+      One cycle remaining (cycle 3) before the 3-cycle cap.
 
 # Historical context: a previous /team-review run completed in this same project
 # pre-reset (commit fb3adeb, 2026-05-09T03:55:00Z) found 10 MUST + 14 SHOULD + 2 WON'T.
