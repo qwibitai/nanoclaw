@@ -100,8 +100,8 @@ describe('routeAgentMessage return-path', () => {
     const db = initTestDb();
     runMigrations(db);
 
-    createAgentGroup({ id: A, name: 'A', folder: 'a', agent_provider: null, created_at: now() });
-    createAgentGroup({ id: B, name: 'B', folder: 'b', agent_provider: null, created_at: now() });
+    createAgentGroup({ id: A, name: 'A', folder: 'a', agent_provider: null, model: null, created_at: now() });
+    createAgentGroup({ id: B, name: 'B', folder: 'b', agent_provider: null, model: null, created_at: now() });
 
     // S1 (older), S2 (newer) — both active sessions on A.
     S1 = {
@@ -302,7 +302,7 @@ describe('routeAgentMessage return-path', () => {
   it('cross-agent-group guard: origin session belonging to wrong agent group is rejected', async () => {
     // Third agent group C sends to B, stamping source_session_id = SC on B's inbound.
     const C = 'ag-C';
-    createAgentGroup({ id: C, name: 'C', folder: 'c', agent_provider: null, created_at: now() });
+    createAgentGroup({ id: C, name: 'C', folder: 'c', agent_provider: null, model: null, created_at: now() });
     const SC: Session = {
       id: 'sess-C',
       agent_group_id: C,

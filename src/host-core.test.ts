@@ -72,6 +72,7 @@ describe('session manager', () => {
       name: 'Test Agent',
       folder: 'test-agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
     createMessagingGroup({
@@ -364,6 +365,7 @@ describe('router', () => {
       name: 'Test Agent',
       folder: 'test-agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
     // Use 'public' policy so the router tests exercise routing, not the
@@ -507,6 +509,7 @@ describe('router', () => {
       name: 'Secondary Agent',
       folder: 'secondary-agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
     createMessagingGroupAgent({
@@ -604,6 +607,7 @@ describe('routing metadata preservation', () => {
       name: 'Test Agent',
       folder: 'test-agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
     createMessagingGroup({
@@ -663,6 +667,7 @@ describe('routing metadata preservation', () => {
       name: 'Agent Two',
       folder: 'agent-two',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
     createMessagingGroupAgent({
@@ -711,6 +716,7 @@ describe('writeSessionRouting', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
     createMessagingGroup({
@@ -748,6 +754,7 @@ describe('writeSessionRouting', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
 
@@ -776,6 +783,7 @@ describe('writeSessionRouting', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
     createMessagingGroup({
@@ -815,6 +823,7 @@ describe('agent-shared session resolution', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
 
@@ -832,6 +841,7 @@ describe('agent-shared session resolution', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
 
@@ -847,6 +857,7 @@ describe('agent-to-agent routing', () => {
       name: 'PA',
       folder: 'pa-agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
     createMessagingGroup({
@@ -863,6 +874,7 @@ describe('agent-to-agent routing', () => {
       name: 'Researcher',
       folder: 'researcher-agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
 
@@ -998,6 +1010,7 @@ describe('delivery', () => {
       name: 'Agent',
       folder: 'agent',
       agent_provider: null,
+      model: null,
       created_at: now(),
     });
     createMessagingGroup({

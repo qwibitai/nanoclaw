@@ -17,6 +17,10 @@ If you are a fresh install (you ran `git clone`, not `git pull`) and there are n
 
 Personal Claude assistant. See [README.md](README.md) for philosophy and setup. Architecture lives in `docs/`.
 
+## Workflow Rule: Plan Before Executing
+
+For any non-trivial task (multi-step features, multi-phase work, anything beyond a single localized edit): write the plan to `plans/<feature>.md` **before** starting implementation. The plan must enumerate all phases / steps with enough detail that a future session (or a different Claude) can resume mid-stream without guessing. Update the file as the plan evolves and tick phases off as they land. Conversation-only plans are not acceptable — they vanish when the session ends.
+
 ## Quick Context
 
 The host is a single Node process that orchestrates per-session agent containers. Platform messages land via channel adapters, route through an entity model (users → messaging groups → agent groups → sessions), get written into the session's inbound DB, and wake a container. The agent-runner inside the container polls the DB, calls Claude, and writes back to the outbound DB. The host polls the outbound DB and delivers through the same adapter.
@@ -64,12 +68,12 @@ For ad-hoc queries from skills or scripts, use the in-tree wrapper rather than t
 | `src/delivery.ts` | Polls `outbound.db`, delivers via adapter, handles system actions (schedule, approvals, etc.) |
 | `src/host-sweep.ts` | 60s sweep: `processing_ack` sync, stale detection, due-message wake, recurrence |
 | `src/session-manager.ts` | Resolves sessions; opens `inbound.db` / `outbound.db`; manages heartbeat path |
-| `src/container-runner.ts` | Spawns per-agent-group Docker containers with session DB + outbox mounts, OneCLI `ensureAgent` |
+| `src/container-runner.ts` | Spawns per-agent-group Docker containers with session DB + outbox mounts, injects credential-proxy env vars |
+| `src/credential-proxy.ts` | Local HTTP proxy on port 3001 — containers send placeholder credentials, proxy substitutes real keys/OAuth tokens, forwards to api.anthropic.com (default path) or api.openai.com (`/openai/*` prefix) |
 | `src/container-runtime.ts` | Runtime selection (Docker vs Apple containers), orphan cleanup |
 | `src/modules/permissions/access.ts` | `canAccessAgentGroup` — owner / global admin / scoped admin / member resolution against `user_roles` + `agent_group_members` |
 | `src/modules/approvals/primitive.ts` | `pickApprover`, `pickApprovalDelivery`, `requestApproval`, approval-handler registry |
 | `src/command-gate.ts` | Router-side admin command gate — queries `user_roles` directly (no env var, no container-side check) |
-| `src/onecli-approvals.ts` | OneCLI credentialed-action approval bridge |
 | `src/user-dm.ts` | Cold-DM resolution + `user_dms` cache |
 | `src/group-init.ts` | Per-agent-group filesystem scaffold (CLAUDE.md, skills, agent-runner-src overlay) |
 | `src/db/` | DB layer — agent_groups, messaging_groups, sessions, user_roles, user_dms, pending_*, migrations |
@@ -124,42 +128,23 @@ One tier of agent self-modification today:
 
 A second tier (direct source-level self-edits via a draft/activate flow) is planned but not yet implemented.
 
-## Secrets / Credentials / OneCLI
+## Secrets / Credentials
 
-API keys, OAuth tokens, and auth credentials are managed by the OneCLI gateway. Secrets are injected into per-agent containers at request time — none are passed in env vars or through chat context. The container agent sees this via the `onecli-gateway` container skill (`container/skills/onecli-gateway/SKILL.md`), which teaches it how the proxy works, how to handle auth errors, and to never ask for raw credentials. Host-side wiring: `src/onecli-approvals.ts`, `ensureAgent()` in `container-runner.ts`. Run `onecli --help`.
+Credentials live on the host in `.env`. Containers receive placeholder values only; the local credential proxy at `127.0.0.1:3001` (bound to docker0 IP on Linux so containers can reach it) substitutes real keys/tokens at request time. None of these secrets ever sit in container env vars or chat context.
 
-### Gotcha: auto-created agents start in `selective` secret mode
+**Wiring:** `src/credential-proxy.ts` (the proxy), `src/container-runner.ts` `buildContainerArgs` (sets container env). On startup the proxy reads from `.env`: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, plus optional `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` overrides.
 
-When the host first spawns a session for a new agent group, `container-runner.ts:385` calls `onecli.ensureAgent({ name, identifier })`. The OneCLI `POST /api/agents` endpoint creates the agent in **`selective`** secret mode — meaning **no secrets are assigned to it by default**, even if the secrets exist in the vault and have host patterns that would otherwise match.
+**Container env at spawn time:**
+- `ANTHROPIC_BASE_URL=http://host.docker.internal:3001` — Anthropic SDK target
+- `OPENAI_BASE_URL=http://host.docker.internal:3001/openai/v1` — OpenAI SDK target (the `/openai` prefix is how the proxy multiplexes providers; `/v1` is OpenAI's own API version)
+- `ANTHROPIC_API_KEY=placeholder` *or* `CLAUDE_CODE_OAUTH_TOKEN=placeholder` (depending on host's auth mode)
+- `OPENAI_API_KEY=placeholder` (always — SDKs refuse to init without it)
 
-Symptom: container starts, the proxy + CA cert are wired correctly, but the agent gets `401 Unauthorized` (or similar) from APIs whose credentials *are* in the vault. The credential just isn't in this agent's allow-list.
+**OAuth handling:** when the host runs in OAuth mode, the proxy exchanges the placeholder for the real Claude OAuth token (auto-refreshed from `~/.claude/.credentials.json`). For Anthropic API key mode, the proxy simply rewrites the `x-api-key` header. For OpenAI, the proxy injects `Authorization: Bearer <real key>`.
 
-The SDK does not expose `setSecretMode` — the only fix is the CLI (or the web UI at `http://127.0.0.1:10254`).
+**Rotation:** edit `.env`, restart the host (`systemctl --user restart nanoclaw`). No container rebuild — every future spawn picks up the new key on its next request.
 
-```bash
-# Find the agent (identifier is the agent group id)
-onecli agents list
-
-# Flip to "all" so every vault secret with a matching host pattern gets injected
-onecli agents set-secret-mode --id <agent-id> --mode all
-
-# Or, stay selective and assign specific secrets
-onecli secrets list                                    # find secret ids
-onecli agents set-secrets --id <agent-id> --secret-ids <id1>,<id2>
-
-# Inspect what an agent currently has
-onecli agents secrets --id <agent-id>                  # secrets assigned to this agent
-onecli secrets list                                    # all vault secrets (with host patterns)
-```
-
-If you've just enabled `mode all`, no container restart is needed — the gateway looks up secrets per request, so the next API call from the running container will see the new credentials.
-
-### Requiring approval for credential use
-
-Approval-gating credentialed actions is a **two-sided** flow:
-
-- **Server-side** (OneCLI gateway): decides *when* to hold a request and emit a pending approval. As of `onecli@1.3.0`, the CLI does **not** expose this — `rules create --action` only accepts `block` or `rate_limit`, and `secrets create` has no approval flag. Approval policies must be configured via the OneCLI web UI at `http://127.0.0.1:10254`. If/when the CLI grows an `approve` action, this section needs updating.
-- **Host-side** (nanoclaw): receives pending approvals and routes them to a human. `src/modules/approvals/onecli-approvals.ts` registers a callback via `onecli.configureManualApproval(cb)` (long-polls `GET /api/approvals/pending`). The callback uses `pickApprover` + `pickApprovalDelivery` from `src/modules/approvals/primitive.ts` to DM an approver. Approvers are resolved from the `user_roles` table — preference order: scoped admins for the agent group → global admins → owners. There is no env var like `NANOCLAW_ADMIN_USER_IDS`; roles are persisted in the central DB only.
+**Adding a new provider:** add the key to `readEnvFile()` in `credential-proxy.ts`, add a routing branch (path prefix or host match), set the corresponding `*_BASE_URL=http://host:3001/<prefix>/...` in `container-runner.ts`'s `buildContainerArgs`. Mirror the OpenAI pattern.
 
 If approvals are configured server-side but the host callback isn't running (or throws), every credentialed call hangs until the gateway times out. Conversely, if the gateway has no rule asking for approval, the host callback never fires regardless of how it's wired.
 
@@ -169,8 +154,8 @@ Four types of skills. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full taxono
 
 - **Channel/provider install skills** — copy the relevant module(s) in from the `channels` or `providers` branch, wire imports, install pinned deps (e.g. `/add-discord`, `/add-slack`, `/add-whatsapp`, `/add-opencode`).
 - **Utility skills** — ship code files alongside `SKILL.md` (e.g. `/claw`).
-- **Operational skills** — instruction-only workflows (`/setup`, `/debug`, `/customize`, `/init-first-agent`, `/manage-channels`, `/init-onecli`, `/update-nanoclaw`).
-- **Container skills** — loaded inside agent containers at runtime (`container/skills/`: `onecli-gateway`, `welcome`, `self-customize`, `agent-browser`, `slack-formatting`).
+- **Operational skills** — instruction-only workflows (`/setup`, `/debug`, `/customize`, `/init-first-agent`, `/manage-channels`, `/update-nanoclaw`).
+- **Container skills** — loaded inside agent containers at runtime (`container/skills/`: `welcome`, `self-customize`, `agent-browser`, `slack-formatting`).
 
 | Skill | When to Use |
 |-------|-------------|
@@ -180,7 +165,6 @@ Four types of skills. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full taxono
 | `/customize` | Adding channels, integrations, behavior changes |
 | `/debug` | Container issues, logs, troubleshooting |
 | `/update-nanoclaw` | Bring upstream updates into a customized install |
-| `/init-onecli` | Install OneCLI Agent Vault and migrate `.env` credentials |
 
 ## Contributing
 

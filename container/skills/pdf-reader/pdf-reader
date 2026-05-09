@@ -1,0 +1,54 @@
+#!/bin/bash
+# PDF Reader - Extract text from PDF files
+# Dependencies: poppler-utils (pdftotext, pdfinfo), curl
+
+set -euo pipefail
+
+usage() {
+  echo "Usage: pdf-reader <command> <path-or-url>"
+  echo ""
+  echo "Commands:"
+  echo "  extract <path>   Extract text from a local PDF"
+  echo "  info <path>      Show PDF metadata"
+  echo "  fetch <url>      Download PDF from URL and extract text"
+  exit 1
+}
+
+[[ $# -lt 2 ]] && usage
+
+command="$1"
+target="$2"
+
+case "$command" in
+  extract)
+    if [[ ! -f "$target" ]]; then
+      echo "Error: File not found: $target" >&2
+      exit 1
+    fi
+    pdftotext -layout "$target" -
+    ;;
+  info)
+    if [[ ! -f "$target" ]]; then
+      echo "Error: File not found: $target" >&2
+      exit 1
+    fi
+    pdfinfo "$target"
+    ;;
+  fetch)
+    tmpfile=$(mktemp /tmp/pdf-reader-XXXXXX.pdf)
+    trap 'rm -f "$tmpfile"' EXIT
+    curl -sL -o "$tmpfile" "$target"
+    if ! file "$tmpfile" | grep -q PDF; then
+      echo "Error: Downloaded file is not a valid PDF" >&2
+      exit 1
+    fi
+    echo "=== PDF Info ==="
+    pdfinfo "$tmpfile" 2>/dev/null || true
+    echo ""
+    echo "=== Content ==="
+    pdftotext -layout "$tmpfile" -
+    ;;
+  *)
+    usage
+    ;;
+esac

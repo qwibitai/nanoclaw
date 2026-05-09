@@ -1,0 +1,46 @@
+[
+  {
+    "folder": "draft",
+    "has_claude_md": false,
+    "claude_md_bytes": 0,
+    "files": [
+      "CLAUDE.local.md",
+      "logs",
+      "memory"
+    ]
+  },
+  {
+    "folder": "draft_telegram_main",
+    "has_claude_md": false,
+    "claude_md_bytes": 0,
+    "files": [
+      "CLAUDE.local.md",
+      "logs",
+      "memory"
+    ]
+  },
+  {
+    "folder": "main",
+    "has_claude_md": false,
+    "claude_md_bytes": 0,
+    "files": [
+      "CLAUDE.local.md"
+    ]
+  },
+  {
+    "folder": "telegram_main",
+    "has_claude_md": false,
+    "claude_md_bytes": 0,
+    "files": [
+      "CLAUDE.local.md",
+      "attachments",
+      "chip_tonkin.md",
+      "clemson_brand_guide.md",
+      "clemson_brand_raw",
+      "gc_celebration_invitation.pdf",
+      "generated",
+      "logs",
+      "website"
+    ]
+  }
+]

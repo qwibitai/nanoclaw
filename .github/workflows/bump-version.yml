@@ -1,9 +1,8 @@
 name: Bump version
 
+# Disabled on fork — requires upstream GitHub App secrets (APP_ID, APP_PRIVATE_KEY)
 on:
-  push:
-    branches: [main]
-    paths: ['src/**', 'container/**']
+  workflow_dispatch:
 
 jobs:
   bump-version:

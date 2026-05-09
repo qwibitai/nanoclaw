@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NanoClaw Agent Playground</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">NanoClaw Playground</div>
+    <div id="active-info" hidden>
+      <span class="label">draft</span>
+      <strong id="active-draft-name"></strong>
+      <span class="arrow">→</span>
+      <span id="active-target-name"></span>
+      <span id="status-badge" class="status-badge"></span>
+      <nav id="mode-tabs">
+        <button data-mode="chat" class="tab active">Chat</button>
+        <button data-mode="persona" class="tab">Persona</button>
+        <button data-mode="skills" class="tab">Skills</button>
+        <button data-mode="files" class="tab">Files</button>
+        <button data-mode="diff" class="tab">Diff</button>
+      </nav>
+      <div id="provider-toggle" class="toggle-group" title="Switch provider for this session — kills the running container so the next message uses the new provider">
+        <button data-provider="claude" class="toggle">claude</button>
+        <button data-provider="codex" class="toggle">codex</button>
+      </div>
+      <button id="apply-btn" class="primary" title="Write draft files to target">Apply</button>
+      <button id="end-btn" class="ghost">End session</button>
+    </div>
+  </header>
+
+  <main id="root">
+    <section id="picker" class="pane">
+      <h2>Drafts</h2>
+      <ul id="drafts-list" class="list"></ul>
+      <div id="picker-empty" class="empty" hidden>No drafts yet.</div>
+
+      <h2>Create a new draft</h2>
+      <ul id="groups-list" class="list"></ul>
+      <div id="groups-empty" class="empty" hidden>No agent groups available.</div>
+
+      <button id="refresh-btn" class="ghost">Refresh</button>
+    </section>
+
+    <section id="workspace" class="pane" hidden>
+      <div id="mode-chat" class="mode active">
+        <ul id="chat-log" class="chat-log"></ul>
+        <form id="chat-form">
+          <input id="chat-input" type="text" placeholder="Send a message to your draft agent…" autocomplete="off">
+          <button type="submit" class="primary">Send</button>
+        </form>
+      </div>
+
+      <div id="mode-persona" class="mode" hidden>
+        <div class="persona-toolbar">
+          <span class="label">CLAUDE.local.md</span>
+          <span id="persona-status" class="muted"></span>
+          <button id="persona-save-btn" class="primary" disabled>Save</button>
+          <button id="persona-reload-btn" class="ghost">Reload</button>
+        </div>
+        <textarea id="persona-text" spellcheck="false"></textarea>
+      </div>
+
+      <div id="mode-skills" class="mode" hidden>
+        <div class="persona-toolbar">
+          <span class="label">Skills enabled for this draft</span>
+          <span id="skills-status" class="muted"></span>
+          <button id="skills-refresh-btn" class="ghost" title="git pull anthropic/skills cache">Refresh library</button>
+        </div>
+        <div class="skills-pane">
+          <div>
+            <h3 class="muted">Enabled</h3>
+            <div id="skills-enabled-list" class="skills-list"></div>
+            <label class="muted small">
+              <input id="skills-all-toggle" type="checkbox"> Allow all skills (container default)
+            </label>
+          </div>
+          <div>
+            <h3 class="muted">Library (anthropic/skills)</h3>
+            <div id="skills-library-list" class="skills-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="mode-files" class="mode" hidden>
+        <div class="persona-toolbar">
+          <span class="label">Files in draft</span>
+          <span id="files-status" class="muted"></span>
+          <button id="files-refresh-btn" class="ghost">Refresh</button>
+          <button id="files-save-btn" class="primary" disabled>Save</button>
+        </div>
+        <div class="files-pane">
+          <div id="files-list" class="files-list"></div>
+          <textarea id="files-text" spellcheck="false" placeholder="Select a file…"></textarea>
+        </div>
+      </div>
+
+      <div id="mode-diff" class="mode" hidden>
+        <div class="persona-toolbar">
+          <span class="label">draft vs target</span>
+          <span id="diff-status" class="muted"></span>
+          <button id="diff-refresh-btn" class="ghost">Refresh</button>
+        </div>
+        <div id="diff-output" class="diff-output"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toasts"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

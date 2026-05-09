@@ -153,89 +153,63 @@ class ClaudeProvider implements AgentProvider {
 
 ### Codex Provider
 
-Wraps `@openai/codex-sdk`.
+Wraps `codex app-server` over stdio JSON-RPC.
+
+The earlier `@openai/codex-sdk` sketch was replaced because NanoClaw needs the
+same top-level provider role that Claude Code fills: persistent sessions,
+streaming turn/item events, MCP tool wiring, server-driven approvals, and
+Codex-owned transcript/context management. The SDK is still useful for small
+embedded workflows, but the app-server protocol exposes the thread/turn surface
+NanoClaw needs without moving provider-specific state into the poll loop.
 
 ```typescript
 class CodexProvider implements AgentProvider {
   query(input: QueryInput): AgentQuery {
-    const codex = new Codex(this.buildOptions(input));
-    const thread = input.sessionId
-      ? codex.resumeThread(input.sessionId, this.threadOptions(input))
-      : codex.startThread(this.threadOptions(input));
-
-    const abortController = new AbortController();
-    let pendingFollowUp: string | null = null;
+    const pending = [input.prompt];
 
     return {
-      push: (msg) => {
-        // Codex doesn't support streaming input.
-        // Store the follow-up and abort the current turn.
-        pendingFollowUp = msg;
-        abortController.abort();
-      },
-      end: () => { /* no-op — Codex turns end naturally */ },
-      abort: () => abortController.abort(),
-      events: this.run(thread, input.prompt, abortController, () => pendingFollowUp),
+      push: (msg) => pending.push(msg),
+      end: () => markEnded(),
+      abort: () => markAborted(),
+      events: this.runAppServer(input, pending),
     };
   }
 
-  private async *run(thread, prompt, abortController, getPendingFollowUp): AsyncIterable<ProviderEvent> {
-    let currentPrompt = prompt;
+  private async *runAppServer(input, pending): AsyncIterable<ProviderEvent> {
+    writeCodexMcpConfigToml(input.mcpServers);
+    const server = spawnCodexAppServer(createCodexConfigOverrides());
+    attachCodexAutoApproval(server);
 
-    while (true) {
-      try {
-        const streamed = await thread.runStreamed(currentPrompt, {
-          signal: abortController.signal,
-        });
+    await initializeCodexAppServer(server);
 
-        let sessionId: string | undefined;
-        let resultText = '';
+    const threadId = await startOrResumeCodexThread(server, input.continuation, {
+      cwd: input.cwd,
+      model: input.env.CODEX_MODEL, // optional; omit to use Codex's own default
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      baseInstructions: composeBaseInstructions(input.systemContext?.instructions),
+    });
 
-        for await (const event of streamed.events) {
-          if (event.type === 'thread.started') {
-            sessionId = event.thread_id;
-            yield { type: 'init', sessionId };
-          }
-          if (event.type === 'item.completed' && event.item.type === 'agent_message') {
-            resultText = event.item.text || resultText;
-          }
-          if (event.type === 'turn.failed') {
-            yield { type: 'error', message: event.error.message, retryable: false };
-            return;
-          }
-        }
+    yield { type: 'init', continuation: threadId };
 
-        yield { type: 'result', text: resultText || null };
-
-        // Check if a follow-up was queued during this turn
-        const followUp = getPendingFollowUp();
-        if (followUp) {
-          currentPrompt = followUp;
-          // Reset for next iteration
-          continue;
-        }
-
-        return;
-      } catch (err) {
-        if (abortController.signal.aborted && getPendingFollowUp()) {
-          // Aborted because of follow-up — restart with new prompt
-          currentPrompt = getPendingFollowUp();
-          abortController = new AbortController();
-          continue;
-        }
-        throw err;
-      }
+    while (pending.length > 0) {
+      const text = pending.shift();
+      await startCodexTurn(server, { threadId, inputText: text, cwd: input.cwd });
+      yield* translateAppServerNotifications(server);
     }
   }
 }
 ```
 
 **Codex-specific behavior inside the provider:**
-- `developer_instructions` for system prompt (loaded from CLAUDE.md)
-- `git init` in workspace (Codex requires a git repo)
-- Abort+restart pattern for follow-up messages
-- `sandboxMode`, `approvalPolicy`, `networkAccessEnabled` from env vars
-- Conversation archiving (Codex doesn't have PreCompact)
+- `baseInstructions` is composed from `CLAUDE.md`, `CLAUDE.local.md`, and the poll-loop's addendum because Codex does not expand Claude Code `@` imports for us.
+- `~/.codex/config.toml` is rewritten per spawn from the normalized MCP server map. The host mounts a per-session `~/.codex` copy so this never clobbers the user's host Codex config.
+- `CODEX_MODEL` is an optional override. When unset, NanoClaw omits `model` from `thread/start` / `turn/start` and lets the pinned Codex CLI/app-server choose its own configured default.
+- Follow-up messages are queued and drained between turns. Codex turns do not accept mid-turn input, and the poll loop only pushes when new pending messages arrive.
+- `codex app-server` may ask for command/file/permission approvals through server-initiated JSON-RPC requests. NanoClaw auto-accepts those requests because the container and its explicit mount list are the security boundary.
+- The Dockerfile pins `@openai/codex` with `CODEX_VERSION`. Treat app-server protocol changes as intentional upgrades: bump the pin, run the provider tests, and smoke-test `initialize` -> `thread/start` or `thread/resume` -> `turn/start` -> streaming `item/*` and `turn/*` notifications.
+- Stale thread IDs are recognized narrowly. Unknown-thread errors can start a fresh thread; auth, version, and transport errors fail loudly instead of silently discarding session state.
+- Context/transcript management is owned by Codex app-server. NanoClaw does not maintain a client-side compaction threshold for Codex.
 
 ### OpenCode Provider
 

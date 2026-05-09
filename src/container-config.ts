@@ -39,6 +39,8 @@ export interface ContainerConfig {
   skills: string[] | 'all';
   /** Agent provider name (e.g. "claude", "opencode"). Default: "claude". */
   provider?: string;
+  /** Model override. Falls back to provider default if unset. */
+  model?: string;
   /** Agent group display name (used in transcript archiving). */
   groupName?: string;
   /** Assistant display name (used in system prompt / responses). */
@@ -47,6 +49,13 @@ export interface ContainerConfig {
   agentGroupId?: string;
   /** Max messages per prompt. Falls back to code default if unset. */
   maxMessagesPerPrompt?: number;
+  /**
+   * Per-group environment variables passed to the container at spawn time.
+   * Use sparingly — most config belongs in container.json itself, read by
+   * the runner. This is for env vars consumed by code we don't own (e.g.
+   * `GOOGLE_APPLICATION_CREDENTIALS` for the Google Workspace CLI).
+   */
+  env?: Record<string, string>;
 }
 
 function emptyConfig(): ContainerConfig {
@@ -83,10 +92,12 @@ export function readContainerConfig(folder: string): ContainerConfig {
       additionalMounts: raw.additionalMounts ?? [],
       skills: raw.skills ?? 'all',
       provider: raw.provider,
+      model: raw.model,
       groupName: raw.groupName,
       assistantName: raw.assistantName,
       agentGroupId: raw.agentGroupId,
       maxMessagesPerPrompt: raw.maxMessagesPerPrompt,
+      env: raw.env,
     };
   } catch (err) {
     console.error(`[container-config] failed to parse ${p}: ${String(err)}`);

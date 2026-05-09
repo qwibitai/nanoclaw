@@ -29,6 +29,7 @@
 import type Database from 'better-sqlite3';
 import fs from 'fs';
 
+import { backupCentralDb } from './db/backup.js';
 import { getActiveSessions } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import {
@@ -133,6 +134,7 @@ async function sweep(): Promise<void> {
   if (!running) return;
 
   try {
+    await backupCentralDb();
     const sessions = getActiveSessions();
     for (const session of sessions) {
       await sweepSession(session);

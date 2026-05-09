@@ -1,10 +1,8 @@
 name: Update token count
 
+# Disabled on fork — requires upstream GitHub App secrets (APP_ID, APP_PRIVATE_KEY)
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['src/**', 'container/**', 'launchd/**', 'CLAUDE.md']
 
 jobs:
   update-tokens:

@@ -1,13 +1,10 @@
 /**
  * Handle an admin's response to an approval card.
  *
- * Two categories of pending_approvals rows exist:
- *   1. Module-initiated actions — the module called `requestApproval()` with
- *      some free-form `action` string and registered a handler via
- *      `registerApprovalHandler(action, handler)`. On approve, we look up the
- *      handler and call it; on reject, we notify the agent and move on.
- *   2. OneCLI credential approvals (`action = 'onecli_credential'`). Resolved
- *      via an in-memory Promise — see onecli-approvals.ts.
+ * Module-initiated actions: the module called `requestApproval()` with some
+ * free-form `action` string and registered a handler via
+ * `registerApprovalHandler(action, handler)`. On approve, we look up the
+ * handler and call it; on reject, we notify the agent and move on.
  *
  * The response handler is registered via core's `registerResponseHandler`;
  * core iterates handlers and the first one to return `true` claims the response.
@@ -18,25 +15,11 @@ import type { ResponsePayload } from '../../response-registry.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import type { PendingApproval } from '../../types.js';
-import { ONECLI_ACTION, resolveOneCLIApproval } from './onecli-approvals.js';
 import { getApprovalHandler } from './primitive.js';
 
 export async function handleApprovalsResponse(payload: ResponsePayload): Promise<boolean> {
-  // OneCLI credential approvals — resolved via in-memory Promise first.
-  if (resolveOneCLIApproval(payload.questionId, payload.value)) {
-    return true;
-  }
-
-  // DB-backed pending_approvals.
   const approval = getPendingApproval(payload.questionId);
   if (!approval) return false;
-
-  if (approval.action === ONECLI_ACTION) {
-    // Row exists but the in-memory resolver is gone (timer fired or the process
-    // was in a weird state). Nothing to do — just drop the row.
-    deletePendingApproval(payload.questionId);
-    return true;
-  }
 
   await handleRegisteredApproval(approval, payload.value, payload.userId ?? '');
   return true;

@@ -1,0 +1,14 @@
+[
+  {
+    "jid": "tg:8731035088",
+    "name": "telegram_main",
+    "folder": "telegram_main",
+    "trigger_pattern": "@Felix",
+    "added_at": "2026-03-15T18:57:23.313Z",
+    "container_config": null,
+    "requires_trigger": 0,
+    "is_main": true,
+    "inferred_channel_type": "telegram",
+    "inferred_is_group": 0
+  }
+]

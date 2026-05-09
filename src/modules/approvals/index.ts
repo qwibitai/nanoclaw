@@ -16,21 +16,11 @@
  * `src/modules/self-mod/` in PR #7 — they now register delivery actions
  * + approval handlers via this module's public API.
  */
-import { onDeliveryAdapterReady } from '../../delivery.js';
-import { registerResponseHandler, onShutdown } from '../../response-registry.js';
+import { registerResponseHandler } from '../../response-registry.js';
 import { handleApprovalsResponse } from './response-handler.js';
-import { startOneCLIApprovalHandler, stopOneCLIApprovalHandler } from './onecli-approvals.js';
 
 // Public API re-exports so consumers import from the module root.
 export { requestApproval, registerApprovalHandler, notifyAgent } from './primitive.js';
 export type { ApprovalHandler, ApprovalHandlerContext, RequestApprovalOptions } from './primitive.js';
 
 registerResponseHandler(handleApprovalsResponse);
-
-onDeliveryAdapterReady((adapter) => {
-  startOneCLIApprovalHandler(adapter);
-});
-
-onShutdown(() => {
-  stopOneCLIApprovalHandler();
-});

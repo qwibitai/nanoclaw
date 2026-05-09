@@ -1,1 +1,14 @@
-pnpm run format:fix
+# Block commits that contain secrets (gitleaks scans staged diff only).
+# Gracefully skipped if gitleaks isn't installed locally so the hook
+# doesn't block environments that haven't run `brew install gitleaks`.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --staged --redact --no-banner -v || {
+    echo ""
+    echo "❌ gitleaks blocked the commit — a potential secret was detected in staged changes."
+    echo "   Review the finding above. If it's a false positive, add the pattern to .gitleaks.toml allowlist."
+    exit 1
+  }
+fi
+
+# Format staged code.
+npm run format:fix

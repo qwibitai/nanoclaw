@@ -1,0 +1,297 @@
+{
+  "head": "7c08ed338b14335584d9ce17d3b138e29a4f93b6",
+  "merge_base": "941a75f65d1599f94e9376f8bda7c1a57fe253a7",
+  "upstream_ref": "upstream/main",
+  "files": [
+    {
+      "path": ".github/workflows/bump-version.yml",
+      "additions": 2,
+      "deletions": 3
+    },
+    {
+      "path": ".github/workflows/gitleaks.yml",
+      "additions": 21,
+      "deletions": 0
+    },
+    {
+      "path": ".github/workflows/update-tokens.yml",
+      "additions": 1,
+      "deletions": 3
+    },
+    {
+      "path": ".gitleaks.toml",
+      "additions": 29,
+      "deletions": 0
+    },
+    {
+      "path": ".husky/pre-commit",
+      "additions": 14,
+      "deletions": 1
+    },
+    {
+      "path": ".nanoclaw-migrations/guide.md",
+      "additions": 367,
+      "deletions": 0
+    },
+    {
+      "path": "container/Dockerfile",
+      "additions": 4,
+      "deletions": 0
+    },
+    {
+      "path": "container/agent-runner/src/providers/codex-app-server.ts",
+      "additions": 393,
+      "deletions": 0
+    },
+    {
+      "path": "container/agent-runner/src/providers/codex.factory.test.ts",
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "container/agent-runner/src/providers/codex.ts",
+      "additions": 332,
+      "deletions": 0
+    },
+    {
+      "path": "container/agent-runner/src/providers/index.ts",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "container/skills/google-workspace/SKILL.md",
+      "additions": 111,
+      "deletions": 0
+    },
+    {
+      "path": "container/skills/image-gen/SKILL.md",
+      "additions": 95,
+      "deletions": 0
+    },
+    {
+      "path": "container/skills/image-gen/generate.js",
+      "additions": 117,
+      "deletions": 0
+    },
+    {
+      "path": "container/skills/pdf-reader/SKILL.md",
+      "additions": 35,
+      "deletions": 0
+    },
+    {
+      "path": "container/skills/pdf-reader/pdf-reader",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "docs/student-playground-multi-agent-prompt.md",
+      "additions": 136,
+      "deletions": 0
+    },
+    {
+      "path": "docs/student-playground-setup.md",
+      "additions": 92,
+      "deletions": 0
+    },
+    {
+      "path": "docs/student-setup-guide.md",
+      "additions": 93,
+      "deletions": 0
+    },
+    {
+      "path": "groups/global/CLAUDE.md",
+      "additions": 0,
+      "deletions": 166
+    },
+    {
+      "path": "groups/main/CLAUDE.md",
+      "additions": 0,
+      "deletions": 312
+    },
+    {
+      "path": "package.json",
+      "additions": 3,
+      "deletions": 1
+    },
+    {
+      "path": "personas/account-manager.md",
+      "additions": 44,
+      "deletions": 0
+    },
+    {
+      "path": "personas/content-strategist.md",
+      "additions": 42,
+      "deletions": 0
+    },
+    {
+      "path": "personas/copywriter.md",
+      "additions": 47,
+      "deletions": 0
+    },
+    {
+      "path": "personas/creative-director.md",
+      "additions": 49,
+      "deletions": 0
+    },
+    {
+      "path": "personas/event-planner.md",
+      "additions": 43,
+      "deletions": 0
+    },
+    {
+      "path": "personas/graphic-designer.md",
+      "additions": 51,
+      "deletions": 0
+    },
+    {
+      "path": "personas/packaging-scientist.md",
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "personas/personal-assistant.md",
+      "additions": 40,
+      "deletions": 0
+    },
+    {
+      "path": "personas/photographer.md",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "personas/print-expert.md",
+      "additions": 70,
+      "deletions": 0
+    },
+    {
+      "path": "personas/production-artist.md",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "personas/social-media-manager.md",
+      "additions": 42,
+      "deletions": 0
+    },
+    {
+      "path": "personas/video-producer.md",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "additions": 309,
+      "deletions": 0
+    },
+    {
+      "path": "raccoon-unicycle.png",
+      "additions": 0,
+      "deletions": 0
+    },
+    {
+      "path": "setup/index.ts",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "setup/verify.ts",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "src/auth-switch.ts",
+      "additions": 93,
+      "deletions": 0
+    },
+    {
+      "path": "src/channels/index.ts",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "src/channels/telegram-markdown-sanitize.test.ts",
+      "additions": 78,
+      "deletions": 0
+    },
+    {
+      "path": "src/channels/telegram-markdown-sanitize.ts",
+      "additions": 55,
+      "deletions": 0
+    },
+    {
+      "path": "src/channels/telegram-pairing.test.ts",
+      "additions": 248,
+      "deletions": 0
+    },
+    {
+      "path": "src/channels/telegram-pairing.ts",
+      "additions": 339,
+      "deletions": 0
+    },
+    {
+      "path": "src/channels/telegram.ts",
+      "additions": 503,
+      "deletions": 0
+    },
+    {
+      "path": "src/config.ts",
+      "additions": 3,
+      "deletions": 0
+    },
+    {
+      "path": "src/container-runner.ts",
+      "additions": 24,
+      "deletions": 0
+    },
+    {
+      "path": "src/container-runtime.ts",
+      "additions": 30,
+      "deletions": 0
+    },
+    {
+      "path": "src/credential-proxy.test.ts",
+      "additions": 192,
+      "deletions": 0
+    },
+    {
+      "path": "src/credential-proxy.ts",
+      "additions": 232,
+      "deletions": 0
+    },
+    {
+      "path": "src/image.ts",
+      "additions": 70,
+      "deletions": 0
+    },
+    {
+      "path": "src/index.ts",
+      "additions": 10,
+      "deletions": 1
+    },
+    {
+      "path": "src/providers/codex.ts",
+      "additions": 49,
+      "deletions": 0
+    },
+    {
+      "path": "src/providers/index.ts",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "path": "src/remote-control.test.ts",
+      "additions": 403,
+      "deletions": 0
+    },
+    {
+      "path": "src/remote-control.ts",
+      "additions": 212,
+      "deletions": 0
+    },
+    {
+      "path": "src/transcription.ts",
+      "additions": 84,
+      "deletions": 0
+    }
+  ]
+}

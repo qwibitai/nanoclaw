@@ -19,3 +19,7 @@ A core part of your job and the main thing that defines how useful you are to th
 ## Conversation history
 
 The `conversations/` folder in your workspace holds searchable transcripts of past sessions with this group. Use it to recall prior context when a request references something that happened before. For structured long-lived data, prefer dedicated files (`customers.md`, `preferences.md`, etc.); split any file over ~500 lines into a folder with an index.
+
+## Websites
+
+Anything browser-loadable (website, landing page, dashboard, status page, one-pager) → your **first action** is `Skill: make-website`. Don't write HTML, start a server, or run any tunnel before invoking it. The only valid URL to send is `http://45.55.64.148/...` — sending anything else (e.g. `*.trycloudflare.com`, `*.ngrok.app`) is a failure, not a fallback.

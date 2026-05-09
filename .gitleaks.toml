@@ -1,0 +1,29 @@
+# Gitleaks configuration for nanoclaw_gccourse
+#
+# Inherits the default ruleset and adds an allowlist for known-safe patterns
+# that are flagged by default rules but are NOT secrets.
+#
+# Used by:
+#   - The husky pre-commit hook (scans staged changes only)
+#   - On-demand history scans: `gitleaks git --no-banner -v`
+
+title = "nanoclaw_gccourse gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist — known-safe patterns flagged as false positives by default rules"
+regexes = [
+  # PostHog public project API keys (phc_*) are write-only ingestion tokens
+  # designed to be embedded in client code. Per PostHog docs:
+  # https://posthog.com/docs/api — "Public project API keys are safe to use
+  # in production code." Different from phx_* private keys.
+  '''phc_[a-zA-Z0-9]{40,}''',
+
+  # Anthropic's public OAuth client ID for the Claude Code SDK / setup-token
+  # flow. Hardcoded in @anthropic-ai/claude-agent-sdk and many open-source
+  # integrations. Public-by-design — like all OAuth client IDs in PKCE flows
+  # (different from a client_secret). Used here in src/credential-proxy.ts.
+  '''9d1c250a-e61b-44d9-88ed-5944d1962f5e''',
+]

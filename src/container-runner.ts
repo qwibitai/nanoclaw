@@ -7,20 +7,24 @@ import { ChildProcess, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { OneCLI } from '@onecli-sh/sdk';
-
 import {
   CONTAINER_IMAGE,
   CONTAINER_IMAGE_BASE,
   CONTAINER_INSTALL_LABEL,
+  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
-  ONECLI_API_KEY,
-  ONECLI_URL,
   TIMEZONE,
 } from './config.js';
+import { collectContainerEnv } from './container-env-registry.js';
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
-import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import {
+  CONTAINER_HOST_GATEWAY,
+  CONTAINER_RUNTIME_BIN,
+  hostGatewayArgs,
+  readonlyMountArgs,
+  stopContainer,
+} from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
@@ -36,6 +40,7 @@ import {
   type ProviderContainerContribution,
   type VolumeMount,
 } from './providers/provider-container-registry.js';
+import { detectAuthMode } from './credential-proxy.js';
 import {
   heartbeatPath,
   markContainerRunning,
@@ -44,8 +49,6 @@ import {
   writeSessionRouting,
 } from './session-manager.js';
 import type { AgentGroup, Session } from './types.js';
-
-const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 
 /** Active containers tracked by session ID. */
 const activeContainers = new Map<string, { process: ChildProcess; containerName: string }>();
@@ -123,14 +126,15 @@ async function spawnContainer(session: Session): Promise<void> {
   // buildMounts, and buildContainerArgs so we don't re-read the file.
   const containerConfig = readContainerConfig(agentGroup.folder);
 
-  // Ensure container.json has the agent group identity fields the runner needs.
-  // Written at spawn time so the runner can read them from the RO mount.
-  ensureRuntimeFields(containerConfig, agentGroup);
-
   // Resolve the effective provider + any host-side contribution it declares
   // (extra mounts, env passthrough). Computed once and threaded through both
   // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
   const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
+
+  // Ensure container.json has the agent group identity fields + the resolved
+  // provider so the in-container runner picks the right runtime. Written at
+  // spawn time so the runner can read them from the RO mount.
+  ensureRuntimeFields(containerConfig, agentGroup, provider);
 
   const mounts = buildMounts(agentGroup, session, containerConfig, contribution);
   const containerName = `nanoclaw-v2-${agentGroup.folder}-${Date.now()}`;
@@ -331,6 +335,16 @@ function buildMounts(
     mounts.push(...providerContribution.mounts);
   }
 
+  // Mount web hosting directory so agents can create and deploy websites
+  const sitesDir = '/var/www/sites';
+  if (fs.existsSync(sitesDir)) {
+    mounts.push({
+      hostPath: sitesDir,
+      containerPath: '/var/www/sites',
+      readonly: false,
+    });
+  }
+
   return mounts;
 }
 
@@ -405,6 +419,7 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
 function ensureRuntimeFields(
   containerConfig: import('./container-config.js').ContainerConfig,
   agentGroup: AgentGroup,
+  resolvedProvider: string,
 ): void {
   let dirty = false;
   if (containerConfig.agentGroupId !== agentGroup.id) {
@@ -417,6 +432,17 @@ function ensureRuntimeFields(
   }
   if (containerConfig.assistantName !== agentGroup.name) {
     containerConfig.assistantName = agentGroup.name;
+    dirty = true;
+  }
+  if (containerConfig.provider !== resolvedProvider) {
+    containerConfig.provider = resolvedProvider;
+    dirty = true;
+  }
+  // Sync the per-group model override from the DB. Null clears any
+  // stale value so the in-container provider falls back to env / default.
+  const desiredModel = agentGroup.model ?? undefined;
+  if (containerConfig.model !== desiredModel) {
+    containerConfig.model = desiredModel;
     dirty = true;
   }
   if (dirty) {
@@ -439,6 +465,33 @@ async function buildContainerArgs(
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Credential proxy: route API traffic through the local proxy so containers
+  // never see real secrets. Mirror the host's auth method with a placeholder.
+  // API key mode: SDK sends x-api-key, proxy replaces with real key.
+  // OAuth mode:   SDK exchanges placeholder token for temp API key,
+  //               proxy injects real OAuth token on that exchange request.
+  // Native credential proxy: route container API calls to host:3001 with
+  // placeholder credentials. Proxy substitutes real keys/OAuth tokens.
+  args.push('-e', `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`);
+  args.push('-e', `OPENAI_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/openai/v1`);
+  // Google APIs route — credential proxy refreshes the OAuth bearer
+  // from ~/.config/gws/credentials.json on the host. The container
+  // sees only this URL; no Google secrets ever cross the boundary.
+  args.push('-e', `GWS_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/googleapis`);
+
+  const authMode = detectAuthMode();
+  if (authMode === 'api-key') {
+    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+  } else {
+    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // OpenAI SDKs refuse to initialize without OPENAI_API_KEY set, even when
+  // OPENAI_BASE_URL overrides the endpoint. Placeholder satisfies the
+  // SDK's env check; the proxy substitutes the real key in the
+  // Authorization header before forwarding.
+  args.push('-e', 'OPENAI_API_KEY=placeholder');
+
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {
     for (const [key, value] of Object.entries(providerContribution.env)) {
@@ -446,19 +499,21 @@ async function buildContainerArgs(
     }
   }
 
-  // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls
-  // are routed through the agent vault for credential injection. Treated as
-  // a transient hard failure: if we can't wire the gateway, we don't spawn.
-  // The caller (router or host-sweep) catches the throw, leaves the inbound
-  // message pending, and the next sweep tick retries.
-  if (agentIdentifier) {
-    await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
+  // Per-group env vars from container.json. Last writer wins, so these can
+  // override provider defaults if a group genuinely needs to.
+  if (containerConfig.env) {
+    for (const [key, value] of Object.entries(containerConfig.env)) {
+      args.push('-e', `${key}=${value}`);
+    }
   }
-  const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
-  if (!onecliApplied) {
-    throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
+
+  // Extension-contributed env vars (e.g. class feature's GIT_AUTHOR_*
+  // injection). Each contributor decides what to emit per agent group;
+  // returns empty when nothing applies. No-op when no contributors are
+  // registered (default install).
+  for (const [key, value] of collectContainerEnv({ agentGroup })) {
+    args.push('-e', `${key}=${value}`);
   }
-  log.info('OneCLI gateway applied', { containerName });
 
   // Host gateway
   args.push(...hostGatewayArgs());
