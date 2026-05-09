@@ -436,7 +436,7 @@ A short, opinionated kill list. Each is a thing a Linear-fluent designer would p
 - **Styling.** CSS variables for the OKLCH tokens, vanilla CSS modules per component. Use `min-height: 100dvh` (not `100vh`) for any full-screen panel — iOS Safari viewport bug.
 - **Memory.** Vite's production bundle for this surface area lands well under the 100–150MB target. Skip framer-motion (use Web Animations API for the two motions that need it). Skip moment / dayjs (use `Intl.RelativeTimeFormat`).
 - **Static assets.** Branded favicon (16/32/180 + SVG), no other graphics. No social-share Open Graph tags — the dashboard is localhost-only and never linked externally.
-- **Server.** A new `src/dashboard/` module on the host: a small Node built-in `http` server with one SSE endpoint, ~8 JSON endpoints, and a static handler for the built bundle. Runs on `127.0.0.1:7457` by default. Auth: bearer token (random, generated at host startup) + `Origin` header allowlist + `Host` header allowlist for mutating endpoints. See `design.md` § Dashboard Auth for the full model.
+- **Server.** A new `src/dashboard/` module on the host: a small Node built-in `http` server with one SSE endpoint, ~8 JSON endpoints, and a static handler for the built bundle. Runs on `127.0.0.1:7457` by default. Auth: bearer token (CLI/curl path) OR `HttpOnly` session cookie (browser path) — cookie issued by setup endpoint after token entry; required for SSE because browser `EventSource` API can't set custom headers. Plus `Origin` and `Host` header allowlists. See `design.md` § Dashboard Auth for the full model.
 
 ---
 
