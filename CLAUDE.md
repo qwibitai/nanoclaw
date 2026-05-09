@@ -118,9 +118,18 @@ Each `/add-<name>` skill is idempotent: `git fetch origin <branch>` → copy mod
 
 ## Self-Modification
 
-One tier of agent self-modification today:
+One tier of agent self-modification today — four MCP tools the agent can fire from inside its container, each gated by admin approval:
 
-1. **`install_packages` / `add_mcp_server`** — changes to the per-agent-group container config only (apt/npm deps, wire an existing MCP server). Single admin approval per request; on approve, the handler in `src/modules/self-mod/apply.ts` rebuilds the image when needed (`install_packages` only) and restarts the container. `container/agent-runner/src/mcp-tools/self-mod.ts`.
+| Tool | Effect on approve | Image rebuild? | Notes |
+|---|---|---|---|
+| `install_packages` | Append apt/npm to `container.json:packages`; rebuild image; restart container | yes | apt + npm names sanitized at the tool boundary AND on the host |
+| `add_mcp_server` | Wire an existing MCP server into `container.json:mcpServers`; restart container | no — bun runs TS directly | Operator must already know the `command` + `args` |
+| `install_plugin` | Enable a Claude Code plugin in `container.json:plugins.enabled`; optional inline `source` registers the marketplace atomically; restart container | no | SDK clones + loads the plugin at next session start. Use this to add new skills/tools to a running agent. |
+| `uninstall_plugin` | Remove the entry from `container.json:plugins.enabled`; restart container | no | Marketplace registration stays so other plugins from it remain installable |
+
+All four go through `src/modules/self-mod/`: `request.ts` validates input + queues an approval; `apply.ts` runs on approve. MCP tool definitions: `container/agent-runner/src/mcp-tools/self-mod.ts`.
+
+**Denial-loop suppression.** All four register with `dedupeDenials: true`. On Reject, the response handler writes a row to `recent_denials` keyed on `(agent_group_id, sha256(action + canonical_payload))`. A subsequent identical request within 24h is suppressed at the request side — no new card reaches the admin; the agent gets a system note instead. Without this, an agent that drives its own retries (notably `install_plugin`) could wake the admin repeatedly with the same card. See [src/modules/approvals/recent-denials.ts](src/modules/approvals/recent-denials.ts) and migration `014-recent-denials`. Pruned at 7d by the host sweep.
 
 A second tier (direct source-level self-edits via a draft/activate flow) is planned but not yet implemented.
 
