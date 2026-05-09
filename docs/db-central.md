@@ -201,7 +201,7 @@ Access layer: `src/db/agent-destinations.ts`.
 
 Two workflows share this table:
 
-- **Session-bound MCP approvals** — `install_packages`, `add_mcp_server`. `session_id` is set.
+- **Session-bound MCP approvals** — `install_packages`, `add_mcp_server`, `install_plugin`, `uninstall_plugin`. `session_id` is set.
 - **OneCLI credential approvals** — `session_id` may be NULL; `agent_group_id` + `channel_type` + `platform_id` route the admin card.
 
 ```sql
@@ -227,6 +227,30 @@ CREATE INDEX idx_pending_approvals_action_status ON pending_approvals(action, st
 - `status`: `pending` | `approved` | `rejected` | `expired`.
 - `platform_message_id` lets the host edit the admin card in place after a decision.
 - Access layer: `src/db/sessions.ts`; sweep + delivery: `src/onecli-approvals.ts`.
+
+### 1.11a `recent_denials`
+
+Short-lived memory of admin-rejected approval requests, used to suppress denial loops on agent-initiated self-mods. Without this, an agent that drives its own retries (notably `install_plugin`) can wake the admin again on the next message after a single Reject because it has no built-in "denied recently" memory.
+
+```sql
+CREATE TABLE recent_denials (
+  agent_group_id TEXT NOT NULL,
+  action_hash    TEXT NOT NULL,
+  denied_at      INTEGER NOT NULL,
+  denied_by      TEXT NOT NULL,
+  PRIMARY KEY (agent_group_id, action_hash)
+);
+CREATE INDEX idx_recent_denials_denied_at ON recent_denials(denied_at);
+```
+
+- `action_hash`: `sha256(action + canonical(payload))`. Object keys are sorted before hashing so `{a, b}` and `{b, a}` collapse to the same row; arrays preserve order.
+- `denied_at`: unix epoch seconds.
+- TTL on the gate: 24h (`DENIAL_TTL_SECONDS`). Sweep deletes rows older than 7d (`DENIAL_MAX_AGE_SECONDS`).
+- Writer: `recordDenial()` in `src/modules/approvals/recent-denials.ts`, called from the approvals response handler when an action registered with `dedupeDenials: true` is rejected.
+- Reader: `findRecentDenial()`, called from `requestApproval()` when invoked with `dedupeDenials: true`. Hit → emit `notifyAgent()` and skip the admin card.
+- Cleanup: `cleanupOldDenials()` runs once per host sweep tick (`src/host-sweep.ts`).
+
+Currently opted-in: all four self-mod actions (`install_packages`, `add_mcp_server`, `install_plugin`, `uninstall_plugin`). Other approval flows (channel registration, sender registration, OneCLI credentials) are **not** dedupe-tracked because they're user-initiated and naturally bounded by chat cadence.
 
 ### 1.12 `unregistered_senders`
 
