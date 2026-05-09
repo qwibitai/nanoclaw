@@ -16,7 +16,7 @@
  * access gate is not registered and core defaults to allow-all.
  */
 import { recordDroppedMessage } from '../../db/dropped-messages.js';
-import { getAgentGroup, getAllAgentGroups } from '../../db/agent-groups.js';
+import { getAgentGroup, getAllAgentGroups, getAllAgentGroupsByRecentActivity } from '../../db/agent-groups.js';
 import { createMessagingGroupAgent, setMessagingGroupDeniedAt } from '../../db/messaging-groups.js';
 import {
   routeInbound,
@@ -346,7 +346,7 @@ async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<
     const adapter = getDeliveryAdapter();
     if (!adapter) return true;
 
-    const agentGroups = getAllAgentGroups();
+    const agentGroups = getAllAgentGroupsByRecentActivity();
     const options = buildAgentSelectionOptions(agentGroups);
     const title = '📋 Choose an agent';
     updatePendingChannelApprovalCard(row.messaging_group_id, title, JSON.stringify(options));

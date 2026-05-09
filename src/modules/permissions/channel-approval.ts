@@ -280,9 +280,13 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
  * Build normalized options for the agent-selection follow-up card.
  */
 export function buildAgentSelectionOptions(agentGroups: AgentGroup[]): NormalizedOption[] {
+  // Label by folder, not name — installs commonly have a single assistant
+  // name ("jibot") across many groups, so showing the assistant_name on
+  // every button makes the picker unreadable. Folder is unique and
+  // human-meaningful (`dm-with-joi`, `henkaku-quest`, ...).
   const options: RawOption[] = agentGroups.map((ag) => ({
-    label: ag.name,
-    selectedLabel: `✅ Connected to ${ag.name}`,
+    label: ag.folder,
+    selectedLabel: `✅ Connected to ${ag.folder}`,
     value: `${CONNECT_PREFIX}${ag.id}`,
   }));
   options.push({

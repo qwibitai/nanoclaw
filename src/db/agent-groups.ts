@@ -22,6 +22,24 @@ export function getAllAgentGroups(): AgentGroup[] {
   return getDb().prepare('SELECT * FROM agent_groups ORDER BY name').all() as AgentGroup[];
 }
 
+// Returns agent groups sorted by most-recent session activity first (groups
+// with no sessions sort last by created_at). Used by the channel-approval
+// picker so the operator's active agent is at the top of a long list.
+export function getAllAgentGroupsByRecentActivity(): AgentGroup[] {
+  return getDb()
+    .prepare(
+      `SELECT ag.*
+         FROM agent_groups ag
+         LEFT JOIN (
+           SELECT agent_group_id, MAX(COALESCE(last_active, created_at)) AS recency
+             FROM sessions
+            GROUP BY agent_group_id
+         ) s ON s.agent_group_id = ag.id
+        ORDER BY COALESCE(s.recency, ag.created_at) DESC`,
+    )
+    .all() as AgentGroup[];
+}
+
 export function updateAgentGroup(id: string, updates: Partial<Pick<AgentGroup, 'name' | 'agent_provider'>>): void {
   const fields: string[] = [];
   const values: Record<string, unknown> = { id };
