@@ -1,5 +1,7 @@
 # NanoClaw Dashboard — UI/UX Specification
 
+> **STATUS — DEFERRED TO V2 (2026-05-09)**: The dashboard was deferred from v1 MVP per the cap-reached Option-4 cut after `/team-review` cycle 3. v1 ships orchestrator dispatch + Slack/Discord subthreads only; visibility comes from native subthreads + orchestrator chat summaries + `scripts/lookback.ts`. This spec is preserved as the v2 reference. When v2 picks it up, the v1 schema (tasks, sessions.dispatch_task_id, finalize markers) is sufficient as-is for the dashboard's read model — no schema changes needed.
+
 A focused, single-operator orchestration console for a fleet of AI-agent groups. Built to be lived in for hours, glanced at for seconds, and never to nag.
 
 This spec is the visual + interaction contract for the dashboard surface defined in [`./design.md`](./design.md). It is opinionated by request: one option per decision, no "could do A or B."

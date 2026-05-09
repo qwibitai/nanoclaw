@@ -1,8 +1,17 @@
 # Orchestrator Dispatch
 
-**Status**: design draft, pre-build (10 MUST-FIX from `/team-review` cycle 1 open)
+**Status**: v1 MVP design (post Option-4 scope cut). Pending fresh `/team-review` on the simplified surface.
 **Author**: Dave + Claude (Opus 4.7) + Codex (review)
-**Last updated**: 2026-05-09
+**Last updated**: 2026-05-09 (post-cap-reached MVP cut)
+
+## Scope cut (2026-05-09)
+
+After three `/team-review` cycles surfaced compounding precision gaps in the larger design, the owner exercised cap-reached Option 4 (cut to MVP). **Two cuts apply:**
+
+1. **Dashboard deferred to v2.** No `src/dashboard/` module, no Vite SPA, no SSE endpoint, no auth flow, no UI in v1. Visibility comes from Slack/Discord subthreads + the orchestrator agent's text summaries (fed by `task_complete` system rows). `ui-design.md` is kept as a reference for the v2 implementation.
+2. **Dependency chains (`blocked_on`) deferred to v2.** No `task_dependencies` table, no `dependents_unblocked_json` column, no fan-out logic on completion. Owner sequences manually — dispatch batch 1, wait for `task_complete`, dispatch batch 2.
+
+The scope cut keeps the v1 MVP focused on the orchestrator-dispatch spine: orchestrator role, durable task ledger, dispatch state machine with crash idempotency, Slack/Discord subthread surface for owner chat, reverse-signal completion writes, watchdog for hung tasks. Both deferred capabilities are designed so they can be re-introduced in v2 without breaking v1.
 
 ## Brief Reference
 
@@ -113,11 +122,10 @@ CREATE TABLE tasks (
   dispatch_state_updated_at TEXT NOT NULL,
   dispatch_retry_count INTEGER NOT NULL DEFAULT 0,
   -- Completion finalization markers (cycle-1 M3 + cycle-2 M2-F refinements):
-  dependents_released_at  TEXT,    -- fan-out to task_dependencies; written FIRST so parent message contains the final list
-  dependents_unblocked_json TEXT,  -- cycle-3 M3-7: persists the released list itself (JSON array of task_ids); read by step d to populate parent message; survives crashes
+  -- v2-cut: dependents_released_at + dependents_unblocked_json removed (no dependency chains in v1)
   child_summary_posted_at TEXT,    -- user-visible summary posted to child subthread; for internal-only tasks (child_thread_id IS NULL) set to completed_at at terminal-status time (not-applicable marker)
-  parent_notified_at      TEXT,    -- system row written to parent's session; written LAST and contains the final dependents_unblocked list
-  parent_woken_at         TEXT,    -- cycle-2 M2-F: separate marker for wakeContainer(parent), so failed wakes are retried
+  parent_notified_at      TEXT,    -- system row written to parent's session
+  parent_woken_at         TEXT,    -- separate marker for wakeContainer(parent), so failed wakes are retried
   -- Cancellation
   cancelled_at         TEXT,                                     -- cycle-2 M2-B: set by applyCancelTask alongside status='cancelled'; watchdog hard-kill timer reads this
   -- Other
@@ -141,7 +149,6 @@ CREATE INDEX idx_tasks_finalization ON tasks(status)
   WHERE status IN ('complete','failed','cancelled')
     AND (parent_notified_at IS NULL
          OR (child_thread_id IS NOT NULL AND child_summary_posted_at IS NULL)
-         OR dependents_released_at IS NULL
          OR parent_woken_at IS NULL);
 
 -- Bidirectional binding: closes cycle-2 M2-A. sessions.dispatch_task_id makes
@@ -151,32 +158,14 @@ CREATE INDEX idx_tasks_finalization ON tasks(status)
 ALTER TABLE sessions ADD COLUMN dispatch_task_id TEXT UNIQUE REFERENCES tasks(task_id);
 CREATE INDEX idx_sessions_dispatch_task ON sessions(dispatch_task_id) WHERE dispatch_task_id IS NOT NULL;
 
--- Dependencies as a join table (cycle-1 S8 / cycle-1 M14 / cycle-2 S2-B trigger).
-CREATE TABLE task_dependencies (
-  task_id              TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
-  blocked_on_task_id   TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
-  parent_session_id    TEXT NOT NULL,
-  PRIMARY KEY (task_id, blocked_on_task_id),
-  CHECK (task_id != blocked_on_task_id)
-);
-CREATE INDEX idx_task_deps_blocked_on ON task_dependencies(blocked_on_task_id);
-CREATE INDEX idx_task_deps_parent ON task_dependencies(parent_session_id);
-
--- DB-level enforcement of same-parent-session (cycle-2 S2-B). SQLite cannot reference other tables in CHECK,
--- but BEFORE INSERT triggers can. This makes the invariant self-defending — any direct INSERT path
--- (migration backfill, scripts/q.ts ad-hoc, future code) is rejected at the database layer.
-CREATE TRIGGER task_deps_same_parent_session_task
-BEFORE INSERT ON task_dependencies
-WHEN (SELECT parent_session_id FROM tasks WHERE task_id = NEW.task_id) != NEW.parent_session_id
-BEGIN
-  SELECT RAISE(ABORT, 'task_dependencies.task_id parent_session_id mismatch');
-END;
-CREATE TRIGGER task_deps_same_parent_session_blocked
-BEFORE INSERT ON task_dependencies
-WHEN (SELECT parent_session_id FROM tasks WHERE task_id = NEW.blocked_on_task_id) != NEW.parent_session_id
-BEGIN
-  SELECT RAISE(ABORT, 'task_dependencies.blocked_on_task_id parent_session_id mismatch');
-END;
+-- task_dependencies: DEFERRED TO V2. No dependency chains in v1 MVP.
+-- When v2 reintroduces this, the table + same-parent-session triggers from cycle-2 S2-B
+-- can be added in a follow-up migration. The trigger pattern is documented for future use:
+--   CREATE TRIGGER task_deps_same_parent_session_task
+--     BEFORE INSERT ON task_dependencies
+--     WHEN (SELECT parent_session_id FROM tasks WHERE task_id = NEW.task_id) != NEW.parent_session_id
+--     BEGIN SELECT RAISE(ABORT, 'task_dependencies.task_id parent_session_id mismatch'); END;
+--   (analogous trigger for blocked_on_task_id)
 
 -- Cycle-3 M3-6: bind tasks.child_session_id to sessions.dispatch_task_id symmetrically.
 -- Authorization via source-session capability requires this invariant to hold; without
@@ -216,9 +205,9 @@ Multi-step state machine with persisted `dispatch_state` per step. Each transiti
       title:           "XZO-54: redeploy UDTF_GET_DEPLETIONS_FORECAST"
       prompt:          <full task brief>
       deadline:        <optional ISO timestamp>
-      blocked_on:      <optional list of task_ids in the SAME parent_session_id>
       idempotency_key: <orchestrator-supplied UUID; required, NOT NULL>
       model, effort:   <optional, per-task overrides>
+      -- Note: blocked_on parameter REMOVED in v1 MVP scope cut. No dependency chains in v1.
 
 [2] Container writes outbound system action `dispatch_task` to outbound.db.
     (Container is sole writer of outbound.db — invariant preserved.)
@@ -228,11 +217,10 @@ Multi-step state machine with persisted `dispatch_state` per step. Each transiti
       - source agent group has 'orchestrator' role in agent_roles
         (host re-checks regardless of MCP-tool presence — defense in depth)
       - target_group folder maps to an existing agent_groups row
-      - blocked_on task_ids exist AND share this parent_session_id
-        (cross-session deps rejected — closes M14)
       - deadline is well-formed
       - idempotency_key not already used in this parent_session_id
         (UNIQUE constraint); duplicate → return existing task_id, skip insert
+      -- v1 cut: no blocked_on validation; parameter removed.
 
 [4] Host INSERTs tasks row with:
       status='pending', dispatch_state='pending', dispatch_state_updated_at=now,
@@ -262,14 +250,10 @@ Multi-step state machine with persisted `dispatch_state` per step. Each transiti
        WHERE target_agent_group_id = ?
          AND status IN ('dispatched','running')
          FOR resulting count to be < 3 (configurable per agent_group);
-      -- Dependency check (M3-5)
-      NOT EXISTS (
-        SELECT 1 FROM task_dependencies td JOIN tasks t ON t.task_id = td.blocked_on_task_id
-         WHERE td.task_id = ? AND t.status != 'complete'
-      );
-      -- All three pass:
+      -- v1 cut: no dependency check (no task_dependencies table in v1).
+      -- All cap checks pass:
       UPDATE tasks SET status='dispatched',
-                       dispatch_state='admitted',                  -- M3-2: neutral
+                       dispatch_state='admitted',
                        dispatch_state_updated_at=now
        WHERE task_id = ? AND status='pending';
       COMMIT;
@@ -411,20 +395,9 @@ Two writes per completion: user-visible chat into the **child's own subthread** 
            UPDATE tasks SET status, completed_at, result_summary, failure_reason
             WHERE task_id = ? AND status IN ('dispatched','running').
 
-        b. **Compute, PERSIST, and release dependents** (cycle-3 M3-7: persist the
-           list itself, not just the marker — survives a crash between b and d):
-           **Skip this step if status='cancelled'** (cycle-3 S3-D-G: cancelled
-           tasks did not produce work, so they should NOT unblock dependents).
-             SELECT t.task_id FROM task_dependencies td JOIN tasks t ON t.task_id = td.task_id
-              WHERE td.blocked_on_task_id = <completed task_id> AND t.status = 'pending';
-           For each, check if all of its dependencies are now complete; collect
-           into the "dependents_unblocked" list. Mark each unblocked task as
-           eligible (no status change yet — they remain 'pending'; §Watchdog
-           responsibility 4 promotes per cap budget).
-           Persist BOTH the list and the marker in one UPDATE:
-           UPDATE tasks SET dependents_released_at=now,
-                            dependents_unblocked_json='[...task_ids...]'
-                       WHERE task_id=? AND dependents_released_at IS NULL.
+        b. **Dependent fan-out: SKIPPED in v1 MVP** (cut per Option 4 — no
+           dependency chains). Step removed entirely; finalize jumps from
+           step a directly to step c.
 
         c. **Write 1 (user-visible child summary)** — only if
            child_thread_id IS NOT NULL (child has a platform surface):
@@ -454,7 +427,9 @@ Two writes per completion: user-visible chat into the **child's own subthread** 
                  summary_markdown:   <truncated to 8KB>,
                  failure_reason:     <optional>,
                  completed_at:       <ISO 8601>,
-                 dependents_unblocked: [<task_id>, ...]   // read from tasks.dependents_unblocked_json — durable across crashes (cycle-3 M3-7)
+                 -- dependents_unblocked: [] — always empty in v1 (no dep chains).
+                 -- Field reserved in the wire format for v2 compatibility.
+                 dependents_unblocked: []
                }
              }
            Deterministic message id `task-complete-system-${task_id}`.
@@ -612,14 +587,16 @@ Extension to `src/host-sweep.ts`. Single 60s sweep, **five** responsibilities. S
 
 2. **Deadline expiry** (closes M4): scan tasks where `status IN ('dispatched', 'running')` AND `deadline IS NOT NULL` AND `deadline < now`. For each, call `finalizeTaskCompletion(task_id, status='failed', summary='Task exceeded deadline.', failure_reason='timeout')` directly with host authority. **No synthetic `task_complete` outbound** — that would require `completion_nonce` validation which the host doesn't legitimately possess in the watchdog context. The factored authorize/finalize separation makes this clean.
 
-3. **Completion-finalization resume** (closes M3 + cycle-2 M2-F): scan tasks where `status IN ('complete','failed','cancelled')` AND (`dependents_released_at IS NULL` OR `(child_thread_id IS NOT NULL AND child_summary_posted_at IS NULL)` OR `parent_notified_at IS NULL` OR `parent_woken_at IS NULL`). Note the `child_thread_id IS NOT NULL` predicate — internal-only tasks have `child_summary_posted_at` set to `completed_at` at terminal-status time (a "not applicable" marker), so they do not loop here. For each remaining row, re-attempt the missing finalize step in the documented order (b → c → d → e per §Reverse signal). Each step is PK-protected and marker-guarded so retries are idempotent.
+3. **Completion-finalization resume** (closes M3 + cycle-2 M2-F): scan tasks where `status IN ('complete','failed','cancelled')` AND (`(child_thread_id IS NOT NULL AND child_summary_posted_at IS NULL)` OR `parent_notified_at IS NULL` OR `parent_woken_at IS NULL`). Internal-only tasks have `child_summary_posted_at` set to `completed_at` at terminal-status time (a "not applicable" marker), so they do not loop here. For each remaining row, re-attempt the missing finalize step in the documented order (c → d → e per §Reverse signal). Each step is PK-protected and marker-guarded so retries are idempotent.
+   _(v1 cut: dependent fan-out step b removed; `dependents_released_at` and `dependents_unblocked_json` columns removed.)_
 
-4. **Cap-aware promotion** (closes M9): scan tasks where `status='pending'` AND all dependencies in `task_dependencies` are complete (`SELECT 1 FROM task_dependencies td JOIN tasks t ON t.task_id = td.blocked_on_task_id WHERE td.task_id = pending.task_id AND t.status != 'complete' LIMIT 1` returns no rows). For each (FIFO by `spawned_at`):
-     - per-orchestrator-cap check: `COUNT(*) FROM tasks WHERE parent_session_id = ? AND status IN ('dispatched','running')` ≤ 6
-     - per-target-cap check: `COUNT(*) FROM tasks WHERE target_agent_group_id = ? AND status IN ('dispatched','running')` ≤ 3 (configurable per agent group)
-     - if both pass: enter §Dispatch flow step 5a-5e
+4. **Cap-aware promotion** (closes M9): scan tasks where `status='pending'` ordered FIFO by `spawned_at`. For each:
+     - per-orchestrator-cap check: `COUNT(*) FROM tasks WHERE parent_session_id = ? AND status IN ('dispatched','running')` < 6 (cycle-3 M3-4: strict less-than)
+     - per-target-cap check: `COUNT(*) FROM tasks WHERE target_agent_group_id = ? AND status IN ('dispatched','running')` < 3 (configurable per agent group)
+     - if both pass: enter §Dispatch flow's cap-aware-promotion atomic transaction
      - if either fails: skip; next sweep retries
-   This is the only path that promotes pending → dispatched. §Reverse signal step 2d does NOT directly dispatch dependents; it merely marks them eligible.
+   This is the only path that promotes pending → dispatched.
+   _(v1 cut: dependency-completeness predicate removed — no dependency chains in v1.)_
 
 5. **Orphan recovery**: scan tasks where `status IN ('complete','failed','cancelled')` AND `parent_notified_at IS NOT NULL` AND `parent_session_id` references a session no longer active (status='archived' or row deleted). Mark `status='orphaned'`. DM the `spawned_by_user_id` user (closes S1 — populated at dispatch) via the `user_dms` cache with the result summary.
 
@@ -629,14 +606,14 @@ _(`dispatch_task` schema and authorization are documented in §MCP tools above.)
 
 ## Phasing
 
-### MVP — orchestrator dispatch + real Slack/Discord subthreads + dashboard
+### MVP — orchestrator dispatch + real Slack/Discord subthreads
 
-Single shipping unit. Slack-first by design — non-thread channels degrade to internal-only sessions (the fallback path described below).
+Single shipping unit. Slack-first by design — non-thread channels degrade to internal-only sessions. Dashboard deferred to v2.
 
 **Dispatch flow with channel surface (Slack, Discord, any adapter exposing `createThread`):**
 
-1. Orchestrator calls `dispatch_task` with target_group + title + prompt.
-2. Host validates orchestrator role + target group + dependencies.
+1. Orchestrator calls `dispatch_task` with target_group + title + prompt + idempotency_key.
+2. Host validates orchestrator role + target group (no dependency validation in v1 — `blocked_on` parameter removed).
 3. Host posts "Launched task <title>" as a parent message in the orchestrator's `messaging_group`.
 4. Host calls `adapter.createThread(messagingGroupId, parentMessageId, title, firstMessage) → { threadId, messageId }`. New adapter capability — see C2.
 5. Real `thread_id` returned by the adapter is recorded on the child session row. `messaging_group_id` is the orchestrator's mg.
@@ -660,72 +637,44 @@ Most NanoClaw use is Slack/Discord, so this fallback path is rare-but-correct ra
 
 Per-child git worktree manager. Codex's repo-corruption concern (22 parallel agents on `xzo-analytics` = trash). Until this ships as its own spec, the orchestrator's job is to either constrain dispatch to disjoint file scopes or sequence code-touching tasks via `blocked_on` chains.
 
-## Dashboard
+## Dashboard — DEFERRED to v2
 
-Vite + React + TypeScript SPA, bundled and served from the existing Node host on `127.0.0.1:7457`. The host runs a small Node `http` server (closes review M1 — `undici` is a client-only library, the codebase already uses Node `http` in `src/webhook-server.ts:93` and `src/channels/chat-sdk-bridge.ts:841`) with one SSE endpoint, ~8 JSON endpoints, plus a static handler for the built bundle. Reads `data/v2.db` and per-session DBs directly via `better-sqlite3` — no new API service, no separate process.
+The dashboard is out of v1 MVP scope. The original spec (Vite + React + TypeScript SPA on `127.0.0.1:7457`, three-layer auth, SSE feed from `delivery.ts`'s outbound-poll path) is preserved in `ui-design.md` for v2 reference.
 
-**Auth (closes M3 + cycle-1 M6/M7 + cycle-2 M2-G)**: three layers with one explicit unauthenticated entry point.
+**v1 visibility surfaces** (replacing the dashboard):
+- **Slack/Discord native subthreads**: each dispatched task with a thread-supporting channel runs in its own subthread. Owner clicks into the subthread to read the full task transcript and chat with the child agent.
+- **Orchestrator chat summaries**: the orchestrator session receives `task_complete` system rows for each dispatched task. The orchestrator agent can summarize on request ("status of dispatched tasks?") or proactively post running totals back to its own chat thread.
+- **Watchdog DM fallback**: if the parent (orchestrator) session is gone when a task completes, the host DMs the `spawned_by_user_id` user via the `user_dms` cache.
+- **`scripts/lookback.ts`** (already shipped to main): owner can run on-demand for cross-thread visibility.
 
-1. Bind the listener to `127.0.0.1` only (not `0.0.0.0`).
-2. Random bearer token generated at host startup, printed once to setup logs and stored at `data/dashboard-token`. The bearer token is the entry to the auth model.
-3. **Single unauthenticated endpoint**: `POST /api/login` accepts `{ token }`; on match, returns 204 with a `Set-Cookie` header issuing a session cookie (`HttpOnly`, `Secure=false` since localhost, `SameSite=Strict`, `Domain=127.0.0.1`, `Path=/`). On mismatch, returns 401. **No other endpoint is unauthenticated** beyond static asset serving (the SPA bundle JS/CSS — no data exposed). Closes cycle-2 M2-G's missing login exception.
-4. **All other API endpoints AND the SSE endpoint** require either the session cookie OR an `Authorization: Bearer <token>` header. The bearer is accepted for non-browser clients (curl, scripts); browsers use the cookie set at login. Native `EventSource` carries the cookie automatically — closes cycle-1 M7.
-5. **`Origin` header allowlist** (`http://127.0.0.1:7457` only) enforced on **mutating methods** (POST/PUT/PATCH/DELETE) — closes cycle-2 M2-G's SSE handling (browsers may omit Origin on same-origin GET, so requiring it on GET/SSE breaks legitimate flows).
-6. **`Host` header allowlist** (`127.0.0.1:7457` only) enforced on **every** request — defeats DNS rebinding.
+When v2 reintroduces the dashboard, the deferred spec sections (cookie-based SSE auth, three-layer Origin/Host/token defense, single `/api/login` unauth endpoint, SSE-from-`delivery.ts` event emission, fontsource Geist + JetBrains Mono, OKLCH design tokens) all live in `ui-design.md`. The schema changes already in v1 (tasks table, sessions.dispatch_task_id, finalize markers) are sufficient for the dashboard's read model — **no schema changes needed when adding the UI in v2**.
 
-Combined with `SameSite=Strict` cookie, this satisfies OWASP CSRF prevention defense-in-depth (T1 source: OWASP CSRF cheat sheet).
+**Concurrency caps** (apply in v1, no dashboard required): per-orchestrator-session cap (default 6 dispatched/running) AND per-target-group container cap (default 3, configurable per agent group). Both apply, enforced in `applyDispatchTask` and §Watchdog responsibility 4.
 
-UI/UX specification: see [`./ui-design.md`](./ui-design.md) (separate file, generated via /impeccable design pass and hardened by a /jony-ive audit).
+## Implementation order — v1 MVP (post Option-4 cut)
 
-**Fonts (closes review M2)**: `@fontsource-variable/geist` and `@fontsource-variable/jetbrains-mono` self-hosted via Vite's asset pipeline. Do **not** use the `geist` npm package — it has a `next` peerDep and Vite cannot resolve `next/font/local`.
-
-Memory budget:
-
-| Component | Estimated RSS |
-|---|---|
-| Vite production SPA bundle (loaded in browser) | client-side, not host RSS |
-| Node `http` server + SSE handler in existing Node process | ~10–20 MB on top of host baseline |
-| `better-sqlite3` read connections, opened-on-demand-and-closed (closes review S11) | ~5 MB |
-| Total additional host RSS | ≤ 30 MB |
-
-Comfortably under the 150 MB budget (constraint C9). Compare to Multica's 400–700 MB.
-
-**Real-time updates (closes review M9)**: Server-Sent Events from the host. Drop the chokidar/fsevents file watcher entirely — `anthropics/claude-code#16523` documents that fsevents on macOS does not reliably fire on SQLite WAL writes, and Dave develops on macOS. Instead, the host's existing `delivery.ts` outbound-poll path (which is already the sole reader of `outbound.db`) emits SSE events on the same code path that reads new `messages_out` rows. One read code path, one notification path, no second observer of the file system, no platform divergence.
-
-SSE event types pushed to the dashboard:
-- `task.started` / `task.progress` / `task.tool_started` / `task.tool_finished` / `task.message` / `task.completed` / `task.failed`
-- `approval.requested`
-
-Client integration: a single `EventSource` on the dashboard side; on each event, the handler calls `queryClient.setQueryData(['tasks', ...], updater)` (closes review S6 — `tanstack/query` has no first-class SSE primitive, the integration is userland). `useQuery` consumers re-render automatically. Reconnection backoff handled by the EventSource client (1s → 2s → 5s → 5s).
-
-**Concurrency caps**: per-orchestrator-session cap (default 6 dispatched/running) AND per-target-group container cap (default 3, configurable per agent group — closes review S4). Both apply.
-
-## Implementation order
-
-Single MVP, ~12 focused days. Steps grouped by dependency layer.
+Single MVP, ~7-8 focused days (down from 12 — dashboard removed).
 
 | # | What | Where | Effort |
 |---|---|---|---|
-| 1 | `agent_roles` migration + helpers | `src/db/migrations/`, `src/db/agent-roles.ts` | 0.5 day |
-| 2 | `tasks` migration + helpers | `src/db/migrations/`, `src/db/tasks.ts` | 0.5 day |
-| 3 | Owner approval flow for granting orchestrator role | `src/modules/approvals/` | 0.5 day |
-| 4 | `createThread` adapter capability — Slack | `channels` branch, slack adapter | 1 day |
-| 5 | `createThread` adapter capability — Discord | `channels` branch, discord adapter | 1 day |
-| 6 | `dispatch_task` MCP tool + container wiring (orchestrator-only) | `container/agent-runner/src/mcp-tools/` | 1 day |
-| 7 | Host module `src/modules/orchestrator-dispatch/`: `applyDispatchTask` (with createThread call + non-thread fallback), `applyTaskComplete`, dependency resolution | new module | 2 days |
-| 8 | Watchdog: stale `dispatched`/`running` task detection + parent-orphan recovery | `src/host-sweep.ts` | 0.5 day |
-| 9 | E2E test: orchestrator dispatches 3 Slack tasks, owner steers one mid-flight via subthread, all complete, results route back, dependent task fires | `src/modules/orchestrator-dispatch/*.test.ts` | 1 day |
-| 10 | Dashboard skeleton (Vite+React, owner check, Tasks view) | `src/dashboard/` (new) | 1.5 days |
-| 11 | Dashboard Task Detail view: transcript, steer composer, ToolCallTicker, Inspector | `src/dashboard/` | 2 days |
-| 12 | Dashboard Agents + Settings views, SSE live updates, connection-loss state | `src/dashboard/` | 1.5 days |
+| 1 | `agent_roles` + `roles_catalog` migration + helpers | `src/db/migrations/`, `src/db/agent-roles.ts` | 0.5 day |
+| 2 | `tasks` migration (no `task_dependencies` in v1) + sessions.dispatch_task_id ALTER + binding-integrity trigger + helpers | `src/db/migrations/`, `src/db/tasks.ts` | 1 day |
+| 3 | Owner approval flow for granting orchestrator role + per-dispatch approval handler (for `dispatch_approval_mode='per-dispatch'`) | `src/modules/approvals/` | 0.5 day |
+| 4 | `postParent?` + `createThreadFromParent?` + `getThreadId?` adapter capabilities — Slack | `channels` branch, slack adapter | 2 days (was 1; updated per S4) |
+| 5 | Same adapter capabilities — Discord | `channels` branch, discord adapter | 2 days (was 1; updated per S4) |
+| 6 | `dispatch_task` + `task_complete` + `task_progress` + `cancel_task` MCP tools (always-present, host-authorized) | `container/agent-runner/src/mcp-tools/` | 1 day |
+| 7 | Host module `src/modules/orchestrator-dispatch/`: `applyDispatchTask` (cap-aware promotion, BEGIN IMMEDIATE), `applyTaskComplete` (authorize + finalize state machine), `applyTaskProgress`, `applyCancelTask`, `createDispatchedSession` helper | new module | 2 days |
+| 8 | Watchdog: 5 responsibilities (stuck dispatch reconciler, deadline expiry, finalization resume, cap-aware promotion, orphan recovery) | `src/host-sweep.ts` | 0.5 day |
+| 9 | E2E test: orchestrator dispatches 3 Slack tasks, owner steers one mid-flight via subthread, all complete, results route back via `task_complete` system rows | `src/modules/orchestrator-dispatch/*.test.ts` | 1 day |
 
-Total: ~12 days focused. One ship gate.
+Total: ~10-11 days focused (channels-branch overhead per S4 is real).
 
-Sequencing notes:
+**Cut from v1 (deferred to v2)**: dashboard skeleton + task detail + agents/settings + SSE pipeline + dashboard auth (~5 days).
+
+**Sequencing**:
 - Steps 1–3 are independent and parallelizable.
-- Steps 4–5 (adapter work on the `channels` branch) can run in parallel with 1–3.
-- Steps 6–9 (dispatch + watchdog + tests) depend on 1–5.
-- Steps 10–12 (dashboard) can start as soon as the `tasks` table exists (after step 2) — they read it, the dispatch module writes to it. The dashboard ships with stubbed data first, then live data once the dispatch module is in place.
+- Steps 4–5 (channels-branch adapter work) can run in parallel with 1–3.
+- Steps 6–9 depend on 1–5.
 
 ## Risks
 
@@ -749,11 +698,11 @@ Mirrors the assumptions tracked in `decisions.yaml`. Each assumption has a state
 
 | # | Assumption | Impact if wrong | How to validate |
 |---|---|---|---|
-| A1 | Orchestrator-spawned child sessions can chat with the owner directly through Slack/Discord subthreads, leveraging existing NanoClaw thread plumbing. | High (R3 / C11 not deliverable; product reverts to dashboard-only operation). | Spike during MVP build before relying: confirm Slack `chat.postMessage` with `thread_ts` works for a parent message we just posted; confirm Discord `Message#startThread` produces a thread we can post into and receive from via the existing inbound webhook. |
-| A2 | Single owner, single host, ≤22 concurrent tasks, ≤11 agent groups is the operational scale envelope. | Medium (some choices, e.g. dependencies-as-JSON per S8, would need re-shape at higher scale). Validation already complete: 22-XZO-triage explicitly cited by user. |
-| A3 | Slack subthreads are the primary surface for owner-chat-with-child; non-thread channels (Telegram, iMessage, email) accept dashboard-only as the fallback. | Low (already user-confirmed). Re-validate if a non-Slack channel becomes a top use case. |
-| A4 | The host's existing `delivery.ts` outbound-poll path is the natural place to emit SSE events (per review M9). Dashboard does not need a separate file watcher. | Medium (if outbound-poll cadence is too slow for sub-second update target, we'd need to introduce an in-process event emitter). Validate during dashboard build: measure end-to-end latency from a `messages_out` insert to a dashboard pixel update; target <1000ms (per SC4). |
-| A5 | Slack and Discord adapter `createThread` capability can be implemented in 1 day each (per implementation order). | Low (estimate slips by a day are tolerable; doesn't change architecture). |
+| A1 | Orchestrator-spawned child sessions can chat with the owner directly through Slack/Discord subthreads via `postParent` + `createThreadFromParent`. | High (R3 not deliverable; non-thread channels would be the only path, owner has no per-task chat surface). | Spike during MVP build: confirm Slack chat.postMessage with thread_ts works for a parent message we just posted; confirm Discord Message#startThread produces a thread we can post into and receive from via the existing inbound webhook. |
+| A2 | Single owner, single host, ≤22 concurrent tasks, ≤11 agent groups is the operational scale envelope. | Medium. Validation already complete: 22-XZO-triage cited by user. |
+| A3 | Slack subthreads are the primary surface for owner-chat-with-child; non-thread channels (Telegram, iMessage, email) accept "no per-task chat surface" in v1 (orchestrator's thread surfaces task_complete summaries only). | Low (already user-confirmed). Re-validate if a non-Slack channel becomes a top use case for parallel work. |
+| A4 | Slack and Discord adapter `postParent` + `createThreadFromParent` + `getThreadId` capabilities can be implemented in ~2 days each (per implementation order, with channels-branch overhead). | Low (estimate slips by a day are tolerable; doesn't change architecture). |
+_(v1 cut: A4 SSE outbound-poll assumption and A6 dashboard memory budget removed — both moot when dashboard is deferred to v2.)_
 
 ## Appendix: alternatives considered
 

@@ -249,6 +249,52 @@ decisions:
     constraint_refs: [C5]
     affects_groups: []
 
+  - id: D6
+    stage: design
+    description: Cut dashboard from v1 MVP (Option 4 cap-reached cut)
+    chosen: |
+      Defer the entire dashboard surface (Vite SPA + SSE + auth + dashboard
+      memory budget) to v2. v1 visibility = Slack/Discord native subthreads
+      + orchestrator chat summaries via task_complete system rows + watchdog
+      DM fallback + scripts/lookback.ts. The ui-design.md spec is preserved
+      as the v2 reference; the v1 schema is sufficient for the dashboard's
+      read model (no schema changes when adding the UI in v2).
+    rejected:
+      - option: Keep dashboard in v1 MVP and accept additional review cycles
+        reason: |
+          Trajectory pattern (cycle-1 16 MUST → cycle-2 9 NEW → cycle-3 8
+          NEW) hit the 3-cycle cap. The dashboard contributed
+          disproportionately to the precision-gap count: M3 auth, M6+M7
+          dashboard auth contradictions, M9 chokidar/SSE, M2-G login
+          endpoint, plus dashboard-memory-budget + dashboard-render
+          findings. Removing it eliminates ~50% of the surface that was
+          generating findings each cycle.
+    constraint_refs: [C9]  # memory budget — moot when dashboard deferred
+    affects_groups: []
+
+  - id: D7
+    stage: design
+    description: Cut dependency chains (blocked_on, task_dependencies) from v1 MVP
+    chosen: |
+      Defer task_dependencies table, dependents_unblocked_json column,
+      dependents_released_at marker, and dispatch_task's blocked_on
+      parameter to v2. v1 sequencing is the owner's job — dispatch
+      batch 1, wait for task_complete reports in the orchestrator's
+      thread, dispatch batch 2.
+    rejected:
+      - option: Keep dependency chains in v1 with all the cycle-3 fixes applied
+        reason: |
+          Cycle-2 surfaced dep-related issues (S8 join table, M14
+          cross-session enforcement); cycle-3 surfaced more (M3-5
+          missing dep check in initial promotion, M3-7 dependents_released
+          list not durable, S3-B cycle detection). Each fix added schema
+          surface that compounded the design's precision-gap rate.
+          Owner sequencing is acceptable for the documented use case
+          (22-XZO-triage in batches), and v2 can reintroduce dep chains
+          on a stable v1 substrate.
+    constraint_refs: []
+    affects_groups: []
+
 waivers: []  # populated as user decides which findings to waive
 
 assumptions:
@@ -507,51 +553,50 @@ auto_judgments:
       weakens_safety_invariant: false
     recorded_at: 2026-05-09T17:02:00Z
 
-review_cycles:
+review_cycles: []
+# Active cycle counter RESET on 2026-05-09T18:00:00Z after owner exercised
+# cap-reached Option 4 (cut to MVP — drop dashboard + dependency chains from
+# v1). Per /team-review's Step 0 semantics, this admits a fresh cycle 1 on
+# the simplified v1 design. The 3 archived cycles below preserve the
+# historical record.
+
+review_cycles_archived:
   - iteration: 1
     must_fix_count: 16
     should_fix_count: 8
     wont_fix_count: 2
     completed_at: 2026-05-09T16:30:00Z
+    archived_reason: "cap-reached Option-4 cut to MVP (dashboard + dep chains deferred)"
     note: |
-      Fresh cycle-1 review on the post-cycle-1-revisions design (commit 029509c).
-      Reviewers: A (architecture-advisor, Claude) + B (best-practice-check, Claude) +
-      C (Codex adversarial, xhigh). Surfaced 16 MUST-FIX (architecture/security gaps in the
-      cycle-1 spec-text fixes), 8 SHOULD-FIX, 2 WON'T-FIX. /team-auto attempting revision
-      pass per Stage A revision table; if MUST resolves, cycle 2 will validate.
-
+      First cycle on the post-revision design (commit 029509c). Reviewers
+      A+B+C surfaced 16 MUST-FIX (architecture/security gaps in cycle-1
+      spec-text fixes). Closed by cycle-2 revision pass.
   - iteration: 2
     must_fix_count: 9
     should_fix_count: 8
     wont_fix_count: 2
     completed_at: 2026-05-09T17:00:00Z
+    archived_reason: "cap-reached Option-4 cut to MVP"
     note: |
-      Cycle 2 against cycle-1-revision-pass design. 16 cycle-1 MUST-FIX confirmed
-      addressed; 9 NEW cycle-2 MUST-FIX surfaced from the cycle-1 revisions
-      themselves. Reviewer B confirmed conformance high, drift LOW. Key cycle-2
-      finding: Codex C4 surfaced that completion_nonce is unnecessary — the
-      source-session binding alone is sufficient authorization once
-      sessions.dispatch_task_id UNIQUE makes the binding 1:1. Simplification:
-      drop the nonce + /workspace/.task-context.json mechanism entirely.
-      One cycle remaining (cycle 3) before the 3-cycle cap.
-
+      9 NEW MUST-FIX from cycle-1 revisions themselves. Key cycle-2
+      finding: Codex C4 — drop completion_nonce; sessions.dispatch_task_id
+      UNIQUE makes (task_id, child_session_id) 1:1, source-session binding
+      alone is sufficient. Closed by cycle-3 revision pass.
   - iteration: 3
     must_fix_count: 8
     should_fix_count: 7
     wont_fix_count: 2
     completed_at: 2026-05-09T17:30:00Z
+    archived_reason: "cap-reached Option-4 cut to MVP"
     note: |
-      Cycle 3 (LAST cap-allowed). 9 cycle-2 MUST-FIX confirmed addressed
-      (Reviewer A verified 7 cycle-2 fixes clean; B verdict "build it").
-      8 NEW MUST-FIX surfaced from cycle-2 revisions: cancelled internal-only
-      marker leakage (A), cap-promotion dispatch_state ambiguity (A),
-      session-token approval mode has no substrate (A+C merged), cap check
-      off-by-one ≤ vs < (C), dependency check missing in initial promotion
-      (C), sessions↔tasks binding integrity gap (C), dependents_released
-      list not durable across crashes (C), adapter createThread mid-call
-      durability (C). /team-auto attempting revision pass — next
-      /team-review invocation hits the cap and emits cap-reached;
-      /team-auto escalates with owner decision options.
+      8 NEW MUST-FIX from cycle-2 revisions. Reviewer B endorsed "build it"
+      with operational drifts only; A+C found precision gaps. Trajectory
+      pattern (16→9→8 NEW each cycle) hit the cap. Owner chose Option 4
+      to cut dashboard + dep chains; ~5 days of complexity removed from
+      v1 surface area. Cycle-3 fixes that remain applicable (M3-1, M3-2,
+      M3-3 [cut to none/per-dispatch only], M3-4, M3-6, M3-8) carried
+      forward into the simplified design; M3-5 and M3-7 made moot by
+      the dependency-chains cut.
 
 # Historical context: a previous /team-review run completed in this same project
 # pre-reset (commit fb3adeb, 2026-05-09T03:55:00Z) found 10 MUST + 14 SHOULD + 2 WON'T.

@@ -13,49 +13,54 @@ Two related needs:
 
 The owner explicitly does NOT want to move away from NanoClaw's session/thread primitive. Each task should be a real chattable session/thread, not a row in some external ledger that the agent reads from. The "agent we chat with" becomes an orchestrator that fans out to other agents.
 
-## Requirements
+## Requirements (v1 MVP — post Option-4 scope cut)
+
+**Scope reduction (2026-05-09)**: after three /team-review cycles surfaced compounding precision gaps in the larger design, the owner exercised cap-reached Option 4 (cut to MVP). **The dashboard and dependency chains are deferred to v2.** Visibility in v1 comes from (a) Slack/Discord subthreads — owner clicks into each task's subthread to read its full transcript natively; (b) the orchestrator agent's text summaries in its own thread, fed by `task_complete` system rows. Sequencing in v1 is the owner's job — dispatch batch 1, wait, dispatch batch 2.
 
 - **R1**: Owner can invoke an orchestrator agent that dispatches N tasks in a single chat turn, each task targeting a specific existing agent group (one of the 11).
 - **R2**: Each dispatched task spawns its own session in the target agent group.
-- **R3**: Each task is independently chattable — owner can directly converse with a specific task's agent in its own surface (Slack/Discord native subthread when available; dashboard chat when not).
-- **R4**: Tasks have durable host-side state — status, dependencies, deadline, parent linkage — that survives container crashes and host restarts.
-- **R5**: Tasks support dependency chains — task B can declare it's blocked on task A; B doesn't dispatch until A completes successfully.
-- **R6**: Reverse signal — child task reports completion back to the orchestrator; dependent tasks unblock automatically.
-- **R7**: Owner has a single dashboard view of every in-flight task across all agent groups, with live progress updates (sub-second from agent activity to pixel update on the typical loaded page).
-- **R8**: Dashboard supports steering — owner can type into a chat panel and the message routes into the selected task's session.
-- **R9**: Watchdog detects hung children (deadline exceeded) and orphaned completions (parent session gone), surfaces both to the owner.
-- **R10**: Per-task model and effort selection — orchestrator can dispatch some tasks at low cost/effort and others at high cost/effort, mixing within one batch.
-- **R11**: Cancellation — owner can cancel any in-flight task from the dashboard or via the orchestrator's chat surface.
+- **R3**: Each task is independently chattable — owner can directly converse with a specific task's agent in its own surface (Slack/Discord native subthread when available; non-thread channels degrade to internal-only with no per-task chat surface in v1).
+- **R4**: Tasks have durable host-side state — status, deadline, parent linkage — that survives container crashes and host restarts.
+- ~~R5~~: **DEFERRED to v2.** Dependency chains (`blocked_on`, automatic unblocking on prerequisite completion) are out of MVP scope. Owner sequences batches manually for v1.
+- **R6**: Reverse signal — child task reports completion back to the orchestrator. (Dependent-unblocking removed; orchestrator gets the completion, owner decides next batch.)
+- ~~R7~~: **DEFERRED to v2.** No dedicated dashboard in v1. Visibility surfaces are Slack/Discord subthreads (per-task transcript) + the orchestrator agent's text summaries in its own thread.
+- ~~R8~~: **DEFERRED to v2** (with R7). Steering in v1 is via Slack/Discord subthreads — owner replies in the subthread, normal NanoClaw routing carries the message to the child session.
+- **R9**: Watchdog detects hung children (deadline exceeded) and orphaned completions (parent session gone), surfaces both to the owner via DM (the `user_dms` cache).
+- **R10**: Per-task model and effort selection — orchestrator can dispatch some tasks at low cost/effort and others at high cost/effort.
+- **R11**: Cancellation — owner can cancel any in-flight task via the orchestrator's chat surface (`cancel_task` MCP tool). Best-effort soft cancel + 2-min hard timeout.
 - **R12**: Dispatch retry-safety — a crash mid-dispatch leaves no orphaned platform threads, no duplicate child sessions, no tasks stuck in indeterminate state.
-- **R13**: Dispatch authorization — only an agent group with the explicit `orchestrator` role can dispatch tasks; role grant requires owner approval (one-time per orchestrator group, not per dispatch).
-- **R14**: Task completion authorization — task completion signals must validate source identity; an arbitrary agent cannot mark another's task complete.
+- **R13**: Dispatch authorization — only an agent group with the explicit `orchestrator` role can dispatch tasks; role grant requires owner approval (one-time per orchestrator group). v1 dispatch_approval_mode is `'none'` (default — role grant is the gate) or `'per-dispatch'` (per-task approval card).
+- **R14**: Task completion authorization — task completion signals must validate source identity via the (task_id, child_session_id) binding; an arbitrary agent cannot mark another's task complete.
 
-## Constraints
+## Constraints (v1 MVP)
 
-- **[HARD]** Single owner. No multi-user dashboards. No multi-tenant authorization.
-- **[HARD]** Localhost-only dashboard. Bound to `127.0.0.1`. Owner-bearer-token + `Origin` + `Host` allowlist required for mutating endpoints to defeat browser-based local attacks (DNS rebinding, drive-by CSRF).
-- **[HARD]** Memory budget — dashboard adds ≤ 150MB additional resident on the host. The whole point of skipping Multica is that NanoClaw stays "memory-efficient AF."
-- **[HARD]** No new long-running services. Dashboard runs in the existing Node host process. No PostgreSQL, no separate Go backend, no daemon-based runtime.
-- **[HARD]** Slack-first for owner chat with children. The primary owner workflow is clicking into a Slack subthread and typing — not opening the dashboard.
-- **[HARD]** Channel adapters supporting native subthreads (Slack, Discord) get a `createThread` capability added as an *optional* method (mirrors existing `setTyping?`, `deleteMessage?`, `subscribe?` convention) so non-thread adapters compile without changes.
-- **[HARD]** NanoClaw's two-DB invariant: host is sole inbound writer, container is sole outbound writer. Orchestrator-dispatch must preserve this — no exceptions.
+- **[HARD]** Single owner. No multi-user authorization.
+- **[HARD]** Slack-first for owner chat with children. The primary owner workflow is clicking into a Slack/Discord subthread and typing.
+- **[HARD]** Channel adapters supporting native subthreads (Slack, Discord) gain `postParent?` + `createThreadFromParent?` + `getThreadId?` as optional methods (mirrors existing `setTyping?`, `deleteMessage?`, `subscribe?` convention) so non-thread adapters compile without changes.
+- **[HARD]** NanoClaw's two-DB invariant: host is sole inbound writer, container is sole outbound writer. Orchestrator-dispatch must preserve this; M5's reverse-signal Write 1 uses `session-manager.ts:writeOutboundDirect` (the documented existing host-initiated bypass for system writes).
 - **[HARD]** Migration 024 partial-UNIQUE invariant on `sessions(agent_group_id, messaging_group_id) WHERE thread_id IS NULL AND messaging_group_id IS NOT NULL`. Dispatch must never create a thread_id=NULL child with a non-NULL mg if a channel-root session already exists for that pair.
-- **[HARD]** No synthetic `thread_id` values when `messaging_group_id` is set — the value is passed straight to the channel adapter; synthetic IDs fail Slack/Discord delivery.
+- **[HARD]** No synthetic `thread_id` values when `messaging_group_id` is set. Synthetic IDs are valid only in the internal-only fallback path where `messaging_group_id IS NULL`.
 - **[HARD]** Existing `agent-to-agent` (`create_agent`) module stays untouched. Orchestrator-dispatch is a new sibling module, not a refactor or replacement.
-- **[SOFT]** Dashboard taste: Linear / Raycast / Arc lineage. Restrained, dense, dark-first, keyboard-primacy. No marketing aesthetics, no glassmorphism, no parallax. (Documented in `ui-design.md`.)
-- **[SOFT]** Concurrency caps configurable, with sensible defaults: 6 concurrent tasks per orchestrator session AND 3 concurrent containers per target agent group. Both apply.
+- **[HARD]** `sessions.dispatch_task_id UNIQUE` makes the (task_id ↔ child_session_id) binding 1:1. This is the authorization capability for `task_complete` (no separate nonce/secret).
+- **[SOFT]** Concurrency cap configurable, defaults: 6 concurrent tasks per orchestrator session AND 3 concurrent containers per target agent group. Both apply.
 
-## Non-Goals (Explicitly Out of Scope)
+**DEFERRED constraints (re-introduced in v2):**
+- ~~Localhost-only dashboard with token + Origin + Host allowlist~~ — moot in v1 (no dashboard).
+- ~~Dashboard memory budget ≤150MB~~ — moot in v1.
+- ~~Dashboard taste / Linear-Raycast-Arc lineage~~ — moot in v1; ui-design.md kept for v2 reference.
+- ~~No new long-running services~~ — still applies in spirit (orchestrator-dispatch is a module on the existing Node host), but no specific dashboard process to budget.
 
-- **NG1**: Multi-user dashboards. One owner.
+## Non-Goals (Explicitly Out of Scope — v1 MVP)
+
+- **NG1**: Multi-user authorization. One owner.
 - **NG2**: Autopilot orchestrator that picks up work without an owner kicking it off. The orchestrator runs because the owner messages it.
-- **NG3**: Non-orchestrator agents dispatching tasks. Dispatch capability is gated by the explicit `orchestrator` role on the agent group.
-- **NG4**: Per-task git worktree isolation manager. Code-touching parallel work that conflicts on shared files is the orchestrator's responsibility to sequence (via `blocked_on` chains) for now. Worktree manager will be its own future spec.
+- **NG3**: Non-orchestrator agents dispatching tasks. Dispatch capability is gated by the explicit `orchestrator` role.
+- **NG4**: Per-task git worktree isolation manager. For v1, owner is responsible for not dispatching code-touching parallel work that conflicts on shared files (sequence batches manually). Worktree manager is a separate future spec.
 - **NG5**: Replacing or merging into the existing `agent-to-agent` / `create_agent` module. Both stay as-is for the hierarchical-subagent pattern.
-- **NG6**: Surfacing pre-existing `agent-to-agent` subagent sessions in the dashboard. Dashboard shows orchestrator-dispatched tasks only. (Possible follow-up.)
-- **NG7**: Cost/token analytics in the dashboard. No top-strip "tokens today / cost today" line, no analytics view, no charts. (Use OneCLI dashboard or chat queries for cost questions.)
-- **NG8**: External access to the dashboard. No public URL. No tunnel. No SSO. Localhost only.
-- **NG9**: Mobile / phone surface for the dashboard. Slack already serves that role.
+- **NG6**: **DEFERRED to v2: dedicated dashboard.** Visibility in v1 is via Slack/Discord subthreads + orchestrator chat summaries. The `ui-design.md` spec is kept as a reference artifact for the v2 implementation.
+- **NG7**: **DEFERRED to v2: dependency chains (`blocked_on`).** Owner sequences manually in v1 — dispatch batch 1, wait for `task_complete` reports in the orchestrator's thread, then dispatch batch 2. The schema does not include `task_dependencies` in v1.
+- **NG8**: Cost/token analytics. (Carried forward; relevant when v2 dashboard ships.)
+- **NG9**: Mobile / phone surface for any future dashboard. Slack already serves that role.
 
 ## Key Concepts
 
@@ -79,14 +84,16 @@ The owner explicitly does NOT want to move away from NanoClaw's session/thread p
 | Email (Resend) | not supported | Dashboard only | Internal-only fallback path |
 | Other channels-branch adapters (Linear, GitHub, Webex, Matrix, etc.) | optional addition | Dashboard only by default; native if adapter adds `createThread` | Each channel can opt in independently |
 
-## Coverage Matrix — top-level dashboard views
+## Coverage Matrix — top-level dashboard views (DEFERRED to v2)
 
-| View | Required for MVP | Purpose |
-|---|---|---|
-| Tasks (`/`) | yes | Default; live list of all in-flight tasks across all agent groups, sorted Needs-You / Running / Completed today |
-| Task detail (`/tasks/:id`) | yes | Transcript + steer composer + run info + artifacts |
-| Agents (`/agents`) | yes | Read-only fleet table; per-group inspector |
-| Settings (`/settings`) | yes | Owner identity, channel health, runtime info, theme |
+The dashboard is out of v1 MVP scope. Kept here for v2 design reference.
+
+| View | v1 | v2 | Purpose |
+|---|---|---|---|
+| Tasks (`/`) | — | yes | Default; live list of all in-flight tasks |
+| Task detail (`/tasks/:id`) | — | yes | Transcript + steer composer + run info + artifacts |
+| Agents (`/agents`) | — | yes | Read-only fleet table; per-group inspector |
+| Settings (`/settings`) | — | yes | Owner identity, channel health, runtime info |
 
 ## Open Questions
 
@@ -95,16 +102,16 @@ All previously open questions in the design have been resolved through the revie
 - **OQ1 (light theme tokens)**: stays open — visual validation deferred until implementation reaches a working build (~20 min pass).
 - **OQ-UI-2 (`g <letter>` keyboard collision handling)**: stays open — validate in build with a real keyboard test before locking it in.
 
-## Success Criteria
+## Success Criteria (v1 MVP)
 
-- **SC1**: Owner can paste a list of 5+ tasks into the orchestrator's chat, each is dispatched to a target agent group, all run in their own subthreads, and the owner can click into any subthread to chat with that specific task. End-to-end test in MVP must demonstrate this with at least 3 tasks across 2+ different agent groups.
-- **SC2**: Dispatching a task with `blocked_on=[other_task_id]` waits for the other task's `task_complete` before firing; verified by integration test.
+- **SC1**: Owner can paste a list of 5+ tasks into the orchestrator's chat, each is dispatched to a target agent group, all run in their own Slack/Discord subthreads, and the owner can click into any subthread to chat with that specific task. End-to-end test in MVP must demonstrate this with at least 3 tasks across 2+ different agent groups.
+- ~~SC2~~: **DEFERRED to v2** (with dependency chains).
 - **SC3**: Killing the host process mid-dispatch and restarting leaves no orphaned platform threads or unrecoverable task rows; reconciler resumes or marks failed; verified by chaos test.
-- **SC4**: Dashboard updates within 1 second of a child agent posting a new message; verified by manual timing test on the loaded MVP.
-- **SC5**: Dashboard mutating endpoints reject requests without the owner bearer token, requests with an unexpected `Origin`, and requests with an unexpected `Host`; verified by security test (curl with forged headers).
+- ~~SC4~~: **DEFERRED to v2** (with dashboard).
+- ~~SC5~~: **DEFERRED to v2** (with dashboard auth).
 - **SC6**: Watchdog kills a hung task at deadline + extension grace, marks it `failed`, and notifies the orchestrator; verified by integration test with a sleep-forever task.
-- **SC7**: Total resident memory of the host process after dashboard load + 5 active tasks is ≤ original-NanoClaw + 150MB; verified by `ps` snapshot.
-- **SC8**: All 10 `MUST-FIX` findings from `/team-review` cycle 1 are addressed in the revised design before `/team-build`; verified by `/team-review` cycle 2 returning MUST-FIX = 0 (or each remaining finding explicitly waived with a stated reason).
+- ~~SC7~~: **DEFERRED to v2** (with dashboard memory budget).
+- **SC8**: `/team-review` returns MUST-FIX = 0 on the simplified MVP design (re-run after this scope cut), or each remaining finding is explicitly waived with a stated reason.
 
 ---
 
