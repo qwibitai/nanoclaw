@@ -89,37 +89,58 @@ The orchestration ledger. Source of truth — task state is durable, not in sess
 ```sql
 CREATE TABLE tasks (
   task_id              TEXT PRIMARY KEY,
+  idempotency_key      TEXT,                                   -- closes review M7: orchestrator-supplied key, dedupe on retry
   parent_session_id    TEXT NOT NULL REFERENCES sessions(id),  -- orchestrator's session
   parent_agent_group_id TEXT NOT NULL REFERENCES agent_groups(id),
-  child_session_id     TEXT REFERENCES sessions(id),  -- null until session resolved
+  child_session_id     TEXT REFERENCES sessions(id),           -- null until session resolved
   target_agent_group_id TEXT NOT NULL REFERENCES agent_groups(id),
   title                TEXT NOT NULL,
   prompt               TEXT NOT NULL,
   status               TEXT NOT NULL DEFAULT 'pending',
                        -- pending | dispatched | running | complete | failed | orphaned | cancelled
-  blocked_on_task_ids  TEXT,  -- JSON array of task_ids that must complete first
-  deadline             TEXT,  -- ISO timestamp; watchdog enforces
+  dispatch_state       TEXT NOT NULL DEFAULT 'pending',         -- closes review M7: persisted multi-step machine
+                       -- pending | thread_created | session_created | prompt_injected | wake_sent | dispatched
+  completion_nonce     TEXT,                                   -- closes review M5: per-task secret returned to child
+  blocked_on_task_ids  TEXT,                                   -- normalized into task_dependencies (M-from-S8); kept for v1 compat, deprecate in v2
+  deadline             TEXT,                                   -- ISO timestamp; watchdog enforces
+  model                TEXT,                                   -- closes review S5: optional per-task model override
+  effort               TEXT,                                   -- closes review S5: optional per-task effort override
   spawned_by_user_id   TEXT REFERENCES users(id),
   spawned_at           TEXT NOT NULL,
   started_at           TEXT,
   completed_at         TEXT,
   result_summary       TEXT,
-  failure_reason       TEXT
+  failure_reason       TEXT,
+  UNIQUE(parent_session_id, idempotency_key)                   -- enforce dedup per orchestrator session
 );
 CREATE INDEX idx_tasks_parent ON tasks(parent_session_id, status);
 CREATE INDEX idx_tasks_child  ON tasks(child_session_id);
 CREATE INDEX idx_tasks_status ON tasks(status, deadline);
+CREATE INDEX idx_tasks_dispatch_state ON tasks(dispatch_state) WHERE dispatch_state != 'dispatched';
+
+-- Closes review S8 / Codex C4: dependencies as a join table, not a JSON blob
+CREATE TABLE task_dependencies (
+  task_id              TEXT NOT NULL REFERENCES tasks(task_id),
+  blocked_on_task_id   TEXT NOT NULL REFERENCES tasks(task_id),
+  PRIMARY KEY (task_id, blocked_on_task_id)
+);
+CREATE INDEX idx_task_deps_blocked_on ON task_dependencies(blocked_on_task_id);
+-- Constraint enforced at insert time in application code: both rows share parent_session_id
 ```
 
 ### Dispatch flow
 
+Multi-step procedure with persisted `dispatch_state` per step (closes review M7). Each transition writes the new state before moving on, so a host crash mid-flow is resumable by `host-sweep`'s reconciler. The `idempotency_key` (orchestrator-supplied) deduplicates retries.
+
 ```
 [1] Orchestrator container calls dispatch_task MCP tool with:
-      target_group: <folder name>
-      title:        "XZO-54: redeploy UDTF_GET_DEPLETIONS_FORECAST"
-      prompt:       <full task brief>
-      deadline:     <optional ISO timestamp>
-      blocked_on:   <optional list of task_ids>
+      target_group:    <folder name>
+      title:           "XZO-54: redeploy UDTF_GET_DEPLETIONS_FORECAST"
+      prompt:          <full task brief>
+      deadline:        <optional ISO timestamp>
+      blocked_on:      <optional list of task_ids>
+      idempotency_key: <orchestrator-supplied UUID; required>
+      model, effort:   <optional, per-task overrides — closes review S5>
 
 [2] Container writes outbound system action `dispatch_task` to outbound.db.
     (Container is sole writer of outbound.db — invariant preserved.)
@@ -131,81 +152,159 @@ CREATE INDEX idx_tasks_status ON tasks(status, deadline);
       - target_group folder maps to an existing agent_groups row
       - blocked_on task_ids exist
       - deadline is well-formed
+      - idempotency_key not already used in this parent_session_id (UNIQUE
+        constraint); duplicate → return existing task_id, skip insert
 
-[4] Host inserts tasks row with status='pending'. If blocked_on is set
-    and any prerequisite task is not yet complete, status stays 'pending'
-    — host-sweep will pick it up when the prerequisites complete.
+[4] Host INSERT tasks row with status='pending', dispatch_state='pending'.
+    Generates completion_nonce (random, secret). Populates
+    task_dependencies table from blocked_on. If any prerequisite isn't
+    complete, status stays 'pending' — host-sweep picks it up when
+    prerequisites complete.
 
-[5] If unblocked, host immediately:
-      a. resolveSession(target_group_id, mg_id, thread_id, mode) →
-         creates a child session row.
-      b. writeSessionMessage(child) injects the task prompt as an inbound
-         chat message with a system banner ("Dispatched by orchestrator
-         <X>, task <task_id>").
-      c. Updates tasks row: child_session_id, status='dispatched',
-         started_at=now.
-      d. wakeContainer(child) — agent runs.
+[5] If unblocked, host advances through the state machine. Each step
+    persists dispatch_state BEFORE attempting the next operation, so
+    a crash leaves a recoverable row.
+
+      a. (Phase: thread surface, if applicable) Post "Launched task X"
+         parent message to orchestrator's mg. Call adapter.createThread().
+         UPDATE tasks SET dispatch_state='thread_created', child_thread_id=<real id>.
+
+      b. resolveSession(target_group_id, effective_mg_id, effective_thread_id, mode)
+         → creates a child session row. UPDATE tasks SET
+         child_session_id=<id>, dispatch_state='session_created'.
+
+      c. writeSessionMessage(child) injects the task prompt as an inbound
+         chat message with a system banner: "Dispatched by orchestrator
+         <X>, task <task_id>, completion_nonce <nonce>". UPDATE tasks
+         SET dispatch_state='prompt_injected', started_at=now.
+
+      d. wakeContainer(child). UPDATE tasks SET dispatch_state='wake_sent'.
+
+      e. On first heartbeat from the child, transition status='running' AND
+         dispatch_state='dispatched'. If no heartbeat within 30s, the
+         host-sweep reconciler resumes from wake_sent (idempotent re-wake)
+         or marks the task failed if the container has died.
 ```
 
-The (mg_id, thread_id, mode) tuple in step 5a depends on the phase — see [Phasing](#phasing).
+The (mg_id, thread_id, mode) tuple in step 5b depends on the phase — see [Phasing](#phasing).
 
 ### Reverse signal
 
-When the child finishes:
+When the child finishes, it emits a `task_complete` outbound system action via the host-provided `task_complete` MCP tool (see §`task_complete` MCP tool below). Two writes per completion (closes review M8): one user-visible chat into the **child's own subthread** so the owner sees closure where they were watching, and one `kind='system'` row into the **parent session** so the orchestrator processes the result and fans out dependents.
 
 ```
 [1] Child container writes outbound system action `task_complete` with:
-      task_id:        <from initial banner>
-      status:         'complete' | 'failed'
-      summary:        <markdown summary>
-      failure_reason: <optional>
+      task_id:           <from initial banner>
+      completion_nonce:  <from initial banner; required — closes review M5>
+      status:            'complete' | 'failed'
+      summary:           <markdown summary>
+      failure_reason:    <optional>
 
 [2] Host's `applyTaskComplete` handler:
-      a. UPDATE tasks SET status, completed_at, result_summary,
+      a. Authorization check (closes review M5):
+         SELECT * FROM tasks
+          WHERE task_id = ?
+            AND child_session_id = <source session of the outbound row>
+            AND target_agent_group_id = <source agent group of the outbound row>
+            AND completion_nonce = ?
+            AND status IN ('dispatched', 'running')
+         If row not found, log + drop. Source identity is implicit
+         in the outbound row's session — the host knows which session
+         emitted the system action.
+
+      b. UPDATE tasks SET status, completed_at, result_summary,
          failure_reason WHERE task_id = ?
-      b. Fan out to dependents: any task with this task_id in blocked_on
-         and all other prerequisites complete → triggers their dispatch.
-      c. Direct-write a kind='system' inbound row into the orchestrator's
-         session (parent_session_id) carrying the result summary. NOT a
-         channel_type='agent' message — that drags in agent-to-agent ACL
-         assumptions we don't want here.
-      d. wakeContainer(parent) so the orchestrator processes the result.
+
+      c. **Write 1 (user-visible)**: post the summary as a chat message
+         into the child's subthread, going through the normal delivery
+         path (`delivery.ts`) so it lands in the platform thread. This
+         is what the owner reads when they scroll back to the task's
+         subthread — the closure on what was being watched.
+
+      d. **Write 2 (parent system)**: direct-write a kind='system'
+         inbound row into the orchestrator's session (parent_session_id)
+         carrying the result summary + task metadata. NOT
+         channel_type='agent' — keeps the orchestrator-dispatch bypass
+         surgical and avoids agent-to-agent ACL assumptions.
+
+      e. Fan out to dependents: SELECT task_id FROM task_dependencies
+         WHERE blocked_on_task_id = <completed task_id>; for each, check
+         if all dependencies now complete → trigger dispatch (recursive
+         from step 5).
+
+      f. wakeContainer(parent) so the orchestrator processes the result.
 ```
 
-Codex flagged this: completion routing is keyed on `parent_session_id`, not on `parent_agent_group_id`. An orchestrator group can have many sessions concurrently (different chat threads, different users, different times); only the originating session should hear the result.
+Completion routing is keyed on `parent_session_id`, not on `parent_agent_group_id`. An orchestrator group can have many sessions concurrently (different chat threads, different users, different times); only the originating session should hear the result.
 
-### Watchdog
+### `task_complete` MCP tool (child-side, closes review M6)
 
-Extension to `src/host-sweep.ts`:
+Auto-mounted into any container whose currently-running session matches a `tasks.child_session_id` row in `dispatched` or `running` state. Auto-unmounted after the first successful call (one-shot). Mount-list resolution happens at container wake (`src/container-runner.ts:spawnContainer`); same staleness window as `dispatch_task` mounting, with the same host-side defense-in-depth check (see review S1).
 
-- Every 60s, scan tasks where `status IN ('dispatched', 'running')` AND `deadline IS NOT NULL` AND `deadline < now`.
-- For each: write a synthetic `task_complete` system-action row into the parent's inbound (status=`failed`, failure_reason=`timeout`). Mark the tasks row `status='failed'`.
-- Separate scan: tasks where `status='complete'/'failed'` but `parent_session_id` is no longer active (parent session deleted, channel disconnected). Mark `status='orphaned'`, log, optionally DM the owner via the user_dms cache.
+```typescript
+// container/agent-runner/src/mcp-tools/task-complete.ts
+{
+  name: 'task_complete',
+  description: 'Signal completion of the dispatched task this session is working on. Call this when the task is done (status=complete) or definitively cannot proceed (status=failed). Single-shot.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      task_id:           { type: 'string',  description: 'From the dispatch banner — must match this session\'s assigned task_id' },
+      completion_nonce:  { type: 'string',  description: 'From the dispatch banner — opaque secret, do not display or paraphrase' },
+      status:            { type: 'string',  enum: ['complete', 'failed'] },
+      summary:           { type: 'string',  description: 'Markdown summary of work done. Posted to the task subthread for the owner.' },
+      failure_reason:    { type: 'string',  description: 'Required when status=failed. One-line first cause (HTTP code + endpoint, exception class + message, exit code + command).' },
+    },
+    required: ['task_id', 'completion_nonce', 'status', 'summary'],
+  },
+}
+```
 
-### dispatch_task MCP tool (container-side)
+The child's first inbound (the dispatch banner) instructs the agent: *"When you finish this task, call `task_complete` with the values from this banner. Do not invent the values — they're authorization tokens."*
 
-Mounted only when the agent group has the `orchestrator` role. Resolution happens at container wake (in `src/container-runner.ts:spawnContainer`); if the role is granted/revoked while a session is running, the change takes effect on next wake.
+**Fallback detection (closes review M6, second half)**: if the child container exits without emitting `task_complete`, host-sweep marks the task `failed` with `failure_reason='child exited without completion signal'`. This catches crashes, agent runaway, and prompt-injection refusals.
+
+### Watchdog and reconciler
+
+Extension to `src/host-sweep.ts`. Single 60s sweep, three responsibilities:
+
+1. **Stuck dispatch reconciler** (closes review M7 second half): scan tasks where `dispatch_state IN ('thread_created', 'session_created', 'prompt_injected', 'wake_sent')` AND `spawned_at < now - 60s`. For each, resume from the last persisted state (idempotent re-attempt) or, after 2 retries, mark `status='failed'`, `failure_reason='dispatch stalled at <state>'`, and proceed to step 3 (parent notification).
+
+2. **Deadline expiry**: scan tasks where `status IN ('dispatched', 'running')` AND `deadline IS NOT NULL` AND `deadline < now`. Each emits a synthetic `task_complete` (status=`failed`, failure_reason=`timeout`) which then flows through `applyTaskComplete` (preserves the single completion code path).
+
+3. **Orphan recovery (closes review S9 partial)**: scan tasks where `status='complete'/'failed'` but `parent_session_id` is no longer active (session archived, channel disconnected, owner-deleted). Mark `status='orphaned'`, post the result summary directly to the owner via the `user_dms` cache (DM fallback when the parent thread is gone).
+
+**Deadline extension** (closes review S9 partial): a child can extend its deadline by emitting a `task_progress` system action with a new `deadline` value before the existing deadline fires. Bounded by a config max (default: 4× the original deadline) so a runaway can't extend indefinitely.
+
+### `dispatch_task` MCP tool (orchestrator-side)
+
+Mounted only when the agent group has the `orchestrator` role. Container-side mounting is at wake-time (`src/container-runner.ts:spawnContainer`); host-side defense in depth (closes review S1) re-checks `agent_roles` on every `applyDispatchTask` regardless of the container's claim, mirroring `command-gate.ts`'s pattern of querying `user_roles` per request.
 
 ```typescript
 // container/agent-runner/src/mcp-tools/dispatch-task.ts
 {
   name: 'dispatch_task',
-  description: 'Dispatch a task to another agent group. Each call spawns a new session in the target group...',
+  description: 'Dispatch a task to another agent group. Each call spawns a new session in the target group with the task as its first message. The orchestrator can chat with each task in its own subthread (Slack/Discord) or via the dashboard (non-thread channels).',
   input_schema: {
     type: 'object',
     properties: {
-      target_group: { type: 'string', description: 'Folder name of target agent group' },
-      title: { type: 'string', maxLength: 120 },
-      prompt: { type: 'string', maxLength: 16000 },
-      deadline: { type: 'string', format: 'date-time' },
-      blocked_on: { type: 'array', items: { type: 'string' } },
+      target_group:    { type: 'string', description: 'Folder name of target agent group' },
+      title:           { type: 'string', maxLength: 120 },
+      prompt:          { type: 'string', maxLength: 16000 },
+      deadline:        { type: 'string', format: 'date-time', description: 'Optional. Watchdog enforces. Child can extend via task_progress.' },
+      blocked_on:      { type: 'array',  items: { type: 'string' }, description: 'Optional list of task_ids that must complete first.' },
+      idempotency_key: { type: 'string', description: 'Required. Orchestrator-supplied UUID. Re-calling with the same key returns the existing task_id (closes review M7).' },
+      model:           { type: 'string', description: 'Optional per-task model override (closes review S5).' },
+      effort:          { type: 'string', enum: ['low', 'medium', 'high'], description: 'Optional per-task effort override.' },
     },
-    required: ['target_group', 'title', 'prompt'],
+    required: ['target_group', 'title', 'prompt', 'idempotency_key'],
   },
 }
 ```
 
-The tool response includes the assigned `task_id`, which the orchestrator uses to track the task and reference it in subsequent `dispatch_task` calls (for `blocked_on`).
+The tool response includes the assigned `task_id`, which the orchestrator uses to track the task and reference it in subsequent `dispatch_task` calls (for `blocked_on`). The response also surfaces the child's subthread URL when the channel adapter supports threads.
+
+A separate `cancel_task` MCP tool (closes review S9) is auto-mounted alongside `dispatch_task`. It accepts `{ task_id }`, flips the tasks row to `status='cancelled'`, writes a terminate signal into the child's session, and acknowledges to the orchestrator. Mirrors the existing `scheduling.ts:174` cancellation pattern.
 
 ## Phasing
 
@@ -243,27 +342,40 @@ Per-child git worktree manager. Codex's repo-corruption concern (22 parallel age
 
 ## Dashboard
 
-Vite + React + TypeScript SPA, bundled and served from the existing Node host on `127.0.0.1:7457`. The host runs a small `undici`-based HTTP server (one SSE endpoint, ~8 JSON endpoints, plus a static handler for the built bundle). Reads `data/v2.db` and per-session DBs directly via `better-sqlite3` — no new API service, no separate process. Owner-only auth: localhost-bound + a single owner check (same security posture as the rest of NanoClaw).
+Vite + React + TypeScript SPA, bundled and served from the existing Node host on `127.0.0.1:7457`. The host runs a small Node `http` server (closes review M1 — `undici` is a client-only library, the codebase already uses Node `http` in `src/webhook-server.ts:93` and `src/channels/chat-sdk-bridge.ts:841`) with one SSE endpoint, ~8 JSON endpoints, plus a static handler for the built bundle. Reads `data/v2.db` and per-session DBs directly via `better-sqlite3` — no new API service, no separate process.
 
-UI/UX specification: see [`./ui-design.md`](./ui-design.md) (separate file, generated via /impeccable design pass).
+**Auth (closes review M3)**: three layers, not just port binding.
+
+1. Bind the listener to `127.0.0.1` only (not `0.0.0.0`).
+2. Random bearer token generated at host startup, printed once to setup logs and stored at `data/dashboard-token`. Required on every API request via `Authorization: Bearer <token>`.
+3. `Origin` header allowlist on mutating endpoints (only `http://127.0.0.1:7457`). `Host` header allowlist on every request to defeat DNS rebinding.
+
+Read endpoints can be unauthenticated for simplicity, but Origin/Host checks always apply.
+
+UI/UX specification: see [`./ui-design.md`](./ui-design.md) (separate file, generated via /impeccable design pass and hardened by a /jony-ive audit).
+
+**Fonts (closes review M2)**: `@fontsource-variable/geist` and `@fontsource-variable/jetbrains-mono` self-hosted via Vite's asset pipeline. Do **not** use the `geist` npm package — it has a `next` peerDep and Vite cannot resolve `next/font/local`.
 
 Memory budget:
 
 | Component | Estimated RSS |
 |---|---|
-| Next.js node process (production build) | ~120MB |
-| WebSocket handler (chokidar watching session DBs) | ~15MB |
-| Total | ~135MB |
+| Vite production SPA bundle (loaded in browser) | client-side, not host RSS |
+| Node `http` server + SSE handler in existing Node process | ~10–20 MB on top of host baseline |
+| `better-sqlite3` read connections, opened-on-demand-and-closed (closes review S11) | ~5 MB |
+| Total additional host RSS | ≤ 30 MB |
 
-Compare to Multica: ~400-700MB (Postgres+pgvector + Go backend + Next.js).
+Comfortably under the 150 MB budget (constraint C9). Compare to Multica's 400–700 MB.
 
-Real-time updates: WebSocket from host → dashboard. Triggers:
+**Real-time updates (closes review M9)**: Server-Sent Events from the host. Drop the chokidar/fsevents file watcher entirely — `anthropics/claude-code#16523` documents that fsevents on macOS does not reliably fire on SQLite WAL writes, and Dave develops on macOS. Instead, the host's existing `delivery.ts` outbound-poll path (which is already the sole reader of `outbound.db`) emits SSE events on the same code path that reads new `messages_out` rows. One read code path, one notification path, no second observer of the file system, no platform divergence.
 
-- New task row inserted/updated → push tasks-list patch
-- New row in any session's `outbound.db` → push transcript patch for that task
-- Pending approval inserted → push approvals-list patch
+SSE event types pushed to the dashboard:
+- `task.started` / `task.progress` / `task.tool_started` / `task.tool_finished` / `task.message` / `task.completed` / `task.failed`
+- `approval.requested`
 
-Implementation: `chokidar` watches `data/v2-sessions/*/*/outbound.db` (file mtime changes trigger a query for new rows). Lightweight; no schema changes needed.
+Client integration: a single `EventSource` on the dashboard side; on each event, the handler calls `queryClient.setQueryData(['tasks', ...], updater)` (closes review S6 — `tanstack/query` has no first-class SSE primitive, the integration is userland). `useQuery` consumers re-render automatically. Reconnection backoff handled by the EventSource client (1s → 2s → 5s → 5s).
+
+**Concurrency caps**: per-orchestrator-session cap (default 6 dispatched/running) AND per-target-group container cap (default 3, configurable per agent group — closes review S4). Both apply.
 
 ## Implementation order
 

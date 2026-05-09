@@ -313,15 +313,17 @@ assumptions:
     validated: false
     invalidated_at: null
 
-review_cycles:
-  - iteration: 1
-    must_fix_count: 10
-    should_fix_count: 14
-    wont_fix_count: 2
-    completed_at: 2026-05-09T03:55:00Z
+review_cycles: []
+# Cycle-1 review (2026-05-09T03:55:00Z) found 10 MUST + 14 SHOULD + 2 WON'T.
+# Cycle-2 and cycle-3 commits in git history (d778e70, aa2e2d2, f2ca57f, 9b0d0dd)
+# attempted revisions but did not consistently propagate to review.md or this
+# array. Cycle counter reset to [] after a comprehensive design.md body revision
+# pass on 2026-05-09 that addressed all 10 cycle-1 MUST findings (M1-M10)
+# inline. Next /team-review invocation runs as a fresh cycle 1 against the
+# revised design; if MUST=0, /team-auto proceeds to /team-plan.
 
 # Open questions deferred from design (carried forward for /team-plan):
 #   OQ1 (light theme tokens not visually validated)
-#   OQ2 (per-task model/effort) — review S5 lifts this into MUST-have-in-MVP
-#   OQ3 (cancellation surface) — review S9 lifts this into MUST-have-in-MVP
+#   OQ2 (per-task model/effort) — lifted into MVP per review S5; tracked in tasks.model/effort
+#   OQ3 (cancellation surface) — lifted into MVP per review S9; cancel_task MCP tool spec'd
 #   OQ4 (multi-orchestrator coordination) — out of scope, single orchestrator practice
