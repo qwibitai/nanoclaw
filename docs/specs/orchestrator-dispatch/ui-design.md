@@ -431,12 +431,12 @@ A short, opinionated kill list. Each is a thing a Linear-fluent designer would p
 ## 7. Implementation Posture
 
 - **Stack.** Vite + React + TypeScript. `react-router` for routing, `tanstack/query` for SSE-fed cache, `clsx` and `class-variance-authority` for variants. No UI kit — Radix primitives where accessibility is non-trivial (palette, inspector, listbox), hand-built everything else. No Tailwind UI templates. No shadcn block dumps.
-- **Fonts.** `geist` (Geist Variable) + `geist/mono` for `JetBrains Mono`-equivalent monospace, OR self-hosted Geist Variable + JetBrains Mono Variable from `@fontsource-variable/*` to avoid runtime fetches.
+- **Fonts.** Self-hosted Geist Variable + JetBrains Mono Variable from `@fontsource-variable/geist` and `@fontsource-variable/jetbrains-mono`. Do NOT use the `geist` npm package — it requires a Next.js peer dep and imports `next/font/local` internally; incompatible with the Vite stack.
 - **Icons.** `@phosphor-icons/react` (regular weight, stroke 1.5) for chrome icons (rail, palette, button trailing). Status glyphs (`◐ ⏸ ✓ ✕ ●`) stay as unicode characters in semantic-colored spans — they're glyphs, not icons.
 - **Styling.** CSS variables for the OKLCH tokens, vanilla CSS modules per component. Use `min-height: 100dvh` (not `100vh`) for any full-screen panel — iOS Safari viewport bug.
 - **Memory.** Vite's production bundle for this surface area lands well under the 100–150MB target. Skip framer-motion (use Web Animations API for the two motions that need it). Skip moment / dayjs (use `Intl.RelativeTimeFormat`).
 - **Static assets.** Branded favicon (16/32/180 + SVG), no other graphics. No social-share Open Graph tags — the dashboard is localhost-only and never linked externally.
-- **Server.** A new `src/dashboard/` module on the host: a small `undici`-based HTTP server with one SSE endpoint, ~8 JSON endpoints, and a static handler for the built bundle. Runs on `127.0.0.1:7457` by default. No external auth — owner check is "you're on localhost," same posture as the rest of NanoClaw.
+- **Server.** A new `src/dashboard/` module on the host: a small Node built-in `http` server with one SSE endpoint, ~8 JSON endpoints, and a static handler for the built bundle. Runs on `127.0.0.1:7457` by default. Auth: bearer token (random, generated at host startup) + `Origin` header allowlist + `Host` header allowlist for mutating endpoints. See `design.md` § Dashboard Auth for the full model.
 
 ---
 
