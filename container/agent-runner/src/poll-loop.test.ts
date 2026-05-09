@@ -4,7 +4,7 @@ import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '
 import { getPendingMessages, markCompleted } from './db/messages-in.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
-import { isAdmissibleTrigger, selectInTurnFollowUps } from './poll-loop.js';
+import { dispatchResultText, isAdmissibleTrigger, selectInTurnFollowUps } from './poll-loop.js';
 import { MockProvider } from './providers/mock.js';
 
 beforeEach(() => {
@@ -625,6 +625,113 @@ describe('end-to-end with mock provider', () => {
     expect(outMessages).toHaveLength(1);
     expect(JSON.parse(outMessages[0].content).text).toBe('The answer is 4');
     expect(outMessages[0].in_reply_to).toBe('m1');
+  });
+});
+
+describe('dispatchResultText — unwrapped output fallback', () => {
+  function seedDestination(name: string, channelType: string, platformId: string): void {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES (?, ?, 'channel', ?, ?, NULL)`,
+      )
+      .run(name, name, channelType, platformId);
+  }
+
+  function routing(channelType: string | null, platformId: string | null) {
+    return { channelType, platformId, threadId: null, inReplyTo: null, quietStatus: false };
+  }
+
+  it('routes wrapped <message to=...> blocks to their named destinations', () => {
+    seedDestination('slack-main', 'slack', 'C-MAIN');
+    seedDestination('discord-side', 'discord', 'chan-9');
+
+    dispatchResultText(
+      '<message to="discord-side">explicit reply</message>',
+      routing('slack', 'C-MAIN'),
+    );
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(out[0].channel_type).toBe('discord');
+    expect(out[0].platform_id).toBe('chan-9');
+    expect(JSON.parse(out[0].content).text).toBe('explicit reply');
+  });
+
+  it('multi-destination + unwrapped text → routes to origin destination (the fix)', () => {
+    // Two destinations wired (e.g. agent-shared mode, or auto-wired channels).
+    // The agent forgot to wrap and produced bare text. Origin = slack-main
+    // because routing.channelType+platformId match it.
+    seedDestination('slack-main', 'slack', 'C-MAIN');
+    seedDestination('discord-side', 'discord', 'chan-9');
+
+    dispatchResultText(
+      'Sorry, I dropped the wrapping. Here is my actual answer.',
+      routing('slack', 'C-MAIN'),
+    );
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(out[0].channel_type).toBe('slack');
+    expect(out[0].platform_id).toBe('C-MAIN');
+    expect(JSON.parse(out[0].content).text).toContain('Here is my actual answer.');
+  });
+
+  it('multi-destination + unwrapped text + unresolvable origin → drops (no broadcast)', () => {
+    // Routing has no platformId match in destinations table, and we have
+    // multiple destinations — there's no safe target, drop the text.
+    seedDestination('slack-main', 'slack', 'C-MAIN');
+    seedDestination('discord-side', 'discord', 'chan-9');
+
+    dispatchResultText(
+      'unwrapped reply with no resolvable origin',
+      routing('telegram', 'unknown-chat'),
+    );
+
+    expect(getUndeliveredMessages()).toHaveLength(0);
+  });
+
+  it('single-destination + unwrapped text + null routing → routes to the only destination', () => {
+    // Legacy behavior preserved: cron-fired tasks with stripped routing in
+    // a single-destination group still get rescued.
+    seedDestination('slack-only', 'slack', 'C-ONLY');
+
+    dispatchResultText(
+      'bare text from a null-routed source',
+      routing(null, null),
+    );
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(out[0].channel_type).toBe('slack');
+    expect(out[0].platform_id).toBe('C-ONLY');
+  });
+
+  it('wrapped output + scratchpad does NOT trigger fallback', () => {
+    // If the agent wrapped at least one block, scratchpad is just notes
+    // — don't double-deliver via fallback.
+    seedDestination('slack-main', 'slack', 'C-MAIN');
+    seedDestination('discord-side', 'discord', 'chan-9');
+
+    dispatchResultText(
+      'thinking out loud<message to="slack-main">final answer</message>more notes',
+      routing('slack', 'C-MAIN'),
+    );
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toBe('final answer');
+  });
+
+  it('only <internal> tags → empty scratchpad → no delivery', () => {
+    seedDestination('slack-main', 'slack', 'C-MAIN');
+
+    dispatchResultText(
+      '<internal>just thinking</internal>',
+      routing('slack', 'C-MAIN'),
+    );
+
+    expect(getUndeliveredMessages()).toHaveLength(0);
   });
 });
 
