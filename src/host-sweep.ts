@@ -236,11 +236,12 @@ function enforceRunningContainerSla(
   session: Session,
   agentGroupId: string,
 ): void {
+  const claims = getProcessingClaims(outDb);
   const decision = decideStuckAction({
     now: Date.now(),
     heartbeatMtimeMs: heartbeatMtimeMs(agentGroupId, session.id),
     containerState: getContainerState(outDb),
-    claims: getProcessingClaims(outDb),
+    claims,
   });
 
   if (decision.action === 'ok') return;
@@ -250,10 +251,16 @@ function enforceRunningContainerSla(
       sessionId: session.id,
       heartbeatAgeMs: decision.heartbeatAgeMs,
       ceilingMs: decision.ceilingMs,
+      hasActiveClaim: claims.length > 0,
     });
     killContainer(session.id, 'absolute-ceiling');
     resetStuckProcessingRows(inDb, outDb, session, 'absolute-ceiling');
-    void notifyCeilingKill(session, decision.ceilingMs);
+    // Only notify when there's an in-flight claim. The "I had to stop working
+    // on your last message" text is misleading on a session that was idle —
+    // there was no message in flight to stop.
+    if (claims.length > 0) {
+      void notifyCeilingKill(session, decision.ceilingMs);
+    }
     return;
   }
 
