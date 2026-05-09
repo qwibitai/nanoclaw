@@ -691,11 +691,31 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           data: f.data,
           filename: f.filename,
         }));
-        // Split if over the adapter's max length. Files ride on the first
-        // chunk so the head of the reply still carries them.
-        const chunks =
+        // Status (kind='status') messages are meta info — a "thinking
+        // bubble" that grows during a turn and gets deleted when the chat
+        // reply lands. If the first status of a turn is itself oversize
+        // (e.g. the agent's first thinking event for the turn already
+        // exceeds the platform's per-message limit), we MUST NOT post
+        // additional chunks: only the first chunk's id is returned and
+        // tracked in delivery.ts:statusTracking, and orphan-cleanup on
+        // chat delivery deletes only that tracked id — chunks 2+ would
+        // linger as un-tracked "second thinking blocks" that look (to
+        // the user) like truncated response text.
+        //
+        // Truncate to a single chunk with an ellipsis. Edits later in
+        // the same turn target the same single bubble (delivery.ts wraps
+        // them as operation='edit' once existing tracking is set), and
+        // the edit path also truncates (see above). The user always sees
+        // exactly one thinking bubble per turn.
+        //
+        // Chat replies (kind='chat') keep the original multi-chunk
+        // behavior: they're real content the user wants in full, and the
+        // 429 retry below ensures all chunks land.
+        const chunks: string[] =
           config.maxTextLength && text.length > config.maxTextLength
-            ? splitForLimit(text, config.maxTextLength)
+            ? message.kind === 'status'
+              ? [splitForLimit(text, config.maxTextLength)[0].trimEnd() + '…']
+              : splitForLimit(text, config.maxTextLength)
             : [text];
         let firstId: string | undefined;
         for (let i = 0; i < chunks.length; i++) {

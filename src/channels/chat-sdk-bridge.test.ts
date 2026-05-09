@@ -495,6 +495,71 @@ describe('createChatSdkBridge.deliver — edit path (status post-then-edit)', ()
   });
 });
 
+describe('createChatSdkBridge.deliver — status fresh-post truncation', () => {
+  it('truncates oversize status fresh-post to a single chunk (no orphan thinking-block tail)', async () => {
+    // Bug observed in production after Fix B: a 2028-char STATUS was the
+    // FIRST status of a turn, so delivery.ts wrapped it as a fresh post
+    // (statusTracking was empty after the prior chat reply cleared it).
+    // The bridge's post-path then split into multiple chunks; only the
+    // first chunk's id was tracked, chunks 2+ posted as untracked Discord
+    // messages and survived orphan-cleanup as a visible "second thinking
+    // block" to the user — matching exactly the symptom reported.
+    const calls: Array<{ markdown?: string }> = [];
+    const adapter = stubAdapter({
+      postMessage: async (_threadId: string, body: { markdown?: string }) => {
+        calls.push(body);
+        return { id: `id-${calls.length}`, threadId: 'x', raw: {} };
+      },
+    } as unknown as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 50 });
+
+    const longStatus = '> 💭 ' + 'a'.repeat(200);
+    const id = await bridge.deliver('discord:c1', null, {
+      kind: 'status',
+      content: { text: longStatus },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].markdown!.length).toBeLessThanOrEqual(51);
+    expect(calls[0].markdown!.endsWith('…')).toBe(true);
+    expect(id).toBe('id-1');
+  });
+
+  it('chat fresh-post still splits and posts all chunks (no regression)', async () => {
+    const calls: Array<{ markdown?: string }> = [];
+    const adapter = stubAdapter({
+      postMessage: async (_threadId: string, body: { markdown?: string }) => {
+        calls.push(body);
+        return { id: `id-${calls.length}`, threadId: 'x', raw: {} };
+      },
+    } as unknown as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 30 });
+    const text = 'A'.repeat(30) + '\n' + 'B'.repeat(30) + '\n' + 'C'.repeat(30);
+    await bridge.deliver('discord:c1', null, { kind: 'chat', content: { text } });
+    expect(calls).toHaveLength(3);
+    expect(calls[0].markdown).toContain('A');
+    expect(calls[1].markdown).toContain('B');
+    expect(calls[2].markdown).toContain('C');
+  });
+
+  it('short status delivered verbatim (no spurious ellipsis)', async () => {
+    const calls: Array<{ markdown?: string }> = [];
+    const adapter = stubAdapter({
+      postMessage: async (_threadId: string, body: { markdown?: string }) => {
+        calls.push(body);
+        return { id: 'id-1', threadId: 'x', raw: {} };
+      },
+    } as unknown as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 100 });
+    await bridge.deliver('discord:c1', null, {
+      kind: 'status',
+      content: { text: '> 💭 short thinking' },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].markdown).toBe('> 💭 short thinking');
+  });
+});
+
 describe('createChatSdkBridge.deliver — post path 429 retry', () => {
   it('retries a chunk on 429 and posts all chunks', async () => {
     // Bug A regression guard. A 5400-char chat reply splits into multiple
