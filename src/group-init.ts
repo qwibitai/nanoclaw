@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, GROUPS_DIR } from './config.js';
-import { initContainerConfig } from './container-config.js';
+import { initContainerConfig, readContainerConfig } from './container-config.js';
 import { log } from './log.js';
 import type { AgentGroup } from './types.js';
 
@@ -87,6 +87,13 @@ export function initGroupFilesystem(group: AgentGroup, opts?: { instructions?: s
     ensurePreCompactHook(settingsFile, initialized);
   }
 
+  // Plugin config is sourced from groups/<folder>/container.json:plugins
+  // and merged into settings.json on every spawn. Runs unconditionally
+  // (outside the existsSync branches above) so first-init-with-plugins
+  // works AND existing groups pick up container.json edits without manual
+  // settings.json touches.
+  ensurePluginsConfig(settingsFile, group, initialized);
+
   // Skills directory — created empty here; symlinks are synced at spawn
   // time by container-runner.ts based on container.json skills selection.
   const skillsDst = path.join(claudeDir, 'skills');
@@ -103,6 +110,98 @@ export function initGroupFilesystem(group: AgentGroup, opts?: { instructions?: s
       steps: initialized,
     });
   }
+}
+
+/**
+ * Mirror per-group `container.json:plugins` into `settings.json`'s
+ * `extraKnownMarketplaces` and `enabledPlugins` blocks so the SDK loads
+ * declared plugins on next spawn.
+ *
+ * Defensive against stale-format settings.json (missing blocks, malformed
+ * JSON, top-level non-object) — never crashes group init. On parse failure
+ * logs a warning and falls back to a fresh-write path.
+ *
+ * **Additive-only.** Pre-existing keys not declared in container.json are
+ * preserved (the SDK writes its own state to a separate registry at
+ * `~/.claude/plugins/known_marketplaces.json`, so additive-only is safe).
+ * A future `pruneUndeclared` mode is gated on empirical confirmation that
+ * the SDK doesn't write back to settings.json — see F1 in the plan.
+ *
+ * Idempotent: running twice in a row produces the same file.
+ */
+function ensurePluginsConfig(settingsFile: string, group: AgentGroup, initialized: string[]): void {
+  let plugins;
+  try {
+    plugins = readContainerConfig(group.folder).plugins;
+  } catch (err) {
+    log.warn('ensurePluginsConfig: failed to read container.json', {
+      group: group.folder,
+      err: String(err),
+    });
+    return;
+  }
+
+  const desiredMarketplaces = plugins?.marketplaces ?? {};
+  const desiredEnabled = plugins?.enabled ?? {};
+  const hasContent = Object.keys(desiredMarketplaces).length > 0 || Object.keys(desiredEnabled).length > 0;
+  if (!hasContent) return;
+
+  // Defensive parse of existing settings.json. Stale-format and malformed
+  // cases fall back to an empty object that we'll merge into.
+  let settings: Record<string, unknown>;
+  try {
+    const raw = fs.readFileSync(settingsFile, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      log.warn('ensurePluginsConfig: settings.json top-level is not an object; rewriting', {
+        group: group.folder,
+      });
+      settings = {};
+    } else {
+      settings = parsed as Record<string, unknown>;
+    }
+  } catch (err) {
+    log.warn('ensurePluginsConfig: settings.json malformed; rewriting', {
+      group: group.folder,
+      err: String(err),
+    });
+    settings = {};
+  }
+
+  // Merge marketplaces. Existing entries not declared in container.json
+  // are preserved (additive-only). Existing entries with the same key are
+  // overwritten by container.json's value (container.json wins).
+  const existingMarketplaces = isPlainObject(settings.extraKnownMarketplaces) ? settings.extraKnownMarketplaces : {};
+  const mergedMarketplaces: Record<string, unknown> = { ...existingMarketplaces };
+  let changed = false;
+  for (const [name, entry] of Object.entries(desiredMarketplaces)) {
+    if (JSON.stringify(mergedMarketplaces[name]) !== JSON.stringify(entry)) {
+      mergedMarketplaces[name] = entry;
+      changed = true;
+    }
+  }
+
+  // Same merge logic for enabledPlugins.
+  const existingEnabled = isPlainObject(settings.enabledPlugins) ? settings.enabledPlugins : {};
+  const mergedEnabled: Record<string, unknown> = { ...existingEnabled };
+  for (const [key, value] of Object.entries(desiredEnabled)) {
+    if (JSON.stringify(mergedEnabled[key]) !== JSON.stringify(value)) {
+      mergedEnabled[key] = value;
+      changed = true;
+    }
+  }
+
+  if (!changed) return;
+
+  settings.extraKnownMarketplaces = mergedMarketplaces;
+  settings.enabledPlugins = mergedEnabled;
+
+  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
+  initialized.push('settings.json (plugins config)');
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
 const PRE_COMPACT_COMMAND = 'bun /app/src/compact-instructions.ts';

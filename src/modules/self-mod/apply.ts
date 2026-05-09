@@ -24,7 +24,7 @@ export const applyInstallPackages: ApprovalHandler = async ({ session, payload, 
     notify('install_packages approved but agent group missing.');
     return;
   }
-  updateContainerConfig(agentGroup.folder, (cfg) => {
+  await updateContainerConfig(agentGroup.folder, (cfg) => {
     if (payload.apt) cfg.packages.apt.push(...(payload.apt as string[]));
     if (payload.npm) cfg.packages.npm.push(...(payload.npm as string[]));
   });
@@ -71,7 +71,7 @@ export const applyAddMcpServer: ApprovalHandler = async ({ session, payload, use
     notify('add_mcp_server approved but agent group missing.');
     return;
   }
-  updateContainerConfig(agentGroup.folder, (cfg) => {
+  await updateContainerConfig(agentGroup.folder, (cfg) => {
     cfg.mcpServers[payload.name as string] = {
       command: payload.command as string,
       args: (payload.args as string[]) || [],

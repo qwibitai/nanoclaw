@@ -422,6 +422,13 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
     case 'compacted':
       log(`Compacted: ${event.text}`);
       break;
+    case 'plugin_install_failed':
+      // SDK failed to install a marketplace/plugin declared in
+      // settings.json:extraKnownMarketplaces. Log loudly so the operator
+      // notices when scanning agent logs; the agent's session continues
+      // without the failed plugin (SDK behavior, verified empirically).
+      log(`Plugin install failed: name=${event.name ?? '<unknown>'} error=${event.error.slice(0, 300)}`);
+      break;
   }
 }
 

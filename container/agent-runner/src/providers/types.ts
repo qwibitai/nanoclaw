@@ -87,4 +87,13 @@ export type ProviderEvent =
    * after compaction. Distinct from `result` so it doesn't mark the turn
    * completed or get dispatched as a chat message. See qwibitai/nanoclaw#2325.
    */
-  | { type: 'compacted'; text: string };
+  | { type: 'compacted'; text: string }
+  /**
+   * Plugin install failure event. Emitted by claude provider when the SDK
+   * fires a `plugin_install:failed` system message during marketplace clone
+   * or plugin install. Distinct from `error` because this isn't a poll-loop
+   * retry signal — the SDK continues the session without the failed
+   * plugin, and the host should log + surface the failure to the operator
+   * without aborting the turn.
+   */
+  | { type: 'plugin_install_failed'; name: string | null; error: string };

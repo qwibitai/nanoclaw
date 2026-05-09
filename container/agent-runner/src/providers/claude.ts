@@ -333,6 +333,24 @@ export class ClaudeProvider implements AgentProvider {
         } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
           const tn = message as { summary?: string };
           yield { type: 'progress', message: tn.summary || 'Task notification' };
+        } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'plugin_install') {
+          // SDK plugin install lifecycle (started/installed/failed/completed).
+          // Failures need explicit surfacing so the operator sees them; other
+          // statuses are activity-only signals — installs can take 30+ seconds
+          // for slow github clones, and the poll loop's idle timer would
+          // otherwise fire mid-clone and kill the session.
+          const m = message as { status?: string; name?: string; error?: string };
+          if (m.status === 'failed') {
+            log(`plugin_install failed: name=${m.name ?? '<unknown>'} error=${m.error?.slice(0, 200) ?? ''}`);
+            yield {
+              type: 'plugin_install_failed',
+              name: m.name ?? null,
+              error: m.error ?? 'unknown error',
+            };
+          } else if (m.status === 'installed') {
+            log(`plugin_install installed: ${m.name ?? '<unknown>'}`);
+          }
+          // started/completed: covered by the activity yield above.
         }
       }
       log(`Query completed after ${messageCount} SDK messages`);
