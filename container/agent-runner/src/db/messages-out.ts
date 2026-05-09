@@ -77,11 +77,33 @@ export function writeMessageOut(msg: WriteMessageOut): number {
 }
 
 /**
+ * Strip a trailing `:ag-<timestamp>-<short>` suffix from a message ID. The
+ * host's router writes `messages_in.id` as `<rawPlatformId>:<agentGroupId>`
+ * to keep its PRIMARY KEY unique across fan-out into multiple per-agent
+ * session DBs (see src/router.ts messageIdForAgent). For agent-facing
+ * lookups (edit_message, add_reaction) we want only the platform-side
+ * portion — Discord rejects the composite with `NUMBER_TYPE_COERCE: not a
+ * snowflake`, and other adapters would silently target the wrong message.
+ *
+ * The agent-group suffix is the last colon-separated segment when it
+ * matches `ag-<digits>-<alnum>`. Telegram-style composites like
+ * `6037840640:42` (chatId:messageId, no agent suffix) pass through
+ * unchanged; `6037840640:42:ag-...` gets the trailing piece stripped.
+ */
+const AGENT_GROUP_SUFFIX = /:ag-\d+-[a-z0-9]+$/;
+
+export function stripAgentGroupSuffix(id: string): string {
+  return id.replace(AGENT_GROUP_SUFFIX, '');
+}
+
+/**
  * Look up a message's platform ID by seq number.
  * Searches both inbound and outbound DBs since seq spans both.
  *
  * For inbound messages, the Chat SDK message ID is already the platform message ID
- * (e.g., "6037840640:42" for Telegram).
+ * (e.g., "6037840640:42" for Telegram), but the host's router stores it with an
+ * `:<agentGroupId>` suffix in messages_in.id (see stripAgentGroupSuffix above
+ * for the why). We strip that suffix here so callers see a clean platform id.
  *
  * For outbound messages, the internal ID (msg-xxx) won't work for edits/reactions.
  * Instead, look up the platform_message_id from the delivered table (host writes this
@@ -90,11 +112,10 @@ export function writeMessageOut(msg: WriteMessageOut): number {
 export function getMessageIdBySeq(seq: number): string | null {
   const inbound = getInboundDb();
 
-  // Inbound messages: ID is already the platform message ID
-  const inRow = inbound.prepare('SELECT id FROM messages_in WHERE seq = ?').get(seq) as
-    | { id: string }
-    | undefined;
-  if (inRow) return inRow.id;
+  // Inbound messages: strip the host's :agentGroupId namespace suffix to
+  // expose the clean platform message id.
+  const inRow = inbound.prepare('SELECT id FROM messages_in WHERE seq = ?').get(seq) as { id: string } | undefined;
+  if (inRow) return stripAgentGroupSuffix(inRow.id);
 
   // Outbound messages: look up platform message ID from delivered table
   const outRow = getOutboundDb().prepare('SELECT id FROM messages_out WHERE seq = ?').get(seq) as
