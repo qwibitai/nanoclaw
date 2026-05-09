@@ -25,8 +25,8 @@ import path from 'path';
 
 import { initOperatorDb } from './lib/db-init.js';
 import { getAgentGroupByFolder } from '../src/db/agent-groups.js';
-import { addMarketplace } from './lib/plugins-config.js';
-import { parseMarketplaceSource } from './lib/marketplace-source-validator.js';
+import { addMarketplace } from '../src/modules/plugins/config.js';
+import { parseMarketplaceSource } from '../src/modules/plugins/source-validator.js';
 
 async function main(): Promise<void> {
   const [, , folder, name, sourceJson] = process.argv;

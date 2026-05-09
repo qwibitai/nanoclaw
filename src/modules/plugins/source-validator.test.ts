@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   validateMarketplaceSource,
   parseMarketplaceSource,
-} from './marketplace-source-validator.js';
+} from './source-validator.js';
 
 describe('validateMarketplaceSource — accepts every documented variant', () => {
   it.each([

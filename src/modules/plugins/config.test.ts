@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
-import { GROUPS_DIR } from '../../src/config.js';
+import { GROUPS_DIR } from '../../config.js';
 import {
   addMarketplace,
   removeMarketplace,
@@ -11,8 +11,8 @@ import {
   listMarketplaces,
   listEnabledPlugins,
   parsePluginSpec,
-} from './plugins-config.js';
-import { writeContainerConfig } from '../../src/container-config.js';
+} from './config.js';
+import { writeContainerConfig } from '../../container-config.js';
 
 let testFolders: string[];
 

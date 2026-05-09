@@ -6,7 +6,7 @@
  */
 import { initOperatorDb } from './lib/db-init.js';
 import { getAgentGroupByFolder } from '../src/db/agent-groups.js';
-import { listEnabledPlugins } from './lib/plugins-config.js';
+import { listEnabledPlugins } from '../src/modules/plugins/config.js';
 
 const folder = process.argv[2];
 if (!folder) {

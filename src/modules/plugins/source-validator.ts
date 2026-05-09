@@ -1,13 +1,12 @@
 /**
- * scripts/lib/marketplace-source-validator.ts — schema validation for
- * `extraKnownMarketplaces` source variants.
+ * Schema validation for `extraKnownMarketplaces` source variants.
  *
  * Mirrors the SDK's typed schema (eight variants). Used by
  * /add-marketplace and /install-plugin --source to reject malformed
  * source specs before they hit `container.json` (and from there, the
  * SDK at next spawn — where the failure mode is harder to diagnose).
  */
-import type { ExtraKnownMarketplaceSource } from '../../src/container-config.js';
+import type { ExtraKnownMarketplaceSource } from '../../container-config.js';
 
 export type ValidationResult = { ok: true; source: ExtraKnownMarketplaceSource } | { ok: false; error: string };
 

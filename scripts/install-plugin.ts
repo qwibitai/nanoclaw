@@ -25,8 +25,8 @@ import path from 'path';
 
 import { initOperatorDb } from './lib/db-init.js';
 import { getAgentGroupByFolder } from '../src/db/agent-groups.js';
-import { installPlugin } from './lib/plugins-config.js';
-import { parseMarketplaceSource } from './lib/marketplace-source-validator.js';
+import { installPlugin } from '../src/modules/plugins/config.js';
+import { parseMarketplaceSource } from '../src/modules/plugins/source-validator.js';
 import { findGithubGitSecret } from './lib/onecli-vault-helpers.js';
 
 async function main(): Promise<void> {

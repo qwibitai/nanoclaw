@@ -1,8 +1,9 @@
 /**
- * scripts/lib/plugins-config.ts — read/validate/write the
- * `container.json:plugins` block, with safety checks for the operator
- * skills (`/add-marketplace`, `/remove-marketplace`, `/install-plugin`,
- * `/uninstall-plugin`).
+ * Plugin/marketplace config helpers — read/validate/write the
+ * `container.json:plugins` block. Used by operator skills
+ * (`/add-marketplace`, `/remove-marketplace`, `/install-plugin`,
+ * `/uninstall-plugin`) and the self-mod install_plugin/uninstall_plugin
+ * approval handlers.
  *
  * All mutations route through `updateContainerConfig()` so concurrent
  * writers (multiple operator skills, self-mod approval handlers) are
@@ -12,8 +13,8 @@ import {
   readContainerConfig,
   updateContainerConfig,
   type ExtraKnownMarketplaceSource,
-} from '../../src/container-config.js';
-import { parseMarketplaceSource } from './marketplace-source-validator.js';
+} from '../../container-config.js';
+import { parseMarketplaceSource } from './source-validator.js';
 
 /**
  * Add or update a marketplace entry in `container.json:plugins.marketplaces`.

@@ -11,7 +11,7 @@ import path from 'path';
 
 import { initOperatorDb } from './lib/db-init.js';
 import { getAgentGroupByFolder } from '../src/db/agent-groups.js';
-import { removeMarketplace } from './lib/plugins-config.js';
+import { removeMarketplace } from '../src/modules/plugins/config.js';
 
 async function main(): Promise<void> {
   const [, , folder, name] = process.argv;

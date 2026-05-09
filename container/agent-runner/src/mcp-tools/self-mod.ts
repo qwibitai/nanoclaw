@@ -117,4 +117,80 @@ export const addMcpServer: McpToolDefinition = {
   },
 };
 
-registerTools([installPackages, addMcpServer]);
+export const installPlugin: McpToolDefinition = {
+  tool: {
+    name: 'install_plugin',
+    description:
+      'Install a Claude Code plugin into your agent group. Plugins are loaded by the SDK at session init via container.json:plugins. Requires admin approval; fire-and-forget. On approval, the plugin is enabled in container.json, the container is restarted, and the SDK clones + installs the marketplace at next spawn. ' +
+      'plugin_spec is "name@marketplace" (the format the SDK uses). If the marketplace is not yet registered for this group, supply a `source` parameter — JSON matching extraKnownMarketplaces source schema (e.g. { "source": "github", "repo": "owner/repo", "ref": "main" }). For private github repos, the operator must have run /setup-private-plugins on the host first to wire the OneCLI vault entry.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        plugin_spec: { type: 'string', description: 'Plugin in "name@marketplace" format (e.g. "fmt@acme")' },
+        source: {
+          type: 'object',
+          description: 'Optional inline source for the marketplace if not yet registered. Must match SDK extraKnownMarketplaces schema. Skip if marketplace already registered for the group.',
+        },
+        reason: { type: 'string', description: 'Why this plugin is needed' },
+      },
+      required: ['plugin_spec'],
+    },
+  },
+  async handler(args) {
+    const pluginSpec = args.plugin_spec as string;
+    if (!pluginSpec || typeof pluginSpec !== 'string') return err('plugin_spec is required and must be a string');
+    if (!pluginSpec.includes('@')) return err('plugin_spec must be in "name@marketplace" format');
+
+    const requestId = generateId();
+    writeMessageOut({
+      id: requestId,
+      kind: 'system',
+      content: JSON.stringify({
+        action: 'install_plugin',
+        plugin_spec: pluginSpec,
+        source: args.source ?? null,
+        reason: (args.reason as string) || '',
+      }),
+    });
+
+    log(`install_plugin: ${requestId} → "${pluginSpec}"${args.source ? ' (with inline source)' : ''}`);
+    return ok(`Plugin install request submitted. You will be notified when admin approves or rejects.`);
+  },
+};
+
+export const uninstallPlugin: McpToolDefinition = {
+  tool: {
+    name: 'uninstall_plugin',
+    description:
+      'Disable a previously-installed plugin from your agent group. Requires admin approval; fire-and-forget. The marketplace registration stays so other plugins from the same source remain installable. plugin_spec is "name@marketplace".',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        plugin_spec: { type: 'string', description: 'Plugin in "name@marketplace" format' },
+        reason: { type: 'string', description: 'Why this plugin should be removed' },
+      },
+      required: ['plugin_spec'],
+    },
+  },
+  async handler(args) {
+    const pluginSpec = args.plugin_spec as string;
+    if (!pluginSpec || typeof pluginSpec !== 'string') return err('plugin_spec is required and must be a string');
+    if (!pluginSpec.includes('@')) return err('plugin_spec must be in "name@marketplace" format');
+
+    const requestId = generateId();
+    writeMessageOut({
+      id: requestId,
+      kind: 'system',
+      content: JSON.stringify({
+        action: 'uninstall_plugin',
+        plugin_spec: pluginSpec,
+        reason: (args.reason as string) || '',
+      }),
+    });
+
+    log(`uninstall_plugin: ${requestId} → "${pluginSpec}"`);
+    return ok(`Plugin uninstall request submitted. You will be notified when admin approves or rejects.`);
+  },
+};
+
+registerTools([installPackages, addMcpServer, installPlugin, uninstallPlugin]);

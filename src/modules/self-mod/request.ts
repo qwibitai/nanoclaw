@@ -63,6 +63,72 @@ export async function handleInstallPackages(content: Record<string, unknown>, se
   });
 }
 
+export async function handleInstallPlugin(content: Record<string, unknown>, session: Session): Promise<void> {
+  const agentGroup = getAgentGroup(session.agent_group_id);
+  if (!agentGroup) {
+    notifyAgent(session, 'install_plugin failed: agent group not found.');
+    return;
+  }
+
+  const pluginSpec = content.plugin_spec as string;
+  if (!pluginSpec || !pluginSpec.includes('@')) {
+    notifyAgent(session, 'install_plugin failed: plugin_spec must be in "name@marketplace" format.');
+    return;
+  }
+  const [, marketplace] = pluginSpec.split('@');
+  if (!marketplace) {
+    notifyAgent(session, 'install_plugin failed: marketplace name missing after "@".');
+    return;
+  }
+
+  // Validate inline source if provided. Use the same validator the operator
+  // skills use, so the same schema rules apply for agent-initiated installs.
+  let validatedSource: unknown = null;
+  if (content.source) {
+    try {
+      const { parseMarketplaceSource } = await import('../plugins/source-validator.js');
+      validatedSource = parseMarketplaceSource(content.source);
+    } catch (err) {
+      notifyAgent(session, `install_plugin failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn('install_plugin: invalid source rejected', { spec: pluginSpec, err });
+      return;
+    }
+  }
+
+  const reason = (content.reason as string) || '';
+  const sourceDesc = validatedSource ? ` (with inline source: ${JSON.stringify(validatedSource).slice(0, 100)})` : '';
+  await requestApproval({
+    session,
+    agentName: agentGroup.name,
+    action: 'install_plugin',
+    payload: { plugin_spec: pluginSpec, source: validatedSource, reason },
+    title: 'Install Plugin Request',
+    question: `Agent "${agentGroup.name}" wants to install plugin:\n${pluginSpec}${sourceDesc}${reason ? `\nReason: ${reason}` : ''}\n\nThe plugin will be cloned and loaded by the SDK at next session start. Container will restart on approval.`,
+  });
+}
+
+export async function handleUninstallPlugin(content: Record<string, unknown>, session: Session): Promise<void> {
+  const agentGroup = getAgentGroup(session.agent_group_id);
+  if (!agentGroup) {
+    notifyAgent(session, 'uninstall_plugin failed: agent group not found.');
+    return;
+  }
+  const pluginSpec = content.plugin_spec as string;
+  if (!pluginSpec || !pluginSpec.includes('@')) {
+    notifyAgent(session, 'uninstall_plugin failed: plugin_spec must be in "name@marketplace" format.');
+    return;
+  }
+  const reason = (content.reason as string) || '';
+  await requestApproval({
+    session,
+    agentName: agentGroup.name,
+    action: 'uninstall_plugin',
+    payload: { plugin_spec: pluginSpec, reason },
+    title: 'Uninstall Plugin Request',
+    question: `Agent "${agentGroup.name}" wants to disable plugin:\n${pluginSpec}${reason ? `\nReason: ${reason}` : ''}\n\nThe marketplace registration stays so other plugins from it remain installable. Container will restart on approval.`,
+  });
+}
+
 export async function handleAddMcpServer(content: Record<string, unknown>, session: Session): Promise<void> {
   const agentGroup = getAgentGroup(session.agent_group_id);
   if (!agentGroup) {
