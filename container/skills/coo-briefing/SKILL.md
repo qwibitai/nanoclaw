@@ -185,9 +185,9 @@ Three windows:
 - Prior 7d: reviews where DATE_REVIEW >= today-14 AND < today-7
 
 Per window compute:
-- **Recommend Score (0-10)**: average of NPS column. This column is likelihood-to-recommend (0-10 scale), not true Net Promoter Score. Only populated for Survey source reviews -- show "--" if no Survey reviews in window.
-- **True NPS**: computed from Survey reviews only. Promoters = score >= 9, Detractors = score <= 6. NPS = (count Promoters - count Detractors) / total Survey reviews * 100. Show as integer, e.g. "+42" or "-15". If fewer than 5 Survey reviews in window, show "--".
-- **Survey Overall Experience (1-5)**: from Survey source reviews only. Parse `survey_topics` field (JSON array). Find the topic whose name contains "Overall Experience" (e.g. "Your Overall Experience"). Within that topic, find the question whose name contains "Overall Experience" and read its `ratingAnswer`. Average those values across all Survey reviews in the window. If the field is missing or null for a review, skip it. Show "--" if fewer than 3 valid values.
+- **Recommend Score (0-10)**: average of NPS column. This column is likelihood-to-recommend (0-10 scale), not true Net Promoter Score. Only populated for `REVIEW_SOURCE = 'Revinate Surveys'` rows -- show "--" if none in window.
+- **True NPS**: computed from `REVIEW_SOURCE = 'Revinate Surveys'` rows only. Promoters = score >= 9, Detractors = score <= 6. NPS = (count Promoters - count Detractors) / total survey rows * 100. Show as integer, e.g. "+42" or "-15". If fewer than 5 survey rows in window, show "--".
+- **Survey Overall Experience (1-5)**: from `REVIEW_SOURCE = 'Revinate Surveys'` rows only. Parse `SURVEY_TOPICS` field (JSON array). Find the topic whose name contains "Overall Experience" (e.g. "Your Overall Experience"). Within that topic, find the question whose name contains "Overall Experience" and read its `ratingAnswer`. Average those values across all survey rows in the window. If the field is missing or null for a review, skip it. Show "--" if fewer than 3 valid values.
 - **Platform Rating (1-5)**: average of `rating` field (1-5 scale, populated for external platform reviews: Google, Booking.com, TripAdvisor, Expedia). Different from the survey score above.
 - **Review count**: total reviews in window (all sources).
 
@@ -209,12 +209,12 @@ for r in alice_raw:
         dedup_alice.append(r)
 ```
 
-Filter to last 7 days by parsed date. Per hotel:
+Compute four windows (7d, 30d, 60d, 90d) by filtering deduped records to parsed_date >= today - N. Per hotel per window:
 - Tickets: total count
 - Est. Comp: sum of TRY_TO_NUMBER(REPLACE(REPLACE(COMPENSATION,'$',''),',',''))
 - Top 3 Issues: three most frequent GLITCH_ISSUE values with counts, e.g. "Room cleanliness (4), Noise (3), AC (2)"
 
-If no ALICE data for hotel, show "--" in all columns.
+If no ALICE data for hotel in a window, show "--" across all columns for that row.
 
 Max date of ALICE data: if more than 14 days old, show "(pipeline stale)" in section header.
 
@@ -264,149 +264,158 @@ Do not pad with generic observations. If fewer than 5 meaningful signals, use 4 
 
 ### 2. Executive Summary
 
-Seven cross-portfolio tables. Use the full computed dataset -- no extra API calls.
+Emit exactly the following skeleton. Seven tables, fixed columns, no additions. Rows are dynamic (data-driven) but columns are locked. All numbers exact -- never round or approximate.
 
-**Table 1 -- 7-Day Pickup Leaders (0-30d window)**
+```
+## Executive Summary
 
+### Table 1 -- 7-Day Pickup Leaders (0-30d)
+Rows: top 5 hotels by 7D Pickup Rev descending.
 | Hotel | 7D Pickup Rev |
-|---|---|
+|-------|---------------|
+| {{hotel}} | {{val}} |
+... (up to 5 rows)
 
-Show top 5 hotels by 7D Pickup Rev in the 0-30d window, descending.
+### Table 2 -- Largest Pace Gaps vs STLY (0-30d)
+Rows: hotels where 0-30d vs STLY % < -10%, sorted most negative first.
+If fewer than 3 qualify, show top 3 most negative regardless of threshold.
+| Hotel | OTB Revenue | STLY Revenue | Gap % |
+|-------|-------------|--------------|-------|
+| {{hotel}} | {{val}} | {{val}} | {{val}} |
+...
 
-**Table 2 -- Largest Pace Gaps vs STLY (0-30d)**
+### Table 3 -- Day-over-Day Revenue Movers (0-30d)
+Rows: top 5 by absolute DoD change, descending. Include both gains and losses.
+| Hotel | Today OTB Rev | Yesterday OTB Rev | Change |
+|-------|---------------|-------------------|--------|
+| {{hotel}} | {{val}} | {{val}} | +/- {{val}} |
+...
 
-| Hotel | Revenue | STLY Revenue | Gap % |
-|---|---|---|---|
+### Table 4 -- Forecast Accuracy MTD (P.Fcst as of 3:00am {{CACHE_DATE}})
+Rows: all 12 hotels, sorted by absolute (Actual % of Fcst - Month Elapsed %) descending.
+Month Elapsed = {{PCT}} ({{N}}/{{D}}d) -- same for all rows, shown in header not repeated per row.
+| Hotel | Actual MTD Rev | Forecast Rev | Actual % of Fcst | Month Elapsed |
+|-------|----------------|--------------|------------------|---------------|
+| {{hotel}} | {{val}} | {{val}} | {{val}} | {{PCT}} ({{N}}/{{D}}d) |
+...
 
-Show hotels where 0-30d vs STLY % < -10%. Sort by gap % ascending (most negative first). If fewer than 3 hotels qualify, show top 3 by largest negative gap.
+### Table 5 -- STR RGI Watchlist (YTD Total RevPAR Index < 90)
+Omit this table entirely if no hotels qualify.
+| Hotel | RevPAR Index YTD | RevPAR Index R28 | YTD Rank |
+|-------|-----------------|-----------------|----------|
+| {{hotel}} | {{val}} | {{val}} | {{val}} |
+...
 
-**Table 3 -- Day-over-Day Revenue Movers (0-30d)**
-
-| Hotel | Today | Yesterday | Change |
-|---|---|---|---|
-
-Show top 5 DoD movers by absolute change (both positive and negative). Sort by absolute value of change, descending. Label gains with "+" and losses with "-".
-
-**Table 4 -- Forecast Accuracy MTD (largest variances)**
-
-| Hotel | Actual MTD | Forecast MTD | Variance |
-|---|---|---|---|
-
-Show hotels sorted by absolute variance %, largest first. Show top 6. Variance = Revenue Actual vs Revenue Forecast.
-
-**Table 5 -- RGI Watchlist (YTD Total RevPAR Index < 90)**
-
-| Hotel | RevPAR Index (YTD) | RevPAR Index (R28) | Rank |
-|---|---|---|---|
-
-Show all hotels where Total/YTD RevPAR Index < 90. Include R28 for trend direction and latest-day rank. If none, omit this table.
-
-**Table 6 -- Guest Experience WoW Recommend Score Drops (Last 7d vs Prior 7d)**
-
+### Table 6 -- Guest Experience: Recommend Score Drops (Last 7d vs Prior 7d)
+Rows: hotels where WoW Recommend Score delta < -0.5, sorted most negative first.
+Omit this table entirely if no hotels qualify.
 | Hotel | Last 7d Score | Prior 7d Score | Delta |
-|---|---|---|---|
+|-------|---------------|----------------|-------|
+| {{hotel}} | {{val}} | {{val}} | {{val}} |
+...
 
-Show hotels where WoW Recommend Score delta < -0.5. Sort by delta ascending (largest drop first). Omit table if no drops.
-
-**Table 7 -- Operations: ALICE Ticket Volume (last 7d)**
-
+### Table 7 -- ALICE Ticket Volume (Last 7d)
+Rows: all hotels with any tickets last 7d, sorted by ticket count descending.
 | Hotel | Tickets | Est. Comp | Top 3 Issues |
-|---|---|---|---|
-
-Show all hotels that had any ALICE tickets in last 7d, sorted by ticket count descending.
+|-------|---------|-----------|--------------|
+| {{hotel}} | {{val}} | {{val}} | {{val}} |
+...
+```
 
 ---
 
 ### 3. Property Detail
 
-For each hotel in portfolio order (SMP, DTLA, HJL, HJM, ATX, SFP, SHEL, MYC, TCH, ING, AVBH, AVPS):
+For each hotel in portfolio order (SMP, DTLA, HJL, HJM, ATX, SFP, SHEL, MYC, TCH, ING, AVBH, AVPS), compute all values first, then emit EXACTLY the following skeleton -- no more, no less. Replace every `{{placeholder}}` with its computed value. Do not add, remove, or reorder any section. Do not add narrative text outside the defined slots.
 
+```
+## {{HOTEL_FULL_NAME}} (Rooms: {{ROOM_COUNT}})
+Duetto OTB as of 3:00am {{CACHE_DATE}} | P.Fcst as of 3:00am {{CACHE_DATE}}
 
+### 3a. Takeaways
+- {{TAKEAWAY_1}}
+- {{TAKEAWAY_2}}
+- {{TAKEAWAY_3}}
+- {{TAKEAWAY_4}}
+- {{TAKEAWAY_5}}
 
-**Hotel header:** Full name (from property_mapping.json) + room count. Example: "Austin Proper (Rooms: 238)".
+{{ACTION_ITEMS}}
 
-#### 3a. Top 5 Takeaways + Actions
+### 3b. Pickup & Pace (Duetto Total segment)
+| Window | OTB Rooms | OTB Rev    | ADR   | vs STLY | vs Budget | 7D Pickup | DoD Delta |
+|--------|-----------|------------|-------|---------|-----------|-----------|-----------|
+| MTD    | {{val}}   | {{val}}    | {{val}}| {{val}} | {{val}}   | --        | {{val}}   |
+| 0-30d  | {{val}}   | {{val}}    | {{val}}| {{val}} | {{val}}   | {{val}}   | {{val}}   |
+| 31-60d | {{val}}   | {{val}}    | {{val}}| {{val}} | {{val}}   | {{val}}   | {{val}}   |
+| 61-90d | {{val}}   | {{val}}    | {{val}}| {{val}} | {{val}}   | {{val}}   | {{val}}   |
 
-Auto-generate 5 hotel-specific bullets from its computed data. Examples of what to look for:
-- 0-30d pace vs STLY with pickup direction
-- MTD revenue vs STLY and vs budget
-- STR RGI vs 90 threshold and rank
-- Forward window (31-60 or 61-90) signals
-- DoD revenue delta
-- NPS WoW direction with context (review count)
-- Upcoming demand events
+### 3c. Forecast Accuracy MTD (P.Fcst as of 3:00am {{CACHE_DATE}})
+| Metric  | Actual MTD | Forecast | Budget | Actual % of Fcst | Actual % of Bud | Month Elapsed      |
+|---------|------------|----------|--------|------------------|-----------------|--------------------|
+| Rooms   | {{val}}    | {{val}}  | {{val}}| {{val}}          | {{val}}         | {{PCT}} ({{N}}/{{D}}d) |
+| Revenue | {{val}}    | {{val}}  | {{val}}| {{val}}          | {{val}}         | {{PCT}} ({{N}}/{{D}}d) |
 
-Format: one sentence per bullet, specific numbers, no filler.
+### 3d. STR (as of {{STR_MAX_DATE}})
+| Segment   | Period  | Occ Index | ADR Index | RevPAR Index | Occ Rank | ADR Rank | RevPAR Rank |
+|-----------|---------|-----------|-----------|--------------|----------|----------|-------------|
+| Total     | CurrWk  | {{val}}   | {{val}}   | {{val}}      | {{val}}  | {{val}}  | {{val}}     |
+| Total     | R28     | {{val}}   | {{val}}   | {{val}}      | {{val}}  | {{val}}  | {{val}}     |
+| Total     | YTD     | {{val}}   | {{val}}   | {{val}}      | {{val}}  | {{val}}  | {{val}}     |
+| Transient | CurrWk  | {{val}}   | {{val}}   | {{val}}      | {{val}}  | {{val}}  | {{val}}     |
+| Transient | R28     | {{val}}   | {{val}}   | {{val}}      | {{val}}  | {{val}}  | {{val}}     |
+| Transient | YTD     | {{val}}   | {{val}}   | {{val}}      | {{val}}  | {{val}}  | {{val}}     |
+| Group     | CurrWk  | {{val}}   | {{val}}   | {{val}}      | {{val}}  | {{val}}  | {{val}}     |
+| Group     | R28     | {{val}}   | {{val}}   | {{val}}      | {{val}}  | {{val}}  | {{val}}     |
+| Group     | YTD     | {{val}}   | {{val}}   | {{val}}      | {{val}}  | {{val}}  | {{val}}     |
 
-After the 5 bullets, generate action items for this hotel using the Action Routing rules. One action line per distinct issue. Omit if no actionable signals.
+### 3e. Guest Experience -- Surveys (Revinate Surveys source only)
+| Metric                    | L30d    | Last 7d | Prior 7d | WoW Delta |
+|---------------------------|---------|---------|----------|-----------|
+| Recommend Score (0-10)    | {{val}} | {{val}} | {{val}}  | {{val}}   |
+| NPS (Promoters-Detractors)| {{val}} | {{val}} | {{val}}  | --        |
+| Survey Overall Exp (1-5)  | {{val}} | {{val}} | {{val}}  | --        |
+| Survey Responses          | {{val}} | {{val}} | {{val}}  | --        |
 
-#### 3b. Pickup & Pace
+### 3f. Guest Experience -- Platform Reviews
+| Platform     | MTD Avg | MTD Reviews | Prior Month Avg | Prior Month Reviews | YTD Avg | YTD Reviews |
+|--------------|---------|-------------|-----------------|---------------------|---------|-------------|
+| **Overall**  | {{val}} | {{val}}     | {{val}}         | {{val}}             | {{val}} | {{val}}     |
+| Google       | {{val}} | {{val}}     | {{val}}         | {{val}}             | {{val}} | {{val}}     |
+| TripAdvisor  | {{val}} | {{val}}     | {{val}}         | {{val}}             | {{val}} | {{val}}     |
+| Booking.com  | {{val}} | {{val}}     | {{val}}         | {{val}}             | {{val}} | {{val}}     |
+| Expedia      | {{val}} | {{val}}     | {{val}}         | {{val}}             | {{val}} | {{val}}     |
+| Hotels.com   | {{val}} | {{val}}     | {{val}}         | {{val}}             | {{val}} | {{val}}     |
 
-| Window | OTB Rooms | OTB Rev | ADR | vs STLY | vs Budget | 7D Pickup | DoD Delta Rev |
-|---|---|---|---|---|---|---|---|
-| MTD | | | | | | -- | |
-| 0-30 | | | | | | | |
-| 31-60 | | | | | | | |
-| 61-90 | | | | | | | |
+### 3g. Operations -- ALICE
+| Window   | Tickets | Est. Comp | Top 3 Issues |
+|----------|---------|-----------|--------------|
+| Last 7d  | {{val}} | {{val}}   | {{val}}      |
+| Last 30d | {{val}} | {{val}}   | {{val}}      |
+| Last 60d | {{val}} | {{val}}   | {{val}}      |
+| Last 90d | {{val}} | {{val}}   | {{val}}      |
 
-All values from Total segment Duetto data.
+### 3h. Events -- Next 7 Days
+| Date    | Event   | Type    |
+|---------|---------|---------|
+| {{val}} | {{val}} | {{val}} |
 
-#### 3c. Forecast Accuracy (MTD)
+---END PROPERTY---
+```
 
-| Metric | Actual | Forecast | Budget | vs Fcst | vs Budget |
-|---|---|---|---|---|---|
-| Rooms | | | | | |
-| Revenue | | | | | |
-
-#### 3d. STR
-
-Three sub-tables, one per segment: Total, Transient, Group.
-
-Single 9-row x 8-column table. Rows = 3 segments x 3 periods. Rank = latest-day value from STR_DAILY (not averaged); show "--" if not in cache.
-
-| Segment | Period | Occ Index | ADR Index | RevPAR Index | Occ Rank | ADR Rank | RevPAR Rank |
-|---|---|---|---|---|---|---|---|
-| Total | CurrWk | | | | | | |
-| Total | R28 | | | | | | |
-| Total | YTD | | | | | | |
-| Transient | CurrWk | | | | | | |
-| Transient | R28 | | | | | | |
-| Transient | YTD | | | | | | |
-| Group | CurrWk | | | | | | |
-| Group | R28 | | | | | | |
-| Group | YTD | | | | | | |
-
-If any RevPAR Index < 90, add "(watchlist)" in red. Do NOT revert to the old single-line MPI/ARI/RGI format.
-
-#### 3e. Guest Experience -- Revinate (last 30d and WoW)
-
-| Metric | L30d | Last 7d | Prior 7d | WoW Delta |
-|---|---|---|---|---|
-| Recommend Score (0-10) | | | | |
-| NPS (Promoters - Detractors) | | | | |
-| Survey Overall Exp (1-5) | | | | |
-| Platform Rating (1-5) | | | | |
-| Reviews | | | | |
-
-Recommend Score WoW delta in red if < -0.5, green if > +0.5.
-If L30d Recommend Score < 7.5, note in amber "(below threshold)".
-NPS: show as signed integer (e.g. "+42"). No WoW delta required for NPS.
-Survey Overall Exp: survey-sourced 1-5 score. Platform Rating: public review star average (Google/Booking/TripAdvisor).
-
-#### 3f. Operations -- ALICE (last 7d)
-
-| Tickets | Est. Comp | Top 3 Issues |
-|---|---|---|
-| | | |
-
-If no ALICE data, show one row: "-- | -- | No ALICE data"
-
-#### 3g. Events (next 7 days)
-
-| Date | Event | Type |
-|---|---|---|
-
-From Lighthouse. If no events, show "None listed."
+**Value rules:**
+- All numbers exact -- never round or approximate. $450,859 not "$450K".
+- Signed variances: "+4.9%" or "-2.5%", "+42" or "-15" for NPS.
+- Missing data: "--" in that cell only.
+- Recommend Score WoW delta: red if < -0.5, green if > +0.5.
+- If L30d Recommend Score < 7.5, append "(below threshold)" in amber.
+- STR RevPAR Index < 90: append "(watchlist)" in red to that cell.
+- Platform rows: omit any platform with zero reviews in both MTD and YTD.
+- Overall platform row = simple average of RATING across all non-survey sources for that period.
+- ALICE dedup mandatory before counting (PROPERTY + DATE + TYPE + GLITCH_ISSUE). Top 3 Issues = most frequent GLITCH_ISSUE values with counts.
+- Surveys = REVIEW_SOURCE = 'Revinate Surveys' only. Platform reviews = all other sources.
+- {{ACTION_ITEMS}}: one line per actionable signal using Action Routing rules. Omit block entirely if no signals.
+- Month Elapsed = days_elapsed / days_in_month as percentage, e.g. "29% (9/31d)".
+- Actual % of Fcst = Actual / Forecast * 100 (consumption rate vs full-month forecast, not a delta).
 
 ---
 
