@@ -2,16 +2,27 @@ import { findByName, getAllDestinations, type DestinationEntry } from './destina
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
 import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
+import { clearContinuation, migrateLegacyContinuation, setContinuation } from './db/session-state.js';
 import {
-  clearContinuation,
-  migrateLegacyContinuation,
-  setContinuation,
-} from './db/session-state.js';
-import { formatMessages, extractRouting, categorizeMessage, isClearCommand, isRunnerCommand, stripInternalTags, type RoutingContext } from './formatter.js';
+  formatMessages,
+  extractRouting,
+  categorizeMessage,
+  isClearCommand,
+  isRunnerCommand,
+  stripInternalTags,
+  type RoutingContext,
+} from './formatter.js';
 import type { AgentProvider, AgentQuery, ProviderEvent } from './providers/types.js';
 
 const POLL_INTERVAL_MS = 1000;
 const ACTIVE_POLL_INTERVAL_MS = 500;
+// Exit cleanly after this much consecutive idle time. The 20s heartbeat tick
+// in index.ts decoupled liveness from event flow, which means the host's
+// absolute-ceiling sweep no longer fires on healthy idle containers — they
+// would otherwise sit forever holding RAM. The host respawns from the saved
+// continuation on the next inbound message, so this is a graceful sleep, not
+// a session-loss event.
+const IDLE_SHUTDOWN_MS = 30 * 60 * 1000;
 
 function log(msg: string): void {
   console.error(`[poll-loop] ${msg}`);
@@ -62,6 +73,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   clearStaleProcessingAcks();
 
   let pollCount = 0;
+  let lastActivityAt = Date.now();
   while (true) {
     // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
     const messages = getPendingMessages().filter((m) => m.kind !== 'system');
@@ -73,9 +85,16 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     }
 
     if (messages.length === 0) {
+      if (Date.now() - lastActivityAt > IDLE_SHUTDOWN_MS) {
+        log(
+          `Idle for ${Math.round(IDLE_SHUTDOWN_MS / 60_000)} min — exiting cleanly; host will respawn on next inbound`,
+        );
+        return;
+      }
       await sleep(POLL_INTERVAL_MS);
       continue;
     }
+    lastActivityAt = Date.now();
 
     // Accumulate gate: if the batch contains only trigger=0 rows
     // (context-only, router-stored under ignored_message_policy='accumulate'),
@@ -385,7 +404,9 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       log(`Result: ${event.text ? event.text.slice(0, 200) : '(empty)'}`);
       break;
     case 'error':
-      log(`Error: ${event.message} (retryable: ${event.retryable}${event.classification ? `, ${event.classification}` : ''})`);
+      log(
+        `Error: ${event.message} (retryable: ${event.retryable}${event.classification ? `, ${event.classification}` : ''})`,
+      );
       break;
     case 'progress':
       log(`Progress: ${event.message}`);

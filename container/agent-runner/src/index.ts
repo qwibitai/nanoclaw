@@ -26,6 +26,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { loadConfig } from './config.js';
+import { touchHeartbeat } from './db/connection.js';
 import { buildSystemPromptAddendum } from './destinations.js';
 import { normalizeMcpEntry, type RawMcpEntry } from './mcp-config.js';
 // Providers barrel — each enabled provider self-registers on import.
@@ -41,11 +42,25 @@ function log(msg: string): void {
 
 const CWD = '/workspace/agent';
 
+// Process-liveness heartbeat. The poll-loop touches heartbeat as events
+// stream from the provider, which is fine for streaming providers (Claude SDK,
+// Codex) but starves on request/response providers like amplifier-remote: a
+// 90s synchronous HTTP wait yields no events, so the heartbeat goes stale and
+// the host's claim-stuck sweep (60s tolerance) kills a perfectly healthy
+// container mid-turn. Touching on a fixed 20s tick decouples liveness from
+// provider event flow — if the Node event loop is running, the container is
+// alive. Genuine deadlocks (pegged CPU, sync fs hang) still stop the timer.
+const HEARTBEAT_TICK_MS = 20_000;
+
 async function main(): Promise<void> {
   const config = loadConfig();
   const providerName = config.provider.toLowerCase() as ProviderName;
 
   log(`Starting v2 agent-runner (provider: ${providerName})`);
+
+  const heartbeatInterval = setInterval(touchHeartbeat, HEARTBEAT_TICK_MS);
+  heartbeatInterval.unref();
+  touchHeartbeat();
 
   // Runtime-generated system-prompt addendum: agent identity (name) plus
   // the live destinations map. Everything else (capabilities, per-module
