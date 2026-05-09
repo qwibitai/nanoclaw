@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# Injected by beads (GH#3132): husky helper layout not mirrored into this dir.
+export PATH="$PWD/node_modules/.bin:$PATH"
