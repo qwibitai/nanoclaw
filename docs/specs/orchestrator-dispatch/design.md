@@ -24,17 +24,17 @@ NanoClaw today is purely reactive: each session exists because someone messaged 
 Two related needs:
 
 1. **Dispatch parallel work**: drop a list of N tasks (e.g. the 22-item XZO triage) and have an orchestrator agent farm them out to existing agent groups, each task running in its own session.
-2. **Visibility**: a single dashboard showing every in-flight task, live status, and a path to chat with each task individually.
+2. **Visibility (v1)**: per-task Slack/Discord subthreads + orchestrator chat summaries fed by `task_complete` system rows + `scripts/lookback.ts` for cross-thread surveys. (Dedicated dashboard surface deferred to v2.)
 
 The existing `agent-to-agent` module is structurally wrong for this. It's a hierarchical *subagent-spawning* primitive (`create_agent` produces a permanent child group, ACL via per-pair `agent_destinations` rows, agents reference each other by parent-scoped local names, and `routeAgentMessage` inherits the caller's threading so children collapse into one session per parent thread). What we need is *flat dispatch* into existing groups with a fresh thread per task.
 
 ## Goals
 
 - **G1**: Orchestrator can dispatch N tasks → N sessions in N target agent groups, each addressable independently.
-- **G2**: Owner can read live progress and steer any in-flight task from a single dashboard.
-- **G3**: Tasks have durable host-side state (status, dependencies, parent linkage, deadlines) that survives container crashes and host restarts.
+- **G2**: Owner can read live progress and steer any in-flight task from the per-task Slack/Discord subthread (v1). Dashboard surface deferred to v2.
+- **G3**: Tasks have durable host-side state (status, parent linkage, dispatch state, deadlines) that survives container crashes and host restarts.
 - **G4**: Reverse signal: child reports completion → orchestrator notified via system row in parent session. (Automatic dependent-task unblocking deferred to v2 with dependency chains.)
-- **G5**: Memory budget for the dashboard ≤ 150MB additional resident on the host. No new background services beyond the existing Node host.
+- ~~**G5**~~: **DEFERRED to v2** — dashboard memory budget (≤150MB) reserved for v2 reintroduction.
 
 ## Non-goals
 
@@ -218,6 +218,22 @@ Multi-step state machine with persisted `dispatch_state` per step. Each transiti
 [2] Container writes outbound system action `dispatch_task` to outbound.db.
     (Container is sole writer of outbound.db — invariant preserved.)
 
+    **MCP tool return contract (closes Codex C-2-3 v1-cut)**: the
+    orchestrator's container-side `dispatch_task` MCP handler:
+    1. Generates the host-routable task_id locally as
+       `task-${idempotency_key}` (deterministic, caller-derived; no
+       round-trip needed).
+    2. Writes the outbound system action with this task_id.
+    3. Returns the task_id synchronously to the orchestrator agent in
+       the MCP tool result.
+    4. Host's `applyDispatchTask` validates and INSERTs the tasks row
+       using the same `task-${idempotency_key}` PK (UNIQUE constraint
+       on `(parent_session_id, idempotency_key)` still enforces dedup).
+    The orchestrator can immediately reference task_id for subsequent
+    cancel_task / progress queries; if the host rejects the dispatch
+    (cap, missing role, etc), a `dispatch_rejected` system action is
+    written back to the parent session with the rejection reason.
+
 [3] Host's delivery.ts:280 (system-action dispatch) routes to
     `applyDispatchTask`. Host validates:
       - source agent group has 'orchestrator' role in agent_roles
@@ -361,12 +377,14 @@ The (mg_id, thread_id, mode) tuple in step 5b depends on the phase — see [Phas
 
 **Authorization model (cycle-2 M2-E simplification):** a child session has at most one dispatched task (enforced by `sessions.dispatch_task_id UNIQUE`); a task has exactly one child session (enforced by application logic + the UNIQUE column). The pair (task_id ↔ child_session_id) is the capability. `task_complete` authorization is `task_id = ? AND child_session_id = <source session of outbound row> AND target_agent_group_id = <source agent group>` — no nonce required. The source-session of an outbound row is implicit in the row itself (host knows which session emitted the system action), so a forged claim from a non-dispatched session fails the binding check immediately.
 
-**Adapter idempotency contract (cycle-3 M3-8 — split from cycle-2 M2-D's combined call):** the `ChannelAdapter` interface gains three optional methods:
-- `postParent?(messagingGroupId, localParentMessageId, title): Promise<{ parentPlatformMessageId: string; messageId: string }>` — posts the platform parent message; idempotent on `localParentMessageId` (PK-protected via `writeSessionMessage` on NanoClaw's local row).
-- `createThreadFromParent?(messagingGroupId, parentPlatformMessageId, firstMessage): Promise<{ threadId: string }>` — creates the thread from an already-posted parent. On Slack, this means posting the first child reply with `thread_ts=parentPlatformMessageId`. On Discord, calls `Message#startThread`.
-- `getThreadId?(messagingGroupId, parentPlatformMessageId): Promise<string | null>` — reconciler crash-recovery probe. Slack: returns threadId if and only if `parent.thread_ts == parent.ts` AND `parent.reply_count > 0`. Discord: returns thread id if `Message#thread !== null`.
+**Adapter idempotency contract (cycle-3 M3-8 — split from cycle-2 M2-D's combined call):** the `ChannelAdapter` interface gains four optional methods. Cycle-2 v1-cut M-26 added `findParentByLocalKey` to close the host-crash-after-platform-accept window: even before `parent_platform_message_id` is persisted on the NanoClaw side, the adapter can recover the platform ID by querying for the local key embedded in the platform message metadata.
 
-The adapter capability flag `supportsCreateThread` (true if both `postParent` AND `createThreadFromParent` are implemented) is what the dispatch flow consults.
+- `postParent?(messagingGroupId, localParentMessageId, title): Promise<{ parentPlatformMessageId: string; messageId: string }>` — posts the platform parent message **with the `localParentMessageId` embedded as platform-side metadata**: Slack uses `metadata.event_payload.local_id`; Discord uses an embed footer or hidden Markdown comment. Idempotent on `localParentMessageId`: the adapter MUST first call its own `findParentByLocalKey` lookup; if found, return the existing `parentPlatformMessageId` without re-posting.
+- `findParentByLocalKey?(messagingGroupId, localParentMessageId): Promise<string | null>` — searches recent platform messages (last 100 in the messaging group) for one whose embedded local-key metadata matches. Returns the `parentPlatformMessageId` if found, else null. **Closes the cycle-2-v1-cut M-26 / Codex C-2-4 host-crash-after-platform-accept gap**: the reconciler resuming from `creating_thread` with `parent_platform_message_id IS NULL` calls this before re-attempting `postParent`.
+- `createThreadFromParent?(messagingGroupId, parentPlatformMessageId, firstMessage): Promise<{ threadId: string }>` — creates the thread from an already-posted parent. On Slack, posting the first child reply with `thread_ts=parentPlatformMessageId`. On Discord, calls `Message#startThread`.
+- `getThreadId?(messagingGroupId, parentPlatformMessageId): Promise<string | null>` — reconciler crash-recovery probe. Slack: returns threadId iff `parent.thread_ts == parent.ts` AND `parent.reply_count > 0`. Discord: returns thread id if `Message#thread !== null`.
+
+The adapter capability flag `supportsCreateThread` (true if all four methods are implemented) is what the dispatch flow consults.
 
 ### Reverse signal
 
@@ -424,8 +442,8 @@ Two writes per completion: user-visible chat into the **child's own subthread** 
            Setting it to completed_at marks "not applicable, finalized" so
            the watchdog finalization scan doesn't loop on it.
 
-        d. **Write 2 (parent system row)** — now contains the final
-           dependents_unblocked list because step b ran first.
+        d. **Write 2 (parent system row)** — for v1, dependents_unblocked
+           is always empty (no fan-out logic in v1; v2 will populate).
            Direct-write a kind='system' inbound row to parent_session_id.
            Wire format (formatter.ts:307-317):
              {
@@ -519,7 +537,7 @@ The host enforces all gating in `applyTaskComplete` via `authorizeChildCompletio
     type: 'object',
     properties: {
       task_id:          { type: 'string' },
-      progress_message: { type: 'string', description: 'Optional one-line status. Surfaced in dashboard.' },
+      progress_message: { type: 'string', description: 'Optional one-line status. v1: persisted on tasks row (last_progress_message column) for v2 dashboard backfill; not displayed on any v1 surface.' },
       deadline_extension_seconds: { type: 'integer', description: 'Optional. New deadline = max(current_deadline, now + this). Capped at original_deadline × 4. Rejected with error if original_deadline is NULL.' },
     },
     required: ['task_id'],
@@ -531,7 +549,7 @@ Host's `applyTaskProgress` shares `authorizeChildCompletion`'s session-binding i
 - If `tasks.original_deadline IS NULL`: reject with error `original_deadline_required` (closes cycle-2 M2-I).
 - Else: compute `max_allowed = original_deadline + 4 × (original_deadline - spawned_at)`; new_deadline = min(now + requested, max_allowed); UPDATEs `tasks.deadline`.
 
-Emits a `task.progress` SSE event to the dashboard. (The dashboard SSE event name `task.progress` is intentionally distinct from any `task_progress` system-action terminology — they're at different layers.)
+v1 surface: persists progress_message on the tasks row only (no live broadcast, no SSE — dashboard deferred to v2). v2 will add a `task.progress` SSE event for the dashboard. The orchestrator agent does NOT see `task_progress` calls in v1 unless it explicitly queries the tasks table.
 
 #### `cancel_task` MCP tool (closes review S9 / cycle-2 M12)
 
@@ -547,11 +565,15 @@ Emits a `task.progress` SSE event to the dashboard. (The dashboard SSE event nam
 }
 ```
 
-Host's `applyCancelTask` (closes cycle-1 M12 + cycle-2 M2-B — soft+hard pattern with `cancelled_at` properly tracked):
+Host's `applyCancelTask` (closes cycle-1 M12 + cycle-2 M2-B + cycle-2-v1-cut M-28):
 
 1. Validate caller has `orchestrator` role on the calling session's agent_group. (Matches `dispatch_task` gating.)
 2. UPDATE tasks SET status='cancelled', cancelled_at=now, completed_at=now WHERE task_id=? AND status IN ('pending','dispatched','running'). The `cancelled_at` column (cycle-2 M2-B) is what the watchdog hard-kill timer reads. **`completed_at` is also set** (cycle-3 M3-1) so internal-only cancelled tasks don't leak `child_summary_posted_at = NULL` permanently — §Reverse signal step c reads `completed_at` for the not-applicable marker.
-3. Write a `kind='system'` inbound row into the child's session: `{ action: 'cancel', task_id }`. Wake the child.
+3. **Branch on dispatch_state (closes cycle-2-v1-cut M-28 — Codex C-2-6 cancellation race)**: cancellation behavior depends on whether the child session exists yet:
+   - `dispatch_state IN ('pending', 'admitted')`: **no child session yet** (`child_session_id IS NULL`). Skip the child-session write entirely. Run `finalizeTaskCompletion(status='cancelled', summary='Task cancelled before dispatch began', failure_reason='cancelled_before_start')` immediately. Internal-only finalize (no platform thread to write to).
+   - `dispatch_state IN ('creating_thread', 'parent_posted')`: **child session may not exist yet, but a parent platform message may have been posted**. Skip child-session write. The reconciler (responsibility 1) will detect the dispatch_state has been overridden by status='cancelled' and abort the dispatch before continuing (see step 4 below for the dispatch-loop guard). Run `finalizeTaskCompletion` after; if `parent_platform_message_id IS NOT NULL`, the parent message is left as-is (orphaned but harmless platform artifact — owner sees "Launched task X" with no thread underneath).
+   - `dispatch_state IN ('thread_created', 'session_created', 'prompt_injected', 'wake_sent', 'running')`: **child session exists**. Write a `kind='system'` inbound row into the child's session: `{ action: 'cancel', task_id }`. Wake the child. Soft-cancel proceeds as in step 4 below.
+4. **Dispatch-loop cancellation guard (closes cycle-2-v1-cut M-28)**: every dispatch_state transition in §Dispatch flow's step 5a/5b/5c/5d/5e is guarded by `WHERE task_id=? AND status='dispatched' AND dispatch_state=?`. If the row no longer matches (because `applyCancelTask` set status='cancelled'), the transition aborts cleanly. The reconciler (responsibility 1) only processes `status='dispatched'` rows, so a cancelled mid-dispatch task is excluded from retry.
 4. Child agent — instructed via dispatch banner: *"If you receive a system action with action='cancel' for your task_id, exit gracefully without calling task_complete."* Best-effort soft cancellation; the agent might still be mid-LLM-call when the system row arrives.
 5. Watchdog enforces hard kill: if `tasks.status='cancelled'` AND `dispatch_state IN ('prompt_injected','wake_sent','running')` AND `cancelled_at < now - 120s`, host calls `killContainer(child_session)`. (`killContainer` already exists in `src/container-runner.ts`.)
 6. After kill or graceful exit, `finalizeTaskCompletion(status='cancelled', summary='Task cancelled by orchestrator', failure_reason=null)` runs through the same idempotent state machine as completion. The `cancelled` status is included in finalization-resume index (see `idx_tasks_finalization` in §Data model).
@@ -585,7 +607,7 @@ LLM-turn interruption is fundamentally hard in NanoClaw's polling model — ther
 
 ### Watchdog and reconciler
 
-Extension to `src/host-sweep.ts`. Single 60s sweep, **six** responsibilities. Stuck-detection uses `dispatch_state_updated_at` (NOT `spawned_at` — closes M15) so legitimately-paused tasks aren't false-flagged.
+Extension to `src/host-sweep.ts`. Single 60s sweep, **seven** responsibilities. Stuck-detection uses `dispatch_state_updated_at` (NOT `spawned_at` — closes M15) so legitimately-paused tasks aren't false-flagged.
 
 1. **Stuck dispatch reconciler** (closes M1, M15): scan tasks where `status='dispatched'` AND `dispatch_state IN ('admitted', 'creating_thread', 'parent_posted', 'thread_created', 'session_created', 'prompt_injected', 'wake_sent')` AND `dispatch_state_updated_at < now - 60s` AND `dispatch_retry_count < 3`. The `status='dispatched'` filter ensures cancelled tasks (status='cancelled') are not re-driven through dispatch (closes Codex C4 cancellation/reconciler race). For each:
    - `admitted`: re-read adapter capability for the target's mg, transition to either `creating_thread` (thread-supporting) or directly into step 5b (fallback). Idempotent because no side effect has happened yet.
@@ -612,7 +634,16 @@ Extension to `src/host-sweep.ts`. Single 60s sweep, **six** responsibilities. St
 
 5. **Orphan recovery**: scan tasks where `status IN ('complete','failed','cancelled')` AND `parent_notified_at IS NOT NULL` AND `parent_session_id` references a session no longer active (status='archived' or row deleted). Mark `status='orphaned'`. DM the `spawned_by_user_id` user (closes S1 — populated at dispatch) via the `user_dms` cache with the result summary.
 
-6. **Child-exit failure detection** (closes Codex C5 cycle-1-v1-cut): scan tasks where `status IN ('dispatched','running')` AND `child_session_id IS NOT NULL` AND the child session has `status='archived'` OR its container has exited. For each, mark `status='failed'`, `failure_reason='child container exited without task_complete signal'`, then run `finalizeTaskCompletion()`. This catches container crashes, agent runaway, and prompt-injection refusals where the child never emits `task_complete`. Implementation note: `src/container-runtime.ts` already tracks container lifecycle; this responsibility hooks into the existing exit-watching path rather than introducing a new poller.
+6. **Child-exit failure detection** (closes Codex C5 cycle-1-v1-cut): scan tasks where `status IN ('dispatched','running')` AND `child_session_id IS NOT NULL` AND the child session has `container_status='stopped'` (written by `markContainerStopped()` from `session-manager.ts:714`, called from `container-runner.ts:252`'s `container.on('close')` handler — verified by Reviewer A v1 cycle-2). The reaper is a periodic SQL scan reading host-state that the spawn-watcher writes; this is the canonical durable-execution stale-reaper pattern (Temporal start-to-close timeout, Conductor responseTimeout) — NOT an event-driven hook on the spawn-watcher itself.
+
+   **Race-safety with delivery loop (closes A4 + C7 cycle-2-v1-cut)**: a child can legitimately (a) write `task_complete` to outbound.db, (b) exit (container.on('close') → `markContainerStopped`), then (c) responsibility 6's sweep tick fires before delivery picks up the outbound row. To prevent the legitimate completion from being dropped, responsibility 6:
+   - **Drains outbound.db first**: before deciding to fail-on-exit, call `processSessionOutbound(child_session_id)` to flush any pending `task_complete` rows through the normal delivery path. If the task transitions to terminal status during this drain, responsibility 6 skips it.
+   - **Grace window**: if the container exited <30s ago (`sessions.container_status_changed_at` — added in this cycle), responsibility 6 skips and waits for the next sweep tick. This gives the delivery loop time to process queued completions.
+   - **Authorize-tolerant**: `authorizeChildCompletion` accepts `status='failed'` AND `failure_reason='child container exited without task_complete signal'` as a recoverable state — a real `task_complete` arriving within 5 minutes of the auto-failure flips status back to `complete`/`failed` per the agent's actual report. Outside that window, the auto-failure is canonical.
+
+   After the drain + grace + authorize-tolerant guards, if the task is still `dispatched`/`running` AND the container is genuinely gone, mark `status='failed'`, `failure_reason='child container exited without task_complete signal'`, then run `finalizeTaskCompletion()`.
+
+7. **No-progress timeout** (closes Codex C5 cycle-2-v1-cut): scan tasks where `status='running'` AND `dispatch_state_updated_at < now - max_no_progress_seconds` AND `deadline IS NULL`. Default `max_no_progress_seconds = 1800` (30 min) — configurable per agent_group. Marks the task `failed`, `failure_reason='no progress reported within timeout'`, runs `finalizeTaskCompletion()`. This protects against tasks dispatched without an explicit deadline that hang forever consuming cap slots. Tasks WITH a deadline are governed by responsibility 2 (deadline expiry) instead — no overlap.
 
 **Deadline extension** mechanism (closes M11): see `task_progress` MCP tool above. Child emits the system action; host's `applyTaskProgress` updates `tasks.deadline` (capped at `original_deadline + 4 × (original_deadline - spawned_at)`). The original deadline is in `tasks.original_deadline`, immutable, set at insert.
 
@@ -679,7 +710,7 @@ Single MVP, ~7-8 focused days (down from 12 — dashboard removed).
 | 5 | Same adapter capabilities — Discord | `channels` branch, discord adapter | 2 days (was 1; updated per S4) |
 | 6 | `dispatch_task` + `task_complete` + `task_progress` + `cancel_task` MCP tools (always-present, host-authorized) | `container/agent-runner/src/mcp-tools/` | 1 day |
 | 7 | Host module `src/modules/orchestrator-dispatch/`: `applyDispatchTask` (cap-aware promotion, BEGIN IMMEDIATE), `applyTaskComplete` (authorize + finalize state machine), `applyTaskProgress`, `applyCancelTask`, `createDispatchedSession` helper | new module | 2 days |
-| 8 | Watchdog: 5 responsibilities (stuck dispatch reconciler, deadline expiry, finalization resume, cap-aware promotion, orphan recovery) | `src/host-sweep.ts` | 0.5 day |
+| 8 | Watchdog: 7 responsibilities (stuck dispatch reconciler, deadline expiry, finalization resume, cap-aware promotion, orphan recovery, child-exit failure detection, no-progress timeout) | `src/host-sweep.ts` | 1 day |
 | 9 | E2E test: orchestrator dispatches 3 Slack tasks, owner steers one mid-flight via subthread, all complete, results route back via `task_complete` system rows | `src/modules/orchestrator-dispatch/*.test.ts` | 1 day |
 
 Total: ~10-11 days focused (channels-branch overhead per S4 is real).
