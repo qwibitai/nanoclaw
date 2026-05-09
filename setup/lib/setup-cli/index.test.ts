@@ -27,11 +27,23 @@ describe('setup-cli registry', () => {
 });
 
 describe('claude adapter shape', () => {
-  it('headless returns print-mode argv', () => {
+  it('headless returns print-mode argv (tools off by default)', () => {
     const spawn = claudeCli.headless('what is 2+2');
     expect(spawn.args).toEqual(['-p', '--output-format', 'text', 'what is 2+2']);
     expect(spawn.stdin).toBe('ignore');
     expect(spawn.output).toBe('pipe');
+  });
+
+  it('headless with tools=true adds bypassPermissions for the assist flow', () => {
+    const spawn = claudeCli.headless('diagnose this', { tools: true });
+    expect(spawn.args).toEqual([
+      '-p',
+      '--output-format',
+      'text',
+      '--permission-mode',
+      'bypassPermissions',
+      'diagnose this',
+    ]);
   });
 
   it('handoff returns interactive argv', () => {
@@ -52,6 +64,11 @@ describe('codex adapter shape', () => {
     expect(spawn.args).toEqual(['exec', 'what is 2+2']);
     expect(spawn.stdin).toBe('ignore');
     expect(spawn.output).toBe('pipe');
+  });
+
+  it('headless tools opt is a no-op (exec already allows tool use)', () => {
+    const spawn = codexCli.headless('diagnose this', { tools: true });
+    expect(spawn.args).toEqual(['exec', 'diagnose this']);
   });
 
   it('handoff is bare invocation with prompt as argv', () => {

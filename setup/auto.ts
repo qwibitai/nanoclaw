@@ -518,7 +518,7 @@ async function main(): Promise<void> {
         note(notes.join('\n'), "What's left");
       }
       // "What's left" is a soft failure — we don't abort like fail(), but the
-      // user is still stuck and a fix is exactly what claude-assist is for.
+      // user is still stuck and a fix is exactly what cli-assist is for.
       const summary = notes
         .map((n) => n.replace(/^•\s*/, '').split('\n')[0].trim())
         .filter(Boolean)

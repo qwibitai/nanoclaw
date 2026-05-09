@@ -31,10 +31,10 @@ import k from 'kleur';
 import {
   type AssistContext,
   BIG_PICTURE_FILES,
-  ensureClaudeReady,
-  offerClaudeAssist,
+  ensureSetupCliReady,
+  offerSetupCliAssist,
   STEP_FILES,
-} from './claude-assist.js';
+} from './cli-assist.js';
 import { ensureAnswer } from './runner.js';
 import { resolveSetupCli } from './setup-cli/index.js';
 import type { SetupCli } from './setup-cli/types.js';
@@ -185,21 +185,21 @@ function buildSystemPrompt(ctx: HandoffContext): string {
  * Dispatcher: checks NANOCLAW_SETUP_ASSIST_MODE and delegates to either
  * the interactive failure handoff (default) or the non-interactive assist.
  *
- * Drop-in replacement for `offerClaudeAssist` at failure call sites.
+ * Drop-in replacement for `offerSetupCliAssist` at failure call sites.
  */
 export async function offerSetupCliOnFailure(
   ctx: AssistContext,
   projectRoot: string = process.cwd(),
 ): Promise<boolean> {
   if (process.env.NANOCLAW_SETUP_ASSIST_MODE === 'true' || process.env.NANOCLAW_SETUP_ASSIST_MODE === '1') {
-    return offerClaudeAssist(ctx, projectRoot);
+    return offerSetupCliAssist(ctx, projectRoot);
   }
   return offerFailureHandoff(ctx, projectRoot);
 }
 
 /**
  * Interactive setup-CLI handoff for setup failures. Same role as
- * `offerClaudeAssist` but spawns an interactive session instead of
+ * `offerSetupCliAssist` but spawns an interactive session instead of
  * parsing a structured REASON/COMMAND response.
  *
  * Returns `true` if the CLI was launched (the user may have fixed
@@ -210,7 +210,7 @@ async function offerFailureHandoff(
   projectRoot: string,
 ): Promise<boolean> {
   if (process.env.NANOCLAW_SKIP_CLAUDE_ASSIST === '1') return false;
-  if (!(await ensureClaudeReady(projectRoot))) return false;
+  if (!(await ensureSetupCliReady(projectRoot))) return false;
 
   const cli = resolveSetupCli();
   if (!cli) return false;

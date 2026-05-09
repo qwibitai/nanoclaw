@@ -17,7 +17,7 @@
  */
 import { execSync } from 'child_process';
 
-import type { SpawnArgs, SetupCli } from './types.js';
+import type { HeadlessOpts, SpawnArgs, SetupCli } from './types.js';
 
 function isInstalled(): boolean {
   try {
@@ -35,7 +35,9 @@ function isAuthenticated(): boolean | undefined {
   return undefined;
 }
 
-function headless(prompt: string): SpawnArgs {
+function headless(prompt: string, _opts: HeadlessOpts = {}): SpawnArgs {
+  // `codex exec` already permits tool use in its sandbox; opts.tools is
+  // accepted for API uniformity but doesn't change the argv.
   return {
     args: ['exec', prompt],
     stdin: 'ignore',

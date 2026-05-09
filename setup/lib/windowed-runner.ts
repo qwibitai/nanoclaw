@@ -5,13 +5,12 @@
  * output stream goes silent for too long.
  *
  * Used for the container build (3–10 minutes on a fresh machine, no user
- * feedback with a plain spinner). Models the UI on claude-assist.ts's
- * 3-line action window — a single-line spinner header sitting above three
- * gutter-prefixed lines of the most recent output, redrawn in place via
- * ANSI cursor controls.
+ * feedback with a plain spinner). The 3-line action window — a
+ * single-line spinner header sitting above three gutter-prefixed lines
+ * of the most recent output, redrawn in place via ANSI cursor controls.
  *
  * Stall detection: a silence timer resets on every new line. When it hits
- * STALL_THRESHOLD_MS we pause the render, show `offerClaudeAssist` with
+ * STALL_THRESHOLD_MS we pause the render, show `offerSetupCliOnFailure` with
  * the step's raw log, and either resume (user said "keep waiting") or
  * let the step run its course while giving them the exit path.
  */
@@ -209,8 +208,8 @@ async function handleStall(
   );
 
   if (choice === 'help') {
-    // offerClaudeAssist runs its own spinner and may propose a fix command.
-    // We don't attempt to restart the stalled build from here — if Claude
+    // offerSetupCliOnFailure runs its own spinner and may propose a fix command.
+    // We don't attempt to restart the stalled build from here — if the CLI
     // proposes a command the user accepts, they can retry setup afterwards.
     await offerSetupCliOnFailure({
       stepName,

@@ -11,7 +11,7 @@
 import { execSync } from 'child_process';
 import path from 'path';
 
-import type { SpawnArgs, SetupCli } from './types.js';
+import type { HeadlessOpts, SpawnArgs, SetupCli } from './types.js';
 
 function isInstalled(): boolean {
   try {
@@ -32,9 +32,17 @@ function isAuthenticated(): boolean | undefined {
   }
 }
 
-function headless(prompt: string): SpawnArgs {
+function headless(prompt: string, opts: HeadlessOpts = {}): SpawnArgs {
+  const args = ['-p', '--output-format', 'text'];
+  if (opts.tools) {
+    // bypassPermissions lets the assist flow Read files and run Bash
+    // diagnostics without per-tool prompts in print mode. Pure text
+    // utility calls (default) don't need this.
+    args.push('--permission-mode', 'bypassPermissions');
+  }
+  args.push(prompt);
   return {
-    args: ['-p', '--output-format', 'text', prompt],
+    args,
     stdin: 'ignore',
     output: 'pipe',
   };

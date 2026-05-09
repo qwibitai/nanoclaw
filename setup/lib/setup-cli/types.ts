@@ -25,6 +25,19 @@ export interface SpawnArgs {
   output: 'inherit' | 'pipe';
 }
 
+/**
+ * Options for `SetupCli.headless()`.
+ *
+ * `tools` controls whether the CLI is allowed to call its tools (Read,
+ * Bash, etc.) during this invocation. Off by default — appropriate for
+ * pure text-to-text utility prompts (e.g. parsing a free-text timezone
+ * description). Turn on for the assist flow where the CLI needs to read
+ * source files and logs to diagnose a setup failure.
+ */
+export interface HeadlessOpts {
+  tools?: boolean;
+}
+
 export interface SetupCli {
   /** Stable identifier — used in `.env` (`NANOCLAW_SETUP_CLI=<name>`). */
   name: string;
@@ -54,9 +67,13 @@ export interface SetupCli {
   /**
    * Build the argv for a non-interactive ("print mode") invocation that
    * sends `prompt` and reads the agent's reply from stdout. Used by
-   * headless helpers like timezone resolution.
+   * headless helpers like timezone resolution and the on-failure assist.
+   *
+   * `opts.tools` (default `false`) controls whether the CLI may use its
+   * built-in tools during this invocation. Pure text utility prompts
+   * leave it off; assist flows that need file reads turn it on.
    */
-  headless(prompt: string): SpawnArgs;
+  headless(prompt: string, opts?: HeadlessOpts): SpawnArgs;
 
   /**
    * Build the argv for an interactive handoff. The user takes over the
