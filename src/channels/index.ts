@@ -14,3 +14,4 @@ import './slack.js';
 import './discord.js';
 import './line.js';
 import './email.js';
+import './imessage.js';
