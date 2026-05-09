@@ -1055,13 +1055,37 @@ class EmailChannelAdapter implements ChannelAdapter {
     const fullArgs = ['--no-input', ...args];
     const env = { ...process.env, ...this.cfg.gogEnv };
     if (opts.stdin === undefined) {
-      const { stdout } = await execFileAsync(this.cfg.gogBin, fullArgs, {
-        encoding: 'utf-8',
-        timeout: GOG_TIMEOUT_MS,
-        maxBuffer: GOG_MAX_BUFFER,
-        env,
-      });
-      return stdout;
+      try {
+        const { stdout } = await execFileAsync(this.cfg.gogBin, fullArgs, {
+          encoding: 'utf-8',
+          timeout: GOG_TIMEOUT_MS,
+          maxBuffer: GOG_MAX_BUFFER,
+          env,
+        });
+        return stdout;
+      } catch (err) {
+        // execFile rejects with an Error that carries `.stderr`, `.code`,
+        // `.signal`, and `.killed` -- but those don't show up in `.message`,
+        // so the structured logger only sees "Command failed: ...". Surface
+        // them so the caller (and the launchd log) can actually see WHY gog
+        // failed (auth refresh contention, API 5xx, missing scope, etc).
+        // Mirrors the symmetric pattern used by the stdin spawn path below.
+        const e = err as NodeJS.ErrnoException & {
+          stderr?: string;
+          stdout?: string;
+          code?: number | string;
+          signal?: NodeJS.Signals | null;
+          killed?: boolean;
+        };
+        const stderr = (e.stderr ?? '').toString().trim();
+        const code = e.code ?? '?';
+        const signal = e.signal ? ` signal=${e.signal}` : '';
+        const killed = e.killed ? ' (killed)' : '';
+        const argSummary = args.join(' ');
+        throw new Error(
+          `gog exit ${code}${signal}${killed}: ${argSummary}${stderr ? ` -- ${stderr.slice(0, 500)}` : ''}`,
+        );
+      }
     }
     return new Promise<string>((resolve, reject) => {
       const child = spawn(this.cfg.gogBin, fullArgs, { stdio: ['pipe', 'pipe', 'pipe'], env });
