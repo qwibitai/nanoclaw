@@ -20,7 +20,13 @@ import {
   TIMEZONE,
 } from './config.js';
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
-import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import {
+  CONTAINER_RUNTIME_BIN,
+  hostGatewayArgs,
+  onecliCaArgs,
+  readonlyMountArgs,
+  stopContainer,
+} from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
@@ -462,6 +468,12 @@ async function buildContainerArgs(
 
   // Host gateway
   args.push(...hostGatewayArgs());
+
+  // OneCLI gateway CA — if the host has one installed, mount it readonly
+  // and point Node-based tools (claude-code, agent-runner, agent-browser,
+  // vercel) at it via NODE_EXTRA_CA_CERTS so they trust the gateway's
+  // MITM cert. No-op on non-OneCLI installs.
+  args.push(...onecliCaArgs());
 
   // User mapping
   const hostUid = process.getuid?.();

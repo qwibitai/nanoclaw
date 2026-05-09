@@ -3,10 +3,37 @@
  * All runtime-specific logic lives here so swapping runtimes means changing one file.
  */
 import { execSync } from 'child_process';
+import fs from 'fs';
 import os from 'os';
+import path from 'path';
 
 import { CONTAINER_INSTALL_LABEL } from './config.js';
 import { log } from './log.js';
+
+/** Path inside the container where the OneCLI gateway CA is mounted. */
+export const ONECLI_CA_CONTAINER_PATH = '/etc/onecli/gateway-ca.pem';
+
+/** Path on the host where the OneCLI gateway CA cert lives, if installed. */
+export const ONECLI_CA_HOST_PATH = path.join(os.homedir(), '.onecli', 'gateway-ca.pem');
+
+/**
+ * If the OneCLI gateway CA is installed on the host, return the CLI args
+ * needed to bind-mount it readonly into the container and trust it from
+ * Node-based tools (`NODE_EXTRA_CA_CERTS`). Returns `[]` on non-OneCLI
+ * installs so the change is a no-op there.
+ *
+ * The container's HTTPS_PROXY (set by `onecli.applyContainerConfig`) points
+ * at the gateway, which MITMs TLS with this CA. Without this trust wiring,
+ * every credentialed call fails with `SELF_SIGNED_CERT_IN_CHAIN`.
+ */
+export function onecliCaArgs(): string[] {
+  if (!fs.existsSync(ONECLI_CA_HOST_PATH)) return [];
+  return [
+    ...readonlyMountArgs(ONECLI_CA_HOST_PATH, ONECLI_CA_CONTAINER_PATH),
+    '-e',
+    `NODE_EXTRA_CA_CERTS=${ONECLI_CA_CONTAINER_PATH}`,
+  ];
+}
 
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'docker';
