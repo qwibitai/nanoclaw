@@ -11,9 +11,9 @@
  *   wake with container-appropriate MCP server paths, without racing
  *   other sessions or leaking per-session paths back to the host.
  *
- * Env passthrough covers the two knobs that are read at runtime:
+ * Env passthrough covers the runtime knobs Codex reads:
  *   OPENAI_API_KEY  — fallback auth when auth.json isn't a subscription token
- *   CODEX_MODEL     — model override if the user wants something other than the default
+ *   CODEX_MODEL     — optional model override; unset lets Codex use its default
  *   OPENAI_BASE_URL — rare, but supports API-compatible alternates
  */
 import fs from 'fs';

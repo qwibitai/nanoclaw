@@ -5,7 +5,7 @@ import path from 'path';
 import { describe, it, expect } from 'bun:test';
 
 import { createProvider } from './factory.js';
-import { CodexProvider, resolveClaudeImports } from './codex.js';
+import { CodexProvider, resolveClaudeImports, resolveCodexModel } from './codex.js';
 
 describe('createProvider (codex)', () => {
   it('returns CodexProvider for codex', () => {
@@ -29,6 +29,23 @@ describe('createProvider (codex)', () => {
   it('declares no native slash command support', () => {
     const p = new CodexProvider();
     expect(p.supportsNativeSlashCommands).toBe(false);
+  });
+});
+
+describe('resolveCodexModel', () => {
+  it('leaves the Codex CLI/app-server default model alone when unset', () => {
+    expect(resolveCodexModel(undefined)).toBeUndefined();
+    expect(resolveCodexModel({})).toBeUndefined();
+  });
+
+  it('ignores blank model overrides', () => {
+    expect(resolveCodexModel({ CODEX_MODEL: '' })).toBeUndefined();
+    expect(resolveCodexModel({ CODEX_MODEL: '   ' })).toBeUndefined();
+  });
+
+  it('uses CODEX_MODEL when explicitly configured', () => {
+    expect(resolveCodexModel({ CODEX_MODEL: 'gpt-5.2-codex' })).toBe('gpt-5.2-codex');
+    expect(resolveCodexModel({ CODEX_MODEL: ' gpt-5.2-codex ' })).toBe('gpt-5.2-codex');
   });
 });
 

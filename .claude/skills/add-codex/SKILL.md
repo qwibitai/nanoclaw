@@ -1,6 +1,6 @@
 ---
 name: add-codex
-description: Use Codex (CLI + AppServer) as the full agent provider — planning, tool orchestration, native compaction, MCP tools, session resume — in place of the Claude Agent SDK. ChatGPT subscription or OPENAI_API_KEY. Per-group via agent_provider. Distinct from using OpenAI as an MCP tool (where Claude remains the planner).
+description: Use Codex (CLI + AppServer) as the full agent provider — planning, tool orchestration, Codex-owned context management, MCP tools, session resume — in place of the Claude Agent SDK. ChatGPT subscription or OPENAI_API_KEY. Per-group via agent_provider. Distinct from using OpenAI as an MCP tool (where Claude remains the planner).
 ---
 
 # Codex agent provider
@@ -9,7 +9,7 @@ NanoClaw runs agents in a long-lived **poll loop** inside the container. The bac
 
 Trunk ships with only the `claude` provider baked in. This skill copies the Codex provider files in from the `providers` branch, wires them into the host and container barrels, updates the Dockerfile to install the Codex CLI, and rebuilds the image.
 
-The Codex provider runs `codex app-server` as a child process and speaks JSON-RPC over stdio. That gives it native session resume, streaming events, MCP tool access, and `thread/compact/start` compaction — same feature bar as the Claude Agent SDK, without the Anthropic-only lock-in.
+The Codex provider runs `codex app-server` as a child process and speaks JSON-RPC over stdio. That gives it native session resume, streaming events, MCP tool access, approvals, and Codex-owned transcript/context management — same feature bar as the Claude Agent SDK, without the Anthropic-only lock-in.
 
 ## Install
 
@@ -79,6 +79,8 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 
 Note: **no agent-runner package dependency** — Codex is a CLI binary, not a library. Unlike OpenCode, there's nothing to add to `container/agent-runner/package.json`.
 
+Keep `CODEX_VERSION` pinned to a concrete semver. `codex app-server` is the protocol surface this provider depends on, so upgrades should be deliberate: bump the pin, run the focused provider tests, and smoke-test a real `initialize` -> `thread/start` or `thread/resume` -> `turn/start` cycle before shipping.
+
 ### 5. Build
 
 ```bash
@@ -107,10 +109,11 @@ No `.env` variables required for this mode.
 
 ```env
 OPENAI_API_KEY=sk-...
-CODEX_MODEL=gpt-5.4-mini
+# Optional. If omitted, Codex CLI/app-server uses its configured default.
+CODEX_MODEL=gpt-5.2-codex
 ```
 
-The host forwards both variables into the container. If both subscription (`auth.json`) and `OPENAI_API_KEY` are present, Codex prefers the subscription.
+The host forwards both variables into the container. If both subscription (`auth.json`) and `OPENAI_API_KEY` are present, Codex prefers the subscription. Leave `CODEX_MODEL` unset unless you intentionally want to override the Codex CLI/app-server default for this NanoClaw install.
 
 ### Option C — BYO OpenAI-compatible endpoint (experimental)
 
@@ -138,8 +141,8 @@ Extra MCP servers still come from **`NANOCLAW_MCP_SERVERS`** / `container_config
 
 - **Spawn-per-query:** Codex's app-server is spawned fresh per query invocation, matching the OpenCode pattern. No long-lived daemon to keep healthy across sessions.
 - **Per-session `~/.codex` isolation:** each group gets its own copy of the host's `auth.json`. The container can rewrite `config.toml` freely on every wake without touching the host's Codex config.
-- **Native compaction:** kicks in automatically at 40K cumulative input tokens between turns, via `thread/compact/start`. If compaction fails, the provider logs and continues uncompacted — no fatal error.
-- **Approvals:** auto-accepted inside the container (the container is the sandbox; same posture as Claude/OpenCode).
+- **Codex context management:** NanoClaw does not maintain a client-side token threshold or manually call `thread/compact/start`. The app-server owns transcript/context management for Codex threads. If context-limit failures appear in real use, add a notification-driven trigger from app-server token-usage events rather than a hard-coded threshold.
+- **Approvals:** auto-accepted inside the container because the container, user, and explicit mount list are the sandbox. Do not expand mounts, env passthrough, or host credential access without treating it as a security-sensitive change.
 - **Mid-turn input:** Codex turns don't accept mid-turn messages. Follow-up `push()` calls queue and drain between turns, matching the OpenCode pattern. The poll-loop only pushes between turns anyway, so no messages are dropped.
 - **Stale thread recovery:** `isSessionInvalid` matches on stale-thread-ID errors (`thread not found`, `unknown thread`, etc.) so a cold-started app-server can recover cleanly when it sees a stored continuation it no longer has.
 
@@ -149,7 +152,7 @@ Extra MCP servers still come from **`NANOCLAW_MCP_SERVERS`** / `container_config
 grep -q "./codex.js" container/agent-runner/src/providers/index.ts && echo "container barrel: OK"
 grep -q "./codex.js" src/providers/index.ts && echo "host barrel: OK"
 grep -q "@openai/codex@" container/Dockerfile && echo "Dockerfile install: OK"
-cd container/agent-runner && bun test src/providers/codex.factory.test.ts && cd -
+cd container/agent-runner && bun test src/providers/codex.factory.test.ts src/providers/codex-app-server.test.ts && cd -
 ```
 
 After the image rebuild, set `agent_provider = 'codex'` on a test group and send a message. Successful round-trip looks like:

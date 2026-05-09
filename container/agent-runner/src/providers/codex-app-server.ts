@@ -282,7 +282,7 @@ export async function initializeCodexAppServer(server: AppServer): Promise<void>
 }
 
 export interface ThreadParams {
-  model: string;
+  model?: string;
   cwd: string;
   sandbox?: string;
   approvalPolicy?: string;

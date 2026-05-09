@@ -1,6 +1,16 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
 import { describe, it, expect } from 'bun:test';
 
-import { STALE_THREAD_RE, tomlBasicString } from './codex-app-server.js';
+import {
+  type AppServer,
+  type JsonRpcServerRequest,
+  STALE_THREAD_RE,
+  attachCodexAutoApproval,
+  tomlBasicString,
+} from './codex-app-server.js';
 
 describe('tomlBasicString', () => {
   it('leaves safe strings unchanged inside quotes', () => {
@@ -43,5 +53,67 @@ describe('STALE_THREAD_RE', () => {
     expect(STALE_THREAD_RE.test('authentication failed')).toBe(false);
     expect(STALE_THREAD_RE.test('connection reset by peer')).toBe(false);
     expect(STALE_THREAD_RE.test('internal server error')).toBe(false);
+  });
+});
+
+describe('Codex CLI pin contract', () => {
+  it('keeps app-server behind a concrete pinned @openai/codex install', () => {
+    const testDir = path.dirname(fileURLToPath(import.meta.url));
+    const dockerfile = fs.readFileSync(path.resolve(testDir, '../../../Dockerfile'), 'utf-8');
+
+    const versionMatch = dockerfile.match(/^ARG CODEX_VERSION=(.+)$/m);
+    expect(versionMatch).not.toBeNull();
+    expect(versionMatch![1]).not.toBe('latest');
+    expect(versionMatch![1]).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(dockerfile).toContain('pnpm install -g "@openai/codex@${CODEX_VERSION}"');
+  });
+});
+
+describe('attachCodexAutoApproval', () => {
+  function fakeServer(): { server: AppServer; writes: string[] } {
+    const writes: string[] = [];
+    const server = {
+      process: {
+        stdin: {
+          write: (line: string) => {
+            writes.push(line);
+            return true;
+          },
+        },
+      },
+      pending: new Map(),
+      notificationHandlers: [],
+      serverRequestHandlers: [],
+    } as unknown as AppServer;
+
+    return { server, writes };
+  }
+
+  function send(server: AppServer, method: string): void {
+    const request: JsonRpcServerRequest = { id: 7, method, params: {} };
+    server.serverRequestHandlers[0](request);
+  }
+
+  it('auto-accepts command and file approvals inside the container sandbox', () => {
+    const { server, writes } = fakeServer();
+    attachCodexAutoApproval(server);
+
+    send(server, 'item/commandExecution/requestApproval');
+    send(server, 'item/fileChange/requestApproval');
+
+    expect(writes.map((line) => JSON.parse(line).result.decision)).toEqual(['accept', 'accept']);
+  });
+
+  it('grants broad app-server permissions because NanoClaw relies on container mounts as the boundary', () => {
+    const { server, writes } = fakeServer();
+    attachCodexAutoApproval(server);
+
+    send(server, 'item/permissions/requestApproval');
+
+    const result = JSON.parse(writes[0]).result;
+    expect(result).toEqual({
+      permissions: { fileSystem: { read: ['/'], write: ['/'] }, network: { enabled: true } },
+      scope: 'session',
+    });
   });
 });
