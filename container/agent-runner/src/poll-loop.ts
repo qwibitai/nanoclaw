@@ -758,6 +758,25 @@ function dispatchResultText(text: string, routing: RoutingContext): void {
 
   const scratchpad = stripInternalTags(scratchpadParts.join(''));
 
+  // Single-destination fallback: if the agent forgot to wrap (a common
+  // failure mode after long turns or auto-compaction) AND the group has
+  // exactly one destination, route the cleaned scratchpad to that
+  // destination instead of silently dropping the reply. There's no
+  // ambiguity about WHERE to send — only one place exists. The original
+  // multi-destination concerns (routing drift on null-routed cron tasks,
+  // cross-channel thread bleed in agent-shared sessions; commit 9db39b2)
+  // don't apply here: sendToDestination resolves fresh per-destination
+  // routing via resolveDestinationThread, and there is no "other channel"
+  // to bleed into.
+  if (sent === 0 && scratchpad) {
+    const all = getAllDestinations();
+    if (all.length === 1) {
+      sendToDestination(all[0], scratchpad, routing);
+      log(`Single-destination fallback: bare text routed to "${all[0].name}" (${scratchpad.length} chars)`);
+      return;
+    }
+  }
+
   if (scratchpad) {
     log(`[scratchpad] ${scratchpad.slice(0, 500)}${scratchpad.length > 500 ? '…' : ''}`);
   }
