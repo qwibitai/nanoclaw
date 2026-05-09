@@ -40,6 +40,8 @@ import { runWhatsAppChannel } from './channels/whatsapp.js';
 import { pingCliAgent, type PingResult } from './lib/agent-ping.js';
 import { brightSelect } from './lib/bright-select.js';
 import { offerSetupCliOnFailure } from './lib/cli-handoff.js';
+import { listSetupClis } from './lib/setup-cli/index.js';
+import type { SetupCli } from './lib/setup-cli/types.js';
 import {
   applyToEnv,
   parseFlags,
@@ -113,6 +115,12 @@ async function main(): Promise<void> {
     configValues = await runAdvancedScreen(configValues);
     applyToEnv(configValues);
   }
+
+  // Pick the setup-CLI helper (Claude Code or OpenAI Codex) before any
+  // step that might call into cli-handoff/cli-assist on failure. Once
+  // chosen the value is persisted to .env (NANOCLAW_SETUP_CLI=…) so
+  // subsequent runs skip the prompt.
+  await pickSetupCli();
 
   const skip = new Set(
     (process.env.NANOCLAW_SKIP ?? '')
@@ -928,6 +936,109 @@ async function runCustomEndpointAuth(
   // user has configured a custom endpoint; standard installs don't load
   // the file at all.
   appendProviderImport('./claude.js');
+}
+
+/**
+ * Pick the setup-helper CLI (Claude Code or OpenAI Codex) and persist
+ * the choice to `.env` as `NANOCLAW_SETUP_CLI=<name>`. Three paths:
+ *
+ *   1. Already-configured: `NANOCLAW_SETUP_CLI` is set, the named
+ *      adapter exists, and the binary is installed → skip the prompt.
+ *      If the configured CLI is missing (env var stale, or the user
+ *      uninstalled it), fall through and re-pick with a warning.
+ *   2. Auto-pick: exactly one CLI installed → silently persist that
+ *      choice and continue.
+ *   3. Picker: zero or two-or-more installed. With ≥2 we ask which
+ *      one. With 0 we offer to install Claude Code via its install
+ *      script (Codex has no scriptable installer in this fork) and
+ *      bail if declined.
+ */
+async function pickSetupCli(): Promise<void> {
+  const installed = listSetupClis().filter((c) => c.isInstalled());
+  const configured = (process.env.NANOCLAW_SETUP_CLI ?? '').toLowerCase().trim();
+
+  // Path 1: already-configured + still installed.
+  if (configured) {
+    const match = installed.find((c) => c.name === configured);
+    if (match) {
+      setupLog.userInput('setup_cli', `${match.name} (preconfigured)`);
+      return;
+    }
+    p.log.warn(
+      brandBody(
+        `NANOCLAW_SETUP_CLI is set to "${configured}" but that CLI isn't installed. Re-picking.`,
+      ),
+    );
+  }
+
+  // Path 3a: nothing installed — offer Claude Code's install script.
+  if (installed.length === 0) {
+    const claude = listSetupClis().find((c) => c.installScript);
+    if (!claude) {
+      p.log.warn(
+        brandBody(
+          'No setup-helper CLI is installed and none of the registered adapters has a scriptable installer. ' +
+            'Install Claude Code or OpenAI Codex manually, then re-run setup.',
+        ),
+      );
+      return;
+    }
+    const install = ensureAnswer(
+      await p.confirm({
+        message: `No setup-helper CLI found. Install ${claude.displayName} now?`,
+        initialValue: true,
+      }),
+    );
+    if (!install) {
+      p.log.warn(
+        brandBody(
+          `Continuing without a setup-helper. If a step fails I won't be able to hand you off — install ${claude.displayName} or OpenAI Codex and re-run setup to enable that.`,
+        ),
+      );
+      return;
+    }
+    if (!claude.installScript) return;
+    const code = spawnSync('bash', [claude.installScript], {
+      cwd: process.cwd(),
+      stdio: 'inherit',
+    }).status;
+    if (code !== 0 || !claude.isInstalled()) {
+      p.log.error(`Couldn't install ${claude.displayName}.`);
+      return;
+    }
+    p.log.success(`${claude.displayName} installed.`);
+    persistSetupCli(claude);
+    return;
+  }
+
+  // Path 2: exactly one installed — auto-pick silently.
+  if (installed.length === 1) {
+    persistSetupCli(installed[0]);
+    setupLog.userInput('setup_cli', `${installed[0].name} (auto-picked)`);
+    return;
+  }
+
+  // Path 3b: ≥2 installed — ask which one.
+  const pick = ensureAnswer(
+    await brightSelect<string>({
+      message: 'Which coding-assistant CLI should setup use for diagnostics?',
+      options: installed.map((c) => ({
+        value: c.name,
+        label: c.displayName,
+        hint: c.binary,
+      })),
+      initialValue: installed[0].name,
+    }),
+  ) as string;
+  const chosen = installed.find((c) => c.name === pick);
+  if (!chosen) return;
+  persistSetupCli(chosen);
+  setupLog.userInput('setup_cli', `${chosen.name} (picked)`);
+}
+
+function persistSetupCli(cli: SetupCli): void {
+  process.env.NANOCLAW_SETUP_CLI = cli.name;
+  writeEnvLine('NANOCLAW_SETUP_CLI', cli.name);
 }
 
 function writeEnvLine(key: string, value: string): void {
