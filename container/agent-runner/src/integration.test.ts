@@ -113,20 +113,26 @@ describe('poll loop integration', () => {
     await loopPromise.catch(() => {});
   });
 
-  it('bare text produces no outbound messages (scratchpad only)', async () => {
+  it('bare text falls back to the origin destination instead of dropping', async () => {
+    // Contract: when the agent forgets to wrap final text in <message to="..."> blocks
+    // (a common failure mode after long turns or auto-compaction), dispatchResultText
+    // routes the cleaned scratchpad to the origin destination rather than silently
+    // dropping the reply. Without this fallback, only the streaming status events
+    // (thinking blocks) reach the user — the actual answer disappears.
     insertMessage('m1', { sender: 'Alice', text: 'hello' }, { platformId: 'chan-1', channelType: 'discord' });
 
-    // Agent responds with bare text — no <message to="..."> wrapping
     const provider = new MockProvider({}, () => 'I am thinking about this...');
     const controller = new AbortController();
     const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 2000);
 
-    // Wait long enough for the poll loop to process
-    await sleep(1000);
+    await waitFor(() => getUndeliveredMessages().length > 0, 2000);
     controller.abort();
 
     const out = getUndeliveredMessages();
-    expect(out).toHaveLength(0);
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toContain('I am thinking about this...');
+    expect(out[0].channel_type).toBe('discord');
+    expect(out[0].platform_id).toBe('chan-1');
 
     await loopPromise.catch(() => {});
   });
