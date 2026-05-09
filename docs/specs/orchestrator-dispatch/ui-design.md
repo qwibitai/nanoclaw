@@ -4,7 +4,7 @@ A focused, single-operator orchestration console for a fleet of AI-agent groups.
 
 This spec is the visual + interaction contract for the dashboard surface defined in [`./design.md`](./design.md). It is opinionated by request: one option per decision, no "could do A or B."
 
-**Revision note (2026-05-09)**: hardened against an external design audit. Major changes: Needs You is now a chrome-distinct band, left rail is icons-only by default, status filter chips removed, Failed section dissolved into Needs You / Completed, keyboard model switched to Cmd-1/2/3/4 + `g <letter>` for agent groups, progress bars removed (duration only), tool-call activity made explicit, connection-loss state specified, dependencies inlined under task title. No cost/token ticker (anti-analytics rule extended to per-line metrics).
+**Revision note (2026-05-09)**: iterated against two design audits. First pass tightened structure (Needs You as chrome-distinct band, left rail icons-only by default, status filter chips removed, Failed section dissolved into Needs You / Completed, Cmd-1/2/3/4 view nav + `g <letter>` for agent groups, progress bars removed, tool-call activity made explicit, connection-loss state specified, dependencies inlined under task title, no cost/token ticker). Second pass added: sentence-case section headers, tinted shadows, active/pressed feedback, active-rail indicator, button taxonomy, max-width container, inline failure reasons, Geist body type, Phosphor chrome icons, squircle avatar, accessibility primitives (skip-link, aria-live, aria-current), 404 view.
 
 ## 0. Frame
 
@@ -61,21 +61,22 @@ Spacing notation: a single character is roughly 8px in a real implementation; th
 │    │  Tasks                                                  [All ▾]   [Owner ▾]   │
 │ ⌂  ├───────────────────────────────────────────────────────────────────────────────┤
 │ ⊞  │┌─────────────────────────────────────────────────────────────────────────────┐│
-│ ⊟  ││ NEEDS YOU · 3                                                               ││ ← chrome band:
-│ ⚙  ││ ●  illysium       Approve write to prod DB         waiting 4m   [Approve]   ││   bg-elev,
-│    ││ ●  axie-dev       Question: stub or real fixtures? waiting 1h   [Answer]    ││   1.25× row,
-│ ─  ││ ✕  axie-dev       Vercel deploy (auth error)       failed 10m   [Retry]     ││   no caret,
-│    │└─────────────────────────────────────────────────────────────────────────────┘│   never collapses
+│ ⊟  ││ • Needs you · 3                                                             ││ ← chrome band:
+│ ⚙  ││ ●  illysium       Approve write to prod DB         waiting 4m  [Approve]    ││   bg-elev,
+│    ││ ●  axie-dev       Question: stub or real fixtures? waiting 1h  [Answer]     ││   1.25× row,
+│ ─  ││ ✕  axie-dev       Vercel deploy (auth error)       failed 10m  [Retry]     ││   no caret,
+│    ││    401 Unauthorized at api.vercel.com/v1/deployments                         ││   never collapses
+│    │└─────────────────────────────────────────────────────────────────────────────┘│
 │ ◉  │                                                                               │
-│ ◉  │  ▾  RUNNING · 6                                                               │
-│ ◉  │  ◐  madison-reed   Refactor checkout to use SKU map            running 3m     │
-│ ◉  │  ◐  number-drinks  Daily revenue digest                        running 12s    │
+│ ●  │  ▾ · Running · 6                                                              │  ← active group:
+│ ◉  │  ◐  madison-reed   Refactor checkout to use SKU map            running 3m     │     1.5× dot
+│ ◉  │  ◐  number-drinks  Daily revenue digest                        running 12s    │     + 1px ring
 │ ◉  │  ◐  axis-labs      Migrate analytics to dbt cloud              running 47m    │
 │ ◉  │  ◐  sunday         Investigate flaky integration test          running 2m     │
 │ ◉  │  ⏸  video-agent    Render weekly recap MP4         (blocked by · sunday)      │
 │ ◉  │  ◐  xerus          Index repo into gitnexus                    running 18m    │
 │ ◉  │                                                                               │
-│ ◉  │  ▾  COMPLETED TODAY · 11                                                      │
+│ ◉  │  ▾ · Completed today · 11                                                     │
 │ ◉  │  ✓  main           Triage GitHub PRs                              5m  · 4:32 │
 │ ◉  │  ✓  dirt-market    Pull listing comps for 12 zips               14m  · 2:08 │
 │ ◉  │  ✓  xzo            Generate demo storyboard                      3m  · 1:47 │
@@ -83,15 +84,19 @@ Spacing notation: a single character is roughly 8px in a real implementation; th
 └────┴───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Left rail — icons by default.** The four primary view icons sit at the top. Below the divider, eleven colored dots represent the eleven agent groups (one dot per group, color-coded so shape-recognition works). Hover expands the rail to show full names; expansion is a width transition only, no entrance choreography. The 3-letter slug is *not* used in the rail — it lives only as `<GroupTag>` chips inline in task rows. The rail's job is glanceable presence + click target, not text identification.
+**Left rail — icons by default.** The four primary view icons sit at the top (Phosphor: House, SquaresFour, Stack, Gear). Below the divider, eleven colored dots represent the eleven agent groups (one dot per group, color-coded so shape-recognition works). Hover expands the rail to show full names; expansion is a width transition only, no entrance choreography. The 3-letter slug is *not* used in the rail — it lives only as `<GroupTag>` chips inline in task rows. The rail's job is glanceable presence + click target, not text identification.
 
-**Section semantics.** Tasks always sort into the same three sections in this order: **Needs You**, **Running**, **Completed Today**. There is no separate Failed section — untriaged failures appear in Needs You until you ack them; acknowledged failures move to Completed (with `✕` instead of `✓`). A section with zero items collapses to a one-line dim header rather than disappearing — Dave should not have to wonder whether a section exists. **Needs You never collapses** and is rendered as a chrome-distinct band (`bg-elev` background, full-bleed under the filter row, 1.25× row height, no disclosure caret). Hierarchy must match function.
+**Active rail indicator.** The current view's icon renders in `accent` color with a 1px left border in `accent` flush to the rail edge. The currently-filtered agent group's dot renders at 1.5× size with a 1px `accent` ring. Both expose `aria-current="page"` for screen readers and keyboard users.
+
+**Section semantics.** Tasks always sort into the same three sections in this order: **Needs you**, **Running**, **Completed today**. There is no separate Failed section — untriaged failures appear in Needs you until you ack them; acknowledged failures move to Completed (with `✕` instead of `✓`). Section headers render in sentence case, `text-md` weight 550, with a leading `accent`-colored dot and a thin disclosure caret. A section with zero items collapses to a one-line dim header rather than disappearing — Dave should not have to wonder whether a section exists. **Needs you never collapses** and is rendered as a chrome-distinct band (`bg-elev` background, full-bleed under the filter row, 1.25× row height, no disclosure caret). Hierarchy must match function.
 
 **Filter chips.** Two only: `[All ▾]` (group filter) and `[Owner ▾]` (assignee). Status filtering is what the section model is for — adding a `[Running ▾]` chip duplicates a slicing axis and forces the user to mentally compose two filters at once. Single slicing axis per axis.
 
 **Row anatomy.** A status glyph (●◐⏸✓✕), an agent group tag (`<GroupTag>`, 3-letter), a single-line task title, a status string (waiting 4m / running 3m / blocked-by reference / completed-at timestamp), and trailing actions only when relevant. **No progress bars** — the duration string carries enough signal, and step-bar resolution is too coarse to add value (see §5 for the per-row breathing indicator that conveys "alive vs stuck"). No avatars, no thumbnails, no chips that don't earn their pixels.
 
-**Responsive.** Below 1080px wide, the left rail stays icons-only (no expansion possible — the rail is *already* its compact form). Below 720px, it becomes a slide-over (`g` then a letter to switch to an agent group, Cmd-1..4 for views). The status string truncates before the title does. The dashboard isn't designed to be the primary mobile surface — Slack already is.
+**Responsive.** Below 1080px wide, the left rail stays icons-only (no expansion possible — the rail is *already* its compact form). Below 720px, it becomes a slide-over (`g` then a letter to switch to an agent group, Cmd-1..4 for views). The status string truncates before the title does. Above 1800px wide, the body content is constrained to `max-width: 1680px` and centers between the rail (pinned left) and the inspector (pinned right when open) — prevents row text from sprawling on ultra-wide monitors. The dashboard isn't designed to be the primary mobile surface — Slack already is.
+
+**Failure rows in Needs you.** Failed tasks render their actual failure reason inline (`text-xs danger` on a second line under the title), not just the `✕` glyph. The reason should be the real first-line of the error (HTTP code + endpoint, exception class + message, exit code + command), not a generic "task failed." If the agent itself produced a structured failure summary in `task_complete`, prefer that.
 
 ### 2.2 Task Detail (`/tasks/:id`)
 
@@ -176,13 +181,13 @@ Density target: 11 rows fit above the fold at 1440×900 with room to breathe.
 │    │  Tasks                       [All ▾] [Owner]│  Refactor checkout to SKU map  │
 │ ⌂  ├─────────────────────────────────────────────┤  madison-reed · ◐ running · 3m │
 │ ⊞  │┌───────────────────────────────────────────┐│  ──────────────────────────── │
-│ ⊟  ││ NEEDS YOU · 3                             ││                               │
+│ ⊟  ││ • Needs you · 3                           ││                               │
 │ ⚙  ││ ●  illysium  Approve write...   [Approve] ││  RUN INFO                     │
 │    ││ ●  axie-dev  Question...        [Answer]  ││  Started   11:42 PM           │
 │ ─  ││ ✕  axie-dev  Vercel deploy      [Retry]   ││  Elapsed   00:03:18           │
 │    │└───────────────────────────────────────────┘│  Tokens    142k in / 8k       │
 │ ◉  │                                             │  Cost      $0.41              │
-│ ◉  │  ▾  RUNNING · 6                             │                               │
+│ ●  │  ▾ · Running · 6                            │                               │
 │ ◉  │  ◐  madison-reed   Refactor… selected ▶    │  ARTIFACTS                    │
 │ ◉  │  ◐  number-drinks  Daily revenue digest    │  ⎘ branch diff                │
 │ ◉  │  ◐  axis-labs      Migrate analytics       │  ⎘ test output                │
@@ -231,7 +236,7 @@ A long single page, sectioned by horizontal rule + heading. Rule: **Settings nev
 
 ### Typography
 
-One family. Inter Variable, with `font-feature-settings: "ss01", "cv11", "tnum"` enabled — `tnum` (tabular numbers) is required because timestamps, durations, and tokens are everywhere. Code blocks use `JetBrains Mono`.
+One family. **Geist Variable** for body and chrome, with `font-feature-settings: "tnum", "cv11"` enabled — `tnum` (tabular numbers) is required because timestamps, durations, and message counts are everywhere. Code blocks use `JetBrains Mono`. Geist over Inter: same UI density credentials, slightly more identity, ships with a closer-to-monospace numeric set when `tnum` is on.
 
 | Token | Size | Weight | Line height | Tracking | Use |
 |---|---|---|---|---|---|
@@ -276,7 +281,12 @@ Multiples of 4px. `0, 1=4, 2=8, 3=12, 4=16, 5=20, 6=24, 8=32, 10=40, 12=48, 16=6
 
 ### Elevation
 
-Two shadows total. `shadow-sm` for the inspector panel and the command palette. `shadow-md` for the palette dropdown over the palette. No elevation on rows, cards, or buttons.
+Two shadows total, both **tinted** to carry the cool-blue chroma rather than neutral black:
+
+- `shadow-sm`: `0 4px 16px oklch(0.05 0.005 250 / 0.45)` — inspector panel, command palette
+- `shadow-md`: `0 12px 32px oklch(0.05 0.005 250 / 0.55)` — palette dropdown over the palette
+
+No elevation on rows, cards, or buttons. Light-theme shadows use the same hue at lower lightness/alpha (`oklch(0.40 0.005 250 / 0.18)`).
 
 ---
 
@@ -285,10 +295,12 @@ Two shadows total. `shadow-sm` for the inspector panel and the command palette. 
 | Primitive | Variants | Notes |
 |---|---|---|
 | `<StatusGlyph>` | running (◐), paused (⏸), blocked (⏸), complete (✓), failed (✕), waiting-on-you (●) | Single character rendered in semantic color. Always 12px. The breathing variant (1Hz rotation) renders only when the agent has an in-flight tool call. |
-| `<GroupTag>` | inline-row (3-letter chip), rail-dot (1-color dot) | Inline: 3-letter abbreviation, monospace, `bg-sunken` chip with 1px border, hover reveals full name. Rail: a 6px colored dot, hover expands rail to show full name. |
+| `<GroupTag>` | inline-row (3-letter chip), rail-dot (1-color dot), rail-dot-active (1.5× + ring) | Inline: 3-letter abbreviation, monospace, `bg-sunken` chip with 1px border, hover reveals full name. Rail: a 6px colored dot, hover expands rail to show full name. Active variant scales to 9px with a 1px `accent` ring. |
+| `<RailIcon>` | default, active | Phosphor icon (House, SquaresFour, Stack, Gear) at 16px stroke 1.5. Active variant: `accent` color + 1px left border in `accent` flush to rail edge + `aria-current="page"`. |
+| `<Button>` | primary, destructive, secondary | Primary: filled `accent`, white-on-accent text, used at most once per row (e.g., `[Approve]`). Destructive: filled `danger`, used for irreversible actions (`[Retry]` on a failed task is destructive only if it re-runs side effects; otherwise secondary). Secondary: text-only `fg-muted` with hover underline. All buttons get `:active` press feedback (see §5). |
 | `<TaskRow>` | default, hover, selected, focused, needs-you (in band) | Single line, glyph-tag-title-status-actions. Selectable with arrow keys. |
 | `<NeedsYouBand>` | default | Wraps the Needs-You section in `bg-elev` full-bleed panel under the filter row. No disclosure caret. Never collapses. |
-| `<SectionHeader>` | default, empty | "Running · 6" with disclosure caret. Empty section dims the count and disables the caret. |
+| `<SectionHeader>` | default, empty, persistent (Needs you) | Sentence case, `text-md` weight 550, leading `accent` dot, thin disclosure caret. Empty section dims the count and disables the caret. Persistent variant has no caret and never collapses. |
 | `<MessageBubble>` | user, agent, system | No actual bubble — just a left-aligned avatar character + name + indented body. |
 | `<ToolCallGroup>` | collapsed, expanded | "ran 3 tools ▾" header, list of `verb · args` rows, inline output with truncation. |
 | `<ToolCallTicker>` | running | Single replacing line above the composer when an agent has an in-flight tool call. `◐ running: <verb> · <args> (<elapsed>)`. Replaces itself; never scrolls. |
@@ -297,7 +309,7 @@ Two shadows total. `shadow-sm` for the inspector panel and the command palette. 
 | `<Inspector>` | task, agent | Right-side 320px panel. Slides from `translateX(8px) opacity-0` to home. Same component used as the Task Detail right column. |
 | `<Composer>` | steer | Auto-growing textarea, no toolbar. Returns its own keyboard shortcut hints under the box. |
 | `<Toast>` | success, info, error | Bottom-right, 4s linger, max one at a time. Stack of two if a second arrives. |
-| `<Avatar>` | owner only | A single character on a 28px circle, `bg-elev`, no image. There is one user. |
+| `<Avatar>` | owner only | A single character on a 28px **squircle** (border-radius 8px on a 28px element), `bg-elev`, no image. There is one user. |
 | `<KbdHint>` | inline | `<kbd>⌘K</kbd>` rendered as 11px mono, 1px border, 4px radius. |
 | `<EmptyState>` | tasks-zero, agents-zero, search-zero | A single line of secondary text plus one keyboard hint. No illustration. No graphic. |
 | `<ConnectionState>` | live, reconnecting, offline | Top-strip dot + optional one-line `bg-elev` banner under the strip. See §5 loading states for behavior. |
@@ -334,13 +346,22 @@ For four primary destinations, single-press keys (Cmd-1..4) beat chords. Reserve
 
 The palette's grammar is Raycast-shaped: type to filter, ⏎ to run, ⇧⏎ to run in a new tab if relevant. `>` switches to actions only (kill task, restart container, open logs). `?` switches to full-text transcript search.
 
-### Click vs hover
+### Click vs hover, press feedback
 
 Clicks select, double-clicks open. Hover reveals: row actions (right-aligned, fade-in over 80ms), copy buttons on code blocks, full names on group tags. Hover never reveals destructive actions; those are always visible or behind a confirm.
 
-### Focus management
+**Press feedback** (the missing :active state): all buttons and clickable rows get `transform: translateY(1px)` on `:active`, with a 60ms ease-out return. This is the physical-click cue that separates a tool from a slide deck. Keyboard equivalents (`⏎` on a focused row) get the same feedback for one frame so the keyboard path doesn't feel ghostly.
+
+### Focus management and accessibility
 
 A visible focus ring is mandatory: 2px `accent` outline at 2px offset on `bg`. Clicking does not blur the focused row — keyboard users can mouse without losing their place. Opening the inspector sets focus to the inspector header; closing it returns focus to the originating row.
+
+**Accessibility primitives** (non-negotiable):
+- **Skip-to-content link**: visually hidden by default, becomes visible on first `Tab`, jumps focus past the rail and top strip directly to the main content region. Required for keyboard-only operators.
+- **`aria-current="page"`** on the active rail icon and `aria-current="true"` on the active agent-group dot. Screen readers announce the current location without requiring sighted context.
+- **`aria-live="polite"`** on the connection-state banner and the toast container. Status changes (Reconnecting, Offline, task-complete toast) reach screen readers without stealing focus.
+- **`role="status"`** on the per-row tool-call ticker so screen readers can opt into hearing it without it being announced on every tick.
+- **All interactive elements reachable by keyboard** — palette → list → row → action button → composer, in a logical Tab order that mirrors visual reading order.
 
 ### Per-row tool-call activity
 
@@ -358,10 +379,12 @@ The single biggest "is this thing alive" question for a long-running task. Resol
 - **Offline (reconnect failed)**: dot turns red. Banner becomes `Offline — last update <Xm ago>`. Steer composer disables (queue-on-reconnect is v2). Existing data stays visible (don't blank the screen).
 - **No spinner**: a spinning glyph appears nowhere.
 
-### Empty states
+### Empty and not-found states
 
-- Tasks empty: *"No tasks running. Start one from Slack, or press ⌘K → New task."* Single line, secondary text, one kbd hint.
-- Search empty: *"Nothing matches. Try a group name or status."*
+- **Tasks empty**: *"No tasks running. Start one from Slack, or press ⌘K → New task."* Single line, secondary text, one kbd hint.
+- **Search empty**: *"Nothing matches. Try a group name or status."*
+- **Task not found** (`/tasks/:id` for a deleted or non-existent ID): *"That task doesn't exist or was deleted."* + a `← Back to Tasks` text link. Uses `<EmptyState>` with the `tasks-zero` variant and a `not-found` modifier for the copy.
+- **Route not found** (any other unmatched path): same shape, copy *"That page doesn't exist."* + Tasks link. No branded 404 illustration.
 
 ### Real-time
 
@@ -408,8 +431,11 @@ A short, opinionated kill list. Each is a thing a Linear-fluent designer would p
 ## 7. Implementation Posture
 
 - **Stack.** Vite + React + TypeScript. `react-router` for routing, `tanstack/query` for SSE-fed cache, `clsx` and `class-variance-authority` for variants. No UI kit — Radix primitives where accessibility is non-trivial (palette, inspector, listbox), hand-built everything else. No Tailwind UI templates. No shadcn block dumps.
-- **Styling.** CSS variables for the OKLCH tokens, vanilla CSS modules per component.
+- **Fonts.** `geist` (Geist Variable) + `geist/mono` for `JetBrains Mono`-equivalent monospace, OR self-hosted Geist Variable + JetBrains Mono Variable from `@fontsource-variable/*` to avoid runtime fetches.
+- **Icons.** `@phosphor-icons/react` (regular weight, stroke 1.5) for chrome icons (rail, palette, button trailing). Status glyphs (`◐ ⏸ ✓ ✕ ●`) stay as unicode characters in semantic-colored spans — they're glyphs, not icons.
+- **Styling.** CSS variables for the OKLCH tokens, vanilla CSS modules per component. Use `min-height: 100dvh` (not `100vh`) for any full-screen panel — iOS Safari viewport bug.
 - **Memory.** Vite's production bundle for this surface area lands well under the 100–150MB target. Skip framer-motion (use Web Animations API for the two motions that need it). Skip moment / dayjs (use `Intl.RelativeTimeFormat`).
+- **Static assets.** Branded favicon (16/32/180 + SVG), no other graphics. No social-share Open Graph tags — the dashboard is localhost-only and never linked externally.
 - **Server.** A new `src/dashboard/` module on the host: a small `undici`-based HTTP server with one SSE endpoint, ~8 JSON endpoints, and a static handler for the built bundle. Runs on `127.0.0.1:7457` by default. No external auth — owner check is "you're on localhost," same posture as the rest of NanoClaw.
 
 ---
