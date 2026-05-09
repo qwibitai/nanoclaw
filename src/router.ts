@@ -144,6 +144,28 @@ export function setInboundContentFilter(fn: InboundContentFilterFn): void {
 }
 
 /**
+ * Passive inbound observer. Runs once `mg` has been resolved (or auto-
+ * created) for an event, regardless of whether any agent will engage.
+ * Non-consuming: the return value is ignored and routing continues either
+ * way. Used by the jibrain-intake module to capture every non-confidential
+ * message into the shared intake hook even when no agent is wired
+ * (the silent-mode case — listening_mode='silent', agentCount=0).
+ *
+ * Single-registrant. Errors thrown by the observer are caught and logged
+ * so an observer can never break routing.
+ */
+export type InboundObserverFn = (event: InboundEvent, mg: MessagingGroup) => void | Promise<void>;
+
+let inboundObserver: InboundObserverFn | null = null;
+
+export function setInboundObserver(fn: InboundObserverFn): void {
+  if (inboundObserver) {
+    log.warn('Inbound observer overwritten');
+  }
+  inboundObserver = fn;
+}
+
+/**
  * Channel-registration hook. Runs when the router sees a mention/DM on a
  * messaging group that has no wirings AND hasn't been denied. The hook is
  * expected to escalate to an owner (card, etc.) and arrange for future
@@ -292,6 +314,23 @@ async function doRouteInbound(event: InboundEvent): Promise<void> {
   } else {
     mg = found.mg;
     agentCount = found.agentCount;
+  }
+
+  // 1a. Passive observer hook. Fires once mg is known (auto-created or
+  //     looked up), before any drop returns and regardless of whether an
+  //     agent will engage. Lets modules like jibrain-intake capture every
+  //     non-confidential message — including silent-mode channels with no
+  //     agent wired, which would otherwise return at the agentCount=0
+  //     branch below before any side-effect could fire.
+  if (inboundObserver) {
+    try {
+      const obsResult = inboundObserver(event, mg);
+      if (obsResult && typeof (obsResult as Promise<void>).catch === 'function') {
+        (obsResult as Promise<void>).catch((err) => log.warn('Inbound observer threw (async)', { err }));
+      }
+    } catch (err) {
+      log.warn('Inbound observer threw', { err });
+    }
   }
 
   // 1b. No wirings — either silent drop (plain chatter / denied channel) or

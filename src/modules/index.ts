@@ -23,3 +23,4 @@ import './permissions/index.js';
 import './agent-to-agent/index.js';
 import './self-mod/index.js';
 import './intake/index.js';
+import './jibrain-intake/index.js';

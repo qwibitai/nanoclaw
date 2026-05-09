@@ -37,6 +37,36 @@ export interface MessagingGroup {
    * the column itself defaults to 0 in SQLite.
    */
   auto_url_intake?: number; // 0 | 1
+  /**
+   * Per-channel listening mode (added by migration 015). Carried forward
+   * from v1's YAML `listening_mode` field. The router itself doesn't gate
+   * on this yet — engage rules are per-wiring on `messaging_group_agents`.
+   * The jibrain-intake module reads it informationally so the hook script
+   * can route silent vs attentive captures differently.
+   *
+   *   'attentive' — normal default; agent engage rules apply unchanged.
+   *   'silent'    — channel is a passive listener; no agent should be wired.
+   *   'intake'    — explicit knowledge-feed channel.
+   *
+   * Optional on the TS type so pre-migration-015 fixtures don't need updating.
+   */
+  listening_mode?: 'attentive' | 'silent' | 'intake';
+  /**
+   * When 1, the jibrain-intake module suppresses the shared-intake hook for
+   * this channel (the conversation is sensitive; capture happens via the
+   * per-workstream confidential path elsewhere). See migration 015.
+   * Optional on the TS type for the same reason as the fields above.
+   */
+  confidential_intake?: number; // 0 | 1
+  /**
+   * Capture mode forwarded to the jibrain hook script (5th positional arg).
+   *
+   *   'standalone' — one intake markdown per quiet-window burst (default).
+   *   'digest'     — daily aggregated digest markdown per channel.
+   *
+   * Mirrors v1's joi-sd4 capture_mode YAML field. See migration 015.
+   */
+  capture_mode?: 'standalone' | 'digest';
   created_at: string;
 }
 

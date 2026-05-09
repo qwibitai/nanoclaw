@@ -124,6 +124,39 @@ export function setMessagingGroupAutoUrlIntake(id: string, on: 0 | 1): void {
   getDb().prepare('UPDATE messaging_groups SET auto_url_intake = ? WHERE id = ?').run(on, id);
 }
 
+/**
+ * Set the listening_mode / confidential_intake / capture_mode columns added
+ * by migration 015. Used by the YAML→DB backfill script and by future ops
+ * tools. Pass undefined for any column to leave it unchanged.
+ */
+export function setMessagingGroupListeningConfig(
+  id: string,
+  cfg: {
+    listening_mode?: 'attentive' | 'silent' | 'intake';
+    confidential_intake?: 0 | 1;
+    capture_mode?: 'standalone' | 'digest';
+  },
+): void {
+  const fields: string[] = [];
+  const values: Record<string, unknown> = { id };
+  if (cfg.listening_mode !== undefined) {
+    fields.push('listening_mode = @listening_mode');
+    values.listening_mode = cfg.listening_mode;
+  }
+  if (cfg.confidential_intake !== undefined) {
+    fields.push('confidential_intake = @confidential_intake');
+    values.confidential_intake = cfg.confidential_intake;
+  }
+  if (cfg.capture_mode !== undefined) {
+    fields.push('capture_mode = @capture_mode');
+    values.capture_mode = cfg.capture_mode;
+  }
+  if (fields.length === 0) return;
+  getDb()
+    .prepare(`UPDATE messaging_groups SET ${fields.join(', ')} WHERE id = @id`)
+    .run(values);
+}
+
 // ── Messaging Group Agents ──
 
 /**
