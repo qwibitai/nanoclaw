@@ -24,6 +24,21 @@
 
 const cache = new Map<string, string>(); // lowercased-name → userId
 
+const MD_LINK_RE = /\[([^\]]+)\]\(([^)]+)\)/g;
+
+/**
+ * Unwrap redundant markdown links of the form `[X](X)` to bare `X`. Discord
+ * does not render these — its parser trips on the brackets when the label
+ * is itself a URL, so `[https://opensea.io/...](https://opensea.io/...)`
+ * shows as literal text instead of a clickable link. Bare URLs auto-link
+ * fine on Discord, so dropping the wrapper is the right move. Genuine
+ * `[label](url)` links (label !== url) pass through unchanged.
+ */
+export function unwrapRedundantMarkdownLinks(text: string): string {
+  if (!text || !text.includes('](')) return text;
+  return text.replace(MD_LINK_RE, (match, label, url) => (label === url ? label : match));
+}
+
 /**
  * Record an inbound author. Called by the chat-sdk bridge whenever it
  * forwards an inbound message. Cheap enough to call unconditionally per

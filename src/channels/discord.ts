@@ -7,7 +7,7 @@ import { createDiscordAdapter } from '@chat-adapter/discord';
 import { readEnvFile } from '../env.js';
 import { createChatSdkBridge, type ReplyContext } from './chat-sdk-bridge.js';
 import { registerChannelAdapter } from './channel-registry.js';
-import { compactDiscordMentions, recordDiscordIdentity } from './discord-mentions.js';
+import { compactDiscordMentions, recordDiscordIdentity, unwrapRedundantMarkdownLinks } from './discord-mentions.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractReplyContext(raw: Record<string, any>): ReplyContext | null {
@@ -84,7 +84,7 @@ registerChannelAdapter('discord', {
       // cache of names seen on inbound. 1.x parity for real mention
       // pings (vs. chat-sdk's literal `<@DisplayName>` which renders as
       // unclickable text). The cache populates via recordInboundAuthor.
-      transformOutboundText: compactDiscordMentions,
+      transformOutboundText: (text: string) => compactDiscordMentions(unwrapRedundantMarkdownLinks(text)),
       recordInboundAuthor: recordDiscordIdentity,
     });
   },
