@@ -1,31 +1,37 @@
 import { describe, it, expect } from 'vitest';
-import {
-  validateMarketplaceSource,
-  parseMarketplaceSource,
-} from './source-validator.js';
+import { validateMarketplaceSource, parseMarketplaceSource } from './source-validator.js';
 
 describe('validateMarketplaceSource — accepts every documented variant', () => {
   it.each([
     ['url with required fields', { source: 'url', url: 'https://x.com/m.json' }],
-    ['url with optional headers', {
-      source: 'url',
-      url: 'https://x.com/m.json',
-      headers: { Authorization: 'Bearer x' },
-    }],
+    [
+      'url with optional headers',
+      {
+        source: 'url',
+        url: 'https://x.com/m.json',
+        headers: { Authorization: 'Bearer x' },
+      },
+    ],
     ['github with repo only', { source: 'github', repo: 'owner/repo' }],
-    ['github with all fields', {
-      source: 'github',
-      repo: 'owner/repo',
-      ref: 'main',
-      path: 'sub/dir',
-      sparsePaths: ['plugins'],
-    }],
+    [
+      'github with all fields',
+      {
+        source: 'github',
+        repo: 'owner/repo',
+        ref: 'main',
+        path: 'sub/dir',
+        sparsePaths: ['plugins'],
+      },
+    ],
     ['git with url only', { source: 'git', url: 'https://gitlab.com/x/y.git' }],
-    ['git with sparsePaths', {
-      source: 'git',
-      url: 'git@host:x/y.git',
-      sparsePaths: ['a', 'b'],
-    }],
+    [
+      'git with sparsePaths',
+      {
+        source: 'git',
+        url: 'git@host:x/y.git',
+        sparsePaths: ['a', 'b'],
+      },
+    ],
     ['npm', { source: 'npm', package: '@scope/pkg' }],
     ['file', { source: 'file', path: '/abs/path/marketplace.json' }],
     ['directory', { source: 'directory', path: '/abs/path/' }],

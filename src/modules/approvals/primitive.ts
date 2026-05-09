@@ -31,6 +31,7 @@ import { writeSessionMessage } from '../../session-manager.js';
 import type { MessagingGroup, Session } from '../../types.js';
 import { getAdminsOfAgentGroup, getGlobalAdmins, getOwners } from '../permissions/db/user-roles.js';
 import { ensureUserDm } from '../permissions/user-dm.js';
+import { findRecentDenial, hashAction } from './recent-denials.js';
 
 /** Two-button approval UI — the only options the primitive supports today. */
 const APPROVAL_OPTIONS: RawOption[] = [
@@ -54,17 +55,37 @@ export interface ApprovalHandlerContext {
 
 export type ApprovalHandler = (ctx: ApprovalHandlerContext) => Promise<void>;
 
-const approvalHandlers = new Map<string, ApprovalHandler>();
+export interface RegisterApprovalHandlerOptions {
+  /**
+   * When true, the response handler records a denial row on Reject so a
+   * subsequent identical request (same action + payload, same agent group)
+   * is suppressed for 24h. Pair with `requestApproval({ dedupeDenials: true })`
+   * on the request side. See recent-denials.ts.
+   */
+  dedupeDenials?: boolean;
+}
 
-export function registerApprovalHandler(action: string, handler: ApprovalHandler): void {
+const approvalHandlers = new Map<string, ApprovalHandler>();
+const dedupeTrackedActions = new Set<string>();
+
+export function registerApprovalHandler(
+  action: string,
+  handler: ApprovalHandler,
+  opts: RegisterApprovalHandlerOptions = {},
+): void {
   if (approvalHandlers.has(action)) {
     log.warn('Approval handler re-registered (overwriting)', { action });
   }
   approvalHandlers.set(action, handler);
+  if (opts.dedupeDenials) dedupeTrackedActions.add(action);
 }
 
 export function getApprovalHandler(action: string): ApprovalHandler | undefined {
   return approvalHandlers.get(action);
+}
+
+export function isDedupeTrackedAction(action: string): boolean {
+  return dedupeTrackedActions.has(action);
 }
 
 // ── Approver picking ──
@@ -153,6 +174,16 @@ export interface RequestApprovalOptions {
   title: string;
   /** Card body shown to the admin. */
   question: string;
+  /**
+   * Opt in to denial-loop suppression. When true:
+   *   - Before creating the pending row, check `recent_denials` for an
+   *     identical (action, payload) within the TTL. If hit, skip the
+   *     approval and emit a `notifyAgent` instead.
+   *   - On reject, the response handler records a denial row.
+   * Use for agent-initiated approvals (self-mod) where an agent might
+   * otherwise loop on the same request after a single Deny.
+   */
+  dedupeDenials?: boolean;
 }
 
 /**
@@ -162,7 +193,24 @@ export interface RequestApprovalOptions {
  * approval handler for this action via the response dispatcher.
  */
 export async function requestApproval(opts: RequestApprovalOptions): Promise<void> {
-  const { session, action, payload, title, question, agentName } = opts;
+  const { session, action, payload, title, question, agentName, dedupeDenials } = opts;
+
+  if (dedupeDenials) {
+    const recent = findRecentDenial(session.agent_group_id, hashAction(action, payload));
+    if (recent) {
+      const deniedAt = new Date(recent.denied_at * 1000).toISOString();
+      log.info('Approval suppressed by recent denial', {
+        action,
+        agentGroupId: session.agent_group_id,
+        deniedAt,
+      });
+      notifyAgent(
+        session,
+        `Your ${action} request matches one an admin denied at ${deniedAt}. Don't auto-retry the same request — surface it to the user with context if you believe it should be reconsidered.`,
+      );
+      return;
+    }
+  }
 
   const approvers = pickApprover(session.agent_group_id);
   if (approvers.length === 0) {

@@ -19,7 +19,8 @@ import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import type { PendingApproval } from '../../types.js';
 import { ONECLI_ACTION, resolveOneCLIApproval } from './onecli-approvals.js';
-import { getApprovalHandler } from './primitive.js';
+import { getApprovalHandler, isDedupeTrackedAction } from './primitive.js';
+import { hashAction, recordDenial } from './recent-denials.js';
 
 export async function handleApprovalsResponse(payload: ResponsePayload): Promise<boolean> {
   // OneCLI credential approvals — resolved via in-memory Promise first.
@@ -70,6 +71,18 @@ async function handleRegisteredApproval(
   };
 
   if (selectedOption !== 'approve') {
+    if (isDedupeTrackedAction(approval.action)) {
+      try {
+        const payload = JSON.parse(approval.payload);
+        recordDenial(session.agent_group_id, hashAction(approval.action, payload), userId);
+      } catch (err) {
+        log.warn('Failed to record denial — payload parse failed', {
+          approvalId: approval.approval_id,
+          action: approval.action,
+          err,
+        });
+      }
+    }
     notify(`Your ${approval.action} request was rejected by admin.`);
     log.info('Approval rejected', { approvalId: approval.approval_id, action: approval.action, userId });
     deletePendingApproval(approval.approval_id);

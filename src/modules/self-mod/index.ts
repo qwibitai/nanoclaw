@@ -20,18 +20,8 @@
  */
 import { registerDeliveryAction } from '../../delivery.js';
 import { registerApprovalHandler } from '../approvals/index.js';
-import {
-  applyAddMcpServer,
-  applyInstallPackages,
-  applyInstallPlugin,
-  applyUninstallPlugin,
-} from './apply.js';
-import {
-  handleAddMcpServer,
-  handleInstallPackages,
-  handleInstallPlugin,
-  handleUninstallPlugin,
-} from './request.js';
+import { applyAddMcpServer, applyInstallPackages, applyInstallPlugin, applyUninstallPlugin } from './apply.js';
+import { handleAddMcpServer, handleInstallPackages, handleInstallPlugin, handleUninstallPlugin } from './request.js';
 
 registerDeliveryAction('install_packages', handleInstallPackages);
 registerDeliveryAction('add_mcp_server', handleAddMcpServer);

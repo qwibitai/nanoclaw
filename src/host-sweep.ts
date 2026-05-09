@@ -141,6 +141,19 @@ async function sweep(): Promise<void> {
     log.error('Host sweep error', { err });
   }
 
+  // MODULE-HOOK:approvals-recent-denials-cleanup:start
+  // Drop denial rows older than DENIAL_MAX_AGE_SECONDS (7d). Independent of
+  // session sweep — denials are central-DB rows, not per-session. Failures
+  // here must not stop the sweep loop.
+  try {
+    const { cleanupOldDenials } = await import('./modules/approvals/recent-denials.js');
+    const dropped = cleanupOldDenials();
+    if (dropped > 0) log.info('Pruned old denial rows', { count: dropped });
+  } catch (err) {
+    log.warn('Denial cleanup failed', { err });
+  }
+  // MODULE-HOOK:approvals-recent-denials-cleanup:end
+
   setTimeout(sweep, SWEEP_INTERVAL_MS);
 }
 

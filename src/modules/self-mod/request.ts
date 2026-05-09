@@ -60,6 +60,7 @@ export async function handleInstallPackages(content: Record<string, unknown>, se
     payload: { apt, npm, reason },
     title: 'Install Packages Request',
     question: `Agent "${agentGroup.name}" is attempting to install a package + rebuild container:\n${packageList}${reason ? `\nReason: ${reason}` : ''}`,
+    dedupeDenials: true,
   });
 }
 
@@ -104,6 +105,7 @@ export async function handleInstallPlugin(content: Record<string, unknown>, sess
     payload: { plugin_spec: pluginSpec, source: validatedSource, reason },
     title: 'Install Plugin Request',
     question: `Agent "${agentGroup.name}" wants to install plugin:\n${pluginSpec}${sourceDesc}${reason ? `\nReason: ${reason}` : ''}\n\nThe plugin will be cloned and loaded by the SDK at next session start. Container will restart on approval.`,
+    dedupeDenials: true,
   });
 }
 
@@ -126,6 +128,7 @@ export async function handleUninstallPlugin(content: Record<string, unknown>, se
     payload: { plugin_spec: pluginSpec, reason },
     title: 'Uninstall Plugin Request',
     question: `Agent "${agentGroup.name}" wants to disable plugin:\n${pluginSpec}${reason ? `\nReason: ${reason}` : ''}\n\nThe marketplace registration stays so other plugins from it remain installable. Container will restart on approval.`,
+    dedupeDenials: true,
   });
 }
 
@@ -153,5 +156,6 @@ export async function handleAddMcpServer(content: Record<string, unknown>, sessi
     },
     title: 'Add MCP Request',
     question: `Agent "${agentGroup.name}" is attempting to add a new MCP server:\n${serverName} (${command})`,
+    dedupeDenials: true,
   });
 }

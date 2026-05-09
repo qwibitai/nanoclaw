@@ -94,9 +94,9 @@ describe('addMarketplace / listMarketplaces', () => {
 
   it('rejects invalid name', async () => {
     const folder = makeFolder('add-bad');
-    await expect(
-      addMarketplace(folder, 'has space', { source: 'github', repo: 'a/b' }),
-    ).rejects.toThrow(/invalid characters/);
+    await expect(addMarketplace(folder, 'has space', { source: 'github', repo: 'a/b' })).rejects.toThrow(
+      /invalid characters/,
+    );
   });
 });
 

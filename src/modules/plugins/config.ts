@@ -138,10 +138,7 @@ export async function installPlugin(
  * Disable a plugin. Removes the entry from `enabled`. The marketplace
  * registration stays so other plugins from it can still be enabled.
  */
-export async function uninstallPlugin(
-  folder: string,
-  pluginSpec: string,
-): Promise<{ wasDisabled: boolean }> {
+export async function uninstallPlugin(folder: string, pluginSpec: string): Promise<{ wasDisabled: boolean }> {
   // Validate format up front so a typo doesn't silently no-op.
   parsePluginSpec(pluginSpec);
   let wasDisabled = false;
@@ -154,9 +151,7 @@ export async function uninstallPlugin(
   return { wasDisabled };
 }
 
-export function listEnabledPlugins(
-  folder: string,
-): Record<string, boolean | string[] | { [k: string]: unknown }> {
+export function listEnabledPlugins(folder: string): Record<string, boolean | string[] | { [k: string]: unknown }> {
   const cfg = readContainerConfig(folder);
   return cfg.plugins?.enabled ?? {};
 }
