@@ -277,6 +277,7 @@ Rows: top 5 hotels by 7D Pickup Rev descending.
 ... (up to 5 rows)
 
 ### Table 2 -- Largest Pace Gaps vs STLY (0-30d)
+Note: STLY = OTB as of same date last year, not full LY actuals.
 Rows: hotels where 0-30d vs STLY % < -10%, sorted most negative first.
 If fewer than 3 qualify, show top 3 most negative regardless of threshold.
 | Hotel | OTB Revenue | STLY Revenue | Gap % |
@@ -341,7 +342,7 @@ Duetto OTB as of 3:00am {{CACHE_DATE}} | P.Fcst as of 3:00am {{CACHE_DATE}}
 
 {{ACTION_ITEMS}}
 
-### 3b. Pickup & Pace (Duetto Total segment)
+### 3b. Pickup & Pace (Duetto Total segment -- STLY = OTB as of same date last year, not full LY actuals)
 | Window | OTB Rooms | OTB Rev    | ADR   | vs STLY | vs Budget | 7D Pickup | DoD Delta |
 |--------|-----------|------------|-------|---------|-----------|-----------|-----------|
 | MTD    | {{val}}   | {{val}}    | {{val}}| {{val}} | {{val}}   | --        | {{val}}   |
