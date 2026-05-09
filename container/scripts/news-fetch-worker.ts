@@ -8,7 +8,7 @@
  */
 import { existsSync, readFileSync } from 'fs';
 
-const CONFIG_PATH = '/workspace/agent/news-sources.json';
+const CONFIG_PATH = process.env.NEWS_SOURCES_PATH ?? '/workspace/agent/news-sources.json';
 const DEFAULT_MAX_ITEMS_PER_SOURCE = 15;
 const DEFAULT_TOTAL_BUDGET = 30000;
 const DEFAULT_WINDOW_HOURS = 24;
