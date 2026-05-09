@@ -293,6 +293,18 @@ review_cycles:
     should_fix_count: 14
     wont_fix_count: 2
     completed_at: 2026-05-09T03:55:00Z
+  - iteration: 2
+    must_fix_count: 13
+    should_fix_count: 11
+    wont_fix_count: 0  # cycle-1 W1, W2 still logged
+    completed_at: 2026-05-09T04:30:00Z
+    notes: |
+      5 of 10 cycle-1 MUST-FIX produced new MUST-FIX in cycle 2 (M3, M5, M6,
+      M7, M8 cycle-1 each had follow-on gaps surfaced by reviewing the
+      revised text). Cycle-2 also surfaced 7 cycle-1 verification gaps and
+      issues A1 (cancel_task collision) and A2 (MCP tool gating primitive)
+      that cycle 1 didn't catch. Net: revision pass on the way; one cycle
+      remaining.
 
 # Open questions deferred from design (carried forward for /team-plan):
 #   OQ1 (light theme tokens not visually validated)
