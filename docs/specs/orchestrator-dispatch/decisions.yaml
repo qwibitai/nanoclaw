@@ -535,6 +535,24 @@ review_cycles:
       drop the nonce + /workspace/.task-context.json mechanism entirely.
       One cycle remaining (cycle 3) before the 3-cycle cap.
 
+  - iteration: 3
+    must_fix_count: 8
+    should_fix_count: 7
+    wont_fix_count: 2
+    completed_at: 2026-05-09T17:30:00Z
+    note: |
+      Cycle 3 (LAST cap-allowed). 9 cycle-2 MUST-FIX confirmed addressed
+      (Reviewer A verified 7 cycle-2 fixes clean; B verdict "build it").
+      8 NEW MUST-FIX surfaced from cycle-2 revisions: cancelled internal-only
+      marker leakage (A), cap-promotion dispatch_state ambiguity (A),
+      session-token approval mode has no substrate (A+C merged), cap check
+      off-by-one ≤ vs < (C), dependency check missing in initial promotion
+      (C), sessions↔tasks binding integrity gap (C), dependents_released
+      list not durable across crashes (C), adapter createThread mid-call
+      durability (C). /team-auto attempting revision pass — next
+      /team-review invocation hits the cap and emits cap-reached;
+      /team-auto escalates with owner decision options.
+
 # Historical context: a previous /team-review run completed in this same project
 # pre-reset (commit fb3adeb, 2026-05-09T03:55:00Z) found 10 MUST + 14 SHOULD + 2 WON'T.
 # Cycle-2 and cycle-3 attempts (d778e70, aa2e2d2, f2ca57f, 9b0d0dd) made partial revisions.

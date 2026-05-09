@@ -104,11 +104,17 @@ CREATE TABLE tasks (
                        -- before any side effect, so cap counts include in-flight dispatching tasks
                        -- and authorize accepts fast completions before heartbeat)
   dispatch_state       TEXT NOT NULL DEFAULT 'pending',
-                       -- pending | creating_thread | thread_created | session_created | prompt_injected | wake_sent | running
+                       -- pending | admitted | parent_posted | thread_created | session_created | prompt_injected | wake_sent | running
+                       -- (cycle-3 M3-2: cap-promotion sets 'admitted' regardless of phase;
+                       -- step 5 branches on adapter capability outside the cap transaction)
+                       -- (cycle-3 M3-8: parent_posted is a NEW intermediate state — adapter contract
+                       -- now has postParent() + createThreadFromParent() so the platform parent id
+                       -- is durable before the thread call)
   dispatch_state_updated_at TEXT NOT NULL,
   dispatch_retry_count INTEGER NOT NULL DEFAULT 0,
   -- Completion finalization markers (cycle-1 M3 + cycle-2 M2-F refinements):
   dependents_released_at  TEXT,    -- fan-out to task_dependencies; written FIRST so parent message contains the final list
+  dependents_unblocked_json TEXT,  -- cycle-3 M3-7: persists the released list itself (JSON array of task_ids); read by step d to populate parent message; survives crashes
   child_summary_posted_at TEXT,    -- user-visible summary posted to child subthread; for internal-only tasks (child_thread_id IS NULL) set to completed_at at terminal-status time (not-applicable marker)
   parent_notified_at      TEXT,    -- system row written to parent's session; written LAST and contains the final dependents_unblocked list
   parent_woken_at         TEXT,    -- cycle-2 M2-F: separate marker for wakeContainer(parent), so failed wakes are retried
@@ -172,6 +178,17 @@ BEGIN
   SELECT RAISE(ABORT, 'task_dependencies.blocked_on_task_id parent_session_id mismatch');
 END;
 
+-- Cycle-3 M3-6: bind tasks.child_session_id to sessions.dispatch_task_id symmetrically.
+-- Authorization via source-session capability requires this invariant to hold; without
+-- the trigger, a stale UPDATE could leave them out of sync and authorize the wrong agent.
+CREATE TRIGGER tasks_child_session_binding_check
+BEFORE UPDATE OF child_session_id ON tasks
+WHEN NEW.child_session_id IS NOT NULL
+ AND (SELECT dispatch_task_id FROM sessions WHERE id = NEW.child_session_id) != NEW.task_id
+BEGIN
+  SELECT RAISE(ABORT, 'tasks.child_session_id binding mismatch with sessions.dispatch_task_id');
+END;
+
 -- Insert helper still exists in src/db/task-dependencies.ts for ergonomics, but the trigger is the boundary.
 
 -- Roles catalog (cycle-1 S5).
@@ -228,20 +245,43 @@ Multi-step state machine with persisted `dispatch_state` per step. Each transiti
     sufficient because sessions.dispatch_task_id UNIQUE makes the
     (task_id, child_session_id) binding 1:1 (cycle-2 M2-E simplification).
 
-[CAP CHECK + atomic 'dispatched' transition — cycle-2 M2-C closes M9]
-    Before advancing to step 5, host evaluates within ONE transaction:
-      per-orchestrator: COUNT(*) FROM tasks WHERE parent_session_id = ?
-                       AND status IN ('dispatched','running')  ≤ 6
-      per-target-group: COUNT(*) FROM tasks WHERE target_agent_group_id = ?
-                       AND status IN ('dispatched','running')  ≤ 3 (configurable)
-    If both pass: UPDATE tasks SET status='dispatched',
-    dispatch_state='creating_thread' (or 'session_created' for non-thread fallback),
-    dispatch_state_updated_at=now WHERE task_id = ? AND status='pending'.
-    The atomic UPDATE serves as the cap reservation — subsequent dispatches
-    counting `IN ('dispatched','running')` see this row and respect the cap.
-    If either cap is at limit, status stays 'pending' — promotion happens
-    via §Watchdog responsibility 4. Initial dispatch and watchdog promotion
-    BOTH go through this same cap-aware transaction (one code path).
+[CAP + DEPENDENCY CHECK + atomic 'dispatched' transition]
+    Cycle-3 fixes folded in: M3-2 introduces neutral 'admitted' state to
+    decouple cap admission from dispatch-path selection; M3-4 fixes off-by-one
+    (< not ≤); M3-5 adds dependency-complete check; S3-C requires BEGIN IMMEDIATE.
+    Before advancing to step 5, host runs ONE transaction (BEGIN IMMEDIATE so
+    write-lock is acquired upfront, avoiding mid-transaction SQLITE_BUSY):
+
+      BEGIN IMMEDIATE;
+      -- Cap checks (M3-4: strict less-than)
+      SELECT COUNT(*) FROM tasks
+       WHERE parent_session_id = ?
+         AND status IN ('dispatched','running')
+         FOR resulting count to be < 6;
+      SELECT COUNT(*) FROM tasks
+       WHERE target_agent_group_id = ?
+         AND status IN ('dispatched','running')
+         FOR resulting count to be < 3 (configurable per agent_group);
+      -- Dependency check (M3-5)
+      NOT EXISTS (
+        SELECT 1 FROM task_dependencies td JOIN tasks t ON t.task_id = td.blocked_on_task_id
+         WHERE td.task_id = ? AND t.status != 'complete'
+      );
+      -- All three pass:
+      UPDATE tasks SET status='dispatched',
+                       dispatch_state='admitted',                  -- M3-2: neutral
+                       dispatch_state_updated_at=now
+       WHERE task_id = ? AND status='pending';
+      COMMIT;
+
+    The 'admitted' state means cap-reserved but adapter capability not yet
+    resolved. Step 5 reads agent_groups → messaging_groups → adapter and
+    branches between thread-supporting and non-thread-fallback paths,
+    transitioning 'admitted' → 'parent_posted' (or 'session_created' for
+    fallback). Initial dispatch and watchdog responsibility 4 BOTH use
+    this same transaction (one code path).
+    If any check fails: status stays 'pending'; promotion happens via
+    §Watchdog responsibility 4 on next sweep tick.
 
 [5] After atomic promotion to status='dispatched', advance through side
     effects. For every transition: UPDATE tasks SET dispatch_state=<next>,
@@ -250,24 +290,41 @@ Multi-step state machine with persisted `dispatch_state` per step. Each transiti
     posts), use the "creating_X" intent state set in the cap-promotion
     transaction so the reconciler detects partial completion.
 
-      a. (When phase has thread surface — dispatch_state='creating_thread')
-         Post "Launched task <title>" parent message via deterministic
-         local message id `dispatch-parent-${task_id}` (PK-protected via
-         writeSessionMessage's INSERT OR IGNORE).
-         Call adapter.createThread(messagingGroupId, local_parent_msg, title,
-         firstMessage); the adapter is responsible for posting the platform
-         parent (returning its real id) AND creating the thread, returning
-         { parentPlatformMessageId, threadId }. Persist BOTH:
-         UPDATE tasks SET parent_platform_message_id=<...>, child_thread_id=<...>,
-                          dispatch_state='thread_created',
-                          dispatch_state_updated_at=now.
-         On reconciler retry from 'creating_thread': if
-         (parent_platform_message_id IS NOT NULL AND child_thread_id IS NOT NULL)
-         skip; else if parent_platform_message_id IS NOT NULL but child_thread_id
-         IS NULL, call adapter.getThreadId(parentPlatformMessageId) — if it
-         returns a thread id, adopt it; otherwise re-call createThread with
-         skipParentPost=true. Adapter ensures createThread is itself idempotent
-         when parent already exists.
+      a. (When phase has thread surface — adapter.supportsCreateThread === true)
+         Cycle-3 M3-8 splits this into two staged sub-steps; each persists
+         the durable platform ID immediately on return so a mid-call crash
+         is recoverable.
+
+         a1. Transition: UPDATE tasks SET dispatch_state='admitted' →
+             'creating_thread' (intent persisted), dispatch_state_updated_at=now.
+             Call `adapter.postParent(messagingGroupId, localParentMessageId, title)`
+             where localParentMessageId = `dispatch-parent-${task_id}` (PK-protected
+             via writeSessionMessage's INSERT OR IGNORE).
+             Adapter: posts platform parent message, returns { parentPlatformMessageId, messageId }.
+             IMMEDIATELY persist:
+             UPDATE tasks SET parent_platform_message_id=<...>,
+                              dispatch_state='parent_posted',
+                              dispatch_state_updated_at=now.
+
+             Reconciler from 'creating_thread': if `parent_platform_message_id IS NULL`,
+             retry adapter.postParent (PK-protected on local message id; safe).
+
+         a2. Transition: dispatch_state='parent_posted' (already persisted).
+             Call `adapter.createThreadFromParent(messagingGroupId,
+             parent_platform_message_id, firstMessage)`. Adapter creates thread
+             from existing parent, returns { threadId }.
+             IMMEDIATELY persist:
+             UPDATE tasks SET child_thread_id=<...>,
+                              dispatch_state='thread_created',
+                              dispatch_state_updated_at=now.
+
+             Reconciler from 'parent_posted': call
+             `adapter.getThreadId(parent_platform_message_id)` first (cheap, idempotent).
+             If it returns a thread id (Slack: parent.thread_ts == parent.ts AND
+             reply_count > 0; Discord: Message#thread !== null), adopt it. If null,
+             re-call createThreadFromParent (idempotent on the platform side because
+             the parent already exists; second call posts a duplicate first-reply
+             which is benign — the thread is the same thread).
 
       b. createDispatchedSession(task_id, target_agent_group_id, effective_mg_id,
          effective_thread_id, session_mode='per-thread')
@@ -310,9 +367,12 @@ The (mg_id, thread_id, mode) tuple in step 5b depends on the phase — see [Phas
 
 **Authorization model (cycle-2 M2-E simplification):** a child session has at most one dispatched task (enforced by `sessions.dispatch_task_id UNIQUE`); a task has exactly one child session (enforced by application logic + the UNIQUE column). The pair (task_id ↔ child_session_id) is the capability. `task_complete` authorization is `task_id = ? AND child_session_id = <source session of outbound row> AND target_agent_group_id = <source agent group>` — no nonce required. The source-session of an outbound row is implicit in the row itself (host knows which session emitted the system action), so a forged claim from a non-dispatched session fails the binding check immediately.
 
-**Adapter idempotency contract (cycle-2 M2-D):** the `ChannelAdapter` interface gains two optional methods:
-- `createThread?(messagingGroupId, localParentMessageId, title, firstMessage, opts?: { skipParentPost?: boolean }): Promise<{ parentPlatformMessageId: string; threadId: string; messageId: string }>` — owns BOTH platform parent post and thread creation; returns durable platform IDs.
-- `getThreadId?(messagingGroupId, parentPlatformMessageId): Promise<string | null>` — for reconciler crash-recovery. Slack semantics: returns threadId if and only if `parent.thread_ts == parent.ts` AND `parent.reply_count > 0` (i.e. a thread genuinely exists). Discord semantics: returns thread id if `Message#thread !== null`. If the adapter returns null, the reconciler re-calls `createThread` with `skipParentPost=true` (parent already posted, just create the thread).
+**Adapter idempotency contract (cycle-3 M3-8 — split from cycle-2 M2-D's combined call):** the `ChannelAdapter` interface gains three optional methods:
+- `postParent?(messagingGroupId, localParentMessageId, title): Promise<{ parentPlatformMessageId: string; messageId: string }>` — posts the platform parent message; idempotent on `localParentMessageId` (PK-protected via `writeSessionMessage` on NanoClaw's local row).
+- `createThreadFromParent?(messagingGroupId, parentPlatformMessageId, firstMessage): Promise<{ threadId: string }>` — creates the thread from an already-posted parent. On Slack, this means posting the first child reply with `thread_ts=parentPlatformMessageId`. On Discord, calls `Message#startThread`.
+- `getThreadId?(messagingGroupId, parentPlatformMessageId): Promise<string | null>` — reconciler crash-recovery probe. Slack: returns threadId if and only if `parent.thread_ts == parent.ts` AND `parent.reply_count > 0`. Discord: returns thread id if `Message#thread !== null`.
+
+The adapter capability flag `supportsCreateThread` (true if both `postParent` AND `createThreadFromParent` are implemented) is what the dispatch flow consults.
 
 ### Reverse signal
 
@@ -351,16 +411,20 @@ Two writes per completion: user-visible chat into the **child's own subthread** 
            UPDATE tasks SET status, completed_at, result_summary, failure_reason
             WHERE task_id = ? AND status IN ('dispatched','running').
 
-        b. **Compute and persist dependent release** (must precede parent
-           notification — closes Codex C6).
+        b. **Compute, PERSIST, and release dependents** (cycle-3 M3-7: persist the
+           list itself, not just the marker — survives a crash between b and d):
+           **Skip this step if status='cancelled'** (cycle-3 S3-D-G: cancelled
+           tasks did not produce work, so they should NOT unblock dependents).
              SELECT t.task_id FROM task_dependencies td JOIN tasks t ON t.task_id = td.task_id
               WHERE td.blocked_on_task_id = <completed task_id> AND t.status = 'pending';
-           For each, check if all of its dependencies are now complete;
-           collect into the "dependents_unblocked" list. Mark each unblocked
-           task as eligible (no status change yet — they remain 'pending';
-           §Watchdog responsibility 4 promotes per cap budget).
-           UPDATE tasks SET dependents_released_at=now WHERE task_id=?
-                            AND dependents_released_at IS NULL.
+           For each, check if all of its dependencies are now complete; collect
+           into the "dependents_unblocked" list. Mark each unblocked task as
+           eligible (no status change yet — they remain 'pending'; §Watchdog
+           responsibility 4 promotes per cap budget).
+           Persist BOTH the list and the marker in one UPDATE:
+           UPDATE tasks SET dependents_released_at=now,
+                            dependents_unblocked_json='[...task_ids...]'
+                       WHERE task_id=? AND dependents_released_at IS NULL.
 
         c. **Write 1 (user-visible child summary)** — only if
            child_thread_id IS NOT NULL (child has a platform surface):
@@ -390,7 +454,7 @@ Two writes per completion: user-visible chat into the **child's own subthread** 
                  summary_markdown:   <truncated to 8KB>,
                  failure_reason:     <optional>,
                  completed_at:       <ISO 8601>,
-                 dependents_unblocked: [<task_id>, ...]   // accurate from step b
+                 dependents_unblocked: [<task_id>, ...]   // read from tasks.dependents_unblocked_json — durable across crashes (cycle-3 M3-7)
                }
              }
            Deterministic message id `task-complete-system-${task_id}`.
@@ -410,21 +474,26 @@ Two writes per completion: user-visible chat into the **child's own subthread** 
 
 Completion routing is keyed on `parent_session_id`, not on `parent_agent_group_id`. An orchestrator group can have many sessions concurrently (different chat threads, different users, different times); only the originating session should hear the result.
 
-### Dispatch authorization scope (closes cycle-2 S2-D)
+### Dispatch authorization scope
 
-Codex C9 noted that giving an agent group the `orchestrator` role makes any prompt that reaches that group able to dispatch real work — a stale or prompt-injected orchestrator session can fan out to other groups without per-dispatch owner intent. The brief's R13 ("role grant requires owner approval — one-time per orchestrator group") accepts this risk for low-exposure orchestrator sessions, but it shouldn't be the only mode.
+Codex C9 (cycle 2) noted that giving an agent group the `orchestrator` role makes any prompt that reaches that group able to dispatch real work — a stale or prompt-injected orchestrator session can fan out to other groups without per-dispatch owner intent. The brief's R13 ("role grant requires owner approval — one-time per orchestrator group") accepts this risk for low-exposure orchestrator sessions, but it shouldn't be the only mode.
 
-New column: `agent_groups.dispatch_approval_mode TEXT NOT NULL DEFAULT 'session-token'`.
+**Cycle-3 M3-3 scope reduction (A-3-3 + Codex C-3-6 merged)**: the cycle-2 design proposed three modes including a `'session-token'` default with run-token semantics, but that mode has no implementable substrate in the current codebase — `src/modules/approvals/primitive.ts:188` `requestApproval` is fire-and-forget and has no token-issuance surface. **v1 ships TWO modes only**, and the `'session-token'` feature defers to a follow-up spec where the run-token storage table, the consumeDispatchToken helper, and a dedicated approval handler can be designed properly.
+
+New column: `agent_groups.dispatch_approval_mode TEXT NOT NULL DEFAULT 'none' CHECK (dispatch_approval_mode IN ('none','per-dispatch'))`.
 
 | Mode | Behavior | Use case |
 |---|---|---|
-| `'none'` | Role grant alone authorizes any dispatch (current cycle-1 behavior). | Internal orchestrator groups with no chat exposure. |
-| `'session-token'` (default) | Orchestrator must hold a valid **dispatch run token** scoped to `parent_session_id`. Owner approves once at the start of an orchestration run; token covers up to N dispatches with M-minute expiry (defaults: N=30, M=60min). Per-dispatch friction = zero after one approval. | Default for any orchestrator group exposed to chat input. |
-| `'per-dispatch'` | Every `dispatch_task` call surfaces a per-task approval card to the owner. | High-stakes orchestrator groups where every dispatch needs eyes-on. |
+| `'none'` (default) | Role grant alone authorizes any dispatch. Matches brief R13 — owner already approved the role at grant time. | Default for orchestrator groups; sufficient for low-exposure orchestrators. |
+| `'per-dispatch'` | Every `dispatch_task` call surfaces a per-task approval card via `requestApproval`. | High-stakes orchestrator groups where every dispatch needs eyes-on. |
 
-`applyDispatchTask` checks the mode and (a) requires no token for `'none'`; (b) validates run token in `parent_session_id` for `'session-token'` (issuing a `request_token` system row to the orchestrator if the token is missing/expired, and blocking the dispatch until the owner approves); (c) opens a per-dispatch approval card via the existing `requestApproval` flow for `'per-dispatch'`.
+`applyDispatchTask` checks the mode: `'none'` proceeds; `'per-dispatch'` opens an approval card via the existing `requestApproval` flow with `action='dispatch_task'` and the dispatch payload — a registered approval handler (`applyDispatchTaskApproval`) replays the actual dispatch on approve.
 
-This is additive — does not change the `agent_roles` model, only adds a per-group policy on top.
+**Deferred (out of v1)**: `'session-token'` mode. When ready, follow-up spec adds:
+- `dispatch_run_tokens(token_id, parent_session_id, agent_group_id, dispatches_remaining, expires_at, granted_by)` table + migration
+- `consumeDispatchToken()` helper (atomic decrement + expiry check)
+- A registered approval handler that issues tokens on owner approve
+- Updates to `applyDispatchTask` to validate the token in the cap-promotion transaction.
 
 ### MCP tools (architecture: always-present, host-authorized)
 
@@ -496,7 +565,7 @@ Emits a `task.progress` SSE event to the dashboard. (The dashboard SSE event nam
 Host's `applyCancelTask` (closes cycle-1 M12 + cycle-2 M2-B — soft+hard pattern with `cancelled_at` properly tracked):
 
 1. Validate caller has `orchestrator` role on the calling session's agent_group. (Matches `dispatch_task` gating.)
-2. UPDATE tasks SET status='cancelled', cancelled_at=now WHERE task_id=? AND status IN ('pending','dispatched','running'). The `cancelled_at` column (added in §Data model per cycle-2 M2-B) is what the watchdog hard-kill timer reads.
+2. UPDATE tasks SET status='cancelled', cancelled_at=now, completed_at=now WHERE task_id=? AND status IN ('pending','dispatched','running'). The `cancelled_at` column (cycle-2 M2-B) is what the watchdog hard-kill timer reads. **`completed_at` is also set** (cycle-3 M3-1) so internal-only cancelled tasks don't leak `child_summary_posted_at = NULL` permanently — §Reverse signal step c reads `completed_at` for the not-applicable marker.
 3. Write a `kind='system'` inbound row into the child's session: `{ action: 'cancel', task_id }`. Wake the child.
 4. Child agent — instructed via dispatch banner: *"If you receive a system action with action='cancel' for your task_id, exit gracefully without calling task_complete."* Best-effort soft cancellation; the agent might still be mid-LLM-call when the system row arrives.
 5. Watchdog enforces hard kill: if `tasks.status='cancelled'` AND `dispatch_state IN ('prompt_injected','wake_sent','running')` AND `cancelled_at < now - 120s`, host calls `killContainer(child_session)`. (`killContainer` already exists in `src/container-runner.ts`.)
