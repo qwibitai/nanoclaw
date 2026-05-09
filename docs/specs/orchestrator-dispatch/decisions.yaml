@@ -287,33 +287,38 @@ assumptions:
     validated: true
     invalidated_at: null
 
+  - id: A4
+    stage: design
+    text: |
+      The host's existing delivery.ts outbound-poll path is the natural
+      place to emit SSE events for the dashboard. The dashboard does
+      not need a separate chokidar/fsevents file watcher (per review M9
+      drop).
+    validation: |
+      Measure end-to-end latency from messages_out insert to dashboard
+      pixel update during MVP build. Target: <1000ms (success criterion
+      SC4). If too slow, introduce an in-process event emitter on the
+      same code path.
+    validated: false
+    invalidated_at: null
+
+  - id: A5
+    stage: design
+    text: |
+      Slack and Discord adapter createThread capability can be
+      implemented in 1 day each (implementation order steps 4-5).
+    validation: |
+      Track actual hours during MVP build; if either lands at >2 days,
+      reflag as a risk in the next /team-review.
+    validated: false
+    invalidated_at: null
+
 review_cycles:
   - iteration: 1
     must_fix_count: 10
     should_fix_count: 14
     wont_fix_count: 2
     completed_at: 2026-05-09T03:55:00Z
-  - iteration: 2
-    must_fix_count: 13
-    should_fix_count: 11
-    wont_fix_count: 0  # cycle-1 W1, W2 still logged
-    completed_at: 2026-05-09T04:30:00Z
-    notes: |
-      5 of 10 cycle-1 MUST-FIX produced new MUST-FIX in cycle 2.
-  - iteration: 3
-    must_fix_count: 4
-    should_fix_count: 8
-    wont_fix_count: 0
-    completed_at: 2026-05-09T05:30:00Z
-    notes: |
-      Final allowed cycle. Cycle-3 found 4 MUST-FIX (M1: cycle-2 reorder
-      was a regression; M2: _completeTaskCore status guard too narrow;
-      M3: propagated failures bypass fan-out; M4: dashboard markdown XSS).
-      All 4 are codebase-grounded mechanical fixes; revisions applied
-      inline. No [NEEDS SPEC] carry-forward needed. Best-practice reviewer
-      verdict: "no new MEDIUM or HIGH drift; design ready to ship modulo
-      LOW clarifications." Per /team-auto, next /team-review invocation
-      will hit the 3-cycle cap; cap-reached escalation expected.
 
 # Open questions deferred from design (carried forward for /team-plan):
 #   OQ1 (light theme tokens not visually validated)
