@@ -15,6 +15,7 @@ import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runti
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { routeInbound, awaitInboundDrain } from './router.js';
+import { dispatchResponse, awaitDispatchDrain } from './dispatch.js';
 import { log } from './log.js';
 
 // Response + shutdown registries live in response-registry.ts to break the
@@ -22,28 +23,9 @@ import { log } from './log.js';
 // effects, and the modules call registerResponseHandler/onShutdown at top
 // level — which would hit a TDZ error if the arrays lived here. Re-exported
 // here so existing callers see the same surface.
-import {
-  registerResponseHandler,
-  getResponseHandlers,
-  onShutdown,
-  getShutdownCallbacks,
-  type ResponsePayload,
-  type ResponseHandler,
-} from './response-registry.js';
+import { registerResponseHandler, onShutdown, getShutdownCallbacks } from './response-registry.js';
 export { registerResponseHandler, onShutdown };
-export type { ResponsePayload, ResponseHandler };
-
-async function dispatchResponse(payload: ResponsePayload): Promise<void> {
-  for (const handler of getResponseHandlers()) {
-    try {
-      const claimed = await handler(payload);
-      if (claimed) return;
-    } catch (err) {
-      log.error('Response handler threw', { questionId: payload.questionId, err });
-    }
-  }
-  log.warn('Unclaimed response', { questionId: payload.questionId, value: payload.value });
-}
+export type { ResponsePayload, ResponseHandler } from './response-registry.js';
 
 // Channel barrel — each enabled channel self-registers on import.
 // Channel skills uncomment lines in channels/index.ts to enable them.
@@ -179,6 +161,13 @@ async function shutdown(signal: string): Promise<void> {
   // indefinitely block launchd restart.
   const drainTimeoutMs = Number(process.env.INBOUND_DRAIN_TIMEOUT_MS ?? 30_000);
   await awaitInboundDrain(drainTimeoutMs);
+  // Drain in-flight outbound dispatches (approval-flow / button-press replies
+  // routed via dispatchResponse). Same dropped-reply class of bug as the
+  // inbound drain, but on the onAction path. Independent timeout because the
+  // dispatch handlers do their own outbound writes and may take a few seconds.
+  // DISPATCH_DRAIN_TIMEOUT_MS defaults to 30 000 ms.
+  const dispatchTimeoutMs = Number(process.env.DISPATCH_DRAIN_TIMEOUT_MS ?? 30_000);
+  await awaitDispatchDrain(dispatchTimeoutMs);
   for (const cb of getShutdownCallbacks()) {
     try {
       await cb();
