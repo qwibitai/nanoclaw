@@ -15,7 +15,7 @@ The scope cut keeps the v1 MVP focused on the orchestrator-dispatch spine: orche
 
 ## Brief Reference
 
-This design implements the requirements set out in [`./brief.md`](./brief.md). Specifically: R1–R14 (orchestrator dispatch primitive, per-task chattable threads, durable ledger, dependency chains, reverse signal, visibility dashboard, steering, watchdog, model/effort selection, cancellation, retry-safety, dispatch authorization, completion authorization). Constraints C1–C14 from `decisions.yaml` are the binding contract.
+This design implements the v1 MVP requirements in [`./brief.md`](./brief.md): R1–R4, R6, R9–R14 (orchestrator dispatch primitive, per-task chattable threads via Slack/Discord subthreads, durable host-side task ledger, reverse signal completion, watchdog, model/effort selection, cancellation, retry-safety, dispatch authorization, completion authorization). **R5 (dependency chains) and R7/R8 (visibility dashboard + dashboard steering) are deferred to v2** per the Option-4 cut at the top of this document. Constraints from `decisions.yaml` are the binding contract.
 
 ## Problem
 
@@ -33,7 +33,7 @@ The existing `agent-to-agent` module is structurally wrong for this. It's a hier
 - **G1**: Orchestrator can dispatch N tasks → N sessions in N target agent groups, each addressable independently.
 - **G2**: Owner can read live progress and steer any in-flight task from a single dashboard.
 - **G3**: Tasks have durable host-side state (status, dependencies, parent linkage, deadlines) that survives container crashes and host restarts.
-- **G4**: Reverse signal: child reports completion → orchestrator notified → dependent tasks unblock automatically.
+- **G4**: Reverse signal: child reports completion → orchestrator notified via system row in parent session. (Automatic dependent-task unblocking deferred to v2 with dependency chains.)
 - **G5**: Memory budget for the dashboard ≤ 150MB additional resident on the host. No new background services beyond the existing Node host.
 
 ## Non-goals
@@ -113,12 +113,18 @@ CREATE TABLE tasks (
                        -- before any side effect, so cap counts include in-flight dispatching tasks
                        -- and authorize accepts fast completions before heartbeat)
   dispatch_state       TEXT NOT NULL DEFAULT 'pending',
-                       -- pending | admitted | parent_posted | thread_created | session_created | prompt_injected | wake_sent | running
-                       -- (cycle-3 M3-2: cap-promotion sets 'admitted' regardless of phase;
-                       -- step 5 branches on adapter capability outside the cap transaction)
-                       -- (cycle-3 M3-8: parent_posted is a NEW intermediate state — adapter contract
-                       -- now has postParent() + createThreadFromParent() so the platform parent id
-                       -- is durable before the thread call)
+                       -- pending | admitted | creating_thread | parent_posted | thread_created | session_created | prompt_injected | wake_sent | running
+                       -- States in order of progression:
+                       --   pending          → row inserted, no cap yet
+                       --   admitted         → cap reservation acquired in BEGIN IMMEDIATE cap-promotion
+                       --   creating_thread  → about to call adapter.postParent (intent persisted in its own committed transaction)
+                       --   parent_posted    → adapter.postParent returned; parent_platform_message_id durable
+                       --   thread_created   → adapter.createThreadFromParent returned; child_thread_id durable
+                       --   session_created  → createDispatchedSession returned; child_session_id durable
+                       --   prompt_injected  → dispatch banner row written to child inbound
+                       --   wake_sent        → wakeContainer(child) issued
+                       --   running          → first heartbeat from child received
+                       -- Each dispatch_state UPDATE is its own committed transaction — no BEGIN/COMMIT envelope spans a network call (closes Reviewer B drift on autocommit semantics).
   dispatch_state_updated_at TEXT NOT NULL,
   dispatch_retry_count INTEGER NOT NULL DEFAULT 0,
   -- Completion finalization markers (cycle-1 M3 + cycle-2 M2-F refinements):
@@ -192,7 +198,7 @@ INSERT INTO roles_catalog (role, description) VALUES
 -- Retention policy (cycle-2 S2-F): document only, deferred to v2 ops.
 -- Recommended cron purge: tasks WHERE status='complete' AND completed_at < now - 30 days
 --                         tasks WHERE status IN ('failed','cancelled','orphaned') AND completed_at < now - 90 days
--- (FK ON DELETE CASCADE on task_dependencies handles dep cleanup automatically.)
+-- (When v2 reintroduces task_dependencies, add `FK ON DELETE CASCADE` on its `task_id` column for automatic cleanup.)
 ```
 
 ### Dispatch flow
@@ -226,8 +232,7 @@ Multi-step state machine with persisted `dispatch_state` per step. Each transiti
       status='pending', dispatch_state='pending', dispatch_state_updated_at=now,
       original_deadline=deadline,
       spawned_by_user_id=<orchestrator session's most-recent user inbound>.
-    Populates task_dependencies via insertTaskDependency() helper
-    (DB-level trigger enforces same-parent-session — cycle-2 S2-B).
+    -- v1 cut: no task_dependencies population (no dep chains in v1).
 
     No completion_nonce is generated. Source-session authorization is
     sufficient because sessions.dispatch_task_id UNIQUE makes the
@@ -267,12 +272,17 @@ Multi-step state machine with persisted `dispatch_state` per step. Each transiti
     If any check fails: status stays 'pending'; promotion happens via
     §Watchdog responsibility 4 on next sweep tick.
 
-[5] After atomic promotion to status='dispatched', advance through side
-    effects. For every transition: UPDATE tasks SET dispatch_state=<next>,
-    dispatch_state_updated_at=now BEFORE attempting the next side effect.
-    Where the side effect must precede the persist (Slack/Discord platform
-    posts), use the "creating_X" intent state set in the cap-promotion
-    transaction so the reconciler detects partial completion.
+[5] After atomic promotion to status='dispatched' (dispatch_state='admitted'),
+    advance through side effects. The host reads the target adapter's
+    capability (postParent/createThreadFromParent presence on the resolved
+    target_agent_group's mg) and branches:
+      - thread-supporting → step 5a (write 'creating_thread' intent → postParent → 'parent_posted' → createThreadFromParent → 'thread_created'), then step 5b
+      - non-thread fallback → skip step 5a, go directly to step 5b with mg_id=NULL
+    Each dispatch_state UPDATE is its own committed transaction — never
+    inside a transaction that wraps a network call. The cap-promotion
+    transaction (above) only ever sets 'admitted'; intent states like
+    'creating_thread' are written by step 5a in a separate small
+    transaction immediately before invoking the side effect.
 
       a. (When phase has thread surface — adapter.supportsCreateThread === true)
          Cycle-3 M3-8 splits this into two staged sub-steps; each persists
@@ -360,9 +370,9 @@ The adapter capability flag `supportsCreateThread` (true if both `postParent` AN
 
 ### Reverse signal
 
-Completion is an idempotent state machine, not an atomic operation. The host's `applyTaskComplete` separates **authorize** from **finalize**. The finalize path persists per-side-effect markers (`dependents_released_at`, `child_summary_posted_at`, `parent_notified_at`, `parent_woken_at`) so a host crash mid-finalize is resumable by the watchdog. The **order of finalize steps is load-bearing** (cycle-2 M2-F closes Codex C6): dependents are computed and released BEFORE the parent system row is written, so the parent message contains the final, accurate `dependents_unblocked` list.
+Completion is an idempotent state machine, not an atomic operation. The host's `applyTaskComplete` separates **authorize** from **finalize**. The finalize path persists per-side-effect markers (`child_summary_posted_at`, `parent_notified_at`, `parent_woken_at`) so a host crash mid-finalize is resumable by the watchdog.
 
-Two writes per completion: user-visible chat into the **child's own subthread** so the owner sees closure where they were watching, and a `kind='system'` row into the **parent session** so the orchestrator can fan out dependents.
+Two writes per completion: user-visible chat into the **child's own subthread** so the owner sees closure where they were watching, and a `kind='system'` row into the **parent session** so the orchestrator can react (summarize, dispatch follow-up batches manually, etc — no automatic dependent unblocking in v1).
 
 ```
 [1] Child container writes outbound system action `task_complete` with:
@@ -427,8 +437,8 @@ Two writes per completion: user-visible chat into the **child's own subthread** 
                  summary_markdown:   <truncated to 8KB>,
                  failure_reason:     <optional>,
                  completed_at:       <ISO 8601>,
-                 -- dependents_unblocked: [] — always empty in v1 (no dep chains).
-                 -- Field reserved in the wire format for v2 compatibility.
+                 -- Always [] in v1; v2 fan-out logic will populate it.
+                 -- Schema includes the field so v1 and v2 share a single payload type.
                  dependents_unblocked: []
                }
              }
@@ -563,7 +573,7 @@ LLM-turn interruption is fundamentally hard in NanoClaw's polling model — ther
       title:           { type: 'string', maxLength: 120 },
       prompt:          { type: 'string', maxLength: 16000 },
       deadline:        { type: 'string', format: 'date-time', description: 'Optional. Watchdog enforces. Child can request extensions via task_progress (capped at 4× original).' },
-      blocked_on:      { type: 'array',  items: { type: 'string' }, description: 'Optional list of task_ids that must complete first. Must share parent_session_id with the new task.' },
+      // blocked_on parameter intentionally omitted in v1 (no dependency chains). v2 reintroduces.
       idempotency_key: { type: 'string', description: 'Required, NOT NULL. UUIDv4. Re-calling with the same key returns the existing task_id (closes M13).' },
       model:           { type: 'string', description: 'Optional per-task model override.' },
       effort:          { type: 'string', enum: ['low','medium','high'], description: 'Optional per-task effort override.' },
@@ -575,11 +585,13 @@ LLM-turn interruption is fundamentally hard in NanoClaw's polling model — ther
 
 ### Watchdog and reconciler
 
-Extension to `src/host-sweep.ts`. Single 60s sweep, **five** responsibilities. Stuck-detection uses `dispatch_state_updated_at` (NOT `spawned_at` — closes M15) so legitimately-paused tasks aren't false-flagged.
+Extension to `src/host-sweep.ts`. Single 60s sweep, **six** responsibilities. Stuck-detection uses `dispatch_state_updated_at` (NOT `spawned_at` — closes M15) so legitimately-paused tasks aren't false-flagged.
 
-1. **Stuck dispatch reconciler** (closes M1, M15): scan tasks where `dispatch_state IN ('creating_thread', 'thread_created', 'session_created', 'prompt_injected', 'wake_sent')` AND `dispatch_state_updated_at < now - 60s` AND `dispatch_retry_count < 3`. For each:
-   - `creating_thread`: call `adapter.getThreadId(messagingGroupId, parent_message_id)` — if a thread exists, adopt it (`UPDATE child_thread_id, dispatch_state='thread_created'`); else re-call `createThread`.
-   - `thread_created`: idempotent — re-run step 5b (`createDispatchedSession` is naturally PK-protected on the child session row).
+1. **Stuck dispatch reconciler** (closes M1, M15): scan tasks where `status='dispatched'` AND `dispatch_state IN ('admitted', 'creating_thread', 'parent_posted', 'thread_created', 'session_created', 'prompt_injected', 'wake_sent')` AND `dispatch_state_updated_at < now - 60s` AND `dispatch_retry_count < 3`. The `status='dispatched'` filter ensures cancelled tasks (status='cancelled') are not re-driven through dispatch (closes Codex C4 cancellation/reconciler race). For each:
+   - `admitted`: re-read adapter capability for the target's mg, transition to either `creating_thread` (thread-supporting) or directly into step 5b (fallback). Idempotent because no side effect has happened yet.
+   - `creating_thread`: if `parent_platform_message_id IS NULL`, re-call `adapter.postParent` (PK-protected on local message id). Else if `parent_platform_message_id IS NOT NULL` but `child_thread_id IS NULL`, treat as `parent_posted`.
+   - `parent_posted`: call `adapter.getThreadId(parent_platform_message_id)` — if a thread exists, adopt it (`UPDATE child_thread_id, dispatch_state='thread_created'`); else re-call `adapter.createThreadFromParent`.
+   - `thread_created`: idempotent — re-run step 5b (`createDispatchedSession` is naturally PK-protected on `sessions.dispatch_task_id`).
    - `session_created`: re-run step 5c (banner is PK-protected via deterministic message id).
    - `prompt_injected`: re-run step 5d (`wakeContainer` is idempotent).
    - `wake_sent`: re-run step 5d.
@@ -600,6 +612,8 @@ Extension to `src/host-sweep.ts`. Single 60s sweep, **five** responsibilities. S
 
 5. **Orphan recovery**: scan tasks where `status IN ('complete','failed','cancelled')` AND `parent_notified_at IS NOT NULL` AND `parent_session_id` references a session no longer active (status='archived' or row deleted). Mark `status='orphaned'`. DM the `spawned_by_user_id` user (closes S1 — populated at dispatch) via the `user_dms` cache with the result summary.
 
+6. **Child-exit failure detection** (closes Codex C5 cycle-1-v1-cut): scan tasks where `status IN ('dispatched','running')` AND `child_session_id IS NOT NULL` AND the child session has `status='archived'` OR its container has exited. For each, mark `status='failed'`, `failure_reason='child container exited without task_complete signal'`, then run `finalizeTaskCompletion()`. This catches container crashes, agent runaway, and prompt-injection refusals where the child never emits `task_complete`. Implementation note: `src/container-runtime.ts` already tracks container lifecycle; this responsibility hooks into the existing exit-watching path rather than introducing a new poller.
+
 **Deadline extension** mechanism (closes M11): see `task_progress` MCP tool above. Child emits the system action; host's `applyTaskProgress` updates `tasks.deadline` (capped at `original_deadline + 4 × (original_deadline - spawned_at)`). The original deadline is in `tasks.original_deadline`, immutable, set at insert.
 
 _(`dispatch_task` schema and authorization are documented in §MCP tools above.)_
@@ -610,16 +624,17 @@ _(`dispatch_task` schema and authorization are documented in §MCP tools above.)
 
 Single shipping unit. Slack-first by design — non-thread channels degrade to internal-only sessions. Dashboard deferred to v2.
 
-**Dispatch flow with channel surface (Slack, Discord, any adapter exposing `createThread`):**
+**Dispatch flow with channel surface (Slack, Discord, any adapter exposing `postParent` + `createThreadFromParent`):**
 
 1. Orchestrator calls `dispatch_task` with target_group + title + prompt + idempotency_key.
-2. Host validates orchestrator role + target group (no dependency validation in v1 — `blocked_on` parameter removed).
-3. Host posts "Launched task <title>" as a parent message in the orchestrator's `messaging_group`.
-4. Host calls `adapter.createThread(messagingGroupId, parentMessageId, title, firstMessage) → { threadId, messageId }`. New adapter capability — see C2.
-5. Real `thread_id` returned by the adapter is recorded on the child session row. `messaging_group_id` is the orchestrator's mg.
-6. `resolveSession(target_agent_group_id, mg_id, real_thread_id, 'per-thread')` creates the child session. Constraint C1 is satisfied — `thread_id` is a real platform identifier so subsequent outbound delivery works.
-7. `writeSessionMessage` injects the task prompt as the child's first inbound (with a system banner "Dispatched by orchestrator <X>, task <task_id>").
-8. `wakeContainer(child)` — child agent runs.
+2. Host validates orchestrator role + target group + idempotency key uniqueness (no dependency validation in v1).
+3. Host enters BEGIN IMMEDIATE cap-promotion: cap checks pass → `status='dispatched'`, `dispatch_state='admitted'`. The atomic UPDATE serves as the cap reservation.
+4. Host posts "Launched task <title>" as a parent message via `adapter.postParent` (returns durable `parentPlatformMessageId`); persists. Then `adapter.createThreadFromParent` (returns `threadId`); persists. Both writes are individually committed.
+5. `createDispatchedSession(task_id, target_agent_group_id, orchestrator_mg, real_thread_id, 'per-thread')` creates the child session row with `dispatch_task_id=<task_id>` UNIQUE binding.
+6. `writeSessionMessage` injects the task prompt as the child's first inbound (kind='system' banner with task_id).
+7. `wakeContainer(child)` — child agent runs.
+
+(Detailed step-by-step with crash-recovery transitions in §Dispatch flow above; this is the high-level summary.)
 
 Owner clicks into the Slack/Discord subthread to chat with that specific child task. Normal NanoClaw flow takes over (the subthread is just a thread to NanoClaw — same plumbing as any other thread). Each task = its own chattable thread, exactly the workflow you described.
 
@@ -635,7 +650,7 @@ Most NanoClaw use is Slack/Discord, so this fallback path is rare-but-correct ra
 
 ### Future — code-touching tasks (out of scope, separate spec)
 
-Per-child git worktree manager. Codex's repo-corruption concern (22 parallel agents on `xzo-analytics` = trash). Until this ships as its own spec, the orchestrator's job is to either constrain dispatch to disjoint file scopes or sequence code-touching tasks via `blocked_on` chains.
+Per-child git worktree manager. Codex's repo-corruption concern (22 parallel agents on `xzo-analytics` = trash). Until this ships as its own spec, the orchestrator's job is to either constrain dispatch to disjoint file scopes or sequence code-touching tasks manually (dispatch batch 1, wait for `task_complete`, dispatch batch 2). v2 dependency chains will provide automatic sequencing once added.
 
 ## Dashboard — DEFERRED to v2
 
@@ -681,7 +696,7 @@ Total: ~10-11 days focused (channels-branch overhead per S4 is real).
 - **R1 (Codex H1)**: Ad-hoc destination resolution at dispatch time vs the existing `agent_destinations` projection model. Mitigation: orchestrator-dispatch is a totally separate module that doesn't touch `agent_destinations` or container-side `inbound.db.destinations`. Lazy host-side lookup of target by folder, scoped only to the dispatch_task action.
 - **R2 (Codex M2)**: Folder names in `platform_id`. Mitigation: dispatch_task accepts a folder name (human-friendly) but the host immediately resolves it to an `agent_group_id` and uses the ID throughout. Folder is never persisted in any message column.
 - **R3 (Codex H6)**: Orchestrator session disappears mid-task. Mitigation: explicit `orphaned` status in the watchdog. Owner is DM'd via user_dms cache so the result isn't silently lost.
-- **R4**: Non-thread channel children (Telegram/iMessage/email fallback path) have no channel surface = owner can only inspect/steer them via the dashboard. Mitigation: dashboard ships in the same MVP (steps 10–12).
+- **R4**: Non-thread channel children (Telegram/iMessage/email fallback path) have no per-task chat surface in v1. The orchestrator's own chat thread receives `task_complete` system rows for these children, so owner sees milestone updates (start, complete, failed) in the orchestrator thread. Mitigation: documented limitation in v1 (per A3 in Assumptions Log). Re-evaluate when v2 dashboard ships, or sooner if a non-thread channel becomes a top use case.
 - **R5**: Concurrency cap. 22 dispatched tasks = 22 containers. Single host might thrash. Mitigation: orchestrator dispatch handler enforces a configurable cap (default 6 concurrent `dispatched`/`running` tasks per orchestrator session); excess stay `pending` and pick up as slots free.
 - **R6**: Prompt injection in a chat thread getting an orchestrator agent to dispatch malicious tasks to other groups. Mitigation: `orchestrator` role grant is owner-approved (one-time), and the role is on the agent group, not on individual prompts. The orchestrator agent's CLAUDE.md explicitly defines its dispatch policy. Defense-in-depth: an optional per-dispatch approval gate (configurable on the orchestrator group), surfacing a click-approve card before any task fires.
 

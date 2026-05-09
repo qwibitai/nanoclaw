@@ -553,12 +553,27 @@ auto_judgments:
       weakens_safety_invariant: false
     recorded_at: 2026-05-09T17:02:00Z
 
-review_cycles: []
-# Active cycle counter RESET on 2026-05-09T18:00:00Z after owner exercised
-# cap-reached Option 4 (cut to MVP — drop dashboard + dependency chains from
-# v1). Per /team-review's Step 0 semantics, this admits a fresh cycle 1 on
-# the simplified v1 design. The 3 archived cycles below preserve the
-# historical record.
+review_cycles:
+  - iteration: 1
+    must_fix_count: 6
+    should_fix_count: 7
+    wont_fix_count: 0
+    completed_at: 2026-05-09T18:30:00Z
+    note: |
+      Fresh cycle-1 on the v1-cut design. Reviewer A: 6 MUST + 7 SHOULD —
+      all stale-reference cleanup the Option-4 cut left behind (missing
+      'creating_thread' enum, 'admitted' state missing from watchdog scan,
+      lingering blocked_on in dispatch_task schema, dependent_released_at
+      mentions, R4 dashboard reference, etc.). Reviewer B: "On the right
+      track. Pattern fit is strong." 6 LOW-MED operational drifts, no
+      MUST-FIX. Reviewer C (Codex): 5 findings, 3 overlap with A; 2 NEW
+      (cancellation/reconciler race C4 — fixed by adding status='dispatched'
+      filter to watchdog responsibility 1; child-exit failure detection C5
+      — fixed by adding watchdog responsibility 6). All findings allowed
+      revisions per /team-auto Stage A table; revision pass applied;
+      re-invoking /team-review for cycle 2.
+# Active cycle counter started fresh after Option-4 cut on 2026-05-09T18:00:00Z.
+# 3 archived cycles below preserve the pre-cut historical record.
 
 review_cycles_archived:
   - iteration: 1
