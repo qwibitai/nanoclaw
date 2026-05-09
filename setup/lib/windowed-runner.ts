@@ -18,7 +18,7 @@
 import * as p from '@clack/prompts';
 import k from 'kleur';
 
-import { offerClaudeOnFailure } from './claude-handoff.js';
+import { offerSetupCliOnFailure } from './cli-handoff.js';
 import { emit as phEmit } from './diagnostics.js';
 import type { StepResult, SpinnerLabels } from './runner.js';
 import { dumpTranscriptOnFailure, spawnStep, writeStepEntry } from './runner.js';
@@ -212,7 +212,7 @@ async function handleStall(
     // offerClaudeAssist runs its own spinner and may propose a fix command.
     // We don't attempt to restart the stalled build from here — if Claude
     // proposes a command the user accepts, they can retry setup afterwards.
-    await offerClaudeOnFailure({
+    await offerSetupCliOnFailure({
       stepName,
       msg: `The ${stepName} step has produced no output for 60 seconds.`,
       hint: 'It may be hung on a slow network pull or a failing Dockerfile step.',
