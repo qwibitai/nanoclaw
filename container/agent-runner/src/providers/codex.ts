@@ -2,10 +2,10 @@
  * OpenAI Codex provider — wraps `codex app-server` via JSON-RPC.
  *
  * Unlike the (deprecated) @openai/codex-sdk approach, the app-server
- * protocol exposes proper session/stream semantics, native compaction, and
- * stable MCP config via ~/.codex/config.toml — which is the same mechanism
- * the standalone codex CLI uses, so the container and host share one
- * provider-integration story.
+ * protocol exposes proper session/stream semantics, Codex-owned context
+ * management, and stable MCP config via ~/.codex/config.toml — which is the
+ * same mechanism the standalone codex CLI uses, so the container and host
+ * share one provider-integration story.
  *
  * Codex turns don't accept mid-turn input. Follow-up `push()` messages are
  * queued and drained after the current turn completes (same pattern as the
@@ -102,11 +102,11 @@ export class CodexProvider implements AgentProvider {
   readonly supportsNativeSlashCommands = false;
 
   private readonly mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
-  private readonly model: string;
+  private readonly model: string | undefined;
 
   constructor(options: ProviderOptions = {}) {
     this.mcpServers = options.mcpServers ?? {};
-    this.model = (options.env?.CODEX_MODEL as string | undefined) ?? 'gpt-5.4-mini';
+    this.model = resolveCodexModel(options.env);
   }
 
   isSessionInvalid(err: unknown): boolean {
@@ -203,6 +203,11 @@ export class CodexProvider implements AgentProvider {
   }
 }
 
+export function resolveCodexModel(env: Record<string, string | undefined> | undefined): string | undefined {
+  const model = env?.CODEX_MODEL?.trim();
+  return model || undefined;
+}
+
 // ── Per-turn event pump ─────────────────────────────────────────────────────
 // Pulled out because the gen() loop above reads cleaner with it extracted,
 // and because it's a natural seam for future unit tests that drive it with
@@ -212,7 +217,7 @@ async function* runOneTurn(
   server: AppServer,
   threadId: string,
   inputText: string,
-  model: string,
+  model: string | undefined,
   cwd: string,
   hasInit: () => boolean,
   markInit: () => void,
