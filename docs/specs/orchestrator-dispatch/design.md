@@ -1,6 +1,6 @@
 # Orchestrator Dispatch
 
-**Status**: design — cycle 3 (revised against `/team-review` cycle 2 findings)
+**Status**: design — cycle 3 v2 (revised against `/team-review` cycle 2 + cycle 3 findings)
 **Author**: Dave + Claude (Opus 4.7) + Codex (review)
 **Last updated**: 2026-05-09
 
@@ -94,12 +94,15 @@ CREATE TABLE tasks (
                        -- (M10 cycle 2)
   dispatch_state       TEXT,
                        -- For status IN ('dispatching','dispatched'):
-                       -- NULL | session_created | prompt_injected | wake_sent
-                       --       | parent_posted | thread_created | dispatched
-                       -- Note ordering: internal-only steps first
-                       -- (session_created → prompt_injected → wake_sent), then
-                       -- platform side effects (parent_posted → thread_created),
-                       -- then terminal 'dispatched'. (M5 cycle 2 reorder.)
+                       -- NULL | parent_posted | thread_created
+                       --       | session_created | prompt_injected | wake_sent
+                       --       | dispatched
+                       -- Ordering (cycle-3 M1 — reverted cycle-2 reorder):
+                       -- external first (parent_posted, thread_created),
+                       -- then internal (session_created, prompt_injected,
+                       -- wake_sent), then terminal 'dispatched'.
+                       -- External-first lets internal setup use real
+                       -- platform thread_id without a placeholder.
   external_thread_id   TEXT,                -- platform thread_id (Slack thread_ts, Discord thread channel id)
   external_message_id  TEXT,                -- platform parent message id
 
@@ -170,7 +173,7 @@ END;
 
 ### Dispatch flow
 
-Multi-step procedure with mandatory idempotency, persistent dispatch_state, and **internal-side-effects-first ordering** (M5 cycle-2 reorder). External platform side effects happen LAST so a crash before them leaves zero external state. The residual orphan window is the time between adapter call returning and DB commit (~milliseconds — not zero, but bounded; see G6).
+Multi-step procedure with mandatory idempotency, persistent dispatch_state, and **external-side-effects-first ordering** (cycle-3 M1 revert of cycle-2 reorder). Cycle-2's "internal first, external last" ordering created a placeholder thread_id (violating C1 since `mg_id IS NOT NULL` makes the placeholder a synthetic thread_id) AND woke the child container before the platform thread existed (a guaranteed cost-leak window where the child agent burned tokens with nowhere to deliver). External-first solves both: child wakes only when its delivery target exists; orphan window narrows to "adapter call returned, DB write committing" (~ms — same residual G6 window the design admits).
 
 ```
 [1] Orchestrator container calls dispatch_task MCP tool with:
@@ -220,60 +223,55 @@ Multi-step procedure with mandatory idempotency, persistent dispatch_state, and 
     If any answer is no, leave at status='pending'; pending scheduler
     will pick up when conditions change.
 
-[6] Internal-only steps first (no external side effects yet):
-    Step 6a:
-      - Transition status='dispatching' (visible to reconciler immediately).
-    Step 6b — session_created:
-      - resolveSession(target_agent_group_id, mg_id, thread_id_placeholder, mode):
-          Channel surface (adapter.supportsCreateThread): mg_id = orchestrator_mg,
-                                                          thread_id_placeholder = 'pending-<task_id>',
-                                                          mode='per-thread'
-          Fallback (no thread support):                   mg_id = NULL,
-                                                          thread_id = 'task-<task_id>',
-                                                          mode='per-thread'
-        For the channel-surface case, thread_id is a temporary placeholder
-        that will be replaced with the real platform thread_id at step 7
-        (atomic update inside the same transaction). If a crash happens
-        before step 7, the reconciler can detect the placeholder and either
-        retry the platform post or mark the task failed.
-      - Update tasks: child_session_id, dispatch_state='session_created'.
-    Step 6c — prompt_injected:
-      - writeSessionMessage(child) injects system banner + task prompt
-        (see "Per-session MCP tool mounting" below for what the banner
-        contains).
-      - dispatch_state='prompt_injected'.
-    Step 6d — wake_sent:
-      - wakeContainer(child).
-      - dispatch_state='wake_sent'.
+[6] Transition status='dispatching' (visible to reconciler immediately).
 
-[7] Platform side effects (only after internal steps committed):
-    Step 7a — parent_posted (channel-surface only):
+[7] EXTERNAL side effects (commit-on-return; happen FIRST so internal
+    setup uses real platform identifiers — cycle-3 M1):
+
+    Step 7a — parent_posted (channel-surface only; adapter.supportsCreateThread):
       - Post "Launched task <title>" parent message via
-        adapter.deliver(...) using messaging_group_id from the orchestrator's
-        session and the orchestrator's thread_id. Persist
-        external_message_id atomically with dispatch_state='parent_posted'.
+        adapter.deliver(channel_type, platform_id, orchestrator's thread_id,
+        'chat', text). Returns platform message_id.
+      - Persist external_message_id; set dispatch_state='parent_posted'.
     Step 7b — thread_created (channel-surface only):
       - adapter.createThread(messagingGroupId, parentMessageId, title,
         firstMessage) returns { threadId, messageId }.
-      - Update tasks: external_thread_id=<real>, sessions row's thread_id
-        replaces the 'pending-<task_id>' placeholder atomically with
-        dispatch_state='thread_created'.
+      - Persist external_thread_id; set dispatch_state='thread_created'.
+    Fallback path (no createThread): skip 7a/7b. external_thread_id stays
+    NULL.
 
-[8] Final commit:
+[8] INTERNAL setup (uses real thread_id, no placeholder — cycle-3 M1):
+    Step 8a — session_created:
+      - resolveSession(target_agent_group_id, mg_id, thread_id, mode):
+          Channel surface: mg_id = orchestrator_mg, thread_id = real
+                           external_thread_id from step 7b, mode='per-thread'
+          Fallback:        mg_id = NULL, thread_id = 'task-<task_id>'
+                           (synthetic but safe — C1 doesn't apply because
+                           mg_id IS NULL), mode='per-thread'
+      - Update tasks: child_session_id; set dispatch_state='session_created'.
+    Step 8b — prompt_injected:
+      - writeSessionMessage(child) injects system banner + task prompt.
+      - dispatch_state='prompt_injected'.
+    Step 8c — wake_sent (LAST — child wakes only when delivery target exists):
+      - wakeContainer(child).
+      - dispatch_state='wake_sent'.
+
+[9] Final commit:
       - Update tasks: status='dispatched', started_at=now,
         dispatch_state='dispatched'.
 
-[9] When the child container's first non-status outbound row appears, host
-    transitions status='running' AND running_at=now.
+[10] When the child container's first non-status outbound row appears, host
+     transitions status='running' AND running_at=now.
 ```
 
 **Reconciler (host-sweep)**: scans `idx_tasks_inflight` for rows past 60s without progress.
-- `dispatch_state` IN (NULL, 'session_created', 'prompt_injected'): all internal; safe to retry from the last persisted step (resolveSession is a lookup; writeSessionMessage is idempotent on `(session_id, message_id)`).
-- `dispatch_state='wake_sent'`: container received wake but did not start running; re-wake.
-- `dispatch_state='parent_posted'`: the parent platform message exists but createThread didn't run. Retry createThread; if the adapter reports the thread already exists for the same parent message, reuse.
-- `dispatch_state='thread_created'`: only the final commit (step 8) didn't happen. Just commit it.
+- `dispatch_state=NULL` AND status='dispatching': transition succeeded but no progress beyond — start at step 7 (or step 8 for fallback).
+- `dispatch_state='parent_posted'`: parent message exists; retry createThread. Slack/Discord adapters return existing thread for the same parent message (or detect duplicate-create via the adapter's own dedupe and reuse). If adapter can't dedupe, the reconciler logs and surfaces to dashboard for manual cleanup (residual orphan).
+- `dispatch_state='thread_created'`: external is fully committed. Resume internal setup at step 8a.
+- `dispatch_state IN ('session_created','prompt_injected')`: internal-only; idempotent. resolveSession is a lookup; writeSessionMessage is idempotent on `(session_id, message_id)`. Safe to retry.
+- `dispatch_state='wake_sent'`: container received wake; re-wake (idempotent).
 
-**Residual orphan window**: a host crash between an adapter call returning successfully and DB write committing (~milliseconds). When the reconciler sees `dispatch_state` at the prior step but the adapter would report "already done," it recovers. When the adapter has no "already done" lookup (Slack threads addressed by `(channel, ts)` we never persisted), the reconciler logs `"untracked external thread possibly created"` and surfaces it to the dashboard for manual cleanup. G6 honestly admits this narrow window.
+**Residual orphan window**: a host crash between adapter call returning (step 7a or 7b) and DB write committing (~ms). For step 7a (parent message posted), reconciler re-posts via deliver-with-idempotency or accepts a duplicate parent message (low cost). For step 7b (thread created), if the adapter has no "already done" lookup (Slack `(channel, ts)`), reconciler logs `"untracked external thread possibly created"` and surfaces to dashboard for manual cleanup. G6 admits this narrow window. Compared to the cycle-2 reorder, the orphan-shape is identical but the cost-leak window is eliminated — child wakes only when delivery target exists.
 
 ### Reverse signal
 
@@ -297,42 +295,84 @@ When the child finishes, completion writes happen across two surfaces (child sub
         - task.target_agent_group_id == source session's agent_group_id
       If any check fails: log security warning, drop, no update.
 
-    Call _completeTaskCore(task, status, summary, reason).
+    Call _completeTaskCore(task, status, summary, reason,
+                           allowed_source_states=['dispatched','running']).
 
-[3] _completeTaskCore (called by both applyTaskComplete and watchdog):
+[3] _completeTaskCore — called by applyTaskComplete, watchdog (with broader
+    allowed_source_states), cancel handler, and fail-propagator. Cycle-3 M2
+    fixes the previous narrow guard:
 
-    a. UPDATE tasks SET status, completed_at, result_summary, failure_reason
-       WHERE task_id = ? AND status IN ('dispatched','running').
-       (Status guard prevents double-complete races.)
+    Signature: _completeTaskCore(task, terminal_status, summary, reason,
+                                 allowed_source_states)
 
-    b. CHILD SUBTHREAD WRITE (M8 cycle 2 — does NOT violate two-DB invariant):
-       If task has external_thread_id AND messaging_group_id (channel
-       surface): host calls deliveryAdapter.deliver(channelType, platformId,
-       external_thread_id, 'chat', summary) directly. Same path as the
-       dispatch flow's parent message post. Bypasses any session DB.
-       If fallback mode (no channel surface): skip. Dashboard is the only
-       completion surface for those tasks.
+    Caller-specific allowed_source_states:
+      voluntary completion:    ['dispatched','running']
+      watchdog timeout:        ['pending','dispatching','dispatched','running']
+      cancellation:            ['pending','dispatching','dispatched','running']
+      failed-prereq propagation: ['pending']  -- in-flight tasks finish on their own
 
-    c. PARENT SYSTEM WRITE (S1 cycle 2 — explicit API):
-       writeSessionMessage(parent_session.agent_group_id, parent_session_id, {
+    Steps (every terminalization path goes through the same code — cycle-3 M3):
+
+    a. UPDATE tasks SET status=<terminal_status>, completed_at=now,
+       result_summary=?, failure_reason=?
+       WHERE task_id = ? AND status IN (<allowed_source_states>).
+       If 0 rows affected (status race or guard mismatch): abort silently.
+       Status guard prevents double-complete races.
+
+    b. CHILD SUBTHREAD WRITE (root-failure or any success): does NOT violate
+       two-DB invariant — host calls deliveryAdapter.deliver directly.
+       - For voluntary completion, watchdog timeout, cancellation: write
+         summary to child's external_thread_id if channel surface exists.
+       - For propagated failures: SKIP this write (S3 cycle-3 — avoid
+         notification storm; transitive failures are dashboard-only).
+         Owner sees the original failure's chat write at root; transitive
+         fan-out is visible in the dashboard task tree.
+
+    c. PARENT SYSTEM WRITE (every terminalization, including propagation —
+       cycle-3 M3): writeSessionMessage(parent_session.agent_group_id,
+       parent_session_id, {
          kind: 'system', trigger: 1, channelType: null, platformId: null,
-         threadId: null, content: <result summary system action>
-       })
-       The recall pipeline is no-op for kind='system'; this is the
-       wake-the-orchestrator write.
+         threadId: null, content: <result summary system action with task_id,
+                                    terminal_status, summary, propagation_origin?>
+       }). The recall pipeline is no-op for kind='system'; this wakes the
+       orchestrator.
 
-    d. Update parent_delivery_state='delivered' if step c succeeded.
+    d. Update parent_delivery_state='delivered' if step c committed.
+       (Watchdog's parent-orphan recovery flips this to 'orphaned' if the
+       parent session is gone by the time we get here.)
 
-    e. DEPENDENCY FAN-OUT (M12 cycle 2 — propagate terminal-non-success):
-       If status == 'complete':
-         - SELECT task_id FROM task_dependencies WHERE blocked_on_task_id = ?
-           For each: if all prerequisites are 'complete', re-attempt
-           dispatch (re-enter step 5 of dispatch flow).
-       If status IN ('failed','cancelled'):
-         - SELECT task_id FROM task_dependencies WHERE blocked_on_task_id = ?
-           For each: transition that task to 'failed' with
-           failure_reason='blocked dependency <task_id> ' + status + ': ' + ?
-           Recursively propagate (transitive closure, single transaction).
+    e. SSE EMISSION (every terminalization): after the DB transaction
+       commits, emit the corresponding event (task.completed | task.failed
+       | task.cancelled). Dashboard sees the propagation pattern in real
+       time.
+
+    f. DEPENDENCY FAN-OUT — BFS, not recursion (S3 cycle-3 — bounds stack
+       depth + separates DB state mutation from external delivery):
+
+       Phase 1 — DB state mutation (one SQLite transaction, no external
+       calls inside):
+         worklist = [task_id]
+         while worklist not empty AND iterations < MAX_DEPTH (50):
+           current = worklist.pop()
+           if current.terminal_status == 'complete':
+             SELECT task_id FROM task_dependencies WHERE blocked_on_task_id = current
+             For each dependent: if all prerequisites complete, mark for
+             dispatch attempt (handled by pending scheduler).
+           if current.terminal_status IN ('failed','cancelled'):
+             SELECT task_id FROM task_dependencies WHERE blocked_on_task_id = current
+             For each dependent in status='pending': call _completeTaskCore
+             recursively (will go through this same fan-out logic, transitively
+             failing all blocked descendants). In-flight dependents are NOT
+             auto-failed — they finish on their own.
+         If iterations hit MAX_DEPTH: log structured error, mark remaining
+         dependents as 'failed' with reason='dependency depth cap exceeded'
+         (no further recursion).
+
+       Phase 2 — Post-commit delivery (after DB transaction commits):
+         For each transitively-terminalized task, the recursive
+         _completeTaskCore calls handle their own steps b/c/d/e. Step b
+         skips the child subthread write for propagated failures (S3); step
+         c emits the parent system row; step e emits the SSE event.
 
     f. wakeContainer(parent_session) so the orchestrator sees the new
        system row and can fan out further work.
@@ -347,9 +387,10 @@ Runs every 60s in `src/host-sweep.ts`. **Plus a startup pass** that runs immedia
 3. **Pending-task scheduler** (M6 cycle 2): for each `tasks` row with `status='pending'` AND no unmet dependencies AND under both running caps AND under the per-orchestrator-session pending cap, re-enter dispatch flow at step 5.
 4. **Deadline expiry — running tasks** (`status IN ('dispatching','dispatched','running')` AND `deadline < now` AND `deadline_extensions < MAX_EXTENSIONS`): call `_completeTaskCore(task, 'failed', '', 'timeout after N extensions')` — same code path as voluntary completion. Single completion code path; auth is handled by being host-emitted (no auth-bypass parameter needed because `_completeTaskCore` doesn't have auth).
 5. **Deadline expiry — pending tasks**: `status='pending'` AND `deadline < now`: call `_completeTaskCore(task, 'failed', '', 'deadline expired before dispatch (blocked or capped)')`.
-6. **Idle-child detector** (S11 cycle 2): for each `status='running'` task whose child session has had no outbound row for `IDLE_THRESHOLD` (default 30 minutes) AND `deadline > now+5min`, write a `kind='system'` inbound to the child session: "This task has been idle for N minutes. If complete, call `task_complete` now. Otherwise continue or call `extend_deadline`." Increments an `idle_pings` counter (cap 2) to prevent spam.
+6. **Idle-child detector** (S11 cycle 2; S7 cycle 3 caveat): for each `status='running'` task whose child session has had no outbound row for `IDLE_THRESHOLD` (default 30 minutes) AND `deadline > now+5min`, write a `kind='system'` inbound to the child session: "This task has been idle for N minutes. If complete, call `task_complete` now. Otherwise continue or call `extend_deadline`." Increments an `idle_pings` counter (cap 2) to prevent spam. **Trade-off note (S7 cycle 3)**: this inbound enters the agent's conversation context and consumes tokens on the next turn; it can also interrupt mid-tool-call reasoning. The 30-minute threshold is conservative to bound how often this fires. A future revision could replace this with a dedicated heartbeat MCP tool the agent calls voluntarily, decoupling liveness signals from the conversation context.
 7. **Parent-orphan recovery** (M13 cycle 2 — does NOT overwrite status): rows where `parent_delivery_state='pending'` AND `status IN ('complete','failed','cancelled')` AND `parent_session` is no longer active. Set `parent_delivery_state='orphaned'`, `orphaned_at=now`. DM the owner via `user_dms` cache; set `owner_dm_sent_at=now`. Status remains the actual terminal outcome.
 8. **Cancellation propagation**: `status='cancelled'` AND child container is running. Write a `kind='system'` inbound terminate to the child.
+9. **Archival** (S8 cycle 3): runs daily, not every 60s. Tasks where `status IN ('complete','failed','cancelled')` AND `completed_at < now - 30d` AND `parent_delivery_state IN ('delivered','orphaned')` move to a `tasks_archive` table (same schema, no indexes beyond `task_id` PK). `task_dependencies` rows for archived tasks move to `task_dependencies_archive`. Reduces working-set scan size as the install ages. Idempotency-key uniqueness check (per S5) only consults the live `tasks` table, so archived rows can't be replayed by a same-key dispatch — bounded retention satisfies both archival and idempotency-key TTL needs.
 
 ### Per-session MCP tool mounting (M2 cycle 2)
 
@@ -368,7 +409,11 @@ Without a host→container channel for tool gating, `dispatch_task`/`task_comple
   - `task_completion`: the session has a `tasks` row with `child_session_id = <this session>`.
 - `container/agent-runner/src/mcp-tools/index.ts` reads this file at MCP server start. Tools opt in by category; if their category isn't in the allowlist, they don't register.
 - Host re-writes the file on every wake (so role grants/revocations and task assignments take effect on next wake).
-- Defense in depth: each handler still validates server-side (orchestrator role re-check on dispatch; task ownership check on completion). The allowlist is hint-level; the host-side checks are the boundary.
+
+**Security boundary** (S1 cycle 3): The `enabled_tools.json` file is written to `data/v2-sessions/.../` which is bind-mounted RW into the container at `/workspace/`. **The file is RW from inside the container.** A compromised child agent can rewrite the allowlist to add tool entries — but this is a hint-level allowlist, NOT a security boundary. The actual boundary is server-side, enforced unconditionally on every call:
+- `applyDispatchTask`: re-checks `agent_roles` for the source session's agent group. A child that adds `dispatch_task` to its allowlist will fail this check unless the role was actually granted.
+- `applyTaskComplete` / `applyExtendDeadline`: validate `child_session_id == source` AND `target_agent_group_id == source.agent_group_id`. A child cannot forge another session's identity (the source is determined by the outbound DB's location on disk, not by anything the child supplies).
+The allowlist exists to keep the agent's tool-list clean (so it doesn't see tools it can't use) and to provide one layer of defense in depth. **The host-side handler checks are the security boundary.**
 
 The first inbound message a dispatched child receives includes an explicit instruction: "When you finish this task, call `task_complete` with task_id=X and status=complete (or failed) and a summary."
 
@@ -385,7 +430,7 @@ The first inbound message a dispatched child receives includes an explicit instr
       target_group: { type: 'string', description: 'Folder name of target agent group' },
       title: { type: 'string', maxLength: 120 },
       prompt: { type: 'string', maxLength: 16000 },
-      idempotency_key: { type: 'string', description: 'MANDATORY. Orchestrator generates one per logical task; second call returns existing task_id without re-firing.' },
+      idempotency_key: { type: 'string', description: 'MANDATORY. Orchestrator generates one per logical task; second call with same (parent_session_id, idempotency_key) returns existing task_id without re-firing. Different request fields (target_group/title/prompt) under the same key: first wins, returns the original task_id silently — DO NOT rely on a retry to update an in-flight task. Idempotency keys are scoped to parent_session_id and expire after 7 days (S5/S6 cycle 3).' },
       deadline: { type: 'string', format: 'date-time', description: 'Optional; defaults to spawn time + 4 hours' },
       blocked_on: { type: 'array', items: { type: 'string' }, description: 'task_ids that must complete before this dispatches' },
       model: { type: 'string', description: "Override target group's default model" },
@@ -442,6 +487,7 @@ Handler:
 - Authorization: same as `task_complete` (`task.child_session_id == source` AND `task.target_agent_group_id == source.agent_group_id` AND task in non-terminal state).
 - `deadline_extensions < MAX_EXTENSIONS` (default 3).
 - `new_deadline > now`.
+- **`new_deadline > task.deadline + MIN_EXTENSION` (default 5 min)** — S4 cycle 3, blocks deadline shrinkage and no-op extensions that would still increment the counter. Reject otherwise with structured error.
 - Update tasks: `deadline = new_deadline`, `deadline_extensions += 1`.
 
 ### cancel_dispatched_task MCP tool (orchestrator-only)
@@ -493,16 +539,24 @@ UI/UX specification: see [`./ui-design.md`](./ui-design.md).
 
 ### Auth
 
-**Three layers, mandatory for mutating endpoints:**
+**Layered defense, mandatory for mutating endpoints:**
 
 1. **Bind** to `127.0.0.1` only.
 2. **Token + cookie** (M11 cycle 2 — fixes the EventSource header limitation):
-   - Random 32-byte token generated at host startup, written to `data/dashboard-token` (chmod 600), printed to setup output once. **Not in `logs/`** (M7 cycle 2).
+   - Random 32-byte token generated at host startup, written to `data/dashboard-token` (chmod 600), printed to setup output once.
    - On first dashboard load, the user enters the token via a setup endpoint. Server validates and issues an `HttpOnly`, `SameSite=Strict`, `Secure=false` (localhost) session cookie scoped to `/`. Cookie persists for the dashboard tab's lifetime.
    - **Mutating endpoints** accept either bearer token (CLI/curl path) OR session cookie (browser path).
-   - **SSE connections** authenticate via the session cookie. (Browser `EventSource` API forbids custom headers — token-via-header doesn't work; cookie-via-Cookie does.)
-3. **`Origin` header allowlist**: only `http://127.0.0.1:7457` accepted on mutating endpoints.
+   - **SSE connections** authenticate via the session cookie. (Browser `EventSource` API forbids custom headers.)
+3. **`Origin` header allowlist**: only `http://127.0.0.1:7457` accepted on mutating endpoints AND on the setup-token endpoint (S2 cycle 3).
 4. **`Host` header allowlist**: literal `127.0.0.1:7457` enforced on every request (defeats DNS rebinding).
+5. **Setup-token endpoint** (S2 cycle 3) — closes the cookie-set CSRF gap:
+   - Accepts the token in the request body (paste-from-file UX), not URL parameter.
+   - Enforces the same `Origin`/`Host` allowlist as mutating endpoints.
+   - Rate-limited to 5 attempts/minute per source IP. Brute-force protection on the 32-byte token entropy.
+6. **Markdown rendering & XSS defense** (M4 cycle 3) — agent-authored content (task summaries, transcripts, error reasons) is rendered in the dashboard with cookie auth, so any inline script in agent content can `fetch()` mutating endpoints same-origin. Three layers of defense:
+   - **Markdown sanitization with allowlist**: render via DOMPurify or rehype-sanitize with explicit allowlist — no `<script>`, no `<iframe>`, no event handler attributes (`onclick=`, etc.), no `javascript:` URLs, no `data:` URLs, no `<style>`. Use `react-markdown` with `rehype-sanitize` configured to the GitHub schema (or stricter). Never `dangerouslySetInnerHTML` raw agent content.
+   - **Strict CSP** as response header: `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`. No `'unsafe-inline'` on script-src; no `'unsafe-eval'`.
+   - **User-gesture confirmation** for dangerous mutating actions (cancel, retry, approve): require an active click registered within the last 5 seconds (browser's user-activation tracking via `navigator.userActivation.isActive`). Mitigates same-origin auto-mutation if sanitization regresses.
 
 Token rotation: regenerated on host restart. Old cookies become invalid; the dashboard prompts for the new token.
 
@@ -555,13 +609,13 @@ Single MVP. Honest critical path: ~16-18 focused days (cycle 2 added M2 mounting
 | 9 | Watchdog: 8 scan steps + startup pass + idle-child detector | `src/host-sweep.ts` | 1 day |
 | 10 | model/effort precedence in spawnContainer | `src/container-runner.ts` | 0.5 day |
 | 11 | E2E + chaos test: 3-task dispatch with deps, owner steers via subthread, results route to subthread + parent, dependent fires; chaos test kills host between dispatch_state steps and verifies reconciler recovers; per-orchestrator and per-target-group caps verified | `src/modules/orchestrator-dispatch/*.test.ts` | 2 days |
-| 12 | Dashboard server (Node `http`): bearer/cookie auth, Origin/Host allowlist, JSON endpoints, setup-token endpoint | `src/dashboard/server.ts` (new) | 2 days |
+| 12 | Dashboard server (Node `http`): bearer/cookie auth, Origin/Host allowlist, JSON endpoints, rate-limited setup-token endpoint, CSP response header, archival cron pass | `src/dashboard/server.ts` (new), `src/host-sweep.ts` (archival) | 2.5 days |
 | 13 | SSE bus module + emission hooks at _completeTaskCore + delivery.ts onDeliveredHook + filter on tasks.child_session_id | `src/dashboard/sse.ts`, `src/delivery.ts` (hook) | 1.5 days |
 | 14 | Dashboard SPA skeleton (Vite+React, Tasks view, TanStack Query SSE integration with reconnect buffering) | `src/dashboard/web/` (new) | 1.5 days |
-| 15 | Dashboard Task Detail view: transcript, steer composer, ToolCallTicker, Inspector | `src/dashboard/web/` | 2 days |
+| 15 | Dashboard Task Detail view: transcript (with allowlist-sanitized markdown via rehype-sanitize), steer composer (user-gesture confirmation on dangerous mutations), ToolCallTicker, Inspector | `src/dashboard/web/` | 2 days |
 | 16 | Dashboard Agents + Settings views, connection-loss state, 404 view, accessibility primitives | `src/dashboard/web/` | 1.5 days |
 
-**Total: ~16-18 days focused.** One ship gate.
+**Total: ~17-19 days focused.** One ship gate. Cycle-3 added ~1 day for M4 sanitization/CSP (~0.5d), S2 setup-token rate limit (~0.25d), S8 archival pass (~0.5d).
 
 ## Risks
 
@@ -577,6 +631,10 @@ Single MVP. Honest critical path: ~16-18 focused days (cycle 2 added M2 mounting
 - **R10**: Forgetful child agent doesn't call `task_complete`. Mitigation: deadline mandatory with 4h default; idle-child detector pings the agent at 30min; deadline-expiry path always fires within deadline + grace.
 - **R11**: SSE reconnect race clobbers live state. Mitigation: client buffers events during requery, replays after.
 - **R12**: SSE backpressure with slow client. Mitigation: server detects buffer fullness, closes connection; client reconnects.
+- **R13** (cycle 3 M4): Same-origin XSS via agent-authored markdown calling mutating endpoints with the cookie. Mitigation: allowlist-sanitized markdown rendering + strict CSP + user-gesture confirmation on dangerous mutations.
+- **R14** (cycle 3 S2): CSRF on the setup-token endpoint setting an unwanted cookie via cross-site Set-Cookie. Mitigation: Origin/Host allowlist on setup endpoint, paste-from-file UX (token never in URL), rate limit 5/min per IP.
+- **R15** (cycle 3 S3): Recursive transitive closure on dependency fan-out blowing the stack on deep chains. Mitigation: BFS with worklist, max-depth 50; remaining dependents marked failed with structured reason if cap hit.
+- **R16** (cycle 3 S5+S8): Unbounded `tasks` table growth over months/years. Mitigation: 7-day idempotency-key TTL (covered by 30-day terminal-state archival into `tasks_archive`); working-set indexes filter to live tasks.
 
 ## Open questions
 
@@ -605,3 +663,6 @@ Still open:
 - **Bearer-only SSE auth**: rejected cycle 2 (browser EventSource API forbids custom headers; use cookie set by setup endpoint).
 - **Status overwrite to `orphaned`**: rejected cycle 2 (destroys terminal outcome; use separate `parent_delivery_state` column).
 - **`completion_nonce` hash-stored**: rejected cycle 2 (only mitigates DB exfil, not the actual threat model of prompt-injection exfil; just drop the nonce).
+- **Internal-first dispatch ordering**: rejected cycle 3 (cycle-2 reorder created a guaranteed cost-leak window where the child agent burned tokens before its delivery target existed; the placeholder `'pending-<task_id>'` thread_id violated C1 since `mg_id IS NOT NULL` made it a synthetic thread_id). External-first matches Temporal's "side effects of the workflow execute through retries" pattern with the residual ~ms orphan window honestly admitted in G6.
+- **Recursive transitive closure for fail-propagation**: rejected cycle 3 (stack depth + transaction-scope conflict with adapter calls). BFS with worklist; phase-1 DB mutation (transactional, no external calls), phase-2 post-commit per-task `_completeTaskCore` calls.
+- **Markdown rendering as raw HTML in dashboard**: rejected cycle 3 (XSS surface; agent-authored content + cookie auth + same-origin = drive-by mutation). Allowlist-sanitized rendering only.

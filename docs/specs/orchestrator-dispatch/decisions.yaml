@@ -299,12 +299,21 @@ review_cycles:
     wont_fix_count: 0  # cycle-1 W1, W2 still logged
     completed_at: 2026-05-09T04:30:00Z
     notes: |
-      5 of 10 cycle-1 MUST-FIX produced new MUST-FIX in cycle 2 (M3, M5, M6,
-      M7, M8 cycle-1 each had follow-on gaps surfaced by reviewing the
-      revised text). Cycle-2 also surfaced 7 cycle-1 verification gaps and
-      issues A1 (cancel_task collision) and A2 (MCP tool gating primitive)
-      that cycle 1 didn't catch. Net: revision pass on the way; one cycle
-      remaining.
+      5 of 10 cycle-1 MUST-FIX produced new MUST-FIX in cycle 2.
+  - iteration: 3
+    must_fix_count: 4
+    should_fix_count: 8
+    wont_fix_count: 0
+    completed_at: 2026-05-09T05:30:00Z
+    notes: |
+      Final allowed cycle. Cycle-3 found 4 MUST-FIX (M1: cycle-2 reorder
+      was a regression; M2: _completeTaskCore status guard too narrow;
+      M3: propagated failures bypass fan-out; M4: dashboard markdown XSS).
+      All 4 are codebase-grounded mechanical fixes; revisions applied
+      inline. No [NEEDS SPEC] carry-forward needed. Best-practice reviewer
+      verdict: "no new MEDIUM or HIGH drift; design ready to ship modulo
+      LOW clarifications." Per /team-auto, next /team-review invocation
+      will hit the 3-cycle cap; cap-reached escalation expected.
 
 # Open questions deferred from design (carried forward for /team-plan):
 #   OQ1 (light theme tokens not visually validated)
