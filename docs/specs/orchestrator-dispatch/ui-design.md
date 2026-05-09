@@ -431,12 +431,18 @@ A short, opinionated kill list. Each is a thing a Linear-fluent designer would p
 ## 7. Implementation Posture
 
 - **Stack.** Vite + React + TypeScript. `react-router` for routing, `tanstack/query` for SSE-fed cache, `clsx` and `class-variance-authority` for variants. No UI kit — Radix primitives where accessibility is non-trivial (palette, inspector, listbox), hand-built everything else. No Tailwind UI templates. No shadcn block dumps.
-- **Fonts.** Self-hosted Geist Variable + JetBrains Mono Variable from `@fontsource-variable/geist` and `@fontsource-variable/jetbrains-mono`. Do NOT use the `geist` npm package — it requires a Next.js peer dep and imports `next/font/local` internally; incompatible with the Vite stack.
+- **Fonts.** `geist` (Geist Variable) + `geist/mono` for `JetBrains Mono`-equivalent monospace, OR self-hosted Geist Variable + JetBrains Mono Variable from `@fontsource-variable/*` to avoid runtime fetches.
 - **Icons.** `@phosphor-icons/react` (regular weight, stroke 1.5) for chrome icons (rail, palette, button trailing). Status glyphs (`◐ ⏸ ✓ ✕ ●`) stay as unicode characters in semantic-colored spans — they're glyphs, not icons.
 - **Styling.** CSS variables for the OKLCH tokens, vanilla CSS modules per component. Use `min-height: 100dvh` (not `100vh`) for any full-screen panel — iOS Safari viewport bug.
 - **Memory.** Vite's production bundle for this surface area lands well under the 100–150MB target. Skip framer-motion (use Web Animations API for the two motions that need it). Skip moment / dayjs (use `Intl.RelativeTimeFormat`).
 - **Static assets.** Branded favicon (16/32/180 + SVG), no other graphics. No social-share Open Graph tags — the dashboard is localhost-only and never linked externally.
-- **Server.** A new `src/dashboard/` module on the host: a small Node built-in `http` server with one SSE endpoint, ~8 JSON endpoints, and a static handler for the built bundle. Runs on `127.0.0.1:7457` by default. Auth: bearer token (CLI/curl path) OR `HttpOnly` session cookie (browser path) — cookie issued by setup endpoint after token entry; required for SSE because browser `EventSource` API can't set custom headers. Plus `Origin` and `Host` header allowlists. See `design.md` § Dashboard Auth for the full model.
+- **Server.** A new `src/dashboard/` module on the host: a small Node `http`-based server (mirrors the existing `src/webhook-server.ts` / `src/channels/chat-sdk-bridge.ts` pattern; `undici` is client-only and was wrongly cited in the prior revision). One SSE endpoint, ~8 JSON endpoints, plus a static handler for the built bundle. Runs on `127.0.0.1:7457` by default.
+- **Auth.** Three layers, applied to **every** API endpoint (read AND mutating):
+  - Bind to `127.0.0.1` only, never `0.0.0.0`.
+  - Random bearer token generated at host startup (stored at `data/dashboard-token`, printed once to setup logs). The dashboard's first load shows a minimal `/login` page accepting the token; on success, the host issues a session cookie (`HttpOnly`, `SameSite=Strict`, `Path=/`). All subsequent JSON and SSE requests authenticate via the cookie. The bearer token is also accepted via `Authorization: Bearer …` for non-browser clients.
+  - `Origin` header allowlist (`http://127.0.0.1:7457` only) AND `Host` header allowlist (`127.0.0.1:7457` only) on every request. Defeats DNS rebinding; combined with `SameSite=Strict` cookie, satisfies OWASP CSRF defense-in-depth.
+  - Static asset serving (the SPA bundle) is the only unauthenticated surface — no data exposed there.
+  See `design.md` §Dashboard for full rationale (closes review M3 / cycle-2 M6 / M7).
 
 ---
 

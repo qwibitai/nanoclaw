@@ -305,22 +305,157 @@ assumptions:
   - id: A5
     stage: design
     text: |
-      Slack and Discord adapter createThread capability can be
-      implemented in 1 day each (implementation order steps 4-5).
+      Slack and Discord adapter createThread + getThreadId capability
+      can be implemented in ~2-3 days each (implementation order steps 4-5).
+      Updated from the original 1-day-each estimate after review S4 noted
+      the channels-branch separation: the methods live on the long-lived
+      `channels` branch (per CLAUDE.md), which has its own merge cadence
+      and isn't validated against trunk's tests automatically. Realistic
+      effort includes channels-branch PR + chat-sdk-bridge propagation +
+      cross-branch test coverage.
     validation: |
-      Track actual hours during MVP build; if either lands at >2 days,
+      Track actual hours during MVP build; if either lands at >4 days,
       reflag as a risk in the next /team-review.
     validated: false
     invalidated_at: null
 
-review_cycles: []
-# Cycle-1 review (2026-05-09T03:55:00Z) found 10 MUST + 14 SHOULD + 2 WON'T.
-# Cycle-2 and cycle-3 commits in git history (d778e70, aa2e2d2, f2ca57f, 9b0d0dd)
-# attempted revisions but did not consistently propagate to review.md or this
-# array. Cycle counter reset to [] after a comprehensive design.md body revision
-# pass on 2026-05-09 that addressed all 10 cycle-1 MUST findings (M1-M10)
-# inline. Next /team-review invocation runs as a fresh cycle 1 against the
-# revised design; if MUST=0, /team-auto proceeds to /team-plan.
+  - id: A6
+    stage: design
+    text: |
+      Dashboard adds ≤30MB additional host RSS at steady state with the
+      SPA bundle served, 5 SSE clients connected, and 22 sessions open
+      (closes review S3). Comfortably under the 150MB budget (C9).
+    validation: |
+      During MVP build: snapshot RSS via `ps -p <pid> -o rss=` before
+      vs after the dashboard module is registered; repeat with 5 SSE
+      clients held open and 22 active sessions. If exceeded, switch
+      to streaming the static bundle from disk via fs.createReadStream
+      rather than buffering it in process memory.
+    validated: false
+    invalidated_at: null
+
+  - id: A7
+    stage: design
+    text: |
+      The /workspace/.task-context.json out-of-band nonce delivery
+      mechanism (closes M16) does not introduce a regression on the
+      existing /workspace mount semantics. The file is created by the
+      host inside data/v2-sessions/<group>/<session>/workspace/ before
+      the container is woken; the container reads from that path
+      because /workspace is bind-mounted into every container.
+    validation: |
+      During MVP build: confirm that container.json's mount stanza
+      makes /workspace readable by the agent-runner user, and that
+      the .task-context.json file is created with mode 0644 (readable
+      by the container's UID). Spike before relying.
+    validated: false
+    invalidated_at: null
+
+# Auto-judgments recorded during /team-auto Stage A revision pass (cycle-1 fresh review)
+auto_judgments:
+  - stage: Review
+    iteration: 1
+    decision: |
+      Pivot the MCP tool architecture from "auto-mounted/auto-unmounted
+      per session" (cycle-0 spec) to "always-present in every container,
+      host enforces via authorization check on each call" (cycle-1
+      revision). Closes M2.
+    alternatives_considered:
+      - "Build a real per-session MCP-tool gating mechanism (a new mcp-tools-gate.json written into the session by the host on wake; tool handlers read it and short-circuit with isError)."
+      - "Always-present + host-authorized (chosen)."
+    grounding:
+      - "container/agent-runner/src/mcp-tools/index.ts surfaced by Reviewer A — barrel imports every tool unconditionally at boot; no per-session hook exists"
+      - "src/command-gate.ts surfaced by Reviewer A — established codebase convention is host-side query of authoritative role/permission record per request, not container-side gating"
+      - "design.md §Constraint Analysis C5 (CLAUDE.md two-DB invariant) — host is sole authority for inbound writes; this is the existing architectural pattern"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T16:35:00Z
+
+  - stage: Review
+    iteration: 1
+    decision: |
+      Resolve EventSource auth incompatibility (Codex C7) by switching
+      to a session cookie (HttpOnly, SameSite=Strict) rather than a
+      fetch-based SSE polyfill. The cookie is issued at first token
+      validation; EventSource sends it natively.
+    alternatives_considered:
+      - "Fetch-based SSE client (e.g. @microsoft/fetch-event-source) supports custom headers but adds a dependency."
+      - "Session cookie (HttpOnly, SameSite=Strict) — chosen."
+    grounding:
+      - "Reviewer B T1 source: OWASP CSRF cheat sheet recommends cookie + Origin double-defense as the standard CSRF prevention pattern"
+      - "MDN T1: native EventSource supports cookies via `withCredentials`; established web platform behavior"
+      - "design.md §Dashboard Auth — the bearer token is still accepted for non-browser clients (curl, scripts), so this is additive not replacing"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T16:36:00Z
+
+  - stage: Review
+    iteration: 1
+    decision: |
+      Define cancellation as best-effort soft cancel (host writes a
+      system row to the child's inbound, child agent exits gracefully
+      between turns) plus a 2-minute hard timeout (watchdog calls
+      killContainer). Closes M12.
+    alternatives_considered:
+      - "True real-time LLM-turn interruption — fundamentally hard in NanoClaw's polling architecture (no signal stops in-flight Claude call)."
+      - "Best-effort + hard timeout (chosen) — matches the existing NanoClaw killContainer pattern."
+    grounding:
+      - "src/container-runner.ts:killContainer surfaced by Reviewer A — established codebase pattern for SIGKILL after grace period"
+      - "src/modules/scheduling/db.ts:cancelTask surfaced by Reviewer A — existing async-soft cancellation pattern for scheduled tasks"
+      - "design.md §Reverse signal authorize/finalize separation — cancellation reuses finalizeTaskCompletion(status='cancelled') without needing the child's nonce"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T16:37:00Z
+
+  - stage: Review
+    iteration: 1
+    decision: |
+      Deliver completion_nonce to the child via /workspace/.task-context.json
+      (host-written, container-readable) rather than embedding it in the
+      dispatch banner's chat content. Closes M16.
+    alternatives_considered:
+      - "Inject nonce as kind='system' row that formatter strips from chat-platform delivery — agent sees it but Slack/Discord doesn't."
+      - "Out-of-band file delivery via /workspace mount (chosen) — secret never enters conversation data plane at all."
+    grounding:
+      - "CLAUDE.md mount-allowlist section: /workspace mount is established convention; per-session workspace dir is part of the standard agent-runner contract"
+      - "Reviewer A finding A20: the dispatch banner is a kind='chat' row that gets formatted into both Claude's input AND Slack/Discord platform delivery — chat-history secret leakage"
+      - "Reviewer A finding A15: prompt injection asking for 'initial instructions' would extract a nonce in conversation history"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T16:38:00Z
+
+review_cycles:
+  - iteration: 1
+    must_fix_count: 16
+    should_fix_count: 8
+    wont_fix_count: 2
+    completed_at: 2026-05-09T16:30:00Z
+    note: |
+      Fresh cycle-1 review on the post-cycle-1-revisions design (commit 029509c).
+      Reviewers: A (architecture-advisor, Claude) + B (best-practice-check, Claude) +
+      C (Codex adversarial, xhigh). Surfaced 16 MUST-FIX (architecture/security gaps in the
+      cycle-1 spec-text fixes), 8 SHOULD-FIX, 2 WON'T-FIX. /team-auto attempting revision
+      pass per Stage A revision table; if MUST resolves, cycle 2 will validate.
+
+# Historical context: a previous /team-review run completed in this same project
+# pre-reset (commit fb3adeb, 2026-05-09T03:55:00Z) found 10 MUST + 14 SHOULD + 2 WON'T.
+# Cycle-2 and cycle-3 attempts (d778e70, aa2e2d2, f2ca57f, 9b0d0dd) made partial revisions.
+# Counter was reset after commit 029509c rebuilt design.md body to cleanly address those
+# original 10 MUST findings. The fresh cycle 1 above ran against THAT revised design and
+# found new structural gaps the cycle-1 fixes introduced (per-session MCP tool mounting
+# fiction, state-machine crash idempotency holes, etc).
 
 # Open questions deferred from design (carried forward for /team-plan):
 #   OQ1 (light theme tokens not visually validated)
