@@ -1,11 +1,11 @@
 feature: orchestrator-dispatch
-created_by: /team-review
-last_updated_by: /team-review
+created_by: /team-brief  # backfilled retroactively after /team-design and /team-review
+last_updated_by: /team-brief
 
-# /team-brief and /team-design were skipped for this feature; the design and
-# review artifacts were authored directly by the user + AI pair. This file is
-# created at /team-review time with constraints lifted from design.md and
-# new HARD constraints surfaced by the review (M4, S3).
+# Workflow note: /team-brief was backfilled after /team-design and
+# /team-review already completed. The constraints, decisions, and
+# assumptions below were lifted from those artifacts and the
+# conversation history; nothing here is new.
 
 constraints:
   - id: C1
@@ -73,6 +73,94 @@ constraints:
       Dashboard reads outbound.db, but must not introduce a second writer
       anywhere.
     source: CLAUDE.md
+    verified: true
+    affects_groups: []
+
+  - id: C7
+    type: HARD
+    text: |
+      Single owner. No multi-user dashboards. No multi-tenant authorization.
+      One human, one orchestrator practice, one set of credentials.
+    source: brief
+    verified: true
+    affects_groups: []
+
+  - id: C8
+    type: HARD
+    text: |
+      Localhost-only dashboard. Server binds to 127.0.0.1 only. Owner
+      bearer token (random, generated at host startup) required on
+      every API request. Origin header allowlist (only http://127.0.0.1:7457)
+      enforced on mutating endpoints. Host header allowlist enforced
+      to defeat DNS rebinding. Read endpoints can skip auth for
+      simplicity but Origin/Host checks always apply.
+    source: brief
+    verified: true
+    affects_groups: []
+
+  - id: C9
+    type: HARD
+    text: |
+      Memory budget: dashboard adds ≤150MB additional resident memory
+      to the host process. Verified by ps snapshot in success criterion
+      SC7. The whole point of skipping Multica is that NanoClaw stays
+      memory-efficient.
+    source: brief
+    verified: true
+    affects_groups: []
+
+  - id: C10
+    type: HARD
+    text: |
+      No new long-running services. Dashboard runs in the existing Node
+      host process. No PostgreSQL, no separate Go backend, no daemon
+      runtime. The dashboard's HTTP server is a small Node http module
+      attached to the existing event loop.
+    source: brief
+    verified: true
+    affects_groups: []
+
+  - id: C11
+    type: HARD
+    text: |
+      Slack-first owner workflow for child interaction. Primary owner
+      surface for chatting with a specific child task is the native
+      Slack/Discord subthread under the orchestrator's "Launched task X"
+      parent message. Dashboard is the secondary surface for non-thread
+      channels and for fleet visibility.
+    source: brief
+    verified: true
+    affects_groups: []
+
+  - id: C12
+    type: HARD
+    text: |
+      Existing src/modules/agent-to-agent/ module (create_agent +
+      routeAgentMessage) stays untouched. Orchestrator-dispatch is a
+      new sibling module at src/modules/orchestrator-dispatch/. No
+      refactor, no merge, no replacement.
+    source: brief
+    verified: true
+    affects_groups: []
+
+  - id: C13
+    type: SOFT
+    text: |
+      Concurrency caps configurable with sensible defaults: 6 concurrent
+      tasks per orchestrator session (existing R5 in design) AND 3
+      concurrent containers per target agent group (added per review S4).
+      Both apply.
+    source: brief
+    verified: true
+    affects_groups: []
+
+  - id: C14
+    type: SOFT
+    text: |
+      Dashboard taste: Linear / Raycast / Arc lineage. Restrained, dense,
+      dark-first, keyboard-primacy. No marketing aesthetics, no
+      glassmorphism, no parallax. Documented in ui-design.md.
+    source: brief
     verified: true
     affects_groups: []
 
