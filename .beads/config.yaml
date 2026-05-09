@@ -52,3 +52,5 @@ issue-prefix: "nanoclaw"
 # - linear.api-key
 # - github.org
 # - github.repo
+
+export.git-add: false
