@@ -76,7 +76,15 @@ async function main(): Promise<void> {
   // Parse CLI flags first — `--help` short-circuits before we render anything,
   // and flag values get folded into process.env so existing step code reading
   // NANOCLAW_* sees them unchanged.
-  const flagResult = parseFlags(process.argv.slice(2));
+  //
+  // `--reconfigure-cli` is a meta-mode that re-prompts for the setup-helper
+  // CLI (Claude Code or OpenAI Codex) and exits without running setup.
+  // We strip it before passing argv to parseFlags since it isn't in the
+  // config registry.
+  const rawArgv = process.argv.slice(2);
+  const reconfigureCli = rawArgv.includes('--reconfigure-cli');
+  const filteredArgv = rawArgv.filter((a) => a !== '--reconfigure-cli');
+  const flagResult = parseFlags(filteredArgv);
   if (flagResult.help) {
     printHelp();
     process.exit(0);
@@ -89,6 +97,13 @@ async function main(): Promise<void> {
   }
   let configValues = { ...readFromEnv(), ...flagResult.values };
   applyToEnv(configValues);
+
+  if (reconfigureCli) {
+    p.intro('Reconfigure setup-helper CLI');
+    await pickSetupCli({ force: true });
+    p.outro(brandBody('Done — your next setup run (or step failure) will use the chosen CLI.'));
+    process.exit(0);
+  }
 
   printIntro();
   initProgressionLog();
@@ -952,13 +967,16 @@ async function runCustomEndpointAuth(
  *      one. With 0 we offer to install Claude Code via its install
  *      script (Codex has no scriptable installer in this fork) and
  *      bail if declined.
+ *
+ * `opts.force` skips path 1 (always re-prompt or auto-pick from current
+ * install state). Used by the `--reconfigure-cli` mode.
  */
-async function pickSetupCli(): Promise<void> {
+async function pickSetupCli(opts: { force?: boolean } = {}): Promise<void> {
   const installed = listSetupClis().filter((c) => c.isInstalled());
   const configured = (process.env.NANOCLAW_SETUP_CLI ?? '').toLowerCase().trim();
 
-  // Path 1: already-configured + still installed.
-  if (configured) {
+  // Path 1: already-configured + still installed (skipped under --force).
+  if (configured && !opts.force) {
     const match = installed.find((c) => c.name === configured);
     if (match) {
       setupLog.userInput('setup_cli', `${match.name} (preconfigured)`);
@@ -1011,14 +1029,24 @@ async function pickSetupCli(): Promise<void> {
     return;
   }
 
-  // Path 2: exactly one installed — auto-pick silently.
+  // Path 2: exactly one installed — auto-pick silently. Under --force
+  // we surface a one-line confirmation since the user explicitly asked
+  // to reconfigure and would otherwise see nothing happen.
   if (installed.length === 1) {
     persistSetupCli(installed[0]);
     setupLog.userInput('setup_cli', `${installed[0].name} (auto-picked)`);
+    if (opts.force) {
+      p.log.success(
+        brandBody(`Only ${installed[0].displayName} is installed — keeping it as the setup-helper CLI.`),
+      );
+    }
     return;
   }
 
-  // Path 3b: ≥2 installed — ask which one.
+  // Path 3b: ≥2 installed — ask which one. Default to the currently-
+  // configured CLI if it's still installed (so under --force the user
+  // can hit Enter to keep their existing pick).
+  const initial = installed.find((c) => c.name === configured)?.name ?? installed[0].name;
   const pick = ensureAnswer(
     await brightSelect<string>({
       message: 'Which coding-assistant CLI should setup use for diagnostics?',
@@ -1027,7 +1055,7 @@ async function pickSetupCli(): Promise<void> {
         label: c.displayName,
         hint: c.binary,
       })),
-      initialValue: installed[0].name,
+      initialValue: initial,
     }),
   ) as string;
   const chosen = installed.find((c) => c.name === pick);
