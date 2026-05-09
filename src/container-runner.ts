@@ -477,6 +477,19 @@ async function buildContainerArgs(
   }
   log.info('OneCLI gateway applied', { containerName });
 
+  // OneCLI's applyContainerConfig sets NODE_EXTRA_CA_CERTS, SSL_CERT_FILE,
+  // DENO_CERT for various runtimes — but NOT GIT_SSL_CAINFO. Git's HTTPS
+  // verification therefore uses the system CA bundle and rejects the
+  // OneCLI MITM cert when traffic flows through HTTPS_PROXY. The SDK's
+  // marketplace/plugin clones happen via `git clone` and silently fail
+  // with "server certificate verification failed". Mirror the cert path
+  // OneCLI just injected into GIT_SSL_CAINFO so git trusts the gateway.
+  const nodeCaArg = args.find((a, i) => i > 0 && args[i - 1] === '-e' && a.startsWith('NODE_EXTRA_CA_CERTS='));
+  if (nodeCaArg) {
+    const caPath = nodeCaArg.slice('NODE_EXTRA_CA_CERTS='.length);
+    args.push('-e', `GIT_SSL_CAINFO=${caPath}`);
+  }
+
   // Host gateway
   args.push(...hostGatewayArgs());
 
