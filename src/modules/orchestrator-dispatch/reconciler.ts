@@ -1,6 +1,6 @@
 import { log } from '../../log.js';
 import { getOrphanedTasks } from './db/tasks.js';
-import { completeDispatchSideEffects } from './dispatch.js';
+import { completeSpawnSideEffects } from './dispatch.js';
 
 export function runReconcilerSweep(): void {
   const orphans = getOrphanedTasks();
@@ -8,9 +8,10 @@ export function runReconcilerSweep(): void {
 
   log.info('Reconciler: scheduling side-effects for orphaned tasks', { count: orphans.length });
   for (const task of orphans) {
-    // Lease + completionInFlight in completeDispatchSideEffects dedupes against
-    // any in-flight setImmediate from the original admit.
-    setImmediate(completeDispatchSideEffects, task.task_id);
+    // Lease + completionInFlight in completeSpawnSideEffects dedupes against
+    // any in-flight setImmediate from the original admit. Self-orchestration:
+    // child agent group is always the parent's agent group.
+    setImmediate(completeSpawnSideEffects, task.task_id, task.parent_agent_group_id);
   }
 }
 

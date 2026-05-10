@@ -21,7 +21,7 @@ import {
   updateArtifactColumn,
   getTaskByParentAndIdempotency,
 } from './db/tasks.js';
-import { computeRequestHash, deriveDispatchTaskId } from './derive-task-id.js';
+import { computeRequestHash, deriveSpawnTaskId } from './derive-task-id.js';
 
 const DEFAULT_CAPABILITY_CONFIG: CapabilityConfig = {
   concurrencyCap: 5,
@@ -30,55 +30,47 @@ const DEFAULT_CAPABILITY_CONFIG: CapabilityConfig = {
   drainGraceSec: 120,
 };
 
-/** In-process deduplication guard for completeDispatchSideEffects. */
+/** In-process deduplication guard for completeSpawnSideEffects. */
 const completionInFlight = new Map<string, Promise<void>>();
 
-export async function applyDispatchTask(content: Record<string, unknown>, callerSession: Session): Promise<void> {
+export async function applySpawnTask(content: Record<string, unknown>, callerSession: Session): Promise<void> {
   const idempotencyKey = content.idempotency_key as string | undefined;
-  const targetGroupRaw = content.target_group as string | undefined;
   const taskContent = content.content as string | undefined;
   const deadline = (content.deadline as string | null | undefined) ?? null;
 
-  if (!idempotencyKey || !targetGroupRaw || !taskContent) {
-    await _notifyCaller(
-      callerSession,
-      'dispatch rejected: missing required fields (target_group, content, idempotency_key)',
-    );
+  if (!idempotencyKey || !taskContent) {
+    await _notifyCaller(callerSession, 'spawn rejected: missing required fields (content, idempotency_key)');
     return;
   }
 
-  // Step 1: Auth — caller's agent_group must have orchestrator capability
+  // Auth: caller's agent_group must have orchestrator capability
   if (!hasOrchestratorCapability(callerSession.agent_group_id)) {
-    await _notifyCaller(callerSession, 'dispatch rejected: not an orchestrator');
+    await _notifyCaller(callerSession, 'spawn rejected: not an orchestrator');
     return;
   }
 
-  // Resolve target_group: agents typically pass folder/name (e.g. 'illysium'),
-  // not the opaque id ('ag_*'). Try id first, then folder, then name.
-  // Per QA Codex finding E4 (target_group accepts only IDs).
-  const targetGroup = _resolveAgentGroupId(targetGroupRaw);
-  if (!targetGroup) {
-    await _notifyCaller(callerSession, `dispatch rejected: target agent group not found: ${targetGroupRaw}`);
-    return;
-  }
+  // Self-orchestration: spawned children always run in the SAME agent group as
+  // the parent. They share workspace, memory, CLAUDE.md, channels — only the
+  // session/thread is isolated. There is no cross-group dispatch primitive.
+  const childAgentGroupId = callerSession.agent_group_id;
 
   const capConfig = getCapabilityConfig(callerSession.agent_group_id, 'orchestrator') ?? DEFAULT_CAPABILITY_CONFIG;
 
-  // All 8 admission steps inside a single better-sqlite3 transaction.
+  // All admission steps inside a single better-sqlite3 transaction.
   // Use IMMEDIATE (write lock from BEGIN) instead of DEFERRED (default) so the
   // cap-count read holds the write lock through the INSERT — prevents two parallel
-  // delivery drains from different orchestrator sessions both reading the same
-  // count, both passing the cap check, and both succeeding INSERT (per-target-group
-  // cap exceeded). Cycle-3 S3-C / Concurrency-reviewer #5.
+  // delivery drains from the same orchestrator both reading the same count, both
+  // passing the cap check, and both succeeding INSERT (cap exceeded). Cycle-3
+  // S3-C / Concurrency-reviewer #5.
   const db = getDb();
   let taskRow: Task | null = null;
   let replayResult: { message: string } | null = null;
 
   db.transaction(() => {
-    // Step 2: Idempotency replay PRECEDES cap (cycle-3 M20)
+    // Step 1: Idempotency replay PRECEDES cap (cycle-3 M20)
     const existingByIdempotency = getTaskByParentAndIdempotency(callerSession.id, idempotencyKey);
     if (existingByIdempotency) {
-      const computedHash = computeRequestHash(targetGroup, taskContent, deadline);
+      const computedHash = computeRequestHash(taskContent, deadline);
       if (existingByIdempotency.request_hash !== computedHash) {
         replayResult = { message: `idempotency_key_reused_with_different_payload: key=${idempotencyKey}` };
         return;
@@ -89,48 +81,19 @@ export async function applyDispatchTask(content: Record<string, unknown>, caller
       return;
     }
 
-    // Step 3: Concurrency cap — only for NEW admissions
+    // Step 2: Concurrency cap — only for NEW admissions
     const activeCount = countActiveByParent(callerSession.id);
     if (activeCount >= capConfig.concurrencyCap) {
       replayResult = {
-        message: `dispatch rejected: concurrency cap reached (${activeCount}/${capConfig.concurrencyCap})`,
+        message: `spawn rejected: concurrency cap reached (${activeCount}/${capConfig.concurrencyCap})`,
       };
       return;
     }
 
-    // Step 4: Target validation
-    if (targetGroup === callerSession.agent_group_id) {
-      replayResult = { message: 'dispatch rejected: cannot dispatch to own agent group' };
-      return;
-    }
-    const targetExists = db.prepare('SELECT 1 FROM agent_groups WHERE id = ? LIMIT 1').get(targetGroup);
-    if (!targetExists) {
-      replayResult = { message: `dispatch rejected: target agent group not found: ${targetGroup}` };
-      return;
-    }
-    if (hasOrchestratorCapability(targetGroup)) {
-      replayResult = {
-        message:
-          'dispatch rejected: cannot dispatch to another orchestrator (no orchestrator-targeting orchestrators in v1)',
-      };
-      return;
-    }
+    // Step 3: Compute request_hash
+    const requestHash = computeRequestHash(taskContent, deadline);
 
-    // Step 5: Wiring check
-    if (callerSession.messaging_group_id !== null) {
-      const wired = db
-        .prepare('SELECT 1 FROM messaging_group_agents WHERE agent_group_id = ? AND messaging_group_id = ? LIMIT 1')
-        .get(targetGroup, callerSession.messaging_group_id);
-      if (!wired) {
-        replayResult = { message: 'dispatch rejected: target_not_wired_to_caller_messaging_group' };
-        return;
-      }
-    }
-
-    // Step 6: Compute request_hash
-    const requestHash = computeRequestHash(targetGroup, taskContent, deadline);
-
-    // Step 7: Determine surface_mode — per-channel capability check (cycle-3 S24)
+    // Step 4: Determine surface_mode — per-channel capability check (cycle-3 S24)
     let surfaceMode: 'native_thread' | 'headless' = 'headless';
     if (callerSession.messaging_group_id !== null) {
       const mg = getMessagingGroup(callerSession.messaging_group_id);
@@ -142,8 +105,8 @@ export async function applyDispatchTask(content: Record<string, unknown>, caller
       }
     }
 
-    // Step 8: Atomic INSERT
-    const taskId = deriveDispatchTaskId(callerSession.id, idempotencyKey);
+    // Step 5: Atomic INSERT
+    const taskId = deriveSpawnTaskId(callerSession.id, idempotencyKey);
     const now = new Date().toISOString();
     taskRow = insertTaskAtomic({
       task_id: taskId,
@@ -151,7 +114,6 @@ export async function applyDispatchTask(content: Record<string, unknown>, caller
       parent_session_id: callerSession.id,
       parent_agent_group_id: callerSession.agent_group_id,
       parent_messaging_group_id: callerSession.messaging_group_id,
-      target_agent_group_id: targetGroup,
       child_session_id: null,
       status: 'pending',
       task_content: taskContent,
@@ -201,7 +163,7 @@ export async function applyDispatchTask(content: Record<string, unknown>, caller
 
   const finalTaskRow = taskRow as Task | null;
   if (!finalTaskRow) {
-    log.warn('applyDispatchTask: no task row after transaction (unexpected)', { callerSessionId: callerSession.id });
+    log.warn('applySpawnTask: no task row after transaction (unexpected)', { callerSessionId: callerSession.id });
     return;
   }
 
@@ -215,23 +177,24 @@ export async function applyDispatchTask(content: Record<string, unknown>, caller
     log.warn('wakeContainer(caller) failed after admit notification', { err }),
   );
 
-  // Schedule side-effect completion
-  setImmediate(completeDispatchSideEffects, admittedTask.task_id);
+  // Schedule side-effect completion. Pass the resolved child agent group id
+  // so the side-effect path doesn't need to re-derive it.
+  setImmediate(completeSpawnSideEffects, admittedTask.task_id, childAgentGroupId);
 }
 
 /**
  * Post-admit side-effect completion: postParent → createThread → openSession.
- * Called via setImmediate from applyDispatchTask AND from the reconciler for crash recovery.
+ * Called via setImmediate from applySpawnTask AND from the reconciler for crash recovery.
  */
-export async function completeDispatchSideEffects(taskId: string): Promise<void> {
+export async function completeSpawnSideEffects(taskId: string, childAgentGroupId: string): Promise<void> {
   // In-process deduplication guard
   const existing = completionInFlight.get(taskId);
   if (existing) {
     return existing;
   }
 
-  const promise = _runCompletionSideEffects(taskId).catch((err) => {
-    log.warn('completeDispatchSideEffects: unhandled error', { taskId, err });
+  const promise = _runCompletionSideEffects(taskId, childAgentGroupId).catch((err) => {
+    log.warn('completeSpawnSideEffects: unhandled error', { taskId, err });
   });
   completionInFlight.set(taskId, promise);
   promise.finally(() => {
@@ -240,11 +203,11 @@ export async function completeDispatchSideEffects(taskId: string): Promise<void>
   return promise;
 }
 
-async function _runCompletionSideEffects(taskId: string): Promise<void> {
+async function _runCompletionSideEffects(taskId: string, childAgentGroupId: string): Promise<void> {
   // Acquire durable lease — returns null if another worker holds it
   const leaseRow = acquireCompletionLease(taskId);
   if (!leaseRow) {
-    log.debug('completeDispatchSideEffects: lease held by another worker, skipping', { taskId });
+    log.debug('completeSpawnSideEffects: lease held by another worker, skipping', { taskId });
     return;
   }
 
@@ -252,7 +215,7 @@ async function _runCompletionSideEffects(taskId: string): Promise<void> {
     try {
       getDb().prepare(`UPDATE tasks SET completion_lease_at = NULL WHERE task_id = ?`).run(taskId);
     } catch (err) {
-      log.warn('completeDispatchSideEffects: failed to release lease', { taskId, err });
+      log.warn('completeSpawnSideEffects: failed to release lease', { taskId, err });
     }
   };
 
@@ -263,26 +226,26 @@ async function _runCompletionSideEffects(taskId: string): Promise<void> {
     }
 
     if (task.surface_mode === 'native_thread') {
-      await _runThreadedPath(task);
+      await _runThreadedPath(task, childAgentGroupId);
     } else {
-      await _runHeadlessPath(task);
+      await _runHeadlessPath(task, childAgentGroupId);
     }
   } catch (err) {
-    log.warn('completeDispatchSideEffects: error during completion', { taskId, err });
+    log.warn('completeSpawnSideEffects: error during completion', { taskId, err });
     const attempts = incrementCompletionAttempts(taskId);
     if (attempts >= 5) {
       transitionToTerminal(taskId, 'failed', {
         fail_reason: 'completion_exhausted',
         failed_at: new Date().toISOString(),
       });
-      log.warn('completeDispatchSideEffects: task marked completion_exhausted', { taskId, attempts });
+      log.warn('completeSpawnSideEffects: task marked completion_exhausted', { taskId, attempts });
     }
   } finally {
     releaseLeaseAndFinish();
   }
 }
 
-async function _runThreadedPath(task: Task): Promise<void> {
+async function _runThreadedPath(task: Task, childAgentGroupId: string): Promise<void> {
   const taskId = task.task_id;
 
   // Resolve adapter — if adapter no longer has createThread, mark failed immediately
@@ -313,7 +276,7 @@ async function _runThreadedPath(task: Task): Promise<void> {
     if (current.parent_platform_message_id === null) {
       const truncContent = task.task_content.slice(0, 100);
       // Per-adapter signature: postParent(platformId, text) — no channelType prefix
-      const { messageId } = await adapter.postParent!(mg.platform_id, `Launched dispatch: ${truncContent}`);
+      const { messageId } = await adapter.postParent!(mg.platform_id, `Spawned task: ${truncContent}`);
       const updated = updateArtifactColumn(taskId, 'parent_platform_message_id', messageId);
       if (!updated) return; // status-CAS rejected — another path won
     }
@@ -350,7 +313,7 @@ async function _runThreadedPath(task: Task): Promise<void> {
 
     if (current.child_session_id === null) {
       const { session: childSession } = resolveSession(
-        task.target_agent_group_id,
+        childAgentGroupId,
         task.parent_messaging_group_id,
         current.child_platform_thread_id!,
         'per-thread',
@@ -366,15 +329,15 @@ async function _runThreadedPath(task: Task): Promise<void> {
         .run(childSession.id, now, now, taskId);
       if (updated.changes === 0) return;
 
-      // b. Write dispatch_task_id to child's inbound.db session_routing
-      _writeDispatchTaskIdToRouting(childSession.agent_group_id, childSession.id, taskId);
+      // b. Write spawn_task_id to child's inbound.db session_routing
+      _writeSpawnTaskIdToRouting(childSession.agent_group_id, childSession.id, taskId);
 
       // c. Write first inbound to child
       await writeSessionMessage(childSession.agent_group_id, childSession.id, {
         id: randomUUID(),
         kind: 'chat',
         timestamp: now,
-        content: JSON.stringify({ _dispatch: { task_id: taskId }, text: task.task_content }),
+        content: JSON.stringify({ _spawn: { task_id: taskId }, text: task.task_content }),
       });
 
       // d. Wake child LAST (cycle-3 M21)
@@ -395,7 +358,7 @@ async function _runThreadedPath(task: Task): Promise<void> {
   }
 }
 
-async function _runHeadlessPath(task: Task): Promise<void> {
+async function _runHeadlessPath(task: Task, childAgentGroupId: string): Promise<void> {
   const taskId = task.task_id;
 
   const current = getTaskById(taskId);
@@ -403,7 +366,7 @@ async function _runHeadlessPath(task: Task): Promise<void> {
 
   if (current.child_session_id === null) {
     const { session: childSession } = resolveSession(
-      task.target_agent_group_id,
+      childAgentGroupId,
       null,
       taskId, // synthetic thread_id = task_id (C4 safe: mgId=null → no adapter.deliver)
       'per-thread',
@@ -419,15 +382,15 @@ async function _runHeadlessPath(task: Task): Promise<void> {
       .run(childSession.id, now, now, taskId);
     if (updated.changes === 0) return;
 
-    // b. Write dispatch_task_id to child's inbound.db session_routing
-    _writeDispatchTaskIdToRouting(childSession.agent_group_id, childSession.id, taskId);
+    // b. Write spawn_task_id to child's inbound.db session_routing
+    _writeSpawnTaskIdToRouting(childSession.agent_group_id, childSession.id, taskId);
 
     // c. Write first inbound
     await writeSessionMessage(childSession.agent_group_id, childSession.id, {
       id: randomUUID(),
       kind: 'chat',
       timestamp: now,
-      content: JSON.stringify({ _dispatch: { task_id: taskId }, text: task.task_content }),
+      content: JSON.stringify({ _spawn: { task_id: taskId }, text: task.task_content }),
     });
 
     // d. Wake child LAST
@@ -446,16 +409,16 @@ async function _runHeadlessPath(task: Task): Promise<void> {
   }
 }
 
-function _writeDispatchTaskIdToRouting(agentGroupId: string, sessionId: string, taskId: string): void {
+function _writeSpawnTaskIdToRouting(agentGroupId: string, sessionId: string, taskId: string): void {
   const dbPath = inboundDbPath(agentGroupId, sessionId);
   if (!fs.existsSync(dbPath)) return;
 
   const db = openInboundDb(agentGroupId, sessionId);
   try {
     db.prepare(
-      `INSERT INTO session_routing (id, dispatch_task_id)
+      `INSERT INTO session_routing (id, spawn_task_id)
        VALUES (1, ?)
-       ON CONFLICT(id) DO UPDATE SET dispatch_task_id = excluded.dispatch_task_id`,
+       ON CONFLICT(id) DO UPDATE SET spawn_task_id = excluded.spawn_task_id`,
     ).run(taskId);
   } finally {
     db.close();
@@ -467,37 +430,6 @@ function _resolveParentSession(task: Task): Session | null {
   return session ?? null;
 }
 
-/**
- * Resolve a target agent group identifier to a canonical id.
- *
- * Agents typically know groups by folder name (e.g. 'illysium'), not the opaque
- * `ag_*` id. The MCP tool schema doesn't enforce id-only, and orchestrators are
- * far more likely to pass folder/name. Resolution order: id → folder → name.
- * Returns null if no match found in any column.
- *
- * Per QA Codex finding E4 — admit-time validation must accept either id or
- * folder/name to be useful in practice.
- */
-function _resolveAgentGroupId(targetGroupRaw: string): string | null {
-  const db = getDb();
-  // Try canonical id first (cheapest, most specific)
-  const byId = db.prepare('SELECT id FROM agent_groups WHERE id = ? LIMIT 1').get(targetGroupRaw) as
-    | { id: string }
-    | undefined;
-  if (byId) return byId.id;
-  // Then folder (UNIQUE per migration 001)
-  const byFolder = db.prepare('SELECT id FROM agent_groups WHERE folder = ? LIMIT 1').get(targetGroupRaw) as
-    | { id: string }
-    | undefined;
-  if (byFolder) return byFolder.id;
-  // Then human-facing name (not unique — return first match if any)
-  const byName = db.prepare('SELECT id FROM agent_groups WHERE name = ? LIMIT 1').get(targetGroupRaw) as
-    | { id: string }
-    | undefined;
-  if (byName) return byName.id;
-  return null;
-}
-
 async function _notifyCaller(session: Session, message: string): Promise<void> {
   try {
     await writeSessionMessage(session.agent_group_id, session.id, {
@@ -507,7 +439,7 @@ async function _notifyCaller(session: Session, message: string): Promise<void> {
       content: JSON.stringify({ text: message }),
     });
   } catch (err) {
-    log.warn('applyDispatchTask: failed to notify caller', { sessionId: session.id, err });
+    log.warn('applySpawnTask: failed to notify caller', { sessionId: session.id, err });
   }
 }
 
@@ -522,6 +454,6 @@ async function _notifyParent(task: Task, message: string): Promise<void> {
       content: JSON.stringify({ text: message }),
     });
   } catch (err) {
-    log.warn('completeDispatchSideEffects: failed to notify parent', { taskId: task.task_id, err });
+    log.warn('completeSpawnSideEffects: failed to notify parent', { taskId: task.task_id, err });
   }
 }

@@ -151,13 +151,13 @@ describe('026-tasks-and-dispatch-routing', () => {
     }).toThrow();
   });
 
-  it('test_inbound_schema_has_dispatch_task_id', () => {
+  it('test_inbound_schema_has_spawn_task_id', () => {
     const inboundDb = new Database(':memory:');
     try {
       inboundDb.exec(INBOUND_SCHEMA);
       const cols = inboundDb.prepare(`PRAGMA table_info(session_routing)`).all() as { name: string }[];
       const colNames = cols.map((c) => c.name);
-      expect(colNames).toContain('dispatch_task_id');
+      expect(colNames).toContain('spawn_task_id');
     } finally {
       inboundDb.close();
     }

@@ -20,7 +20,7 @@ import './permissions.js';
 import './channel-config.js';
 import './render-diagram.js';
 import './backlog.js';
-import { startMcpServer, mountDispatchTools } from './server.js';
+import { startMcpServer, mountSpawnTools } from './server.js';
 
 function log(msg: string): void {
   console.error(`[mcp-tools] ${msg}`);
@@ -33,10 +33,10 @@ function log(msg: string): void {
 // can be invoked.
 loadConfig();
 
-// Mount dispatch tools bifurcated (orchestrator vs child) then start the server.
-mountDispatchTools()
+// Mount spawn tools bifurcated (orchestrator vs child) then start the server.
+mountSpawnTools()
   .then(() => startMcpServer())
-  .catch((err) => {
+  .catch((err: unknown) => {
     log(`MCP server error: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   });

@@ -1,19 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  closeDb,
-  createAgentGroup,
-  createMessagingGroup,
-  createMessagingGroupAgent,
-  createSession,
-  initTestDb,
-  runMigrations,
-} from '../../db/index.js';
+import { closeDb, createAgentGroup, createMessagingGroup, createSession, initTestDb, runMigrations } from '../../db/index.js';
 import { getDb } from '../../db/connection.js';
 import { getTaskByParentAndIdempotency, getTaskById, insertTaskAtomic } from './db/tasks.js';
 import type { Task } from './db/tasks.js';
 import { computeRequestHash } from './derive-task-id.js';
-import { applyDispatchTask, completeDispatchSideEffects } from './dispatch.js';
+import { applySpawnTask, completeSpawnSideEffects } from './dispatch.js';
 import type { Session } from '../../types.js';
 
 // ── Mock side-effecting modules ──────────────────────────────────────────────
@@ -160,38 +152,13 @@ function grantOrchestratorCap1(agId: string): void {
     .run(agId, config, now());
 }
 
-function wireTargetToMg(targetAgId: string, mgId: string): void {
-  createMessagingGroupAgent({
-    id: `mga-${targetAgId}-${mgId}`,
-    messaging_group_id: mgId,
-    agent_group_id: targetAgId,
-    engage_mode: 'mention',
-    engage_pattern: null,
-    sender_scope: 'all',
-    ignored_message_policy: 'drop',
-    session_mode: 'shared',
-    priority: 0,
-    default_model: null,
-    default_effort: null,
-    default_tone: null,
-    created_at: now(),
-  });
-}
-
-function insertActiveTask(
-  taskId: string,
-  idempotencyKey: string,
-  sessionId: string,
-  agId: string,
-  targetAgId: string,
-): Task {
+function insertActiveTask(taskId: string, idempotencyKey: string, sessionId: string, agId: string): Task {
   return insertTaskAtomic({
     task_id: taskId,
     idempotency_key: idempotencyKey,
     parent_session_id: sessionId,
     parent_agent_group_id: agId,
     parent_messaging_group_id: null,
-    target_agent_group_id: targetAgId,
     child_session_id: null,
     status: 'running',
     task_content: 'do something',
@@ -225,17 +192,16 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// ── B2 Tests ─────────────────────────────────────────────────────────────────
+// ── applySpawnTask ───────────────────────────────────────────────────────────
 
-describe('applyDispatchTask', () => {
+describe('applySpawnTask', () => {
   it('test_admit_missing_capability_rejects: rejects when caller has no orchestrator capability', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedSession('sess-caller', 'ag-caller');
 
     const caller = makeCallerSession();
-    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
+    await applySpawnTask({ content: 'Do X', idempotency_key: 'k1' }, caller);
 
     const task = getTaskByParentAndIdempotency('sess-caller', 'k1');
     expect(task).toBeNull();
@@ -251,7 +217,6 @@ describe('applyDispatchTask', () => {
   it('test_admit_happy_path: inserts task with correct fields (headless mode)', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedSession('sess-caller', 'ag-caller');
     grantOrchestrator('ag-caller');
 
@@ -259,7 +224,7 @@ describe('applyDispatchTask', () => {
     vi.mocked(getChannelAdapter).mockReturnValue(undefined); // no adapter → headless
 
     const caller = makeCallerSession();
-    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
+    await applySpawnTask({ content: 'Do X', idempotency_key: 'k1' }, caller);
 
     const task = getTaskByParentAndIdempotency('sess-caller', 'k1');
     expect(task).not.toBeNull();
@@ -271,22 +236,20 @@ describe('applyDispatchTask', () => {
   it('test_idempotency_replay_succeeds_at_cap: replay succeeds even when at concurrency cap', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedSession('sess-caller', 'ag-caller');
     grantOrchestratorCap1('ag-caller');
 
     // Insert one active task (at cap)
-    insertActiveTask('task-existing', 'k-other', 'sess-caller', 'ag-caller', 'ag-target');
+    insertActiveTask('task-existing', 'k-other', 'sess-caller', 'ag-caller');
 
     // Also insert the idempotency key we'll replay
-    const replayHash = computeRequestHash('ag-target', 'Do X', null);
+    const replayHash = computeRequestHash('Do X', null);
     insertTaskAtomic({
       task_id: 'task-replay',
       idempotency_key: 'k1',
       parent_session_id: 'sess-caller',
       parent_agent_group_id: 'ag-caller',
       parent_messaging_group_id: null,
-      target_agent_group_id: 'ag-target',
       child_session_id: null,
       status: 'pending',
       task_content: 'Do X',
@@ -312,7 +275,7 @@ describe('applyDispatchTask', () => {
     // Now we have 2 tasks (running + pending) but cap is 1.
     // Replaying k1 should succeed (replay precedes cap check).
     const caller = makeCallerSession();
-    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
+    await applySpawnTask({ content: 'Do X', idempotency_key: 'k1' }, caller);
 
     const { writeSessionMessage } = await import('../../session-manager.js');
     const calls = vi.mocked(writeSessionMessage).mock.calls;
@@ -325,19 +288,17 @@ describe('applyDispatchTask', () => {
   it('test_idempotency_replay_with_different_payload: rejects with key_reused', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedSession('sess-caller', 'ag-caller');
     grantOrchestrator('ag-caller');
 
-    // Insert existing task with hash for ('ag-target', 'X', null)
-    const originalHash = computeRequestHash('ag-target', 'X', null);
+    // Insert existing task with hash for ('X', null)
+    const originalHash = computeRequestHash('X', null);
     insertTaskAtomic({
       task_id: 'task-orig',
       idempotency_key: 'k1',
       parent_session_id: 'sess-caller',
       parent_agent_group_id: 'ag-caller',
       parent_messaging_group_id: null,
-      target_agent_group_id: 'ag-target',
       child_session_id: null,
       status: 'pending',
       task_content: 'X',
@@ -361,7 +322,7 @@ describe('applyDispatchTask', () => {
     });
 
     const caller = makeCallerSession();
-    await applyDispatchTask({ target_group: 'ag-target', content: 'X-DIFFERENT', idempotency_key: 'k1' }, caller);
+    await applySpawnTask({ content: 'X-DIFFERENT', idempotency_key: 'k1' }, caller);
 
     const { writeSessionMessage } = await import('../../session-manager.js');
     const messages = vi
@@ -377,15 +338,14 @@ describe('applyDispatchTask', () => {
   it('test_cap_rejects_new_admission: rejects when at concurrency cap', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedSession('sess-caller', 'ag-caller');
     grantOrchestratorCap1('ag-caller');
 
     // Insert one active (running) task → at cap
-    insertActiveTask('task-existing', 'k-other', 'sess-caller', 'ag-caller', 'ag-target');
+    insertActiveTask('task-existing', 'k-other', 'sess-caller', 'ag-caller');
 
     const caller = makeCallerSession();
-    await applyDispatchTask({ target_group: 'ag-target', content: 'New work', idempotency_key: 'k-new' }, caller);
+    await applySpawnTask({ content: 'New work', idempotency_key: 'k-new' }, caller);
 
     const newTask = getTaskByParentAndIdempotency('sess-caller', 'k-new');
     expect(newTask).toBeNull();
@@ -397,35 +357,11 @@ describe('applyDispatchTask', () => {
     expect(messages.some((m) => m.includes('concurrency cap reached'))).toBe(true);
   });
 
-  it('test_target_not_wired_rejects: rejects when target not wired to caller messaging group', async () => {
-    setupDb();
-    seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
-    seedMessagingGroup('mg-1');
-    seedSession('sess-caller', 'ag-caller', 'mg-1');
-    grantOrchestrator('ag-caller');
-    // NO messaging_group_agents row for (ag-target, mg-1)
-
-    const caller = makeCallerSession({ messaging_group_id: 'mg-1' });
-    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
-
-    const task = getTaskByParentAndIdempotency('sess-caller', 'k1');
-    expect(task).toBeNull();
-
-    const { writeSessionMessage } = await import('../../session-manager.js');
-    const messages = vi
-      .mocked(writeSessionMessage)
-      .mock.calls.map((c) => JSON.parse(c[2].content as string).text as string);
-    expect(messages.some((m) => m.includes('target_not_wired_to_caller_messaging_group'))).toBe(true);
-  });
-
   it('test_headless_path_when_no_create_thread: surface_mode=headless when adapter lacks createThread', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedMessagingGroup('mg-1');
     seedSession('sess-caller', 'ag-caller', 'mg-1');
-    wireTargetToMg('ag-target', 'mg-1');
     grantOrchestrator('ag-caller');
 
     const { getChannelAdapter } = await import('../../channels/channel-registry.js');
@@ -433,7 +369,7 @@ describe('applyDispatchTask', () => {
     vi.mocked(getChannelAdapter).mockReturnValue(mockAdapterWithoutThread as any);
 
     const caller = makeCallerSession({ messaging_group_id: 'mg-1' });
-    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
+    await applySpawnTask({ content: 'Do X', idempotency_key: 'k1' }, caller);
 
     const task = getTaskByParentAndIdempotency('sess-caller', 'k1');
     expect(task).not.toBeNull();
@@ -443,75 +379,43 @@ describe('applyDispatchTask', () => {
   it('ASSERT: surface_mode=native_thread when adapter has createThread and mgId is non-null', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedMessagingGroup('mg-1');
     seedSession('sess-caller', 'ag-caller', 'mg-1');
-    wireTargetToMg('ag-target', 'mg-1');
     grantOrchestrator('ag-caller');
 
     const { getChannelAdapter } = await import('../../channels/channel-registry.js');
     vi.mocked(getChannelAdapter).mockReturnValue(mockAdapterWithThread as any);
 
     const caller = makeCallerSession({ messaging_group_id: 'mg-1' });
-    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
+    await applySpawnTask({ content: 'Do X', idempotency_key: 'k1' }, caller);
 
     const task = getTaskByParentAndIdempotency('sess-caller', 'k1');
     expect(task).not.toBeNull();
     expect(task!.surface_mode).toBe('native_thread');
   });
 
-  it('ASSERT: target-is-orchestrator rejects', async () => {
+  it('ASSERT: post-INSERT setImmediate(completeSpawnSideEffects, task_id, childAgentGroupId) called', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
-    seedSession('sess-caller', 'ag-caller');
-    grantOrchestrator('ag-caller');
-    // Also grant orchestrator to target
-    grantOrchestrator('ag-target');
-
-    const caller = makeCallerSession();
-    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
-
-    const task = getTaskByParentAndIdempotency('sess-caller', 'k1');
-    expect(task).toBeNull();
-  });
-
-  it('ASSERT: self-dispatch rejects', async () => {
-    setupDb();
-    seedAgentGroup('ag-caller');
-    seedSession('sess-caller', 'ag-caller');
-    grantOrchestrator('ag-caller');
-
-    const caller = makeCallerSession();
-    await applyDispatchTask(
-      { target_group: 'ag-caller', content: 'Do X', idempotency_key: 'k1' }, // target = self
-      caller,
-    );
-
-    const task = getTaskByParentAndIdempotency('sess-caller', 'k1');
-    expect(task).toBeNull();
-  });
-
-  it('ASSERT: post-INSERT setImmediate(completeDispatchSideEffects, task_id) called', async () => {
-    setupDb();
-    seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedSession('sess-caller', 'ag-caller');
     grantOrchestrator('ag-caller');
 
     const setImmediateSpy = vi.spyOn(global, 'setImmediate');
 
     const caller = makeCallerSession();
-    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
+    await applySpawnTask({ content: 'Do X', idempotency_key: 'k1' }, caller);
 
-    expect(setImmediateSpy).toHaveBeenCalledWith(expect.any(Function), expect.stringContaining('dispatch-'));
+    expect(setImmediateSpy).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.stringContaining('spawn-'),
+      'ag-caller',
+    );
     setImmediateSpy.mockRestore();
   });
 
   it('ASSERT: notify-caller wrapped in try/catch — writeSessionMessage failure does not throw', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedSession('sess-caller', 'ag-caller');
     grantOrchestrator('ag-caller');
 
@@ -520,19 +424,16 @@ describe('applyDispatchTask', () => {
 
     const caller = makeCallerSession();
     // Should NOT throw even though writeSessionMessage fails
-    await expect(
-      applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller),
-    ).resolves.not.toThrow();
+    await expect(applySpawnTask({ content: 'Do X', idempotency_key: 'k1' }, caller)).resolves.not.toThrow();
   });
 });
 
-// ── B3 Tests ─────────────────────────────────────────────────────────────────
+// ── completeSpawnSideEffects ─────────────────────────────────────────────────
 
-describe('completeDispatchSideEffects', () => {
+describe('completeSpawnSideEffects', () => {
   it('test_lease_skip_when_held: skips silently when lease is already held', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedSession('sess-caller', 'ag-caller');
 
     // Insert task with lease already held (set to now, not expired)
@@ -540,15 +441,15 @@ describe('completeDispatchSideEffects', () => {
     getDb()
       .prepare(
         `INSERT INTO tasks (task_id, idempotency_key, parent_session_id, parent_agent_group_id,
-          target_agent_group_id, status, task_content, request_hash, admitted_at, surface_mode,
+          status, task_content, request_hash, admitted_at, surface_mode,
           completion_lease_at, dispatch_completion_attempts, created_at)
-         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'ag-target', 'pending', 'do x', 'hash', ?, 'headless', ?, 0, ?)`,
+         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'pending', 'do x', 'hash', ?, 'headless', ?, 0, ?)`,
       )
       .run(taskId, now(), now(), now()); // lease set to NOW (not expired)
 
     const { postParent } = mockAdapterWithThread;
 
-    await completeDispatchSideEffects(taskId);
+    await completeSpawnSideEffects(taskId, 'ag-caller');
 
     // Should not have called any adapter method
     expect(postParent).not.toHaveBeenCalled();
@@ -557,39 +458,33 @@ describe('completeDispatchSideEffects', () => {
   it('test_concurrent_setImmediate_dedupe: second call returns same promise (in-process guard)', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedSession('sess-caller', 'ag-caller');
 
     const taskId = 'task-dedup';
     getDb()
       .prepare(
         `INSERT INTO tasks (task_id, idempotency_key, parent_session_id, parent_agent_group_id,
-          target_agent_group_id, status, task_content, request_hash, admitted_at, surface_mode,
+          status, task_content, request_hash, admitted_at, surface_mode,
           dispatch_completion_attempts, created_at)
-         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'ag-target', 'pending', 'do x', 'hash', ?, 'headless', 0, ?)`,
+         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'pending', 'do x', 'hash', ?, 'headless', 0, ?)`,
       )
       .run(taskId, now(), now());
 
-    let callCount = 0;
     const { writeSessionMessage } = await import('../../session-manager.js');
     vi.mocked(writeSessionMessage).mockImplementation(async () => {
-      callCount++;
+      /* noop */
     });
 
     // Call twice concurrently — only first should run
-    const p1 = completeDispatchSideEffects(taskId);
-    const p2 = completeDispatchSideEffects(taskId);
+    const p1 = completeSpawnSideEffects(taskId, 'ag-caller');
+    const p2 = completeSpawnSideEffects(taskId, 'ag-caller');
     await Promise.all([p1, p2]);
     // The Map dedup returns the same promise, so the side effects only run once
-    // (we can't check callCount easily since headless path would still call writeSessionMessage)
-    // Just verify no double-run exceptions
   });
 
   it('test_adapter_unavailable_marks_failed_immediately: adapter_unavailable does not consume retry budget', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
-    seedSession('sess-caller', 'ag-caller');
     seedMessagingGroup('mg-1');
     seedSession('sess-caller', 'ag-caller', 'mg-1');
 
@@ -597,9 +492,9 @@ describe('completeDispatchSideEffects', () => {
     getDb()
       .prepare(
         `INSERT INTO tasks (task_id, idempotency_key, parent_session_id, parent_agent_group_id,
-          parent_messaging_group_id, target_agent_group_id, status, task_content, request_hash,
+          parent_messaging_group_id, status, task_content, request_hash,
           admitted_at, surface_mode, dispatch_completion_attempts, created_at)
-         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'mg-1', 'ag-target', 'pending', 'do x', 'hash', ?, 'native_thread', 0, ?)`,
+         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'mg-1', 'pending', 'do x', 'hash', ?, 'native_thread', 0, ?)`,
       )
       .run(taskId, now(), now());
 
@@ -607,7 +502,7 @@ describe('completeDispatchSideEffects', () => {
     // Return adapter WITHOUT createThread
     vi.mocked(getChannelAdapter).mockReturnValue(mockAdapterWithoutThread as any);
 
-    await completeDispatchSideEffects(taskId);
+    await completeSpawnSideEffects(taskId, 'ag-caller');
 
     const task = getTaskById(taskId);
     expect(task!.status).toBe('failed');
@@ -619,16 +514,15 @@ describe('completeDispatchSideEffects', () => {
   it('test_completion_exhausted_after_5_failures: marks failed after 5 throws', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedSession('sess-caller', 'ag-caller');
 
     const taskId = 'task-exhaust';
     getDb()
       .prepare(
         `INSERT INTO tasks (task_id, idempotency_key, parent_session_id, parent_agent_group_id,
-          target_agent_group_id, status, task_content, request_hash, admitted_at, surface_mode,
+          status, task_content, request_hash, admitted_at, surface_mode,
           dispatch_completion_attempts, created_at)
-         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'ag-target', 'pending', 'do x', 'hash', ?, 'headless', 0, ?)`,
+         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'pending', 'do x', 'hash', ?, 'headless', 0, ?)`,
       )
       .run(taskId, now(), now());
 
@@ -639,7 +533,7 @@ describe('completeDispatchSideEffects', () => {
     for (let i = 0; i < 5; i++) {
       // Reset the lease between calls (simulate each call as a separate process run)
       getDb().prepare(`UPDATE tasks SET completion_lease_at = NULL WHERE task_id = ?`).run(taskId);
-      await completeDispatchSideEffects(taskId);
+      await completeSpawnSideEffects(taskId, 'ag-caller');
     }
 
     const task = getTaskById(taskId);
@@ -650,26 +544,22 @@ describe('completeDispatchSideEffects', () => {
   it('test_status_cas_aborts_on_cancel_mid_flight: aborts when status no longer pending', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedSession('sess-caller', 'ag-caller');
 
     const taskId = 'task-cancelled-mid';
     getDb()
       .prepare(
         `INSERT INTO tasks (task_id, idempotency_key, parent_session_id, parent_agent_group_id,
-          target_agent_group_id, status, task_content, request_hash, admitted_at, surface_mode,
+          status, task_content, request_hash, admitted_at, surface_mode,
           dispatch_completion_attempts, created_at)
-         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'ag-target', 'cancelled', 'do x', 'hash', ?, 'headless', 0, ?)`,
+         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'cancelled', 'do x', 'hash', ?, 'headless', 0, ?)`,
       )
       .run(taskId, now(), now());
 
-    const { writeSessionMessage } = await import('../../session-manager.js');
-    await completeDispatchSideEffects(taskId);
+    await completeSpawnSideEffects(taskId, 'ag-caller');
 
     // Should have exited immediately — acquireCompletionLease requires status='pending'
     // so it returns null. No writeSessionMessage calls.
-    // (The acquireCompletionLease UPDATE won't match since status is 'cancelled')
-    // If it DID run, it would have tried to write a message — verify it didn't.
     const task = getTaskById(taskId);
     expect(task!.status).toBe('cancelled'); // unchanged
   });
@@ -677,7 +567,6 @@ describe('completeDispatchSideEffects', () => {
   it('test_slack_thread_id_is_parent_message_id: persists threadId not messageId', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedMessagingGroup('mg-1');
     seedSession('sess-caller', 'ag-caller', 'mg-1');
 
@@ -685,9 +574,9 @@ describe('completeDispatchSideEffects', () => {
     getDb()
       .prepare(
         `INSERT INTO tasks (task_id, idempotency_key, parent_session_id, parent_agent_group_id,
-          parent_messaging_group_id, target_agent_group_id, status, task_content, request_hash,
+          parent_messaging_group_id, status, task_content, request_hash,
           admitted_at, surface_mode, dispatch_completion_attempts, created_at)
-         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'mg-1', 'ag-target', 'pending', 'do x', 'hash', ?, 'native_thread', 0, ?)`,
+         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'mg-1', 'pending', 'do x', 'hash', ?, 'native_thread', 0, ?)`,
       )
       .run(taskId, now(), now());
 
@@ -695,7 +584,7 @@ describe('completeDispatchSideEffects', () => {
     vi.mocked(getChannelAdapter).mockReturnValue(mockAdapterWithThread as any);
     // createThread returns {threadId: 'parent-ts-123', messageId: 'reply-ts-456'}
 
-    await completeDispatchSideEffects(taskId);
+    await completeSpawnSideEffects(taskId, 'ag-caller');
 
     const task = getTaskById(taskId);
     // child_platform_thread_id should be threadId ('parent-ts-123'), NOT messageId ('reply-ts-456')
@@ -708,16 +597,15 @@ describe('completeDispatchSideEffects', () => {
   it('test_open_session_write_order: tasks UPDATE before writeSessionMessage before wakeContainer', async () => {
     setupDb();
     seedAgentGroup('ag-caller');
-    seedAgentGroup('ag-target');
     seedSession('sess-caller', 'ag-caller');
 
     const taskId = 'task-write-order';
     getDb()
       .prepare(
         `INSERT INTO tasks (task_id, idempotency_key, parent_session_id, parent_agent_group_id,
-          target_agent_group_id, status, task_content, request_hash, admitted_at, surface_mode,
+          status, task_content, request_hash, admitted_at, surface_mode,
           dispatch_completion_attempts, created_at)
-         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'ag-target', 'pending', 'do x', 'hash', ?, 'headless', 0, ?)`,
+         VALUES (?, 'ik', 'sess-caller', 'ag-caller', 'pending', 'do x', 'hash', ?, 'headless', 0, ?)`,
       )
       .run(taskId, now(), now());
 
@@ -738,7 +626,7 @@ describe('completeDispatchSideEffects', () => {
       return true;
     });
 
-    await completeDispatchSideEffects(taskId);
+    await completeSpawnSideEffects(taskId, 'ag-caller');
 
     // wakeContainer must come after writeSessionMessage
     const wakeIdx = order.lastIndexOf('wakeContainer');
@@ -748,3 +636,6 @@ describe('completeDispatchSideEffects', () => {
     }
   });
 });
+
+// Re-export an unused import to silence linter for createSession (kept in import list for parity).
+void createSession;

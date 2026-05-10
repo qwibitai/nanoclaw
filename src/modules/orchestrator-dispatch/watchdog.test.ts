@@ -1,7 +1,7 @@
 /**
  * Unit tests for the watchdog decision function and outbound-DB helper.
  * The decideTaskAction tests are pure (no DB required).
- * The pendingTerminalDispatchOutboundSeenAt tests use in-memory SQLite via mocked path resolution.
+ * The pendingTerminalSpawnOutboundSeenAt tests use in-memory SQLite via mocked path resolution.
  */
 import Database from 'better-sqlite3';
 import path from 'path';
@@ -23,7 +23,6 @@ function baseTask(overrides: Partial<Task> = {}): Task {
     parent_session_id: 'parent-sess',
     parent_agent_group_id: 'parent-ag',
     parent_messaging_group_id: null,
-    target_agent_group_id: 'target-ag',
     child_session_id: null,
     status: 'running',
     task_content: '{}',
@@ -275,7 +274,7 @@ describe('decideTaskAction', () => {
   });
 });
 
-// ─── C2: pendingTerminalDispatchOutboundSeenAt ────────────────────────────────
+// ─── C2: pendingTerminalSpawnOutboundSeenAt ────────────────────────────────
 // Tests use real on-disk SQLite DBs in a temp directory, with vi.mock to
 // redirect outboundDbPath to the temp location.
 
@@ -323,9 +322,9 @@ afterEach(() => {
   tmpSessions.length = 0;
 });
 
-describe('pendingTerminalDispatchOutboundSeenAt', () => {
+describe('pendingTerminalSpawnOutboundSeenAt', () => {
   it('test_returns_null_no_pending: returns null when only chat messages exist', async () => {
-    const { pendingTerminalDispatchOutboundSeenAt } = await import('./watchdog.js');
+    const { pendingTerminalSpawnOutboundSeenAt } = await import('./watchdog.js');
     const agentGroupId = 'ag-null-test';
     const sessionId = 'sess-null-test';
     const db = makeTmpOutboundDb(agentGroupId, sessionId);
@@ -334,78 +333,78 @@ describe('pendingTerminalDispatchOutboundSeenAt', () => {
     );
     db.close();
 
-    const result = pendingTerminalDispatchOutboundSeenAt(agentGroupId, sessionId);
+    const result = pendingTerminalSpawnOutboundSeenAt(agentGroupId, sessionId);
     expect(result).toBeNull();
   });
 
   it('test_returns_min_timestamp: returns earliest timestamp for multiple terminal rows', async () => {
-    const { pendingTerminalDispatchOutboundSeenAt } = await import('./watchdog.js');
+    const { pendingTerminalSpawnOutboundSeenAt } = await import('./watchdog.js');
     const agentGroupId = 'ag-min-test';
     const sessionId = 'sess-min-test';
     const db = makeTmpOutboundDb(agentGroupId, sessionId);
     db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:01:00.000Z', 'system', ?)").run(
-      JSON.stringify({ action: 'dispatch_complete', task_id: 'task-1' }),
+      JSON.stringify({ action: 'spawn_complete', task_id: 'task-1' }),
     );
     db.prepare("INSERT INTO messages_out VALUES ('m2', 2, null, '2026-01-01T00:02:00.000Z', 'system', ?)").run(
-      JSON.stringify({ action: 'dispatch_complete', task_id: 'task-2' }),
+      JSON.stringify({ action: 'spawn_complete', task_id: 'task-2' }),
     );
     db.prepare("INSERT INTO messages_out VALUES ('m3', 3, null, '2026-01-01T00:00:30.000Z', 'system', ?)").run(
-      JSON.stringify({ action: 'dispatch_failed', task_id: 'task-3' }),
+      JSON.stringify({ action: 'spawn_failed', task_id: 'task-3' }),
     );
     db.close();
 
-    const result = pendingTerminalDispatchOutboundSeenAt(agentGroupId, sessionId);
+    const result = pendingTerminalSpawnOutboundSeenAt(agentGroupId, sessionId);
     expect(result).toBe('2026-01-01T00:00:30.000Z');
   });
 
   it('test_excludes_chat_messages_with_action_word: excludes non-system rows even with action text', async () => {
-    const { pendingTerminalDispatchOutboundSeenAt } = await import('./watchdog.js');
+    const { pendingTerminalSpawnOutboundSeenAt } = await import('./watchdog.js');
     const agentGroupId = 'ag-chat-test';
     const sessionId = 'sess-chat-test';
     const db = makeTmpOutboundDb(agentGroupId, sessionId);
     // Chat message containing action text — kind='chat' guard must reject it
     db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:01:00.000Z', 'chat', ?)").run(
-      JSON.stringify({ action: 'dispatch_complete', text: 'task done' }),
+      JSON.stringify({ action: 'spawn_complete', text: 'task done' }),
     );
     db.close();
 
-    const result = pendingTerminalDispatchOutboundSeenAt(agentGroupId, sessionId);
+    const result = pendingTerminalSpawnOutboundSeenAt(agentGroupId, sessionId);
     expect(result).toBeNull();
   });
 
-  it('test_excludes_false_positive_match: excludes system rows with action as superstring of dispatch_complete', async () => {
-    const { pendingTerminalDispatchOutboundSeenAt } = await import('./watchdog.js');
+  it('test_excludes_false_positive_match: excludes system rows with action as superstring of spawn_complete', async () => {
+    const { pendingTerminalSpawnOutboundSeenAt } = await import('./watchdog.js');
     const agentGroupId = 'ag-fp-test';
     const sessionId = 'sess-fp-test';
     const db = makeTmpOutboundDb(agentGroupId, sessionId);
-    // "dispatch_complete_other" contains "dispatch_complete" as substring — must NOT match
+    // "spawn_complete_other" contains "spawn_complete" as substring — must NOT match
     db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:01:00.000Z', 'system', ?)").run(
-      JSON.stringify({ action: 'dispatch_complete_other' }),
+      JSON.stringify({ action: 'spawn_complete_other' }),
     );
     db.close();
 
-    const result = pendingTerminalDispatchOutboundSeenAt(agentGroupId, sessionId);
+    const result = pendingTerminalSpawnOutboundSeenAt(agentGroupId, sessionId);
     expect(result).toBeNull();
   });
 
   it('returns null when outbound.db does not exist', async () => {
-    const { pendingTerminalDispatchOutboundSeenAt } = await import('./watchdog.js');
+    const { pendingTerminalSpawnOutboundSeenAt } = await import('./watchdog.js');
     // No DB created at this path
-    const result = pendingTerminalDispatchOutboundSeenAt('ag-nonexistent-xyz', 'sess-nonexistent-xyz');
+    const result = pendingTerminalSpawnOutboundSeenAt('ag-nonexistent-xyz', 'sess-nonexistent-xyz');
     expect(result).toBeNull();
   });
 
-  it('matches dispatch_failed correctly', async () => {
-    const { pendingTerminalDispatchOutboundSeenAt } = await import('./watchdog.js');
+  it('matches spawn_failed correctly', async () => {
+    const { pendingTerminalSpawnOutboundSeenAt } = await import('./watchdog.js');
     const agentGroupId = 'ag-failed-test';
     const sessionId = 'sess-failed-test';
     const db = makeTmpOutboundDb(agentGroupId, sessionId);
     db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:05:00.000Z', 'system', ?)").run(
-      JSON.stringify({ action: 'dispatch_failed', task_id: 'task-1' }),
+      JSON.stringify({ action: 'spawn_failed', task_id: 'task-1' }),
     );
     db.close();
 
-    const result = pendingTerminalDispatchOutboundSeenAt(agentGroupId, sessionId);
+    const result = pendingTerminalSpawnOutboundSeenAt(agentGroupId, sessionId);
     expect(result).toBe('2026-01-01T00:05:00.000Z');
   });
 });

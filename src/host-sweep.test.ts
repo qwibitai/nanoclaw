@@ -49,7 +49,7 @@ vi.mock('./modules/orchestrator-dispatch/watchdog.js', async (importOriginal) =>
   const real = await importOriginal<typeof import('./modules/orchestrator-dispatch/watchdog.js')>();
   return {
     ...real,
-    pendingTerminalDispatchOutboundSeenAt: (...args: unknown[]) => mockPendingTerminalDispatchOutboundSeenAt(...args),
+    pendingTerminalSpawnOutboundSeenAt: (...args: unknown[]) => mockPendingTerminalDispatchOutboundSeenAt(...args),
   };
 });
 
@@ -487,7 +487,6 @@ function makeTask(
     parent_session_id: 'parent-sess',
     parent_agent_group_id: 'parent-ag',
     parent_messaging_group_id: null,
-    target_agent_group_id: 'target-ag',
     child_session_id: 'child-sess',
     status: 'running' as const,
     task_content: '{}',

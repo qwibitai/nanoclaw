@@ -88,13 +88,13 @@ export function decideTaskAction(args: {
 
 /**
  * Reads the child session's outbound.db and returns the earliest timestamp of
- * any pending terminal dispatch system action (dispatch_complete or dispatch_failed),
+ * any pending terminal spawn system action (spawn_complete or spawn_failed),
  * or null if none exists.
  *
  * Host-invariant: opens outbound.db read-only (container is the sole writer).
  * Content is deserialized as JSON to avoid substring false-positive matches (S20).
  */
-export function pendingTerminalDispatchOutboundSeenAt(agentGroupId: string, sessionId: string): string | null {
+export function pendingTerminalSpawnOutboundSeenAt(agentGroupId: string, sessionId: string): string | null {
   const dbPath = outboundDbPath(agentGroupId, sessionId);
   if (!fs.existsSync(dbPath)) return null;
 
@@ -111,7 +111,7 @@ export function pendingTerminalDispatchOutboundSeenAt(agentGroupId: string, sess
     for (const row of rows) {
       try {
         const parsed = JSON.parse(row.content) as Record<string, unknown>;
-        if (parsed.action === 'dispatch_complete' || parsed.action === 'dispatch_failed') {
+        if (parsed.action === 'spawn_complete' || parsed.action === 'spawn_failed') {
           if (earliest === null || row.timestamp < earliest) {
             earliest = row.timestamp;
           }
@@ -122,7 +122,7 @@ export function pendingTerminalDispatchOutboundSeenAt(agentGroupId: string, sess
     }
     return earliest;
   } catch (err) {
-    log.warn('pendingTerminalDispatchOutboundSeenAt: failed to read outbound.db', { agentGroupId, sessionId, err });
+    log.warn('pendingTerminalSpawnOutboundSeenAt: failed to read outbound.db', { agentGroupId, sessionId, err });
     return null;
   } finally {
     try {

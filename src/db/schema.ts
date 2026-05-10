@@ -222,12 +222,12 @@ CREATE TABLE IF NOT EXISTS destinations (
 -- default the channel/thread of outbound messages when the agent doesn't
 -- specify an explicit destination.
 CREATE TABLE IF NOT EXISTS session_routing (
-  id               INTEGER PRIMARY KEY CHECK (id = 1),
-  channel_type     TEXT,
-  platform_id      TEXT,
-  thread_id        TEXT,
-  dispatch_task_id TEXT,
-  session_id       TEXT
+  id            INTEGER PRIMARY KEY CHECK (id = 1),
+  channel_type  TEXT,
+  platform_id   TEXT,
+  thread_id     TEXT,
+  spawn_task_id TEXT,
+  session_id    TEXT
 );
 `;
 

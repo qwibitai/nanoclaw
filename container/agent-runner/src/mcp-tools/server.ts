@@ -8,18 +8,18 @@
  * Default when only `core.ts` is imported: the core `send_message` /
  * `send_file` / `edit_message` / `add_reaction` tools are available.
  *
- * Dispatch tools are mounted bifurcated via `mountDispatchTools()`:
- * - Orchestrator tools (dispatch_task, list_dispatched_tasks, dispatch_cancel)
- *   when getSessionDispatchTaskId() === null AND agent has orchestrator capability
- * - Child tools (dispatch_progress, dispatch_complete, dispatch_failed)
- *   when getSessionDispatchTaskId() !== null (Phase 1: mutually exclusive)
+ * Spawn tools are mounted bifurcated via `mountSpawnTools()`:
+ * - Orchestrator tools (spawn_task, list_spawned_tasks, spawn_cancel)
+ *   when getSessionSpawnTaskId() === null AND agent has orchestrator capability
+ * - Child tools (spawn_progress, spawn_complete, spawn_failed)
+ *   when getSessionSpawnTaskId() !== null (Phase 1: mutually exclusive)
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 import type { McpToolDefinition } from './types.js';
-import { getSessionDispatchTaskId } from '../db/session-routing.js';
+import { getSessionSpawnTaskId } from '../db/session-routing.js';
 import { getCentralDb } from '../db/connection.js';
 import { getConfig } from '../config.js';
 
@@ -53,31 +53,31 @@ function hasOrchestratorCapability(): boolean {
 }
 
 /**
- * Mount dispatch tools bifurcated based on session role.
+ * Mount spawn tools bifurcated based on session role.
  *
  * Phase 1 simplification (acked in drift-acks.json entry B1):
  * orchestrator and child tool sets are mutually exclusive.
  *
  * Call this from the barrel (index.ts) after loadConfig() and before startMcpServer().
  */
-export async function mountDispatchTools(): Promise<void> {
-  const dispatchTaskId = getSessionDispatchTaskId();
+export async function mountSpawnTools(): Promise<void> {
+  const spawnTaskId = getSessionSpawnTaskId();
 
-  if (dispatchTaskId !== null) {
+  if (spawnTaskId !== null) {
     // Child session — mount child tools
-    const { dispatchProgress, dispatchComplete, dispatchFailed } = await import('./dispatch-child.js');
-    registerTools([dispatchProgress, dispatchComplete, dispatchFailed]);
-    log('Dispatch: mounted child tools (dispatch_progress, dispatch_complete, dispatch_failed)');
+    const { spawnProgress, spawnComplete, spawnFailed } = await import('./dispatch-child.js');
+    registerTools([spawnProgress, spawnComplete, spawnFailed]);
+    log('Spawn: mounted child tools (spawn_progress, spawn_complete, spawn_failed)');
     return;
   }
 
   // Not a child session — check orchestrator capability
   if (hasOrchestratorCapability()) {
-    const { dispatchTask, listDispatchedTasks, dispatchCancel } = await import('./dispatch.js');
-    registerTools([dispatchTask, listDispatchedTasks, dispatchCancel]);
-    log('Dispatch: mounted orchestrator tools (dispatch_task, list_dispatched_tasks, dispatch_cancel)');
+    const { spawnTask, listSpawnedTasks, spawnCancel } = await import('./dispatch.js');
+    registerTools([spawnTask, listSpawnedTasks, spawnCancel]);
+    log('Spawn: mounted orchestrator tools (spawn_task, list_spawned_tasks, spawn_cancel)');
   } else {
-    log('Dispatch: no dispatch tools mounted (not orchestrator, not child)');
+    log('Spawn: no spawn tools mounted (not orchestrator, not child)');
   }
 }
 

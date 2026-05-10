@@ -1006,3 +1006,91 @@ auto_qa_cycles:
     should_fix_count: ~15
     completed_at: 2026-05-09T23:42:00Z
     notes: "Boot crash + 6 other MUST-FIX applied. E2 (orphaned-running task on crash) recorded as Known Risk K7 — recovery works via watchdog reap within ~30 min, capacity slot held. Architectural fix deferred to follow-up sprint per scope budget."
+
+# Post-merge spawn rework — 2026-05-10
+# Phase 1 (PR #80, merge 3bcf601 on davekim917/nanoclaw/main) shipped with the
+# wrong framing. User wanted self-orchestration (parent spawns N children in the
+# SAME group, sharing workspace/memory/CLAUDE.md/channels); built cross-group
+# dispatch instead. Rework branch: feat/orchestrator-spawn-rework.
+spawn_rework:
+  - decision: "Strip cross-group dispatch entirely (no feature flag, no soft-deprecate)"
+    alternatives_considered:
+      - "Strip entirely (chosen — user explicitly wants no dead code; cross-group can be re-introduced explicitly later if a real admin-level use case emerges)"
+      - "Add feature flag and keep cross-group as opt-in"
+      - "Repurpose cross-group as 'specialist groups' option (rejected — duplicates existing /create-agent flow with no semantic distinction)"
+    grounding:
+      - "User: 'we just built a very slightly modified version that does the same exact thing, didn't we? If so, I do not want dead code confusing ourselves later down the line.'"
+    scope_check:
+      adds_user_facing_capability: false  # removes a capability that wasn't being used
+      changes_external_behavior: true     # MCP tool schemas change
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-10T12:00:00Z
+
+  - decision: "Rename dispatch_task → spawn_task across MCP tools, system actions, formatter envelopes, code symbols"
+    alternatives_considered:
+      - "Rename to spawn_* (chosen — 'dispatch' carries cross-group connotation; 'spawn' matches the actual semantic of 'fork off another instance of myself')"
+      - "Keep dispatch_* names"
+      - "Use 'fork_task' (rejected — overloaded with VCS / process semantics)"
+    grounding:
+      - "User: 'spawn_task' (explicit choice)"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: true     # MCP tool names change; agents will need to relearn
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-10T12:00:00Z
+
+  - decision: "Drop tasks.target_agent_group_id column entirely (migration 027), not soft-deprecate"
+    alternatives_considered:
+      - "Drop the column (chosen — Phase 1 hasn't been used for live dispatches; no production data to preserve; soft-deprecate leaves a confusing dead column)"
+      - "Soft-deprecate: backfill to parent_agent_group_id, leave column nullable"
+    grounding:
+      - "Phase 1 shipped without anyone running a live dispatch through it (validated against logs)"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false    # column is internal
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-10T12:00:00Z
+
+  - decision: "Rename inbound.db session_routing.dispatch_task_id → spawn_task_id via per-session ALTER TABLE (extended migrateSessionRoutingTable), not a separate central migration"
+    alternatives_considered:
+      - "Per-session migrateSessionRoutingTable extension (chosen — matches existing pattern for inbound.db schema evolution; idempotent; handles fresh + Phase-1 + post-rework cases in one place)"
+      - "Separate central migration file (rejected — central migrations don't run against inbound.db)"
+    grounding:
+      - "src/db/session-db.ts:migrateSessionRoutingTable already encapsulates inbound.db schema upgrades"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-10T12:00:00Z
+
+  - decision: "Leave folder name `src/modules/orchestrator-dispatch/` and module filenames as-is — only rename the user-facing surface"
+    alternatives_considered:
+      - "Leave folder + filenames (chosen — keeps the diff readable; folder rename is a separate cosmetic PR if ever desired)"
+      - "Rename folder to orchestrator-spawn/ in the same PR (rejected — would obscure the strip + rename diff)"
+    grounding:
+      - "Module folder is internal naming; user-facing surface is MCP tool names + system action names + the renamed column"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-10T12:00:00Z
+
+  - decision: "Sibling-to-sibling MCP API NOT in scope; parent-coordinated dependency model is the recommended pattern"
+    alternatives_considered:
+      - "No sibling-comms API (chosen — siblings coordinate via shared workspace files, shared memory, shared backlog/ship_log; parent waits for A, reads result_summary, spawns B with A's output)"
+      - "Add wait_for_sibling(task_id) MCP tool"
+      - "Add read_sibling_progress(task_id) MCP tool"
+    grounding:
+      - "User: 'each instance of illie would need to talk to each other' — but acknowledged shared workspace satisfies the dependency case for now"
+    scope_check:
+      adds_user_facing_capability: false  # explicit defer
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-10T12:00:00Z
+    note: "Future MCP tool only if real-time sibling comms become a felt pain. Current pattern: parent reads child's result_summary on completion, then spawns dependent children with the prior output as context."

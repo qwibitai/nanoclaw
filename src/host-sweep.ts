@@ -58,7 +58,7 @@ import type { Session } from './types.js';
 import { getActiveTasks, transitionToTerminal } from './modules/orchestrator-dispatch/db/tasks.js';
 import { getCapabilityConfig } from './modules/orchestrator-dispatch/db/agent-group-capabilities.js';
 import { runReconcilerSweep } from './modules/orchestrator-dispatch/reconciler.js';
-import { decideTaskAction, pendingTerminalDispatchOutboundSeenAt } from './modules/orchestrator-dispatch/watchdog.js';
+import { decideTaskAction, pendingTerminalSpawnOutboundSeenAt } from './modules/orchestrator-dispatch/watchdog.js';
 
 /**
  * SQLite TIMESTAMP columns store UTC without a timezone marker. Date.parse
@@ -289,13 +289,12 @@ async function sweepTaskWatchdog(): Promise<void> {
         childContainerStatus = isContainerRunning(task.child_session_id) ? 'running' : 'stopped';
       }
 
-      // Check child's outbound.db for pending terminal dispatch actions (drain-first guard).
-      // Child session lives under target_agent_group_id, NOT parent_agent_group_id —
-      // dispatching to self is rejected at admit time, so these are always different agents.
-      // Reading the wrong path silently returns null and skips the drain guard entirely.
+      // Check child's outbound.db for pending terminal spawn actions (drain-first guard).
+      // Self-orchestration: child session lives in the SAME agent group as the parent,
+      // so the lookup uses parent_agent_group_id.
       const terminalOutboundSeenAt =
         task.child_session_id !== null
-          ? pendingTerminalDispatchOutboundSeenAt(task.target_agent_group_id, task.child_session_id)
+          ? pendingTerminalSpawnOutboundSeenAt(task.parent_agent_group_id, task.child_session_id)
           : null;
 
       // Pull per-orchestrator timeout config; fall back to defaults when absent.
@@ -348,9 +347,7 @@ async function sweepTaskWatchdog(): Promise<void> {
           kind: 'system',
           timestamp: nowIso,
           content: JSON.stringify({
-            // dispatch_-prefixed per C16 (HARD constraint) — orchestrator agent's
-            // dispatch policy in CLAUDE.md greps for dispatch_* system actions.
-            action: 'dispatch_task_watchdog_fail',
+            action: 'spawn_task_watchdog_fail',
             task_id: task.task_id,
             fail_reason: failReason,
           }),

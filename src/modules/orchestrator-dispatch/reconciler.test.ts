@@ -1,13 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { closeDb, createAgentGroup, initTestDb, runMigrations } from '../../db/index.js';
 import { getDb } from '../../db/connection.js';
-import { runReconcilerSweep, runReconcilerOnStartup } from './reconciler.js';
+import { runReconcilerSweep } from './reconciler.js';
 
-// Mock completeDispatchSideEffects so we can track calls without running the full side-effect chain
+// Mock completeSpawnSideEffects so we can track calls without running the full side-effect chain
 vi.mock('./dispatch.js', () => ({
-  completeDispatchSideEffects: vi.fn().mockResolvedValue(undefined),
-  applyDispatchTask: vi.fn(),
+  completeSpawnSideEffects: vi.fn().mockResolvedValue(undefined),
+  applySpawnTask: vi.fn(),
 }));
 
 function now(): string {
@@ -32,13 +32,6 @@ function seedGroups(): void {
     agent_provider: null,
     created_at: now(),
   });
-  createAgentGroup({
-    id: 'ag-target',
-    name: 'ag-target',
-    folder: 'ag-target',
-    agent_provider: null,
-    created_at: now(),
-  });
   getDb()
     .prepare(`INSERT INTO sessions (id, agent_group_id, created_at) VALUES (?, ?, ?)`)
     .run('sess-parent', 'ag-parent', now());
@@ -48,9 +41,9 @@ function insertOrphanedTask(taskId: string, leaseAt: string | null = null): void
   getDb()
     .prepare(
       `INSERT INTO tasks (task_id, idempotency_key, parent_session_id, parent_agent_group_id,
-        target_agent_group_id, status, task_content, request_hash, admitted_at, surface_mode,
+        status, task_content, request_hash, admitted_at, surface_mode,
         completion_lease_at, dispatch_completion_attempts, created_at)
-       VALUES (?, ?, 'sess-parent', 'ag-parent', 'ag-target', 'pending', 'do x', 'hash', ?, 'headless', ?, 0, ?)`,
+       VALUES (?, ?, 'sess-parent', 'ag-parent', 'pending', 'do x', 'hash', ?, 'headless', ?, 0, ?)`,
     )
     .run(taskId, `ik-${taskId}`, tenMinutesAgo(), leaseAt, now());
 }
@@ -70,7 +63,7 @@ describe('runReconcilerSweep', () => {
 
     runReconcilerSweep();
 
-    expect(setImmediateSpy).toHaveBeenCalledWith(expect.any(Function), 'task-orphan');
+    expect(setImmediateSpy).toHaveBeenCalledWith(expect.any(Function), 'task-orphan', 'ag-parent');
 
     setImmediateSpy.mockRestore();
   });
@@ -85,7 +78,7 @@ describe('runReconcilerSweep', () => {
 
     runReconcilerSweep();
 
-    expect(setImmediateSpy).not.toHaveBeenCalledWith(expect.any(Function), 'task-leased');
+    expect(setImmediateSpy).not.toHaveBeenCalledWith(expect.any(Function), 'task-leased', expect.any(String));
 
     setImmediateSpy.mockRestore();
   });
@@ -100,7 +93,7 @@ describe('runReconcilerSweep', () => {
 
     runReconcilerSweep();
 
-    const taskIds = (setImmediateSpy.mock.calls as unknown as [Function, string][]).map((c) => c[1]);
+    const taskIds = (setImmediateSpy.mock.calls as unknown as [Function, string, string][]).map((c) => c[1]);
     expect(taskIds).toContain('task-a');
     expect(taskIds).toContain('task-b');
 
@@ -132,18 +125,20 @@ describe('index.ts — ASSERT registered actions', () => {
     const matches = indexSrc.match(/registerDeliveryAction\(/g) ?? [];
     expect(matches.length).toBe(5);
 
-    // ASSERT: all 5 expected actions present
+    // ASSERT: all 5 expected actions present (renamed dispatch_* → spawn_*)
     const expectedActions = [
-      'dispatch_task',
-      'dispatch_complete',
-      'dispatch_failed',
-      'dispatch_cancel',
-      'dispatch_progress',
+      'spawn_task',
+      'spawn_complete',
+      'spawn_failed',
+      'spawn_cancel',
+      'spawn_progress',
     ];
     for (const action of expectedActions) {
       expect(indexSrc).toContain(`'${action}'`);
     }
 
+    // ASSERT: legacy dispatch_* names are NOT registered
+    expect(indexSrc).not.toContain("'dispatch_task'");
     // ASSERT: 'cancel_task' (with quotes) is NOT registered (collision avoidance with scheduling module)
     expect(indexSrc).not.toContain("'cancel_task'");
   });

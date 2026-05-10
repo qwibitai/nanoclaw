@@ -55,7 +55,6 @@ describe('agent-group-capabilities CRUD', () => {
     setupDb();
     createUser('user-system');
     createAgentGroup({ id: 'ag-x', name: 'X', folder: 'x', agent_provider: null, created_at: now() });
-    createAgentGroup({ id: 'ag-target', name: 'Target', folder: 'target', agent_provider: null, created_at: now() });
     grantCapability('ag-x', 'orchestrator', defaultConfig, 'user-system');
 
     const db = getDb();
@@ -63,8 +62,8 @@ describe('agent-group-capabilities CRUD', () => {
     db.exec(`
       INSERT INTO tasks (
         task_id, idempotency_key, parent_session_id, parent_agent_group_id,
-        target_agent_group_id, task_content, request_hash, admitted_at, status, created_at
-      ) VALUES ('t1', 'k1', 'sess-x', 'ag-x', 'ag-target', 'content', 'hash', '${now()}', 'running', '${now()}')
+        task_content, request_hash, admitted_at, status, created_at
+      ) VALUES ('t1', 'k1', 'sess-x', 'ag-x', 'content', 'hash', '${now()}', 'running', '${now()}')
     `);
 
     const result = revokeCapability('ag-x', 'orchestrator');

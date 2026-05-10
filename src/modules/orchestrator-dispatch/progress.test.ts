@@ -4,7 +4,7 @@ import { closeDb, createAgentGroup, initTestDb, runMigrations } from '../../db/i
 import { getDb } from '../../db/connection.js';
 import { getTaskById, insertTaskAtomic } from './db/tasks.js';
 import type { Task } from './db/tasks.js';
-import { applyDispatchProgress } from './progress.js';
+import { applySpawnProgress } from './progress.js';
 import type { Session } from '../../types.js';
 
 function now(): string {
@@ -41,7 +41,6 @@ function makeRunningTask(lastProgressAt?: string): Task {
     parent_session_id: 'sess-parent',
     parent_agent_group_id: 'ag-parent',
     parent_messaging_group_id: null,
-    target_agent_group_id: 'ag-child',
     child_session_id: 'sess-child',
     status: 'running',
     task_content: 'do something',
@@ -98,14 +97,14 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('applyDispatchProgress', () => {
+describe('applySpawnProgress', () => {
   it('test_progress_resets_timer: updates last_progress_at and last_progress_message', async () => {
     setupDb();
     seedGroups();
     makeRunningTask();
 
     const before = Date.now();
-    await applyDispatchProgress({ task_id: 'task-1', message: 'Working' }, makeChildSession());
+    await applySpawnProgress({ task_id: 'task-1', message: 'Working' }, makeChildSession());
     const after = Date.now();
 
     const task = getTaskById('task-1');
@@ -121,7 +120,7 @@ describe('applyDispatchProgress', () => {
     seedGroups();
     makeRunningTask();
 
-    await applyDispatchProgress({ task_id: 'task-1', message: 'X'.repeat(1000) }, makeChildSession());
+    await applySpawnProgress({ task_id: 'task-1', message: 'X'.repeat(1000) }, makeChildSession());
 
     const task = getTaskById('task-1');
     expect(task!.last_progress_message!.length).toBe(500);
@@ -133,7 +132,7 @@ describe('applyDispatchProgress', () => {
     makeRunningTask();
 
     await expect(
-      applyDispatchProgress({ task_id: 'task-1', message: 'Working' }, makeWrongSession()),
+      applySpawnProgress({ task_id: 'task-1', message: 'Working' }, makeWrongSession()),
     ).resolves.not.toThrow();
 
     // Task should be unchanged (no update happened)
@@ -151,7 +150,6 @@ describe('applyDispatchProgress', () => {
       parent_session_id: 'sess-parent',
       parent_agent_group_id: 'ag-parent',
       parent_messaging_group_id: null,
-      target_agent_group_id: 'ag-child',
       child_session_id: 'sess-child',
       status: 'running', // need to be 'running' for auth to match
       task_content: 'x',
@@ -178,7 +176,7 @@ describe('applyDispatchProgress', () => {
 
     // Should not throw — no status guard
     await expect(
-      applyDispatchProgress({ task_id: 'task-pend', message: 'Still reporting' }, makeChildSession()),
+      applySpawnProgress({ task_id: 'task-pend', message: 'Still reporting' }, makeChildSession()),
     ).resolves.not.toThrow();
   });
 });
