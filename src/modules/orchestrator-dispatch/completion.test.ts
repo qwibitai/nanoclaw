@@ -4,7 +4,7 @@ import { closeDb, createAgentGroup, createSession, initTestDb, runMigrations } f
 import { getDb } from '../../db/connection.js';
 import { getTaskById, insertTaskAtomic } from './db/tasks.js';
 import type { Task } from './db/tasks.js';
-import { applyDispatchComplete, applyDispatchFailed } from './completion.js';
+import { applySpawnComplete, applySpawnFailed } from './completion.js';
 import type { Session } from '../../types.js';
 
 vi.mock('../../session-manager.js', () => ({
@@ -57,7 +57,6 @@ function makeRunningTask(): Task {
     parent_session_id: 'sess-parent',
     parent_agent_group_id: 'ag-parent',
     parent_messaging_group_id: null,
-    target_agent_group_id: 'ag-child',
     child_session_id: 'sess-child',
     status: 'running',
     task_content: 'do something',
@@ -128,7 +127,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('applyDispatchComplete', () => {
+describe('applySpawnComplete', () => {
   it('test_complete_happy_path: transitions to completed and notifies parent', async () => {
     setupDb();
     seedGroups();
@@ -137,7 +136,7 @@ describe('applyDispatchComplete', () => {
     const { getSession } = await import('../../db/sessions.js');
     vi.mocked(getSession).mockReturnValue(makeParentSession());
 
-    await applyDispatchComplete({ task_id: 'task-1', summary: 'Done!' }, makeChildSession());
+    await applySpawnComplete({ task_id: 'task-1', summary: 'Done!' }, makeChildSession());
 
     const task = getTaskById('task-1');
     expect(task!.status).toBe('completed');
@@ -157,7 +156,7 @@ describe('applyDispatchComplete', () => {
     seedGroups();
     makeRunningTask();
 
-    await applyDispatchComplete({}, makeChildSession()); // no task_id
+    await applySpawnComplete({}, makeChildSession()); // no task_id
 
     const task = getTaskById('task-1');
     expect(task!.status).toBe('running'); // unchanged
@@ -168,7 +167,7 @@ describe('applyDispatchComplete', () => {
     seedGroups();
     makeRunningTask();
 
-    await applyDispatchComplete({ task_id: 'task-1', summary: 'Done' }, makeWrongSession());
+    await applySpawnComplete({ task_id: 'task-1', summary: 'Done' }, makeWrongSession());
 
     const task = getTaskById('task-1');
     expect(task!.status).toBe('running'); // unchanged
@@ -188,7 +187,7 @@ describe('applyDispatchComplete', () => {
       .run(now(), task.task_id);
 
     const { writeSessionMessage } = await import('../../session-manager.js');
-    await applyDispatchComplete({ task_id: 'task-1', summary: 'Done' }, makeChildSession());
+    await applySpawnComplete({ task_id: 'task-1', summary: 'Done' }, makeChildSession());
 
     const updated = getTaskById('task-1');
     expect(updated!.status).toBe('cancelled'); // unchanged — CAS rejected
@@ -196,7 +195,7 @@ describe('applyDispatchComplete', () => {
   });
 });
 
-describe('applyDispatchFailed', () => {
+describe('applySpawnFailed', () => {
   it('test_failed_includes_reason: stores fail_reason and transitions to failed', async () => {
     setupDb();
     seedGroups();
@@ -205,7 +204,7 @@ describe('applyDispatchFailed', () => {
     const { getSession } = await import('../../db/sessions.js');
     vi.mocked(getSession).mockReturnValue(makeParentSession());
 
-    await applyDispatchFailed(
+    await applySpawnFailed(
       { task_id: 'task-1', summary: 'Error occurred', fail_reason: 'agent_error' },
       makeChildSession(),
     );
@@ -221,7 +220,7 @@ describe('applyDispatchFailed', () => {
     seedGroups();
     makeRunningTask();
 
-    await applyDispatchFailed({ task_id: 'task-1', summary: 'X' }, makeWrongSession());
+    await applySpawnFailed({ task_id: 'task-1', summary: 'X' }, makeWrongSession());
 
     const task = getTaskById('task-1');
     expect(task!.status).toBe('running'); // unchanged
@@ -236,7 +235,7 @@ describe('applyDispatchFailed', () => {
     getDb().prepare(`UPDATE tasks SET status = 'completed', completed_at = ? WHERE task_id = ?`).run(now(), 'task-1');
 
     const { writeSessionMessage } = await import('../../session-manager.js');
-    await applyDispatchFailed({ task_id: 'task-1', summary: 'X' }, makeChildSession());
+    await applySpawnFailed({ task_id: 'task-1', summary: 'X' }, makeChildSession());
 
     expect(vi.mocked(writeSessionMessage)).not.toHaveBeenCalled();
   });

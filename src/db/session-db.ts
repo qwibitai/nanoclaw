@@ -49,16 +49,24 @@ export function openOutboundDbWritable(dbPath: string): Database.Database {
 export const openOutboundDbRw = openOutboundDbWritable;
 
 /**
- * Ensure session_routing has the dispatch_task_id and session_id columns that
- * were added in migration 026. Inbound DBs created before that migration are
- * missing these columns — calling this before any upsert that references them
- * keeps older sessions compatible without requiring a separate migration runner.
+ * Ensure session_routing has the spawn_task_id and session_id columns the
+ * upsert needs. Handles three cases idempotently:
+ *   1. Pre-Phase-1 sessions (no extra columns)            → ADD spawn_task_id + session_id
+ *   2. Phase-1 sessions (have legacy dispatch_task_id)    → RENAME to spawn_task_id
+ *   3. Post-rework sessions (already have spawn_task_id)  → no-op
+ *
+ * SQLite ALTER TABLE RENAME COLUMN requires 3.25+ (better-sqlite3 ships 3.45+).
  */
 export function migrateSessionRoutingTable(db: Database.Database): void {
   const existing = new Set(
     (db.prepare('PRAGMA table_info(session_routing)').all() as Array<{ name: string }>).map((c) => c.name),
   );
-  for (const col of ['dispatch_task_id TEXT', 'session_id TEXT']) {
+  if (existing.has('dispatch_task_id') && !existing.has('spawn_task_id')) {
+    db.exec('ALTER TABLE session_routing RENAME COLUMN dispatch_task_id TO spawn_task_id');
+    existing.delete('dispatch_task_id');
+    existing.add('spawn_task_id');
+  }
+  for (const col of ['spawn_task_id TEXT', 'session_id TEXT']) {
     const colName = col.split(' ')[0]!;
     if (!existing.has(colName)) {
       db.exec(`ALTER TABLE session_routing ADD COLUMN ${col}`);
@@ -72,23 +80,23 @@ export function upsertSessionRouting(
     channel_type: string | null;
     platform_id: string | null;
     thread_id: string | null;
-    dispatch_task_id?: string | null;
+    spawn_task_id?: string | null;
     session_id?: string | null;
   },
 ): void {
   migrateSessionRoutingTable(db);
   db.prepare(
-    `INSERT INTO session_routing (id, channel_type, platform_id, thread_id, dispatch_task_id, session_id)
-     VALUES (1, @channel_type, @platform_id, @thread_id, @dispatch_task_id, @session_id)
+    `INSERT INTO session_routing (id, channel_type, platform_id, thread_id, spawn_task_id, session_id)
+     VALUES (1, @channel_type, @platform_id, @thread_id, @spawn_task_id, @session_id)
      ON CONFLICT(id) DO UPDATE SET
-       channel_type     = excluded.channel_type,
-       platform_id      = excluded.platform_id,
-       thread_id        = excluded.thread_id,
-       dispatch_task_id = COALESCE(excluded.dispatch_task_id, session_routing.dispatch_task_id),
-       session_id       = COALESCE(excluded.session_id, session_routing.session_id)`,
+       channel_type  = excluded.channel_type,
+       platform_id   = excluded.platform_id,
+       thread_id     = excluded.thread_id,
+       spawn_task_id = COALESCE(excluded.spawn_task_id, session_routing.spawn_task_id),
+       session_id    = COALESCE(excluded.session_id, session_routing.session_id)`,
   ).run({
     ...routing,
-    dispatch_task_id: routing.dispatch_task_id ?? null,
+    spawn_task_id: routing.spawn_task_id ?? null,
     session_id: routing.session_id ?? null,
   });
 }

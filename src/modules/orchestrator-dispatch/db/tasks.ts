@@ -6,7 +6,6 @@ export interface Task {
   parent_session_id: string;
   parent_agent_group_id: string;
   parent_messaging_group_id: string | null;
-  target_agent_group_id: string;
   child_session_id: string | null;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   task_content: string;
@@ -46,7 +45,7 @@ export function insertTaskAtomic(row: Omit<Task, 'created_at'>): Task | null {
     .prepare(
       `INSERT INTO tasks (
         task_id, idempotency_key, parent_session_id, parent_agent_group_id,
-        parent_messaging_group_id, target_agent_group_id, child_session_id,
+        parent_messaging_group_id, child_session_id,
         status, task_content, request_hash, deadline, parent_platform_message_id,
         child_platform_thread_id, child_messaging_group_id, admitted_at,
         started_at, completed_at, failed_at, cancelled_at, last_progress_at,
@@ -54,7 +53,7 @@ export function insertTaskAtomic(row: Omit<Task, 'created_at'>): Task | null {
         dispatch_completion_attempts, completion_lease_at, surface_mode, created_at
       ) VALUES (
         @task_id, @idempotency_key, @parent_session_id, @parent_agent_group_id,
-        @parent_messaging_group_id, @target_agent_group_id, @child_session_id,
+        @parent_messaging_group_id, @child_session_id,
         @status, @task_content, @request_hash, @deadline, @parent_platform_message_id,
         @child_platform_thread_id, @child_messaging_group_id, @admitted_at,
         @started_at, @completed_at, @failed_at, @cancelled_at, @last_progress_at,

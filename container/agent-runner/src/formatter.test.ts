@@ -258,20 +258,20 @@ describe('formatSystemMessage', () => {
   });
 });
 
-describe('dispatch envelope (_dispatch)', () => {
-  it('test_dispatch_envelope_renders_text_only', () => {
-    insertMessage('dm1', 'chat', { _dispatch: { task_id: 'dispatch-abc' }, text: 'Do X' });
+describe('spawn envelope (_spawn)', () => {
+  it('test_spawn_envelope_renders_text_only', () => {
+    insertMessage('dm1', 'chat', { _spawn: { task_id: 'spawn-abc' }, text: 'Do X' });
     const result = formatMessages(getPendingMessages());
     expect(result).toContain('Do X');
-    // _dispatch JSON should NOT appear in user-visible text
-    expect(result).not.toContain('"_dispatch"');
+    // _spawn JSON should NOT appear in user-visible text
+    expect(result).not.toContain('"_spawn"');
   });
 
-  it('test_dispatch_envelope_exposes_task_id_to_system', () => {
-    insertMessage('dm2', 'chat', { _dispatch: { task_id: 'dispatch-abc' }, text: 'Do X' });
+  it('test_spawn_envelope_exposes_task_id_to_system', () => {
+    insertMessage('dm2', 'chat', { _spawn: { task_id: 'spawn-abc' }, text: 'Do X' });
     const result = formatMessages(getPendingMessages());
     // task_id must appear in the system context section
-    expect(result).toContain('dispatch-abc');
+    expect(result).toContain('spawn-abc');
   });
 
   it('test_plain_text_unchanged', () => {
@@ -280,50 +280,50 @@ describe('dispatch envelope (_dispatch)', () => {
     expect(result).toContain('Hello world');
   });
 
-  it('test_non_dispatch_json_renders_text_field', () => {
+  it('test_non_spawn_json_renders_text_field', () => {
     insertMessage('nm1', 'chat', { text: 'Hi' });
     const result = formatMessages(getPendingMessages());
     expect(result).toContain('Hi');
-    expect(result).not.toContain('"_dispatch"');
+    expect(result).not.toContain('"_spawn"');
   });
 
-  it('test_dispatch_envelope_does_not_leak_json_as_visible_text', () => {
-    insertMessage('dm3', 'chat', { _dispatch: { task_id: 'dispatch-xyz' }, text: 'Run the analysis' });
+  it('test_spawn_envelope_does_not_leak_json_as_visible_text', () => {
+    insertMessage('dm3', 'chat', { _spawn: { task_id: 'spawn-xyz' }, text: 'Run the analysis' });
     const result = formatMessages(getPendingMessages());
     // The raw JSON envelope must not appear in user-visible output
-    expect(result).not.toContain('_dispatch_cancel');
-    expect(result).not.toContain('"task_id":"dispatch-xyz"');
+    expect(result).not.toContain('_spawn_cancel');
+    expect(result).not.toContain('"task_id":"spawn-xyz"');
     // But the task_id itself should appear in a structured system note
-    expect(result).toContain('dispatch-xyz');
+    expect(result).toContain('spawn-xyz');
   });
 });
 
-describe('dispatch cancel envelope (_dispatch_cancel)', () => {
-  it('test_dispatch_cancel_envelope_renders_as_system_note', () => {
+describe('spawn cancel envelope (_spawn_cancel)', () => {
+  it('test_spawn_cancel_envelope_renders_as_system_note', () => {
     insertMessage('dc1', 'system', {
-      _dispatch_cancel: { task_id: 'dispatch-abc', reason: 'orchestrator override' },
+      _spawn_cancel: { task_id: 'spawn-abc', reason: 'orchestrator override' },
     });
     const result = formatMessages(getPendingMessages());
     expect(result).toContain('cancelled by the orchestrator');
     expect(result).toContain('orchestrator override');
     // Raw JSON envelope must NOT appear as user-visible text
-    expect(result).not.toContain('"_dispatch_cancel"');
+    expect(result).not.toContain('"_spawn_cancel"');
   });
 
-  it('test_dispatch_cancel_envelope_without_reason_uses_placeholder', () => {
+  it('test_spawn_cancel_envelope_without_reason_uses_placeholder', () => {
     insertMessage('dc2', 'system', {
-      _dispatch_cancel: { task_id: 'dispatch-abc' },
+      _spawn_cancel: { task_id: 'spawn-abc' },
     });
     const result = formatMessages(getPendingMessages());
     expect(result).toContain('cancelled by the orchestrator');
     expect(result).toContain('(none)');
     // Must not throw — this is a critical invariant
-    expect(result).not.toContain('"_dispatch_cancel"');
+    expect(result).not.toContain('"_spawn_cancel"');
   });
 
-  it('test_dispatch_cancel_envelope_task_id_does_not_appear_as_visible_json', () => {
+  it('test_spawn_cancel_envelope_task_id_does_not_appear_as_visible_json', () => {
     insertMessage('dc3', 'system', {
-      _dispatch_cancel: { task_id: 'dispatch-test', reason: 'test reason' },
+      _spawn_cancel: { task_id: 'spawn-test', reason: 'test reason' },
     });
     const result = formatMessages(getPendingMessages());
     // Should be a plain readable system note, not raw JSON

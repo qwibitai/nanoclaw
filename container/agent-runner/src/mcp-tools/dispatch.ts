@@ -1,22 +1,27 @@
 /**
- * Orchestrator-only MCP tools: dispatch_task, list_dispatched_tasks, dispatch_cancel.
+ * Orchestrator-only MCP tools: spawn_task, list_spawned_tasks, spawn_cancel.
  *
  * Mounted ONLY when:
- * 1. getSessionDispatchTaskId() === null (this is not a child/dispatched session)
+ * 1. getSessionSpawnTaskId() === null (this is not a child/spawned session)
  * 2. This agent's group has agent_group_capabilities.role = 'orchestrator'
  *    in the per-agent central DB projection.
  *
  * All three tools write kind='system' outbound rows. The host processes them
  * in the delivery loop — there is no synchronous host round-trip.
+ *
+ * Self-orchestration: spawn_task always targets the SAME agent group as the
+ * caller (sharing workspace, memory, CLAUDE.md, channels). There is no
+ * cross-group dispatch primitive — group is the trust boundary, session is
+ * the work-unit boundary.
  */
-import { getCentralDb, getOutboundDb } from '../db/connection.js';
+import { getCentralDb } from '../db/connection.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { getSessionId } from '../db/session-routing.js';
-import { deriveDispatchTaskId } from '../dispatch/derive-task-id.js';
+import { deriveSpawnTaskId } from '../dispatch/derive-task-id.js';
 import type { McpToolDefinition } from './types.js';
 
 function log(msg: string): void {
-  console.error(`[dispatch] ${msg}`);
+  console.error(`[spawn] ${msg}`);
 }
 
 function ok(text: string) {
@@ -28,30 +33,28 @@ function err(text: string) {
 }
 
 function sysId(): string {
-  return `dispatch-sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `spawn-sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export const dispatchTask: McpToolDefinition = {
+export const spawnTask: McpToolDefinition = {
   tool: {
-    name: 'dispatch_task',
+    name: 'spawn_task',
     description:
-      'Dispatch a task to another agent group. Returns the task_id immediately (locally computed). ' +
-      'The host admits or rejects the dispatch asynchronously — the outcome arrives as an inbound message on the next turn.',
+      'Spawn a parallel task in a new session of THIS agent group. The child session shares ' +
+      'workspace, memory, CLAUDE.md, and channels with you — only the conversation/thread is isolated. ' +
+      'Returns the task_id immediately (locally computed). The host admits or rejects asynchronously — ' +
+      'the outcome arrives as an inbound message on the next turn.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        target_group: {
-          type: 'string',
-          description: 'The agent group name or ID to dispatch the task to.',
-        },
         content: {
           type: 'string',
-          description: 'The task instructions/content for the child agent.',
+          description: 'The task instructions/content for the spawned child session.',
         },
         idempotency_key: {
           type: 'string',
           description:
-            'Unique key for idempotent dispatch. Reusing the same key with the same payload is safe; ' +
+            'Unique key for idempotent spawn. Reusing the same key with the same payload is safe; ' +
             'reusing with different payload is rejected.',
         },
         deadline: {
@@ -59,53 +62,51 @@ export const dispatchTask: McpToolDefinition = {
           description: 'Optional ISO 8601 deadline for the task (e.g., "2026-12-31T23:59:59Z").',
         },
       },
-      required: ['target_group', 'content', 'idempotency_key'],
+      required: ['content', 'idempotency_key'],
     },
   },
   async handler(args) {
-    const targetGroup = args.target_group as string | undefined;
     const content = args.content as string | undefined;
     const idempotencyKey = args.idempotency_key as string | undefined;
     const deadline = (args.deadline as string | undefined) ?? null;
 
-    if (!targetGroup || !content || !idempotencyKey) {
-      return err('target_group, content, and idempotency_key are required');
+    if (!content || !idempotencyKey) {
+      return err('content and idempotency_key are required');
     }
 
-    // Refuse to dispatch if we cannot establish our own session identity.
+    // Refuse to spawn if we cannot establish our own session identity.
     // Falling back to '' would compute task_id from an empty parentSessionId, which
     // would not match the host's task_id (host derives from the real session ID).
-    // The agent would silently see a dispatch acknowledged with a task_id it doesn't
+    // The agent would silently see a spawn acknowledged with a task_id it doesn't
     // recognize. Better to fail loud at the caller boundary.
     const parentSessionId = getSessionId();
     if (!parentSessionId) {
-      return err('dispatch_task: cannot determine parent session id (session_routing.session_id missing); host may need a wake to populate it');
+      return err('spawn_task: cannot determine parent session id (session_routing.session_id missing); host may need a wake to populate it');
     }
-    const taskId = deriveDispatchTaskId(parentSessionId, idempotencyKey);
+    const taskId = deriveSpawnTaskId(parentSessionId, idempotencyKey);
 
     writeMessageOut({
       id: sysId(),
       kind: 'system',
       content: JSON.stringify({
-        action: 'dispatch_task',
+        action: 'spawn_task',
         task_id: taskId,
-        target_group: targetGroup,
         content,
         idempotency_key: idempotencyKey,
         deadline,
       }),
     });
 
-    log(`dispatch_task: ${taskId} → ${targetGroup}`);
-    return ok(`Task dispatched. task_id: ${taskId}\nStatus will arrive as an inbound message on the next turn.`);
+    log(`spawn_task: ${taskId}`);
+    return ok(`Task spawned. task_id: ${taskId}\nStatus will arrive as an inbound message on the next turn.`);
   },
 };
 
-export const listDispatchedTasks: McpToolDefinition = {
+export const listSpawnedTasks: McpToolDefinition = {
   tool: {
-    name: 'list_dispatched_tasks',
+    name: 'list_spawned_tasks',
     description:
-      'List tasks dispatched by this orchestrator session. Reads directly from the central DB — no host round-trip.',
+      'List tasks spawned by this orchestrator session. Reads directly from the central DB — no host round-trip.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -126,12 +127,12 @@ export const listDispatchedTasks: McpToolDefinition = {
     const parentSessionId = getSessionId();
 
     if (!parentSessionId) {
-      return ok('No dispatched tasks (session ID not available).');
+      return ok('No spawned tasks (session ID not available).');
     }
 
     const db = getCentralDb();
     if (!db) {
-      return ok('No dispatched tasks (central DB not mounted).');
+      return ok('No spawned tasks (central DB not mounted).');
     }
 
     try {
@@ -139,7 +140,7 @@ export const listDispatchedTasks: McpToolDefinition = {
       if (status) {
         rows = db
           .prepare(
-            `SELECT task_id, target_agent_group_id, status, task_content, deadline,
+            `SELECT task_id, status, task_content, deadline,
                     admitted_at, completed_at, fail_reason, result_summary
                FROM tasks
               WHERE parent_session_id = ?
@@ -151,7 +152,7 @@ export const listDispatchedTasks: McpToolDefinition = {
       } else {
         rows = db
           .prepare(
-            `SELECT task_id, target_agent_group_id, status, task_content, deadline,
+            `SELECT task_id, status, task_content, deadline,
                     admitted_at, completed_at, fail_reason, result_summary
                FROM tasks
               WHERE parent_session_id = ?
@@ -161,37 +162,37 @@ export const listDispatchedTasks: McpToolDefinition = {
           .all(parentSessionId, limit) as Array<Record<string, unknown>>;
       }
 
-      if (rows.length === 0) return ok('No dispatched tasks found.');
+      if (rows.length === 0) return ok('No spawned tasks found.');
 
       const lines = rows.map((r) => {
         const preview = ((r.task_content as string) || '').slice(0, 60);
         const failNote = r.fail_reason ? ` fail=${r.fail_reason}` : '';
         const resultNote = r.result_summary ? ` result=${String(r.result_summary).slice(0, 40)}` : '';
-        return `- ${r.task_id} [${r.status}] target=${r.target_agent_group_id} → ${preview}${failNote}${resultNote}`;
+        return `- ${r.task_id} [${r.status}] → ${preview}${failNote}${resultNote}`;
       });
 
       return ok(lines.join('\n'));
     } catch (e) {
       // tasks table may not exist on older installs
       const msg = e instanceof Error ? e.message : String(e);
-      if (/no such table/.test(msg)) return ok('No dispatched tasks found.');
-      return err(`Failed to query dispatched tasks: ${msg}`);
+      if (/no such table/.test(msg)) return ok('No spawned tasks found.');
+      return err(`Failed to query spawned tasks: ${msg}`);
     }
   },
 };
 
-export const dispatchCancel: McpToolDefinition = {
+export const spawnCancel: McpToolDefinition = {
   tool: {
-    name: 'dispatch_cancel',
+    name: 'spawn_cancel',
     description:
-      'Cancel a dispatched task by task_id. The host verifies that this session is the parent before applying. ' +
+      'Cancel a spawned task by task_id. The host verifies that this session is the parent before applying. ' +
       'Outcome arrives as an inbound message on the next turn.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         task_id: {
           type: 'string',
-          description: 'The task_id returned by dispatch_task.',
+          description: 'The task_id returned by spawn_task.',
         },
         reason: {
           type: 'string',
@@ -207,7 +208,7 @@ export const dispatchCancel: McpToolDefinition = {
 
     if (!taskId) return err('task_id is required');
 
-    const content: Record<string, unknown> = { action: 'dispatch_cancel', task_id: taskId };
+    const content: Record<string, unknown> = { action: 'spawn_cancel', task_id: taskId };
     if (reason !== undefined) content.reason = reason;
 
     writeMessageOut({
@@ -216,7 +217,7 @@ export const dispatchCancel: McpToolDefinition = {
       content: JSON.stringify(content),
     });
 
-    log(`dispatch_cancel: ${taskId}${reason ? ` (${reason})` : ''}`);
+    log(`spawn_cancel: ${taskId}${reason ? ` (${reason})` : ''}`);
     return ok(`Cancellation requested for task: ${taskId}. Status will arrive as an inbound message.`);
   },
 };

@@ -1,10 +1,10 @@
 /**
- * F1 — End-to-end dispatch fanout integration test.
+ * F1 — End-to-end self-spawn integration test.
  *
  * Tests the complete handler chain:
- *   orchestrator calls applyDispatchTask
- *   → host admits task, opens child session
- *   → child calls applyDispatchProgress / applyDispatchComplete
+ *   orchestrator calls applySpawnTask
+ *   → host admits task, opens child session in the same agent group
+ *   → child calls applySpawnProgress / applySpawnComplete
  *   → orchestrator gets notified
  *
  * No real Docker, no real Slack/Discord — all side-effecting modules are mocked.
@@ -23,12 +23,12 @@ import {
   runMigrations,
 } from '../../db/index.js';
 import { getDb } from '../../db/connection.js';
-import { getTaskById, getTaskByParentAndIdempotency, insertTaskAtomic } from './db/tasks.js';
-import { computeRequestHash, deriveDispatchTaskId } from './derive-task-id.js';
-import { applyDispatchTask, completeDispatchSideEffects } from './dispatch.js';
-import { applyDispatchComplete } from './completion.js';
-import { applyDispatchProgress } from './progress.js';
-import { applyDispatchCancel } from './cancellation.js';
+import { getTaskById, insertTaskAtomic } from './db/tasks.js';
+import { computeRequestHash, deriveSpawnTaskId } from './derive-task-id.js';
+import { applySpawnTask } from './dispatch.js';
+import { applySpawnComplete } from './completion.js';
+import { applySpawnProgress } from './progress.js';
+import { applySpawnCancel } from './cancellation.js';
 import { runReconcilerSweep } from './reconciler.js';
 import { _sweepTaskWatchdogForTesting } from '../../host-sweep.js';
 import type { Session } from '../../types.js';
@@ -39,8 +39,7 @@ import type { Session } from '../../types.js';
 const writtenMessages: Array<{ agentGroupId: string; sessionId: string; content: string }> = [];
 
 // Used by the resolveSession mock to insert child sessions into the central DB
-// so that tasks.child_session_id FK constraints pass. Called lazily from the
-// mock callback; getDb() is defined at that point.
+// so that tasks.child_session_id FK constraints pass.
 function insertChildSession(
   sessionId: string,
   agId: string,
@@ -86,7 +85,6 @@ vi.mock('../../session-manager.js', async (importOriginal) => {
           last_active: null,
           created_at: now,
         };
-        // Insert into central DB so tasks.child_session_id FK check passes
         insertChildSession(sessionId, agId, mgId, threadId, now);
         sessionMap.set(sessionId, session);
         return { session, created: true };
@@ -104,9 +102,6 @@ vi.mock('../../container-runner.js', () => ({
   getContainerSpawnedAt: vi.fn().mockReturnValue(null),
 }));
 
-// getSession from sessions.js — we need this to return real session objects for
-// complete/cancel handlers that look up parent/child sessions.
-// We use the real implementation but patch it to return sessions we control.
 const sessionMap = new Map<string, Session>();
 
 vi.mock('../../db/sessions.js', async (importOriginal) => {
@@ -153,14 +148,11 @@ function setupDb(): void {
   runMigrations(db);
 }
 
-function seedGroups({ withMg = false }: { withMg?: boolean } = {}): {
-  orchSession: Session;
-  mgId: string | null;
-} {
+function seedGroups({ withMg = false }: { withMg?: boolean } = {}): { orchSession: Session; mgId: string | null } {
+  // Self-orchestration: only one agent group is needed. The "child" sessions
+  // resolveSession returns will live in the SAME group (ag-orch).
   createAgentGroup({ id: 'ag-orch', name: 'ag-orch', folder: 'ag-orch', agent_provider: null, created_at: ts() });
-  createAgentGroup({ id: 'ag-target', name: 'ag-target', folder: 'ag-target', agent_provider: null, created_at: ts() });
 
-  // Grant orchestrator capability
   const capConfig = JSON.stringify({
     concurrencyCap: 5,
     noProgressTimeoutSec: 1800,
@@ -194,21 +186,6 @@ function seedGroups({ withMg = false }: { withMg?: boolean } = {}): {
       sender_scope: 'all',
       ignored_message_policy: 'drop',
       session_mode: 'shared',
-      priority: 0,
-      default_model: null,
-      default_effort: null,
-      default_tone: null,
-      created_at: ts(),
-    });
-    createMessagingGroupAgent({
-      id: 'mga-target',
-      messaging_group_id: mgId,
-      agent_group_id: 'ag-target',
-      engage_mode: 'mention',
-      engage_pattern: null,
-      sender_scope: 'all',
-      ignored_message_policy: 'drop',
-      session_mode: 'per-thread',
       priority: 0,
       default_model: null,
       default_effort: null,
@@ -283,20 +260,22 @@ describe('F1: e2e threaded happy path', () => {
       mockAdapterWithThread as unknown as ReturnType<typeof getChannelAdapter>,
     );
 
-    // Step 1: orchestrator dispatches a task
-    await applyDispatchTask({ target_group: 'ag-target', content: 'Do thing', idempotency_key: 'k1' }, orchSession);
+    // Step 1: orchestrator spawns a task
+    await applySpawnTask({ content: 'Do thing', idempotency_key: 'k1' }, orchSession);
 
-    // Step 2: drain setImmediate (completeDispatchSideEffects)
+    // Step 2: drain setImmediate (completeSpawnSideEffects)
     await drainImmediate();
     await drainImmediate(); // second drain for async chain inside _runThreadedPath
 
     // Step 3: verify task row is running with all key fields populated
-    const taskId = deriveDispatchTaskId('sess-orch', 'k1');
+    const taskId = deriveSpawnTaskId('sess-orch', 'k1');
     const task = getTaskById(taskId);
     expect(task).not.toBeNull();
     expect(task!.status).toBe('running');
     expect(task!.surface_mode).toBe('native_thread');
     expect(task!.child_session_id).not.toBeNull();
+    // Self-orchestration: child session lives in the parent's agent group
+    expect(task!.child_session_id).toContain('child-sess-ag-orch');
 
     // M25: child_platform_thread_id === parent_platform_message_id (Slack semantics)
     expect(task!.parent_platform_message_id).toBe('parent-msg-id-001');
@@ -306,18 +285,18 @@ describe('F1: e2e threaded happy path', () => {
     const orchMessages = getWrittenFor('sess-orch');
     expect(orchMessages.some((m) => m.includes('Task admitted'))).toBe(true);
 
-    // Step 5: verify child session got the _dispatch envelope
+    // Step 5: verify child session got the _spawn envelope
     const childSessionId = task!.child_session_id!;
     const childMessages = getWrittenFor(childSessionId);
-    const dispatchMsg = childMessages.find((m) => m.includes('_dispatch'));
-    expect(dispatchMsg).toBeDefined();
-    const parsed = JSON.parse(dispatchMsg!);
-    expect(parsed._dispatch.task_id).toBe(taskId);
+    const spawnMsg = childMessages.find((m) => m.includes('_spawn'));
+    expect(spawnMsg).toBeDefined();
+    const parsed = JSON.parse(spawnMsg!);
+    expect(parsed._spawn.task_id).toBe(taskId);
 
-    // Step 6: child reports progress
+    // Step 6: child reports progress (child shares the parent agent group)
     const childSession: Session = {
       id: childSessionId,
-      agent_group_id: 'ag-target',
+      agent_group_id: 'ag-orch',
       messaging_group_id: null,
       thread_id: null,
       status: 'active',
@@ -328,14 +307,14 @@ describe('F1: e2e threaded happy path', () => {
     };
     sessionMap.set(childSessionId, childSession);
 
-    await applyDispatchProgress({ task_id: taskId, message: 'step 1 done' }, childSession);
+    await applySpawnProgress({ task_id: taskId, message: 'step 1 done' }, childSession);
     const afterProgress = getTaskById(taskId);
     expect(afterProgress!.last_progress_at).not.toBeNull();
     expect(afterProgress!.last_progress_message).toBe('step 1 done');
 
     // Step 7: child reports completion
     sessionMap.set('sess-orch', orchSession);
-    await applyDispatchComplete({ task_id: taskId, summary: 'all done' }, childSession);
+    await applySpawnComplete({ task_id: taskId, summary: 'all done' }, childSession);
 
     // Step 8: verify terminal state + parent notification
     const completedTask = getTaskById(taskId);
@@ -350,8 +329,6 @@ describe('F1: e2e threaded happy path', () => {
     expect(completionParsed._task_update.status).toBe('completed');
 
     // M21: child_session_id set in tasks BEFORE writeSessionMessage to child
-    // Verified by checking that child_session_id is non-null in the task row,
-    // and the _dispatch message was written (which happens AFTER the UPDATE).
     expect(task!.child_session_id).not.toBeNull();
     expect(childMessages.length).toBeGreaterThan(0);
   }, 10_000);
@@ -367,14 +344,11 @@ describe('F1: e2e headless happy path', () => {
       mockAdapterWithoutThread as unknown as ReturnType<typeof getChannelAdapter>,
     );
 
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do headless thing', idempotency_key: 'k-headless' },
-      orchSession,
-    );
+    await applySpawnTask({ content: 'Do headless thing', idempotency_key: 'k-headless' }, orchSession);
     await drainImmediate();
     await drainImmediate();
 
-    const taskId = deriveDispatchTaskId('sess-orch', 'k-headless');
+    const taskId = deriveSpawnTaskId('sess-orch', 'k-headless');
     const task = getTaskById(taskId);
     expect(task).not.toBeNull();
     expect(task!.status).toBe('running');
@@ -384,14 +358,13 @@ describe('F1: e2e headless happy path', () => {
     expect(task!.parent_platform_message_id).toBeNull();
 
     // Child session uses task_id as synthetic thread_id
-    // (resolveSession is called with threadId = taskId for headless)
     const childSessionId = task!.child_session_id;
     expect(childSessionId).not.toBeNull();
 
-    // Verify _dispatch was written to child
+    // Verify _spawn was written to child
     const childMessages = getWrittenFor(childSessionId!);
-    const dispatchMsg = childMessages.find((m) => m.includes('_dispatch'));
-    expect(dispatchMsg).toBeDefined();
+    const spawnMsg = childMessages.find((m) => m.includes('_spawn'));
+    expect(spawnMsg).toBeDefined();
 
     // No adapter.deliver should be called (headless path has no platform delivery)
     expect(mockAdapterWithoutThread.deliver).not.toHaveBeenCalled();
@@ -400,10 +373,10 @@ describe('F1: e2e headless happy path', () => {
     const orchMessages = getWrittenFor('sess-orch');
     expect(orchMessages.some((m) => m.includes('Task admitted') || m.includes('Headless task running'))).toBe(true);
 
-    // Complete from child
+    // Complete from child (same agent group as parent)
     const childSession: Session = {
       id: childSessionId!,
-      agent_group_id: 'ag-target',
+      agent_group_id: 'ag-orch',
       messaging_group_id: null,
       thread_id: taskId,
       status: 'active',
@@ -415,7 +388,7 @@ describe('F1: e2e headless happy path', () => {
     sessionMap.set(childSessionId!, childSession);
     sessionMap.set('sess-orch', orchSession);
 
-    await applyDispatchComplete({ task_id: taskId, summary: 'headless done' }, childSession);
+    await applySpawnComplete({ task_id: taskId, summary: 'headless done' }, childSession);
     const completedTask = getTaskById(taskId);
     expect(completedTask!.status).toBe('completed');
   }, 10_000);
@@ -429,11 +402,11 @@ describe('F1: e2e idempotency replay', () => {
     const { getChannelAdapter } = await import('../../channels/channel-registry.js');
     vi.mocked(getChannelAdapter).mockReturnValue(undefined);
 
-    // First dispatch
-    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k-replay' }, orchSession);
+    // First spawn
+    await applySpawnTask({ content: 'Do X', idempotency_key: 'k-replay' }, orchSession);
 
-    // Second dispatch with SAME idempotency_key
-    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k-replay' }, orchSession);
+    // Second spawn with SAME idempotency_key
+    await applySpawnTask({ content: 'Do X', idempotency_key: 'k-replay' }, orchSession);
 
     // Only one row should exist
     const allTasks = getDb().prepare(`SELECT * FROM tasks WHERE parent_session_id = 'sess-orch'`).all();
@@ -464,20 +437,18 @@ describe('F1: e2e idempotency replay', () => {
     const { getChannelAdapter } = await import('../../channels/channel-registry.js');
     vi.mocked(getChannelAdapter).mockReturnValue(undefined);
 
-    // Insert a pre-existing running task to fill the cap
-    // (must insert the child session first to satisfy FK)
+    // Insert a pre-existing running task to fill the cap (child session lives in same group)
     getDb()
       .prepare(`INSERT OR IGNORE INTO sessions (id, agent_group_id, created_at) VALUES (?, ?, ?)`)
-      .run('some-child-sess', 'ag-target', ts());
+      .run('some-child-sess', 'ag-orch', ts());
 
-    const replayHash = computeRequestHash('ag-target', 'Do X', null);
+    const replayHash = computeRequestHash('Do X', null);
     insertTaskAtomic({
       task_id: 'task-filler',
       idempotency_key: 'k-other',
       parent_session_id: 'sess-orch',
       parent_agent_group_id: 'ag-orch',
       parent_messaging_group_id: null,
-      target_agent_group_id: 'ag-target',
       child_session_id: 'some-child-sess',
       status: 'running',
       task_content: 'filler',
@@ -507,7 +478,6 @@ describe('F1: e2e idempotency replay', () => {
       parent_session_id: 'sess-orch',
       parent_agent_group_id: 'ag-orch',
       parent_messaging_group_id: null,
-      target_agent_group_id: 'ag-target',
       child_session_id: null,
       status: 'pending',
       task_content: 'Do X',
@@ -531,7 +501,7 @@ describe('F1: e2e idempotency replay', () => {
     });
 
     // Replay k-replay: cap is 1 (2 active tasks), but idempotency check runs BEFORE cap check (M20)
-    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k-replay' }, orchSession);
+    await applySpawnTask({ content: 'Do X', idempotency_key: 'k-replay' }, orchSession);
 
     const orchMessages = getWrittenFor('sess-orch');
     expect(orchMessages.some((m) => m.includes('task-replay'))).toBe(true);
@@ -540,29 +510,26 @@ describe('F1: e2e idempotency replay', () => {
 });
 
 describe('F1: e2e cancel during running', () => {
-  it('test_e2e_cancel_during_running: cancel writes _dispatch_cancel and arms kill timer', async () => {
+  it('test_e2e_cancel_during_running: cancel writes _spawn_cancel and arms kill timer', async () => {
     setupDb();
     const { orchSession } = seedGroups({ withMg: false });
 
     const { getChannelAdapter } = await import('../../channels/channel-registry.js');
     vi.mocked(getChannelAdapter).mockReturnValue(undefined);
 
-    // Dispatch and wait for running state (use real timers for this part)
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do cancellable thing', idempotency_key: 'k-cancel' },
-      orchSession,
-    );
+    // Spawn and wait for running state (use real timers for this part)
+    await applySpawnTask({ content: 'Do cancellable thing', idempotency_key: 'k-cancel' }, orchSession);
     await drainImmediate();
     await drainImmediate();
 
-    const taskId = deriveDispatchTaskId('sess-orch', 'k-cancel');
+    const taskId = deriveSpawnTaskId('sess-orch', 'k-cancel');
     const task = getTaskById(taskId);
     expect(task!.status).toBe('running');
 
     const childSessionId = task!.child_session_id!;
     const childSession: Session = {
       id: childSessionId,
-      agent_group_id: 'ag-target',
+      agent_group_id: 'ag-orch',
       messaging_group_id: null,
       thread_id: null,
       status: 'active',
@@ -574,24 +541,24 @@ describe('F1: e2e cancel during running', () => {
     sessionMap.set(childSessionId, childSession);
     sessionMap.set('sess-orch', orchSession);
 
-    // Switch to fake timers AFTER draining the real queue (so setImmediate in dispatch is already fired)
+    // Switch to fake timers AFTER draining the real queue
     vi.useFakeTimers();
 
     // Cancel from orchestrator (parent session)
-    await applyDispatchCancel({ task_id: taskId, reason: 'changed mind' }, orchSession);
+    await applySpawnCancel({ task_id: taskId, reason: 'changed mind' }, orchSession);
 
     // Verify cancelled in DB
     const cancelledTask = getTaskById(taskId);
     expect(cancelledTask!.status).toBe('cancelled');
     expect(cancelledTask!.cancelled_at).not.toBeNull();
 
-    // Verify _dispatch_cancel written to child
+    // Verify _spawn_cancel written to child
     const childMessages = getWrittenFor(childSessionId);
-    const cancelMsg = childMessages.find((m) => m.includes('_dispatch_cancel'));
+    const cancelMsg = childMessages.find((m) => m.includes('_spawn_cancel'));
     expect(cancelMsg).toBeDefined();
     const cancelParsed = JSON.parse(cancelMsg!);
-    expect(cancelParsed._dispatch_cancel.task_id).toBe(taskId);
-    expect(cancelParsed._dispatch_cancel.reason).toBe('changed mind');
+    expect(cancelParsed._spawn_cancel.task_id).toBe(taskId);
+    expect(cancelParsed._spawn_cancel.reason).toBe('changed mind');
 
     // Verify killContainer is NOT called yet (2-min timer hasn't fired)
     const { killContainer } = await import('../../container-runner.js');
@@ -599,7 +566,7 @@ describe('F1: e2e cancel during running', () => {
 
     // Advance fake timers by 120 seconds to fire the kill setTimeout
     vi.advanceTimersByTime(120_000);
-    expect(vi.mocked(killContainer)).toHaveBeenCalledWith(childSessionId, expect.stringContaining('dispatch_cancel'));
+    expect(vi.mocked(killContainer)).toHaveBeenCalledWith(childSessionId, expect.stringContaining('spawn_cancel'));
 
     // Verify parent got cancellation notification
     const orchMessages = getWrittenFor('sess-orch');
@@ -615,21 +582,18 @@ describe('F1: e2e cancel during running', () => {
     const { getChannelAdapter } = await import('../../channels/channel-registry.js');
     vi.mocked(getChannelAdapter).mockReturnValue(undefined);
 
-    // Dispatch + drain
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do then cancel', idempotency_key: 'k-cas' },
-      orchSession,
-    );
+    // Spawn + drain
+    await applySpawnTask({ content: 'Do then cancel', idempotency_key: 'k-cas' }, orchSession);
     await drainImmediate();
     await drainImmediate();
 
-    const taskId = deriveDispatchTaskId('sess-orch', 'k-cas');
+    const taskId = deriveSpawnTaskId('sess-orch', 'k-cas');
     const runningTask = getTaskById(taskId);
     const childSessionId = runningTask!.child_session_id!;
 
     const childSession: Session = {
       id: childSessionId,
-      agent_group_id: 'ag-target',
+      agent_group_id: 'ag-orch',
       messaging_group_id: null,
       thread_id: null,
       status: 'active',
@@ -642,13 +606,13 @@ describe('F1: e2e cancel during running', () => {
     sessionMap.set('sess-orch', orchSession);
 
     // Cancel it
-    await applyDispatchCancel({ task_id: taskId, reason: 'cancel first' }, orchSession);
+    await applySpawnCancel({ task_id: taskId, reason: 'cancel first' }, orchSession);
     expect(getTaskById(taskId)!.status).toBe('cancelled');
 
     // Now child tries to complete — CAS should reject (status is already 'cancelled')
     const completionNotifyCountBefore = getWrittenFor('sess-orch').filter((m) => m.includes('Task completed')).length;
 
-    await applyDispatchComplete({ task_id: taskId, summary: 'too late' }, childSession);
+    await applySpawnComplete({ task_id: taskId, summary: 'too late' }, childSession);
 
     // Status must still be 'cancelled'
     expect(getTaskById(taskId)!.status).toBe('cancelled');
@@ -667,15 +631,12 @@ describe('F1: e2e watchdog terminates no-progress task', () => {
     const { getChannelAdapter } = await import('../../channels/channel-registry.js');
     vi.mocked(getChannelAdapter).mockReturnValue(undefined);
 
-    // Dispatch + drain to get a running task
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Stall forever', idempotency_key: 'k-watchdog' },
-      orchSession,
-    );
+    // Spawn + drain to get a running task
+    await applySpawnTask({ content: 'Stall forever', idempotency_key: 'k-watchdog' }, orchSession);
     await drainImmediate();
     await drainImmediate();
 
-    const taskId = deriveDispatchTaskId('sess-orch', 'k-watchdog');
+    const taskId = deriveSpawnTaskId('sess-orch', 'k-watchdog');
     let task = getTaskById(taskId);
     expect(task!.status).toBe('running');
 
@@ -696,9 +657,11 @@ describe('F1: e2e watchdog terminates no-progress task', () => {
     expect(task!.status).toBe('failed');
     expect(task!.fail_reason).toBe('no_progress_timeout');
 
-    // Parent received task-update notification (watchdog writes action: 'task_watchdog_fail')
+    // Parent received task-update notification (watchdog writes action: 'spawn_task_watchdog_fail')
     const orchMessages = getWrittenFor('sess-orch');
-    expect(orchMessages.some((m) => m.includes('task_watchdog_fail') || m.includes('no_progress_timeout'))).toBe(true);
+    expect(orchMessages.some((m) => m.includes('spawn_task_watchdog_fail') || m.includes('no_progress_timeout'))).toBe(
+      true,
+    );
   }, 10_000);
 });
 
@@ -711,7 +674,7 @@ describe('F1: e2e orphan recovery', () => {
     vi.mocked(getChannelAdapter).mockReturnValue(undefined);
 
     // Insert an orphaned task: admitted (admitted_at set), no child_session_id, expired lease
-    const taskId = deriveDispatchTaskId('sess-orch', 'k-orphan');
+    const taskId = deriveSpawnTaskId('sess-orch', 'k-orphan');
     // Use a past admitted_at > 60s ago so getOrphanedTasks picks it up
     const oldTs = new Date(Date.now() - 90_000).toISOString();
     insertTaskAtomic({
@@ -720,11 +683,10 @@ describe('F1: e2e orphan recovery', () => {
       parent_session_id: 'sess-orch',
       parent_agent_group_id: 'ag-orch',
       parent_messaging_group_id: null,
-      target_agent_group_id: 'ag-target',
       child_session_id: null,
       status: 'pending',
       task_content: 'orphaned work',
-      request_hash: computeRequestHash('ag-target', 'orphaned work', null),
+      request_hash: computeRequestHash('orphaned work', null),
       deadline: null,
       parent_platform_message_id: null,
       child_platform_thread_id: null,
@@ -748,10 +710,10 @@ describe('F1: e2e orphan recovery', () => {
     expect(orphan!.status).toBe('pending');
     expect(orphan!.child_session_id).toBeNull();
 
-    // Run reconciler — it calls setImmediate(completeDispatchSideEffects, taskId)
+    // Run reconciler — it calls setImmediate(completeSpawnSideEffects, taskId, parentAgentGroupId)
     runReconcilerSweep();
 
-    // Drain the setImmediate so completeDispatchSideEffects runs
+    // Drain the setImmediate so completeSpawnSideEffects runs
     await drainImmediate();
     await drainImmediate();
 

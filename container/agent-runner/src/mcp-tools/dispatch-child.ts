@@ -1,19 +1,19 @@
 /**
- * Child-only MCP tools: dispatch_progress, dispatch_complete, dispatch_failed.
+ * Child-only MCP tools: spawn_progress, spawn_complete, spawn_failed.
  *
- * Mounted ONLY when getSessionDispatchTaskId() !== null — i.e., this container
- * is running as a child of an orchestrator dispatch.
+ * Mounted ONLY when getSessionSpawnTaskId() !== null — i.e., this container
+ * is running as a child of an orchestrator's spawn.
  *
  * All three tools write kind='system' outbound rows. task_id is auto-filled
- * from session metadata (getSessionDispatchTaskId) so the agent doesn't need
+ * from session metadata (getSessionSpawnTaskId) so the agent doesn't need
  * to pass it explicitly — the tool injection layer fills it in.
  */
 import { writeMessageOut } from '../db/messages-out.js';
-import { getSessionDispatchTaskId } from '../db/session-routing.js';
+import { getSessionSpawnTaskId } from '../db/session-routing.js';
 import type { McpToolDefinition } from './types.js';
 
 function log(msg: string): void {
-  console.error(`[dispatch-child] ${msg}`);
+  console.error(`[spawn-child] ${msg}`);
 }
 
 function ok(text: string) {
@@ -25,14 +25,14 @@ function err(text: string) {
 }
 
 function sysId(): string {
-  return `dispatch-child-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `spawn-child-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export const dispatchProgress: McpToolDefinition = {
+export const spawnProgress: McpToolDefinition = {
   tool: {
-    name: 'dispatch_progress',
+    name: 'spawn_progress',
     description:
-      'Report progress on this dispatched task to the parent orchestrator. Fire-and-forget — the parent sees this on its next turn.',
+      'Report progress on this spawned task to the parent orchestrator. Fire-and-forget — the parent sees this on its next turn.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -52,25 +52,25 @@ export const dispatchProgress: McpToolDefinition = {
     const message = args.message as string | undefined;
     if (!message) return err('message is required');
 
-    const taskId = (args.task_id as string | undefined) ?? getSessionDispatchTaskId();
-    if (!taskId) return err('task_id could not be determined — not running as a dispatched child');
+    const taskId = (args.task_id as string | undefined) ?? getSessionSpawnTaskId();
+    if (!taskId) return err('task_id could not be determined — not running as a spawned child');
 
     writeMessageOut({
       id: sysId(),
       kind: 'system',
-      content: JSON.stringify({ action: 'dispatch_progress', task_id: taskId, message }),
+      content: JSON.stringify({ action: 'spawn_progress', task_id: taskId, message }),
     });
 
-    log(`dispatch_progress: ${taskId} — ${message}`);
+    log(`spawn_progress: ${taskId} — ${message}`);
     return ok(`Progress reported: ${message}`);
   },
 };
 
-export const dispatchComplete: McpToolDefinition = {
+export const spawnComplete: McpToolDefinition = {
   tool: {
-    name: 'dispatch_complete',
+    name: 'spawn_complete',
     description:
-      'Mark this dispatched task as successfully completed. Terminal state — the parent receives the summary on its next turn.',
+      'Mark this spawned task as successfully completed. Terminal state — the parent receives the summary on its next turn.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -90,25 +90,25 @@ export const dispatchComplete: McpToolDefinition = {
     const summary = args.summary as string | undefined;
     if (!summary) return err('summary is required');
 
-    const taskId = (args.task_id as string | undefined) ?? getSessionDispatchTaskId();
-    if (!taskId) return err('task_id could not be determined — not running as a dispatched child');
+    const taskId = (args.task_id as string | undefined) ?? getSessionSpawnTaskId();
+    if (!taskId) return err('task_id could not be determined — not running as a spawned child');
 
     writeMessageOut({
       id: sysId(),
       kind: 'system',
-      content: JSON.stringify({ action: 'dispatch_complete', task_id: taskId, summary }),
+      content: JSON.stringify({ action: 'spawn_complete', task_id: taskId, summary }),
     });
 
-    log(`dispatch_complete: ${taskId}`);
+    log(`spawn_complete: ${taskId}`);
     return ok(`Task completed. Summary sent to orchestrator.`);
   },
 };
 
-export const dispatchFailed: McpToolDefinition = {
+export const spawnFailed: McpToolDefinition = {
   tool: {
-    name: 'dispatch_failed',
+    name: 'spawn_failed',
     description:
-      'Mark this dispatched task as failed. Terminal state — the parent receives the failure details on its next turn.',
+      'Mark this spawned task as failed. Terminal state — the parent receives the failure details on its next turn.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -132,10 +132,10 @@ export const dispatchFailed: McpToolDefinition = {
     const summary = args.summary as string | undefined;
     if (!summary) return err('summary is required');
 
-    const taskId = (args.task_id as string | undefined) ?? getSessionDispatchTaskId();
-    if (!taskId) return err('task_id could not be determined — not running as a dispatched child');
+    const taskId = (args.task_id as string | undefined) ?? getSessionSpawnTaskId();
+    if (!taskId) return err('task_id could not be determined — not running as a spawned child');
 
-    const content: Record<string, unknown> = { action: 'dispatch_failed', task_id: taskId, summary };
+    const content: Record<string, unknown> = { action: 'spawn_failed', task_id: taskId, summary };
     if (args.fail_reason !== undefined) content.fail_reason = args.fail_reason;
 
     writeMessageOut({
@@ -144,7 +144,7 @@ export const dispatchFailed: McpToolDefinition = {
       content: JSON.stringify(content),
     });
 
-    log(`dispatch_failed: ${taskId}${args.fail_reason ? ` (${args.fail_reason})` : ''}`);
+    log(`spawn_failed: ${taskId}${args.fail_reason ? ` (${args.fail_reason})` : ''}`);
     return ok(`Task failure reported to orchestrator.`);
   },
 };

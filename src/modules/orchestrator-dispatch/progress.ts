@@ -3,24 +3,24 @@ import { log } from '../../log.js';
 import type { Session } from '../../types.js';
 import { getTaskById } from './db/tasks.js';
 
-export async function applyDispatchProgress(content: Record<string, unknown>, callerSession: Session): Promise<void> {
+export async function applySpawnProgress(content: Record<string, unknown>, callerSession: Session): Promise<void> {
   const taskId = content.task_id as string | undefined;
   const message = (content.message as string | undefined) ?? '';
 
   if (!taskId) {
-    log.warn('applyDispatchProgress: missing task_id — silently skipping', { sessionId: callerSession.id });
+    log.warn('applySpawnProgress: missing task_id — silently skipping', { sessionId: callerSession.id });
     return;
   }
 
   const task = getTaskById(taskId);
   if (!task) {
-    log.warn('applyDispatchProgress: task not found — silently skipping', { taskId });
+    log.warn('applySpawnProgress: task not found — silently skipping', { taskId });
     return;
   }
 
   // Two-column auth: task_id + child_session_id (fire-and-forget — auth mismatch logged, not thrown)
   if (task.child_session_id !== callerSession.id) {
-    log.warn('applyDispatchProgress: auth mismatch — silently skipping', {
+    log.warn('applySpawnProgress: auth mismatch — silently skipping', {
       taskId,
       expected: task.child_session_id,
       got: callerSession.id,
@@ -42,6 +42,6 @@ export async function applyDispatchProgress(content: Record<string, unknown>, ca
       )
       .run(now, truncated, taskId);
   } catch (err) {
-    log.warn('applyDispatchProgress: DB update failed — silently swallowing', { taskId, err });
+    log.warn('applySpawnProgress: DB update failed — silently swallowing', { taskId, err });
   }
 }

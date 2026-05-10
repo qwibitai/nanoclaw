@@ -342,7 +342,7 @@ export function writeSessionRouting(agentGroupId: string, sessionId: string): vo
       platform_id: platformId,
       thread_id: session.thread_id,
       session_id: sessionId,
-      // dispatch_task_id intentionally omitted — preserved via COALESCE on conflict
+      // spawn_task_id intentionally omitted — preserved via COALESCE on conflict
     });
   } finally {
     db.close();

@@ -188,9 +188,9 @@ export function extractRouting(messages: MessageInRow[]): RoutingContext {
  *
  * Strips routing fields — the agent never sees platform_id, channel_type, thread_id.
  *
- * Dispatch envelopes handled:
- * - {_dispatch: {task_id}, text}: renders text as prompt; surfaces task_id as system context.
- * - {_dispatch_cancel: {task_id, reason}}: renders as a structured system note (kind='system').
+ * Spawn envelopes handled:
+ * - {_spawn: {task_id}, text}: renders text as prompt; surfaces task_id as system context.
+ * - {_spawn_cancel: {task_id, reason}}: renders as a structured system note (kind='system').
  */
 export function formatMessages(messages: MessageInRow[]): string {
   const header = `<context timezone="${escapeXml(TIMEZONE)}" />\n`;
@@ -204,20 +204,20 @@ export function formatMessages(messages: MessageInRow[]): string {
 
   const parts: string[] = [];
 
-  // Detect dispatch envelope in the first chat message and inject a system fact.
-  // The _dispatch.task_id is surfaced before the prompt so the agent knows it
-  // is operating as a dispatched child and can reference its own task_id.
-  let dispatchTaskId: string | null = null;
+  // Detect spawn envelope in the first chat message and inject a system fact.
+  // The _spawn.task_id is surfaced before the prompt so the agent knows it
+  // is operating as a spawned child and can reference its own task_id.
+  let spawnTaskId: string | null = null;
   if (chatMessages.length > 0) {
     const firstContent = parseContent(chatMessages[0].content);
-    const envelope = detectDispatchEnvelope(firstContent);
+    const envelope = detectSpawnEnvelope(firstContent);
     if (envelope) {
-      dispatchTaskId = envelope.taskId;
+      spawnTaskId = envelope.taskId;
     }
   }
 
-  if (dispatchTaskId) {
-    parts.push(`[Dispatch context]\ntask_id: ${dispatchTaskId}\nYou are running as a dispatched task. Use dispatch_progress, dispatch_complete, or dispatch_failed to report status to the orchestrator.`);
+  if (spawnTaskId) {
+    parts.push(`[Spawn context]\ntask_id: ${spawnTaskId}\nYou are running as a spawned task. Use spawn_progress, spawn_complete, or spawn_failed to report status to the orchestrator.`);
   }
 
   if (chatMessages.length > 0) {
@@ -237,15 +237,15 @@ export function formatMessages(messages: MessageInRow[]): string {
 }
 
 /**
- * Detect whether a chat message carries a dispatch envelope ({_dispatch: {task_id}, text}).
+ * Detect whether a chat message carries a spawn envelope ({_spawn: {task_id}, text}).
  * Returns the envelope and plain text if present, null otherwise.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function detectDispatchEnvelope(content: any): { taskId: string; text: string } | null {
+function detectSpawnEnvelope(content: any): { taskId: string; text: string } | null {
   if (typeof content !== 'object' || content === null) return null;
-  const dispatch = content._dispatch;
-  if (typeof dispatch !== 'object' || dispatch === null) return null;
-  const taskId = dispatch.task_id;
+  const spawn = content._spawn;
+  if (typeof spawn !== 'object' || spawn === null) return null;
+  const taskId = spawn.task_id;
   if (typeof taskId !== 'string') return null;
   return { taskId, text: (content.text as string) || '' };
 }
@@ -292,8 +292,8 @@ function formatChatMessages(messages: MessageInRow[]): string {
 function formatSingleChat(msg: MessageInRow): string {
   const content = parseContent(msg.content);
 
-  // Dispatch envelope: render text field only, suppress _dispatch JSON
-  const envelope = detectDispatchEnvelope(content);
+  // Spawn envelope: render text field only, suppress _spawn JSON
+  const envelope = detectSpawnEnvelope(content);
   if (envelope) {
     const time = formatLocalTime(msg.timestamp, TIMEZONE);
     const idAttr = msg.seq != null ? ` id="${msg.seq}"` : '';
@@ -358,11 +358,11 @@ function formatSystemMessage(msg: MessageInRow): string {
     return `[Recalled context]\n${content.text}`;
   }
 
-  // Dispatch cancellation: render as a structured directive, not raw JSON.
+  // Spawn cancellation: render as a structured directive, not raw JSON.
   // Per design §4 S26: the orchestrator signals the child to flush and exit.
-  if (content._dispatch_cancel && typeof content._dispatch_cancel === 'object') {
-    const reason = (content._dispatch_cancel.reason as string | undefined) ?? '(none)';
-    return `[Dispatch cancelled]\nThis task was cancelled by the orchestrator (reason: ${reason}). Please flush any in-flight work and exit cleanly.`;
+  if (content._spawn_cancel && typeof content._spawn_cancel === 'object') {
+    const reason = (content._spawn_cancel.reason as string | undefined) ?? '(none)';
+    return `[Spawn cancelled]\nThis task was cancelled by the orchestrator (reason: ${reason}). Please flush any in-flight work and exit cleanly.`;
   }
 
   const from = originAttr(msg);

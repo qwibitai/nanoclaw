@@ -94,7 +94,7 @@ describe('migrateMessagesInTable', () => {
   });
 });
 
-describe('upsertSessionRouting — dispatch_task_id + session_id columns', () => {
+describe('upsertSessionRouting — spawn_task_id + session_id columns', () => {
   function makeInboundDb(): Database.Database {
     const db = new Database(':memory:');
     db.pragma('journal_mode = DELETE');
@@ -102,7 +102,7 @@ describe('upsertSessionRouting — dispatch_task_id + session_id columns', () =>
     return db;
   }
 
-  it('test_upsert_writes_session_id_and_dispatch_task_id', () => {
+  it('test_upsert_writes_session_id_and_spawn_task_id', () => {
     const db = makeInboundDb();
     try {
       upsertSessionRouting(db, {
@@ -110,52 +110,52 @@ describe('upsertSessionRouting — dispatch_task_id + session_id columns', () =>
         platform_id: 'C1',
         thread_id: 't1',
         session_id: 'sess-1',
-        dispatch_task_id: 'dispatch-x',
+        spawn_task_id: 'spawn-x',
       });
       const row = db
         .prepare(
-          'SELECT channel_type, platform_id, thread_id, session_id, dispatch_task_id FROM session_routing WHERE id = 1',
+          'SELECT channel_type, platform_id, thread_id, session_id, spawn_task_id FROM session_routing WHERE id = 1',
         )
         .get() as {
         channel_type: string;
         platform_id: string;
         thread_id: string;
         session_id: string;
-        dispatch_task_id: string;
+        spawn_task_id: string;
       };
       expect(row.channel_type).toBe('slack');
       expect(row.platform_id).toBe('C1');
       expect(row.thread_id).toBe('t1');
       expect(row.session_id).toBe('sess-1');
-      expect(row.dispatch_task_id).toBe('dispatch-x');
+      expect(row.spawn_task_id).toBe('spawn-x');
     } finally {
       db.close();
     }
   });
 
-  it('test_upsert_coalesce_preserves_existing_dispatch_task_id', () => {
+  it('test_upsert_coalesce_preserves_existing_spawn_task_id', () => {
     const db = makeInboundDb();
     try {
-      // First write: set dispatch_task_id
+      // First write: set spawn_task_id
       upsertSessionRouting(db, {
         channel_type: 'slack',
         platform_id: 'C1',
         thread_id: null,
         session_id: 'sess-1',
-        dispatch_task_id: 'dispatch-x',
+        spawn_task_id: 'spawn-x',
       });
-      // Second write: routine wake — no dispatch_task_id provided
+      // Second write: routine wake — no spawn_task_id provided
       upsertSessionRouting(db, {
         channel_type: 'slack',
         platform_id: 'C1',
         thread_id: null,
         session_id: 'sess-1',
       });
-      const row = db.prepare('SELECT dispatch_task_id, session_id FROM session_routing WHERE id = 1').get() as {
-        dispatch_task_id: string | null;
+      const row = db.prepare('SELECT spawn_task_id, session_id FROM session_routing WHERE id = 1').get() as {
+        spawn_task_id: string | null;
         session_id: string | null;
       };
-      expect(row.dispatch_task_id).toBe('dispatch-x');
+      expect(row.spawn_task_id).toBe('spawn-x');
       expect(row.session_id).toBe('sess-1');
     } finally {
       db.close();
@@ -187,6 +187,45 @@ describe('upsertSessionRouting — dispatch_task_id + session_id columns', () =>
     }
   });
 
+  it('test_upsert_renames_legacy_dispatch_task_id_column', () => {
+    // Phase-1 inbound.db has dispatch_task_id; upsert must rename it to spawn_task_id.
+    const db = new Database(':memory:');
+    db.pragma('journal_mode = DELETE');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS session_routing (
+        id               INTEGER PRIMARY KEY CHECK (id = 1),
+        channel_type     TEXT,
+        platform_id      TEXT,
+        thread_id        TEXT,
+        dispatch_task_id TEXT,
+        session_id       TEXT
+      );
+      INSERT INTO session_routing (id, channel_type, platform_id, thread_id, dispatch_task_id, session_id)
+        VALUES (1, 'slack', 'C1', 't1', 'dispatch-legacy', 'sess-legacy');
+    `);
+    try {
+      // Routine upsert should trigger the rename and preserve the old value
+      upsertSessionRouting(db, {
+        channel_type: 'slack',
+        platform_id: 'C1',
+        thread_id: 't1',
+        session_id: 'sess-legacy',
+      });
+      const cols = (db.prepare(`PRAGMA table_info(session_routing)`).all() as Array<{ name: string }>).map(
+        (c) => c.name,
+      );
+      expect(cols).toContain('spawn_task_id');
+      expect(cols).not.toContain('dispatch_task_id');
+      const row = db.prepare('SELECT spawn_task_id FROM session_routing WHERE id = 1').get() as {
+        spawn_task_id: string | null;
+      };
+      // Renamed column carries the original value forward
+      expect(row.spawn_task_id).toBe('dispatch-legacy');
+    } finally {
+      db.close();
+    }
+  });
+
   it('test_upsert_works_on_legacy_db_without_new_columns', () => {
     // Simulate an old inbound.db that predates migration 026
     const db = new Database(':memory:');
@@ -207,15 +246,15 @@ describe('upsertSessionRouting — dispatch_task_id + session_id columns', () =>
           platform_id: 'C1',
           thread_id: null,
           session_id: 'sess-1',
-          dispatch_task_id: 'dispatch-x',
+          spawn_task_id: 'spawn-x',
         }),
       ).not.toThrow();
-      const row = db.prepare('SELECT session_id, dispatch_task_id FROM session_routing WHERE id = 1').get() as {
+      const row = db.prepare('SELECT session_id, spawn_task_id FROM session_routing WHERE id = 1').get() as {
         session_id: string | null;
-        dispatch_task_id: string | null;
+        spawn_task_id: string | null;
       };
       expect(row.session_id).toBe('sess-1');
-      expect(row.dispatch_task_id).toBe('dispatch-x');
+      expect(row.spawn_task_id).toBe('spawn-x');
     } finally {
       db.close();
     }

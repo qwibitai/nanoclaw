@@ -8,16 +8,16 @@ import { createHash } from 'crypto';
  * Critical: idempotency_key is user-supplied (orchestrator agent chooses it). Without
  * length-prefix, a key containing ':' could collide with a different (parent_session_id,
  * idempotency_key) pair across orchestrators, causing wrong-task lookup in subsequent
- * applyDispatchComplete / applyDispatchCancel handlers.
+ * applySpawnComplete / applySpawnCancel handlers.
  */
-export function deriveDispatchTaskId(parentSessionId: string, idempotencyKey: string): string {
+export function deriveSpawnTaskId(parentSessionId: string, idempotencyKey: string): string {
   const canonical = `${parentSessionId.length}:${parentSessionId}${idempotencyKey.length}:${idempotencyKey}`;
   const hash = createHash('sha256').update(canonical).digest('hex').slice(0, 16);
-  return `dispatch-${hash}`;
+  return `spawn-${hash}`;
 }
 
-export function computeRequestHash(targetGroup: string, content: string, deadline?: string | null): string {
+export function computeRequestHash(content: string, deadline?: string | null): string {
   const d = deadline ?? '';
-  const canonical = `${targetGroup.length}:${targetGroup}` + `${content.length}:${content}` + `${d.length}:${d}`;
+  const canonical = `${content.length}:${content}` + `${d.length}:${d}`;
   return createHash('sha256').update(canonical).digest('hex');
 }
