@@ -173,9 +173,9 @@ export function buildCentralProjection(srcPath: string, dstPath: string, agentGr
           if (cols.length === 0) continue; // table doesn't exist in src
           const colList = cols.map((c) => c.name).join(', ');
           const placeholders = cols.map(() => '?').join(', ');
-          const rows = src
-            .prepare(`SELECT ${colList} FROM ${table} WHERE ${filterCol} = ?`)
-            .all(agentGroupId) as Array<Record<string, unknown>>;
+          const rows = src.prepare(`SELECT ${colList} FROM ${table} WHERE ${filterCol} = ?`).all(agentGroupId) as Array<
+            Record<string, unknown>
+          >;
           const insertStmt = dst.prepare(`INSERT INTO ${table} (${colList}) VALUES (${placeholders})`);
           for (const row of rows) {
             insertStmt.run(...cols.map((c) => row[c.name]));

@@ -63,8 +63,12 @@ function makeDb(): Database.Database {
 }
 
 function seedSession(d: Database.Database, agId: string, sessId: string): void {
-  d.exec(`INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('${agId}', 'AG', 'folder-${agId}', '2026-01-01T00:00:00Z')`);
-  d.exec(`INSERT INTO sessions (id, agent_group_id, created_at) VALUES ('${sessId}', '${agId}', '2026-01-01T00:00:00Z')`);
+  d.exec(
+    `INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('${agId}', 'AG', 'folder-${agId}', '2026-01-01T00:00:00Z')`,
+  );
+  d.exec(
+    `INSERT INTO sessions (id, agent_group_id, created_at) VALUES ('${sessId}', '${agId}', '2026-01-01T00:00:00Z')`,
+  );
 }
 
 describe('026-tasks-and-dispatch-routing', () => {

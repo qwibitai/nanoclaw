@@ -18,10 +18,20 @@ function setupDb(): void {
 }
 
 function seedGroups(): void {
-  createAgentGroup({ id: 'ag-parent', name: 'ag-parent', folder: 'ag-parent', agent_provider: null, created_at: now() });
+  createAgentGroup({
+    id: 'ag-parent',
+    name: 'ag-parent',
+    folder: 'ag-parent',
+    agent_provider: null,
+    created_at: now(),
+  });
   createAgentGroup({ id: 'ag-child', name: 'ag-child', folder: 'ag-child', agent_provider: null, created_at: now() });
-  getDb().prepare(`INSERT INTO sessions (id, agent_group_id, created_at) VALUES (?, ?, ?)`).run('sess-parent', 'ag-parent', now());
-  getDb().prepare(`INSERT INTO sessions (id, agent_group_id, created_at) VALUES (?, ?, ?)`).run('sess-child', 'ag-child', now());
+  getDb()
+    .prepare(`INSERT INTO sessions (id, agent_group_id, created_at) VALUES (?, ?, ?)`)
+    .run('sess-parent', 'ag-parent', now());
+  getDb()
+    .prepare(`INSERT INTO sessions (id, agent_group_id, created_at) VALUES (?, ?, ?)`)
+    .run('sess-child', 'ag-child', now());
 }
 
 function makeRunningTask(lastProgressAt?: string): Task {

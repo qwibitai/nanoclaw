@@ -641,9 +641,9 @@ describe('createChatSdkBridge.deliver — post path 429 retry', () => {
       },
     } as unknown as Partial<Adapter>);
     const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 30 });
-    await expect(
-      bridge.deliver('discord:c1', null, { kind: 'chat', content: { text: 'short' } }),
-    ).rejects.toThrow('connection refused');
+    await expect(bridge.deliver('discord:c1', null, { kind: 'chat', content: { text: 'short' } })).rejects.toThrow(
+      'connection refused',
+    );
   });
 
   it('gives up after MAX_RATE_LIMIT_RETRIES persistent 429s on a mid-message chunk', async () => {

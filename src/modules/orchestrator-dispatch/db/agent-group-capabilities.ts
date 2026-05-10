@@ -35,10 +35,7 @@ export function grantCapability(
     .run(agentGroupId, role, configJson, grantedBy, grantedAt);
 }
 
-export function revokeCapability(
-  agentGroupId: string,
-  role: 'orchestrator',
-): { success: boolean; reason?: string } {
+export function revokeCapability(agentGroupId: string, role: 'orchestrator'): { success: boolean; reason?: string } {
   const inFlight = getDb()
     .prepare(
       `SELECT 1 FROM tasks
@@ -51,9 +48,7 @@ export function revokeCapability(
     return { success: false, reason: 'tasks_in_flight' };
   }
 
-  getDb()
-    .prepare(`DELETE FROM agent_group_capabilities WHERE agent_group_id = ? AND role = ?`)
-    .run(agentGroupId, role);
+  getDb().prepare(`DELETE FROM agent_group_capabilities WHERE agent_group_id = ? AND role = ?`).run(agentGroupId, role);
 
   return { success: true };
 }

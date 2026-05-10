@@ -841,9 +841,9 @@ describe('writeSessionRouting', () => {
     writeSessionRouting('ag-1', session.id);
 
     const db = new Database(inboundDbPath('ag-1', session.id));
-    const row = db
-      .prepare('SELECT session_id FROM session_routing WHERE id = 1')
-      .get() as { session_id: string | null } | undefined;
+    const row = db.prepare('SELECT session_id FROM session_routing WHERE id = 1').get() as
+      | { session_id: string | null }
+      | undefined;
     db.close();
 
     expect(row).toBeDefined();

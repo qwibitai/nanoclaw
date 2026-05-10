@@ -18,9 +18,6 @@ export function deriveDispatchTaskId(parentSessionId: string, idempotencyKey: st
 
 export function computeRequestHash(targetGroup: string, content: string, deadline?: string | null): string {
   const d = deadline ?? '';
-  const canonical =
-    `${targetGroup.length}:${targetGroup}` +
-    `${content.length}:${content}` +
-    `${d.length}:${d}`;
+  const canonical = `${targetGroup.length}:${targetGroup}` + `${content.length}:${content}` + `${d.length}:${d}`;
   return createHash('sha256').update(canonical).digest('hex');
 }

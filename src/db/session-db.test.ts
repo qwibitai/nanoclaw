@@ -113,14 +113,16 @@ describe('upsertSessionRouting — dispatch_task_id + session_id columns', () =>
         dispatch_task_id: 'dispatch-x',
       });
       const row = db
-        .prepare('SELECT channel_type, platform_id, thread_id, session_id, dispatch_task_id FROM session_routing WHERE id = 1')
+        .prepare(
+          'SELECT channel_type, platform_id, thread_id, session_id, dispatch_task_id FROM session_routing WHERE id = 1',
+        )
         .get() as {
-          channel_type: string;
-          platform_id: string;
-          thread_id: string;
-          session_id: string;
-          dispatch_task_id: string;
-        };
+        channel_type: string;
+        platform_id: string;
+        thread_id: string;
+        session_id: string;
+        dispatch_task_id: string;
+      };
       expect(row.channel_type).toBe('slack');
       expect(row.platform_id).toBe('C1');
       expect(row.thread_id).toBe('t1');
@@ -149,9 +151,10 @@ describe('upsertSessionRouting — dispatch_task_id + session_id columns', () =>
         thread_id: null,
         session_id: 'sess-1',
       });
-      const row = db
-        .prepare('SELECT dispatch_task_id, session_id FROM session_routing WHERE id = 1')
-        .get() as { dispatch_task_id: string | null; session_id: string | null };
+      const row = db.prepare('SELECT dispatch_task_id, session_id FROM session_routing WHERE id = 1').get() as {
+        dispatch_task_id: string | null;
+        session_id: string | null;
+      };
       expect(row.dispatch_task_id).toBe('dispatch-x');
       expect(row.session_id).toBe('sess-1');
     } finally {
@@ -175,9 +178,9 @@ describe('upsertSessionRouting — dispatch_task_id + session_id columns', () =>
         thread_id: null,
         session_id: null,
       });
-      const row = db
-        .prepare('SELECT session_id FROM session_routing WHERE id = 1')
-        .get() as { session_id: string | null };
+      const row = db.prepare('SELECT session_id FROM session_routing WHERE id = 1').get() as {
+        session_id: string | null;
+      };
       expect(row.session_id).toBe('sess-1');
     } finally {
       db.close();
@@ -207,9 +210,10 @@ describe('upsertSessionRouting — dispatch_task_id + session_id columns', () =>
           dispatch_task_id: 'dispatch-x',
         }),
       ).not.toThrow();
-      const row = db
-        .prepare('SELECT session_id, dispatch_task_id FROM session_routing WHERE id = 1')
-        .get() as { session_id: string | null; dispatch_task_id: string | null };
+      const row = db.prepare('SELECT session_id, dispatch_task_id FROM session_routing WHERE id = 1').get() as {
+        session_id: string | null;
+        dispatch_task_id: string | null;
+      };
       expect(row.session_id).toBe('sess-1');
       expect(row.dispatch_task_id).toBe('dispatch-x');
     } finally {

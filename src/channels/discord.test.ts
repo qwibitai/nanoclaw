@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { isUserMessage, rewriteDiscordLinks, discordPostParent, discordCreateThread, type DiscordRestClient } from './discord.js';
+import {
+  isUserMessage,
+  rewriteDiscordLinks,
+  discordPostParent,
+  discordCreateThread,
+  type DiscordRestClient,
+} from './discord.js';
 
 describe('rewriteDiscordLinks', () => {
   it('rewrites bare Google document and slide URLs to safe labeled links', () => {
@@ -79,20 +85,14 @@ describe('discordPostParent', () => {
 describe('discordCreateThread', () => {
   it('test_create_thread_returns_thread_id: returns {threadId, messageId} from REST responses', async () => {
     const mockRest: DiscordRestClient = {
-      post: vi
-        .fn()
-        .mockResolvedValueOnce({ id: 'thread-y' })
-        .mockResolvedValueOnce({ id: 'first-msg-z' }),
+      post: vi.fn().mockResolvedValueOnce({ id: 'thread-y' }).mockResolvedValueOnce({ id: 'first-msg-z' }),
     };
     const result = await discordCreateThread(mockRest, 'channel-X', 'parent-msg-A', 'Task Y', 'first message');
     expect(result).toEqual({ threadId: 'thread-y', messageId: 'first-msg-z' });
   });
 
   it('test_thread_name_used: creates thread with correct name and startMessage', async () => {
-    const postSpy = vi
-      .fn()
-      .mockResolvedValueOnce({ id: 'thread-z' })
-      .mockResolvedValueOnce({ id: 'first-msg-id' });
+    const postSpy = vi.fn().mockResolvedValueOnce({ id: 'thread-z' }).mockResolvedValueOnce({ id: 'first-msg-id' });
     const mockRest: DiscordRestClient = { post: postSpy };
     await discordCreateThread(mockRest, 'channel', 'parent', 'My Task Name', 'first');
     // First call: thread creation with name and startMessage (via Routes.threads)

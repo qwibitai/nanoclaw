@@ -7,10 +7,7 @@ import { wakeContainer } from '../../container-runner.js';
 import type { Session } from '../../types.js';
 import { getTaskById, transitionToTerminal } from './db/tasks.js';
 
-export async function applyDispatchComplete(
-  content: Record<string, unknown>,
-  callerSession: Session,
-): Promise<void> {
+export async function applyDispatchComplete(content: Record<string, unknown>, callerSession: Session): Promise<void> {
   const taskId = content.task_id as string | undefined;
   const summary = (content.summary as string | undefined) ?? '';
 
@@ -69,10 +66,7 @@ export async function applyDispatchComplete(
   }
 }
 
-export async function applyDispatchFailed(
-  content: Record<string, unknown>,
-  callerSession: Session,
-): Promise<void> {
+export async function applyDispatchFailed(content: Record<string, unknown>, callerSession: Session): Promise<void> {
   const taskId = content.task_id as string | undefined;
   const summary = (content.summary as string | undefined) ?? '';
   const failReason = (content.fail_reason as string | undefined) ?? 'agent_error';

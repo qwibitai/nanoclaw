@@ -314,7 +314,11 @@ function makeTmpOutboundDb(agentGroupId: string, sessionId: string): Database.Da
 afterEach(() => {
   // Clean up session directories created in each test
   for (const agentGroupId of tmpSessions) {
-    try { fs.rmSync(path.join(TEST_ROOT, agentGroupId), { recursive: true, force: true }); } catch { /* ignore */ }
+    try {
+      fs.rmSync(path.join(TEST_ROOT, agentGroupId), { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   }
   tmpSessions.length = 0;
 });
@@ -325,8 +329,9 @@ describe('pendingTerminalDispatchOutboundSeenAt', () => {
     const agentGroupId = 'ag-null-test';
     const sessionId = 'sess-null-test';
     const db = makeTmpOutboundDb(agentGroupId, sessionId);
-    db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:00:00.000Z', 'chat', ?)")
-      .run(JSON.stringify({ text: 'hello world' }));
+    db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:00:00.000Z', 'chat', ?)").run(
+      JSON.stringify({ text: 'hello world' }),
+    );
     db.close();
 
     const result = pendingTerminalDispatchOutboundSeenAt(agentGroupId, sessionId);
@@ -338,12 +343,15 @@ describe('pendingTerminalDispatchOutboundSeenAt', () => {
     const agentGroupId = 'ag-min-test';
     const sessionId = 'sess-min-test';
     const db = makeTmpOutboundDb(agentGroupId, sessionId);
-    db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:01:00.000Z', 'system', ?)")
-      .run(JSON.stringify({ action: 'dispatch_complete', task_id: 'task-1' }));
-    db.prepare("INSERT INTO messages_out VALUES ('m2', 2, null, '2026-01-01T00:02:00.000Z', 'system', ?)")
-      .run(JSON.stringify({ action: 'dispatch_complete', task_id: 'task-2' }));
-    db.prepare("INSERT INTO messages_out VALUES ('m3', 3, null, '2026-01-01T00:00:30.000Z', 'system', ?)")
-      .run(JSON.stringify({ action: 'dispatch_failed', task_id: 'task-3' }));
+    db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:01:00.000Z', 'system', ?)").run(
+      JSON.stringify({ action: 'dispatch_complete', task_id: 'task-1' }),
+    );
+    db.prepare("INSERT INTO messages_out VALUES ('m2', 2, null, '2026-01-01T00:02:00.000Z', 'system', ?)").run(
+      JSON.stringify({ action: 'dispatch_complete', task_id: 'task-2' }),
+    );
+    db.prepare("INSERT INTO messages_out VALUES ('m3', 3, null, '2026-01-01T00:00:30.000Z', 'system', ?)").run(
+      JSON.stringify({ action: 'dispatch_failed', task_id: 'task-3' }),
+    );
     db.close();
 
     const result = pendingTerminalDispatchOutboundSeenAt(agentGroupId, sessionId);
@@ -356,8 +364,9 @@ describe('pendingTerminalDispatchOutboundSeenAt', () => {
     const sessionId = 'sess-chat-test';
     const db = makeTmpOutboundDb(agentGroupId, sessionId);
     // Chat message containing action text — kind='chat' guard must reject it
-    db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:01:00.000Z', 'chat', ?)")
-      .run(JSON.stringify({ action: 'dispatch_complete', text: 'task done' }));
+    db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:01:00.000Z', 'chat', ?)").run(
+      JSON.stringify({ action: 'dispatch_complete', text: 'task done' }),
+    );
     db.close();
 
     const result = pendingTerminalDispatchOutboundSeenAt(agentGroupId, sessionId);
@@ -370,8 +379,9 @@ describe('pendingTerminalDispatchOutboundSeenAt', () => {
     const sessionId = 'sess-fp-test';
     const db = makeTmpOutboundDb(agentGroupId, sessionId);
     // "dispatch_complete_other" contains "dispatch_complete" as substring — must NOT match
-    db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:01:00.000Z', 'system', ?)")
-      .run(JSON.stringify({ action: 'dispatch_complete_other' }));
+    db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:01:00.000Z', 'system', ?)").run(
+      JSON.stringify({ action: 'dispatch_complete_other' }),
+    );
     db.close();
 
     const result = pendingTerminalDispatchOutboundSeenAt(agentGroupId, sessionId);
@@ -390,8 +400,9 @@ describe('pendingTerminalDispatchOutboundSeenAt', () => {
     const agentGroupId = 'ag-failed-test';
     const sessionId = 'sess-failed-test';
     const db = makeTmpOutboundDb(agentGroupId, sessionId);
-    db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:05:00.000Z', 'system', ?)")
-      .run(JSON.stringify({ action: 'dispatch_failed', task_id: 'task-1' }));
+    db.prepare("INSERT INTO messages_out VALUES ('m1', 1, null, '2026-01-01T00:05:00.000Z', 'system', ?)").run(
+      JSON.stringify({ action: 'dispatch_failed', task_id: 'task-1' }),
+    );
     db.close();
 
     const result = pendingTerminalDispatchOutboundSeenAt(agentGroupId, sessionId);

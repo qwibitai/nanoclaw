@@ -79,17 +79,20 @@ function withDb(p: string, fn: (db: Database.Database) => void): void {
 
 function addAgent(p: string, agId: string): void {
   withDb(p, (db) => {
-    db.prepare(
-      `INSERT INTO agent_groups (id, name, folder, created_at) VALUES (?, ?, ?, '2026-01-01T00:00:00Z')`,
-    ).run(agId, agId, agId);
+    db.prepare(`INSERT INTO agent_groups (id, name, folder, created_at) VALUES (?, ?, ?, '2026-01-01T00:00:00Z')`).run(
+      agId,
+      agId,
+      agId,
+    );
   });
 }
 
 function addSession(p: string, sessId: string, agId: string): void {
   withDb(p, (db) => {
-    db.prepare(
-      `INSERT INTO sessions (id, agent_group_id, created_at) VALUES (?, ?, '2026-01-01T00:00:00Z')`,
-    ).run(sessId, agId);
+    db.prepare(`INSERT INTO sessions (id, agent_group_id, created_at) VALUES (?, ?, '2026-01-01T00:00:00Z')`).run(
+      sessId,
+      agId,
+    );
   });
 }
 
@@ -125,9 +128,7 @@ function countRows(p: string, table: string): number {
 function tableExists(p: string, table: string): boolean {
   const db = new Database(p, { readonly: true });
   try {
-    return (
-      db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`).get(table) !== undefined
-    );
+    return db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`).get(table) !== undefined;
   } finally {
     db.close();
   }

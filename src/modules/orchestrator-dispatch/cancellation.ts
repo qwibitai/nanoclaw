@@ -8,10 +8,7 @@ import { killContainer } from '../../container-runner.js';
 import type { Session } from '../../types.js';
 import { getTaskById, transitionToTerminal } from './db/tasks.js';
 
-export async function applyDispatchCancel(
-  content: Record<string, unknown>,
-  callerSession: Session,
-): Promise<void> {
+export async function applyDispatchCancel(content: Record<string, unknown>, callerSession: Session): Promise<void> {
   const taskId = content.task_id as string | undefined;
   const reason = (content.reason as string | undefined) ?? 'cancelled';
 

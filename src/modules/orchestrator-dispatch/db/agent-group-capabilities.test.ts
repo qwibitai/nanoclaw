@@ -10,9 +10,7 @@ import { initTestDb, closeDb, runMigrations, createAgentGroup } from '../../../d
 import { getDb } from '../../../db/connection.js';
 
 function createUser(id: string): void {
-  getDb()
-    .prepare(`INSERT INTO users (id, kind, created_at) VALUES (?, 'system', ?)`)
-    .run(id, new Date().toISOString());
+  getDb().prepare(`INSERT INTO users (id, kind, created_at) VALUES (?, 'system', ?)`).run(id, new Date().toISOString());
 }
 
 function now(): string {

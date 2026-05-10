@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  closeDb,
-  createAgentGroup,
-  createSession,
-  initTestDb,
-  runMigrations,
-} from '../../db/index.js';
+import { closeDb, createAgentGroup, createSession, initTestDb, runMigrations } from '../../db/index.js';
 import { getDb } from '../../db/connection.js';
 import { getTaskById, insertTaskAtomic } from './db/tasks.js';
 import type { Task } from './db/tasks.js';
@@ -40,7 +34,13 @@ function setupDb(): void {
 }
 
 function seedGroups(): void {
-  createAgentGroup({ id: 'ag-parent', name: 'ag-parent', folder: 'ag-parent', agent_provider: null, created_at: now() });
+  createAgentGroup({
+    id: 'ag-parent',
+    name: 'ag-parent',
+    folder: 'ag-parent',
+    agent_provider: null,
+    created_at: now(),
+  });
   createAgentGroup({ id: 'ag-child', name: 'ag-child', folder: 'ag-child', agent_provider: null, created_at: now() });
   getDb()
     .prepare(`INSERT INTO sessions (id, agent_group_id, created_at) VALUES (?, ?, ?)`)
@@ -233,9 +233,7 @@ describe('applyDispatchFailed', () => {
     makeRunningTask();
 
     // Pre-complete the task
-    getDb()
-      .prepare(`UPDATE tasks SET status = 'completed', completed_at = ? WHERE task_id = ?`)
-      .run(now(), 'task-1');
+    getDb().prepare(`UPDATE tasks SET status = 'completed', completed_at = ? WHERE task_id = ?`).run(now(), 'task-1');
 
     const { writeSessionMessage } = await import('../../session-manager.js');
     await applyDispatchFailed({ task_id: 'task-1', summary: 'X' }, makeChildSession());

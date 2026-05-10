@@ -78,7 +78,13 @@ export interface ChannelDeliveryAdapter {
   setTyping?(channelType: string, platformId: string, threadId: string | null): Promise<void>;
   deleteMessage?(channelType: string, platformId: string, threadId: string | null, messageId: string): Promise<void>;
   postParent?(channelType: string, platformId: string, text: string): Promise<{ messageId: string }>;
-  createThread?(channelType: string, platformId: string, parentMessageId: string, title: string, firstMessage: string): Promise<{ threadId: string; messageId: string }>;
+  createThread?(
+    channelType: string,
+    platformId: string,
+    parentMessageId: string,
+    title: string,
+    firstMessage: string,
+  ): Promise<{ threadId: string; messageId: string }>;
 }
 
 let deliveryAdapter: ChannelDeliveryAdapter | null = null;

@@ -9,11 +9,7 @@ import { log } from '../../log.js';
 import { inboundDbPath, openInboundDb, resolveSession, writeSessionMessage } from '../../session-manager.js';
 import { wakeContainer } from '../../container-runner.js';
 import type { Session } from '../../types.js';
-import {
-  CapabilityConfig,
-  getCapabilityConfig,
-  hasOrchestratorCapability,
-} from './db/agent-group-capabilities.js';
+import { CapabilityConfig, getCapabilityConfig, hasOrchestratorCapability } from './db/agent-group-capabilities.js';
 import {
   Task,
   acquireCompletionLease,
@@ -37,17 +33,17 @@ const DEFAULT_CAPABILITY_CONFIG: CapabilityConfig = {
 /** In-process deduplication guard for completeDispatchSideEffects. */
 const completionInFlight = new Map<string, Promise<void>>();
 
-export async function applyDispatchTask(
-  content: Record<string, unknown>,
-  callerSession: Session,
-): Promise<void> {
+export async function applyDispatchTask(content: Record<string, unknown>, callerSession: Session): Promise<void> {
   const idempotencyKey = content.idempotency_key as string | undefined;
   const targetGroupRaw = content.target_group as string | undefined;
   const taskContent = content.content as string | undefined;
   const deadline = (content.deadline as string | null | undefined) ?? null;
 
   if (!idempotencyKey || !targetGroupRaw || !taskContent) {
-    await _notifyCaller(callerSession, 'dispatch rejected: missing required fields (target_group, content, idempotency_key)');
+    await _notifyCaller(
+      callerSession,
+      'dispatch rejected: missing required fields (target_group, content, idempotency_key)',
+    );
     return;
   }
 
@@ -87,14 +83,18 @@ export async function applyDispatchTask(
         replayResult = { message: `idempotency_key_reused_with_different_payload: key=${idempotencyKey}` };
         return;
       }
-      replayResult = { message: `Task already exists: task_id=${existingByIdempotency.task_id} status=${existingByIdempotency.status}` };
+      replayResult = {
+        message: `Task already exists: task_id=${existingByIdempotency.task_id} status=${existingByIdempotency.status}`,
+      };
       return;
     }
 
     // Step 3: Concurrency cap — only for NEW admissions
     const activeCount = countActiveByParent(callerSession.id);
     if (activeCount >= capConfig.concurrencyCap) {
-      replayResult = { message: `dispatch rejected: concurrency cap reached (${activeCount}/${capConfig.concurrencyCap})` };
+      replayResult = {
+        message: `dispatch rejected: concurrency cap reached (${activeCount}/${capConfig.concurrencyCap})`,
+      };
       return;
     }
 
@@ -109,16 +109,17 @@ export async function applyDispatchTask(
       return;
     }
     if (hasOrchestratorCapability(targetGroup)) {
-      replayResult = { message: 'dispatch rejected: cannot dispatch to another orchestrator (no orchestrator-targeting orchestrators in v1)' };
+      replayResult = {
+        message:
+          'dispatch rejected: cannot dispatch to another orchestrator (no orchestrator-targeting orchestrators in v1)',
+      };
       return;
     }
 
     // Step 5: Wiring check
     if (callerSession.messaging_group_id !== null) {
       const wired = db
-        .prepare(
-          'SELECT 1 FROM messaging_group_agents WHERE agent_group_id = ? AND messaging_group_id = ? LIMIT 1',
-        )
+        .prepare('SELECT 1 FROM messaging_group_agents WHERE agent_group_id = ? AND messaging_group_id = ? LIMIT 1')
         .get(targetGroup, callerSession.messaging_group_id);
       if (!wired) {
         replayResult = { message: 'dispatch rejected: target_not_wired_to_caller_messaging_group' };
@@ -177,7 +178,9 @@ export async function applyDispatchTask(
     if (taskRow === null) {
       taskRow = getTaskByParentAndIdempotency(callerSession.id, idempotencyKey);
       if (taskRow) {
-        replayResult = { message: `Task already exists (parallel admit): task_id=${taskRow.task_id} status=${taskRow.status}` };
+        replayResult = {
+          message: `Task already exists (parallel admit): task_id=${taskRow.task_id} status=${taskRow.status}`,
+        };
         taskRow = null;
       }
     }
@@ -247,9 +250,7 @@ async function _runCompletionSideEffects(taskId: string): Promise<void> {
 
   const releaseLeaseAndFinish = () => {
     try {
-      getDb()
-        .prepare(`UPDATE tasks SET completion_lease_at = NULL WHERE task_id = ?`)
-        .run(taskId);
+      getDb().prepare(`UPDATE tasks SET completion_lease_at = NULL WHERE task_id = ?`).run(taskId);
     } catch (err) {
       log.warn('completeDispatchSideEffects: failed to release lease', { taskId, err });
     }
@@ -286,9 +287,7 @@ async function _runThreadedPath(task: Task): Promise<void> {
 
   // Resolve adapter — if adapter no longer has createThread, mark failed immediately
   // (adapter_unavailable does NOT consume retry budget — cycle-3 fix / Codex #43)
-  const mg = task.parent_messaging_group_id
-    ? getMessagingGroup(task.parent_messaging_group_id)
-    : undefined;
+  const mg = task.parent_messaging_group_id ? getMessagingGroup(task.parent_messaging_group_id) : undefined;
   if (!mg) {
     transitionToTerminal(taskId, 'failed', {
       fail_reason: 'adapter_unavailable',
@@ -487,14 +486,14 @@ function _resolveAgentGroupId(targetGroupRaw: string): string | null {
     | undefined;
   if (byId) return byId.id;
   // Then folder (UNIQUE per migration 001)
-  const byFolder = db
-    .prepare('SELECT id FROM agent_groups WHERE folder = ? LIMIT 1')
-    .get(targetGroupRaw) as { id: string } | undefined;
+  const byFolder = db.prepare('SELECT id FROM agent_groups WHERE folder = ? LIMIT 1').get(targetGroupRaw) as
+    | { id: string }
+    | undefined;
   if (byFolder) return byFolder.id;
   // Then human-facing name (not unique — return first match if any)
-  const byName = db
-    .prepare('SELECT id FROM agent_groups WHERE name = ? LIMIT 1')
-    .get(targetGroupRaw) as { id: string } | undefined;
+  const byName = db.prepare('SELECT id FROM agent_groups WHERE name = ? LIMIT 1').get(targetGroupRaw) as
+    | { id: string }
+    | undefined;
   if (byName) return byName.id;
   return null;
 }

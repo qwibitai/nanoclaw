@@ -45,7 +45,14 @@ import {
   type ContainerState,
 } from './db/session-db.js';
 import { log } from './log.js';
-import { openInboundDb, openOutboundDb, openOutboundDbRw, inboundDbPath, heartbeatPath, writeSessionMessage } from './session-manager.js';
+import {
+  openInboundDb,
+  openOutboundDb,
+  openOutboundDbRw,
+  inboundDbPath,
+  heartbeatPath,
+  writeSessionMessage,
+} from './session-manager.js';
 import { getContainerSpawnedAt, isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
 import type { Session } from './types.js';
 import { getActiveTasks, transitionToTerminal } from './modules/orchestrator-dispatch/db/tasks.js';
@@ -257,8 +264,8 @@ const DEFAULT_SPAWN_DEADLINE_SEC = 300;
 const DEFAULT_DRAIN_GRACE_SEC = 120;
 
 const ACTION_TO_FAIL_REASON: Record<string, string> = {
-  'fail-deadline':       'deadline_exceeded',
-  'fail-no-progress':    'no_progress_timeout',
+  'fail-deadline': 'deadline_exceeded',
+  'fail-no-progress': 'no_progress_timeout',
   'fail-container-exit': 'container_exit',
   'fail-spawn-deadline': 'spawn_deadline',
 };

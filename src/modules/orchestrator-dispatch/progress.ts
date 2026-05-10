@@ -3,10 +3,7 @@ import { log } from '../../log.js';
 import type { Session } from '../../types.js';
 import { getTaskById } from './db/tasks.js';
 
-export async function applyDispatchProgress(
-  content: Record<string, unknown>,
-  callerSession: Session,
-): Promise<void> {
+export async function applyDispatchProgress(content: Record<string, unknown>, callerSession: Session): Promise<void> {
   const taskId = content.task_id as string | undefined;
   const message = (content.message as string | undefined) ?? '';
 

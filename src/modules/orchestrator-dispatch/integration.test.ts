@@ -64,14 +64,15 @@ vi.mock('../../session-manager.js', async (importOriginal) => {
   const real = await importOriginal<typeof import('../../session-manager.js')>();
   return {
     ...real,
-    writeSessionMessage: vi.fn().mockImplementation(
-      async (agentGroupId: string, sessionId: string, msg: { content: string }) => {
+    writeSessionMessage: vi
+      .fn()
+      .mockImplementation(async (agentGroupId: string, sessionId: string, msg: { content: string }) => {
         writtenMessages.push({ agentGroupId, sessionId, content: msg.content });
-      },
-    ),
+      }),
     // resolveSession: inserts the child session into the central DB so FK constraints pass.
-    resolveSession: vi.fn().mockImplementation(
-      (agId: string, mgId: string | null, threadId: string | null, _mode: string) => {
+    resolveSession: vi
+      .fn()
+      .mockImplementation((agId: string, mgId: string | null, threadId: string | null, _mode: string) => {
         const sessionId = mgId ? `child-sess-${agId}-${threadId ?? 'no-thread'}` : `child-sess-${agId}-headless`;
         const now = new Date().toISOString();
         const session: Session = {
@@ -89,8 +90,7 @@ vi.mock('../../session-manager.js', async (importOriginal) => {
         insertChildSession(sessionId, agId, mgId, threadId, now);
         sessionMap.set(sessionId, session);
         return { session, created: true };
-      },
-    ),
+      }),
     writeSessionRouting: vi.fn(),
     inboundDbPath: vi.fn().mockReturnValue('/tmp/nonexistent-inbound.db'),
     openInboundDb: vi.fn(),
@@ -161,19 +161,64 @@ function seedGroups({ withMg = false }: { withMg?: boolean } = {}): {
   createAgentGroup({ id: 'ag-target', name: 'ag-target', folder: 'ag-target', agent_provider: null, created_at: ts() });
 
   // Grant orchestrator capability
-  const capConfig = JSON.stringify({ concurrencyCap: 5, noProgressTimeoutSec: 1800, spawnDeadlineSec: 300, drainGraceSec: 120 });
+  const capConfig = JSON.stringify({
+    concurrencyCap: 5,
+    noProgressTimeoutSec: 1800,
+    spawnDeadlineSec: 300,
+    drainGraceSec: 120,
+  });
   getDb()
-    .prepare(`INSERT INTO agent_group_capabilities (agent_group_id, role, config_json, granted_by, granted_at) VALUES (?, 'orchestrator', ?, NULL, ?)`)
+    .prepare(
+      `INSERT INTO agent_group_capabilities (agent_group_id, role, config_json, granted_by, granted_at) VALUES (?, 'orchestrator', ?, NULL, ?)`,
+    )
     .run('ag-orch', capConfig, ts());
 
   let mgId: string | null = null;
   if (withMg) {
     mgId = 'mg-shared';
-    createMessagingGroup({ id: mgId, channel_type: 'slack', platform_id: 'C-123', name: 'test-channel', is_group: 1, unknown_sender_policy: 'public', created_at: ts() });
-    createMessagingGroupAgent({ id: 'mga-orch', messaging_group_id: mgId, agent_group_id: 'ag-orch', engage_mode: 'mention', engage_pattern: null, sender_scope: 'all', ignored_message_policy: 'drop', session_mode: 'shared', priority: 0, default_model: null, default_effort: null, default_tone: null, created_at: ts() });
-    createMessagingGroupAgent({ id: 'mga-target', messaging_group_id: mgId, agent_group_id: 'ag-target', engage_mode: 'mention', engage_pattern: null, sender_scope: 'all', ignored_message_policy: 'drop', session_mode: 'per-thread', priority: 0, default_model: null, default_effort: null, default_tone: null, created_at: ts() });
+    createMessagingGroup({
+      id: mgId,
+      channel_type: 'slack',
+      platform_id: 'C-123',
+      name: 'test-channel',
+      is_group: 1,
+      unknown_sender_policy: 'public',
+      created_at: ts(),
+    });
+    createMessagingGroupAgent({
+      id: 'mga-orch',
+      messaging_group_id: mgId,
+      agent_group_id: 'ag-orch',
+      engage_mode: 'mention',
+      engage_pattern: null,
+      sender_scope: 'all',
+      ignored_message_policy: 'drop',
+      session_mode: 'shared',
+      priority: 0,
+      default_model: null,
+      default_effort: null,
+      default_tone: null,
+      created_at: ts(),
+    });
+    createMessagingGroupAgent({
+      id: 'mga-target',
+      messaging_group_id: mgId,
+      agent_group_id: 'ag-target',
+      engage_mode: 'mention',
+      engage_pattern: null,
+      sender_scope: 'all',
+      ignored_message_policy: 'drop',
+      session_mode: 'per-thread',
+      priority: 0,
+      default_model: null,
+      default_effort: null,
+      default_tone: null,
+      created_at: ts(),
+    });
     getDb()
-      .prepare(`INSERT OR IGNORE INTO sessions (id, agent_group_id, messaging_group_id, created_at) VALUES (?, ?, ?, ?)`)
+      .prepare(
+        `INSERT OR IGNORE INTO sessions (id, agent_group_id, messaging_group_id, created_at) VALUES (?, ?, ?, ?)`,
+      )
       .run('sess-orch', 'ag-orch', mgId, ts());
   } else {
     getDb()
@@ -234,13 +279,12 @@ describe('F1: e2e threaded happy path', () => {
     const { orchSession } = seedGroups({ withMg: true });
 
     const { getChannelAdapter } = await import('../../channels/channel-registry.js');
-    vi.mocked(getChannelAdapter).mockReturnValue(mockAdapterWithThread as unknown as ReturnType<typeof getChannelAdapter>);
+    vi.mocked(getChannelAdapter).mockReturnValue(
+      mockAdapterWithThread as unknown as ReturnType<typeof getChannelAdapter>,
+    );
 
     // Step 1: orchestrator dispatches a task
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do thing', idempotency_key: 'k1' },
-      orchSession,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'Do thing', idempotency_key: 'k1' }, orchSession);
 
     // Step 2: drain setImmediate (completeDispatchSideEffects)
     await drainImmediate();
@@ -319,7 +363,9 @@ describe('F1: e2e headless happy path', () => {
     const { orchSession } = seedGroups({ withMg: false }); // no messaging group
 
     const { getChannelAdapter } = await import('../../channels/channel-registry.js');
-    vi.mocked(getChannelAdapter).mockReturnValue(mockAdapterWithoutThread as unknown as ReturnType<typeof getChannelAdapter>);
+    vi.mocked(getChannelAdapter).mockReturnValue(
+      mockAdapterWithoutThread as unknown as ReturnType<typeof getChannelAdapter>,
+    );
 
     await applyDispatchTask(
       { target_group: 'ag-target', content: 'Do headless thing', idempotency_key: 'k-headless' },
@@ -384,16 +430,10 @@ describe('F1: e2e idempotency replay', () => {
     vi.mocked(getChannelAdapter).mockReturnValue(undefined);
 
     // First dispatch
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do X', idempotency_key: 'k-replay' },
-      orchSession,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k-replay' }, orchSession);
 
     // Second dispatch with SAME idempotency_key
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do X', idempotency_key: 'k-replay' },
-      orchSession,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k-replay' }, orchSession);
 
     // Only one row should exist
     const allTasks = getDb().prepare(`SELECT * FROM tasks WHERE parent_session_id = 'sess-orch'`).all();
@@ -409,9 +449,16 @@ describe('F1: e2e idempotency replay', () => {
     const { orchSession } = seedGroups({ withMg: false });
 
     // Set cap to 1
-    const capCfg = JSON.stringify({ concurrencyCap: 1, noProgressTimeoutSec: 1800, spawnDeadlineSec: 300, drainGraceSec: 120 });
+    const capCfg = JSON.stringify({
+      concurrencyCap: 1,
+      noProgressTimeoutSec: 1800,
+      spawnDeadlineSec: 300,
+      drainGraceSec: 120,
+    });
     getDb()
-      .prepare(`UPDATE agent_group_capabilities SET config_json = ? WHERE agent_group_id = 'ag-orch' AND role = 'orchestrator'`)
+      .prepare(
+        `UPDATE agent_group_capabilities SET config_json = ? WHERE agent_group_id = 'ag-orch' AND role = 'orchestrator'`,
+      )
       .run(capCfg);
 
     const { getChannelAdapter } = await import('../../channels/channel-registry.js');
@@ -484,10 +531,7 @@ describe('F1: e2e idempotency replay', () => {
     });
 
     // Replay k-replay: cap is 1 (2 active tasks), but idempotency check runs BEFORE cap check (M20)
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do X', idempotency_key: 'k-replay' },
-      orchSession,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k-replay' }, orchSession);
 
     const orchMessages = getWrittenFor('sess-orch');
     expect(orchMessages.some((m) => m.includes('task-replay'))).toBe(true);
@@ -602,9 +646,7 @@ describe('F1: e2e cancel during running', () => {
     expect(getTaskById(taskId)!.status).toBe('cancelled');
 
     // Now child tries to complete — CAS should reject (status is already 'cancelled')
-    const completionNotifyCountBefore = getWrittenFor('sess-orch').filter((m) =>
-      m.includes('Task completed'),
-    ).length;
+    const completionNotifyCountBefore = getWrittenFor('sess-orch').filter((m) => m.includes('Task completed')).length;
 
     await applyDispatchComplete({ task_id: taskId, summary: 'too late' }, childSession);
 
@@ -612,9 +654,7 @@ describe('F1: e2e cancel during running', () => {
     expect(getTaskById(taskId)!.status).toBe('cancelled');
 
     // No extra 'Task completed' notification sent to parent
-    const completionNotifyCountAfter = getWrittenFor('sess-orch').filter((m) =>
-      m.includes('Task completed'),
-    ).length;
+    const completionNotifyCountAfter = getWrittenFor('sess-orch').filter((m) => m.includes('Task completed')).length;
     expect(completionNotifyCountAfter).toBe(completionNotifyCountBefore);
   }, 10_000);
 });

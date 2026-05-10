@@ -49,8 +49,7 @@ vi.mock('./modules/orchestrator-dispatch/watchdog.js', async (importOriginal) =>
   const real = await importOriginal<typeof import('./modules/orchestrator-dispatch/watchdog.js')>();
   return {
     ...real,
-    pendingTerminalDispatchOutboundSeenAt: (...args: unknown[]) =>
-      mockPendingTerminalDispatchOutboundSeenAt(...args),
+    pendingTerminalDispatchOutboundSeenAt: (...args: unknown[]) => mockPendingTerminalDispatchOutboundSeenAt(...args),
   };
 });
 
@@ -469,17 +468,19 @@ describe('parseSqliteUtc', () => {
 
 const NOW = Date.parse('2026-04-20T12:00:00.000Z');
 
-function makeTask(overrides: Partial<{
-  task_id: string;
-  parent_session_id: string;
-  parent_agent_group_id: string;
-  child_session_id: string | null;
-  status: 'pending' | 'running';
-  admitted_at: string;
-  started_at: string | null;
-  last_progress_at: string | null;
-  deadline: string | null;
-}> = {}) {
+function makeTask(
+  overrides: Partial<{
+    task_id: string;
+    parent_session_id: string;
+    parent_agent_group_id: string;
+    child_session_id: string | null;
+    status: 'pending' | 'running';
+    admitted_at: string;
+    started_at: string | null;
+    last_progress_at: string | null;
+    deadline: string | null;
+  }> = {},
+) {
   return {
     task_id: 'task-watchdog-1',
     idempotency_key: 'idem-w1',
@@ -614,7 +615,9 @@ describe('sweepTaskWatchdog (C3)', () => {
     // First call (bad task) — throws to simulate a corrupt/unrecoverable failure mid-loop
     // Second call (good task) — returns true
     mockTransitionToTerminal
-      .mockImplementationOnce(() => { throw new Error('synthetic failure'); })
+      .mockImplementationOnce(() => {
+        throw new Error('synthetic failure');
+      })
       .mockReturnValue(true);
 
     vi.useFakeTimers();
@@ -704,23 +707,26 @@ describe('sweepTaskWatchdog (C3)', () => {
       expectedFailReason: 'container_exit',
       childContainerStopped: true,
     },
-  ])('test_watchdog_fail_reason_canonical: $label', async ({ taskOverrides, expectedFailReason, childContainerStopped }) => {
-    const task = makeTask(taskOverrides);
-    mockGetActiveTasks.mockReturnValue([task]);
-    mockTransitionToTerminal.mockReturnValue(true);
-    if (childContainerStopped) {
-      mockIsContainerRunning.mockReturnValue(false);
-    }
+  ])(
+    'test_watchdog_fail_reason_canonical: $label',
+    async ({ taskOverrides, expectedFailReason, childContainerStopped }) => {
+      const task = makeTask(taskOverrides);
+      mockGetActiveTasks.mockReturnValue([task]);
+      mockTransitionToTerminal.mockReturnValue(true);
+      if (childContainerStopped) {
+        mockIsContainerRunning.mockReturnValue(false);
+      }
 
-    vi.useFakeTimers();
-    vi.setSystemTime(NOW);
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
 
-    await _sweepTaskWatchdogForTesting();
+      await _sweepTaskWatchdogForTesting();
 
-    expect(mockTransitionToTerminal).toHaveBeenCalledWith(
-      task.task_id,
-      'failed',
-      expect.objectContaining({ fail_reason: expectedFailReason }),
-    );
-  });
+      expect(mockTransitionToTerminal).toHaveBeenCalledWith(
+        task.task_id,
+        'failed',
+        expect.objectContaining({ fail_reason: expectedFailReason }),
+      );
+    },
+  );
 });

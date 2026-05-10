@@ -75,11 +75,17 @@ describe('025-agent-group-capabilities', () => {
     db = makeDb();
     migration025.up(db);
 
-    db.exec(`INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('ag-x', 'X', 'x', '2026-01-01T00:00:00Z')`);
-    db.exec(`INSERT INTO agent_group_capabilities (agent_group_id, role, granted_at) VALUES ('ag-x', 'orchestrator', '2026-01-01T00:00:00Z')`);
+    db.exec(
+      `INSERT INTO agent_groups (id, name, folder, created_at) VALUES ('ag-x', 'X', 'x', '2026-01-01T00:00:00Z')`,
+    );
+    db.exec(
+      `INSERT INTO agent_group_capabilities (agent_group_id, role, granted_at) VALUES ('ag-x', 'orchestrator', '2026-01-01T00:00:00Z')`,
+    );
 
     expect(() => {
-      db!.exec(`INSERT INTO agent_group_capabilities (agent_group_id, role, granted_at) VALUES ('ag-x', 'orchestrator', '2026-01-01T00:00:00Z')`);
+      db!.exec(
+        `INSERT INTO agent_group_capabilities (agent_group_id, role, granted_at) VALUES ('ag-x', 'orchestrator', '2026-01-01T00:00:00Z')`,
+      );
     }).toThrow();
   });
 

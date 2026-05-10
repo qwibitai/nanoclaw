@@ -171,16 +171,12 @@ export function incrementCompletionAttempts(taskId: string): number {
 
 export function getTaskByChildSession(childSessionId: string): Task | null {
   return (
-    (getDb()
-      .prepare(`SELECT * FROM tasks WHERE child_session_id = ?`)
-      .get(childSessionId) as Task | undefined) ?? null
+    (getDb().prepare(`SELECT * FROM tasks WHERE child_session_id = ?`).get(childSessionId) as Task | undefined) ?? null
   );
 }
 
 export function getActiveTasks(): Task[] {
-  return getDb()
-    .prepare(`SELECT * FROM tasks WHERE status IN ('pending', 'running')`)
-    .all() as Task[];
+  return getDb().prepare(`SELECT * FROM tasks WHERE status IN ('pending', 'running')`).all() as Task[];
 }
 
 export function countActiveByParent(parentSessionId: string): number {

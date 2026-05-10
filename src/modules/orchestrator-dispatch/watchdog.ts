@@ -26,7 +26,15 @@ export function decideTaskAction(args: {
   spawnDeadlineSec: number;
   drainGraceSec: number;
 }): TaskActionDecision {
-  const { now, task, childContainerStatus, terminalOutboundSeenAt, noProgressTimeoutSec, spawnDeadlineSec, drainGraceSec } = args;
+  const {
+    now,
+    task,
+    childContainerStatus,
+    terminalOutboundSeenAt,
+    noProgressTimeoutSec,
+    spawnDeadlineSec,
+    drainGraceSec,
+  } = args;
 
   // 1. Hard deadline — ALWAYS wins, even over drain-first (C20).
   if (task.deadline !== null) {
@@ -86,10 +94,7 @@ export function decideTaskAction(args: {
  * Host-invariant: opens outbound.db read-only (container is the sole writer).
  * Content is deserialized as JSON to avoid substring false-positive matches (S20).
  */
-export function pendingTerminalDispatchOutboundSeenAt(
-  agentGroupId: string,
-  sessionId: string,
-): string | null {
+export function pendingTerminalDispatchOutboundSeenAt(agentGroupId: string, sessionId: string): string | null {
   const dbPath = outboundDbPath(agentGroupId, sessionId);
   if (!fs.existsSync(dbPath)) return null;
 
@@ -97,9 +102,10 @@ export function pendingTerminalDispatchOutboundSeenAt(
   try {
     db = new Database(dbPath, { readonly: true });
 
-    const rows = db
-      .prepare(`SELECT timestamp, content FROM messages_out WHERE kind = 'system'`)
-      .all() as Array<{ timestamp: string; content: string }>;
+    const rows = db.prepare(`SELECT timestamp, content FROM messages_out WHERE kind = 'system'`).all() as Array<{
+      timestamp: string;
+      content: string;
+    }>;
 
     let earliest: string | null = null;
     for (const row of rows) {
@@ -119,6 +125,10 @@ export function pendingTerminalDispatchOutboundSeenAt(
     log.warn('pendingTerminalDispatchOutboundSeenAt: failed to read outbound.db', { agentGroupId, sessionId, err });
     return null;
   } finally {
-    try { db?.close(); } catch { /* ignore close errors */ }
+    try {
+      db?.close();
+    } catch {
+      /* ignore close errors */
+    }
   }
 }

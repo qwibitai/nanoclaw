@@ -90,10 +90,7 @@ describe('F2 fixture generation', () => {
       },
     ];
 
-    writeFileSync(
-      'tests/fixtures/dispatch-task-id-vectors.json',
-      JSON.stringify(vectors, null, 2) + '\n',
-    );
+    writeFileSync('tests/fixtures/dispatch-task-id-vectors.json', JSON.stringify(vectors, null, 2) + '\n');
 
     // Verify each vector matches
     for (const v of vectors) {

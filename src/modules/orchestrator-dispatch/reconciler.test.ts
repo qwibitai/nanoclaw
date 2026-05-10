@@ -25,9 +25,23 @@ function setupDb(): void {
 }
 
 function seedGroups(): void {
-  createAgentGroup({ id: 'ag-parent', name: 'ag-parent', folder: 'ag-parent', agent_provider: null, created_at: now() });
-  createAgentGroup({ id: 'ag-target', name: 'ag-target', folder: 'ag-target', agent_provider: null, created_at: now() });
-  getDb().prepare(`INSERT INTO sessions (id, agent_group_id, created_at) VALUES (?, ?, ?)`).run('sess-parent', 'ag-parent', now());
+  createAgentGroup({
+    id: 'ag-parent',
+    name: 'ag-parent',
+    folder: 'ag-parent',
+    agent_provider: null,
+    created_at: now(),
+  });
+  createAgentGroup({
+    id: 'ag-target',
+    name: 'ag-target',
+    folder: 'ag-target',
+    agent_provider: null,
+    created_at: now(),
+  });
+  getDb()
+    .prepare(`INSERT INTO sessions (id, agent_group_id, created_at) VALUES (?, ?, ?)`)
+    .run('sess-parent', 'ag-parent', now());
 }
 
 function insertOrphanedTask(taskId: string, leaseAt: string | null = null): void {
@@ -56,10 +70,7 @@ describe('runReconcilerSweep', () => {
 
     runReconcilerSweep();
 
-    expect(setImmediateSpy).toHaveBeenCalledWith(
-      expect.any(Function),
-      'task-orphan',
-    );
+    expect(setImmediateSpy).toHaveBeenCalledWith(expect.any(Function), 'task-orphan');
 
     setImmediateSpy.mockRestore();
   });
@@ -122,7 +133,13 @@ describe('index.ts — ASSERT registered actions', () => {
     expect(matches.length).toBe(5);
 
     // ASSERT: all 5 expected actions present
-    const expectedActions = ['dispatch_task', 'dispatch_complete', 'dispatch_failed', 'dispatch_cancel', 'dispatch_progress'];
+    const expectedActions = [
+      'dispatch_task',
+      'dispatch_complete',
+      'dispatch_failed',
+      'dispatch_cancel',
+      'dispatch_progress',
+    ];
     for (const action of expectedActions) {
       expect(indexSrc).toContain(`'${action}'`);
     }

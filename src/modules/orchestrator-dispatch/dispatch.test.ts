@@ -22,20 +22,22 @@ vi.mock('../../session-manager.js', async (importOriginal) => {
   return {
     ...real,
     writeSessionMessage: vi.fn().mockResolvedValue(undefined),
-    resolveSession: vi.fn().mockImplementation((agId: string, mgId: string | null, threadId: string | null, _mode: string) => ({
-      session: {
-        id: `child-sess-${agId}`,
-        agent_group_id: agId,
-        messaging_group_id: mgId,
-        thread_id: threadId,
-        status: 'active' as const,
-        container_status: 'stopped' as const,
-        agent_provider: null,
-        last_active: null,
-        created_at: new Date().toISOString(),
-      },
-      created: true,
-    })),
+    resolveSession: vi
+      .fn()
+      .mockImplementation((agId: string, mgId: string | null, threadId: string | null, _mode: string) => ({
+        session: {
+          id: `child-sess-${agId}`,
+          agent_group_id: agId,
+          messaging_group_id: mgId,
+          thread_id: threadId,
+          status: 'active' as const,
+          container_status: 'stopped' as const,
+          agent_provider: null,
+          last_active: null,
+          created_at: new Date().toISOString(),
+        },
+        created: true,
+      })),
     writeSessionRouting: vi.fn(),
     inboundDbPath: vi.fn().mockReturnValue('/tmp/nonexistent-inbound.db'),
     openInboundDb: vi.fn(),
@@ -176,7 +178,13 @@ function wireTargetToMg(targetAgId: string, mgId: string): void {
   });
 }
 
-function insertActiveTask(taskId: string, idempotencyKey: string, sessionId: string, agId: string, targetAgId: string): Task {
+function insertActiveTask(
+  taskId: string,
+  idempotencyKey: string,
+  sessionId: string,
+  agId: string,
+  targetAgId: string,
+): Task {
   return insertTaskAtomic({
     task_id: taskId,
     idempotency_key: idempotencyKey,
@@ -227,10 +235,7 @@ describe('applyDispatchTask', () => {
     seedSession('sess-caller', 'ag-caller');
 
     const caller = makeCallerSession();
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' },
-      caller,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
 
     const task = getTaskByParentAndIdempotency('sess-caller', 'k1');
     expect(task).toBeNull();
@@ -254,10 +259,7 @@ describe('applyDispatchTask', () => {
     vi.mocked(getChannelAdapter).mockReturnValue(undefined); // no adapter → headless
 
     const caller = makeCallerSession();
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' },
-      caller,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
 
     const task = getTaskByParentAndIdempotency('sess-caller', 'k1');
     expect(task).not.toBeNull();
@@ -310,10 +312,7 @@ describe('applyDispatchTask', () => {
     // Now we have 2 tasks (running + pending) but cap is 1.
     // Replaying k1 should succeed (replay precedes cap check).
     const caller = makeCallerSession();
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' },
-      caller,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
 
     const { writeSessionMessage } = await import('../../session-manager.js');
     const calls = vi.mocked(writeSessionMessage).mock.calls;
@@ -362,15 +361,12 @@ describe('applyDispatchTask', () => {
     });
 
     const caller = makeCallerSession();
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'X-DIFFERENT', idempotency_key: 'k1' },
-      caller,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'X-DIFFERENT', idempotency_key: 'k1' }, caller);
 
     const { writeSessionMessage } = await import('../../session-manager.js');
-    const messages = vi.mocked(writeSessionMessage).mock.calls.map((c) =>
-      JSON.parse(c[2].content as string).text as string,
-    );
+    const messages = vi
+      .mocked(writeSessionMessage)
+      .mock.calls.map((c) => JSON.parse(c[2].content as string).text as string);
     expect(messages.some((m) => m.includes('idempotency_key_reused_with_different_payload'))).toBe(true);
 
     // Existing task unchanged
@@ -389,18 +385,15 @@ describe('applyDispatchTask', () => {
     insertActiveTask('task-existing', 'k-other', 'sess-caller', 'ag-caller', 'ag-target');
 
     const caller = makeCallerSession();
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'New work', idempotency_key: 'k-new' },
-      caller,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'New work', idempotency_key: 'k-new' }, caller);
 
     const newTask = getTaskByParentAndIdempotency('sess-caller', 'k-new');
     expect(newTask).toBeNull();
 
     const { writeSessionMessage } = await import('../../session-manager.js');
-    const messages = vi.mocked(writeSessionMessage).mock.calls.map((c) =>
-      JSON.parse(c[2].content as string).text as string,
-    );
+    const messages = vi
+      .mocked(writeSessionMessage)
+      .mock.calls.map((c) => JSON.parse(c[2].content as string).text as string);
     expect(messages.some((m) => m.includes('concurrency cap reached'))).toBe(true);
   });
 
@@ -414,18 +407,15 @@ describe('applyDispatchTask', () => {
     // NO messaging_group_agents row for (ag-target, mg-1)
 
     const caller = makeCallerSession({ messaging_group_id: 'mg-1' });
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' },
-      caller,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
 
     const task = getTaskByParentAndIdempotency('sess-caller', 'k1');
     expect(task).toBeNull();
 
     const { writeSessionMessage } = await import('../../session-manager.js');
-    const messages = vi.mocked(writeSessionMessage).mock.calls.map((c) =>
-      JSON.parse(c[2].content as string).text as string,
-    );
+    const messages = vi
+      .mocked(writeSessionMessage)
+      .mock.calls.map((c) => JSON.parse(c[2].content as string).text as string);
     expect(messages.some((m) => m.includes('target_not_wired_to_caller_messaging_group'))).toBe(true);
   });
 
@@ -443,10 +433,7 @@ describe('applyDispatchTask', () => {
     vi.mocked(getChannelAdapter).mockReturnValue(mockAdapterWithoutThread as any);
 
     const caller = makeCallerSession({ messaging_group_id: 'mg-1' });
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' },
-      caller,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
 
     const task = getTaskByParentAndIdempotency('sess-caller', 'k1');
     expect(task).not.toBeNull();
@@ -466,10 +453,7 @@ describe('applyDispatchTask', () => {
     vi.mocked(getChannelAdapter).mockReturnValue(mockAdapterWithThread as any);
 
     const caller = makeCallerSession({ messaging_group_id: 'mg-1' });
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' },
-      caller,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
 
     const task = getTaskByParentAndIdempotency('sess-caller', 'k1');
     expect(task).not.toBeNull();
@@ -486,10 +470,7 @@ describe('applyDispatchTask', () => {
     grantOrchestrator('ag-target');
 
     const caller = makeCallerSession();
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' },
-      caller,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
 
     const task = getTaskByParentAndIdempotency('sess-caller', 'k1');
     expect(task).toBeNull();
@@ -521,15 +502,9 @@ describe('applyDispatchTask', () => {
     const setImmediateSpy = vi.spyOn(global, 'setImmediate');
 
     const caller = makeCallerSession();
-    await applyDispatchTask(
-      { target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' },
-      caller,
-    );
+    await applyDispatchTask({ target_group: 'ag-target', content: 'Do X', idempotency_key: 'k1' }, caller);
 
-    expect(setImmediateSpy).toHaveBeenCalledWith(
-      expect.any(Function),
-      expect.stringContaining('dispatch-'),
-    );
+    expect(setImmediateSpy).toHaveBeenCalledWith(expect.any(Function), expect.stringContaining('dispatch-'));
     setImmediateSpy.mockRestore();
   });
 
