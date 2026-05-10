@@ -67,9 +67,11 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   clearStaleProcessingAcks();
 
   let pollCount = 0;
+  let isFirstPoll = true;
   while (true) {
     // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
-    const messages = getPendingMessages().filter((m) => m.kind !== 'system');
+    const messages = getPendingMessages(isFirstPoll).filter((m) => m.kind !== 'system');
+    isFirstPoll = false;
     pollCount++;
 
     // Periodic heartbeat so we know the loop is alive

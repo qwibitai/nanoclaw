@@ -4,19 +4,38 @@
  *   ncl help               — list all resources and commands
  *   ncl groups help         — show group resource details (verbs, columns, enums)
  */
+import { getContainerConfig } from '../../db/container-configs.js';
 import { getResource, getResources } from '../crud.js';
+import type { CallerContext } from '../frame.js';
 import { listCommands, register } from '../registry.js';
+
+const GROUP_SCOPE_RESOURCES = new Set(['groups', 'sessions', 'destinations', 'members']);
+
+function getCliScope(ctx: CallerContext): string | undefined {
+  if (ctx.caller !== 'agent') return undefined;
+  return getContainerConfig(ctx.agentGroupId)?.cli_scope ?? 'group';
+}
 
 register({
   name: 'help',
   description: 'List available resources and commands.',
   access: 'open',
   parseArgs: () => ({}),
-  handler: async () => {
-    const resources = getResources();
+  handler: async (_args, ctx) => {
+    const cliScope = getCliScope(ctx);
+    let resources = getResources();
+    if (cliScope === 'group') {
+      resources = resources.filter((r) => GROUP_SCOPE_RESOURCES.has(r.plural));
+    }
     const commands = listCommands().filter((c) => c.access !== 'hidden' && !c.resource);
 
     const lines: string[] = [];
+
+    if (cliScope === 'group') {
+      lines.push('CLI scope: group (--id and group args are auto-filled to your agent group)');
+      lines.push('');
+    }
+
     if (resources.length > 0) {
       lines.push('Resources:');
       for (const r of resources) {
@@ -61,18 +80,27 @@ export function registerResourceHelpCommands(): void {
         access: 'open',
         resource: res.plural,
         parseArgs: () => ({}),
-        handler: async () => {
+        handler: async (_args, ctx) => {
+          const cliScope = getCliScope(ctx);
           const lines: string[] = [];
           lines.push(`${res.plural}: ${res.description}`);
+
+          if (cliScope === 'group' && GROUP_SCOPE_RESOURCES.has(res.plural)) {
+            lines.push('');
+            lines.push('Note: --id and group args are auto-filled to your agent group. You do not need to pass them.');
+          }
+
           lines.push('');
 
           // Verbs
+          const idAutoFilled = cliScope === 'group' && (res.plural === 'groups' || res.plural === 'destinations');
+          const idHint = idAutoFilled ? '' : ' <id>';
           const verbs: string[] = [];
           if (res.operations.list) verbs.push(`list [open]`);
-          if (res.operations.get) verbs.push(`get <id> [open]`);
+          if (res.operations.get) verbs.push(`get${idHint} [open]`);
           if (res.operations.create) verbs.push(`create [approval]`);
-          if (res.operations.update) verbs.push(`update <id> [approval]`);
-          if (res.operations.delete) verbs.push(`delete <id> [approval]`);
+          if (res.operations.update) verbs.push(`update${idHint} [approval]`);
+          if (res.operations.delete) verbs.push(`delete${idHint} [approval]`);
           if (res.customOperations) {
             for (const [verb, op] of Object.entries(res.customOperations)) {
               verbs.push(`${verb} [${op.access}] — ${op.description}`);
@@ -83,9 +111,12 @@ export function registerResourceHelpCommands(): void {
           lines.push('');
 
           // Columns
+          const autoFilledFields =
+            cliScope === 'group' ? new Set(['id', 'agent_group_id', 'group']) : new Set<string>();
           lines.push('Fields:');
           for (const col of res.columns) {
             const tags: string[] = [];
+            if (autoFilledFields.has(col.name)) tags.push('auto-filled');
             if (col.generated) tags.push('auto');
             if (col.required) tags.push('required');
             if (col.updatable) tags.push('updatable');

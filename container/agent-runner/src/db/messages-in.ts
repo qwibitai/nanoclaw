@@ -49,7 +49,7 @@ function getMaxMessagesPerPrompt(): number {
  * sees the prior context it missed. Host's countDueMessages gates waking on
  * trigger=1 separately (see src/db/session-db.ts).
  */
-export function getPendingMessages(): MessageInRow[] {
+export function getPendingMessages(isFirstPoll = false): MessageInRow[] {
   const inbound = openInboundDb();
   const outbound = getOutboundDb();
 
@@ -59,10 +59,11 @@ export function getPendingMessages(): MessageInRow[] {
         `SELECT * FROM messages_in
          WHERE status = 'pending'
            AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))
+           AND (on_wake = 0 OR ?1 = 1)
          ORDER BY seq DESC
-         LIMIT ?`,
+         LIMIT ?2`,
       )
-      .all(getMaxMessagesPerPrompt()) as MessageInRow[];
+      .all(isFirstPoll ? 1 : 0, getMaxMessagesPerPrompt()) as MessageInRow[];
 
     if (pending.length === 0) return [];
 

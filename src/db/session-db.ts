@@ -114,14 +114,20 @@ export function insertMessage(
      * path for the target's reply. NULL on channel-side inbound.
      */
     sourceSessionId?: string | null;
+    /**
+     * 1 = only deliver on the container's first poll (fresh start).
+     * Dying containers (past first poll) skip these rows.
+     */
+    onWake?: 0 | 1;
   },
 ): void {
   db.prepare(
-    `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, source_session_id)
-     VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger, @sourceSessionId)`,
+    `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, source_session_id, on_wake)
+     VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger, @sourceSessionId, @onWake)`,
   ).run({
     ...message,
     trigger: message.trigger ?? 1,
+    onWake: message.onWake ?? 0,
     sourceSessionId: message.sourceSessionId ?? null,
     seq: nextEvenSeq(db),
   });
@@ -317,6 +323,11 @@ export function migrateMessagesInTable(db: Database.Database): void {
     // For agent-to-agent return-path routing. NULL on existing rows is fine —
     // their replies fall back to the legacy "newest active session" lookup.
     db.prepare('ALTER TABLE messages_in ADD COLUMN source_session_id TEXT').run();
+  }
+  if (!cols.has('on_wake')) {
+    // 1 = only deliver on the container's first poll (fresh start).
+    // All existing rows are normal messages, so default 0.
+    db.prepare('ALTER TABLE messages_in ADD COLUMN on_wake INTEGER NOT NULL DEFAULT 0').run();
   }
 }
 

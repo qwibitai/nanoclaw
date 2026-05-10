@@ -10,7 +10,7 @@ Access layer: `src/db/`. Authoritative schema reference: `src/db/schema.ts` (com
 
 ### 1.1 `agent_groups`
 
-Agent workspaces. Each maps 1:1 to a `groups/<folder>/` directory containing `CLAUDE.md`, skills, and `container.json`. Container config lives on disk, not in the DB.
+Agent workspaces. Each maps 1:1 to a `groups/<folder>/` directory containing `CLAUDE.md` and skills. Container config lives in `container_configs` (see §1.x below); a `container.json` file is materialized at spawn time for the container runner to read.
 
 ```sql
 CREATE TABLE agent_groups (
@@ -294,6 +294,32 @@ CREATE TABLE schema_version (
 );
 ```
 
+### 1.15 `container_configs`
+
+Per-agent-group container runtime config. Source of truth for provider, model, packages, MCP servers, mounts, CLI scope, etc. Materialized to `groups/<folder>/container.json` at spawn time.
+
+```sql
+CREATE TABLE container_configs (
+  agent_group_id         TEXT PRIMARY KEY REFERENCES agent_groups(id) ON DELETE CASCADE,
+  provider               TEXT,
+  model                  TEXT,
+  effort                 TEXT,
+  image_tag              TEXT,
+  assistant_name         TEXT,
+  max_messages_per_prompt INTEGER,
+  skills                 TEXT NOT NULL DEFAULT '"all"',
+  mcp_servers            TEXT NOT NULL DEFAULT '{}',
+  packages_apt           TEXT NOT NULL DEFAULT '[]',
+  packages_npm           TEXT NOT NULL DEFAULT '[]',
+  additional_mounts      TEXT NOT NULL DEFAULT '[]',
+  cli_scope              TEXT NOT NULL DEFAULT 'group',   -- disabled | group | global
+  updated_at             TEXT NOT NULL
+);
+```
+
+- **Readers:** `src/container-config.ts`, `src/container-runner.ts`, `src/cli/dispatch.ts` (scope enforcement), `src/claude-md-compose.ts`
+- **Writers:** `src/db/container-configs.ts`, `src/modules/self-mod/apply.ts`, `src/backfill-container-configs.ts`
+
 ---
 
 ## 2. Migration system
@@ -313,6 +339,8 @@ Migrations live in `src/db/migrations/`, one file per migration. Runner: `runMig
 | 007 | `007-pending-approvals-title-options.ts` | `ALTER TABLE pending_approvals` add `title`, `options_json` (retrofits DBs created between 003 and 007) |
 | 008 | `008-dropped-messages.ts` | `unregistered_senders` |
 | 009 | `009-drop-pending-credentials.ts` | Drop the defunct `pending_credentials` table |
+| 014 | `014-container-configs.ts` | `container_configs` — per-agent-group container runtime config |
+| 015 | `015-cli-scope.ts` | `ALTER TABLE container_configs ADD COLUMN cli_scope` |
 
 Numbers 005 and 006 are intentionally absent — migrations were renumbered during early development.
 

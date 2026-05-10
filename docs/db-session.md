@@ -33,19 +33,22 @@ Every message landing in the session: user chat, scheduled task, recurring task,
 
 ```sql
 CREATE TABLE messages_in (
-  id            TEXT PRIMARY KEY,
-  seq           INTEGER UNIQUE,           -- EVEN only (host assigns) — see §3
-  kind          TEXT NOT NULL,
-  timestamp     TEXT NOT NULL,
-  status        TEXT DEFAULT 'pending',   -- pending|completed|failed|paused
-  process_after TEXT,
-  recurrence    TEXT,                     -- cron expr for recurring
-  series_id     TEXT,                     -- groups occurrences of a recurring task
-  tries         INTEGER DEFAULT 0,
-  platform_id   TEXT,
-  channel_type  TEXT,
-  thread_id     TEXT,
-  content       TEXT NOT NULL             -- JSON; shape depends on kind
+  id             TEXT PRIMARY KEY,
+  seq            INTEGER UNIQUE,           -- EVEN only (host assigns) — see §3
+  kind           TEXT NOT NULL,
+  timestamp      TEXT NOT NULL,
+  status         TEXT DEFAULT 'pending',   -- pending|completed|failed|paused
+  process_after  TEXT,
+  recurrence     TEXT,                     -- cron expr for recurring
+  series_id      TEXT,                     -- groups occurrences of a recurring task
+  tries          INTEGER DEFAULT 0,
+  trigger        INTEGER NOT NULL DEFAULT 1, -- 0 = context only (don't wake), 1 = wake agent
+  platform_id    TEXT,
+  channel_type   TEXT,
+  thread_id      TEXT,
+  content        TEXT NOT NULL,            -- JSON; shape depends on kind
+  source_session_id TEXT,                  -- agent-to-agent return path
+  on_wake        INTEGER NOT NULL DEFAULT 0 -- 1 = only deliver on container's first poll
 );
 CREATE INDEX idx_messages_in_series ON messages_in(series_id);
 ```

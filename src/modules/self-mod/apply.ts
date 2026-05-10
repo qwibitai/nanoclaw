@@ -3,17 +3,18 @@
  *
  * The approvals module calls these when an admin clicks Approve on a
  * pending_approvals row whose action matches. Each handler mutates the
- * container config, rebuilds/kills the container as needed, and lets the
- * host sweep respawn it on the new image on the next message.
+ * container config in the DB, rebuilds/kills the container as needed,
+ * and writes an on_wake message so the fresh container picks up where
+ * the old one left off.
  *
- * install_packages: rebuild image + kill container (apt/npm global installs
- *   must be baked into the image layer).
- * add_mcp_server: kill container only — bun runs TS directly, so a pure
- *   MCP wiring change needs nothing more than a process restart.
+ * install_packages: update DB + rebuild image + kill container + on_wake.
+ * add_mcp_server: update DB + kill container + on_wake.
  */
-import { updateContainerConfig } from '../../container-config.js';
-import { buildAgentGroupImage, killContainer } from '../../container-runner.js';
+import { buildAgentGroupImage, killContainer, wakeContainer } from '../../container-runner.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
+import { getContainerConfig, updateContainerConfigJson } from '../../db/container-configs.js';
+import { getSession } from '../../db/sessions.js';
+import type { McpServerConfig } from '../../container-config.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import type { ApprovalHandler } from '../approvals/index.js';
@@ -24,10 +25,28 @@ export const applyInstallPackages: ApprovalHandler = async ({ session, payload, 
     notify('install_packages approved but agent group missing.');
     return;
   }
-  updateContainerConfig(agentGroup.folder, (cfg) => {
-    if (payload.apt) cfg.packages.apt.push(...(payload.apt as string[]));
-    if (payload.npm) cfg.packages.npm.push(...(payload.npm as string[]));
-  });
+
+  const configRow = getContainerConfig(agentGroup.id);
+  if (!configRow) {
+    notify('install_packages approved but container config missing.');
+    return;
+  }
+
+  // Append new packages to existing lists in the DB (deduplicated)
+  if (payload.apt) {
+    const existing = JSON.parse(configRow.packages_apt) as string[];
+    for (const pkg of payload.apt as string[]) {
+      if (!existing.includes(pkg)) existing.push(pkg);
+    }
+    updateContainerConfigJson(agentGroup.id, 'packages_apt', existing);
+  }
+  if (payload.npm) {
+    const existing = JSON.parse(configRow.packages_npm) as string[];
+    for (const pkg of payload.npm as string[]) {
+      if (!existing.includes(pkg)) existing.push(pkg);
+    }
+    updateContainerConfigJson(agentGroup.id, 'packages_npm', existing);
+  }
 
   const pkgs = [
     ...((payload.apt as string[] | undefined) || []),
@@ -36,9 +55,6 @@ export const applyInstallPackages: ApprovalHandler = async ({ session, payload, 
   log.info('Package install approved', { agentGroupId: session.agent_group_id, userId });
   try {
     await buildAgentGroupImage(session.agent_group_id);
-    killContainer(session.id, 'rebuild applied');
-    // Schedule a follow-up prompt a few seconds after kill so the host sweep
-    // respawns the container on the new image and the agent verifies + reports.
     writeSessionMessage(session.agent_group_id, session.id, {
       id: `appr-note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       kind: 'chat',
@@ -51,10 +67,11 @@ export const applyInstallPackages: ApprovalHandler = async ({ session, payload, 
         sender: 'system',
         senderId: 'system',
       }),
-      processAfter: new Date(Date.now() + 5000)
-        .toISOString()
-        .replace('T', ' ')
-        .replace(/\.\d+Z$/, ''),
+      onWake: 1,
+    });
+    killContainer(session.id, 'rebuild applied', () => {
+      const s = getSession(session.id);
+      if (s) wakeContainer(s);
     });
     log.info('Container rebuild completed (bundled with install)', { agentGroupId: session.agent_group_id });
   } catch (e) {
@@ -71,15 +88,39 @@ export const applyAddMcpServer: ApprovalHandler = async ({ session, payload, use
     notify('add_mcp_server approved but agent group missing.');
     return;
   }
-  updateContainerConfig(agentGroup.folder, (cfg) => {
-    cfg.mcpServers[payload.name as string] = {
-      command: payload.command as string,
-      args: (payload.args as string[]) || [],
-      env: (payload.env as Record<string, string>) || {},
-    };
-  });
 
-  killContainer(session.id, 'mcp server added');
-  notify(`MCP server "${payload.name}" added. Your container will restart with it on the next message.`);
+  const configRow = getContainerConfig(agentGroup.id);
+  if (!configRow) {
+    notify('add_mcp_server approved but container config missing.');
+    return;
+  }
+
+  // Add the new MCP server to the existing map in the DB
+  const servers = JSON.parse(configRow.mcp_servers) as Record<string, McpServerConfig>;
+  servers[payload.name as string] = {
+    command: payload.command as string,
+    args: (payload.args as string[]) || [],
+    env: (payload.env as Record<string, string>) || {},
+  };
+  updateContainerConfigJson(agentGroup.id, 'mcp_servers', servers);
+
+  writeSessionMessage(session.agent_group_id, session.id, {
+    id: `appr-note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    kind: 'chat',
+    timestamp: new Date().toISOString(),
+    platformId: session.agent_group_id,
+    channelType: 'agent',
+    threadId: null,
+    content: JSON.stringify({
+      text: `MCP server "${payload.name}" added. Verify it's available (e.g. list your tools) and report the result to the user.`,
+      sender: 'system',
+      senderId: 'system',
+    }),
+    onWake: 1,
+  });
+  killContainer(session.id, 'mcp server added', () => {
+    const s = getSession(session.id);
+    if (s) wakeContainer(s);
+  });
   log.info('MCP server add approved', { agentGroupId: session.agent_group_id, userId });
 };

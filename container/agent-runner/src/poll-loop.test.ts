@@ -14,13 +14,18 @@ afterEach(() => {
   closeSessionDb();
 });
 
-function insertMessage(id: string, kind: string, content: object, opts?: { processAfter?: string; trigger?: 0 | 1 }) {
+function insertMessage(
+  id: string,
+  kind: string,
+  content: object,
+  opts?: { processAfter?: string; trigger?: 0 | 1; onWake?: 0 | 1 },
+) {
   getInboundDb()
     .prepare(
-      `INSERT INTO messages_in (id, kind, timestamp, status, process_after, trigger, content)
-     VALUES (?, ?, datetime('now'), 'pending', ?, ?, ?)`,
+      `INSERT INTO messages_in (id, kind, timestamp, status, process_after, trigger, on_wake, content)
+     VALUES (?, ?, datetime('now'), 'pending', ?, ?, ?, ?)`,
     )
-    .run(id, kind, opts?.processAfter ?? null, opts?.trigger ?? 1, JSON.stringify(content));
+    .run(id, kind, opts?.processAfter ?? null, opts?.trigger ?? 1, opts?.onWake ?? 0, JSON.stringify(content));
 }
 
 describe('formatter', () => {
@@ -128,6 +133,58 @@ describe('accumulate gate (trigger column)', () => {
       .run();
     const [msg] = getPendingMessages();
     expect(msg.trigger).toBe(1);
+  });
+});
+
+describe('on_wake filtering', () => {
+  it('first poll returns on_wake=1 messages', () => {
+    insertMessage('m1', 'chat', { sender: 'system', text: 'Resuming.' }, { onWake: 1 });
+    const messages = getPendingMessages(true);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].id).toBe('m1');
+  });
+
+  it('subsequent polls skip on_wake=1 messages', () => {
+    insertMessage('m1', 'chat', { sender: 'system', text: 'Resuming.' }, { onWake: 1 });
+    const messages = getPendingMessages(false);
+    expect(messages).toHaveLength(0);
+  });
+
+  it('normal messages returned regardless of isFirstPoll', () => {
+    insertMessage('m1', 'chat', { sender: 'A', text: 'hello' });
+    expect(getPendingMessages(true)).toHaveLength(1);
+
+    // Reset: mark completed so we can re-test with a fresh message
+    markCompleted(['m1']);
+    insertMessage('m2', 'chat', { sender: 'A', text: 'hello again' });
+    expect(getPendingMessages(false)).toHaveLength(1);
+  });
+
+  it('mixed batch: first poll returns both normal and on_wake messages', () => {
+    insertMessage('m1', 'chat', { sender: 'A', text: 'user msg' });
+    insertMessage('m2', 'chat', { sender: 'system', text: 'Resuming.' }, { onWake: 1 });
+    const messages = getPendingMessages(true);
+    expect(messages).toHaveLength(2);
+    expect(messages.map((m) => m.id).sort()).toEqual(['m1', 'm2']);
+  });
+
+  it('mixed batch: subsequent poll returns only normal messages', () => {
+    insertMessage('m1', 'chat', { sender: 'A', text: 'user msg' });
+    insertMessage('m2', 'chat', { sender: 'system', text: 'Resuming.' }, { onWake: 1 });
+    const messages = getPendingMessages(false);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].id).toBe('m1');
+  });
+
+  it('on_wake defaults to 0 for inserts without explicit value', () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, content)
+         VALUES ('m1', 'chat', datetime('now'), 'pending', '{"text":"hi"}')`,
+      )
+      .run();
+    // Should be returned even on non-first poll (on_wake=0)
+    expect(getPendingMessages(false)).toHaveLength(1);
   });
 });
 

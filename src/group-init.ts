@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, GROUPS_DIR } from './config.js';
-import { initContainerConfig } from './container-config.js';
+import { ensureContainerConfig } from './db/container-configs.js';
 import { log } from './log.js';
 import type { AgentGroup } from './types.js';
 
@@ -65,12 +65,10 @@ export function initGroupFilesystem(group: AgentGroup, opts?: { instructions?: s
     initialized.push('CLAUDE.local.md');
   }
 
-  // groups/<folder>/container.json — empty container config, replaces the
-  // former agent_groups.container_config DB column. Self-modification flows
-  // read and write this file directly.
-  if (initContainerConfig(group.folder)) {
-    initialized.push('container.json');
-  }
+  // Ensure container_configs row exists in the DB. Idempotent — no-op if
+  // the row already exists (e.g. created by backfill or group creation).
+  ensureContainerConfig(group.id);
+  initialized.push('container_configs');
 
   // 2. data/v2-sessions/<id>/.claude-shared/ — Claude state + per-group skills
   const claudeDir = path.join(DATA_DIR, 'v2-sessions', group.id, '.claude-shared');
