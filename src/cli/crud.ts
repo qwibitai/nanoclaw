@@ -279,7 +279,7 @@ export function registerResource(def: ResourceDef): void {
   if (def.customOperations) {
     for (const [verb, op] of Object.entries(def.customOperations)) {
       register({
-        name: `${def.plural}-${verb}`,
+        name: `${def.plural}-${verb.replace(/ /g, '-')}`,
         description: op.description,
         access: op.access,
         resource: def.plural,

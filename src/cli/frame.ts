@@ -25,6 +25,7 @@ export type ErrorCode =
   | 'unknown-command'
   | 'invalid-args'
   | 'permission-denied'
+  | 'forbidden'
   | 'approval-pending'
   | 'not-found'
   | 'handler-error'

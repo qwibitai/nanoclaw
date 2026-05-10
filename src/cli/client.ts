@@ -85,20 +85,11 @@ function parseArgv(argv: string[]): {
     process.exit(2);
   }
 
-  // Single word: `ncl help`
-  // Two words: `ncl groups list`, `ncl groups help`
-  // Three words: `ncl groups get abc123`
-  let command: string;
-  if (positional.length === 1) {
-    command = positional[0];
-  } else {
-    command = `${positional[0]}-${positional[1]}`;
-  }
-
-  // Third positional is the target ID
-  if (positional.length >= 3) {
-    args.id = positional[2];
-  }
+  // Join all positionals with dashes to form the command name.
+  // If the full name isn't a command, the dispatcher will try trimming
+  // the last segment and using it as the target ID (e.g. `groups get abc`
+  // → command "groups-get", id "abc").
+  const command = positional.join('-');
 
   return { command, args, json };
 }

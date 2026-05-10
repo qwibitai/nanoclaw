@@ -165,12 +165,9 @@ function parseArgv(argv: string[]): {
     process.exit(2);
   }
 
-  const command = positional.length >= 2 ? `${positional[0]}-${positional[1]}` : positional[0];
-
-  // Third positional is the target ID
-  if (positional.length >= 3) {
-    args.id = positional[2];
-  }
+  // Join all positionals with dashes. The dispatcher trims the last
+  // segment as a target ID if the full name isn't a registered command.
+  const command = positional.join('-');
 
   return { command, args, json };
 }
