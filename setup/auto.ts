@@ -305,12 +305,24 @@ async function main(): Promise<void> {
       await fail('service', "Couldn't start NanoClaw.", 'See logs/nanoclaw.error.log for details.');
     }
     if (res.terminal?.fields.DOCKER_GROUP_STALE === 'true') {
+      const stalehint =
+        'Pick one — either is fine:\n\n' +
+        '  A. Log out + back in, then re-run setup. Your docker group will activate\n' +
+        '     and no sudo workaround is needed.\n\n' +
+        '  B. Apply the temporary ACL yourself, then restart the service:\n' +
+        '       sudo setfacl -m u:$(whoami):rw /var/run/docker.sock\n' +
+        `       systemctl --user restart ${getSystemdUnit()}`;
       p.log.warn(brandBody("NanoClaw's permissions need a tweak before it can reach Docker."));
-      p.log.message(
-        brandBody(
-          '  sudo setfacl -m u:$(whoami):rw /var/run/docker.sock\n' + `  systemctl --user restart ${getSystemdUnit()}`,
-        ),
-      );
+      p.log.message(brandBody(stalehint));
+      // Soft-warn: unit installed and started, just degraded until docker
+      // access is restored — so we don't fail(). Still offer Claude-assist
+      // for users who'd rather have it handled.
+      await offerClaudeAssist({
+        stepName: 'service',
+        msg: "NanoClaw's systemd service can't reach the Docker socket.",
+        hint: stalehint,
+        rawLogPath: 'logs/setup-steps/06-service.log',
+      });
     }
   }
 
