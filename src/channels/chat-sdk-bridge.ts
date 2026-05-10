@@ -74,6 +74,16 @@ export interface ChatSdkBridgeConfig {
    * and reactions still target the head of the reply.
    */
   maxTextLength?: number;
+  /**
+   * If true, outbound text goes to the adapter as `{ raw: text }` instead of
+   * `{ markdown: text }`. Use this when the agent already emits strings in
+   * the platform's native format and the adapter's Markdown → AST → platform
+   * round-trip corrupts them. Concrete case: `@chat-adapter/discord` parses
+   * `<https://…>` autolinks into link nodes and renders them back as
+   * `[url](url)`, double-wrapping every suppress-embed link the agent writes.
+   * Adapters that don't support `raw` should fall back to no-op transform.
+   */
+  sendAsRaw?: boolean;
 }
 
 /**
@@ -122,6 +132,8 @@ export function splitForLimit(text: string, limit: number): string[] {
 export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter {
   const { adapter } = config;
   const transformText = (t: string): string => (config.transformOutboundText ? config.transformOutboundText(t) : t);
+  const textPayload = (t: string): { raw: string } | { markdown: string } =>
+    config.sendAsRaw ? { raw: t } : { markdown: t };
   let chat: Chat;
   let state: SqliteStateAdapter;
   let setupConfig: ChannelSetup;
@@ -372,9 +384,11 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       const content = message.content as Record<string, unknown>;
 
       if (content.operation === 'edit' && content.messageId) {
-        await adapter.editMessage(tid, content.messageId as string, {
-          markdown: transformText((content.text as string) || (content.markdown as string) || ''),
-        });
+        await adapter.editMessage(
+          tid,
+          content.messageId as string,
+          textPayload(transformText((content.text as string) || (content.markdown as string) || '')),
+        );
         return;
       }
 
@@ -490,7 +504,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           const attachFiles = i === 0 && fileUploads && fileUploads.length > 0;
           const result = await adapter.postMessage(
             tid,
-            attachFiles ? { markdown: chunk, files: fileUploads } : { markdown: chunk },
+            attachFiles ? { ...textPayload(chunk), files: fileUploads } : textPayload(chunk),
           );
           if (i === 0) firstId = result?.id;
         }
@@ -501,7 +515,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           data: f.data,
           filename: f.filename,
         }));
-        const result = await adapter.postMessage(tid, { markdown: '', files: fileUploads });
+        const result = await adapter.postMessage(tid, { ...textPayload(''), files: fileUploads });
         return result?.id;
       }
     },
