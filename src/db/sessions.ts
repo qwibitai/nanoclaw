@@ -54,8 +54,12 @@ export function findSessionForAgent(
 
 /** Find an active session scoped to an agent group (ignoring messaging group). */
 export function findSessionByAgentGroup(agentGroupId: string): Session | undefined {
+  // Exclude per-thread sessions (thread_id IS NOT NULL) — those are scoped to a
+  // specific PR/issue and must not be reused for cross-channel agent-shared messages.
   return getDb()
-    .prepare("SELECT * FROM sessions WHERE agent_group_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1")
+    .prepare(
+      "SELECT * FROM sessions WHERE agent_group_id = ? AND status = 'active' AND thread_id IS NULL ORDER BY created_at DESC LIMIT 1",
+    )
     .get(agentGroupId) as Session | undefined;
 }
 
