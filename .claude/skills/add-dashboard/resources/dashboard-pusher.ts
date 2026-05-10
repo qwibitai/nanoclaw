@@ -10,11 +10,11 @@ import Database from 'better-sqlite3';
 import { getAllAgentGroups, getAgentGroup } from './db/agent-groups.js';
 import { getSessionsByAgentGroup } from './db/sessions.js';
 import { getAllMessagingGroups, getMessagingGroupAgents } from './db/messaging-groups.js';
-import { getDestinations } from './db/agent-destinations.js';
-import { getMembers } from './db/agent-group-members.js';
-import { getAllUsers, getUser } from './db/users.js';
-import { getUserRoles, getAdminsOfAgentGroup } from './db/user-roles.js';
-import { getUserDmsForUser } from './db/user-dms.js';
+import { getDestinations } from './modules/agent-to-agent/db/agent-destinations.js';
+import { getMembers } from './modules/permissions/db/agent-group-members.js';
+import { getAllUsers, getUser } from './modules/permissions/db/users.js';
+import { getUserRoles, getAdminsOfAgentGroup } from './modules/permissions/db/user-roles.js';
+import { getUserDmsForUser } from './modules/permissions/db/user-dms.js';
 import { getActiveAdapters, getRegisteredChannelNames } from './channels/channel-registry.js';
 import { DATA_DIR, ASSISTANT_NAME } from './config.js';
 import { getDb } from './db/connection.js';
@@ -157,7 +157,6 @@ function collectAgentGroups() {
       name: g.name,
       folder: g.folder,
       agent_provider: g.agent_provider,
-      container_config: g.container_config ? JSON.parse(g.container_config) : null,
       sessionCount: sessions.length,
       runningSessions: running.length,
       wirings,
