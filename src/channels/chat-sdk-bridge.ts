@@ -156,6 +156,47 @@ function resolveSelectedOption(
   return candidate;
 }
 
+/**
+ * Parse a 429 rate-limit error and return the number of milliseconds the
+ * caller should wait before retrying, or null if the error isn't a 429.
+ *
+ * Discord errors arrive as `NetworkError: Discord API error: 429 {...JSON
+ * with "retry_after": <seconds> ...}`. Slack rate-limits surface as
+ * `slack_webapi_platform_error` with a `Retry-After` header (often
+ * normalized into the message). We recognize both shapes and fall back
+ * to a 1s default if the marker is present but the value is missing.
+ *
+ * Returning null signals "not a recoverable rate limit" — the caller
+ * should fall through to its existing failure path (truncate + warn,
+ * or re-throw on first chunk).
+ */
+export function parseRetryAfterMs(err: unknown): number | null {
+  if (!err || typeof err !== 'object') return null;
+  const message = (err as { message?: unknown }).message;
+  if (typeof message !== 'string') return null;
+  if (!/\b429\b|rate[\s_-]?limit/i.test(message)) return null;
+  // Discord JSON shape: "retry_after": 0.3
+  const m = message.match(/"retry_after"\s*:\s*([\d.]+)/);
+  if (m) {
+    const seconds = parseFloat(m[1]);
+    if (!Number.isNaN(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
+  }
+  // Slack/header shape: "Retry-After: 5"
+  const h = message.match(/retry[\s_-]?after[":\s]+([\d.]+)/i);
+  if (h) {
+    const seconds = parseFloat(h[1]);
+    if (!Number.isNaN(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
+  }
+  return 1000;
+}
+
+const MAX_RATE_LIMIT_RETRIES = 3;
+const RATE_LIMIT_BUFFER_MS = 100;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function splitForLimit(text: string, limit: number): string[] {
   if (text.length <= limit) return [text];
   const chunks: string[] = [];
@@ -522,32 +563,22 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
 
       if (content.operation === 'edit' && content.messageId) {
         const editText = transformText((content.text as string) || (content.markdown as string) || '');
-        // If the edit replaces a status-in-place with a long final answer
-        // (delivery.ts morphs the first chat reply of a turn into an edit of
-        // the in-flight progress message), split the same way as a fresh post:
-        // first chunk edits the existing bubble, remaining chunks post as new
-        // messages so nothing silently truncates at the adapter's limit.
-        const chunks =
-          config.maxTextLength && editText.length > config.maxTextLength
-            ? splitForLimit(editText, config.maxTextLength)
-            : [editText];
-        await adapter.editMessage(tid, content.messageId as string, wrapBody(chunks[0]));
-        for (let i = 1; i < chunks.length; i++) {
-          try {
-            await adapter.postMessage(tid, wrapBody(chunks[i]));
-          } catch (err) {
-            // Same duplicate-on-retry trap as the fresh-post chunk loop below.
-            // The edit on chunk 0 already succeeded; if a later chunk throws
-            // and we let the host retry, it'll re-edit chunk 0 and re-post
-            // every chunk that did land. Truncate instead.
-            log.warn('chat-sdk-bridge: chunk post (after edit) failed mid-message; truncating', {
-              chunkIndex: i,
-              totalChunks: chunks.length,
-              err,
-            });
-            break;
-          }
-        }
+        // Edit path is status post-then-edit only — chat replies post fresh
+        // (commit 897a5d0), so the morph-into-long-final-answer case the
+        // prior chunked-edit logic justified no longer exists. If the status
+        // text exceeds the platform's per-message limit, truncate to the
+        // first chunk with an ellipsis instead of posting additional new
+        // messages: the prior code's extra posts were not registered in
+        // delivery.ts:statusTracking and survived orphan-cleanup on chat
+        // delivery, leaving stale "thinking-block tails" visible to the
+        // user. Status is meta info and the bubble is deleted on chat
+        // delivery anyway, so visual truncation here is acceptable.
+        const limit = config.maxTextLength;
+        const fitted =
+          limit && editText.length > limit
+            ? splitForLimit(editText, limit)[0].trimEnd() + '…'
+            : editText;
+        await adapter.editMessage(tid, content.messageId as string, wrapBody(fitted));
         return;
       }
 
@@ -660,34 +691,79 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           data: f.data,
           filename: f.filename,
         }));
-        // Split if over the adapter's max length. Files ride on the first
-        // chunk so the head of the reply still carries them.
-        const chunks =
+        // Status (kind='status') messages are meta info — a "thinking
+        // bubble" that grows during a turn and gets deleted when the chat
+        // reply lands. If the first status of a turn is itself oversize
+        // (e.g. the agent's first thinking event for the turn already
+        // exceeds the platform's per-message limit), we MUST NOT post
+        // additional chunks: only the first chunk's id is returned and
+        // tracked in delivery.ts:statusTracking, and orphan-cleanup on
+        // chat delivery deletes only that tracked id — chunks 2+ would
+        // linger as un-tracked "second thinking blocks" that look (to
+        // the user) like truncated response text.
+        //
+        // Truncate to a single chunk with an ellipsis. Edits later in
+        // the same turn target the same single bubble (delivery.ts wraps
+        // them as operation='edit' once existing tracking is set), and
+        // the edit path also truncates (see above). The user always sees
+        // exactly one thinking bubble per turn.
+        //
+        // Chat replies (kind='chat') keep the original multi-chunk
+        // behavior: they're real content the user wants in full, and the
+        // 429 retry below ensures all chunks land.
+        const chunks: string[] =
           config.maxTextLength && text.length > config.maxTextLength
-            ? splitForLimit(text, config.maxTextLength)
+            ? message.kind === 'status'
+              ? [splitForLimit(text, config.maxTextLength)[0].trimEnd() + '…']
+              : splitForLimit(text, config.maxTextLength)
             : [text];
         let firstId: string | undefined;
         for (let i = 0; i < chunks.length; i++) {
           const chunk = chunks[i];
           const attachFiles = i === 0 && fileUploads && fileUploads.length > 0;
           const body = wrapBody(chunk);
-          try {
-            const result = await adapter.postMessage(tid, attachFiles ? { ...body, files: fileUploads } : body);
-            if (i === 0) firstId = result?.id;
-          } catch (err) {
-            // Mid-message chunk failure (e.g. Discord 429 on chunk 5 of 6).
-            // Letting this throw makes the host retry the whole message, which
-            // re-posts every chunk that already landed → user sees duplicates
-            // (in extreme cases up to MAX_DELIVERY_ATTEMPTS × successful chunks).
-            // First chunk failures still propagate so the host can retry from
-            // scratch with no duplicates.
-            if (i === 0) throw err;
-            log.warn('chat-sdk-bridge: chunk post failed mid-message; truncating to avoid duplicate-on-retry', {
-              chunkIndex: i,
-              totalChunks: chunks.length,
-              err,
-            });
-            break;
+          let attempt = 0;
+          let chunkPosted = false;
+          while (!chunkPosted) {
+            try {
+              const result = await adapter.postMessage(tid, attachFiles ? { ...body, files: fileUploads } : body);
+              if (i === 0 && firstId === undefined) firstId = result?.id;
+              chunkPosted = true;
+            } catch (err) {
+              // 429 rate limit: Discord/Slack are explicitly telling us to
+              // wait. Retry the same chunk after the requested delay rather
+              // than dropping it. Without this, sending a multi-chunk reply
+              // that tickles the per-channel rate limit silently truncates
+              // mid-stream — the user sees only the first chunk(s).
+              const retryAfterMs = parseRetryAfterMs(err);
+              attempt++;
+              if (retryAfterMs !== null && attempt <= MAX_RATE_LIMIT_RETRIES) {
+                log.info('chat-sdk-bridge: chunk rate-limited, retrying', {
+                  chunkIndex: i,
+                  totalChunks: chunks.length,
+                  attempt,
+                  maxAttempts: MAX_RATE_LIMIT_RETRIES,
+                  retryAfterMs,
+                });
+                await sleep(retryAfterMs + RATE_LIMIT_BUFFER_MS);
+                continue;
+              }
+              // Non-429 error or retries exhausted. First-chunk failures
+              // re-throw so the host retries from scratch with no
+              // duplicates. Mid-message chunk failures truncate: letting
+              // them throw makes the host retry the whole message, which
+              // would re-post every chunk that already landed and the user
+              // sees duplicates (in extreme cases MAX_DELIVERY_ATTEMPTS ×
+              // successful chunks).
+              if (i === 0) throw err;
+              log.warn('chat-sdk-bridge: chunk post failed mid-message; truncating to avoid duplicate-on-retry', {
+                chunkIndex: i,
+                totalChunks: chunks.length,
+                attempts: attempt,
+                err,
+              });
+              return firstId;
+            }
           }
         }
         return firstId;

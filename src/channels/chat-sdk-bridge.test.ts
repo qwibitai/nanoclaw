@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Adapter, AdapterPostableMessage, RawMessage } from 'chat';
 
-import { createChatSdkBridge, splitForLimit } from './chat-sdk-bridge.js';
+import { createChatSdkBridge, parseRetryAfterMs, splitForLimit } from './chat-sdk-bridge.js';
 
 function stubAdapter(partial: Partial<Adapter>): Adapter {
   return { name: 'stub', ...partial } as unknown as Adapter;
@@ -397,5 +397,269 @@ describe('createChatSdkBridge.deliver — display cards (send_card)', () => {
     expect(calls).toHaveLength(1);
     const msg = calls[0].message as { markdown?: string };
     expect(msg.markdown).toBe('plain hello');
+  });
+});
+
+describe('parseRetryAfterMs', () => {
+  it('extracts retry_after from Discord 429 JSON', () => {
+    const err = new Error(
+      'Discord API error: 429 {"message": "You are being rate limited.", "retry_after": 0.3, "global": false}',
+    );
+    expect(parseRetryAfterMs(err)).toBe(300);
+  });
+
+  it('rounds up sub-millisecond values', () => {
+    const err = new Error('Discord API error: 429 {"retry_after": 0.0001}');
+    expect(parseRetryAfterMs(err)).toBe(1);
+  });
+
+  it('handles whole-second retry_after', () => {
+    const err = new Error('Discord API error: 429 {"retry_after": 5}');
+    expect(parseRetryAfterMs(err)).toBe(5000);
+  });
+
+  it('handles Slack-style "Retry-After: N" header', () => {
+    const err = new Error('slack rate_limited: Retry-After: 2');
+    expect(parseRetryAfterMs(err)).toBe(2000);
+  });
+
+  it('falls back to 1000ms when 429 marker exists but value is missing', () => {
+    const err = new Error('429 too many requests');
+    expect(parseRetryAfterMs(err)).toBe(1000);
+  });
+
+  it('returns null for non-rate-limit errors', () => {
+    expect(parseRetryAfterMs(new Error('500 internal server error'))).toBeNull();
+    expect(parseRetryAfterMs(new Error('connection refused'))).toBeNull();
+  });
+
+  it('returns null for non-Error inputs', () => {
+    expect(parseRetryAfterMs(null)).toBeNull();
+    expect(parseRetryAfterMs(undefined)).toBeNull();
+    expect(parseRetryAfterMs('429 plain string')).toBeNull();
+    expect(parseRetryAfterMs({ status: 429 })).toBeNull();
+  });
+});
+
+describe('createChatSdkBridge.deliver — edit path (status post-then-edit)', () => {
+  it('truncates to a single edit instead of posting additional chunks for oversize status text', async () => {
+    // Bug B regression guard. Previously, oversize status edits called
+    // editMessage(chunk0) THEN postMessage(chunk1..N). The new posts were
+    // not registered in delivery.ts:statusTracking and survived the orphan
+    // cleanup on chat delivery, leaving stale "thinking-block tails"
+    // visible to the user (they looked like a second thinking block — sometimes
+    // even resembling response text when the agent's reasoning was draft-shaped).
+    const edits: Array<{ threadId: string; messageId: string; body: { markdown?: string } }> = [];
+    const posts: Array<{ threadId: string }> = [];
+    const adapter = stubAdapter({
+      editMessage: async (threadId: string, messageId: string, body: { markdown?: string }) => {
+        edits.push({ threadId, messageId, body });
+      },
+      postMessage: async (threadId: string) => {
+        posts.push({ threadId });
+        return { id: 'extra-chunk', threadId, raw: {} };
+      },
+    } as unknown as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 50 });
+
+    // 200 char status — splits into 4 chunks of 50 under the old code.
+    const longStatus = 'a'.repeat(200);
+    await bridge.deliver('discord:c1', null, {
+      kind: 'status',
+      content: { operation: 'edit', messageId: 'msg-original', text: longStatus },
+    });
+
+    expect(edits).toHaveLength(1);
+    expect(edits[0].messageId).toBe('msg-original');
+    // Truncated, ends with ellipsis, ≤ limit (the ellipsis itself adds 1 char).
+    expect(edits[0].body.markdown!.length).toBeLessThanOrEqual(51);
+    expect(edits[0].body.markdown!.endsWith('…')).toBe(true);
+    // Critical invariant: zero additional posts.
+    expect(posts).toHaveLength(0);
+  });
+
+  it('passes short status text through unchanged (no truncation when it fits)', async () => {
+    const edits: Array<{ body: { markdown?: string } }> = [];
+    const adapter = stubAdapter({
+      editMessage: async (_t: string, _m: string, body: { markdown?: string }) => {
+        edits.push({ body });
+      },
+      postMessage: async () => ({ id: 'unused', threadId: 'x', raw: {} }),
+    } as unknown as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 50 });
+    await bridge.deliver('discord:c1', null, {
+      kind: 'status',
+      content: { operation: 'edit', messageId: 'msg-x', text: 'short status' },
+    });
+    expect(edits[0].body.markdown).toBe('short status');
+  });
+});
+
+describe('createChatSdkBridge.deliver — status fresh-post truncation', () => {
+  it('truncates oversize status fresh-post to a single chunk (no orphan thinking-block tail)', async () => {
+    // Bug observed in production after Fix B: a 2028-char STATUS was the
+    // FIRST status of a turn, so delivery.ts wrapped it as a fresh post
+    // (statusTracking was empty after the prior chat reply cleared it).
+    // The bridge's post-path then split into multiple chunks; only the
+    // first chunk's id was tracked, chunks 2+ posted as untracked Discord
+    // messages and survived orphan-cleanup as a visible "second thinking
+    // block" to the user — matching exactly the symptom reported.
+    const calls: Array<{ markdown?: string }> = [];
+    const adapter = stubAdapter({
+      postMessage: async (_threadId: string, body: { markdown?: string }) => {
+        calls.push(body);
+        return { id: `id-${calls.length}`, threadId: 'x', raw: {} };
+      },
+    } as unknown as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 50 });
+
+    const longStatus = '> 💭 ' + 'a'.repeat(200);
+    const id = await bridge.deliver('discord:c1', null, {
+      kind: 'status',
+      content: { text: longStatus },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].markdown!.length).toBeLessThanOrEqual(51);
+    expect(calls[0].markdown!.endsWith('…')).toBe(true);
+    expect(id).toBe('id-1');
+  });
+
+  it('chat fresh-post still splits and posts all chunks (no regression)', async () => {
+    const calls: Array<{ markdown?: string }> = [];
+    const adapter = stubAdapter({
+      postMessage: async (_threadId: string, body: { markdown?: string }) => {
+        calls.push(body);
+        return { id: `id-${calls.length}`, threadId: 'x', raw: {} };
+      },
+    } as unknown as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 30 });
+    const text = 'A'.repeat(30) + '\n' + 'B'.repeat(30) + '\n' + 'C'.repeat(30);
+    await bridge.deliver('discord:c1', null, { kind: 'chat', content: { text } });
+    expect(calls).toHaveLength(3);
+    expect(calls[0].markdown).toContain('A');
+    expect(calls[1].markdown).toContain('B');
+    expect(calls[2].markdown).toContain('C');
+  });
+
+  it('short status delivered verbatim (no spurious ellipsis)', async () => {
+    const calls: Array<{ markdown?: string }> = [];
+    const adapter = stubAdapter({
+      postMessage: async (_threadId: string, body: { markdown?: string }) => {
+        calls.push(body);
+        return { id: 'id-1', threadId: 'x', raw: {} };
+      },
+    } as unknown as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 100 });
+    await bridge.deliver('discord:c1', null, {
+      kind: 'status',
+      content: { text: '> 💭 short thinking' },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].markdown).toBe('> 💭 short thinking');
+  });
+});
+
+describe('createChatSdkBridge.deliver — post path 429 retry', () => {
+  it('retries a chunk on 429 and posts all chunks', async () => {
+    // Bug A regression guard. A 5400-char chat reply splits into multiple
+    // chunks; if Discord 429s on chunk 2 with retry_after=0.3, the prior
+    // code dropped chunks 2+ silently. The user saw their chat reply
+    // truncated mid-stream — exactly the symptom Axie kept reporting.
+    const calls: Array<{ chunkText: string }> = [];
+    let rateLimitCount = 0;
+    const adapter = stubAdapter({
+      postMessage: async (_threadId: string, body: { markdown?: string }) => {
+        calls.push({ chunkText: body.markdown ?? '' });
+        // Simulate Discord rate-limiting chunk 2 once, then succeeding.
+        if (calls.length === 2 && rateLimitCount === 0) {
+          rateLimitCount++;
+          throw new Error('Discord API error: 429 {"retry_after": 0.05, "global": false}');
+        }
+        return { id: `id-${calls.length}`, threadId: 'x', raw: {} };
+      },
+    } as unknown as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 30 });
+
+    // 90 chars → 3 chunks of 30.
+    const text = 'A'.repeat(30) + '\n' + 'B'.repeat(30) + '\n' + 'C'.repeat(30);
+    const id = await bridge.deliver('discord:c1', null, { kind: 'chat', content: { text } });
+
+    // 4 calls total: chunk 1, chunk 2 (429), chunk 2 (retry success), chunk 3.
+    expect(calls).toHaveLength(4);
+    // All three actual chunks landed.
+    expect(calls[0].chunkText).toContain('A');
+    expect(calls[1].chunkText).toContain('B');
+    expect(calls[2].chunkText).toContain('B'); // retry of chunk 2
+    expect(calls[3].chunkText).toContain('C');
+    // First-chunk id is preserved (host caches this in delivered table).
+    expect(id).toBe('id-1');
+  });
+
+  it('first chunk 429 also retries (no premature throw)', async () => {
+    const calls: number[] = [];
+    let firstChunk429 = 0;
+    const adapter = stubAdapter({
+      postMessage: async () => {
+        calls.push(Date.now());
+        if (calls.length === 1 && firstChunk429 === 0) {
+          firstChunk429++;
+          throw new Error('Discord API error: 429 {"retry_after": 0.05}');
+        }
+        return { id: 'id-ok', threadId: 'x', raw: {} };
+      },
+    } as unknown as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 30 });
+    const id = await bridge.deliver('discord:c1', null, { kind: 'chat', content: { text: 'short' } });
+    expect(calls).toHaveLength(2); // 429 then retry
+    expect(id).toBe('id-ok');
+  });
+
+  it('non-429 mid-message error still truncates rather than duplicating', async () => {
+    // Existing contract preserved: a true network failure on chunk 2 still
+    // returns chunk 1's id and stops, so the host doesn't retry the whole
+    // message and re-post chunk 1 → duplicate.
+    const calls: number[] = [];
+    const adapter = stubAdapter({
+      postMessage: async () => {
+        calls.push(calls.length + 1);
+        if (calls.length === 2) throw new Error('connection reset');
+        return { id: `id-${calls.length}`, threadId: 'x', raw: {} };
+      },
+    } as unknown as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 30 });
+    const text = 'A'.repeat(30) + '\n' + 'B'.repeat(30) + '\n' + 'C'.repeat(30);
+    const id = await bridge.deliver('discord:c1', null, { kind: 'chat', content: { text } });
+    expect(calls).toHaveLength(2);
+    expect(id).toBe('id-1');
+  });
+
+  it('non-429 first-chunk error throws so host can retry from scratch', async () => {
+    const adapter = stubAdapter({
+      postMessage: async () => {
+        throw new Error('connection refused');
+      },
+    } as unknown as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 30 });
+    await expect(
+      bridge.deliver('discord:c1', null, { kind: 'chat', content: { text: 'short' } }),
+    ).rejects.toThrow('connection refused');
+  });
+
+  it('gives up after MAX_RATE_LIMIT_RETRIES persistent 429s on a mid-message chunk', async () => {
+    const calls: number[] = [];
+    const adapter = stubAdapter({
+      postMessage: async () => {
+        calls.push(calls.length + 1);
+        if (calls.length >= 2) throw new Error('Discord API error: 429 {"retry_after": 0.01}');
+        return { id: 'id-1', threadId: 'x', raw: {} };
+      },
+    } as unknown as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true, maxTextLength: 30 });
+    const text = 'A'.repeat(30) + '\n' + 'B'.repeat(30);
+    const id = await bridge.deliver('discord:c1', null, { kind: 'chat', content: { text } });
+    // Chunk 1 ok (1 call) + chunk 2 first attempt (1) + 3 retries = 5 total.
+    expect(calls.length).toBe(1 + 1 + 3);
+    expect(id).toBe('id-1');
   });
 });

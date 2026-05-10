@@ -1,4 +1,4 @@
-import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
+import { findByName, findByRouting, getAllDestinations, type DestinationEntry } from './destinations.js';
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
 import { getInboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
@@ -727,7 +727,7 @@ function handleEvent(event: ProviderEvent, routing: RoutingContext): void {
  * The agent must always wrap output in <message to="name">...</message>
  * blocks, even with a single destination. Bare text is scratchpad only.
  */
-function dispatchResultText(text: string, routing: RoutingContext): void {
+export function dispatchResultText(text: string, routing: RoutingContext): void {
   const MESSAGE_RE = /<message\s+to="([^"]+)"\s*>([\s\S]*?)<\/message>/g;
 
   let match: RegExpExecArray | null;
@@ -757,6 +757,45 @@ function dispatchResultText(text: string, routing: RoutingContext): void {
   }
 
   const scratchpad = stripInternalTags(scratchpadParts.join(''));
+
+  // Unwrapped-output fallback: if the agent forgot to wrap (a common
+  // failure mode after long turns, auto-compaction, or extended thinking),
+  // route the cleaned scratchpad to the most-likely-correct destination
+  // instead of silently dropping the reply. Two-tier resolution:
+  //
+  //   1. Origin (preferred): the destination corresponding to the channel
+  //      that triggered this turn. Looked up by (channelType, platformId)
+  //      from the routing context. Unambiguous regardless of how many
+  //      destinations the agent has wired — the user spoke from one place
+  //      and expects the reply there. Works for chat, task, and a2a
+  //      inbounds (extractRouting falls back to sessionRouting when the
+  //      message itself has no platform_id, so routing fields are
+  //      populated for every well-formed turn).
+  //
+  //   2. Single-destination (legacy): if origin can't be resolved
+  //      (routing.platformId is null AND there's no sessionRouting fallback)
+  //      AND the group has exactly one destination, send there.
+  //
+  // The original multi-destination concerns (routing drift on null-routed
+  // cron tasks, cross-channel thread bleed in agent-shared sessions;
+  // commit 9db39b2) don't apply: sendToDestination resolves fresh
+  // per-destination routing via resolveDestinationThread, and we route to
+  // the origin (not blindly broadcast) so we never bleed into another
+  // channel.
+  if (sent === 0 && scratchpad) {
+    const origin = findByRouting(routing.channelType, routing.platformId);
+    if (origin) {
+      sendToDestination(origin, scratchpad, routing);
+      log(`Origin-fallback: unwrapped text routed to "${origin.name}" (${scratchpad.length} chars)`);
+      return;
+    }
+    const all = getAllDestinations();
+    if (all.length === 1) {
+      sendToDestination(all[0], scratchpad, routing);
+      log(`Single-destination fallback: bare text routed to "${all[0].name}" (${scratchpad.length} chars)`);
+      return;
+    }
+  }
 
   if (scratchpad) {
     log(`[scratchpad] ${scratchpad.slice(0, 500)}${scratchpad.length > 500 ? '…' : ''}`);
