@@ -1,8 +1,8 @@
 /**
- * Offer setup-CLI-assisted debugging when a setup step fails.
+ * Offer AI-coding CLI-assisted debugging when a setup step fails.
  *
  * Flow:
- *   1. Resolve the configured setup-CLI via `resolveSetupCli()`.
+ *   1. Resolve the configured AI-coding CLI via `resolveAiCodingCli()`.
  *      Check it's installed; if not, offer to install it via the
  *      adapter's `installScript` (Claude Code only — Codex has no
  *      scriptable installer in this fork). Check auth via the
@@ -33,8 +33,8 @@ import * as p from '@clack/prompts';
 import k from 'kleur';
 
 import { ensureAnswer } from './runner.js';
-import { resolveSetupCli } from './setup-cli/index.js';
-import type { SetupCli } from './setup-cli/types.js';
+import { resolveAiCodingCli } from './ai-coding-cli/index.js';
+import type { AiCodingCli } from './ai-coding-cli/types.js';
 import { brandBody, fitToWidth, fmtDuration, note } from './theme.js';
 
 export interface AssistContext {
@@ -50,7 +50,7 @@ export interface AssistContext {
  * tool rather than us stuffing contents into the prompt. Keys are step
  * names as they appear in fail() calls; values are repo-relative paths.
  *
- * These are CLI-agnostic — same lists work for any setup-CLI.
+ * These are CLI-agnostic — same lists work for any AI-coding CLI.
  */
 export const STEP_FILES: Record<string, string[]> = {
   bootstrap: ['setup.sh', 'setup/install-node.sh', 'nanoclaw.sh'],
@@ -98,14 +98,14 @@ export const BIG_PICTURE_FILES = ['README.md', 'setup/auto.ts'];
  * Returns `false` for every other outcome (skipped, declined, no command,
  * CLI unreachable, user chose not to run).
  */
-export async function offerSetupCliAssist(
+export async function offerAiCodingCliAssist(
   ctx: AssistContext,
   projectRoot: string = process.cwd(),
 ): Promise<boolean> {
   if (process.env.NANOCLAW_SKIP_CLAUDE_ASSIST === '1') return false;
-  if (!(await ensureSetupCliReady(projectRoot))) return false;
+  if (!(await ensureAiCodingCliReady(projectRoot))) return false;
 
-  const cli = resolveSetupCli();
+  const cli = resolveAiCodingCli();
   if (!cli) return false;
 
   const want = ensureAnswer(
@@ -144,13 +144,13 @@ export async function offerSetupCliAssist(
   return true;
 }
 
-export function isSetupCliInstalled(): boolean {
-  const cli = resolveSetupCli();
+export function isAiCodingCliInstalled(): boolean {
+  const cli = resolveAiCodingCli();
   return cli !== null && cli.isInstalled();
 }
 
-export function isSetupCliAuthenticated(): boolean {
-  const cli = resolveSetupCli();
+export function isAiCodingCliAuthenticated(): boolean {
+  const cli = resolveAiCodingCli();
   if (!cli) return false;
   const probe = cli.isAuthenticated();
   // `undefined` means the adapter has no fast offline probe; treat that
@@ -159,10 +159,10 @@ export function isSetupCliAuthenticated(): boolean {
   return probe !== false;
 }
 
-export async function ensureSetupCliReady(projectRoot: string): Promise<boolean> {
-  const cli = resolveSetupCli();
+export async function ensureAiCodingCliReady(projectRoot: string): Promise<boolean> {
+  const cli = resolveAiCodingCli();
   if (!cli) {
-    p.log.warn(brandBody("No setup-CLI is installed yet — can't diagnose this here."));
+    p.log.warn(brandBody("No AI-coding CLI is installed yet — can't diagnose this here."));
     return false;
   }
 
@@ -220,7 +220,7 @@ export async function ensureSetupCliReady(projectRoot: string): Promise<boolean>
  * script(1) so we can pull the bearer token out of the PTY output and
  * set CLAUDE_CODE_OAUTH_TOKEN for the rest of the setup process.
  */
-async function runClaudeSetupToken(projectRoot: string, cli: SetupCli): Promise<boolean> {
+async function runClaudeSetupToken(projectRoot: string, cli: AiCodingCli): Promise<boolean> {
   const auth = ensureAnswer(
     await p.confirm({
       message: `${cli.displayName} isn't signed in. Sign in now? (a browser will open)`,
@@ -308,17 +308,17 @@ function buildPrompt(ctx: AssistContext, projectRoot: string): string {
 }
 
 /**
- * Run the configured setup-CLI in headless mode with tools enabled, while
+ * Run the configured AI-coding CLI in headless mode with tools enabled, while
  * showing a simple elapsed-time spinner. No streaming progress UI — the
  * earlier Claude-specific stream-json breadcrumb window was dropped to
- * keep the path uniform across CLIs (Phase C of plans/setup-cli-pick.md).
+ * keep the path uniform across CLIs (Phase C of plans/ai-coding-cli-pick.md).
  *
  * No hard timeout — debugging can take a long time, and the cost of
  * cutting the CLI off mid-investigation is worse than letting the
  * spinner run. The user can Ctrl-C if they want to abort.
  */
 async function queryCliUnderSpinner(
-  cli: SetupCli,
+  cli: AiCodingCli,
   prompt: string,
   projectRoot: string,
 ): Promise<string | null> {

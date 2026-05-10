@@ -10,14 +10,14 @@
  * of the most recent output, redrawn in place via ANSI cursor controls.
  *
  * Stall detection: a silence timer resets on every new line. When it hits
- * STALL_THRESHOLD_MS we pause the render, show `offerSetupCliOnFailure` with
+ * STALL_THRESHOLD_MS we pause the render, show `offerAiCodingCliOnFailure` with
  * the step's raw log, and either resume (user said "keep waiting") or
  * let the step run its course while giving them the exit path.
  */
 import * as p from '@clack/prompts';
 import k from 'kleur';
 
-import { offerSetupCliOnFailure } from './cli-handoff.js';
+import { offerAiCodingCliOnFailure } from './cli-handoff.js';
 import { emit as phEmit } from './diagnostics.js';
 import type { StepResult, SpinnerLabels } from './runner.js';
 import { dumpTranscriptOnFailure, spawnStep, writeStepEntry } from './runner.js';
@@ -208,10 +208,10 @@ async function handleStall(
   );
 
   if (choice === 'help') {
-    // offerSetupCliOnFailure runs its own spinner and may propose a fix command.
+    // offerAiCodingCliOnFailure runs its own spinner and may propose a fix command.
     // We don't attempt to restart the stalled build from here — if the CLI
     // proposes a command the user accepts, they can retry setup afterwards.
-    await offerSetupCliOnFailure({
+    await offerAiCodingCliOnFailure({
       stepName,
       msg: `The ${stepName} step has produced no output for 60 seconds.`,
       hint: 'It may be hung on a slow network pull or a failing Dockerfile step.',

@@ -7,7 +7,7 @@
  *      terminal control, then `/exit`s to return to setup)
  *
  * Each supported CLI (Claude Code, OpenAI Codex, future ones) is one
- * adapter file under `setup/lib/setup-cli/<name>.ts`. The registry
+ * adapter file under `setup/lib/ai-coding-cli/<name>.ts`. The registry
  * (in `./index.ts`) lets setup ask the user which CLI to use, persist
  * the choice, and dispatch the actual spawn.
  *
@@ -26,7 +26,7 @@ export interface SpawnArgs {
 }
 
 /**
- * Options for `SetupCli.headless()`.
+ * Options for `AiCodingCli.headless()`.
  *
  * `tools` controls whether the CLI is allowed to call its tools (Read,
  * Bash, etc.) during this invocation. Off by default — appropriate for
@@ -38,8 +38,8 @@ export interface HeadlessOpts {
   tools?: boolean;
 }
 
-export interface SetupCli {
-  /** Stable identifier — used in `.env` (`NANOCLAW_SETUP_CLI=<name>`). */
+export interface AiCodingCli {
+  /** Stable identifier — used in `.env` (`NANOCLAW_AI_CODING_CLI=<name>`). */
   name: string;
   /** Human-readable name shown in prompts ("Claude Code", "OpenAI Codex"). */
   displayName: string;

@@ -1,28 +1,28 @@
 import { describe, it, expect } from 'vitest';
 
-import { claudeCli, codexCli, getSetupCli, listSetupClis } from './index.js';
+import { claudeCli, codexCli, getAiCodingCli, listAiCodingClis } from './index.js';
 
-describe('setup-cli registry', () => {
+describe('ai-coding-cli registry', () => {
   it('lists at least claude and codex', () => {
-    const names = listSetupClis().map((a) => a.name);
+    const names = listAiCodingClis().map((a) => a.name);
     expect(names).toContain('claude');
     expect(names).toContain('codex');
   });
 
-  it('getSetupCli returns the matching adapter', () => {
-    expect(getSetupCli('claude')).toBe(claudeCli);
-    expect(getSetupCli('codex')).toBe(codexCli);
+  it('getAiCodingCli returns the matching adapter', () => {
+    expect(getAiCodingCli('claude')).toBe(claudeCli);
+    expect(getAiCodingCli('codex')).toBe(codexCli);
   });
 
-  it('getSetupCli is case-insensitive', () => {
-    expect(getSetupCli('CLAUDE')).toBe(claudeCli);
-    expect(getSetupCli('Codex')).toBe(codexCli);
+  it('getAiCodingCli is case-insensitive', () => {
+    expect(getAiCodingCli('CLAUDE')).toBe(claudeCli);
+    expect(getAiCodingCli('Codex')).toBe(codexCli);
   });
 
-  it('getSetupCli returns undefined for unknown / null', () => {
-    expect(getSetupCli('mystery-cli')).toBeUndefined();
-    expect(getSetupCli(null)).toBeUndefined();
-    expect(getSetupCli(undefined)).toBeUndefined();
+  it('getAiCodingCli returns undefined for unknown / null', () => {
+    expect(getAiCodingCli('mystery-cli')).toBeUndefined();
+    expect(getAiCodingCli(null)).toBeUndefined();
+    expect(getAiCodingCli(undefined)).toBeUndefined();
   });
 });
 

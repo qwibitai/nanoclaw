@@ -11,7 +11,7 @@
 import { execSync } from 'child_process';
 import path from 'path';
 
-import type { HeadlessOpts, SpawnArgs, SetupCli } from './types.js';
+import type { HeadlessOpts, SpawnArgs, AiCodingCli } from './types.js';
 
 function isInstalled(): boolean {
   try {
@@ -56,7 +56,7 @@ function handoff(prompt: string): SpawnArgs {
   };
 }
 
-export const claudeCli: SetupCli = {
+export const claudeCli: AiCodingCli = {
   name: 'claude',
   displayName: 'Claude Code',
   binary: 'claude',

@@ -1,5 +1,5 @@
 /**
- * Headless setup-CLI fallback for timezone resolution.
+ * Headless AI-coding CLI fallback for timezone resolution.
  *
  * When the user answers the UTC-confirmation prompt with something that
  * isn't a valid IANA zone ("NYC", "Jerusalem time", "eastern"), spawn
@@ -18,15 +18,15 @@ import * as p from '@clack/prompts';
 import k from 'kleur';
 
 import { isValidTimezone } from '../../src/timezone.js';
-import { resolveSetupCli } from './setup-cli/index.js';
+import { resolveAiCodingCli } from './ai-coding-cli/index.js';
 import { fitToWidth, fmtDuration } from './theme.js';
 
-export function setupCliAvailable(): boolean {
-  return resolveSetupCli() !== null;
+export function aiCodingCliAvailable(): boolean {
+  return resolveAiCodingCli() !== null;
 }
 
 /**
- * Ask the configured headless setup-CLI to map a free-text location
+ * Ask the configured headless AI-coding CLI to map a free-text location
  * description to a valid IANA zone. Shows a spinner with elapsed time.
  * Returns the resolved zone string on success, or null if no CLI is
  * available, the CLI errored, or the reply wasn't a valid IANA zone.
@@ -34,7 +34,7 @@ export function setupCliAvailable(): boolean {
 export async function resolveTimezoneViaCli(
   input: string,
 ): Promise<string | null> {
-  const cli = resolveSetupCli();
+  const cli = resolveAiCodingCli();
   if (!cli) return null;
 
   const prompt = buildPrompt(input);

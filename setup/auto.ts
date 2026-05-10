@@ -39,9 +39,9 @@ import { runTelegramChannel } from './channels/telegram.js';
 import { runWhatsAppChannel } from './channels/whatsapp.js';
 import { pingCliAgent, type PingResult } from './lib/agent-ping.js';
 import { brightSelect } from './lib/bright-select.js';
-import { offerSetupCliOnFailure } from './lib/cli-handoff.js';
-import { listSetupClis } from './lib/setup-cli/index.js';
-import type { SetupCli } from './lib/setup-cli/types.js';
+import { offerAiCodingCliOnFailure } from './lib/cli-handoff.js';
+import { listAiCodingClis } from './lib/ai-coding-cli/index.js';
+import type { AiCodingCli } from './lib/ai-coding-cli/types.js';
 import {
   applyToEnv,
   parseFlags,
@@ -53,7 +53,7 @@ import { runWindowedStep } from './lib/windowed-runner.js';
 import { detectRegisteredGroups, detectExistingDisplayName } from './environment.js';
 import { pollHealth } from './onecli.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
-import { resolveTimezoneViaCli, setupCliAvailable } from './lib/tz-from-cli.js';
+import { resolveTimezoneViaCli, aiCodingCliAvailable } from './lib/tz-from-cli.js';
 import * as setupLog from './logs.js';
 import { ensureAnswer, fail, runQuietChild, runQuietStep, spawnQuiet } from './lib/runner.js';
 import { emit as phEmit } from './lib/diagnostics.js';
@@ -100,7 +100,7 @@ async function main(): Promise<void> {
 
   if (reconfigureCli) {
     p.intro('Reconfigure setup-helper CLI');
-    await pickSetupCli({ force: true });
+    await pickAiCodingCli({ force: true });
     p.outro(brandBody('Done — your next setup run (or step failure) will use the chosen CLI.'));
     process.exit(0);
   }
@@ -131,11 +131,11 @@ async function main(): Promise<void> {
     applyToEnv(configValues);
   }
 
-  // Pick the setup-CLI helper (Claude Code or OpenAI Codex) before any
+  // Pick the AI-coding CLI helper (Claude Code or OpenAI Codex) before any
   // step that might call into cli-handoff/cli-assist on failure. Once
-  // chosen the value is persisted to .env (NANOCLAW_SETUP_CLI=…) so
+  // chosen the value is persisted to .env (NANOCLAW_AI_CODING_CLI=…) so
   // subsequent runs skip the prompt.
-  await pickSetupCli();
+  await pickAiCodingCli();
 
   const skip = new Set(
     (process.env.NANOCLAW_SKIP ?? '')
@@ -439,7 +439,7 @@ async function main(): Promise<void> {
       } else {
         phEmit('first_chat_failed', { reason: ping });
         renderPingFailureNote(ping);
-        await offerSetupCliOnFailure({
+        await offerAiCodingCliOnFailure({
           stepName: 'cli-agent',
           msg:
             ping === 'socket_error'
@@ -551,7 +551,7 @@ async function main(): Promise<void> {
         service_running: res.terminal?.fields.SERVICE === 'running',
         has_credentials: res.terminal?.fields.CREDENTIALS === 'configured',
       });
-      await offerSetupCliOnFailure({
+      await offerAiCodingCliOnFailure({
         stepName: 'verify',
         msg: summary || 'Verification completed with unresolved issues.',
         hint: `Terminal block: ${JSON.stringify(res.terminal?.fields ?? {})}`,
@@ -955,9 +955,9 @@ async function runCustomEndpointAuth(
 
 /**
  * Pick the setup-helper CLI (Claude Code or OpenAI Codex) and persist
- * the choice to `.env` as `NANOCLAW_SETUP_CLI=<name>`. Three paths:
+ * the choice to `.env` as `NANOCLAW_AI_CODING_CLI=<name>`. Three paths:
  *
- *   1. Already-configured: `NANOCLAW_SETUP_CLI` is set, the named
+ *   1. Already-configured: `NANOCLAW_AI_CODING_CLI` is set, the named
  *      adapter exists, and the binary is installed → skip the prompt.
  *      If the configured CLI is missing (env var stale, or the user
  *      uninstalled it), fall through and re-pick with a warning.
@@ -971,9 +971,9 @@ async function runCustomEndpointAuth(
  * `opts.force` skips path 1 (always re-prompt or auto-pick from current
  * install state). Used by the `--reconfigure-cli` mode.
  */
-async function pickSetupCli(opts: { force?: boolean } = {}): Promise<void> {
-  const installed = listSetupClis().filter((c) => c.isInstalled());
-  const configured = (process.env.NANOCLAW_SETUP_CLI ?? '').toLowerCase().trim();
+async function pickAiCodingCli(opts: { force?: boolean } = {}): Promise<void> {
+  const installed = listAiCodingClis().filter((c) => c.isInstalled());
+  const configured = (process.env.NANOCLAW_AI_CODING_CLI ?? '').toLowerCase().trim();
 
   // Path 1: already-configured + still installed (skipped under --force).
   if (configured && !opts.force) {
@@ -984,14 +984,14 @@ async function pickSetupCli(opts: { force?: boolean } = {}): Promise<void> {
     }
     p.log.warn(
       brandBody(
-        `NANOCLAW_SETUP_CLI is set to "${configured}" but that CLI isn't installed. Re-picking.`,
+        `NANOCLAW_AI_CODING_CLI is set to "${configured}" but that CLI isn't installed. Re-picking.`,
       ),
     );
   }
 
   // Path 3a: nothing installed — offer Claude Code's install script.
   if (installed.length === 0) {
-    const claude = listSetupClis().find((c) => c.installScript);
+    const claude = listAiCodingClis().find((c) => c.installScript);
     if (!claude) {
       p.log.warn(
         brandBody(
@@ -1025,7 +1025,7 @@ async function pickSetupCli(opts: { force?: boolean } = {}): Promise<void> {
       return;
     }
     p.log.success(`${claude.displayName} installed.`);
-    persistSetupCli(claude);
+    persistAiCodingCli(claude);
     return;
   }
 
@@ -1033,7 +1033,7 @@ async function pickSetupCli(opts: { force?: boolean } = {}): Promise<void> {
   // we surface a one-line confirmation since the user explicitly asked
   // to reconfigure and would otherwise see nothing happen.
   if (installed.length === 1) {
-    persistSetupCli(installed[0]);
+    persistAiCodingCli(installed[0]);
     setupLog.userInput('setup_cli', `${installed[0].name} (auto-picked)`);
     if (opts.force) {
       p.log.success(
@@ -1060,13 +1060,13 @@ async function pickSetupCli(opts: { force?: boolean } = {}): Promise<void> {
   ) as string;
   const chosen = installed.find((c) => c.name === pick);
   if (!chosen) return;
-  persistSetupCli(chosen);
+  persistAiCodingCli(chosen);
   setupLog.userInput('setup_cli', `${chosen.name} (picked)`);
 }
 
-function persistSetupCli(cli: SetupCli): void {
-  process.env.NANOCLAW_SETUP_CLI = cli.name;
-  writeEnvLine('NANOCLAW_SETUP_CLI', cli.name);
+function persistAiCodingCli(cli: AiCodingCli): void {
+  process.env.NANOCLAW_AI_CODING_CLI = cli.name;
+  writeEnvLine('NANOCLAW_AI_CODING_CLI', cli.name);
 }
 
 function writeEnvLine(key: string, value: string): void {
@@ -1168,7 +1168,7 @@ async function runTimezoneStep(): Promise<void> {
 
   let tz: string | null = isValidTimezone(raw) ? raw : null;
   if (!tz) {
-    if (setupCliAvailable()) {
+    if (aiCodingCliAvailable()) {
       tz = await resolveTimezoneViaCli(raw);
     } else {
       p.log.warn(

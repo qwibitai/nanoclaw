@@ -1,5 +1,5 @@
 /**
- * User-initiated handoff to an interactive setup-CLI, parallel to cli-assist.ts.
+ * User-initiated handoff to an interactive AI-coding CLI, parallel to cli-assist.ts.
  *
  * cli-assist is for failures: it runs the CLI in headless print mode,
  * parses a suggested command, and offers to run it. This module is for
@@ -12,8 +12,8 @@
  *   1. Build a handoff prompt from the caller's context: channel, current
  *      step, completed steps, collected values (secrets redacted), relevant
  *      files to read.
- *   2. Resolve the configured setup-CLI (Claude Code, OpenAI Codex, …) via
- *      `resolveSetupCli()` and spawn it interactively with the prompt as
+ *   2. Resolve the configured AI-coding CLI (Claude Code, OpenAI Codex, …) via
+ *      `resolveAiCodingCli()` and spawn it interactively with the prompt as
  *      the opening message; stdio is inherited so the CLI owns the terminal.
  *   3. When the CLI exits, control returns to the setup driver. The driver
  *      can then re-offer the same step (e.g., "How did that go?" select).
@@ -31,13 +31,13 @@ import k from 'kleur';
 import {
   type AssistContext,
   BIG_PICTURE_FILES,
-  ensureSetupCliReady,
-  offerSetupCliAssist,
+  ensureAiCodingCliReady,
+  offerAiCodingCliAssist,
   STEP_FILES,
 } from './cli-assist.js';
 import { ensureAnswer } from './runner.js';
-import { resolveSetupCli } from './setup-cli/index.js';
-import type { SetupCli } from './setup-cli/types.js';
+import { resolveAiCodingCli } from './ai-coding-cli/index.js';
+import type { AiCodingCli } from './ai-coding-cli/types.js';
 import { brandBody, note } from './theme.js';
 
 export interface HandoffContext {
@@ -63,20 +63,20 @@ export interface HandoffContext {
 }
 
 /**
- * Spawn the configured setup-CLI in interactive mode with the rendered
+ * Spawn the configured AI-coding CLI in interactive mode with the rendered
  * context as its opening prompt. Returns when the CLI exits.
  *
- * Silently no-ops (returns `false`) if no setup-CLI is available — setup
+ * Silently no-ops (returns `false`) if no AI-coding CLI is available — setup
  * runs where one is guaranteed to exist (we install it in the auth step
  * or via the picker), but an ultra-early flow failure could technically
  * reach this before that install, and crashing the handoff would be
  * worse than the handoff not firing.
  */
-export async function offerSetupCliHandoff(ctx: HandoffContext): Promise<boolean> {
-  const cli = resolveSetupCli();
+export async function offerAiCodingCliHandoff(ctx: HandoffContext): Promise<boolean> {
+  const cli = resolveAiCodingCli();
   if (!cli) {
     p.log.warn(
-      brandBody("No setup-CLI is installed yet — can't hand you off here. Finish setup first, then retry."),
+      brandBody("No AI-coding CLI is installed yet — can't hand you off here. Finish setup first, then retry."),
     );
     return false;
   }
@@ -105,7 +105,7 @@ export const HELP_ESCAPE_SENTINEL = '__NANOCLAW_HELP_ESCAPE__';
 /**
  * Wrap a clack `validate` callback so typing `?` short-circuits validation
  * and returns the HELP_ESCAPE_SENTINEL. Caller should check for the sentinel
- * after awaiting the prompt and trigger offerSetupCliHandoff if matched.
+ * after awaiting the prompt and trigger offerAiCodingCliHandoff if matched.
  *
  * Usage:
  *   const answer = await p.text({
@@ -115,7 +115,7 @@ export const HELP_ESCAPE_SENTINEL = '__NANOCLAW_HELP_ESCAPE__';
  *       return undefined;
  *     }),
  *   });
- *   if (answer === HELP_ESCAPE_SENTINEL) { await offerSetupCliHandoff(ctx); ... }
+ *   if (answer === HELP_ESCAPE_SENTINEL) { await offerAiCodingCliHandoff(ctx); ... }
  */
 export function validateWithHelpEscape(
   inner?: (value: string) => string | Error | undefined,
@@ -137,8 +137,8 @@ export function isHelpEscape(value: unknown): boolean {
   return typeof value === 'string' && value.trim() === '?';
 }
 
-export function isSetupCliUsable(): boolean {
-  return resolveSetupCli() !== null;
+export function isAiCodingCliUsable(): boolean {
+  return resolveAiCodingCli() !== null;
 }
 
 function buildSystemPrompt(ctx: HandoffContext): string {
@@ -185,21 +185,21 @@ function buildSystemPrompt(ctx: HandoffContext): string {
  * Dispatcher: checks NANOCLAW_SETUP_ASSIST_MODE and delegates to either
  * the interactive failure handoff (default) or the non-interactive assist.
  *
- * Drop-in replacement for `offerSetupCliAssist` at failure call sites.
+ * Drop-in replacement for `offerAiCodingCliAssist` at failure call sites.
  */
-export async function offerSetupCliOnFailure(
+export async function offerAiCodingCliOnFailure(
   ctx: AssistContext,
   projectRoot: string = process.cwd(),
 ): Promise<boolean> {
   if (process.env.NANOCLAW_SETUP_ASSIST_MODE === 'true' || process.env.NANOCLAW_SETUP_ASSIST_MODE === '1') {
-    return offerSetupCliAssist(ctx, projectRoot);
+    return offerAiCodingCliAssist(ctx, projectRoot);
   }
   return offerFailureHandoff(ctx, projectRoot);
 }
 
 /**
- * Interactive setup-CLI handoff for setup failures. Same role as
- * `offerSetupCliAssist` but spawns an interactive session instead of
+ * Interactive AI-coding CLI handoff for setup failures. Same role as
+ * `offerAiCodingCliAssist` but spawns an interactive session instead of
  * parsing a structured REASON/COMMAND response.
  *
  * Returns `true` if the CLI was launched (the user may have fixed
@@ -210,9 +210,9 @@ async function offerFailureHandoff(
   projectRoot: string,
 ): Promise<boolean> {
   if (process.env.NANOCLAW_SKIP_CLAUDE_ASSIST === '1') return false;
-  if (!(await ensureSetupCliReady(projectRoot))) return false;
+  if (!(await ensureAiCodingCliReady(projectRoot))) return false;
 
-  const cli = resolveSetupCli();
+  const cli = resolveAiCodingCli();
   if (!cli) return false;
 
   const want = ensureAnswer(
@@ -238,7 +238,7 @@ async function offerFailureHandoff(
   return runHandoff(cli, prompt);
 }
 
-function runHandoff(cli: SetupCli, prompt: string): Promise<boolean> {
+function runHandoff(cli: AiCodingCli, prompt: string): Promise<boolean> {
   const spawnArgs = cli.handoff(prompt);
   return new Promise<boolean>((resolve) => {
     const child = spawn(cli.binary, spawnArgs.args, {
