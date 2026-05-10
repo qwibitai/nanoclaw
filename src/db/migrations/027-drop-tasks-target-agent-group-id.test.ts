@@ -55,13 +55,21 @@ describe('027-drop-tasks-target-agent-group-id', () => {
   it('drops the idx_tasks_target_group index', () => {
     db = makeDb();
     expect(
-      (db.prepare(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_tasks_target_group'`).all() as Array<{ name: string }>).length,
+      (
+        db
+          .prepare(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_tasks_target_group'`)
+          .all() as Array<{ name: string }>
+      ).length,
     ).toBe(1);
 
     migration027.up(db);
 
     expect(
-      (db.prepare(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_tasks_target_group'`).all() as Array<{ name: string }>).length,
+      (
+        db
+          .prepare(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_tasks_target_group'`)
+          .all() as Array<{ name: string }>
+      ).length,
     ).toBe(0);
   });
 

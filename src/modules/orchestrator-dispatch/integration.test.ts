@@ -14,7 +14,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { closeDb, createAgentGroup, createMessagingGroup, createMessagingGroupAgent, initTestDb, runMigrations } from '../../db/index.js';
+import {
+  closeDb,
+  createAgentGroup,
+  createMessagingGroup,
+  createMessagingGroupAgent,
+  initTestDb,
+  runMigrations,
+} from '../../db/index.js';
 import { getDb } from '../../db/connection.js';
 import { getTaskById, insertTaskAtomic } from './db/tasks.js';
 import { computeRequestHash, deriveSpawnTaskId } from './derive-task-id.js';
@@ -511,10 +518,7 @@ describe('F1: e2e cancel during running', () => {
     vi.mocked(getChannelAdapter).mockReturnValue(undefined);
 
     // Spawn and wait for running state (use real timers for this part)
-    await applySpawnTask(
-      { content: 'Do cancellable thing', idempotency_key: 'k-cancel' },
-      orchSession,
-    );
+    await applySpawnTask({ content: 'Do cancellable thing', idempotency_key: 'k-cancel' }, orchSession);
     await drainImmediate();
     await drainImmediate();
 

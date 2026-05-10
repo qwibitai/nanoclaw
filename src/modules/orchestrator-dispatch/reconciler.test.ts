@@ -126,13 +126,7 @@ describe('index.ts — ASSERT registered actions', () => {
     expect(matches.length).toBe(5);
 
     // ASSERT: all 5 expected actions present (renamed dispatch_* → spawn_*)
-    const expectedActions = [
-      'spawn_task',
-      'spawn_complete',
-      'spawn_failed',
-      'spawn_cancel',
-      'spawn_progress',
-    ];
+    const expectedActions = ['spawn_task', 'spawn_complete', 'spawn_failed', 'spawn_cancel', 'spawn_progress'];
     for (const action of expectedActions) {
       expect(indexSrc).toContain(`'${action}'`);
     }

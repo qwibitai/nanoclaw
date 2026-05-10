@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { closeDb, createAgentGroup, createMessagingGroup, createSession, initTestDb, runMigrations } from '../../db/index.js';
+import {
+  closeDb,
+  createAgentGroup,
+  createMessagingGroup,
+  createSession,
+  initTestDb,
+  runMigrations,
+} from '../../db/index.js';
 import { getDb } from '../../db/connection.js';
 import { getTaskByParentAndIdempotency, getTaskById, insertTaskAtomic } from './db/tasks.js';
 import type { Task } from './db/tasks.js';
@@ -405,11 +412,7 @@ describe('applySpawnTask', () => {
     const caller = makeCallerSession();
     await applySpawnTask({ content: 'Do X', idempotency_key: 'k1' }, caller);
 
-    expect(setImmediateSpy).toHaveBeenCalledWith(
-      expect.any(Function),
-      expect.stringContaining('spawn-'),
-      'ag-caller',
-    );
+    expect(setImmediateSpy).toHaveBeenCalledWith(expect.any(Function), expect.stringContaining('spawn-'), 'ag-caller');
     setImmediateSpy.mockRestore();
   });
 
