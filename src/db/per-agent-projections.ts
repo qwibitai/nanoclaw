@@ -133,11 +133,21 @@ export function buildCentralProjection(srcPath: string, dstPath: string, agentGr
   }
   if (fs.existsSync(dstPath)) fs.unlinkSync(dstPath);
   const dst = new Database(dstPath);
+  // FK targets (agent_groups, users) are intentionally absent from the partial projection.
+  // Disable enforcement so INSERTs into agent_group_capabilities don't fail on missing referent rows.
+  dst.pragma('foreign_keys = OFF');
   try {
     const src = new Database(srcPath, { readonly: true });
     try {
       // Copy ONLY the schemas the container actually reads.
-      const allowed = new Set(['backlog_items', 'ship_log']);
+      const allowed = new Set(['backlog_items', 'ship_log', 'tasks', 'agent_group_capabilities']);
+      // Tables that don't use agent_group_id as their filter column.
+      const filterColumnByTable: Record<string, string> = {
+        backlog_items: 'agent_group_id',
+        ship_log: 'agent_group_id',
+        agent_group_capabilities: 'agent_group_id',
+        tasks: 'parent_agent_group_id',
+      };
       const schemaRows = src
         .prepare(
           "SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND type IN ('table','index') AND name NOT LIKE 'sqlite_%'",
@@ -157,20 +167,25 @@ export function buildCentralProjection(srcPath: string, dstPath: string, agentGr
       }
       for (const table of allowed) {
         try {
+          const filterCol = filterColumnByTable[table];
+          if (!filterCol) continue; // defensive: unknown table, skip
           const cols = src.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
           if (cols.length === 0) continue; // table doesn't exist in src
           const colList = cols.map((c) => c.name).join(', ');
           const placeholders = cols.map(() => '?').join(', ');
-          const rows = src
-            .prepare(`SELECT ${colList} FROM ${table} WHERE agent_group_id = ?`)
-            .all(agentGroupId) as Array<Record<string, unknown>>;
+          const rows = src.prepare(`SELECT ${colList} FROM ${table} WHERE ${filterCol} = ?`).all(agentGroupId) as Array<
+            Record<string, unknown>
+          >;
           const insertStmt = dst.prepare(`INSERT INTO ${table} (${colList}) VALUES (${placeholders})`);
           for (const row of rows) {
             insertStmt.run(...cols.map((c) => row[c.name]));
           }
         } catch (err) {
-          // Table may not exist yet; skip. Log if it's an unexpected error.
-          if (!(err instanceof Error) || !/no such table/.test(err.message)) {
+          const msg = err instanceof Error ? err.message : String(err);
+          // Suppress only the expected case where the table doesn't exist in this source DB yet
+          // (older installs that predate the migration). Any other error is a bug — log it.
+          const tableMissing = new RegExp(`no such table: ${table}\\b`).test(msg);
+          if (!tableMissing) {
             log.warn('buildCentralProjection: table copy failed (continuing)', { table, err });
           }
         }

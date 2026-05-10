@@ -574,10 +574,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         // user. Status is meta info and the bubble is deleted on chat
         // delivery anyway, so visual truncation here is acceptable.
         const limit = config.maxTextLength;
-        const fitted =
-          limit && editText.length > limit
-            ? splitForLimit(editText, limit)[0].trimEnd() + '…'
-            : editText;
+        const fitted = limit && editText.length > limit ? splitForLimit(editText, limit)[0].trimEnd() + '…' : editText;
         await adapter.editMessage(tid, content.messageId as string, wrapBody(fitted));
         return;
       }

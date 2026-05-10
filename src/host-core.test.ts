@@ -818,6 +818,37 @@ describe('writeSessionRouting', () => {
     expect(row!.platform_id).toBe('chan-123');
     expect(row!.thread_id).toBe('thread-77');
   });
+
+  it('test_writeSessionRouting_writes_session_id', () => {
+    createAgentGroup({
+      id: 'ag-1',
+      name: 'Agent',
+      folder: 'agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+    createMessagingGroup({
+      id: 'mg-1',
+      channel_type: 'telegram',
+      platform_id: 'tg:99',
+      name: 'Chat',
+      is_group: 0,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    writeSessionRouting('ag-1', session.id);
+
+    const db = new Database(inboundDbPath('ag-1', session.id));
+    const row = db.prepare('SELECT session_id FROM session_routing WHERE id = 1').get() as
+      | { session_id: string | null }
+      | undefined;
+    db.close();
+
+    expect(row).toBeDefined();
+    expect(row!.session_id).toBe(session.id);
+  });
 });
 
 describe('agent-shared session resolution', () => {

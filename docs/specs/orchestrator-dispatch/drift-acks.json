@@ -1,0 +1,9 @@
+{
+  "acknowledgments": [
+    {
+      "id": "B1",
+      "reason": "Bifurcated mounting mutual-exclusion is an intentional Phase 1 simplification. Design line 313 explicitly carves out the orchestrator-of-orchestrator case as 'not a Phase 1 use case but the schema supports it'. Plan's stricter mutual-exclusion in D3 implements this Phase 1 boundary cleanly; schema-level support (capability table + dispatch_task_id column) is unchanged, so Phase 2 can relax the mounting condition with a one-line code change without schema churn. Risk: zero — the rejected use case is design-acknowledged as non-Phase-1 and the relaxation path is bounded.",
+      "expires_at": "2026-08-01"
+    }
+  ]
+}

@@ -3,7 +3,7 @@
  * Self-registers on import.
  */
 import { createDiscordAdapter } from '@chat-adapter/discord';
-import { Constants, MessageType } from 'discord.js';
+import { Constants, MessageType, REST, Routes } from 'discord.js';
 
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
@@ -181,6 +181,46 @@ export function rewriteDiscordLinks(text: string): string {
   });
 }
 
+/** Minimal REST interface for Discord operations — narrow surface for testing. */
+export interface DiscordRestClient {
+  post(route: `/${string}`, options?: { body?: unknown }): Promise<unknown>;
+}
+
+/**
+ * Post a message to the top level of a Discord channel.
+ * Exported for unit testing.
+ */
+export async function discordPostParent(
+  rest: DiscordRestClient,
+  platformId: string,
+  text: string,
+): Promise<{ messageId: string }> {
+  const msg = (await rest.post(Routes.channelMessages(platformId), {
+    body: { content: text },
+  })) as { id: string };
+  return { messageId: msg.id };
+}
+
+/**
+ * Create a Discord thread from a parent message and post the first message.
+ * Exported for unit testing.
+ */
+export async function discordCreateThread(
+  rest: DiscordRestClient,
+  platformId: string,
+  parentMessageId: string,
+  title: string,
+  firstMessage: string,
+): Promise<{ threadId: string; messageId: string }> {
+  const thread = (await rest.post(Routes.threads(platformId, parentMessageId), {
+    body: { name: title },
+  })) as { id: string };
+  const firstMsg = (await rest.post(Routes.channelMessages(thread.id), {
+    body: { content: firstMessage },
+  })) as { id: string };
+  return { threadId: thread.id, messageId: firstMsg.id };
+}
+
 registerChannelAdapter('discord', {
   factory: () => {
     const env = readEnvFile(['DISCORD_BOT_TOKEN', 'DISCORD_PUBLIC_KEY', 'DISCORD_APPLICATION_ID']);
@@ -190,7 +230,8 @@ registerChannelAdapter('discord', {
       publicKey: env.DISCORD_PUBLIC_KEY,
       applicationId: env.DISCORD_APPLICATION_ID,
     });
-    return createChatSdkBridge({
+    const rest = new REST({ version: '10' }).setToken(env.DISCORD_BOT_TOKEN);
+    const bridge = createChatSdkBridge({
       adapter: discordAdapter,
       concurrency: 'concurrent',
       botToken: env.DISCORD_BOT_TOKEN,
@@ -204,5 +245,9 @@ registerChannelAdapter('discord', {
       inboundFilter: isUserMessage,
       fetchThreadAnchor: makeFetchThreadAnchor(env.DISCORD_BOT_TOKEN),
     });
+    bridge.postParent = (platformId, text) => discordPostParent(rest, platformId, text);
+    bridge.createThread = (platformId, parentMessageId, title, firstMessage) =>
+      discordCreateThread(rest, platformId, parentMessageId, title, firstMessage);
+    return bridge;
   },
 });

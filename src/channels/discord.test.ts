@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { isUserMessage, rewriteDiscordLinks } from './discord.js';
+import {
+  isUserMessage,
+  rewriteDiscordLinks,
+  discordPostParent,
+  discordCreateThread,
+  type DiscordRestClient,
+} from './discord.js';
 
 describe('rewriteDiscordLinks', () => {
   it('rewrites bare Google document and slide URLs to safe labeled links', () => {
@@ -63,5 +69,34 @@ describe('isUserMessage (Discord inbound filter)', () => {
   it('keeps messages with no raw payload', () => {
     expect(isUserMessage({})).toBe(true);
     expect(isUserMessage({ raw: {} })).toBe(true);
+  });
+});
+
+describe('discordPostParent', () => {
+  it('test_post_parent_returns_message_id: returns {messageId} from REST response', async () => {
+    const mockRest: DiscordRestClient = {
+      post: vi.fn().mockResolvedValue({ id: 'msg-abc' }),
+    };
+    const result = await discordPostParent(mockRest, 'channel-id-X', 'launched');
+    expect(result).toEqual({ messageId: 'msg-abc' });
+  });
+});
+
+describe('discordCreateThread', () => {
+  it('test_create_thread_returns_thread_id: returns {threadId, messageId} from REST responses', async () => {
+    const mockRest: DiscordRestClient = {
+      post: vi.fn().mockResolvedValueOnce({ id: 'thread-y' }).mockResolvedValueOnce({ id: 'first-msg-z' }),
+    };
+    const result = await discordCreateThread(mockRest, 'channel-X', 'parent-msg-A', 'Task Y', 'first message');
+    expect(result).toEqual({ threadId: 'thread-y', messageId: 'first-msg-z' });
+  });
+
+  it('test_thread_name_used: creates thread with correct name and startMessage', async () => {
+    const postSpy = vi.fn().mockResolvedValueOnce({ id: 'thread-z' }).mockResolvedValueOnce({ id: 'first-msg-id' });
+    const mockRest: DiscordRestClient = { post: postSpy };
+    await discordCreateThread(mockRest, 'channel', 'parent', 'My Task Name', 'first');
+    // First call: thread creation with name and startMessage (via Routes.threads)
+    expect(postSpy.mock.calls[0][1]).toEqual({ body: { name: 'My Task Name' } });
+    expect(postSpy.mock.calls[0][0]).toContain('/channels/channel/messages/parent/threads');
   });
 });

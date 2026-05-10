@@ -10,7 +10,8 @@ import fs from 'fs';
 import path from 'path';
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { getInboundSourceSessionId, migrateMessagesInTable } from './session-db.js';
+import { getInboundSourceSessionId, migrateMessagesInTable, upsertSessionRouting } from './session-db.js';
+import { INBOUND_SCHEMA } from './schema.js';
 
 const TEST_DIR = '/tmp/nanoclaw-session-db-test';
 const DB_PATH = path.join(TEST_DIR, 'inbound.db');
@@ -90,5 +91,133 @@ describe('migrateMessagesInTable', () => {
     expect(getInboundSourceSessionId(db, 'legacy-2')).toBeNull();
     expect(getInboundSourceSessionId(db, 'does-not-exist')).toBeNull();
     db.close();
+  });
+});
+
+describe('upsertSessionRouting — dispatch_task_id + session_id columns', () => {
+  function makeInboundDb(): Database.Database {
+    const db = new Database(':memory:');
+    db.pragma('journal_mode = DELETE');
+    db.exec(INBOUND_SCHEMA);
+    return db;
+  }
+
+  it('test_upsert_writes_session_id_and_dispatch_task_id', () => {
+    const db = makeInboundDb();
+    try {
+      upsertSessionRouting(db, {
+        channel_type: 'slack',
+        platform_id: 'C1',
+        thread_id: 't1',
+        session_id: 'sess-1',
+        dispatch_task_id: 'dispatch-x',
+      });
+      const row = db
+        .prepare(
+          'SELECT channel_type, platform_id, thread_id, session_id, dispatch_task_id FROM session_routing WHERE id = 1',
+        )
+        .get() as {
+        channel_type: string;
+        platform_id: string;
+        thread_id: string;
+        session_id: string;
+        dispatch_task_id: string;
+      };
+      expect(row.channel_type).toBe('slack');
+      expect(row.platform_id).toBe('C1');
+      expect(row.thread_id).toBe('t1');
+      expect(row.session_id).toBe('sess-1');
+      expect(row.dispatch_task_id).toBe('dispatch-x');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('test_upsert_coalesce_preserves_existing_dispatch_task_id', () => {
+    const db = makeInboundDb();
+    try {
+      // First write: set dispatch_task_id
+      upsertSessionRouting(db, {
+        channel_type: 'slack',
+        platform_id: 'C1',
+        thread_id: null,
+        session_id: 'sess-1',
+        dispatch_task_id: 'dispatch-x',
+      });
+      // Second write: routine wake — no dispatch_task_id provided
+      upsertSessionRouting(db, {
+        channel_type: 'slack',
+        platform_id: 'C1',
+        thread_id: null,
+        session_id: 'sess-1',
+      });
+      const row = db.prepare('SELECT dispatch_task_id, session_id FROM session_routing WHERE id = 1').get() as {
+        dispatch_task_id: string | null;
+        session_id: string | null;
+      };
+      expect(row.dispatch_task_id).toBe('dispatch-x');
+      expect(row.session_id).toBe('sess-1');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('test_upsert_coalesce_preserves_existing_session_id_on_routine_wake', () => {
+    const db = makeInboundDb();
+    try {
+      upsertSessionRouting(db, {
+        channel_type: 'slack',
+        platform_id: 'C1',
+        thread_id: null,
+        session_id: 'sess-1',
+      });
+      // Explicit null session_id — should not clobber via COALESCE
+      upsertSessionRouting(db, {
+        channel_type: 'slack',
+        platform_id: 'C1',
+        thread_id: null,
+        session_id: null,
+      });
+      const row = db.prepare('SELECT session_id FROM session_routing WHERE id = 1').get() as {
+        session_id: string | null;
+      };
+      expect(row.session_id).toBe('sess-1');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('test_upsert_works_on_legacy_db_without_new_columns', () => {
+    // Simulate an old inbound.db that predates migration 026
+    const db = new Database(':memory:');
+    db.pragma('journal_mode = DELETE');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS session_routing (
+        id           INTEGER PRIMARY KEY CHECK (id = 1),
+        channel_type TEXT,
+        platform_id  TEXT,
+        thread_id    TEXT
+      );
+    `);
+    try {
+      // Should not throw — migrateSessionRoutingTable adds missing columns
+      expect(() =>
+        upsertSessionRouting(db, {
+          channel_type: 'slack',
+          platform_id: 'C1',
+          thread_id: null,
+          session_id: 'sess-1',
+          dispatch_task_id: 'dispatch-x',
+        }),
+      ).not.toThrow();
+      const row = db.prepare('SELECT session_id, dispatch_task_id FROM session_routing WHERE id = 1').get() as {
+        session_id: string | null;
+        dispatch_task_id: string | null;
+      };
+      expect(row.session_id).toBe('sess-1');
+      expect(row.dispatch_task_id).toBe('dispatch-x');
+    } finally {
+      db.close();
+    }
   });
 });

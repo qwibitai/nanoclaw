@@ -48,18 +48,49 @@ export function openOutboundDbWritable(dbPath: string): Database.Database {
 // Alias for the upstream name; both reach the same writable open path.
 export const openOutboundDbRw = openOutboundDbWritable;
 
+/**
+ * Ensure session_routing has the dispatch_task_id and session_id columns that
+ * were added in migration 026. Inbound DBs created before that migration are
+ * missing these columns — calling this before any upsert that references them
+ * keeps older sessions compatible without requiring a separate migration runner.
+ */
+export function migrateSessionRoutingTable(db: Database.Database): void {
+  const existing = new Set(
+    (db.prepare('PRAGMA table_info(session_routing)').all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  for (const col of ['dispatch_task_id TEXT', 'session_id TEXT']) {
+    const colName = col.split(' ')[0]!;
+    if (!existing.has(colName)) {
+      db.exec(`ALTER TABLE session_routing ADD COLUMN ${col}`);
+    }
+  }
+}
+
 export function upsertSessionRouting(
   db: Database.Database,
-  routing: { channel_type: string | null; platform_id: string | null; thread_id: string | null },
+  routing: {
+    channel_type: string | null;
+    platform_id: string | null;
+    thread_id: string | null;
+    dispatch_task_id?: string | null;
+    session_id?: string | null;
+  },
 ): void {
+  migrateSessionRoutingTable(db);
   db.prepare(
-    `INSERT INTO session_routing (id, channel_type, platform_id, thread_id)
-     VALUES (1, @channel_type, @platform_id, @thread_id)
+    `INSERT INTO session_routing (id, channel_type, platform_id, thread_id, dispatch_task_id, session_id)
+     VALUES (1, @channel_type, @platform_id, @thread_id, @dispatch_task_id, @session_id)
      ON CONFLICT(id) DO UPDATE SET
-       channel_type = excluded.channel_type,
-       platform_id  = excluded.platform_id,
-       thread_id    = excluded.thread_id`,
-  ).run(routing);
+       channel_type     = excluded.channel_type,
+       platform_id      = excluded.platform_id,
+       thread_id        = excluded.thread_id,
+       dispatch_task_id = COALESCE(excluded.dispatch_task_id, session_routing.dispatch_task_id),
+       session_id       = COALESCE(excluded.session_id, session_routing.session_id)`,
+  ).run({
+    ...routing,
+    dispatch_task_id: routing.dispatch_task_id ?? null,
+    session_id: routing.session_id ?? null,
+  });
 }
 
 export interface DestinationRow {

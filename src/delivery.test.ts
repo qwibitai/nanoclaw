@@ -36,7 +36,7 @@ import {
 } from './db/index.js';
 import { getDeliveredIds } from './db/session-db.js';
 import { resolveSession, outboundDbPath, openInboundDb } from './session-manager.js';
-import { deliverSessionMessages, setDeliveryAdapter } from './delivery.js';
+import { deliverSessionMessages, setDeliveryAdapter, assertChannelRoutingConsistency } from './delivery.js';
 
 function now(): string {
   return new Date().toISOString();
@@ -375,5 +375,34 @@ describe('deliverSessionMessages — permission check', () => {
     const delivered = getDeliveredIds(inDb);
     inDb.close();
     expect(delivered.has('out-unauth')).toBe(true);
+  });
+});
+
+describe('assertChannelRoutingConsistency', () => {
+  it('test_consistency_both_null_ok', () => {
+    expect(() => assertChannelRoutingConsistency({ channelType: null, platformId: null })).not.toThrow();
+  });
+
+  it('test_consistency_both_non_null_ok', () => {
+    expect(() => assertChannelRoutingConsistency({ channelType: 'slack', platformId: 'C123' })).not.toThrow();
+  });
+
+  it('test_consistency_split_state_throws_channel_null', () => {
+    expect(() => assertChannelRoutingConsistency({ channelType: null, platformId: 'C123' })).toThrow(
+      /inconsistent channel routing/,
+    );
+  });
+
+  it('test_consistency_split_state_throws_platform_null', () => {
+    expect(() => assertChannelRoutingConsistency({ channelType: 'slack', platformId: null })).toThrow(
+      /inconsistent channel routing/,
+    );
+  });
+
+  it('test_consistency_empty_string_treated_as_null', () => {
+    // Empty string should count as null (nullish)
+    expect(() => assertChannelRoutingConsistency({ channelType: '', platformId: 'C123' })).toThrow(
+      /inconsistent channel routing/,
+    );
   });
 });

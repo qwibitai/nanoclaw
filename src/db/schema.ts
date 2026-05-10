@@ -4,6 +4,9 @@
  * Actual creation is done by migrations — do not use this at runtime.
  */
 
+// Migration 025 adds agent_group_capabilities (not shown inline — see migrations/025-agent-group-capabilities.ts).
+// Migration 026 adds tasks (not shown inline — see migrations/026-tasks-and-dispatch-routing.ts).
+
 export const SCHEMA = `
 -- Agent workspaces: folder, skills, CLAUDE.md.
 -- All workspaces are equal; privilege lives on users, not groups.
@@ -219,10 +222,12 @@ CREATE TABLE IF NOT EXISTS destinations (
 -- default the channel/thread of outbound messages when the agent doesn't
 -- specify an explicit destination.
 CREATE TABLE IF NOT EXISTS session_routing (
-  id           INTEGER PRIMARY KEY CHECK (id = 1),
-  channel_type TEXT,
-  platform_id  TEXT,
-  thread_id    TEXT
+  id               INTEGER PRIMARY KEY CHECK (id = 1),
+  channel_type     TEXT,
+  platform_id      TEXT,
+  thread_id        TEXT,
+  dispatch_task_id TEXT,
+  session_id       TEXT
 );
 `;
 
