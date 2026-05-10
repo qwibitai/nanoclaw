@@ -43,8 +43,8 @@ For each unwired channel:
 
 Present a multiple-choice with a contextual recommendation. The three options:
 
-- **Same conversation** (`--session-mode "agent-shared"` + existing folder) — all messages land in one session. Recommend for webhook + chat combos (GitHub + Slack).
-- **Same agent, separate conversations** (`--session-mode "shared"` + existing folder) — shared workspace/memory, independent threads. Recommend for same user across platforms.
+- **Same conversation** (`--session-mode "agent-shared"` + existing folder) — all messages land in one session. Recommend for webhook + chat combos (GitHub + Slack). **Do not use** if the agent group also has `per-thread` channels (e.g. GitHub): an active PR session will absorb incoming DMs and reply on the wrong channel.
+- **Same agent, separate conversations** (`--session-mode "shared"` + existing folder) — shared workspace/memory, independent threads. Recommend for same user across platforms (Signal DM, Telegram, etc.).
 - **Separate agent** (new `--folder`) — full isolation. Recommend when different people are involved.
 
 Use the channel's `typical-use` and `default-isolation` fields to pick the recommendation. Offer to explain more if the user is unsure — reference `docs/isolation-model.md` for the detailed explanation.
