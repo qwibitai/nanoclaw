@@ -64,6 +64,59 @@ jobs:
           echo "version=$NEW" >> "$GITHUB_OUTPUT"
           echo "Computed new version: v$NEW"
 
+      # Auto-generate a CHANGELOG section from PRs merged since the last
+      # tag. A maintainer-written `## [<version>]` section, if present,
+      # wins — this step is a no-op in that case, so editorial control
+      # stays with whoever pre-wrote the entry.
+      - name: Auto-generate CHANGELOG entry
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          V="${{ steps.bump.outputs.version }}"
+          if [ -f CHANGELOG.md ] && grep -q "^## \[$V\]" CHANGELOG.md; then
+            echo "CHANGELOG.md already has a [$V] entry — leaving it alone."
+            exit 0
+          fi
+
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -n "$LAST_TAG" ]; then
+            TS=$(git log -1 --format=%ct "$LAST_TAG")
+            SINCE=$(date -u -d "@$TS" +%Y-%m-%dT%H:%M:%SZ)
+            echo "Listing PRs merged since $LAST_TAG ($SINCE)."
+          else
+            SINCE="1970-01-01T00:00:00Z"
+            echo "No prior tag — listing all merged PRs."
+          fi
+
+          BULLETS=$(gh api -X GET "repos/${{ github.repository }}/pulls" \
+            -f state=closed -f base=main -f sort=updated -f direction=desc \
+            -F per_page=100 \
+            --jq "[.[] | select(.merged_at != null and .merged_at > \"$SINCE\") | \"- #\(.number) \(.title) (@\(.user.login))\"] | .[]")
+
+          DATE=$(date -u +%Y-%m-%d)
+          {
+            echo "## [$V] - $DATE"
+            echo ""
+            if [ -n "$BULLETS" ]; then
+              echo "$BULLETS"
+            else
+              echo "- No PRs merged since the last release."
+            fi
+            echo ""
+          } > /tmp/new-section.md
+
+          if [ -f CHANGELOG.md ]; then
+            cat /tmp/new-section.md CHANGELOG.md > /tmp/changelog.new
+          else
+            cp /tmp/new-section.md /tmp/changelog.new
+          fi
+          mv /tmp/changelog.new CHANGELOG.md
+
+          git add CHANGELOG.md
+          git commit -m "docs: auto-generate CHANGELOG for v$V"
+          git push
+          echo "::notice::Auto-generated CHANGELOG entry for v$V. To edit it, cancel this run, push your edits to main, and re-dispatch — the pre-existing section will win on re-run."
+
       # Gate 3: CHANGELOG must already have an entry for the new version.
       - name: Verify CHANGELOG entry exists
         run: |
