@@ -187,6 +187,10 @@ export function extractRouting(messages: MessageInRow[]): RoutingContext {
  * agent scheduled tasks for the wrong hour.
  *
  * Strips routing fields — the agent never sees platform_id, channel_type, thread_id.
+ *
+ * Dispatch envelopes handled:
+ * - {_dispatch: {task_id}, text}: renders text as prompt; surfaces task_id as system context.
+ * - {_dispatch_cancel: {task_id, reason}}: renders as a structured system note (kind='system').
  */
 export function formatMessages(messages: MessageInRow[]): string {
   const header = `<context timezone="${escapeXml(TIMEZONE)}" />\n`;
@@ -199,6 +203,22 @@ export function formatMessages(messages: MessageInRow[]): string {
   const systemMessages = messages.filter((m) => m.kind === 'system');
 
   const parts: string[] = [];
+
+  // Detect dispatch envelope in the first chat message and inject a system fact.
+  // The _dispatch.task_id is surfaced before the prompt so the agent knows it
+  // is operating as a dispatched child and can reference its own task_id.
+  let dispatchTaskId: string | null = null;
+  if (chatMessages.length > 0) {
+    const firstContent = parseContent(chatMessages[0].content);
+    const envelope = detectDispatchEnvelope(firstContent);
+    if (envelope) {
+      dispatchTaskId = envelope.taskId;
+    }
+  }
+
+  if (dispatchTaskId) {
+    parts.push(`[Dispatch context]\ntask_id: ${dispatchTaskId}\nYou are running as a dispatched task. Use dispatch_progress, dispatch_complete, or dispatch_failed to report status to the orchestrator.`);
+  }
 
   if (chatMessages.length > 0) {
     parts.push(formatChatMessages(chatMessages));
@@ -214,6 +234,20 @@ export function formatMessages(messages: MessageInRow[]): string {
   }
 
   return header + parts.join('\n\n');
+}
+
+/**
+ * Detect whether a chat message carries a dispatch envelope ({_dispatch: {task_id}, text}).
+ * Returns the envelope and plain text if present, null otherwise.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function detectDispatchEnvelope(content: any): { taskId: string; text: string } | null {
+  if (typeof content !== 'object' || content === null) return null;
+  const dispatch = content._dispatch;
+  if (typeof dispatch !== 'object' || dispatch === null) return null;
+  const taskId = dispatch.task_id;
+  if (typeof taskId !== 'string') return null;
+  return { taskId, text: (content.text as string) || '' };
 }
 
 /**
@@ -257,6 +291,16 @@ function formatChatMessages(messages: MessageInRow[]): string {
 
 function formatSingleChat(msg: MessageInRow): string {
   const content = parseContent(msg.content);
+
+  // Dispatch envelope: render text field only, suppress _dispatch JSON
+  const envelope = detectDispatchEnvelope(content);
+  if (envelope) {
+    const time = formatLocalTime(msg.timestamp, TIMEZONE);
+    const idAttr = msg.seq != null ? ` id="${msg.seq}"` : '';
+    const fromAttr = originAttr(msg);
+    return `<message${idAttr}${fromAttr} sender="orchestrator" time="${escapeXml(time)}">${escapeXml(envelope.text)}</message>`;
+  }
+
   const sender = content.sender || content.author?.fullName || content.author?.userName || 'Unknown';
   const time = formatLocalTime(msg.timestamp, TIMEZONE);
   const text = content.text || '';
@@ -306,12 +350,21 @@ function formatWebhookMessage(msg: MessageInRow): string {
 
 function formatSystemMessage(msg: MessageInRow): string {
   const content = parseContent(msg.content);
+
   // Mnemon recall context: ambient memory injected by the host before each
   // user turn. Plain text by design — the agent reads it as background
   // context, not a structured system response to act on.
   if (content.subtype === 'recall_context') {
     return `[Recalled context]\n${content.text}`;
   }
+
+  // Dispatch cancellation: render as a structured directive, not raw JSON.
+  // Per design §4 S26: the orchestrator signals the child to flush and exit.
+  if (content._dispatch_cancel && typeof content._dispatch_cancel === 'object') {
+    const reason = (content._dispatch_cancel.reason as string | undefined) ?? '(none)';
+    return `[Dispatch cancelled]\nThis task was cancelled by the orchestrator (reason: ${reason}). Please flush any in-flight work and exit cleanly.`;
+  }
+
   const from = originAttr(msg);
   return `<system_response${from} action="${escapeXml(content.action || 'unknown')}" status="${escapeXml(content.status || 'unknown')}">${JSON.stringify(content.result || null)}</system_response>`;
 }

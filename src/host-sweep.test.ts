@@ -2,9 +2,11 @@
  * Unit tests for the stuck-container decision logic introduced by
  * ACTION-ITEMS item 9. Lives on the pure helper `decideStuckAction` so we
  * don't have to mock the filesystem or the container runner.
+ *
+ * Also contains C3 watchdog integration tests.
  */
 import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { deleteOrphanProcessingClaims, getProcessingClaims } from './db/session-db.js';
 import {
@@ -12,10 +14,76 @@ import {
   CLAIM_STUCK_MS,
   SPAWN_GRACE_MS,
   _resetStuckProcessingRowsForTesting,
+  _sweepTaskWatchdogForTesting,
   decideStuckAction,
   parseSqliteUtc,
 } from './host-sweep.js';
 import type { Session } from './types.js';
+
+// ─── Module mocks for C3 watchdog integration tests ──────────────────────────
+// These mocks are hoisted and only affect tests that use them. The existing
+// decideStuckAction / resetStuckProcessingRows tests are pure and don't invoke
+// these imports, so they are unaffected.
+
+const mockGetActiveTasks = vi.fn();
+const mockTransitionToTerminal = vi.fn();
+const mockGetCapabilityConfig = vi.fn();
+const mockPendingTerminalDispatchOutboundSeenAt = vi.fn();
+const mockWriteSessionMessage = vi.fn();
+const mockWakeContainer = vi.fn();
+const mockIsContainerRunning = vi.fn();
+const mockGetSession = vi.fn();
+const mockRunReconcilerSweep = vi.fn();
+
+vi.mock('./modules/orchestrator-dispatch/db/tasks.js', () => ({
+  getActiveTasks: (...args: unknown[]) => mockGetActiveTasks(...args),
+  transitionToTerminal: (...args: unknown[]) => mockTransitionToTerminal(...args),
+  getOrphanedTasks: vi.fn().mockReturnValue([]),
+}));
+
+vi.mock('./modules/orchestrator-dispatch/db/agent-group-capabilities.js', () => ({
+  getCapabilityConfig: (...args: unknown[]) => mockGetCapabilityConfig(...args),
+}));
+
+vi.mock('./modules/orchestrator-dispatch/watchdog.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./modules/orchestrator-dispatch/watchdog.js')>();
+  return {
+    ...real,
+    pendingTerminalDispatchOutboundSeenAt: (...args: unknown[]) =>
+      mockPendingTerminalDispatchOutboundSeenAt(...args),
+  };
+});
+
+vi.mock('./session-manager.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./session-manager.js')>();
+  return {
+    ...real,
+    writeSessionMessage: (...args: unknown[]) => mockWriteSessionMessage(...args),
+    outboundDbPath: real.outboundDbPath,
+  };
+});
+
+vi.mock('./container-runner.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./container-runner.js')>();
+  return {
+    ...real,
+    isContainerRunning: (...args: unknown[]) => mockIsContainerRunning(...args),
+    wakeContainer: (...args: unknown[]) => mockWakeContainer(...args),
+  };
+});
+
+vi.mock('./db/sessions.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./db/sessions.js')>();
+  return {
+    ...real,
+    getSession: (...args: unknown[]) => mockGetSession(...args),
+  };
+});
+
+vi.mock('./modules/orchestrator-dispatch/reconciler.js', () => ({
+  runReconcilerSweep: () => mockRunReconcilerSweep(),
+  runReconcilerOnStartup: vi.fn(),
+}));
 
 const BASE = Date.parse('2026-04-20T12:00:00.000Z');
 
@@ -389,5 +457,270 @@ describe('parseSqliteUtc', () => {
     // bare string returns different values depending on the host TZ.)
     const bare = '2026-04-20T12:00:00';
     expect(parseSqliteUtc(bare)).toBe(Date.parse(bare + 'Z'));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// C3: Task watchdog integration tests
+//
+// Tests the sweepTaskWatchdog() pass that runs after the per-session sweep loop.
+// Uses vi.mock (hoisted at top of file) to intercept DB and container calls.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const NOW = Date.parse('2026-04-20T12:00:00.000Z');
+
+function makeTask(overrides: Partial<{
+  task_id: string;
+  parent_session_id: string;
+  parent_agent_group_id: string;
+  child_session_id: string | null;
+  status: 'pending' | 'running';
+  admitted_at: string;
+  started_at: string | null;
+  last_progress_at: string | null;
+  deadline: string | null;
+}> = {}) {
+  return {
+    task_id: 'task-watchdog-1',
+    idempotency_key: 'idem-w1',
+    parent_session_id: 'parent-sess',
+    parent_agent_group_id: 'parent-ag',
+    parent_messaging_group_id: null,
+    target_agent_group_id: 'target-ag',
+    child_session_id: 'child-sess',
+    status: 'running' as const,
+    task_content: '{}',
+    request_hash: 'hash',
+    deadline: null,
+    parent_platform_message_id: null,
+    child_platform_thread_id: null,
+    child_messaging_group_id: null,
+    admitted_at: new Date(NOW - 10 * 60 * 1000).toISOString(),
+    started_at: new Date(NOW - 9 * 60 * 1000).toISOString(),
+    completed_at: null,
+    failed_at: null,
+    cancelled_at: null,
+    last_progress_at: new Date(NOW - 2 * 60 * 1000).toISOString(),
+    last_progress_message: null,
+    fail_reason: null,
+    result_summary: null,
+    dispatch_completion_attempts: 0,
+    completion_lease_at: null,
+    surface_mode: 'headless' as const,
+    created_at: new Date(NOW - 10 * 60 * 1000).toISOString(),
+    ...overrides,
+  };
+}
+
+function fakeParentSession() {
+  return {
+    id: 'parent-sess',
+    agent_group_id: 'parent-ag',
+    messaging_group_id: null,
+    thread_id: null,
+    agent_provider: null,
+    status: 'active' as const,
+    container_status: 'running' as const,
+    last_active: null,
+    created_at: new Date().toISOString(),
+  };
+}
+
+describe('sweepTaskWatchdog (C3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSession.mockReturnValue(fakeParentSession());
+    mockIsContainerRunning.mockReturnValue(true);
+    mockWakeContainer.mockResolvedValue(true);
+    mockWriteSessionMessage.mockResolvedValue(undefined);
+    mockGetCapabilityConfig.mockReturnValue(null); // use defaults
+    mockPendingTerminalDispatchOutboundSeenAt.mockReturnValue(null);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('test_watchdog_terminates_no_progress_task: reaped task gets failed + parent notified', async () => {
+    const task = makeTask({
+      last_progress_at: new Date(NOW - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago — past 30 min default
+    });
+    mockGetActiveTasks.mockReturnValue([task]);
+    mockTransitionToTerminal.mockReturnValue(true);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    await _sweepTaskWatchdogForTesting();
+
+    expect(mockTransitionToTerminal).toHaveBeenCalledWith(
+      task.task_id,
+      'failed',
+      expect.objectContaining({ fail_reason: 'no_progress_timeout' }),
+    );
+    expect(mockWriteSessionMessage).toHaveBeenCalledWith(
+      task.parent_agent_group_id,
+      task.parent_session_id,
+      expect.objectContaining({ kind: 'system' }),
+    );
+    expect(mockWakeContainer).toHaveBeenCalled();
+  });
+
+  it('test_watchdog_skips_when_drain_active: task with recent terminal outbound is not reaped', async () => {
+    const task = makeTask({
+      last_progress_at: new Date(NOW - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
+    });
+    // Drain guard: terminal action seen 30s ago, within 120s grace
+    mockPendingTerminalDispatchOutboundSeenAt.mockReturnValue(new Date(NOW - 30 * 1000).toISOString());
+    mockGetActiveTasks.mockReturnValue([task]);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    await _sweepTaskWatchdogForTesting();
+
+    expect(mockTransitionToTerminal).not.toHaveBeenCalled();
+    expect(mockWriteSessionMessage).not.toHaveBeenCalled();
+  });
+
+  it('CAS guard: 0-rows transitionToTerminal skips parent notification', async () => {
+    const task = makeTask({
+      last_progress_at: new Date(NOW - 2 * 60 * 60 * 1000).toISOString(),
+    });
+    mockGetActiveTasks.mockReturnValue([task]);
+    mockTransitionToTerminal.mockReturnValue(false); // CAS failed — already terminal
+
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    await _sweepTaskWatchdogForTesting();
+
+    expect(mockTransitionToTerminal).toHaveBeenCalled();
+    expect(mockWriteSessionMessage).not.toHaveBeenCalled();
+  });
+
+  it('test_one_task_failure_doesnt_skip_others: error in one task does not prevent processing others', async () => {
+    // Both tasks have stale progress — both should trigger transitionToTerminal.
+    // The first call throws (simulates a corrupt task failing mid-reap).
+    const badTask = makeTask({
+      task_id: 'bad-task',
+      last_progress_at: new Date(NOW - 2 * 60 * 60 * 1000).toISOString(), // stale — triggers reap
+    });
+    const goodTask = makeTask({
+      task_id: 'good-task',
+      last_progress_at: new Date(NOW - 2 * 60 * 60 * 1000).toISOString(), // stale — should also be reaped
+    });
+    mockGetActiveTasks.mockReturnValue([badTask, goodTask]);
+    // First call (bad task) — throws to simulate a corrupt/unrecoverable failure mid-loop
+    // Second call (good task) — returns true
+    mockTransitionToTerminal
+      .mockImplementationOnce(() => { throw new Error('synthetic failure'); })
+      .mockReturnValue(true);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    await _sweepTaskWatchdogForTesting();
+
+    // Both tasks were attempted — try/catch isolation ensures good task ran
+    expect(mockTransitionToTerminal).toHaveBeenCalledTimes(2);
+    // Only good task (second call) succeeded, so only one parent notification
+    expect(mockWriteSessionMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses per-orchestrator config when available', async () => {
+    const task = makeTask({
+      last_progress_at: new Date(NOW - 35 * 60 * 1000).toISOString(), // 35 min ago
+    });
+    // Custom timeout of 60 min — 35 min is within timeout, so no reap
+    mockGetCapabilityConfig.mockReturnValue({
+      noProgressTimeoutSec: 3600,
+      spawnDeadlineSec: 600,
+      drainGraceSec: 180,
+      concurrencyCap: 5,
+    });
+    mockGetActiveTasks.mockReturnValue([task]);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    await _sweepTaskWatchdogForTesting();
+
+    expect(mockTransitionToTerminal).not.toHaveBeenCalled();
+  });
+
+  it('falls back to default timeouts when capability config is absent', async () => {
+    const task = makeTask({
+      last_progress_at: new Date(NOW - 35 * 60 * 1000).toISOString(), // 35 min ago — past 30 min default
+    });
+    mockGetCapabilityConfig.mockReturnValue(null); // no config
+    mockGetActiveTasks.mockReturnValue([task]);
+    mockTransitionToTerminal.mockReturnValue(true);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    await _sweepTaskWatchdogForTesting();
+
+    // Default 1800s = 30 min; 35 min ago should trigger no-progress reap
+    expect(mockTransitionToTerminal).toHaveBeenCalledWith(
+      task.task_id,
+      'failed',
+      expect.objectContaining({ fail_reason: 'no_progress_timeout' }),
+    );
+  });
+
+  // test_watchdog_fail_reason_canonical: all 4 watchdog actions produce canonical fail_reason values
+  it.each([
+    {
+      label: 'no-progress → no_progress_timeout',
+      taskOverrides: { last_progress_at: new Date(NOW - 2 * 60 * 60 * 1000).toISOString() },
+      expectedFailReason: 'no_progress_timeout',
+    },
+    {
+      label: 'deadline → deadline_exceeded',
+      taskOverrides: {
+        deadline: new Date(NOW - 60 * 60 * 1000).toISOString(),
+        last_progress_at: new Date(NOW - 2 * 60 * 1000).toISOString(),
+      },
+      expectedFailReason: 'deadline_exceeded',
+    },
+    {
+      label: 'spawn-deadline → spawn_deadline',
+      taskOverrides: {
+        status: 'pending' as const,
+        started_at: null,
+        last_progress_at: null,
+        admitted_at: new Date(NOW - 10 * 60 * 1000).toISOString(), // 10 min > 5 min spawn deadline
+      },
+      expectedFailReason: 'spawn_deadline',
+    },
+    {
+      label: 'container-exit → container_exit',
+      taskOverrides: {
+        child_session_id: 'child-sess',
+        last_progress_at: new Date(NOW - 2 * 60 * 1000).toISOString(), // recent progress
+      },
+      expectedFailReason: 'container_exit',
+      childContainerStopped: true,
+    },
+  ])('test_watchdog_fail_reason_canonical: $label', async ({ taskOverrides, expectedFailReason, childContainerStopped }) => {
+    const task = makeTask(taskOverrides);
+    mockGetActiveTasks.mockReturnValue([task]);
+    mockTransitionToTerminal.mockReturnValue(true);
+    if (childContainerStopped) {
+      mockIsContainerRunning.mockReturnValue(false);
+    }
+
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    await _sweepTaskWatchdogForTesting();
+
+    expect(mockTransitionToTerminal).toHaveBeenCalledWith(
+      task.task_id,
+      'failed',
+      expect.objectContaining({ fail_reason: expectedFailReason }),
+    );
   });
 });

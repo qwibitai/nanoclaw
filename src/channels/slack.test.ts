@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { parseSlackWorkspaces } from './slack.js';
+import { parseSlackWorkspaces, slackPostParent, slackCreateThread, type SlackPostMessageClient } from './slack.js';
 
 describe('parseSlackWorkspaces', () => {
   it('returns an empty list when no credentials present', () => {
@@ -49,5 +49,41 @@ describe('parseSlackWorkspaces', () => {
       SLACK_SIGNING_SECRET_ORPHAN: 'sig-orphan',
     });
     expect(ws).toEqual([]);
+  });
+});
+
+describe('slackPostParent', () => {
+  it('test_post_parent_returns_ts: returns {messageId} from response.ts', async () => {
+    const mockClient: SlackPostMessageClient = {
+      chat: {
+        postMessage: vi.fn().mockResolvedValue({ ts: 'parent-1234.5678', ok: true }),
+      },
+    };
+    const result = await slackPostParent(mockClient, 'C0', 'launched task');
+    expect(result).toEqual({ messageId: 'parent-1234.5678' });
+    expect(mockClient.chat.postMessage).toHaveBeenCalledWith({ channel: 'C0', text: 'launched task' });
+  });
+});
+
+describe('slackCreateThread', () => {
+  it('test_create_thread_returns_parent_as_thread_id: threadId === parentMessageId (not reply.ts)', async () => {
+    const mockClient: SlackPostMessageClient = {
+      chat: {
+        postMessage: vi.fn().mockResolvedValue({ ts: 'reply-9999.0000', ok: true }),
+      },
+    };
+    const result = await slackCreateThread(mockClient, 'C0', 'parent-1234.5678', 'Task X', 'first message');
+    expect(result).toEqual({ threadId: 'parent-1234.5678', messageId: 'reply-9999.0000' });
+  });
+
+  it('test_create_thread_passes_thread_ts_correctly: calls postMessage with thread_ts = parentMessageId', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ts: 'reply-ts', ok: true });
+    const mockClient: SlackPostMessageClient = { chat: { postMessage } };
+    await slackCreateThread(mockClient, 'C0', 'parent-X', 'Task', 'msg');
+    expect(postMessage).toHaveBeenCalledWith({
+      channel: 'C0',
+      thread_ts: 'parent-X',
+      text: 'msg',
+    });
   });
 });

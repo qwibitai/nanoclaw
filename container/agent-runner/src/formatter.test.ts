@@ -258,6 +258,79 @@ describe('formatSystemMessage', () => {
   });
 });
 
+describe('dispatch envelope (_dispatch)', () => {
+  it('test_dispatch_envelope_renders_text_only', () => {
+    insertMessage('dm1', 'chat', { _dispatch: { task_id: 'dispatch-abc' }, text: 'Do X' });
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('Do X');
+    // _dispatch JSON should NOT appear in user-visible text
+    expect(result).not.toContain('"_dispatch"');
+  });
+
+  it('test_dispatch_envelope_exposes_task_id_to_system', () => {
+    insertMessage('dm2', 'chat', { _dispatch: { task_id: 'dispatch-abc' }, text: 'Do X' });
+    const result = formatMessages(getPendingMessages());
+    // task_id must appear in the system context section
+    expect(result).toContain('dispatch-abc');
+  });
+
+  it('test_plain_text_unchanged', () => {
+    insertMessage('pm1', 'chat', { sender: 'Alice', text: 'Hello world' });
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('Hello world');
+  });
+
+  it('test_non_dispatch_json_renders_text_field', () => {
+    insertMessage('nm1', 'chat', { text: 'Hi' });
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('Hi');
+    expect(result).not.toContain('"_dispatch"');
+  });
+
+  it('test_dispatch_envelope_does_not_leak_json_as_visible_text', () => {
+    insertMessage('dm3', 'chat', { _dispatch: { task_id: 'dispatch-xyz' }, text: 'Run the analysis' });
+    const result = formatMessages(getPendingMessages());
+    // The raw JSON envelope must not appear in user-visible output
+    expect(result).not.toContain('_dispatch_cancel');
+    expect(result).not.toContain('"task_id":"dispatch-xyz"');
+    // But the task_id itself should appear in a structured system note
+    expect(result).toContain('dispatch-xyz');
+  });
+});
+
+describe('dispatch cancel envelope (_dispatch_cancel)', () => {
+  it('test_dispatch_cancel_envelope_renders_as_system_note', () => {
+    insertMessage('dc1', 'system', {
+      _dispatch_cancel: { task_id: 'dispatch-abc', reason: 'orchestrator override' },
+    });
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('cancelled by the orchestrator');
+    expect(result).toContain('orchestrator override');
+    // Raw JSON envelope must NOT appear as user-visible text
+    expect(result).not.toContain('"_dispatch_cancel"');
+  });
+
+  it('test_dispatch_cancel_envelope_without_reason_uses_placeholder', () => {
+    insertMessage('dc2', 'system', {
+      _dispatch_cancel: { task_id: 'dispatch-abc' },
+    });
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('cancelled by the orchestrator');
+    expect(result).toContain('(none)');
+    // Must not throw — this is a critical invariant
+    expect(result).not.toContain('"_dispatch_cancel"');
+  });
+
+  it('test_dispatch_cancel_envelope_task_id_does_not_appear_as_visible_json', () => {
+    insertMessage('dc3', 'system', {
+      _dispatch_cancel: { task_id: 'dispatch-test', reason: 'test reason' },
+    });
+    const result = formatMessages(getPendingMessages());
+    // Should be a plain readable system note, not raw JSON
+    expect(result).not.toContain('"task_id"');
+  });
+});
+
 describe('stripInternalTags', () => {
   it('strips single-line internal tags and trims', () => {
     expect(stripInternalTags('hello <internal>secret</internal> world')).toBe('hello  world');

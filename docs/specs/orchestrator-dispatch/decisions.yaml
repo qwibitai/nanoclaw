@@ -1,645 +1,1008 @@
-feature: orchestrator-dispatch
-created_by: /team-brief  # backfilled retroactively after /team-design and /team-review
-last_updated_by: /team-brief
+# Decision record for orchestrator-dispatch
+# Initialized by /team-brief on 2026-05-09
+# Schema: skills/shared/decision-record-schema.md
 
-# Workflow note: /team-brief was backfilled after /team-design and
-# /team-review already completed. The constraints, decisions, and
-# assumptions below were lifted from those artifacts and the
-# conversation history; nothing here is new.
+feature: orchestrator-dispatch
+brief_path: docs/specs/orchestrator-dispatch/brief.md
+generated_at: 2026-05-09
 
 constraints:
   - id: C1
-    type: HARD
-    text: |
-      Synthetic thread_id breaks adapter delivery when messaging_group_id is
-      set. A child session with a channel surface (mg_id non-null) MUST use a
-      real platform thread ID returned by adapter.createThread. Synthetic IDs
-      (e.g. "task-<id>") are valid ONLY when messaging_group_id IS NULL —
-      i.e. internal-only fallback path for non-thread channels.
-    source: design
-    verified: true
-    affects_groups: []  # populated by /team-plan
+    classification: HARD
+    statement: "Total additional resident memory for the dashboard process must not exceed 150MB under normal load"
+    source: user-explicit
+    rationale: "User stated 'memory efficient AF'. Multica (~400-700MB Postgres+Go+Next.js stack) explicitly rejected on this constraint."
 
   - id: C2
-    type: HARD
-    text: |
-      Channel adapter contract has no createThread capability today. MVP
-      cannot ship without adding it. Per M10, the method is optional with
-      a supportsCreateThread capability flag (mirrors existing supportsThreads,
-      setTyping?, deleteMessage? convention) so non-thread adapters compile.
-    source: design
-    verified: true
-    affects_groups: []
+    classification: HARD
+    statement: "No new long-running service. Dashboard piggybacks on existing Node host process."
+    source: derived-from-C1
+    rationale: "Memory budget rules out separate daemon, separate Postgres, separate Go binary."
 
   - id: C3
-    type: SOFT
-    text: |
-      Multica's ~400-700MB resident memory is too heavy for the dashboard
-      budget (target ~120MB). Choice to build a custom Vite SPA over Multica
-      is reversible if budget changes.
-    source: design
-    verified: true
-    affects_groups: []
+    classification: HARD
+    statement: "dispatch_task is additive infrastructure. Must not modify or replace src/modules/agent-to-agent/."
+    source: user-explicit
+    rationale: "User pushed back on reusing agent-to-agent. Both primitives coexist for different patterns: agent-to-agent for hierarchical subagents, dispatch_task for flat orchestrator fanout."
 
   - id: C4
-    type: HARD
-    text: |
-      Migration 024 partial-UNIQUE index (UNIQUE(agent_group_id,
-      messaging_group_id) WHERE thread_id IS NULL AND messaging_group_id
-      IS NOT NULL) forbids two channel-root sessions per (agent_group,
-      messaging_group). Dispatch must never create a thread_id=NULL child
-      with a non-NULL mg if a channel-root session already exists for that
-      pair. Surfaced by review M4.
-    source: review
-    verified: true
-    affects_groups: []
+    classification: HARD
+    statement: "Synthetic thread IDs must not reach a channel adapter that would deliver into a real platform thread. Children must use mgId=null OR a real platform thread from new adapter.createThread capability."
+    source: codex-verified-and-traced
+    rationale: "Verified via session-manager.ts:340 → delivery.ts:358-364 → adapter.deliver path. Slack chat.postMessage with synthetic thread_ts errors or posts to channel root."
 
   - id: C5
-    type: HARD
-    text: |
-      Host is sole inbound writer, container is sole outbound writer. The
-      two-DB invariant from CLAUDE.md. Orchestrator-dispatch must preserve
-      it — child writes outbound system action; host's applyDispatchTask /
-      applyTaskComplete handlers do all inbound writes.
-    source: CLAUDE.md
-    verified: true
-    affects_groups: []
+    classification: HARD
+    statement: "Reverse signal (task_complete/task_failed) uses NEW system action in delivery.ts, NOT channel_type='agent'."
+    source: codex-finding-cycle3
+    rationale: "Reusing agent-to-agent return path drags in agent_destinations ACL and per-pair name assumptions. Direct system action keeps bypass surgical."
 
   - id: C6
-    type: HARD
-    text: |
-      One writer per session DB file. Read-only opens from additional
-      readers in the same process are allowed (better-sqlite3 + WAL).
-      Dashboard reads outbound.db, but must not introduce a second writer
-      anywhere.
-    source: CLAUDE.md
-    verified: true
-    affects_groups: []
+    classification: HARD
+    statement: "Cancellation authorization requires parent_session_id match OR owner/admin override path with audit."
+    source: codex-finding-cycle3-v1
+    rationale: "Orchestrator role check alone insufficient — any prompt-injected orchestrator session could otherwise cancel any other orchestrator's tasks."
 
   - id: C7
-    type: HARD
-    text: |
-      Single owner. No multi-user dashboards. No multi-tenant authorization.
-      One human, one orchestrator practice, one set of credentials.
-    source: brief
-    verified: true
-    affects_groups: []
+    classification: HARD
+    statement: "Watchdog no-progress timer must be reset by genuine progress signals (task_progress MCP call or host-observed child activity)."
+    source: codex-finding-cycle3-v1
+    rationale: "Without reset, a long-running task that actively reports gets auto-killed at first heartbeat + 30min — contradicts the purpose of progress reporting."
 
   - id: C8
-    type: HARD
-    text: |
-      Localhost-only dashboard. Server binds to 127.0.0.1 only. Owner
-      bearer token (random, generated at host startup) required on
-      every API request. Origin header allowlist (only http://127.0.0.1:7457)
-      enforced on mutating endpoints. Host header allowlist enforced
-      to defeat DNS rebinding. Read endpoints can skip auth for
-      simplicity but Origin/Host checks always apply.
-    source: brief
-    verified: true
-    affects_groups: []
+    classification: HARD
+    statement: "Owner-authentication on dashboard reuses existing user_roles via src/modules/permissions/access.ts."
+    source: derived-from-existing-architecture
+    rationale: "Don't introduce parallel auth scheme. user_roles is the canonical owner/admin resolution path."
 
   - id: C9
-    type: HARD
-    text: |
-      Memory budget: dashboard adds ≤150MB additional resident memory
-      to the host process. Verified by ps snapshot in success criterion
-      SC7. The whole point of skipping Multica is that NanoClaw stays
-      memory-efficient.
-    source: brief
-    verified: true
-    affects_groups: []
+    classification: HARD
+    statement: "Phase 1 ships adapter.createThread for Slack and Discord. Other channels degrade to mgId=null for children."
+    source: user-decision-q1
+    rationale: "User chose 'Merge into one shippable Phase 1' — chattable threads are core to the vision."
 
   - id: C10
-    type: HARD
-    text: |
-      No new long-running services. Dashboard runs in the existing Node
-      host process. No PostgreSQL, no separate Go backend, no daemon
-      runtime. The dashboard's HTTP server is a small Node http module
-      attached to the existing event loop.
-    source: brief
-    verified: true
-    affects_groups: []
-
-  - id: C11
-    type: HARD
-    text: |
-      Slack-first owner workflow for child interaction. Primary owner
-      surface for chatting with a specific child task is the native
-      Slack/Discord subthread under the orchestrator's "Launched task X"
-      parent message. Dashboard is the secondary surface for non-thread
-      channels and for fleet visibility.
-    source: brief
-    verified: true
-    affects_groups: []
-
-  - id: C12
-    type: HARD
-    text: |
-      Existing src/modules/agent-to-agent/ module (create_agent +
-      routeAgentMessage) stays untouched. Orchestrator-dispatch is a
-      new sibling module at src/modules/orchestrator-dispatch/. No
-      refactor, no merge, no replacement.
-    source: brief
-    verified: true
-    affects_groups: []
-
-  - id: C13
-    type: SOFT
-    text: |
-      Concurrency caps configurable with sensible defaults: 6 concurrent
-      tasks per orchestrator session (existing R5 in design) AND 3
-      concurrent containers per target agent group (added per review S4).
-      Both apply.
-    source: brief
-    verified: true
-    affects_groups: []
-
-  - id: C14
-    type: SOFT
-    text: |
-      Dashboard taste: Linear / Raycast / Arc lineage. Restrained, dense,
-      dark-first, keyboard-primacy. No marketing aesthetics, no
-      glassmorphism, no parallax. Documented in ui-design.md.
-    source: brief
-    verified: true
-    affects_groups: []
+    classification: SOFT
+    statement: "Dashboard visual quality must pass jony-ive audit and impeccable design review."
+    source: user-explicit
+    rationale: "User said: 'we have UI/UX design skills to leverage as well for the UI build'. Dashboard should feel premium, not default-MUI admin panel."
 
 decisions:
   - id: D1
-    stage: design
-    description: Use a new orchestrator role + dispatch_task primitive instead of reusing agent-to-agent
-    chosen: |
-      Build a new src/modules/orchestrator-dispatch/ module sitting alongside
-      the existing agent-to-agent module. Tasks dispatched into existing
-      agent groups; each task spawns a per-thread session.
-    rejected:
-      - option: Reuse agent-to-agent (create_agent + routeAgentMessage)
-        reason: |
-          create_agent is a heavyweight per-pair persistent subagent
-          spawning primitive — wrong shape for flat dispatch. routeAgentMessage
-          inherits caller threading, collapsing N children into one session.
-    constraint_refs: [C1, C5]
-    affects_groups: []
+    question: "Phase 1 shape: mgId=null architecture-only milestone, full chattable threads, or threads-required-no-fallback?"
+    options_considered:
+      - "Phase 1A (mgId=null) as architecture validation, Phase 1B adds adapter.createThread"
+      - "Merge into one shippable Phase 1 with adapter.createThread for Slack/Discord, mgId=null fallback for non-thread channels"
+      - "Skip mgId=null entirely; threads required, error on non-thread channels"
+    chosen: "Merge into one shippable Phase 1 (option 2)"
+    rationale: "User chose this in Step 3 Q1. Delivers the chattable-threads vision in one milestone. Faster path to user-facing value than splitting; cleaner than refusing on non-thread channels."
+    asked_at: step-3
+    answered_by: user
 
   - id: D2
-    stage: design
-    description: Dashboard runtime — custom Vite+React SPA served from existing Node host vs external service
-    chosen: |
-      Custom Vite SPA bundled and served via Node http on 127.0.0.1:7457.
-      No new background services. Reads central + per-session DBs directly
-      via better-sqlite3.
-    rejected:
-      - option: Multica (PostgreSQL + Go backend + Next.js frontend)
-        reason: |
-          400-700MB resident — too heavy. Daemon-based runtime model fights
-          NanoClaw's ephemeral container model. Ripping just Multica's UI
-          requires implementing its Go API contracts in NanoClaw — comparable
-          cost to writing a focused dashboard from scratch.
-      - option: Mission Control
-        reason: Self-labeled alpha; API churn risk on a system we'd depend on.
-      - option: Beads + community web UIs
-        reason: |
-          Beads is per-repo agent memory, not an orchestration ledger. Task
-          state must be durable host data; community UIs vary in maintenance.
-    constraint_refs: [C3]
-    affects_groups: []
+    question: "Phase 2 dashboard read-only at launch, full chat-from-dashboard, or read-only with orchestrator-only chat?"
+    options_considered:
+      - "Read-only at launch, add chat-from-dashboard later as Phase 2B"
+      - "Full read-write (chat into any child) at Phase 2 launch"
+      - "Read-only board + chat-to-orchestrator-only"
+    chosen: "Read-only at launch, add chat later (option 1)"
+    rationale: "User chose this in Step 3 Q2. Lower risk surface, faster ship. User already has chat via native Slack/Discord threads from Phase 1."
+    asked_at: step-3
+    answered_by: user
 
+forced_defaults:
+  - id: F1
+    decision: "Concurrency cap per orchestrator: 5 parallel running tasks"
+    alternative: "Higher (10+), lower (2-3), or unlimited"
+    rationale: "Enough parallelism for typical workflows; low enough that container overhead × 11 agent groups doesn't melt single host. Configurable via agent_roles.config_json at role-grant time."
+
+  - id: F2
+    decision: "No-progress timeout default: 30 minutes (1800 seconds) for tasks without explicit deadline"
+    alternative: "Shorter (10-15 min), longer (60+ min), or no default (require explicit deadline)"
+    rationale: "Codex's prior cycle landed on this. Same order of magnitude as Temporal heartbeat-timeout guidance. Configurable per role grant."
+
+  - id: F3
+    decision: "Cancellation grace window: 2 minutes between cooperative cancel signal and hard kill"
+    alternative: "Shorter (30s), longer (5+ min), or per-task override"
+    rationale: "Matches existing NanoClaw container shutdown semantics. Long enough for an agent to flush in-flight work; short enough to bound user-visible cancellation latency."
+
+  - id: F4
+    decision: "Eligible target groups: all existing groups except orchestrator-self and other orchestrators"
+    alternative: "Per-target allowlist (codify in agent_roles.config_json) or per-target ACL rows in agent_destinations"
+    rationale: "Role grant IS the authorization. Per-target ACL would replicate agent_destinations (the pattern we explicitly diverge from). Self-dispatch and orchestrator-to-orchestrator excluded to prevent loops."
+
+  - id: F5
+    decision: "Live updates transport: Server-Sent Events (SSE)"
+    alternative: "WebSocket (bidirectional), HTTP long-polling"
+    rationale: "Lower memory, simpler reconnection. One-way push is sufficient for read-only dashboard. Design phase can revisit if Phase 2B (chat) needs WebSocket later."
+
+  - id: F6
+    decision: "Dashboard framework: Vite + React (over Next.js)"
+    alternative: "Next.js, SvelteKit, raw vanilla TypeScript+React"
+    rationale: "Memory budget driver. Next.js dev/runtime adds non-trivial overhead; SSR is unnecessary for a localhost owner-only dashboard. Design phase confirms."
+
+  - id: F7
+    decision: "task_id derivation: caller-supplied idempotency key, formatted as task-${idempotency_key}"
+    alternative: "Server-issued ID + separate idempotency key (Stripe-style two-namespace pattern)"
+    rationale: "Deterministic; orchestrator can reference task_id immediately without host round-trip. Trade-off: idempotency_key and task_id retention TTLs are coupled — document in schema."
+
+  - id: F8
+    decision: "Dispatch authorization: role grant gives blanket dispatch authority across all non-orchestrator groups"
+    alternative: "Per-target authorization row required for each new target (mirrors agent_destinations)"
+    rationale: "Role grant IS the authorization. Per-call ACL would defeat the orchestrator pattern. Cancellation still requires parent_session_id match (C6) for security."
+
+  - id: F9
+    decision: "Phase 0 lookback extractor scope: keep at scripts/lookback.ts, no further iteration in this brief"
+    alternative: "Bring lookback into the orchestrator/dashboard surface"
+    rationale: "Phase 0 already complete and useful (surfaced 4 actionable items today). Restored from HEAD. Future dashboard can integrate the same data source as a 'recent threads' view, but not in this brief."
+
+phasing:
+  - phase: 0
+    name: "Lookback extractor"
+    status: complete
+    artifact: "scripts/lookback.ts (restored 2026-05-09)"
+
+  - phase: 1
+    name: "Orchestrator dispatch with chattable threads"
+    status: planned
+    deliverables:
+      - "agent_roles table + role-grant flow"
+      - "tasks table + central DB migration"
+      - "dispatch_task MCP tool (orchestrator-only)"
+      - "task_complete / task_failed system actions"
+      - "Watchdog in host-sweep.ts with progress-timer reset"
+      - "Cancel/list/progress MCP tools for orchestrator"
+      - "adapter.createThread for Slack and Discord adapters"
+      - "Graceful mgId=null fallback for non-thread channels"
+
+  - phase: 2
+    name: "Dashboard (read-only)"
+    status: planned
+    deliverables:
+      - "Vite + React SPA served from Node host"
+      - "Owner auth via user_roles"
+      - "Kanban board / task detail / session list views"
+      - "SSE live updates from chokidar file watcher"
+      - "jony-ive + impeccable design audit pass"
+
+deferred:
+  - "Phase 2B: chat-from-dashboard (write path into child sessions)"
+  - "Per-task git worktree isolation for code-touching agent groups"
+  - "Multi-host orchestration / federation"
+  - "Auto-retry policy for failed tasks"
+  - "Admin / scoped-admin dashboard access"
+  - "Host-side dependency-graph orchestration (orchestrator agent handles deps in v1)"
+  - "createThread for additional channels (Linear, GitHub, Webex, Matrix)"
+
+prior_attempt_notes: |
+  Previous /team-auto run reached cycle 3 of /team-review, paused at "cap-reached at Stage A"
+  of /team-build. Three cycle-3 v1 review reports (architecture, best-practice, codex
+  adversarial) had completed before user interrupted. Their findings were largely refinements
+  (phantom column references, timer-not-reset bugs, cancellation auth scoping) — not
+  architectural drift. The conceptual architecture is preserved in this brief; the codex
+  findings on cancellation auth (C6) and progress-timer reset (C7) are explicitly captured
+  as HARD constraints to prevent regression.
+
+# ============================================================================
+# Appended by /team-design on 2026-05-09
+# Design saved at docs/specs/orchestrator-dispatch/design.md
+# ============================================================================
+
+design_decisions:
   - id: D3
-    stage: design
-    description: Phase 1 (mgId=null children) and Phase 2 (real Slack/Discord subthreads) collapsed into single MVP
-    chosen: |
-      Single 12-day MVP with real subthreads as the default and mgId=null as
-      the fallback path for non-thread channels. Per S12 actually closer to
-      14-16 days on the honest critical path.
+    question: "Task lifecycle representation: coarse status + nullable artifacts vs fine-grained dispatch_state machine vs eventless inferred status"
+    options_considered:
+      - "Option A: Coarse status (pending/running/completed/failed/cancelled) + nullable artifact columns; state derives from data"
+      - "Option B: Fine-grained dispatch_state machine (pending/admitted/creating_thread/parent_posted/thread_created/running/completing/completed/failed/cancelled) — cycle 3 pattern"
+      - "Option C: No status column; lifecycle fully inferred from artifact column nullability"
+    chosen: "Option A — coarse status + nullable artifacts (single source of truth from data)"
+    rationale: |
+      Cycle 3 v1 of the prior abandoned attempt accumulated 3 MUST-FIX findings (M-29, M-30, M-31)
+      all stemming from parallel state/timestamp columns drifting from artifact columns. Option A
+      eliminates this entire bug class by construction — there is no parallel column to drift.
+      Aligns with existing nanoclaw schema patterns (sessions table is exactly this shape). C7
+      watchdog timer reset is structurally correct: last_progress_at is the single timer column,
+      written by task_progress and read by host-sweep. Option B was greenlit by Reviewer B
+      (best-practice) as Temporal-conformant but its implementation gaps are not theoretical —
+      they bit cycle 3 three times. Option C reduces query ergonomics without correctness gain.
+    asked_at: design-step-4
+    answered_by: design-step-6
     rejected:
-      - option: Ship Phase 1 first (no channel surface), then Phase 2
-        reason: |
-          User wants Slack-first chat; Phase 1's no-channel-surface model
-          would be discarded after ~9 days for a model that ships 3 days
-          later. Bundling avoids the throwaway work.
-    constraint_refs: [C1, C2]
-    affects_groups: []
+      - option: "Option B (fine-grained dispatch_state)"
+        reason: "Empirically accumulates phantom-column / state-drift bugs (cycle 3 v1 evidence). Redundant with artifact columns."
+      - option: "Option C (no status column)"
+        reason: "Long null-check WHERE clauses without correctness benefit; foreign to existing nanoclaw schema patterns."
 
-  - id: D4
-    stage: design
-    description: No cost/token ticker in the dashboard (UI anti-analytics rule extended)
-    chosen: No top-strip "tokens today / cost today" line. No analytics view.
-    rejected:
-      - option: Single-line dim ticker in top strip
-        reason: |
-          User reviewed and rejected — not relevant to the workflow,
-          OneCLI dashboard or chat queries can answer when needed.
-    constraint_refs: []
-    affects_groups: []
+design_constraints_added:
+  - id: C12
+    classification: HARD
+    statement: "tasks table contains last_progress_at and last_progress_message columns from initial migration (026)"
+    source: design
+    rationale: "Required to honor C7 (timer reset on task_progress) and prevent M-30 phantom-column repeat from cycle 3."
 
-  - id: D5
-    stage: design
-    description: Reverse-signal completion — channel_type vs system action
-    chosen: |
-      Direct-write kind='system' inbound row to parent_session_id (NOT
-      channel_type='agent') so the bypass is surgical and avoids dragging
-      in agent-to-agent ACL/name assumptions. Per M8, two writes per
-      task_complete: one user-visible chat into the child's subthread,
-      one system row into the parent's session.
-    rejected:
-      - option: channel_type='agent' message back to parent
-        reason: |
-          Drags in agent_destinations ACL machinery and the destination-name
-          indirection that the orchestrator pattern is built to avoid.
-    constraint_refs: [C5]
-    affects_groups: []
+  - id: C13
+    classification: HARD
+    statement: "Watchdog reads last_progress_at — NOT a separate dispatch_state_updated_at timer"
+    source: design
+    rationale: "Single timer column eliminates the M-31 class of bugs where progress signals fail to reset the watchdog. last_progress_at is written by both first-heartbeat and task_progress."
 
-  - id: D6
-    stage: design
-    description: Cut dashboard from v1 MVP (Option 4 cap-reached cut)
-    chosen: |
-      Defer the entire dashboard surface (Vite SPA + SSE + auth + dashboard
-      memory budget) to v2. v1 visibility = Slack/Discord native subthreads
-      + orchestrator chat summaries via task_complete system rows + watchdog
-      DM fallback + scripts/lookback.ts. The ui-design.md spec is preserved
-      as the v2 reference; the v1 schema is sufficient for the dashboard's
-      read model (no schema changes when adding the UI in v2).
-    rejected:
-      - option: Keep dashboard in v1 MVP and accept additional review cycles
-        reason: |
-          Trajectory pattern (cycle-1 16 MUST → cycle-2 9 NEW → cycle-3 8
-          NEW) hit the 3-cycle cap. The dashboard contributed
-          disproportionately to the precision-gap count: M3 auth, M6+M7
-          dashboard auth contradictions, M9 chokidar/SSE, M2-G login
-          endpoint, plus dashboard-memory-budget + dashboard-render
-          findings. Removing it eliminates ~50% of the surface that was
-          generating findings each cycle.
-    constraint_refs: [C9]  # memory budget — moot when dashboard deferred
-    affects_groups: []
+  - id: C14
+    classification: HARD
+    statement: "Crash recovery resumes from first NULL artifact column (admitted_at → parent_platform_message_id → child_platform_thread_id → child_session_id)"
+    source: design
+    rationale: "Option A reconciliation logic. Reconciler scans tasks in pending/running state and continues the dispatch pipeline from the first incomplete artifact step."
 
-  - id: D7
-    stage: design
-    description: Cut dependency chains (blocked_on, task_dependencies) from v1 MVP
-    chosen: |
-      Defer task_dependencies table, dependents_unblocked_json column,
-      dependents_released_at marker, and dispatch_task's blocked_on
-      parameter to v2. v1 sequencing is the owner's job — dispatch
-      batch 1, wait for task_complete reports in the orchestrator's
-      thread, dispatch batch 2.
-    rejected:
-      - option: Keep dependency chains in v1 with all the cycle-3 fixes applied
-        reason: |
-          Cycle-2 surfaced dep-related issues (S8 join table, M14
-          cross-session enforcement); cycle-3 surfaced more (M3-5
-          missing dep check in initial promotion, M3-7 dependents_released
-          list not durable, S3-B cycle detection). Each fix added schema
-          surface that compounded the design's precision-gap rate.
-          Owner sequencing is acceptable for the documented use case
-          (22-XZO-triage in batches), and v2 can reintroduce dep chains
-          on a stable v1 substrate.
-    constraint_refs: []
-    affects_groups: []
+  - id: C15
+    classification: SOFT
+    statement: "Dashboard auth uses per-owner cookie exchange via DM-issued one-time token"
+    source: design
+    rationale: "Alternative (LAN-only auth, OS user check) is fragile to mistaken access. DM token leverages existing channel auth; user must already be the owner to receive the DM."
 
-waivers: []  # populated as user decides which findings to waive
-
-assumptions:
+design_assumptions:
   - id: A1
-    stage: design
-    text: |
-      The orchestrator-spawned child sessions can chat with the owner
-      directly through Slack/Discord subthreads, leveraging existing
-      NanoClaw thread plumbing.
-    validation: |
-      Slack adapter chat.postMessage with thread_ts works; Discord
-      Message#startThread works. Spike during MVP build before relying.
+    statement: "Vite+React SPA + Node SSE endpoint stays under 150MB resident with 5 active live tasks"
+    impact: medium
+    validation: "ps -o rss= over 60-min test session at /team-ship; reconciliation gate before merge"
     validated: false
-    invalidated_at: null
 
   - id: A2
-    stage: design
-    text: |
-      Single owner, single host, ≤22 concurrent tasks, ≤11 agent groups
-      is the operational scale envelope. Choices that don't scale further
-      (e.g. blocked_on_task_ids JSON array per S8) are acceptable at this
-      scale.
-    validation: |
-      Use case is 22-item XZO triage — verified by user.
-    validated: true
-    invalidated_at: null
+    statement: "Orchestrator-only MCP tool gating can be implemented at server bootstrap by reading agent_roles from central DB on container wake"
+    impact: low
+    validation: "Read container-runner.ts startup path during /team-plan; confirm ENV or destinations projection mechanism for role bit"
+    validated: false
 
   - id: A3
-    stage: design
-    text: |
-      Slack subthreads are the primary surface for owner-chat-with-child.
-      Non-thread channels (Telegram, iMessage, email) use the fallback
-      path; owner inspects via dashboard only.
-    validation: |
-      User explicitly committed to Slack-first workflow.
-    validated: true
-    invalidated_at: null
+    statement: "mgId=null children on adapter-shared mode preserve isolation"
+    impact: low
+    validation: "Reconfirm during /team-plan; trace resolveSession semantics for mgId=null + threadId=null inputs"
+    validated: false
 
   - id: A4
-    stage: design
-    text: |
-      The host's existing delivery.ts outbound-poll path is the natural
-      place to emit SSE events for the dashboard. The dashboard does
-      not need a separate chokidar/fsevents file watcher (per review M9
-      drop).
-    validation: |
-      Measure end-to-end latency from messages_out insert to dashboard
-      pixel update during MVP build. Target: <1000ms (success criterion
-      SC4). If too slow, introduce an in-process event emitter on the
-      same code path.
+    statement: "Slack chat.postMessage with thread_ts returns the new in-thread ts, suitable as thread_id for subsequent posts"
+    impact: low
+    validation: "Slack API docs confirm; smoke test in Phase 1 build"
     validated: false
-    invalidated_at: null
 
   - id: A5
-    stage: design
-    text: |
-      Slack and Discord adapter createThread + getThreadId capability
-      can be implemented in ~2-3 days each (implementation order steps 4-5).
-      Updated from the original 1-day-each estimate after review S4 noted
-      the channels-branch separation: the methods live on the long-lived
-      `channels` branch (per CLAUDE.md), which has its own merge cadence
-      and isn't validated against trunk's tests automatically. Realistic
-      effort includes channels-branch PR + chat-sdk-bridge propagation +
-      cross-branch test coverage.
-    validation: |
-      Track actual hours during MVP build; if either lands at >4 days,
-      reflag as a risk in the next /team-review.
+    statement: "Discord.js channel.threads.create({startMessage}) returns thread object with stable id usable as thread_id"
+    impact: low
+    validation: "Smoke test in Phase 1 build against discord.js v14"
     validated: false
-    invalidated_at: null
 
   - id: A6
-    stage: design
-    text: |
-      Dashboard adds ≤30MB additional host RSS at steady state with the
-      SPA bundle served, 5 SSE clients connected, and 22 sessions open
-      (closes review S3). Comfortably under the 150MB budget (C9).
-    validation: |
-      During MVP build: snapshot RSS via `ps -p <pid> -o rss=` before
-      vs after the dashboard module is registered; repeat with 5 SSE
-      clients held open and 22 active sessions. If exceeded, switch
-      to streaming the static bundle from disk via fs.createReadStream
-      rather than buffering it in process memory.
+    statement: "chokidar watching data/v2-sessions/*/outbound.db does not exceed inotify limits at typical session counts"
+    impact: low
+    validation: "Check /proc/sys/fs/inotify/max_user_watches at /team-build"
     validated: false
-    invalidated_at: null
 
   - id: A7
-    stage: design
-    text: |
-      The /workspace/.task-context.json out-of-band nonce delivery
-      mechanism (closes M16) does not introduce a regression on the
-      existing /workspace mount semantics. The file is created by the
-      host inside data/v2-sessions/<group>/<session>/workspace/ before
-      the container is woken; the container reads from that path
-      because /workspace is bind-mounted into every container.
-    validation: |
-      During MVP build: confirm that container.json's mount stanza
-      makes /workspace readable by the agent-runner user, and that
-      the .task-context.json file is created with mode 0644 (readable
-      by the container's UID). Spike before relying.
+    statement: "Existing webhook-server.ts route registration mechanism supports adding non-webhook routes"
+    impact: low
+    validation: "Read webhook-server.ts end-to-end at /team-plan; confirm route table extensibility"
     validated: false
-    invalidated_at: null
 
-# Auto-judgments recorded during /team-auto Stage A revision pass (cycle-1 fresh review)
-auto_judgments:
-  - stage: Review
-    iteration: 1
-    decision: |
-      Pivot the MCP tool architecture from "auto-mounted/auto-unmounted
-      per session" (cycle-0 spec) to "always-present in every container,
-      host enforces via authorization check on each call" (cycle-1
-      revision). Closes M2.
-    alternatives_considered:
-      - "Build a real per-session MCP-tool gating mechanism (a new mcp-tools-gate.json written into the session by the host on wake; tool handlers read it and short-circuit with isError)."
-      - "Always-present + host-authorized (chosen)."
-    grounding:
-      - "container/agent-runner/src/mcp-tools/index.ts surfaced by Reviewer A — barrel imports every tool unconditionally at boot; no per-session hook exists"
-      - "src/command-gate.ts surfaced by Reviewer A — established codebase convention is host-side query of authoritative role/permission record per request, not container-side gating"
-      - "design.md §Constraint Analysis C5 (CLAUDE.md two-DB invariant) — host is sole authority for inbound writes; this is the existing architectural pattern"
-    scope_check:
-      adds_user_facing_capability: false
-      changes_external_behavior: false
-      changes_hard_constraint: false
-      weakens_safety_invariant: false
-    recorded_at: 2026-05-09T16:35:00Z
+  - id: A8
+    statement: "Channels branch ships createThread/postParent adapter additions without regressing existing delivery paths"
+    impact: medium
+    validation: "Land adapter additions on channels branch first; validate with existing Slack+Discord installs"
+    validated: false
 
-  - stage: Review
-    iteration: 1
-    decision: |
-      Resolve EventSource auth incompatibility (Codex C7) by switching
-      to a session cookie (HttpOnly, SameSite=Strict) rather than a
-      fetch-based SSE polyfill. The cookie is issued at first token
-      validation; EventSource sends it natively.
-    alternatives_considered:
-      - "Fetch-based SSE client (e.g. @microsoft/fetch-event-source) supports custom headers but adds a dependency."
-      - "Session cookie (HttpOnly, SameSite=Strict) — chosen."
-    grounding:
-      - "Reviewer B T1 source: OWASP CSRF cheat sheet recommends cookie + Origin double-defense as the standard CSRF prevention pattern"
-      - "MDN T1: native EventSource supports cookies via `withCredentials`; established web platform behavior"
-      - "design.md §Dashboard Auth — the bearer token is still accepted for non-browser clients (curl, scripts), so this is additive not replacing"
-    scope_check:
-      adds_user_facing_capability: false
-      changes_external_behavior: false
-      changes_hard_constraint: false
-      weakens_safety_invariant: false
-    recorded_at: 2026-05-09T16:36:00Z
+  - id: A9
+    statement: "tasks.last_progress_at written by task_progress is sufficient to keep an active task alive against the no-progress watchdog"
+    impact: high
+    validation: "Test plan in /team-tdd: write recurring task_progress from a long-running child, confirm no auto-failure across multiple sweep ticks"
+    validated: false
 
-  - stage: Review
-    iteration: 1
-    decision: |
-      Define cancellation as best-effort soft cancel (host writes a
-      system row to the child's inbound, child agent exits gracefully
-      between turns) plus a 2-minute hard timeout (watchdog calls
-      killContainer). Closes M12.
-    alternatives_considered:
-      - "True real-time LLM-turn interruption — fundamentally hard in NanoClaw's polling architecture (no signal stops in-flight Claude call)."
-      - "Best-effort + hard timeout (chosen) — matches the existing NanoClaw killContainer pattern."
-    grounding:
-      - "src/container-runner.ts:killContainer surfaced by Reviewer A — established codebase pattern for SIGKILL after grace period"
-      - "src/modules/scheduling/db.ts:cancelTask surfaced by Reviewer A — existing async-soft cancellation pattern for scheduled tasks"
-      - "design.md §Reverse signal authorize/finalize separation — cancellation reuses finalizeTaskCompletion(status='cancelled') without needing the child's nonce"
-    scope_check:
-      adds_user_facing_capability: false
-      changes_external_behavior: false
-      changes_hard_constraint: false
-      weakens_safety_invariant: false
-    recorded_at: 2026-05-09T16:37:00Z
+  - id: A10
+    statement: "Caller-supplied task_id = task-${idempotency_key} collisions across orchestrators are improbable enough that PK uniqueness suffices"
+    impact: low
+    validation: "Document in tool description that idempotency_key namespace is per-orchestrator"
+    validated: false
+    superseded_by: cycle-1-review-M6
+    note: "Cycle 1 review (M6) escalated this assumption to MUST-FIX. Three-reviewer convergence (A, B, C) flagged that namespace must be schema-encoded, not convention. Resolution: derive task_id = hash(parent_session_id, idempotency_key) + UNIQUE(parent_session_id, idempotency_key)."
 
-  - stage: Review
-    iteration: 1
-    decision: |
-      Deliver completion_nonce to the child via /workspace/.task-context.json
-      (host-written, container-readable) rather than embedding it in the
-      dispatch banner's chat content. Closes M16.
-    alternatives_considered:
-      - "Inject nonce as kind='system' row that formatter strips from chat-platform delivery — agent sees it but Slack/Discord doesn't."
-      - "Out-of-band file delivery via /workspace mount (chosen) — secret never enters conversation data plane at all."
-    grounding:
-      - "CLAUDE.md mount-allowlist section: /workspace mount is established convention; per-session workspace dir is part of the standard agent-runner contract"
-      - "Reviewer A finding A20: the dispatch banner is a kind='chat' row that gets formatted into both Claude's input AND Slack/Discord platform delivery — chat-history secret leakage"
-      - "Reviewer A finding A15: prompt injection asking for 'initial instructions' would extract a nonce in conversation history"
-    scope_check:
-      adds_user_facing_capability: false
-      changes_external_behavior: false
-      changes_hard_constraint: false
-      weakens_safety_invariant: false
-    recorded_at: 2026-05-09T16:38:00Z
-
-  # ---- Cycle 2 judgments ----
-
-  - stage: Review
-    iteration: 2
-    decision: |
-      Drop completion_nonce entirely (cycle-2 M2-E). Authorization is
-      source-session binding only: the (task_id, child_session_id) pair
-      is the capability, made unforgeable by sessions.dispatch_task_id
-      UNIQUE. Removes the nonce from /workspace/.task-context.json,
-      /workspace itself (file no longer needed), the tasks schema, and
-      the task_complete + task_progress MCP tool inputs.
-    alternatives_considered:
-      - "Keep nonce, fix /workspace tampering with read-only nested mount (cycle-1 partial fix, cycle-2 A9 finding)."
-      - "Drop nonce entirely — the binding is sufficient, simpler, fewer surfaces (chosen)."
-    grounding:
-      - "Codex C4 surfaced the simplification: 'If only one dispatched task can exist per child session, task_complete should not need a secret at all.'"
-      - "design.md §Data model: sessions.dispatch_task_id UNIQUE makes (task_id, child_session_id) 1:1 — surfaced by Reviewer A's M2-A resolution"
-      - "container/agent-runner/src/formatter.ts surfaced by Reviewer A: outbound rows carry an implicit source-session that the host knows; the agent cannot forge this in the row metadata"
-    scope_check:
-      adds_user_facing_capability: false
-      changes_external_behavior: false
-      changes_hard_constraint: false
-      weakens_safety_invariant: false  # supersedes cycle-1 A1 judgment which assumed nonce was load-bearing
-    recorded_at: 2026-05-09T17:00:00Z
-
-  - stage: Review
-    iteration: 2
-    decision: |
-      Default agent_groups.dispatch_approval_mode = 'session-token' for
-      orchestrator-roled groups (closes cycle-2 S2-D). Owner approves
-      once per orchestration run; token covers N dispatches with M-min
-      expiry. 'none' available for internal groups, 'per-dispatch' for
-      high-stakes groups.
-    alternatives_considered:
-      - "'per-dispatch' as the default — heavy operationally; brief R13 accepts the orchestrator role as one-time approval"
-      - "'none' as the default — accepts the cycle-2 C9 prompt-injection risk on chat-exposed orchestrator groups"
-      - "'session-token' as the default — bounded run token balances UX and risk (chosen)"
-    grounding:
-      - "Codex C9 surfaced the gap and recommended 'owner-approved dispatch run token scoped to parent_session_id, expiry, max-task-count'"
-      - "brief.md R13: role grant is owner-approved (one-time per orchestrator group). Run token preserves this — owner approves the run, token expires"
-      - "src/modules/approvals/ existing approval flow surfaced by Reviewer A: established codebase convention for owner approval requests"
-    scope_check:
-      adds_user_facing_capability: false  # all orchestrator dispatch is already user-facing per R6/R13; this hardens enforcement
-      changes_external_behavior: true  # default mode for new orchestrator groups now requires run-token approval; breaking change for any orchestrator group already deployed without one — mitigated because no orchestrator groups exist yet (pre-build)
-      changes_hard_constraint: false
-      weakens_safety_invariant: false  # strengthens it
-    recorded_at: 2026-05-09T17:01:00Z
-
-  - stage: Review
-    iteration: 2
-    decision: |
-      Reorder finalize steps: dependents_released_at FIRST (compute &
-      persist), child_summary_posted_at SECOND (write to child
-      subthread), parent_notified_at THIRD (parent system row contains
-      final dependents_unblocked list), parent_woken_at FOURTH (separate
-      marker for retry). Closes cycle-2 M2-F (Codex C5+C6 + A6 merged).
-    alternatives_considered:
-      - "Keep original ordering (dependents fan-out last) — cycle-2 C6 shows orchestrator gets permanently incomplete dependents_unblocked list"
-      - "Reorder so dependents are computed first, parent message contains accurate list (chosen)"
-      - "Add parent_woken_at as a separate marker (chosen) — without it, failed wakes have no retry signal"
-    grounding:
-      - "Codex C6 + Reviewer A A6 cite the exact ordering bug: deterministic parent message id + parent_notified_at suppresses rewrites, so an incomplete dependents_unblocked list becomes permanent"
-      - "design.md §Reverse signal authorize/finalize separation pattern — established by cycle-1 M3 resolution; cycle-2 just refines the order"
-      - "tasks schema added parent_woken_at column to support the retry — straightforward extension of the existing finalize-marker pattern"
-    scope_check:
-      adds_user_facing_capability: false
-      changes_external_behavior: false  # contents of parent system message unchanged in shape; now correctly populated
-      changes_hard_constraint: false
-      weakens_safety_invariant: false
-    recorded_at: 2026-05-09T17:02:00Z
+# ============================================================================
+# Appended by /team-review cycle 1 on 2026-05-09
+# Report: docs/specs/orchestrator-dispatch/review.md
+# ============================================================================
 
 review_cycles:
   - iteration: 1
-    must_fix_count: 6
-    should_fix_count: 7
+    must_fix_count: 8
+    should_fix_count: 8
     wont_fix_count: 0
-    completed_at: 2026-05-09T18:30:00Z
-    note: |
-      Fresh cycle-1 on the v1-cut design. Reviewer A: 6 MUST + 7 SHOULD —
-      all stale-reference cleanup the Option-4 cut left behind. Reviewer B:
-      "On the right track. Pattern fit is strong." Reviewer C (Codex): 5
-      findings, 3 overlap with A; 2 NEW (cancellation/reconciler race;
-      child-exit failure detection). All findings allowed revisions per
-      /team-auto Stage A table.
+    reviewers_run: [A, B, C]
+    codex_used: gpt-5.5-xhigh
+    completed_at: 2026-05-09T18:00:00Z
+    summary: |
+      MUST-FIX: 8 items, all schema/signature/wiring corrections at the new-module ↔ existing-infra
+      boundaries. None require re-evaluating the Option A choice. Three-reviewer convergence on:
+      cancel_task name collision (A1+C1), cancellation auth surface (A3+C2), idempotency
+      namespace (A9+B-Pattern-3+C4). Single-reviewer findings: adapter access pattern (A2),
+      adapter signature (C5), child task_id propagation (C3), drain-first scope (C7), webhook-
+      server scope (A4).
+      SHOULD-FIX: 8 items spanning watchdog edge cases, schema invariants, idempotency request_hash,
+      and the serial-dispatch UX issue.
+      Strategy: /team-auto cycle 1 will revise the design to address all 8 MUST-FIX and all 8
+      SHOULD-FIX inline (low-effort textual revisions, all grounded in cited file:line evidence)
+      and re-invoke /team-review for cycle 2.
 
   - iteration: 2
     must_fix_count: 8
-    should_fix_count: 4
+    should_fix_count: 9
     wont_fix_count: 0
-    completed_at: 2026-05-09T19:30:00Z
-    note: |
-      Cycle 2 of fresh count. Reviewer A: 4 MUST + 4 SHOULD + 1 NIT —
-      surfaced that responsibility 6 cited wrong file (container-runtime.ts
-      vs container-runner.ts:252) and wrong column (status='archived' vs
-      container_status='stopped'); flagged race with delivery loop.
-      Reviewer B: "right track / pattern fit strong" — 1 MEDIUM (subsumed
-      by A's responsibility-6 prose finding) + 2 LOW. Reviewer C (Codex):
-      7 findings — 2 overlap A's cleanup; 5 NEW substantive (dispatch_task
-      return path unspecified, platform idempotency host-crash gap,
-      no-progress heartbeat timeout missing, cancellation race for
-      pending/admitted tasks, child-exit/delivery race). All addressed
-      inline: responsibility 6 reframed as canonical ledger-scanning
-      reaper with drain+grace+authorize-tolerant guards;
-      task-${idempotency_key} as deterministic caller-derived task_id;
-      adapter findParentByLocalKey added; new watchdog responsibility 7
-      (no-progress timeout); applyCancelTask branches on dispatch_state.
-      Cycle 3 next — last cap-allowed cycle of fresh count.
-# Active cycle counter started fresh after Option-4 cut on 2026-05-09T18:00:00Z.
-# 3 archived cycles below preserve the pre-cut historical record.
+    reviewers_run: [A, B, C]
+    codex_used: gpt-5.5-xhigh
+    completed_at: 2026-05-09T18:45:00Z
+    summary: |
+      Cycle 1 fixes (M1-M8) all CLOSED per Reviewer A's verification pass. But the cycle 1
+      revision text introduced new drift: per-adapter signature convention (M9/N1), §4
+      sync-vs-async narrative incoherence (M10/N2), reconciler timer cadence undefined
+      (M11/N3+B Q1), tool mounting asymmetry blocking child reverse-signal (M12/C1),
+      sync-RPC vs async-system-action protocol gap (M13/C2), concurrency cap bypass via
+      pending state (M14/C5), drain-first starvation (M15/C7), wiring-check TBD (M16/C8).
 
-review_cycles_archived:
-  - iteration: 1
-    must_fix_count: 16
-    should_fix_count: 8
-    wont_fix_count: 2
-    completed_at: 2026-05-09T16:30:00Z
-    archived_reason: "cap-reached Option-4 cut to MVP (dashboard + dep chains deferred)"
-    note: |
-      First cycle on the post-revision design (commit 029509c). Reviewers
-      A+B+C surfaced 16 MUST-FIX (architecture/security gaps in cycle-1
-      spec-text fixes). Closed by cycle-2 revision pass.
-  - iteration: 2
-    must_fix_count: 9
-    should_fix_count: 8
-    wont_fix_count: 2
-    completed_at: 2026-05-09T17:00:00Z
-    archived_reason: "cap-reached Option-4 cut to MVP"
-    note: |
-      9 NEW MUST-FIX from cycle-1 revisions themselves. Key cycle-2
-      finding: Codex C4 — drop completion_nonce; sessions.dispatch_task_id
-      UNIQUE makes (task_id, child_session_id) 1:1, source-session binding
-      alone is sufficient. Closed by cycle-3 revision pass.
   - iteration: 3
-    must_fix_count: 8
-    should_fix_count: 7
-    wont_fix_count: 2
-    completed_at: 2026-05-09T17:30:00Z
-    archived_reason: "cap-reached Option-4 cut to MVP"
-    note: |
-      8 NEW MUST-FIX from cycle-2 revisions. Reviewer B endorsed "build it"
-      with operational drifts only; A+C found precision gaps. Trajectory
-      pattern (16→9→8 NEW each cycle) hit the cap. Owner chose Option 4
-      to cut dashboard + dep chains; ~5 days of complexity removed from
-      v1 surface area. Cycle-3 fixes that remain applicable (M3-1, M3-2,
-      M3-3 [cut to none/per-dispatch only], M3-4, M3-6, M3-8) carried
-      forward into the simplified design; M3-5 and M3-7 made moot by
-      the dependency-chains cut.
+    must_fix_count: 9
+    should_fix_count: 9
+    wont_fix_count: 0
+    reviewers_run: [A, B, C]
+    codex_used: gpt-5.5-xhigh
+    completed_at: 2026-05-09T19:30:00Z
+    cap_reached: true
+    summary: |
+      Cycle 2 MUST-FIX (M9-M16) all CLOSED per Reviewer A's verification. NEW cycle-3 MUST-FIX
+      cluster around two areas:
+      (1) dispatch_task_id propagation mechanism (M17 = A's F1+F2): container has only a
+      per-agent projection of central.db; sessions/agent_group_capabilities/tasks NOT in
+      allow-list. Cycle-2 M12 fix had right intent, wrong mechanism. Single-fix path: use
+      inbound.db's session_routing instead of central.db.
+      (2) §4 race conditions (M19-M25): completeDispatchSideEffects needs full task row
+      not just RETURNING columns; idempotency replay should precede cap check; child wake
+      must follow tasks-row writes; artifact UPDATEs need status CAS; setImmediate-vs-reconciler
+      concurrent completion produces duplicate platform messages without host crash;
+      drain-first grace timestamp wrong source; Slack createThread returns wrong identifier.
+      Plus: M18 task_id prefix discrepancy (line 301 says 'task-' but everywhere else 'dispatch-').
+      Reviewer B confirms architectural patterns conform; one MEDIUM canonicalization drift
+      on request_hash. CAP REACHED. /team-auto escalates via auto-pause.md per `cap-reached`
+      protocol.
 
-# Historical context: a previous /team-review run completed in this same project
-# pre-reset (commit fb3adeb, 2026-05-09T03:55:00Z) found 10 MUST + 14 SHOULD + 2 WON'T.
-# Cycle-2 and cycle-3 attempts (d778e70, aa2e2d2, f2ca57f, 9b0d0dd) made partial revisions.
-# Counter was reset after commit 029509c rebuilt design.md body to cleanly address those
-# original 10 MUST findings. The fresh cycle 1 above ran against THAT revised design and
-# found new structural gaps the cycle-1 fixes introduced (per-session MCP tool mounting
-# fiction, state-machine crash idempotency holes, etc).
+# ============================================================================
+# Auto-judgments applied during cycle 1 revision pass (Stage A retry per /team-auto)
+# Schema: see skills/shared/decision-record-schema.md
+# ============================================================================
+auto_judgments:
+  - stage: Review
+    iteration: 1
+    decision: "Rename agent_roles -> agent_group_capabilities (D4)"
+    alternatives_considered: [agent_group_capabilities, agent_group_roles, agent_capabilities]
+    grounding:
+      - "src/db/schema.ts:9 — invariant 'privilege lives on users, not groups' from review S2"
+      - "convention: user_roles at src/db/schema.ts:78-86 carries USER privilege; this new table carries GROUP capability"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T18:30:00Z
 
-# Open questions deferred from design (carried forward for /team-plan):
-#   OQ1 (light theme tokens not visually validated)
-#   OQ2 (per-task model/effort) — lifted into MVP per review S5; tracked in tasks.model/effort
-#   OQ3 (cancellation surface) — lifted into MVP per review S9; cancel_task MCP tool spec'd
-#   OQ4 (multi-orchestrator coordination) — out of scope, single orchestrator practice
+  - stage: Review
+    iteration: 1
+    decision: "Prefix all 5 new system actions and MCP tools with `dispatch_` (D5)"
+    alternatives_considered: [dispatch_, ot_, no-prefix-with-collision-check]
+    grounding:
+      - "src/modules/scheduling/index.ts:31 — existing registerDeliveryAction('cancel_task') confirmed by spot-check"
+      - "src/delivery.ts:556 — registerDeliveryAction overwrites silently on duplicate"
+      - "container/agent-runner/src/mcp-tools/scheduling.ts:220-246 — existing cancel_task MCP tool name occupied"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T18:30:00Z
+
+  - stage: Review
+    iteration: 1
+    decision: "Place new postParent/createThread on ChannelDeliveryAdapter (option a) (D6)"
+    alternatives_considered: ["(a) widen ChannelDeliveryAdapter", "(b) import channel-registry from core"]
+    grounding:
+      - "src/delivery.ts:69-80 — ChannelDeliveryAdapter is the existing core/channels boundary"
+      - "src/channels/adapter.ts:127 — ChannelAdapter is wider; not currently imported by core"
+      - "convention: setTyping (line 78) and deleteMessage (line 79) were added previously to ChannelDeliveryAdapter as optional methods — same shape"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T18:30:00Z
+
+  - stage: Review
+    iteration: 1
+    decision: "mgId=null path uses per-task synthetic-thread session, not agent-shared (D7)"
+    alternatives_considered: ["per-task synthetic thread (chosen)", "agent-shared session reused across tasks"]
+    grounding:
+      - "review M5 — agent-shared mode means multiple tasks share one child session; task_id can't disambiguate"
+      - "C4 trace: src/session-manager.ts:340 -> src/delivery.ts:358-364 — synthetic thread_id only fails when adapter.deliver invoked, requires mgId IS NOT NULL"
+      - "convention: session-key uniqueness is project's primary isolation primitive (migration 024 for channel-root sessions)"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: true   # cycle-2 audit-trail correction (review S17): per-task vs agent-shared changes session count, container-spawn rate, observable resource footprint
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T18:30:00Z
+    note: "cycle-2 review S17 corrected the original false: changes_external_behavior is true at the operational level (not API level) — per-task synthetic-thread sessions create N containers vs 1 shared; observable to operators monitoring system."
+
+  - stage: Review
+    iteration: 1
+    decision: "task_id derived from sha256(parent_session_id, idempotency_key) — option (b) from review M6"
+    alternatives_considered: ["(a) opaque server-issued task_id + UNIQUE constraint", "(b) hash-derived (chosen)"]
+    grounding:
+      - "review M6 — three-reviewer convergence (A, B, C) on caller-namespace encoding"
+      - "decisions F7 — caller-deterministic property must be preserved"
+      - "Brandur Leach canonical pattern (T1, brandur.org/idempotency-keys)"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T18:30:00Z
+
+  - stage: Review
+    iteration: 1
+    decision: "Drop owner-override OR-clause from applyDispatchCancel; MCP-side auth is parent_session_id match only (D9)"
+    alternatives_considered: ["drop OR-clause (chosen)", "implement caller_user_id resolution in delivery action context"]
+    grounding:
+      - "src/modules/permissions/access.ts:21 — canAccessAgentGroup takes userId, not session"
+      - "src/modules/permissions/db/user-roles.ts:36 — isOwner takes userId; system action handler provides Session only"
+      - "review M2 — convergence (A+C) on caller_user_id having no defensible source"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: true
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T18:30:00Z
+    note: "changes_external_behavior=true: original design implied owners could cancel via system-action path. Revised: owners use Phase 2 dashboard or admin DB tool. Within scope per brief (dashboard is MVP for owner-cancel); system-action owner-cancel was not an explicit user-facing promise. Not escalated."
+
+  - stage: Review
+    iteration: 1
+    decision: "applyDispatchTask admits synchronously, completes side-effects asynchronously via reconciler (D10)"
+    alternatives_considered: ["sync admit + async completion (chosen)", "fully sync (serializes 22-task fanout)", "deferAck via delivery system"]
+    grounding:
+      - "review S8 — Reviewer A flagged 110s serial bottleneck for brief's 22-task fanout case"
+      - "convention: durable execution pattern (Brandur Leach, Temporal) — admit synchronously, idempotent completion"
+      - "src/host-sweep.ts:61 — existing 60s sweep tick can host reconciler; 5s sub-tick if benchmark requires (A12)"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: true
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T18:30:00Z
+    note: "changes_external_behavior=true: tasks appear in real platform threads with 1-5s latency rather than at admit. Acceptable per brief's success criterion 1 (no latency promise stated)."
+
+  - stage: Review
+    iteration: 1
+    decision: "webhook-server.ts gets bounded multi-route refactor for Phase 2 dashboard (D11)"
+    alternatives_considered: ["bounded refactor (chosen)", "new HTTP server on different port (violates C2)", "skip dashboard"]
+    grounding:
+      - "src/webhook-server.ts:97-110 — routes Map keyed on /webhook/<adapter>; cannot absorb /dashboard/* without code changes"
+      - "src/webhook-server.ts:52-67 — fromWebResponse reads stream to completion; incompatible with infinite SSE"
+      - "C2 requires single-process; refactor preserves this"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T18:30:00Z
+
+  # ===== Cycle 2 revision pass =====
+  - stage: Review
+    iteration: 2
+    decision: "Drop channelType from per-adapter Slack/Discord postParent/createThread signatures (M9)"
+    alternatives_considered: ["per-adapter takes (channelType, platformId, ...) (cycle-1 text)", "per-adapter takes (platformId, ...) matching existing (chosen)"]
+    grounding:
+      - "src/channels/adapter.ts:149 — existing ChannelAdapter.deliver(platformId, threadId, message) drops channelType"
+      - "src/channels/adapter.ts:152, 159 — same convention for setTyping, deleteMessage"
+      - "src/index.ts:215-243 — bridge wrapper strips channelType after adapter lookup"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:00:00Z
+
+  - stage: Review
+    iteration: 2
+    decision: "Commit to happy-path inline (setImmediate) + reconciler-recovery on existing 60s sweep (M10, M11, M13)"
+    alternatives_considered: ["sync admit + setImmediate inline completion + reconciler recovery (chosen)", "sync admit + 5s sub-tick reconciler", "fully sync completion (serialization bottleneck)"]
+    grounding:
+      - "Reviewer B Q1 best-practice analysis: 'always attempt completion inline, only fall back to reconciler on failure' is the canonical Brandur Leach/Inngest/Temporal pattern"
+      - "src/host-sweep.ts:61, 171 — existing 60s sweep tick is the only timer; no need for separate reconciler timer"
+      - "Reviewer A N2: §4 step 8 + step 9 + S8 intro were mutually inconsistent in cycle 1"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false  # latency profile now consistent at <60s recovery, sub-second happy path
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:00:00Z
+
+  - stage: Review
+    iteration: 2
+    decision: "Bifurcate MCP tool mounting: orchestrator-capability vs sessions.dispatch_task_id (M12)"
+    alternatives_considered: ["bifurcated by capability + dispatch_task_id (chosen)", "single condition (orchestrator-only) — wrong because children need progress/complete tools"]
+    grounding:
+      - "Reviewer C cycle-2 finding 1: §3 mounting condition + §4 step 4 denylist together blocked child tool access"
+      - "Existing pattern: container/agent-runner reads session_routing for routing; same mechanism extends to dispatch_task_id"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:00:00Z
+
+  - stage: Review
+    iteration: 2
+    decision: "Add sessions.dispatch_task_id column and dispatch_completion_attempts to tasks (cycle-2 schema additions)"
+    alternatives_considered: ["fold into migration 026 (chosen)", "separate migration 027"]
+    grounding:
+      - "Migration 024 set precedent for in-place schema additions when in same feature; migration 026 not yet shipped so additions are part of the same migration"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:00:00Z
+
+  - stage: Review
+    iteration: 2
+    decision: "Concurrency cap counts pending+running, not running-only (M14)"
+    alternatives_considered: ["count IN ('pending','running') (chosen)", "count running-only (cycle-1 text — bypassable)"]
+    grounding:
+      - "Reviewer C cycle-2 finding 5: D10 admits as pending; running-only count = 0 during fanout"
+      - "decisions F1: orchestrator concurrency cap default 5; cap must apply to admitted-but-not-yet-running tasks"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false  # tightens the concurrency invariant
+    recorded_at: 2026-05-09T19:00:00Z
+
+  - stage: Review
+    iteration: 2
+    decision: "Narrow drain-first scope to pending TERMINAL system actions with bounded grace (M15)"
+    alternatives_considered: ["narrow + bounded grace (chosen)", "broad scope (cycle-1 — starvation risk)", "drop drain-first entirely (race-loss risk)"]
+    grounding:
+      - "Reviewer C cycle-2 finding 7: cycle-1 drain-first guard suppressed all terminal failures indefinitely under stuck outbound"
+      - "Brandur Leach pattern: drain only what could legitimately produce a terminal decision; cap grace at task-acceptable latency"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false  # prevents indefinite hangs without losing race protection
+    recorded_at: 2026-05-09T19:00:00Z
+
+  - stage: Review
+    iteration: 2
+    decision: "Wiring requirement: pre-existing messaging_group_agents row required; task-scoped grants deferred to v2 (M16)"
+    alternatives_considered: ["pre-existing wiring (chosen)", "task-scoped grant via new schema (deferred to v2)", "no wiring check (security risk)"]
+    grounding:
+      - "Reviewer C cycle-2 finding 8: TBD on security-relevant decision blocks /team-plan"
+      - "Existing wiring schema (messaging_group_agents) is the canonical authorization primitive; reusing it avoids parallel mechanism"
+      - "Phase 1 minimization: simpler operator model; if pre-existing wiring is too restrictive, task-scoped grants land in a v2 brief"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: true   # operators may need to pre-wire target groups before dispatch — observable
+      changes_hard_constraint: false
+      weakens_safety_invariant: false  # tightens dispatch surface
+    recorded_at: 2026-05-09T19:00:00Z
+    note: "changes_external_behavior=true: operators must wire target groups to messaging groups before orchestrator can dispatch into them. Documented in Phase 1 IN-scope. Within brief intent (orchestrator pattern operates over EXISTING agent groups). Not escalated."
+
+auto_qa_cycles: []   # populated during /team-qa
+
+# ===== Cycle 3 revision pass (user override of cap-reached gate via "approved /team-auto" Path 1) =====
+# User explicitly approved Path 1 from auto-pause.md: apply all 9 MUST-FIX as a single
+# bounded revision and proceed to /team-plan WITHOUT re-running /team-review (cap is 3).
+# This is documented as an explicit user-override of the cap-reached gate.
+cycle_3_revision_path: |
+  User-approved Path 1 from auto-pause.md (2026-05-09T19:30:00Z). Cap-reached gate explicitly
+  overridden by user with "approved /team-auto" — confirms cycle-3 findings are addressed
+  in a single revision pass without re-running /team-review. Proceed to /team-plan after revision.
+
+auto_judgments_cycle_3:
+  - stage: Review
+    iteration: 3
+    decision: "Relocate dispatch_task_id from central.db sessions table to inbound.db session_routing table (M17)"
+    alternatives_considered:
+      - "(A) inbound.db session_routing column (chosen — cleanest)"
+      - "(B) extend per-agent-projection allow-list to include sessions/agent_group_capabilities/tasks"
+      - "(C) drop the DB-column path; use first-inbound envelope only"
+    grounding:
+      - "src/db/per-agent-projections.ts:128-131,142 — allow-list = {'backlog_items', 'ship_log'} only"
+      - "src/container-runner.ts:723-725 — buildCentralProjection-then-mount confirms container does not see data/v2.db directly"
+      - "container/agent-runner/src/db/session-routing.ts:19 — getSessionRouting() pattern in inbound.db; getSessionDispatchTaskId() truly analogous"
+      - "CLAUDE.md 'Two-DB Session Split' section — the two session DBs are the sole IO surface invariant"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:45:00Z
+
+  - stage: Review
+    iteration: 3
+    decision: "Fix line 301 task_id prefix from 'task-' to 'dispatch-' (M18) and add shared deriveDispatchTaskId helper"
+    alternatives_considered:
+      - "shared helper used by host + container (chosen)"
+      - "duplicate the formula in both code sites (rejected — drift risk)"
+    grounding:
+      - "Cycle-3 review M18 — verified via grep that line 301 had inconsistent prefix"
+      - "Cycle-2 D8 + cycle-2 S16 — 'dispatch-' prefix is the canonical choice"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:45:00Z
+
+  - stage: Review
+    iteration: 3
+    decision: "Use INSERT ... RETURNING * (full row) and reload-at-step pattern in completeDispatchSideEffects (M19)"
+    alternatives_considered:
+      - "RETURNING * + reload-at-step (chosen — most defensive against state changes)"
+      - "RETURNING * + use returned row through all steps (less defensive)"
+      - "RETURNING task_id only + re-SELECT each step (more queries, no benefit)"
+    grounding:
+      - "Cycle-3 Reviewer C #2: side-effect routine needs full row"
+      - "Cycle-3 Reviewer C #5: artifact updates not status-guarded — reload-at-step lets each step CAS on current state"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:45:00Z
+
+  - stage: Review
+    iteration: 3
+    decision: "Reorder atomic admit: idempotency replay (step 2) precedes concurrency cap (step 3) (M20)"
+    alternatives_considered:
+      - "Idempotency before cap (chosen — matches Stripe canonical pattern)"
+      - "Cap before idempotency (cycle-2 design — bypassable replay rejection)"
+    grounding:
+      - "Cycle-3 Reviewer C #3: replays must be idempotent regardless of current cap state"
+      - "Stripe Idempotent Requests doc — replay returns original response without re-evaluating limits"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:45:00Z
+
+  - stage: Review
+    iteration: 3
+    decision: "Reorder step 8: write tasks-row + session_routing BEFORE writeSessionMessage + wakeContainer (M21)"
+    alternatives_considered:
+      - "DB writes before wake (chosen — closes race)"
+      - "Cycle-2 order (wake before tasks-row write — race-class auth/CAS failures)"
+    grounding:
+      - "Cycle-3 Reviewer C #4: child can call dispatch_progress before host row authorizes child session"
+      - "Two-DB Session Split: container can't see DB until wake; ordering writes-before-wake guarantees auth state coherent before child runs"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false  # tightens timing invariant
+    recorded_at: 2026-05-09T19:45:00Z
+
+  - stage: Review
+    iteration: 3
+    decision: "Add status-CAS guards on every artifact UPDATE in step 8 (M22)"
+    alternatives_considered:
+      - "Status CAS on each step (chosen — defensive)"
+      - "Status CAS only on final running transition (cycle-2 — vulnerable to mid-flight cancel race)"
+    grounding:
+      - "Cycle-3 Reviewer C #5: cancel/watchdog can flip status while side-effect job is in flight; without status guard, task can be flipped back to running"
+      - "Brandur Leach atomic-phase pattern — every state-mutating UPDATE should carry the expected pre-state in WHERE"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:45:00Z
+
+  - stage: Review
+    iteration: 3
+    decision: "Add completion_lease_at column + in-process completionInFlight Map for completeDispatchSideEffects concurrency safety (M23)"
+    alternatives_considered:
+      - "Two-layer guard: durable lease + in-process map (chosen)"
+      - "In-process map only (vulnerable to host restart with stale entries)"
+      - "Durable lease only (in-process map provides faster fast-path skip)"
+    grounding:
+      - "Cycle-3 Reviewer C #6: setImmediate and reconciler can both run for the same task without crash"
+      - "Reviewer B Q1 cycle-3: durable lease aligns with Stripe completer pattern"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:45:00Z
+
+  - stage: Review
+    iteration: 3
+    decision: "Drain-first grace measured against pending-terminal-outbound row's timestamp (M24)"
+    alternatives_considered:
+      - "Grace from pending-terminal-outbound timestamp (chosen)"
+      - "Grace from progress timestamps (cycle-2 — quiet long-running task gets killed mid-completion)"
+    grounding:
+      - "Cycle-3 Reviewer C #7: drain_age computed from old progress timestamps disregards the freshly-emitted terminal action"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:45:00Z
+
+  - stage: Review
+    iteration: 3
+    decision: "Slack createThread returns {threadId: parentMessageId, messageId: reply_ts} (M25)"
+    alternatives_considered:
+      - "Return parentMessageId as threadId (chosen — Slack canonical thread_ts semantic)"
+      - "Return reply.ts as threadId (cycle-2 — incorrect; subsequent posts would route wrong)"
+    grounding:
+      - "Cycle-3 Reviewer C #9: Slack thread_ts IS the parent message's ts; reply ts is the in-thread message's ts"
+      - "Slack API docs: chat.postMessage with thread_ts uses the parent's timestamp"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:45:00Z
+
+  - stage: Review
+    iteration: 3
+    decision: "request_hash uses length-prefixed canonicalization (S23)"
+    alternatives_considered:
+      - "Length-prefixed concat (chosen — avoids ':' collision)"
+      - "JCS-canonical JSON (also valid, more deps)"
+      - "Plain concat with ':' (cycle-2 — vulnerable when content contains ':')"
+    grounding:
+      - "Cycle-3 Reviewer B Q4 MEDIUM drift: RFC-8785, AWS-SigV4, crypto.stackexchange consensus on hash canonicalization"
+      - "Length-prefixing is structurally collision-free; no JSON dependency needed"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false  # tightens collision invariant
+    recorded_at: 2026-05-09T19:45:00Z
+
+  - stage: Review
+    iteration: 3
+    decision: "Add surface_mode column persisted at admit; per-channel capability check at admit only (S24, S25)"
+    alternatives_considered:
+      - "Persist surface_mode at admit (chosen)"
+      - "Re-evaluate at every step (cycle-2 — happy-path and recovery can disagree)"
+    grounding:
+      - "Cycle-3 Reviewer C #8 (per-channel capability check) + #10 (surface_mode persistence)"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:45:00Z
+
+  - stage: Review
+    iteration: 3
+    decision: "Specify dispatch_cancel_request container-side protocol (S26)"
+    alternatives_considered:
+      - "Structured envelope + agent-readable system note + 2-min hard-kill (chosen — gives agents a chance to flush)"
+      - "Host-only kill with no agent notification (simpler but harsh)"
+    grounding:
+      - "Cycle-3 Reviewer C #11: builders need explicit container-side handler spec"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: true   # agents now receive system notes for cancellation; observable behavior
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T19:45:00Z
+    note: "changes_external_behavior=true: cooperative agents now have a 2-min cancellation grace period with notification, vs cycle-2's silent kill. Acceptable per brief intent (cancellation is a user action)."
+
+  - stage: Build
+    iteration: 1
+    decision: "Add explicit adapter_unavailable check at start of completeDispatchSideEffects threaded path (B3); bypasses retry-budget"
+    alternatives_considered:
+      - "Add explicit branch (chosen — distinguishes stale-mode from transient errors per design §4 line 437)"
+      - "Rely on completion_exhausted generic catch-all after 5 retries (existing plan — burns retry budget on a permanent condition)"
+    grounding:
+      - "design.md line 437: 'If reconciler observes surface_mode=native_thread but getChannelAdapter(channel_type).createThread is undefined: mark failed with fail_reason=adapter_unavailable'"
+      - "design.md line 398: same check at admit-time threaded path"
+      - "Pre-build drift report Codex Claim #43"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false   # fail_reason value is internal observability; user-facing is just the failure message
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T21:30:00Z
+
+  - stage: Build
+    iteration: 1
+    decision: "Add _dispatch_cancel envelope handling to D5 formatter — render as system note per design §4 S26"
+    alternatives_considered:
+      - "Add explicit handling for both _dispatch and _dispatch_cancel envelopes (chosen — matches design S26's container-side cancel protocol)"
+      - "Leave to builder discretion (rejected — design explicitly specifies the rendering)"
+    grounding:
+      - "design.md S26: 'cancellation handler writes structured envelope to child's inbound; child formatter renders it as a system note for graceful flush'"
+      - "Plan B5 already writes the _dispatch_cancel envelope (line 669); D5 was the missing render side"
+      - "Pre-build drift report Codex Claim #56 PARTIAL"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T21:30:00Z
+
+# Pre-build drift triage — applied inline during /team-build Step 2 (revision-cycle 1/1)
+plan_revisions:
+  - revision: 1
+    triggered_by: "Pre-build drift check (Step 2) surfaced 2 substantive findings + 1 acknowledged DIVERGED + several Phase-2-deferral PARTIALs"
+    revisions_applied:
+      - target: "plan.md Task B3"
+        change: "Added ASSERT for adapter_unavailable fail_reason at threaded-path start (Codex #43)"
+        change2: "Added test case test_adapter_unavailable_marks_failed_immediately"
+      - target: "plan.md Task D5"
+        change: "Extended D5 implementation approach + ASSERTs to handle _dispatch_cancel envelope rendering as system note (Codex #56)"
+        change2: "Added test cases test_dispatch_cancel_envelope_renders_as_system_note and test_dispatch_cancel_envelope_without_reason"
+        change3: "Added acceptance criterion for _dispatch_cancel envelope handling"
+    diverged_acknowledged_in_drift_acks:
+      - id: "B1"
+        reason: "Bifurcated mounting mutual-exclusion is intentional Phase 1 simplification per design line 313 ('not a Phase 1 use case but the schema supports it'). Schema-level support unchanged; future relaxation is a one-line code change in Phase 2."
+    completed_at: 2026-05-09T21:30:00Z
+
+  - stage: QA
+    iteration: 1
+    decision: "Move runReconcilerOnStartup() from module-import-time top-level call to explicit hook called from main() after initDb()/runMigrations()"
+    alternatives_considered:
+      - "Lazy startup hook called explicitly from main() after DB init (chosen)"
+      - "Make reconciler tolerate uninitialized DB and no-op silently (rejected — masks real boot-order bugs in future)"
+    grounding:
+      - "Codex Validator E (xhigh) Finding 1 (severity: critical, confidence: 1.0)"
+      - "Empirical reproduction: pnpm run dev crashed with 'Database not initialized. Call initDb() first.' at runReconcilerOnStartup → getOrphanedTasks → getDb"
+      - "Stack trace pinned to src/modules/orchestrator-dispatch/index.ts:28 (top-level call)"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false   # boot-order fix — reconciler still runs, just at the right time
+      changes_hard_constraint: false
+      weakens_safety_invariant: false   # actually strengthens (reconciler can't run before DB exists)
+    recorded_at: 2026-05-09T23:25:00Z
+    note: "Mechanical fix per /team-auto Stage D — finding told me what to change with empirical reproduction. Boot test confirms clean startup; pnpm run build clean."
+
+  - stage: QA
+    iteration: 1
+    decision: "host-sweep.ts:288 drain-first guard reads task.target_agent_group_id (not parent_agent_group_id) — fixes Concurrency-reviewer #1 (drain guard always missed)"
+    alternatives_considered:
+      - "Fix the agent_group_id (chosen — child session lives under target group)"
+      - "Restructure pendingTerminalDispatchOutboundSeenAt to take task row directly (rejected — bigger refactor)"
+    grounding:
+      - "Concurrency reviewer #1 (CRITICAL): 'pendingTerminalDispatchOutboundSeenAt(task.parent_agent_group_id, task.child_session_id)' opens wrong path; child belongs to target_agent_group_id"
+      - "data/v2-sessions/<agentGroupId>/<sessionId>/outbound.db naming convention — verified at session-manager.ts"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: true   # drain-first guard now actually works (was previously a no-op)
+      changes_hard_constraint: false
+      weakens_safety_invariant: false   # strengthens (M24 design intent restored)
+    recorded_at: 2026-05-09T23:35:00Z
+
+  - stage: QA
+    iteration: 1
+    decision: "Watchdog parent notification action renamed to 'dispatch_task_watchdog_fail' (was 'task_watchdog_fail') + uses canonical fail_reason"
+    alternatives_considered:
+      - "Add dispatch_ prefix per C16 HARD constraint (chosen)"
+      - "Document exception (rejected — C16 is unconditional)"
+    grounding:
+      - "Domain reviewer #1 (BUG): C16 violation — sixth system action lacked dispatch_ prefix"
+      - "decisions.yaml C16 (HARD): 'All five new system actions and MCP tools use the dispatch_ prefix'"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: true   # action name in inbound content changed; orchestrator CLAUDE.md guidance is to grep dispatch_*
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T23:35:30Z
+
+  - stage: QA
+    iteration: 1
+    decision: "applyDispatchCancel sets completed_at: now alongside cancelled_at: now (M3-1 lifecycle invariant)"
+    alternatives_considered:
+      - "Set both timestamps (chosen — design M3-1 explicitly required)"
+      - "Document exception in code comment (rejected — code lies)"
+    grounding:
+      - "Concurrency-reviewer #2 + Adversarial-reviewer #2: M3-1 (auto-pause.md) explicitly required completed_at on cancellation"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false   # strengthens (lifecycle invariant)
+    recorded_at: 2026-05-09T23:36:00Z
+
+  - stage: QA
+    iteration: 1
+    decision: "deriveDispatchTaskId uses length-prefix canonicalization (matching computeRequestHash) — fixes hash inconsistency / colon-collision risk"
+    alternatives_considered:
+      - "Length-prefix both helpers (chosen — design S23 explicitly required for both)"
+      - "Reject idempotency_keys containing ':' (rejected — broke valid use cases)"
+    grounding:
+      - "Security-reviewer #1: derive-task-id.ts uses bare ':' concat; computeRequestHash uses length-prefix — inconsistent. Idempotency_key is user-supplied and may contain ':'."
+      - "decisions.yaml cycle-3 fix S23: length-prefix prevents colon-collision attacks"
+      - "Empirical: regenerated F2 fixture vectors; cross-runtime contract test (host Node + container Bun) confirms bit-identical outputs"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: true   # task_id values change for the same inputs (BREAKING for any pre-existing tasks — none in production yet)
+      changes_hard_constraint: false
+      weakens_safety_invariant: false   # strengthens (collision resistance)
+    recorded_at: 2026-05-09T23:36:30Z
+
+  - stage: QA
+    iteration: 1
+    decision: "Container dispatch_task errors when getSessionId() returns null (was: fall back to empty string) — fail loud at caller boundary"
+    alternatives_considered:
+      - "Error and refuse to dispatch (chosen)"
+      - "Continue with empty parentSessionId fallback (rejected — silent task_id mismatch with host)"
+    grounding:
+      - "Adversarial-reviewer #4: empty parentSessionId produces valid-looking but wrong task_id; agent reports back task_id host doesn't recognize; no error surfaced"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: true   # tool now returns isError instead of computing wrong task_id silently
+      changes_hard_constraint: false
+      weakens_safety_invariant: false   # strengthens
+    recorded_at: 2026-05-09T23:37:00Z
+
+  - stage: QA
+    iteration: 1
+    decision: "applyDispatchTask transaction is IMMEDIATE (BEGIN IMMEDIATE) instead of DEFERRED — closes cap-race under concurrent multi-session delivery"
+    alternatives_considered:
+      - "BEGIN IMMEDIATE via .immediate() (chosen — better-sqlite3 API)"
+      - "External lock per orchestrator (rejected — heavyweight)"
+    grounding:
+      - "Concurrency-reviewer #5: DEFERRED transaction allows two parallel delivery drains for different orchestrator sessions to interleave: both read same count, both pass cap, both INSERT — per-target-group cap exceeded"
+      - "decisions.yaml cycle-3 S3-C: explicit IMMEDIATE requirement"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false   # cap is enforced as designed; no observable change for non-concurrent dispatches
+      changes_hard_constraint: false
+      weakens_safety_invariant: false   # strengthens
+    recorded_at: 2026-05-09T23:37:30Z
+
+  - stage: QA
+    iteration: 1
+    decision: "applyDispatchProgress UPDATE has WHERE status IN ('pending', 'running') guard — prevents stale-progress polluting terminal-row timestamps"
+    alternatives_considered:
+      - "Add status guard (chosen)"
+      - "Leave guardless (rejected — invariant violation)"
+    grounding:
+      - "Concurrency-reviewer #6: stale dispatch_progress on a terminal task updates last_progress_at, post-dating cancelled_at/completed_at/failed_at"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false   # silent-skip on terminal tasks; previously silent-update
+      changes_hard_constraint: false
+      weakens_safety_invariant: false   # strengthens (lifecycle invariant)
+    recorded_at: 2026-05-09T23:38:00Z
+
+  - stage: QA
+    iteration: 1
+    decision: "applyDispatchTask resolves target_group via id → folder → name lookup (was: id-only) — fixes Codex E4 likely-UX-failure"
+    alternatives_considered:
+      - "Resolve via id → folder → name (chosen — agents typically pass folder name, not opaque ag_* id)"
+      - "Document id-only requirement in MCP tool schema (rejected — would break orchestrator UX in practice)"
+    grounding:
+      - "Codex Validator E finding 4 (MEDIUM, conf 0.86): existing code generates opaque ag_* IDs while storing folder separately; orchestrator likely passes 'illysium' which gets rejected"
+    scope_check:
+      adds_user_facing_capability: true   # broadens what target_group accepts; observable to orchestrator agents
+      changes_external_behavior: true
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-09T23:38:30Z
+    note: "adds_user_facing_capability=true: this expands the API to accept folder/name in addition to id. Acceptable per orchestrator brief intent (orchestrator agents address groups by familiar names). Without this fix, the dispatch primitive is not usable in practice."
+
+# QA Cycle 1 outcome
+auto_qa_cycles:
+  - iteration: 1
+    must_fix_count: 7   # 6 fixed + 1 known-risk-deferred (E2 architectural)
+    should_fix_count: ~15
+    completed_at: 2026-05-09T23:42:00Z
+    notes: "Boot crash + 6 other MUST-FIX applied. E2 (orphaned-running task on crash) recorded as Known Risk K7 — recovery works via watchdog reap within ~30 min, capacity slot held. Architectural fix deferred to follow-up sprint per scope budget."

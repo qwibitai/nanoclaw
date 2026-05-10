@@ -77,6 +77,8 @@ export interface ChannelDeliveryAdapter {
   ): Promise<string | undefined>;
   setTyping?(channelType: string, platformId: string, threadId: string | null): Promise<void>;
   deleteMessage?(channelType: string, platformId: string, threadId: string | null, messageId: string): Promise<void>;
+  postParent?(channelType: string, platformId: string, text: string): Promise<{ messageId: string }>;
+  createThread?(channelType: string, platformId: string, parentMessageId: string, title: string, firstMessage: string): Promise<{ threadId: string; messageId: string }>;
 }
 
 let deliveryAdapter: ChannelDeliveryAdapter | null = null;
@@ -92,6 +94,27 @@ let sweepPolling = false;
  */
 type AdapterReadyCallback = (adapter: ChannelDeliveryAdapter) => void | Promise<void>;
 const adapterReadyCallbacks: AdapterReadyCallback[] = [];
+
+/**
+ * Invariant guard: channel_type and platform_id must BOTH be null or BOTH be non-null.
+ * A mix (one null, one set) indicates corrupted routing state and should fail loudly
+ * before any adapter call or DB write that relies on this pair.
+ */
+export function assertChannelRoutingConsistency({
+  channelType,
+  platformId,
+}: {
+  channelType: string | null;
+  platformId: string | null;
+}): void {
+  const isNull = (v: string | null | undefined): boolean => v === null || v === undefined || v === '';
+  if (isNull(channelType) !== isNull(platformId)) {
+    throw new Error(
+      `inconsistent channel routing: channel_type and platform_id must both be null or both non-null. ` +
+        `Got channelType=${JSON.stringify(channelType)}, platformId=${JSON.stringify(platformId)}`,
+    );
+  }
+}
 
 /** Current delivery adapter or null if not yet set. Modules use this in live
  *  message-flow handlers where the adapter is guaranteed to be set. For
@@ -269,6 +292,8 @@ async function deliverMessage(
   session: Session,
   inDb: Database.Database,
 ): Promise<{ platformMsgId?: string; deferAck?: true }> {
+  assertChannelRoutingConsistency({ channelType: msg.channel_type, platformId: msg.platform_id });
+
   if (!deliveryAdapter) {
     log.warn('No delivery adapter configured, dropping message', { id: msg.id });
     return {};

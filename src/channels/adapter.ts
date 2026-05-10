@@ -203,6 +203,30 @@ export interface ChannelAdapter {
    * Returning the same platform_id on repeated calls is expected.
    */
   openDM?(userHandle: string): Promise<string>;
+
+  /**
+   * Post a message to the top level of a channel (no thread_ts / parent).
+   * Used by the orchestrator-dispatch flow to anchor a new task thread.
+   * Returns the platform message id so the caller can reference it for
+   * createThread or later edits.
+   *
+   * Adapters that don't support parent-level posts omit this.
+   */
+  postParent?(platformId: string, text: string): Promise<{ messageId: string }>;
+
+  /**
+   * Create a thread on an existing parent message and post the first message
+   * into it. Returns the thread id (used as thread_ts / reference for
+   * subsequent posts) and the id of the first message sent into the thread.
+   *
+   * Adapters that don't support threads omit this.
+   */
+  createThread?(
+    platformId: string,
+    parentMessageId: string,
+    title: string,
+    firstMessage: string,
+  ): Promise<{ threadId: string; messageId: string }>;
 }
 
 /** Factory function that creates a channel adapter (returns null if credentials missing). */

@@ -27,9 +27,11 @@
  *        claimed a message and went quiet past tolerance since the claim."
  */
 import type Database from 'better-sqlite3';
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 
 import { getActiveSessions } from './db/sessions.js';
+import { getSession } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import {
   countDueMessages,
@@ -43,9 +45,13 @@ import {
   type ContainerState,
 } from './db/session-db.js';
 import { log } from './log.js';
-import { openInboundDb, openOutboundDb, openOutboundDbRw, inboundDbPath, heartbeatPath } from './session-manager.js';
+import { openInboundDb, openOutboundDb, openOutboundDbRw, inboundDbPath, heartbeatPath, writeSessionMessage } from './session-manager.js';
 import { getContainerSpawnedAt, isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
 import type { Session } from './types.js';
+import { getActiveTasks, transitionToTerminal } from './modules/orchestrator-dispatch/db/tasks.js';
+import { getCapabilityConfig } from './modules/orchestrator-dispatch/db/agent-group-capabilities.js';
+import { runReconcilerSweep } from './modules/orchestrator-dispatch/reconciler.js';
+import { decideTaskAction, pendingTerminalDispatchOutboundSeenAt } from './modules/orchestrator-dispatch/watchdog.js';
 
 /**
  * SQLite TIMESTAMP columns store UTC without a timezone marker. Date.parse
@@ -168,6 +174,14 @@ async function sweep(): Promise<void> {
     }
   }
 
+  // MODULE-HOOK:orchestrator-dispatch:reconciler — complete admitted-but-incomplete tasks.
+  // Runs after per-session sweeps so container state is current.
+  runReconcilerSweep();
+
+  // MODULE-HOOK:orchestrator-dispatch:watchdog — reap tasks that have exceeded
+  // their deadline, spawn window, no-progress timeout, or whose child container exited.
+  await sweepTaskWatchdog();
+
   setTimeout(sweep, SWEEP_INTERVAL_MS);
 }
 
@@ -238,6 +252,114 @@ async function sweepSession(session: Session): Promise<void> {
   }
 }
 
+const DEFAULT_NO_PROGRESS_TIMEOUT_SEC = 1800;
+const DEFAULT_SPAWN_DEADLINE_SEC = 300;
+const DEFAULT_DRAIN_GRACE_SEC = 120;
+
+const ACTION_TO_FAIL_REASON: Record<string, string> = {
+  'fail-deadline':       'deadline_exceeded',
+  'fail-no-progress':    'no_progress_timeout',
+  'fail-container-exit': 'container_exit',
+  'fail-spawn-deadline': 'spawn_deadline',
+};
+
+async function sweepTaskWatchdog(): Promise<void> {
+  let tasks;
+  try {
+    tasks = getActiveTasks();
+  } catch (err) {
+    log.error('Task watchdog: failed to load active tasks', { err });
+    return;
+  }
+
+  const now = Date.now();
+
+  for (const task of tasks) {
+    try {
+      // Get child container status from in-memory container set.
+      let childContainerStatus: 'running' | 'stopped' | null = null;
+      if (task.child_session_id !== null) {
+        childContainerStatus = isContainerRunning(task.child_session_id) ? 'running' : 'stopped';
+      }
+
+      // Check child's outbound.db for pending terminal dispatch actions (drain-first guard).
+      // Child session lives under target_agent_group_id, NOT parent_agent_group_id —
+      // dispatching to self is rejected at admit time, so these are always different agents.
+      // Reading the wrong path silently returns null and skips the drain guard entirely.
+      const terminalOutboundSeenAt =
+        task.child_session_id !== null
+          ? pendingTerminalDispatchOutboundSeenAt(task.target_agent_group_id, task.child_session_id)
+          : null;
+
+      // Pull per-orchestrator timeout config; fall back to defaults when absent.
+      const cap = getCapabilityConfig(task.parent_agent_group_id, 'orchestrator');
+      const noProgressTimeoutSec = cap?.noProgressTimeoutSec ?? DEFAULT_NO_PROGRESS_TIMEOUT_SEC;
+      const spawnDeadlineSec = cap?.spawnDeadlineSec ?? DEFAULT_SPAWN_DEADLINE_SEC;
+      const drainGraceSec = cap?.drainGraceSec ?? DEFAULT_DRAIN_GRACE_SEC;
+
+      const decision = decideTaskAction({
+        now,
+        task,
+        childContainerStatus,
+        terminalOutboundSeenAt,
+        noProgressTimeoutSec,
+        spawnDeadlineSec,
+        drainGraceSec,
+      });
+
+      if (decision.action === 'ok') continue;
+
+      const nowIso = new Date(now).toISOString();
+      const failReason = ACTION_TO_FAIL_REASON[decision.action] ?? decision.action;
+      if (!(decision.action in ACTION_TO_FAIL_REASON)) {
+        log.warn('Task watchdog: unknown action, using raw value as fail_reason', { action: decision.action });
+      }
+      const transitioned = transitionToTerminal(task.task_id, 'failed', {
+        fail_reason: failReason,
+        failed_at: nowIso,
+      });
+
+      if (!transitioned) {
+        // Already in terminal state (race with reconciler or another path) — skip notify.
+        log.debug('Task watchdog: task already terminal, skipping notify', { taskId: task.task_id });
+        continue;
+      }
+
+      log.warn('Task watchdog: reaped task', {
+        taskId: task.task_id,
+        reason: decision.action,
+        parentAgentGroupId: task.parent_agent_group_id,
+        parentSessionId: task.parent_session_id,
+      });
+
+      const parentSession = getSession(task.parent_session_id);
+      if (!parentSession) continue;
+
+      try {
+        await writeSessionMessage(task.parent_agent_group_id, task.parent_session_id, {
+          id: randomUUID(),
+          kind: 'system',
+          timestamp: nowIso,
+          content: JSON.stringify({
+            // dispatch_-prefixed per C16 (HARD constraint) — orchestrator agent's
+            // dispatch policy in CLAUDE.md greps for dispatch_* system actions.
+            action: 'dispatch_task_watchdog_fail',
+            task_id: task.task_id,
+            fail_reason: failReason,
+          }),
+        });
+        void wakeContainer(parentSession).catch((err) =>
+          log.warn('Task watchdog: wakeContainer(parent) failed', { taskId: task.task_id, err }),
+        );
+      } catch (err) {
+        log.warn('Task watchdog: failed to notify parent', { taskId: task.task_id, err });
+      }
+    } catch (err) {
+      log.error('Task watchdog: error processing task', { taskId: task.task_id, err });
+    }
+  }
+}
+
 function heartbeatMtimeMs(agentGroupId: string, sessionId: string): number {
   const hbPath = heartbeatPath(agentGroupId, sessionId);
   try {
@@ -297,6 +419,8 @@ export function _resetStuckProcessingRowsForTesting(
 ): void {
   resetStuckProcessingRows(inDb, outDb, session, reason, outDb);
 }
+
+export { sweepTaskWatchdog as _sweepTaskWatchdogForTesting };
 
 function resetStuckProcessingRows(
   inDb: Database.Database,

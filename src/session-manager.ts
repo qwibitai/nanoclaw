@@ -18,6 +18,7 @@ import { deriveAttachmentName } from './attachment-naming.js';
 import { isSafeAttachmentName } from './attachment-safety.js';
 import type { OutboundFile } from './channels/adapter.js';
 import { DATA_DIR } from './config.js';
+import { assertChannelRoutingConsistency } from './delivery.js';
 import { maybeInjectRecall } from './modules/memory/recall-injection.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import {
@@ -332,12 +333,16 @@ export function writeSessionRouting(agentGroupId: string, sessionId: string): vo
     }
   }
 
+  assertChannelRoutingConsistency({ channelType, platformId });
+
   const db = openInboundDb(agentGroupId, sessionId);
   try {
     upsertSessionRouting(db, {
       channel_type: channelType,
       platform_id: platformId,
       thread_id: session.thread_id,
+      session_id: sessionId,
+      // dispatch_task_id intentionally omitted — preserved via COALESCE on conflict
     });
   } finally {
     db.close();

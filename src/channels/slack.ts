@@ -24,6 +24,7 @@
  * override on createChatSdkBridge (already merged upstream-compatible).
  */
 import { createSlackAdapter } from '@chat-adapter/slack';
+import { WebClient } from '@slack/web-api';
 
 import { readEnvFileMatching } from '../env.js';
 import { log } from '../log.js';
@@ -73,6 +74,46 @@ export function parseSlackWorkspaces(env: Record<string, string>): SlackWorkspac
   return workspaces;
 }
 
+/** Minimal interface for the Slack chat.postMessage client — narrow surface for testing. */
+export interface SlackPostMessageClient {
+  chat: {
+    postMessage(args: { channel: string; text: string; thread_ts?: string }): Promise<{ ts?: string | null }>;
+  };
+}
+
+/**
+ * Post a message to the top level of a Slack channel.
+ * Exported for unit testing.
+ */
+export async function slackPostParent(
+  client: SlackPostMessageClient,
+  platformId: string,
+  text: string,
+): Promise<{ messageId: string }> {
+  const response = await client.chat.postMessage({ channel: platformId, text });
+  return { messageId: response.ts as string };
+}
+
+/**
+ * Create a Slack thread by posting a reply to an existing parent message.
+ * threadId IS the parent message's ts (Slack thread_ts semantic) — NOT reply.ts.
+ * Exported for unit testing.
+ */
+export async function slackCreateThread(
+  client: SlackPostMessageClient,
+  platformId: string,
+  parentMessageId: string,
+  _title: string,
+  firstMessage: string,
+): Promise<{ threadId: string; messageId: string }> {
+  const reply = await client.chat.postMessage({
+    channel: platformId,
+    thread_ts: parentMessageId,
+    text: firstMessage,
+  });
+  return { threadId: parentMessageId, messageId: reply.ts as string };
+}
+
 const workspaces = parseSlackWorkspaces(readEnvFileMatching(/^SLACK_(BOT_TOKEN|SIGNING_SECRET)(_[A-Za-z0-9]+)?$/));
 
 for (const ws of workspaces) {
@@ -82,7 +123,8 @@ for (const ws of workspaces) {
         botToken: ws.botToken,
         signingSecret: ws.signingSecret,
       });
-      return createChatSdkBridge({
+      const client = new WebClient(ws.botToken);
+      const bridge = createChatSdkBridge({
         adapter: slackAdapter,
         concurrency: 'concurrent',
         supportsThreads: true,
@@ -92,6 +134,10 @@ for (const ws of workspaces) {
         // input). The adapter handles bold/italic/links/lists/tables natively.
         transformOutboundMarkdown: markdownHeadingsToBold,
       });
+      bridge.postParent = (platformId, text) => slackPostParent(client, platformId, text);
+      bridge.createThread = (platformId, parentMessageId, title, firstMessage) =>
+        slackCreateThread(client, platformId, parentMessageId, title, firstMessage);
+      return bridge;
     },
   });
 }

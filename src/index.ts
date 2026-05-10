@@ -105,6 +105,10 @@ import './channels/index.js';
 // append registry-based modules. Imported for side effects (registrations).
 import './modules/index.js';
 
+// Orchestrator-dispatch reconciler startup hook — called from main() AFTER initDb,
+// since the reconciler queries the central DB.
+import { runReconcilerOnStartup as runDispatchReconcilerOnStartup } from './modules/orchestrator-dispatch/index.js';
+
 import type { ChannelAdapter, ChannelSetup } from './channels/adapter.js';
 import { initChannelAdapters, teardownChannelAdapters, getChannelAdapter } from './channels/channel-registry.js';
 
@@ -137,6 +141,11 @@ async function main(): Promise<void> {
   const db = initDb(dbPath);
   runMigrations(db);
   log.info('Central DB ready', { path: dbPath });
+
+  // 1a. Orchestrator-dispatch reconciler startup scan — must run after migrations
+  // so the tasks table exists. Recovers any tasks left in 'pending' with
+  // admitted_at set but no child_session_id (host crashed mid-completion).
+  runDispatchReconcilerOnStartup();
 
   // 1b. One-time filesystem cutover — idempotent, no-op after first run.
   migrateGroupsToClaudeLocal();
@@ -240,6 +249,22 @@ async function main(): Promise<void> {
     ): Promise<void> {
       const adapter = getChannelAdapter(channelType);
       await adapter?.deleteMessage?.(platformId, threadId, messageId);
+    },
+    async postParent(channelType: string, platformId: string, text: string): Promise<{ messageId: string }> {
+      const adapter = getChannelAdapter(channelType);
+      if (!adapter?.postParent) throw new Error(`adapter ${channelType} doesn't support postParent`);
+      return adapter.postParent(platformId, text);
+    },
+    async createThread(
+      channelType: string,
+      platformId: string,
+      parentMessageId: string,
+      title: string,
+      firstMessage: string,
+    ): Promise<{ threadId: string; messageId: string }> {
+      const adapter = getChannelAdapter(channelType);
+      if (!adapter?.createThread) throw new Error(`adapter ${channelType} doesn't support createThread`);
+      return adapter.createThread(platformId, parentMessageId, title, firstMessage);
     },
   };
   setDeliveryAdapter(deliveryAdapter);

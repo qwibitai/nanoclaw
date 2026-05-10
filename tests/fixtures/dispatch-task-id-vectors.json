@@ -1,0 +1,22 @@
+[
+  {
+    "parent_session_id": "s1",
+    "idempotency_key": "k1",
+    "expected_task_id": "dispatch-0d6316c26655d4d6"
+  },
+  {
+    "parent_session_id": "s2",
+    "idempotency_key": "k1",
+    "expected_task_id": "dispatch-7ad489b40657e66c"
+  },
+  {
+    "parent_session_id": "session-abc-123",
+    "idempotency_key": "my-unique-key",
+    "expected_task_id": "dispatch-e713d212cf411665"
+  },
+  {
+    "parent_session_id": "session-abc-123",
+    "idempotency_key": "key:with:colons",
+    "expected_task_id": "dispatch-886639358b9c00a1"
+  }
+]
