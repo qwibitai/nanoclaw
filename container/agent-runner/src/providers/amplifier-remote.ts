@@ -92,11 +92,31 @@ interface HttpResult {
   body: string;
 }
 
+// Extra grace beyond timeoutMs before the hard-abort backstop fires, in
+// case the underlying http stack is mid-cleanup. Kept tight so a real
+// hang surfaces an error in human-tolerable time.
+const HARD_TIMEOUT_GRACE_MS = 5_000;
+
 /**
  * POST JSON to an arbitrary URL. Uses node:http directly with a fresh
  * ad-hoc Agent (no shared keep-alive pool) — long-running NanoClaw
  * containers surfaced "fetch failed" errors when undici's pool entered a
  * bad state; a fresh Agent per call eliminates that class of issue.
+ *
+ * Two timeout layers:
+ *   1. node:http's socket idle timeout (req.timeout = timeoutMs)
+ *   2. A hard setTimeout backstop at timeoutMs + HARD_TIMEOUT_GRACE_MS
+ *
+ * The backstop exists because production (2026-05-10, jibot-code-rsn)
+ * observed >7-minute hangs in this function with req.timeout set — the
+ * socket idle timer never fired, leaving the rotation path silently
+ * wedged. Most likely a connect-time edge case where socket.setTimeout's
+ * idle measurement doesn't apply during SYN_SENT / DNS resolution. The
+ * setTimeout backstop runs entirely outside the http machinery so it
+ * cannot be subverted by the same failure mode.
+ *
+ * The `settled` guard ensures whichever path completes first wins:
+ * success, http-layer error, soft-timeout-via-error, or hard-timeout.
  */
 function postJsonAt(
   url: URL,
@@ -121,32 +141,59 @@ function postJsonAt(
       agent: new http.Agent({ keepAlive: false }),
       timeout: timeoutMs,
     };
+
+    let settled = false;
+    let hardTimer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (action: () => void): void => {
+      if (settled) return;
+      settled = true;
+      if (hardTimer) clearTimeout(hardTimer);
+      action();
+    };
+
     const req = http.request(opts, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c) => chunks.push(c));
-      res.on('end', () => {
-        resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') });
-      });
-      res.on('error', (err) => reject(err));
+      res.on('end', () =>
+        finish(() => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') })),
+      );
+      res.on('error', (err) => finish(() => reject(err)));
     });
     req.on('timeout', () => {
       req.destroy(new Error(`${timeoutLabel} timed out after ${timeoutMs}ms`));
     });
     req.on('error', (err) => {
       const code = (err as NodeJS.ErrnoException).code;
-      reject(new Error(`${err.message}${code ? ` [${code}]` : ''}`));
+      finish(() => reject(new Error(`${err.message}${code ? ` [${code}]` : ''}`)));
     });
+
+    // Hard backstop: production observed the socket idle timer silently
+    // failing to fire under network black-hole conditions. setTimeout
+    // is independent of the http stack, so it cannot be subverted by
+    // whatever wedged the socket.
+    hardTimer = setTimeout(() => {
+      finish(() => {
+        try {
+          req.destroy(new Error('hard-abort'));
+        } catch {
+          /* socket may already be torn down */
+        }
+        reject(
+          new Error(
+            `${timeoutLabel} hard-aborted after ${timeoutMs + HARD_TIMEOUT_GRACE_MS}ms (socket idle timer did not fire)`,
+          ),
+        );
+      });
+    }, timeoutMs + HARD_TIMEOUT_GRACE_MS);
+    // Allow the event loop to exit if everything else is cleaned up.
+    if (typeof hardTimer.unref === 'function') hardTimer.unref();
+
     req.write(body);
     req.end();
   });
 }
 
-function postJson(
-  cfg: AmplifierdConfig,
-  pathSuffix: string,
-  bodyObj: unknown,
-  timeoutMs: number,
-): Promise<HttpResult> {
+function postJson(cfg: AmplifierdConfig, pathSuffix: string, bodyObj: unknown, timeoutMs: number): Promise<HttpResult> {
   return postJsonAt(
     new URL(cfg.baseUrl + pathSuffix),
     { Authorization: `Bearer ${cfg.apiKey}` },
@@ -196,7 +243,9 @@ async function createSession(cfg: AmplifierdConfig, metadata?: Record<string, un
     throw new Error(`amplifierd network error on createSession: ${(err as Error).message}`);
   }
   if (result.status < 200 || result.status >= 300) {
-    throw new Error(`amplifierd ${result.status} on createSession: ${extractErrorDetail(result.body, `HTTP ${result.status}`)}`);
+    throw new Error(
+      `amplifierd ${result.status} on createSession: ${extractErrorDetail(result.body, `HTTP ${result.status}`)}`,
+    );
   }
   let data: CreateSessionResponse;
   try {
@@ -224,7 +273,9 @@ async function executePrompt(cfg: AmplifierdConfig, sessionId: string, prompt: s
     throw new Error(`amplifierd network error on executePrompt: ${(err as Error).message}`);
   }
   if (result.status < 200 || result.status >= 300) {
-    throw new Error(`amplifierd ${result.status} on executePrompt: ${extractErrorDetail(result.body, `HTTP ${result.status}`)}`);
+    throw new Error(
+      `amplifierd ${result.status} on executePrompt: ${extractErrorDetail(result.body, `HTTP ${result.status}`)}`,
+    );
   }
   let data: ExecuteResponse;
   try {
@@ -353,9 +404,33 @@ async function runTurn(
   } catch (err) {
     if (continuation && isStaleSessionError(err)) {
       log(`stale session ${continuation} — rotating to fresh session and retrying once`);
-      const fresh = await createSession(cfg);
-      const response = await executePrompt(cfg, fresh, sendPrompt);
-      return { continuation: fresh, response };
+      // Heartbeat logs around the rotation path so a hang here is
+      // visible in container logs at human timescales — the previous
+      // single "rotating…" line followed by silence (jibot-code-rsn,
+      // 2026-05-10) made it impossible to tell whether createSession
+      // or executePrompt was the wedged step.
+      let fresh: string;
+      try {
+        log(`rotation: creating fresh session (createSession timeout 30000ms + ${HARD_TIMEOUT_GRACE_MS}ms grace)`);
+        fresh = await createSession(cfg);
+        log(`rotation: created fresh session ${fresh}`);
+      } catch (rotErr) {
+        const msg = rotErr instanceof Error ? rotErr.message : String(rotErr);
+        log(`rotation: createSession failed: ${msg}`);
+        throw new Error(`rotation failed during createSession: ${msg}`);
+      }
+      try {
+        log(
+          `rotation: executing prompt on fresh session ${fresh} (executePrompt timeout ${cfg.timeoutMs}ms + ${HARD_TIMEOUT_GRACE_MS}ms grace)`,
+        );
+        const response = await executePrompt(cfg, fresh, sendPrompt);
+        log(`rotation: succeeded (response ${response.length} bytes)`);
+        return { continuation: fresh, response };
+      } catch (rotErr) {
+        const msg = rotErr instanceof Error ? rotErr.message : String(rotErr);
+        log(`rotation: executePrompt on fresh session ${fresh} failed: ${msg}`);
+        throw new Error(`rotation failed during executePrompt: ${msg}`);
+      }
     }
     throw err;
   }

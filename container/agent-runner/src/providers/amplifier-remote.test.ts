@@ -221,6 +221,52 @@ describe('AmplifierRemoteProvider', () => {
       expect(captured[2]!.path).toBe('/sessions/sess-fresh/execute');
     });
 
+    it('emits heartbeat logs at each step of session rotation (jibot-code-rsn)', async () => {
+      enqueueResponse(404, JSON.stringify({ detail: 'session not found' }));
+      enqueueResponse(200, JSON.stringify({ session_id: 'sess-fresh', status: 'ready' }));
+      enqueueResponse(200, JSON.stringify({ response: 'after retry' }));
+
+      const logs: string[] = [];
+      const errSpy = spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        logs.push(args.map((a) => String(a)).join(' '));
+      });
+      try {
+        const provider = new AmplifierRemoteProvider({ env: VALID_ENV });
+        const q = provider.query({ prompt: 'p', cwd: '/workspace', continuation: 'sess-stale' });
+        q.end();
+        await collect(q.events);
+      } finally {
+        errSpy.mockRestore();
+      }
+
+      // Pre-existing rotation announcement.
+      expect(logs.some((l) => /stale session sess-stale.*rotating/.test(l))).toBe(true);
+      // New heartbeat lines — without these a hung rotation is invisible.
+      expect(logs.some((l) => /rotation: creating fresh session/.test(l))).toBe(true);
+      expect(logs.some((l) => /rotation: created fresh session sess-fresh/.test(l))).toBe(true);
+      expect(logs.some((l) => /rotation: executing prompt on fresh session sess-fresh/.test(l))).toBe(true);
+      expect(logs.some((l) => /rotation: succeeded \(response \d+ bytes\)/.test(l))).toBe(true);
+    });
+
+    it('reports a clear error if executePrompt on the fresh session also fails', async () => {
+      enqueueResponse(404, JSON.stringify({ detail: 'session not found' }));
+      enqueueResponse(200, JSON.stringify({ session_id: 'sess-fresh', status: 'ready' }));
+      enqueueResponse(500, JSON.stringify({ detail: 'amplifierd kaboom' }));
+
+      const provider = new AmplifierRemoteProvider({ env: VALID_ENV });
+      const q = provider.query({ prompt: 'p', cwd: '/workspace', continuation: 'sess-stale' });
+      q.end();
+
+      const events = await collect(q.events);
+      const errs = events.filter((e) => e.type === 'error');
+      expect(errs).toHaveLength(1);
+      // Wrapped error names the failing leg of rotation so an operator
+      // can tell create-vs-execute apart in the field.
+      expect((errs[0] as { message: string }).message).toMatch(
+        /rotation failed during executePrompt:.*amplifierd kaboom/,
+      );
+    });
+
     it('does NOT retry on non-stale errors', async () => {
       enqueueResponse(500, JSON.stringify({ detail: 'internal error' }));
 
@@ -321,11 +367,9 @@ describe('AmplifierRemoteProvider', () => {
       ).toEqual(['line-612998655787401523-Letter to Banks.pdf']);
     });
     it('terminates at ] so markers do not bleed into surrounding text', () => {
-      expect(
-        __test.extractAttachmentBasenames(
-          '[Image: /workspace/attachments/a.jpg] please describe',
-        ),
-      ).toEqual(['a.jpg']);
+      expect(__test.extractAttachmentBasenames('[Image: /workspace/attachments/a.jpg] please describe')).toEqual([
+        'a.jpg',
+      ]);
     });
     it('dedupes repeated paths', () => {
       // Use bracketed form since unbracketed greedy-matches to end-of-line.
@@ -352,9 +396,7 @@ describe('AmplifierRemoteProvider', () => {
       expect(__test.rewriteAttachmentPaths('plain text /etc/passwd')).toBe('plain text /etc/passwd');
     });
     it('does not touch /workspace/agent or other /workspace/* paths', () => {
-      expect(__test.rewriteAttachmentPaths('/workspace/agent/notes.md')).toBe(
-        '/workspace/agent/notes.md',
-      );
+      expect(__test.rewriteAttachmentPaths('/workspace/agent/notes.md')).toBe('/workspace/agent/notes.md');
     });
   });
 
@@ -477,9 +519,7 @@ describe('AmplifierRemoteProvider', () => {
       const events = await collect(q.events);
       const errs = events.filter((e) => e.type === 'error');
       expect(errs).toHaveLength(1);
-      expect((errs[0] as { message: string }).message).toMatch(
-        /attachment ferry failed for "x\.pdf".*ECONNREFUSED/,
-      );
+      expect((errs[0] as { message: string }).message).toMatch(/attachment ferry failed for "x\.pdf".*ECONNREFUSED/);
       expect(captured).toHaveLength(1);
     });
   });
