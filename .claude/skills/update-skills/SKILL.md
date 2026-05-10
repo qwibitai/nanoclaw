@@ -1,11 +1,17 @@
 ---
 name: update-skills
-description: Check for and apply updates to installed skill branches from upstream.
+description: Check for and apply updates to installed branch-based capabilities from upstream.
 ---
 
 # About
 
-Skills are distributed as git branches (`skill/*`). When you install a skill, you merge its branch into your repo. This skill checks upstream for newer commits on those skill branches and helps you update.
+This skill updates branch-based capabilities that still live under `skill/*`.
+Channel installers copy files from `channels`, and provider installers copy
+files from `providers`; they are not detected by this workflow.
+
+When you install a branch-based capability, you merge its `skill/*` branch into
+your repo. This skill checks upstream for newer commits on those branches and
+helps you update.
 
 Run `/update-skills` in Claude Code.
 
@@ -13,7 +19,7 @@ Run `/update-skills` in Claude Code.
 
 **Preflight**: checks for clean working tree and upstream remote.
 
-**Detection**: fetches upstream, lists all `upstream/skill/*` branches, determines which ones you've previously merged (via merge-base), and checks if any have new commits.
+**Detection**: fetches upstream, lists all `upstream/skill/*` branches, determines which branch-based capabilities you've previously merged (via merge-base), and checks if any have new commits.
 
 **Selection**: presents a list of skills with available updates. You pick which to update.
 
@@ -26,7 +32,7 @@ Help users update their installed skill branches from upstream without losing lo
 
 # Operating principles
 - Never proceed with a dirty working tree.
-- Only offer updates for skills the user has already merged (installed).
+- Only offer updates for branch-based capabilities the user has already merged.
 - Use git-native operations. Do not manually rewrite files except conflict markers.
 - Keep token usage low: rely on `git` commands, only open files with actual conflicts.
 
@@ -65,13 +71,13 @@ For each `upstream/skill/<name>`:
 Build three lists:
 - **Updates available**: skills that are merged AND have new commits
 - **Up to date**: skills that are merged and have no new commits
-- **Not installed**: skills that have never been merged
+- **Not installed**: branch-based capabilities that have never been merged
 
 # Step 2: Present results
 
 If no skills have updates available:
 - Tell the user all installed skills are up to date. List them.
-- If there are uninstalled skills, mention them briefly (e.g., "3 other skills available in upstream that you haven't installed").
+- If there are uninstalled branch-based capabilities, mention them briefly (e.g., "3 other skill branches are available in upstream that you haven't installed").
 - Stop here.
 
 If updates are available:
@@ -80,7 +86,7 @@ If updates are available:
   skill/<name>: 3 new commits
   skill/<other>: 1 new commit
   ```
-- Also show skills that are up to date (for context).
+- Also show branch-based capabilities that are up to date (for context).
 - Use AskUserQuestion with `multiSelect: true` to let the user pick which skills to update.
   - One option per skill with updates, labeled with the skill name and commit count.
   - Add an option: "Skip — don't update any skills now"

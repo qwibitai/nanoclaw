@@ -21,7 +21,7 @@
 
 ## Skills
 
-NanoClaw uses [Claude Code skills](https://code.claude.com/docs/en/skills) — markdown files with optional supporting files that teach Claude how to do something. There are four types of skills in NanoClaw, each serving a different purpose.
+NanoClaw uses [Claude Code skills](https://code.claude.com/docs/en/skills) — markdown files with optional supporting files that teach Claude how to do something. Skills can modify the checkout, run maintenance workflows, or teach the runtime agent inside the container.
 
 ### Why skills?
 
@@ -29,28 +29,47 @@ Every user should have clean and minimal code that does exactly what they need. 
 
 ### Skill types
 
-#### 1. Feature skills (branch-based)
+#### 1. Channel and provider installer skills
 
-Add capabilities to NanoClaw by merging a git branch. The SKILL.md contains setup instructions; the actual code lives on a `skill/*` branch.
+Add optional channel adapters or agent providers to a user's checkout. The
+SKILL.md contains setup instructions; the source modules live on long-lived
+capability branches.
 
-**Location:** `.claude/skills/` on `main` (instructions only), code on `skill/*` branch
+**Location:** `.claude/skills/add-*/` on `main`; channel code on `channels`; provider code on `providers`
 
-**Examples:** `/add-telegram`, `/add-slack`, `/add-discord`, `/add-gmail`
+**Examples:** `/add-telegram`, `/add-slack`, `/add-discord`, `/add-codex`, `/add-opencode`
 
 **How they work:**
 1. User runs `/add-telegram`
-2. Claude follows the SKILL.md: fetches and merges the `skill/telegram` branch
-3. Claude walks through interactive setup (env vars, bot creation, etc.)
+2. Claude Code follows the SKILL.md: fetches `channels`, copies the Telegram-owned files, appends the registration import, installs pinned dependencies, and builds
+3. Claude walks through interactive setup and then hands off to `/manage-channels`
 
-**Contributing a feature skill:**
-1. Fork `qwibitai/nanoclaw` and branch from `main`
-2. Make the code changes (new files, modified source, updated `package.json`, etc.)
-3. Add a SKILL.md in `.claude/skills/<name>/` with setup instructions — step 1 should be merging the branch
-4. Open a PR. We'll create the `skill/<name>` branch from your work
+Provider installers follow the same pattern, but copy from `providers` and wire both host-side and container-side provider barrels.
 
-See `/add-telegram` for a good example. See [docs/skills-as-branches.md](docs/skills-as-branches.md) for the full system design.
+Installer skills are separate from NanoClaw's runtime agent provider. A user can install `/add-codex` with Claude Code and then run an agent group on the Codex provider.
 
-#### 2. Utility skills (with code files)
+**Contributing channel or provider support:**
+1. Put channel implementation changes on a branch based on `channels`, or provider implementation changes on a branch based on `providers`
+2. Put installer instructions and any core registry/infrastructure changes on a separate branch based on `main`
+3. Add or update `.claude/skills/add-<name>/SKILL.md` on the `main` branch PR
+4. Keep each PR scoped to the branch it targets: optional implementation code on `channels` or `providers`, installer and shared infrastructure on `main`
+
+See `/add-telegram`, `/add-discord`, `/add-codex`, or `/add-opencode` for current examples. See [docs/skills-as-branches.md](docs/skills-as-branches.md) for the current installer model.
+
+#### 2. Branch-based capability skills
+
+Some non-channel capabilities still use a `skill/*` branch when the capability is naturally represented as a branch merge.
+
+**Location:** `.claude/skills/<name>/` on `main`, code on `skill/<name>`
+
+**How they work:**
+1. User runs the skill
+2. Claude Code fetches and merges `upstream/skill/<name>`
+3. Claude validates the result and handles any setup
+
+Do not create channel-specific `skill/*` branches for normal channel adapters. Use `channels`. Do not create provider-specific `skill/*` branches for normal providers. Use `providers`.
+
+#### 3. Utility skills (with code files)
 
 Standalone tools that ship code files alongside the SKILL.md. The SKILL.md tells Claude how to install the tool; the code lives in the skill directory itself (e.g. in a `scripts/` subfolder).
 
@@ -58,14 +77,14 @@ Standalone tools that ship code files alongside the SKILL.md. The SKILL.md tells
 
 **Examples:** `/claw` (Python CLI in `scripts/claw`)
 
-**Key difference from feature skills:** No branch merge needed. The code is self-contained in the skill directory and gets copied into place during installation.
+**Key difference from branch-based capabilities:** No branch merge needed. The code is self-contained in the skill directory and gets copied into place during installation.
 
 **Guidelines:**
 - Put code in separate files, not inline in the SKILL.md
 - Use `${CLAUDE_SKILL_DIR}` to reference files in the skill directory
 - SKILL.md contains installation instructions, usage docs, and troubleshooting
 
-#### 3. Operational skills (instruction-only)
+#### 4. Operational skills (instruction-only)
 
 Workflows and guides with no code changes. The SKILL.md is the entire skill — Claude follows the instructions to perform a task.
 
@@ -78,7 +97,7 @@ Workflows and guides with no code changes. The SKILL.md is the entire skill — 
 - Use `AskUserQuestion` for interactive prompts
 - These stay on `main` and are always available to every user
 
-#### 4. Container skills (agent runtime)
+#### 5. Container skills (agent runtime)
 
 Skills that run inside the agent container, not on the host. These teach the container agent how to use tools, format output, or perform tasks. They are synced into each group's `.claude/skills/` directory when a container starts.
 

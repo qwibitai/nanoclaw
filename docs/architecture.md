@@ -499,7 +499,11 @@ The architecture is **flexible for code changes, not configurable for everything
 
 ### Code Structure for Skill Customization
 
-NanoClaw is customized via skills — branches that get merged into the user's installation. Different skills add different capabilities (channels, integrations, behaviors). The code must be structured so that:
+NanoClaw is customized via skills. Channel and provider installers copy owned
+files from the long-lived `channels` and `providers` branches; residual
+branch-based capabilities can still merge `skill/*` branches. Different skills
+add different capabilities (channels, integrations, behaviors). The code must be
+structured so that:
 
 1. **Different customizations don't conflict.** Adding Slack and adding Telegram should not produce merge conflicts. Adding a new MCP tool should not conflict with adding a channel. Each type of customization should touch its own file(s).
 

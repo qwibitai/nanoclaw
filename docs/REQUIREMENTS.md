@@ -128,7 +128,7 @@ A personal Claude assistant accessible via messaging, with minimal custom code.
 
 ### Channels
 - WhatsApp (baileys), Telegram (grammy), Discord (discord.js), Slack (@slack/bolt), Gmail (googleapis)
-- Each channel lives in a separate fork repo and is added via skills (e.g., `/add-whatsapp`, `/add-telegram`)
+- Channels live together on the `channels` branch and are copied into a user's fork by `/add-<channel>` skills (e.g., `/add-whatsapp`, `/add-telegram`)
 - Messages stored in SQLite, polled by router
 - Channels self-register at startup — unconfigured channels are skipped with a warning
 
