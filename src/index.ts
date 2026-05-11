@@ -768,6 +768,32 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+    postToSlackChannel: (channel, text, threadTs) => {
+      const slackCh = channels.find((c) => c.name === 'slack') as
+        | (typeof channels[number] & {
+            postToChannel?: (
+              ch: string,
+              t: string,
+              tt?: string,
+            ) => Promise<{
+              ok: boolean;
+              channel?: string;
+              ts?: string;
+              permalink?: string;
+              error?: string;
+              hint?: string;
+            }>;
+          })
+        | undefined;
+      if (!slackCh?.postToChannel) {
+        return Promise.resolve({
+          ok: false,
+          error: 'slack_not_available',
+          hint: 'Slack channel not connected or not registered on this bot.',
+        });
+      }
+      return slackCh.postToChannel(channel, text, threadTs);
+    },
     onTasksChanged: () => {
       const tasks = getAllTasks();
       const taskRows = tasks.map((t) => ({

@@ -10,6 +10,15 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
+export interface SlackPostResult {
+  ok: boolean;
+  channel?: string;
+  ts?: string;
+  permalink?: string;
+  error?: string;
+  hint?: string;
+}
+
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -23,6 +32,27 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  /** Post directly to a Slack channel. Returns structured ok/error response. */
+  postToSlackChannel?: (
+    channel: string,
+    text: string,
+    threadTs?: string,
+  ) => Promise<SlackPostResult>;
+}
+
+/** Write an IPC response file the requesting container polls for. Atomic temp+rename. */
+function writeIpcResponse(
+  ipcBaseDir: string,
+  sourceGroup: string,
+  requestId: string,
+  payload: object,
+): void {
+  const responsesDir = path.join(ipcBaseDir, sourceGroup, 'responses');
+  fs.mkdirSync(responsesDir, { recursive: true });
+  const finalPath = path.join(responsesDir, `${requestId}.json`);
+  const tempPath = `${finalPath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(payload));
+  fs.renameSync(tempPath, finalPath);
 }
 
 let ipcWatcherRunning = false;
@@ -173,11 +203,17 @@ export async function processTaskIpc(
     requiresTrigger?: boolean;
     smartTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For slack_post_to_channel
+    requestId?: string;
+    channel?: string;
+    text?: string;
+    thread_ts?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
   deps: IpcDeps,
 ): Promise<void> {
+  const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   const registeredGroups = deps.registeredGroups();
 
   switch (data.type) {
@@ -419,6 +455,57 @@ export async function processTaskIpc(
           { sourceGroup },
           'Unauthorized refresh_groups attempt blocked',
         );
+      }
+      break;
+
+    case 'slack_post_to_channel':
+      if (data.requestId && data.channel && data.text) {
+        const requestId = data.requestId;
+        const channel = data.channel;
+        const text = data.text;
+        const threadTs = data.thread_ts;
+        const textPreview = text.length > 80 ? `${text.slice(0, 80)}…` : text;
+        if (!deps.postToSlackChannel) {
+          logger.warn(
+            { sourceGroup, channel, requestId },
+            'slack_post_to_channel called but Slack channel not available',
+          );
+          writeIpcResponse(ipcBaseDir, sourceGroup, requestId, {
+            ok: false,
+            error: 'slack_not_available',
+            hint: 'Slack channel is not configured on this bot.',
+          });
+          break;
+        }
+        logger.info(
+          { sourceGroup, channel, textPreview, threadTs, requestId },
+          'slack_post_to_channel: dispatching',
+        );
+        const result = await deps.postToSlackChannel(channel, text, threadTs);
+        logger.info(
+          {
+            sourceGroup,
+            channel: result.channel ?? channel,
+            ts: result.ts,
+            ok: result.ok,
+            error: result.error,
+            requestId,
+          },
+          'slack_post_to_channel: result',
+        );
+        writeIpcResponse(ipcBaseDir, sourceGroup, requestId, result);
+      } else {
+        logger.warn(
+          { sourceGroup, data },
+          'Invalid slack_post_to_channel — missing requestId, channel, or text',
+        );
+        if (data.requestId) {
+          writeIpcResponse(ipcBaseDir, sourceGroup, data.requestId, {
+            ok: false,
+            error: 'invalid_request',
+            hint: 'channel and text are required',
+          });
+        }
       }
       break;
 

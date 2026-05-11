@@ -15,6 +15,7 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const RESPONSES_DIR = path.join(IPC_DIR, 'responses');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -405,6 +406,74 @@ server.tool(
 
     return {
       content: [{ type: 'text' as const, text: output }],
+    };
+  },
+);
+
+// --- Direct Slack channel post ---
+
+server.tool(
+  'slack_post_to_channel',
+  "Post a Slack message directly to a specific channel by its ID or name (#channel or C0XXXXXXX). Use this when you've been instructed in one context (e.g. a DM with the user) to post into a different channel. The bot must be a member of the target channel; if not, the tool returns a clear error including a hint about asking the operator to /invite the bot. For peer-to-peer agent messaging in your current channel, prefer `send_message` instead.",
+  {
+    channel: z
+      .string()
+      .describe('Channel ID (e.g. "C0AP24V9695") or name with hash (e.g. "#x-relay"). Slack resolves both.'),
+    text: z.string().describe('Message text. Slack mrkdwn supported.'),
+    thread_ts: z
+      .string()
+      .optional()
+      .describe('Optional: parent message ts (e.g. "1778425063.986949") to reply in-thread.'),
+  },
+  async (args) => {
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'slack_post_to_channel',
+      requestId,
+      channel: args.channel,
+      text: args.text,
+      thread_ts: args.thread_ts,
+      sourceGroup: groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    const responseFile = path.join(RESPONSES_DIR, `${requestId}.json`);
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      if (fs.existsSync(responseFile)) {
+        try {
+          const raw = fs.readFileSync(responseFile, 'utf-8');
+          const response = JSON.parse(raw);
+          try {
+            fs.unlinkSync(responseFile);
+          } catch {
+            // best-effort cleanup
+          }
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(response) }],
+            isError: response.ok === false,
+          };
+        } catch {
+          // mid-write; retry
+        }
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify({
+            ok: false,
+            error: 'timeout',
+            hint: 'No response from host within 15s. Host IPC watcher may be stalled — check bot logs.',
+            requestId,
+          }),
+        },
+      ],
+      isError: true,
     };
   },
 );

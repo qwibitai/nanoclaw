@@ -192,6 +192,76 @@ export class SlackChannel implements Channel {
     await this.syncChannelMetadata();
   }
 
+  /**
+   * Post directly to a Slack channel by ID or name (no jid prefix required).
+   * Returns the Slack API response with ok/ts on success, or a structured
+   * error object on failure. Used by the slack_post_to_channel IPC handler.
+   */
+  async postToChannel(
+    channel: string,
+    text: string,
+    threadTs?: string,
+  ): Promise<{
+    ok: boolean;
+    channel?: string;
+    ts?: string;
+    permalink?: string;
+    error?: string;
+    hint?: string;
+  }> {
+    if (!this.connected) {
+      return {
+        ok: false,
+        error: 'not_connected',
+        hint: 'Slack channel not connected yet. Retry after the bot finishes startup.',
+      };
+    }
+    try {
+      const result = await this.app.client.chat.postMessage({
+        channel,
+        text,
+        thread_ts: threadTs,
+      });
+      const channelId = (result.channel as string) || channel;
+      const ts = (result.ts as string) || '';
+      let permalink: string | undefined;
+      try {
+        const perm = await this.app.client.chat.getPermalink({
+          channel: channelId,
+          message_ts: ts,
+        });
+        permalink = perm.permalink as string | undefined;
+      } catch {
+        // permalink is best-effort
+      }
+      return { ok: true, channel: channelId, ts, permalink };
+    } catch (err) {
+      const slackErr = err as {
+        data?: { error?: string };
+        code?: string;
+        message?: string;
+      };
+      const errorCode =
+        slackErr?.data?.error ?? slackErr?.code ?? slackErr?.message ?? 'unknown_error';
+      const hints: Record<string, string> = {
+        not_in_channel: `Ask the human operator to /invite this bot to ${channel}, or use send_message to a peer who is in it.`,
+        channel_not_found: `Channel "${channel}" does not exist or the bot can't see it. Verify the ID/name and that the bot is in the same workspace.`,
+        is_archived: `Channel "${channel}" is archived. Pick an active channel.`,
+        msg_too_long: `Message too long for Slack (max ~40k). Split into smaller messages.`,
+        rate_limited: `Slack rate-limited the post. Back off and retry after the Retry-After interval.`,
+        invalid_auth: `Slack bot token is invalid or revoked. Surface to the operator — bot needs reauth.`,
+        not_authed: `Slack bot is not authenticated. Surface to operator.`,
+        token_revoked: `Slack token revoked. Surface to operator — bot needs reauth.`,
+      };
+      return {
+        ok: false,
+        channel,
+        error: errorCode,
+        hint: hints[errorCode] ?? `Slack API returned "${errorCode}". Check Slack logs.`,
+      };
+    }
+  }
+
   async sendMessage(jid: string, text: string): Promise<void> {
     const channelId = jid.replace(/^slack:/, '');
 
@@ -264,7 +334,10 @@ export class SlackChannel implements Channel {
       }
     } catch (err) {
       // Ignore already_reacted / not_reacted — reaction state is best-effort
-      logger.debug({ jid, isTyping, err }, 'Slack typing reaction failed (non-fatal)');
+      logger.debug(
+        { jid, isTyping, err },
+        'Slack typing reaction failed (non-fatal)',
+      );
     }
   }
 
