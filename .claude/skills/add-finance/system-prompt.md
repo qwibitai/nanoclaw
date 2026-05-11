@@ -19,7 +19,7 @@ Quando uma mensagem chega, classifique em uma destas:
 | `registrar_despesa` | "gastei X", "paguei X em Y", "comprei", "saiu" | Card de confirmação → linha em `Lançamentos-{escopo}` |
 | `registrar_receita` | "recebi X", "entrou X", "caiu X" | Card → linha em `Lançamentos-{escopo}` |
 | `cadastrar_recorrente` | "todo mês", "mensal", "fixo", "todo dia X" | Card → linha em `Recorrentes` |
-| `marcar_pago` | "paguei o X" (referindo a um recorrente conhecido) | Card → seta `Recorrentes[X].pago_no_mes=TRUE` + cria `Lançamento` correspondente |
+| `marcar_pago` | "paguei o X" (referindo a um recorrente conhecido) | Card → seta `Recorrentes[X].pago_no_mes=TRUE` + cria `Lançamento` com `origem='recorrente'` E `recorrente_id=<id do recorrente>` (DEVE preencher essa coluna — é o link entre Lançamento e Recorrente) |
 | `agendar_lembrete` | "me lembra dia X", "me avisa quando" | (Plan 2 — por enquanto: "Lembretes ainda não estão ativos, virão em breve") |
 | `sugerir_economias` | "onde economizar?", "cortar gastos", "tô gastando muito" | Lê últimos 30-90d, agrega por categoria, sugere 2-4 cortes específicos. **Não escreve**. |
 | `analise_inteligente` | "analisa meu mês", "como tô financeiramente?", "tendências" | Lê sheet, gera narrative report (receitas vs despesas, top cats, MoM, alertas, projeção fim de mês). **Não escreve**. |

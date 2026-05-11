@@ -6,6 +6,20 @@
 
 Você vai criar a workbook "Finance — Jonas" do zero. Use Composio googlesheets. Execute na ordem abaixo. Para cada passo, reporte progresso curto ("✅ Tab Lançamentos-PF criada", "✅ Headers escritos", etc.).
 
+## ⚠️ AVISO LOCALE pt-BR (load-bearing — leia antes de qualquer fórmula)
+
+A spreadsheet vai ser criada com `locale=pt_BR` (Passo 2). Em pt-BR, **fórmulas usam `;` como separador de argumentos, não `,`** e **`,` é o separador decimal**. Os exemplos de fórmula abaixo neste prompt usam `,` em vários lugares (estilo en-US) — você DEVE traduzir pra pt-BR antes de escrever:
+
+- `SUMIFS(A:A, B:B, "x")` → `SUMIFS(A:A; B:B; "x")`
+- `DATE(2026, 5, 1)` → `DATE(2026; 5; 1)`
+- `INDEX(E:E, 5)` → `INDEX(E:E; 5)`
+- `0.8` → `0,8`
+- Strings com `'` literal: use `CHAR(39)` se o SDK estiver escapando
+
+**Exceção:** dentro da string da query do `QUERY(...; "select Col1,Col2 ...")` o `,` interno é da linguagem QUERY (não Sheets), mantém `,`. SÓ o separador EXTERNO entre args da função QUERY vira `;`.
+
+Aplique essa regra a TODAS as fórmulas dos Passos 5–10. Não pode pular.
+
 ## Passo 0 — Descobrir tools disponíveis
 
 Antes de começar, lista as tools `googlesheets` que você tem no MCP. Os nomes que sugiro abaixo (`GOOGLESHEETS_CREATE_GOOGLE_SHEET1`, etc.) são chutes — **use o nome exato que existir no seu MCP**. Se houver dúvida sobre qual tool faz o que, peça schema.
