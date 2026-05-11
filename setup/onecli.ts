@@ -153,8 +153,16 @@ function installOnecli(): { stdout: string; ok: boolean } {
   const cleanup = removeLegacyOnecliContainers();
   if (cleanup) stdout += cleanup + '\n';
 
+  // On podman systems, default ONECLI_BIND_HOST to 127.0.0.1: the compose file
+  // binds to this by default, and the installer rejects a missing bind address
+  // on machines where it can't auto-detect a Docker bridge interface.
+  const gwEnv =
+    getPlatform() === 'linux' && commandExists('podman') && !process.env.ONECLI_BIND_HOST
+      ? { ...process.env, ONECLI_BIND_HOST: '127.0.0.1' }
+      : undefined;
+
   // Gateway install (docker-compose based, no rate-limit concerns).
-  const gw = runInstall('curl -fsSL onecli.sh/install | sh');
+  const gw = runInstall('curl -fsSL onecli.sh/install | sh', gwEnv);
   stdout += gw.stdout;
   if (!gw.ok) {
     log.error('OneCLI gateway install failed', { stderr: gw.stderr });
@@ -184,11 +192,15 @@ function installOnecli(): { stdout: string; ok: boolean } {
   return { stdout, ok: true };
 }
 
-function runInstall(cmd: string): { stdout: string; stderr?: string; ok: boolean } {
+function runInstall(
+  cmd: string,
+  env?: NodeJS.ProcessEnv,
+): { stdout: string; stderr?: string; ok: boolean } {
   try {
     const stdout = execSync(cmd, {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      ...(env ? { env } : {}),
     });
     return { stdout, ok: true };
   } catch (err) {
