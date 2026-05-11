@@ -10,8 +10,9 @@ import fs from 'fs';
 import path from 'path';
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { getInboundSourceSessionId, migrateMessagesInTable, upsertSessionRouting } from './session-db.js';
+import { getInboundSourceSessionId, migrateMessagesInTable, sessionInboundHasMessage, upsertSessionRouting } from './session-db.js';
 import { INBOUND_SCHEMA } from './schema.js';
+import { DATA_DIR } from '../config.js';
 
 const TEST_DIR = '/tmp/nanoclaw-session-db-test';
 const DB_PATH = path.join(TEST_DIR, 'inbound.db');
@@ -258,5 +259,52 @@ describe('upsertSessionRouting — spawn_task_id + session_id columns', () => {
     } finally {
       db.close();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sessionInboundHasMessage
+// ---------------------------------------------------------------------------
+
+describe('sessionInboundHasMessage', () => {
+  const TEST_GROUP = 'test-group-has-msg';
+  const TEST_SESSION = 'test-session-has-msg';
+
+  function sessionDbPath(): string {
+    return path.join(DATA_DIR, 'v2-sessions', TEST_GROUP, TEST_SESSION, 'inbound.db');
+  }
+
+  afterEach(() => {
+    const dir = path.join(DATA_DIR, 'v2-sessions', TEST_GROUP);
+    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true });
+  });
+
+  it('test_sessionInboundHasMessage_present', () => {
+    const dbPath = sessionDbPath();
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const db = new Database(dbPath);
+    db.pragma('journal_mode = DELETE');
+    db.exec(INBOUND_SCHEMA);
+    db.prepare(
+      "INSERT INTO messages_in (id, seq, kind, timestamp, status, content) VALUES (?, ?, 'chat', datetime('now'), 'pending', '{}')",
+    ).run('msg-1', 2);
+    db.close();
+
+    expect(sessionInboundHasMessage(TEST_GROUP, TEST_SESSION, 'msg-1')).toBe(true);
+  });
+
+  it('test_sessionInboundHasMessage_absent', () => {
+    const dbPath = sessionDbPath();
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const db = new Database(dbPath);
+    db.pragma('journal_mode = DELETE');
+    db.exec(INBOUND_SCHEMA);
+    db.close();
+
+    expect(sessionInboundHasMessage(TEST_GROUP, TEST_SESSION, 'msg-2')).toBe(false);
+  });
+
+  it('test_sessionInboundHasMessage_no_db', () => {
+    expect(sessionInboundHasMessage(TEST_GROUP, 'nonexistent-session', 'msg-1')).toBe(false);
   });
 });

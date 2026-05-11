@@ -44,6 +44,19 @@ export async function applySpawnComplete(content: Record<string, unknown>, calle
     return;
   }
 
+  // Dashboard SSE emit (post-build drift fix B5 — D6 plan callsite missing)
+  void import('../../dashboard/api/events.js')
+    .then((mod) =>
+      mod.emitDashboardEvent('task_event', {
+        task_id: taskId,
+        kind: 'complete',
+        agent_group_id: task.parent_agent_group_id,
+      }),
+    )
+    .catch(() => {
+      /* dashboard module may not be initialized in tests */
+    });
+
   // Notify parent
   const parentSession = getSession(task.parent_session_id);
   if (!parentSession) return;
@@ -103,6 +116,19 @@ export async function applySpawnFailed(content: Record<string, unknown>, callerS
     log.debug('applySpawnFailed: task already in terminal state, skipping notify', { taskId });
     return;
   }
+
+  // Dashboard SSE emit (post-build drift fix B5)
+  void import('../../dashboard/api/events.js')
+    .then((mod) =>
+      mod.emitDashboardEvent('task_event', {
+        task_id: taskId,
+        kind: 'failed',
+        agent_group_id: task.parent_agent_group_id,
+      }),
+    )
+    .catch(() => {
+      /* dashboard module may not be initialized in tests */
+    });
 
   const parentSession = getSession(task.parent_session_id);
   if (!parentSession) return;

@@ -37,6 +37,7 @@ import { startDiscordSlashCommands, stopDiscordSlashCommands } from './channels/
 import { routeInbound } from './router.js';
 import { log } from './log.js';
 import { runStartupOllamaCheck } from './host-ollama-status.js';
+import { startDashboard } from './dashboard/index.js';
 
 // Response + shutdown registries live in response-registry.ts to break the
 // circular import cycle: src/index.ts imports src/modules/index.js for side
@@ -142,12 +143,16 @@ async function main(): Promise<void> {
   runMigrations(db);
   log.info('Central DB ready', { path: dbPath });
 
-  // 1a. Orchestrator-dispatch reconciler startup scan — must run after migrations
+  // 1a. Start dashboard — after migrations (028 must exist) and before
+  //     channel adapters so the HTTP server is up regardless of channel config.
+  startDashboard();
+
+  // 1c. Orchestrator-dispatch reconciler startup scan — must run after migrations
   // so the tasks table exists. Recovers any tasks left in 'pending' with
   // admitted_at set but no child_session_id (host crashed mid-completion).
   runDispatchReconcilerOnStartup();
 
-  // 1b. One-time filesystem cutover — idempotent, no-op after first run.
+  // 1d. One-time filesystem cutover — idempotent, no-op after first run.
   migrateGroupsToClaudeLocal();
 
   // 2. Container runtime

@@ -6,7 +6,10 @@
  * (open-write-close per op). See session-manager.ts header for invariants.
  */
 import Database from 'better-sqlite3';
+import fs from 'fs';
+import path from 'path';
 
+import { DATA_DIR } from '../config.js';
 import { INBOUND_SCHEMA, OUTBOUND_SCHEMA } from './schema.js';
 
 /** Apply the inbound or outbound schema to a DB file. Idempotent. */
@@ -434,4 +437,34 @@ export function getMostRecentPeerSourceSessionId(db: Database.Database, peerAgen
     )
     .get(peerAgentGroupId) as { source_session_id: string | null } | undefined;
   return row?.source_session_id ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Check whether a message id already exists in a session's inbound.db.
+ * Used by the steer write path's partial-write recovery (D5) to detect
+ * whether a message was already inserted before a mid-write failure.
+ *
+ * Open-read-close per call — same discipline as all other inbound.db ops.
+ * Returns false if the DB file does not exist (session not yet initialised).
+ */
+export function sessionInboundHasMessage(
+  agentGroupId: string,
+  sessionId: string,
+  messageId: string,
+): boolean {
+  const dbPath = path.join(DATA_DIR, 'v2-sessions', agentGroupId, sessionId, 'inbound.db');
+  if (!fs.existsSync(dbPath)) return false;
+  const db = new Database(dbPath);
+  db.pragma('journal_mode = DELETE');
+  db.pragma('busy_timeout = 5000');
+  try {
+    const row = db.prepare('SELECT 1 FROM messages_in WHERE id = ? LIMIT 1').get(messageId);
+    return row !== undefined;
+  } finally {
+    db.close();
+  }
 }

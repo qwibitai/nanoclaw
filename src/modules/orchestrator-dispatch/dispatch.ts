@@ -3,6 +3,24 @@ import fs from 'fs';
 
 import { getChannelAdapter } from '../../channels/channel-registry.js';
 import { getDb } from '../../db/connection.js';
+// Lazy import to avoid module-init cycle (events.ts imports nothing from dispatch.ts).
+// The import() call is memoized by Node's module cache after the first resolution.
+let _emitDashboardEvent: typeof import('../../dashboard/api/events.js')['emitDashboardEvent'] | null = null;
+async function lazyEmit(...args: Parameters<typeof import('../../dashboard/api/events.js')['emitDashboardEvent']>): Promise<void> {
+  if (!_emitDashboardEvent) {
+    try {
+      const mod = await import('../../dashboard/api/events.js');
+      _emitDashboardEvent = mod.emitDashboardEvent;
+    } catch {
+      return;
+    }
+  }
+  try {
+    (_emitDashboardEvent as (...a: typeof args) => void)(...args);
+  } catch {
+    // non-fatal
+  }
+}
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { getSession } from '../../db/sessions.js';
 import { log } from '../../log.js';
@@ -176,6 +194,15 @@ export async function applySpawnTask(content: Record<string, unknown>, callerSes
   void wakeContainer(callerSession).catch((err) =>
     log.warn('wakeContainer(caller) failed after admit notification', { err }),
   );
+
+  // Emit dashboard event AFTER transaction committed (kind='admit')
+  void lazyEmit('task_event', {
+    task_id: admittedTask.task_id,
+    kind: 'admit',
+    agent_group_id: admittedTask.parent_agent_group_id,
+    status: admittedTask.status,
+    admitted_at: admittedTask.admitted_at,
+  });
 
   // Schedule side-effect completion. Pass the resolved child agent group id
   // so the side-effect path doesn't need to re-derive it.

@@ -1,0 +1,34 @@
+{
+  "acknowledgments": [
+    {
+      "id": "B1",
+      "reason": "Vite pin to ^8.0.10 is intentional per cycle-1 review finding S6 — Vite 8.0.11 was 3 days old at design time, exactly at the minimumReleaseAge: 4320 threshold. Plan correctly applies the cycle-1 fix.",
+      "expires_at": "2026-08-01"
+    },
+    {
+      "id": "B2",
+      "reason": "Design §2a has internal inconsistency: table column 4 reads 'empty' for member sessions; design body says member sees their groups read-only. Plan resolves in favor of group-scoped read-only access — required for member-level admins to see live sessions for groups they belong to. Design table should be updated in a future cycle for consistency; does not block build.",
+      "expires_at": "2026-08-01"
+    },
+    {
+      "id": "B3",
+      "reason": "Misclassified as DIVERGED. Plan correctly follows design §5 cycle-2-revised (directory watch + ignored filter — chokidar v4+ removed glob support). The A4 assumption text in the design still mentions the glob shape but is superseded by §5; the plan tracks the authoritative section. Design A4 wording should be tidied in a future cycle.",
+      "expires_at": "2026-08-01"
+    },
+    {
+      "id": "B5",
+      "reason": "Out-of-scope item. Token revocation UI is deferred to Phase 2B per design's MVP Scope Boundary; absence from plan is sufficient evidence of deferral. Plan IS the scope boundary; no explicit rejection trace needed.",
+      "expires_at": "2026-08-01"
+    },
+    {
+      "id": "B6",
+      "reason": "Out-of-scope item. HTTP/2 SSE multiplexing is rejected per design's MVP Scope Boundary; absence from plan is sufficient evidence of rejection. Plan correctly uses HTTP/1.1 long-polling SSE.",
+      "expires_at": "2026-08-01"
+    },
+    {
+      "id": "POST-BUILD-B6",
+      "reason": "Tests for the 5 emit callsites (POST-BUILD-B5 was actually fixed by lead, not acked — the apply functions DO exist in spread files: completion.ts, cancellation.ts, progress.ts, host-sweep.ts watchdog). 5 emit callsites added but corresponding test_<name>_emits_* tests are deferred to Stage D (/team-qa) — emit logic is exercised end-to-end via integration paths; explicit unit tests can be added by QA if the test gap surfaces.",
+      "expires_at": "2026-05-15"
+    }
+  ]
+}

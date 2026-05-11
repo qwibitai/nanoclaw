@@ -21,7 +21,8 @@
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:dashboard": "cd dashboard && pnpm install --ignore-workspace && pnpm vite build"
   },
   "dependencies": {
     "@chat-adapter/discord": "4.26.0",
@@ -31,6 +32,7 @@
     "@onecli-sh/sdk": "^0.5.0",
     "better-sqlite3": "11.10.0",
     "chat": "^4.26.0",
+    "chokidar": "5.0.0",
     "cron-parser": "5.5.0",
     "discord.js": "^14.26.0",
     "kleur": "^4.1.5",

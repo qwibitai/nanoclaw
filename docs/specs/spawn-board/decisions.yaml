@@ -1,0 +1,610 @@
+# Decision record for spawn-board (Phase 2 of orchestrator-spawn).
+# Initialized by /team-brief on 2026-05-10.
+# Read by: /team-design (constraint propagation), /team-plan (constraint injection),
+# /team-build (constraint enforcement), /team-drift (drift detection).
+
+feature: spawn-board
+parent_feature: orchestrator-dispatch    # Phase 1 lives there; this is Phase 2 of the same feature line.
+
+constraints:
+  - id: C1
+    type: HARD
+    statement: "Single Node process — dashboard mounted on existing webhook-server, no separate service or port"
+    rationale: "Process-level constraint inherited from Phase 1 design (constraint C2). Avoids deploy / signal / lifecycle drift."
+    affects_groups: []   # populated by /team-plan
+    recorded_at: 2026-05-10T14:30:00Z
+
+  - id: C2
+    type: HARD
+    statement: "Auth via existing user_roles + canAccessAgentGroup; owner + scoped admins per agent group"
+    rationale: "User-chosen scope: owner-only is too narrow for the user's actual operational pattern; global-admins is cheaper but inconsistent with how chat/MCP gating already works. Scoped admins matches existing isolation model."
+    affects_groups: []
+    recorded_at: 2026-05-10T14:30:00Z
+
+  - id: C3
+    type: HARD
+    statement: "Steer is fire-and-forget on next-turn boundary; dashboard returns 202 once inbound.db write + Slack echo are committed"
+    rationale: "No synchronous round-trip would require holding an HTTP connection across an agent turn (variable latency, can be minutes). 202 + SSE is the right async surface."
+    affects_groups: []
+    recorded_at: 2026-05-10T14:30:00Z
+
+  - id: C4
+    type: HARD
+    statement: "Echo to Slack only when surface_mode='native_thread' AND child_platform_thread_id IS NOT NULL"
+    rationale: "Mirrors Phase-1's adapter_unavailable invariant. Headless tasks have no thread to echo into; trying to echo would be a category error."
+    affects_groups: []
+    recorded_at: 2026-05-10T14:30:00Z
+
+  - id: C5
+    type: HARD
+    statement: "Memory budget: incremental RSS under 150MB at 5 active live tasks over 60 minutes; reconciliation gate at /team-ship"
+    rationale: "Inherited from Phase 1 design constraint C1. Realistic incremental at full load is ~7-15MB; 150MB ceiling gives ~10x headroom. Loose budget catches regressions (memory leaks, runaway listeners, accidental in-process caches) without distorting design choices. Briefly tightened to 30MB on 2026-05-10 then reverted same-day: 150MB is 0.6% of a 24GB host; leanness is directional, not gating."
+    affects_groups: []
+    recorded_at: 2026-05-10T14:30:00Z
+    revised_at: 2026-05-10T16:00:00Z
+
+  - id: C6
+    type: HARD
+    statement: "Rate-limit: 30 steers/minute per (user_id, child_session_id); server returns 429 with Retry-After on overflow"
+    rationale: "Backstop against runaway clients. 30/min is generous for human-paced steering, restrictive enough to surface bugs early."
+    affects_groups: []
+    recorded_at: 2026-05-10T14:30:00Z
+
+  - id: C7
+    type: HARD
+    statement: "Server-side input validation: steer text capped at 4000 chars; reject empty/whitespace-only"
+    rationale: "Anthropic Agent SDK has practical context limits and arbitrary-size inputs invite DoS. 4000 chars matches the Slack message ceiling."
+    affects_groups: []
+    recorded_at: 2026-05-10T14:30:00Z
+
+  - id: C8
+    type: HARD
+    statement: "No client-side state persistence beyond URL hash AND the httpOnly auth cookie"
+    rationale: "Single-page dashboard with auth cookie; localStorage adds attack surface and persistence-across-tabs surprises. URL hash is sufficient for view selection / filter state. The auth cookie is the deliberate exception — it is httpOnly + Secure + SameSite=Strict and is the deliberate session-state surface; reviewer A correctly flagged the previous wording as ambiguous (cycle-1 fix S4)."
+    affects_groups: []
+    recorded_at: 2026-05-10T14:30:00Z
+    revised_at: 2026-05-10T17:00:00Z
+
+  - id: C9
+    type: HARD
+    statement: "Concurrency model: steer + Slack messages both write to inbound.db in arrival order with host-owned even-seq invariant; no server-side queueing or rejection"
+    rationale: "User chose 'allow' over block/queue. Matches existing batch-processing semantics for multi-source inbound. Lower-complexity, predictable failure modes."
+    affects_groups: []
+    recorded_at: 2026-05-10T14:30:00Z
+
+  - id: C10
+    type: HARD
+    statement: "Headless steer surfaces only in TaskDetail inline-thread panel (no Slack echo, no synthetic-control-channel relay)"
+    rationale: "User chose inline-panel approach; makes headless tasks first-class on the board rather than degraded variants."
+    affects_groups: []
+    recorded_at: 2026-05-10T14:30:00Z
+
+  - id: C11
+    type: SOFT
+    statement: "Mobile responsive — graceful degrade only, not first-class"
+    rationale: "Operational dashboards are desktop-primary; mobile is opportunistic. One-column collapse + touch tap targets is enough."
+    affects_groups: []
+    recorded_at: 2026-05-10T14:30:00Z
+
+  - id: C12
+    type: SOFT
+    statement: "Idempotency for steer: client UUIDv4 idempotency_key per submit; server stores (user_id, idempotency_key) for 60s dedup"
+    rationale: "Mobile/flaky-network safety net. Re-submit is the natural fallback; dedup prevents duplicate writes."
+    affects_groups: []
+    recorded_at: 2026-05-10T14:30:00Z
+
+decisions:
+  - stage: brief
+    iteration: 1
+    decision: "Auth scope: Owner + scoped admins per agent group (was: owner-only, owner+global-admin)"
+    alternatives_considered:
+      - "Owner only (chosen rejected — too narrow for user's actual pattern; user ops happens across multiple groups)"
+      - "Owner + global admins (chosen rejected — inconsistent with existing chat/MCP gating that uses scoped admins)"
+      - "Owner + scoped admins per agent group (CHOSEN — matches existing isolation model, consistent with canAccessAgentGroup)"
+    grounding:
+      - "User explicit choice in /team-brief Q&A 2026-05-10"
+      - "Existing pattern: src/modules/permissions/access.ts:canAccessAgentGroup uses (user_id, agent_group_id) scoping"
+    scope_check:
+      adds_user_facing_capability: true   # extends to scoped admins, not owner-only
+      changes_external_behavior: true
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-10T14:30:00Z
+
+  - stage: brief
+    iteration: 1
+    decision: "Concurrency model: ALLOW concurrent steer + Slack messages (both land in inbound.db, agent batch-processes)"
+    alternatives_considered:
+      - "Allow (CHOSEN — simplest, matches existing multi-source-inbound semantics, no server-side queueing complexity)"
+      - "Block with 409 (chosen rejected — frustrating UX, requires client-side retry handling)"
+      - "Queue with delay (chosen rejected — hides complexity behind UX latency, more state to manage)"
+    grounding:
+      - "User explicit choice in /team-brief Q&A 2026-05-10"
+      - "Existing host-side seq invariant (host writes even seq, container writes odd) preserves ordering across multiple writers"
+    scope_check:
+      adds_user_facing_capability: false
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-10T14:30:00Z
+
+  - stage: brief
+    iteration: 1
+    decision: "Headless steer: inline TaskDetail panel (no Slack echo possible; first-class affordance)"
+    alternatives_considered:
+      - "Inline panel in TaskDetail (CHOSEN — headless tasks become first-class on the board)"
+      - "Skip headless steer in 2A (chosen rejected — half-degraded UX; users can't tell which tasks are steerable without inspecting surface_mode)"
+      - "Headless steer routes to NanoClaw DM (chosen rejected — awkward UX; mixing dashboard control with DM history)"
+    grounding:
+      - "User explicit choice in /team-brief Q&A 2026-05-10"
+    scope_check:
+      adds_user_facing_capability: true   # adds inline-thread panel for headless tasks
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-10T14:30:00Z
+
+  - stage: brief
+    iteration: 1
+    decision: "Lane discriminator: status (pending/running/completed/failed/cancelled), not parent_session or runtime-toggleable"
+    alternatives_considered:
+      - "Status (CHOSEN — canonical kanban shape; matches what most operations dashboards mean by 'lanes')"
+      - "Parent session (chosen rejected — useful when fanning from many parents but rare; status is the universal axis)"
+      - "User picks at runtime (chosen rejected — defers UX decision, larger build scope, flag-soup risk)"
+    grounding:
+      - "User explicit choice in /team-brief Q&A 2026-05-10"
+    scope_check:
+      adds_user_facing_capability: false   # default lane shape; runtime-toggleable was the rejected alternative
+      changes_external_behavior: false
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-10T14:30:00Z
+
+  - stage: brief
+    iteration: 1
+    decision: "Steer with Slack-echo path chosen over steer-only-into-prompt or post-as-owner-via-Slack-API"
+    alternatives_considered:
+      - "Steer-only-into-prompt (chosen rejected — Slack viewers see the agent reacting to nothing; channel desyncs)"
+      - "Echo to Slack: write to inbound.db AND post '[via dashboard] <text>' to Slack via adapter (CHOSEN — Slack stays source-of-truth audit log; transparent provenance)"
+      - "Post as operator via Slack API (chosen rejected — over-couples dashboard to Slack write path; rate-limit/format complexity; harder to reason about who-said-what)"
+    grounding:
+      - "Conversation 2026-05-10: user prioritized Slack visibility; Slack-as-audit-log is a known operational invariant"
+    scope_check:
+      adds_user_facing_capability: true   # adds dashboard-originated write path
+      changes_external_behavior: true     # new system action (steer) appears in Slack threads
+      changes_hard_constraint: false
+      weakens_safety_invariant: false
+    recorded_at: 2026-05-10T14:30:00Z
+
+rejected_alternatives:
+  - id: R1
+    rejected: "Spawn from the dashboard"
+    reason: "Out of scope per brief Non-Goals. Spawning is the orchestrator agent's job, not the operator's UI affordance. Adding it doubles the auth/validation surface."
+    affects_groups: []
+
+  - id: R2
+    rejected: "Cancel from the dashboard"
+    reason: "Phase-1 cycle-2 review S15 explicitly deferred owner-cancel from the board to a follow-up. Not changing that scope decision in 2A."
+    affects_groups: []
+
+  - id: R3
+    rejected: "Custom lane discriminator (parent_session, tag, runtime-toggleable)"
+    reason: "Status-only lanes are the canonical kanban shape and side-step the post-rework target_group hole. Customization is flag-soup that doesn't pull weight in 2A."
+    affects_groups: []
+
+  - id: R4
+    rejected: "Real-time streaming of partial agent output inside TaskDetail"
+    reason: "Agent batches turn output before writing to outbound.db; there's no sub-turn signal to stream. SSE fires on outbound write events, which is sufficient."
+    affects_groups: []
+
+  - id: R5
+    rejected: "Undo / unsend for steer messages"
+    reason: "Slack/Discord don't let you unsend chat messages; the dashboard inherits that contract. Operator can post a follow-up correction instead."
+    affects_groups: []
+
+  - id: R6
+    rejected: "Persist filter / scroll state in localStorage"
+    reason: "Adds attack surface and cross-tab surprises. URL hash is sufficient. C8 HARD constraint."
+    affects_groups: []
+
+  - id: R7
+    rejected: "Mobile-first redesign"
+    reason: "Operational dashboards are desktop-primary. Mobile is graceful-degrade per C11 SOFT."
+    affects_groups: []
+
+  - id: R8
+    rejected: "Multi-tenant beyond owner + scoped admins (invite system, per-task ACLs)"
+    reason: "Single-host personal-assistant dashboard. Multi-tenancy is a category error here."
+    affects_groups: []
+
+  - id: R9
+    rejected: "Cross-host federation (remote NanoClaw discovery)"
+    reason: "Single-host scope. Federation would be a separate feature with its own brief."
+    affects_groups: []
+
+  - id: R10
+    rejected: "Historical analytics (charts, time-series, export)"
+    reason: "Board is for live operations, not retrospection. Analytics is a different lens with different read patterns."
+    affects_groups: []
+
+  - id: R11
+    rejected: "Push notifications (service worker / system tray)"
+    reason: "Browser-tab visibility is sufficient for the use case. Notifications add OS-level permission complexity for marginal benefit."
+    affects_groups: []
+
+  - id: R12
+    rejected: "Synchronous steer round-trip"
+    reason: "Holding an HTTP connection across an agent turn is variable-latency (minutes possible). 202 + SSE is the right async surface. C3 HARD constraint."
+    affects_groups: []
+
+# Design-stage decisions appended 2026-05-10 by /team-design.
+design_decisions:
+  - id: D1
+    stage: design
+    decision: "Routing: internal route-table primitive in webhook-server.ts with requireAuth HOF (Option B); rejected Option A inline expansion (degrades past 12 routes), rejected Option C split-modules (fragments lifecycle authority)"
+    alternatives_considered:
+      - "Option A — inline expansion of webhook-server.ts (rejected: maintainability ceiling at ~12 routes; auth check inlined per-branch, easy to miss)"
+      - "Option B — route-table primitive (CHOSEN: structural auth enforcement via requireAuth wrapper; matches existing registry pattern of registerDeliveryAction / registerChannelAdapter / registerTools; right-sized for 12-15 steady-state routes)"
+      - "Option C — split into webhook-routes.ts + dashboard-routes.ts (rejected: invents boundary patterns the codebase doesn't otherwise use; fragments lifecycle authority for chokidar/SSE shutdown; over-engineered for the actual scale)"
+    grounding:
+      - "src/webhook-server.ts:88-128 — current routes Map is 1-pattern; the refactor needs N-pattern dispatch"
+      - "src/delivery.ts registerDeliveryAction, src/channels/channel-registry.ts registerChannelAdapter, container/agent-runner/src/mcp-tools/server.ts registerTools — three precedents for registry-with-distributed-handlers pattern"
+    constraint_refs: [C1, C2]
+    affects_groups: []
+    recorded_at: 2026-05-10T15:00:00Z
+
+  - id: D2
+    stage: design
+    decision: "Echo target method: adapter.deliver(platformId, threadId, message), not adapter.postParent(platformId, text)"
+    alternatives_considered:
+      - "adapter.deliver into existing thread (CHOSEN: posts INTO the thread, which is the steer's intent)"
+      - "adapter.postParent (rejected: posts at channel root; would not reach the spawn task's actual conversation thread)"
+    grounding:
+      - "src/channels/adapter.ts:149 — deliver(platformId, threadId, message) is the standard reply-into-thread surface"
+      - "src/channels/adapter.ts:215 — postParent posts at root with no thread context"
+    constraint_refs: [C4]
+    affects_groups: []
+    recorded_at: 2026-05-10T15:00:00Z
+
+  - id: D3
+    stage: design
+    decision: "chokidar version pin: ^5.0.0 (cycle-1 revision)"
+    alternatives_considered:
+      - "Pin to 5.0.0 (CHOSEN, cycle-1 revision: chokidar 5.0.0 was actually published 2025-11-25 per `npm view chokidar@5.0.0 time`, well past the 3-day minimumReleaseAge window. The original draft cited 2026-04-25 as the release date, which was a fact-check error. v5's API surface used here — `watch` + `awaitWriteFinish` — is unchanged from v4.)"
+      - "Pin to 4.0.3 (PREVIOUSLY CHOSEN, REVERSED 2026-05-10T17:00 cycle-1: justification was that v5 was inside the minimumReleaseAge window. That justification was based on a wrong release date.)"
+    grounding:
+      - "npm view chokidar@5.0.0 time → 2025-11-25T23:28:06.854Z (verified by Reviewer A in cycle-1 review)"
+      - "CLAUDE.md supply chain section — pnpm minimumReleaseAge: 4320 (3 days)"
+    constraint_refs: []
+    affects_groups: []
+    recorded_at: 2026-05-10T15:00:00Z
+    revised_at: 2026-05-10T17:00:00Z
+
+  - id: D4
+    stage: design
+    decision: "Token-issuance surface: chat-side slash command (/dashboard-token DM'd to any agent), not a public dashboard endpoint"
+    alternatives_considered:
+      - "Slash command in chat (CHOSEN: reuses existing platform-side auth; the operator is already authenticated to the platform talking to the bot; no new attack surface)"
+      - "Public endpoint POST /dashboard/api/auth/issue (rejected: would need its own bootstrap auth surface — chicken-and-egg; or open to spam; or rate-limited by IP which is weak in shared-NAT environments)"
+    grounding:
+      - "Existing slash command intercept pattern at host side (filters /clear, /compact via formatter.ts categorizeMessage); /dashboard-token follows the same path"
+    constraint_refs: [C2]
+    affects_groups: []
+    recorded_at: 2026-05-10T15:00:00Z
+
+  - id: D5
+    stage: design
+    decision: "Memory budget gate runs at /team-ship, not /team-build"
+    alternatives_considered:
+      - "Run gate at /team-ship (CHOSEN: pre-build CI lacks the synthetic-load + 60min-steady-state infrastructure to measure meaningfully; ship-gate is the natural integration point)"
+      - "Run gate at /team-build (rejected: would require building synthetic-load harness as a build prerequisite, which is its own feature)"
+    grounding:
+      - "Phase 1 design §7 already established this pattern; this design follows it"
+    constraint_refs: [C5]
+    affects_groups: []
+    recorded_at: 2026-05-10T15:00:00Z
+
+# Design-stage assumptions added 2026-05-10
+design_assumptions:
+  - id: A1
+    stage: design
+    statement: "200ms chokidar debounce coalesces burst writes during agent turns without missing transitions"
+    impact: medium
+    validated: false
+    validation_method: "Empirical: run 5 spawn tasks for 60min, count SSE events vs DB writes; ratio should be 0.3-0.7"
+    recorded_at: 2026-05-10T15:00:00Z
+
+  - id: A2
+    stage: design
+    statement: "Host even-seq invariant holds when dashboard writes alongside Slack/Discord adapters at high concurrency"
+    impact: high
+    validated: false
+    validation_method: "Concurrency test: 10 simultaneous steer + Slack writes to same child session, verify all rows have unique even seqs and ordering matches arrival timestamps"
+    blocks_team_build: true
+    recorded_at: 2026-05-10T15:00:00Z
+
+  - id: A3
+    stage: design
+    statement: "adapter.deliver(platformId, threadId, message) accepts arbitrary text content for both Slack and Discord adapters"
+    impact: high
+    validated: false
+    validation_method: "Read Slack and Discord adapter source on the channels skill branch before /team-build; confirm deliver accepts any text content with kind='chat'"
+    blocks_team_build: true
+    recorded_at: 2026-05-10T15:00:00Z
+
+  - id: A4
+    stage: design
+    statement: "chokidar v4.0.3 handles glob `data/v2-sessions/*/*/outbound.db` reliably on Linux+macOS and emits events on better-sqlite3 writes"
+    impact: medium
+    validated: false
+    validation_method: "Smoke test: spin up chokidar against a test SQLite file, do db.prepare(INSERT).run(), verify event fires within 200ms"
+    recorded_at: 2026-05-10T15:00:00Z
+
+  - id: A5
+    stage: design
+    statement: "Vite + React 19 + SWR + EventSource bundle stays under 200KB gzipped"
+    impact: low
+    validated: false
+    validation_method: "Build the dashboard, gzip dist/dashboard/assets/*.js | wc -c"
+    recorded_at: 2026-05-10T15:00:00Z
+
+  - id: A6
+    stage: design
+    statement: "users.display_name is populated for owner + scoped admins"
+    impact: low
+    validated: false
+    validation_method: "SELECT user_id, display_name FROM users WHERE user_id IN (<owners and admins>) — flag null"
+    recorded_at: 2026-05-10T15:00:00Z
+
+  - id: A7
+    stage: design
+    statement: "dashboard_tokens and steer_idempotency tables stay small enough that no pagination/archival is needed"
+    impact: low
+    validated: false
+    validation_method: "One-year projection: ~3650 token rows + ~36500 steer-pre-prune; trivial; sweep prunes idempotency rows"
+    recorded_at: 2026-05-10T15:00:00Z
+
+  - id: A8
+    stage: design
+    statement: "NANOCLAW_DASHBOARD_COOKIE_SECRET auto-generates to ~/.nanoclaw/cookie-secret on first boot, mode 0600, persistent across restarts"
+    impact: medium
+    validated: false
+    validation_method: "Confirm ~/.nanoclaw/ is the right host-config path; check whether anything else lives there"
+    recorded_at: 2026-05-10T15:00:00Z
+
+  - id: A9
+    stage: design
+    statement: "Adding ~7 new npm deps (react, react-dom, swr, vite, @vitejs/plugin-react, chokidar, cookie helper) doesn't trip minimumReleaseAge: 4320 at install time"
+    impact: medium
+    validated: false
+    validation_method: "Pre-build: pnpm view <pkg>@<version> time to check release date; pin to versions ≥3 days old at PR-merge time"
+    recorded_at: 2026-05-10T15:00:00Z
+
+  - id: D7
+    stage: design_cycle_1
+    decision: "Steer write path: reserve-idempotency-before-write (transactional) + advance-after-write pattern with pending/applied status; replays return cached response on applied / replay-resume on pending"
+    alternatives_considered:
+      - "Reserve-before-write with status (CHOSEN: matches Phase 1 insertTaskAtomic pattern; safe under host crash; client retry replays cleanly)"
+      - "Best-effort idempotency record after side effects (PREVIOUS, REJECTED in cycle-1 fix M3: under crash between write and record, retry produces duplicate write)"
+    grounding:
+      - "Reviewer A finding M3 + Reviewer C finding C3 (independently flagged the same root cause)"
+      - "IETF draft-ietf-httpapi-idempotency-key-header-07: reserve-before-side-effect is the standardization-track pattern"
+      - "Phase 1 src/modules/orchestrator-dispatch — insertTaskAtomic uses the same reserve-before pattern"
+    constraint_refs: [C12]
+    affects_groups: []
+    recorded_at: 2026-05-10T17:00:00Z
+
+  - id: D8
+    stage: design_cycle_1
+    decision: "Token storage: HMAC-SHA256(token_raw, server_key); raw token never persisted"
+    alternatives_considered:
+      - "HMAC storage (CHOSEN, cycle-1 fix M34: leaked DB row cannot grant access without server_key; rotating server_key invalidates all outstanding tokens AND cookies in one step)"
+      - "Raw bearer storage in token_hex column (PREVIOUS, REJECTED 2026-05-10T17:00: same defect as plaintext password storage)"
+    grounding:
+      - "Reviewer C finding C6"
+      - "OWASP Authentication Cheat Sheet — bearer token storage best practice"
+    constraint_refs: [C2]
+    affects_groups: []
+    recorded_at: 2026-05-10T17:00:00Z
+
+  - id: D9
+    stage: design_cycle_1
+    decision: "Token issuance flow: POST-only exchange, NO `?token=` URL variant (with safety net via history.replaceState)"
+    alternatives_considered:
+      - "POST exchange only (CHOSEN, cycle-1 fix M33: tokens never appear in URLs; browser history, server logs, reverse proxy logs all stay clean)"
+      - "Allow ?token= URL variant for paste-the-link UX (PREVIOUS, REJECTED 2026-05-10T17:00: tokens leak in URL stack)"
+    grounding:
+      - "Reviewer C finding C6"
+      - "OWASP Session Management Cheat Sheet — token transport"
+    constraint_refs: [C2]
+    affects_groups: []
+    recorded_at: 2026-05-10T17:00:00Z
+
+  - id: D10
+    stage: design_cycle_1
+    decision: "SSE keepalive: SINGLE global setInterval iterating connection Set; no per-connection timers"
+    alternatives_considered:
+      - "Single global timer (CHOSEN, cycle-1 fix M22: documented production-grade fix for SSE memory leaks)"
+      - "Per-connection setInterval (REJECTED, cycle-1: documented #1 production SSE memory leak per arlabs 10k/min ingestor + OpenCode issue #15645)"
+    grounding:
+      - "Reviewer B DRIFT 1 (HIGH severity): arlabs Medium post + OpenCode issue #15645"
+      - "WHATWG SSE spec §9.2 — wire format unchanged"
+    constraint_refs: [C5]
+    affects_groups: []
+    recorded_at: 2026-05-10T17:00:00Z
+
+  - id: D11
+    stage: design_cycle_1
+    decision: "Host-side INTERCEPT_COMMANDS primitive added to command-gate as a third command class beyond FILTERED_COMMANDS and ADMIN_COMMANDS"
+    alternatives_considered:
+      - "INTERCEPT_COMMANDS map + registerInterceptHandler primitive (CHOSEN, cycle-1 fix M4: the design referenced `/clear` as an analogue but `/clear` is forwarded to container, not host-handled. /dashboard-token genuinely needs a new pattern.)"
+      - "Embed `/dashboard-token` handling in router.ts (REJECTED, cycle-1: would scatter slash-command logic across router.ts; intercept primitive belongs in command-gate.ts where the other classifications live.)"
+    grounding:
+      - "Reviewer A finding M4"
+      - "src/command-gate.ts:14-15 — only FILTERED_COMMANDS and ADMIN_COMMANDS exist today"
+    constraint_refs: [C2]
+    affects_groups: []
+    recorded_at: 2026-05-10T17:00:00Z
+
+  - id: D12
+    stage: design_cycle_1
+    decision: "Resource-level authorization: every dashboard handler injects a server-side allowed_group_ids predicate at query time"
+    alternatives_considered:
+      - "Per-query scope predicate via §2a (CHOSEN, cycle-1 fix M29: structural enforcement; auth-vs-authorization separation explicit)"
+      - "Authentication-only via requireAuth, trust UI to filter (REJECTED, cycle-1: read endpoints leak across agent groups; same defect as Phase 1's per-agent projection without parent_agent_group_id filter.)"
+    grounding:
+      - "Reviewer C finding C1"
+      - "Phase 1 src/db/per-agent-projections.ts — same scope-predicate pattern"
+    constraint_refs: [C2]
+    affects_groups: []
+    recorded_at: 2026-05-10T17:00:00Z
+
+  - id: D13
+    stage: design_cycle_1
+    decision: "Dashboard server start: `startDashboard()` in src/index.ts calls `ensureServerStarted()` from webhook-server unconditionally at host bootstrap"
+    alternatives_considered:
+      - "Explicit dashboard-side server start (CHOSEN, cycle-1 fix M5: dashboard works on adapter-less installs (operator with only Discord, gateway-based); decoupled from webhook-adapter registration order.)"
+      - "Lazy start via webhook-adapter side effect (PREVIOUS, REJECTED 2026-05-10T17:00: silently breaks the dashboard for any deploy without a webhook adapter.)"
+    grounding:
+      - "Reviewer A finding M5"
+      - "src/webhook-server.ts:88-89 — ensureServer is currently triggered only by registerWebhookAdapter"
+    constraint_refs: [C1]
+    affects_groups: []
+    recorded_at: 2026-05-10T17:00:00Z
+
+  - id: D14
+    stage: design_cycle_1
+    decision: "Static asset serving: path-traversal-safe with explicit MIME-type table (application/octet-stream default, not text/plain)"
+    alternatives_considered:
+      - "path.resolve + STATIC_ROOT prefix check + explicit MIME table (CHOSEN, cycle-1 fix M36 + S8: structural defense against ../, %2e%2e, null bytes; explicit MIMEs prevent silent SPA breakage)"
+      - "Pass-through with extension-based MIME guess (PREVIOUS, REJECTED 2026-05-10T17:00: unauthenticated arbitrary file read at /dashboard/static/../../etc/passwd)"
+    grounding:
+      - "Reviewer C finding C8"
+      - "Reviewer A finding A18"
+    constraint_refs: [C2]
+    affects_groups: []
+    recorded_at: 2026-05-10T17:00:00Z
+
+  - id: D15
+    stage: design_cycle_1
+    decision: "TaskDetail transcript: combined inbound.db + outbound.db merged by seq, with direction + source labels"
+    alternatives_considered:
+      - "Combined inbound+outbound (CHOSEN, cycle-1 fix M30: matches brief line 18; headless steers (which are written to inbound.db) appear immediately in TaskDetail; honors C10)"
+      - "outbound.db only (PREVIOUS, REJECTED 2026-05-10T17:00: design §1 said 'last-200 from outbound.db'; would make headless steers invisible to their author)"
+    grounding:
+      - "Reviewer C finding C2"
+      - "brief.md line 18 — explicit requirement"
+      - "design.md C10 — headless steer surfaces only in TaskDetail"
+    constraint_refs: [C10]
+    affects_groups: []
+    recorded_at: 2026-05-10T17:00:00Z
+
+  - id: D6
+    stage: design
+    decision: "Lazy chokidar lifecycle (boot on first SSE connect, tear down on last disconnect) + SSE connection cap tightened from 20 to 5 per user"
+    alternatives_considered:
+      - "Lazy chokidar + cap 5/user (CHOSEN: idle dashboard holds zero watcher overhead; 5 connections covers operator-with-multiple-tabs without runaway-client risk)"
+      - "Eager chokidar at server startup (rejected: holds ~5-10MB even when no operator is using the dashboard; opposes operator priority of reserving Node memory for agents)"
+      - "Drop chokidar entirely; poll outbound.db mtimes at 1s (rejected as default: worse UX (1s lag) for the common interactive case; kept as fallback path if the reconciliation gate at /team-ship fails)"
+    grounding:
+      - "Operator constraint stated 2026-05-10: UI must be very lean/efficient in memory; agents' memory priority"
+      - "chokidar typical overhead 5-10MB at the dashboard's watch glob scope"
+    constraint_refs: [C5]
+    affects_groups: []
+    recorded_at: 2026-05-10T15:30:00Z
+
+# Reverted on 2026-05-10T16:00 — D6 was added at 15:30 then dropped same day.
+# 150MB budget on a 24GB host is 0.6%; tightening to 30MB created UX cost
+# (cold-start latency from lazy chokidar, 5-conn cap that hits operators with
+# multiple tabs) for a memory benefit that wasn't the actual pressure point.
+# Operator framing "lean memory" was directional, not gating; the loose 150MB
+# budget already encourages discipline (filesystem-stream static, no in-proc
+# caches, summary projections) without forcing tight optimizations into the
+# default code path.
+withdrawn_decisions:
+  - id: D6
+    withdrawn: true
+    withdrawn_at: 2026-05-10T16:00:00Z
+    withdrawal_reason: "150MB budget is generous on a 24GB host; tightening to 30MB created UX cost (lazy-chokidar cold-start + 5-conn cap) without addressing actual memory pressure. The directional lean signal is preserved by the existing C5 design choices (filesystem-stream static, no in-process caches, summary SSE projections) without making lazy-chokidar a default."
+
+# Review-cycle log — appended by /team-review on each cycle
+review_cycles:
+  - iteration: 1
+    must_fix_count: 9
+    should_fix_count: 12
+    wont_fix_count: 11
+    completed_at: 2026-05-10T17:00:00Z
+    notes: "Cycle 1. All three reviewers ran (A architecture, B best-practice, C codex adversarial). 9 MUST-FIX: M1 chokidar fabricated date / M3 idempotency atomicity / M4 token-intercept pattern doesn't exist / M5 webhook lazy-start coupling / M22 SSE keepalive global vs per-connection / M29 read-endpoint scope filtering / M30 transcript inbound+outbound / M33+M34 token URL leak + raw bearer / M36 static path-traversal. All addressed in design.md cycle-1 revisions. See review.md."
+
+  - iteration: 2
+    must_fix_count: 4
+    should_fix_count: 6
+    wont_fix_count: 6
+    completed_at: 2026-05-10T18:00:00Z
+    notes: "Cycle 2. All three reviewers re-ran on the cycle-1-revised design. Larger surface area surfaced 4 NEW MUST-FIX: M1-c2 chokidar v4+ glob removal (verified by `npm install chokidar@5` + README.md); M2-c2 INTERCEPT_COMMANDS gate runs per-fan-out (verified router.ts:466,666); M3-c2 steer retry SQLITE_CONSTRAINT_PRIMARYKEY (verified session-db.ts:166); M4-c2 SSE doesn't watch inbound.db (verified §5 vs §4). All addressed in design.md cycle-2 revisions. SHOULD-FIX 6 + WON'T-FIX 6. See review.md."
+
+  - iteration: 3
+    must_fix_count: 4
+    should_fix_count: 6
+    wont_fix_count: 5
+    completed_at: 2026-05-10T19:00:00Z
+    cap_reached: true
+    operator_decision_at: 2026-05-10T19:30:00Z
+    operator_decision: "Accept inline resolutions; proceed to /team-plan"
+    notes: "Cycle 3 — LAST ALLOWED CYCLE. All three reviewers re-ran. 4 NEW MUST-FIX: M1-c3 cross-DB timestamp format mismatch (host ISO-with-T-Z vs container datetime('now')); M2-c3 central DB is WAL-mode and chokidar misses writes between checkpoints (verified connection.ts:17 + live v2.db-wal 3.9MB); M3-c3 routing primitive lacks splat/prefix support for /dashboard/static/* (verified §2 pattern syntax); M4-c3 SSE handler signature uses Web Request which has no .on('close') (verified §2 vs §5). All 4 + all 6 SHOULD-FIX addressed in design.md cycle-3 revisions inline. 3-cycle cap means cycle-4 verification cycle is BLOCKED per /team-review Step 0; operator accepted inline resolutions on 2026-05-10T19:30."
+
+# Plan-stage affects_groups mapping — populated 2026-05-10 by /team-plan
+# (Mirrors the Constraint Traceability matrix in plan.md; queryable by downstream
+# skills like /team-drift without re-parsing the plan body.)
+plan_affects_groups:
+  constraints:
+    C1: [A]                      # Single Node process — Group A bootstraps the server
+    C2: [A, B, C, D, E]           # Auth pervasive across all groups
+    C3: [D]                      # Steer fire-and-forget — Group D Task D5
+    C4: [D]                      # Echo native_thread only — Group D Task D5
+    C5: [A, B, C, D, E]           # Memory budget operational across all groups
+    C6: [D]                      # Rate-limit — Group D Task D5
+    C7: [D]                      # Server-side input validation — Group D Task D5
+    C8: [A, B, E]                # No client-side persistence beyond URL hash + cookie
+    C9: [D]                      # Concurrency model — Group D Task D5
+    C10: [D, E]                  # Headless steer surfaces in TaskDetail
+    C11: [E]                     # Mobile responsive — Group E
+    C12: [B, D]                  # Idempotency — Group B schema + Group D logic
+  rejected_alternatives:
+    R1: [D]                      # No spawn from dashboard — D2 + D5 acceptance
+    R2: [D]                      # No cancel from dashboard — D2 + D5 acceptance
+    R3: [E]                      # No custom lane discriminator — E4 hardcoded
+    R4: [E]                      # No real-time streaming — E5 acceptance
+    R5: [E]                      # No undo — E5 acceptance
+    R6: [E]                      # No localStorage — E2-E7 acceptance
+    R7: [E]                      # No mobile-first — E4+E5 graceful-degrade only
+    R8: [B, C]                   # No multi-tenant — B2 isAnyAdmin + C5 auth-me
+    R9: [A]                      # No federation — A2 acceptance (single Node)
+    R10: [D]                     # No analytics — D3+D4 acceptance (no analytics endpoints)
+    R11: [E]                     # No push notifications — E2 acceptance (no SW)
+    R12: [D]                     # No synchronous round-trip — D5 acceptance
+  design_decisions:
+    D1: [A]                      # Routing strategy
+    D2: [D]                      # Echo via adapter.deliver
+    D3: [D, E]                   # chokidar pin (D for runtime, E for any UI use)
+    D4: [C]                      # Chat-side slash command — Group C
+    D5: [E]                      # Memory gate at /team-ship — operational, integration checklist
+    D7: [B, D]                   # Reserve-idempotency-before-write
+    D8: [B, C]                   # HMAC token storage
+    D9: [C]                      # POST-only token exchange
+    D10: [D]                     # SSE single global keepalive
+    D11: [A, C]                  # INTERCEPT_COMMANDS pattern — A registers, C provides handler
+    D12: [D]                     # Resource-level authz scope predicate
+    D13: [A]                     # startDashboard at bootstrap
+    D14: [D]                     # Static asset path-traversal-safe
+    D15: [D]                     # Transcript merge by timestamp
+  design_assumptions:
+    A1: [D]                      # 200ms chokidar debounce — D1
+    A2: [D]                      # Even-seq invariant — D5 (HIGH IMPACT, blocks build)
+    A3: [D]                      # adapter.deliver text — D5 (HIGH IMPACT, blocks build)
+    A4: [D]                      # chokidar reliability — D1
+    A5: [E]                      # SPA bundle size — E1 build artifact
+    A6: [D]                      # display_name populated — D5 fallback to user_id
+    A7: [B, D]                   # token/idempotency table size — B schema + D7 prune
+    A8: [B]                      # NANOCLAW_DASHBOARD_COOKIE_SECRET resolution — B5
+    A9: [E]                      # 7 npm deps don't trip minimumReleaseAge — E1 pin discipline

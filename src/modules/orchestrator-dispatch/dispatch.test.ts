@@ -640,5 +640,67 @@ describe('completeSpawnSideEffects', () => {
   });
 });
 
+// ── D6: emitDashboardEvent call-sites ────────────────────────────────────────
+
+vi.mock('../../dashboard/api/events.js', () => ({
+  emitDashboardEvent: vi.fn(),
+  startSSEFeed: vi.fn(),
+  stopSSEFeed: vi.fn(),
+}));
+
+describe('D6: emitDashboardEvent emits after apply functions commit', () => {
+  it('test_applySpawnTask_emits_task_event_admit', async () => {
+    setupDb();
+    seedAgentGroup('ag-caller');
+    seedSession('sess-caller', 'ag-caller');
+    grantOrchestrator('ag-caller');
+
+    const { emitDashboardEvent } = await import('../../dashboard/api/events.js');
+    const emitSpy = vi.mocked(emitDashboardEvent);
+    emitSpy.mockClear();
+
+    const caller = makeCallerSession();
+    await applySpawnTask({ content: 'Do X', idempotency_key: 'd6-k1' }, caller);
+
+    // Emit fires AFTER the transaction — task must exist in DB
+    const task = getTaskByParentAndIdempotency('sess-caller', 'd6-k1');
+    expect(task).not.toBeNull();
+
+    // Wait for async lazyEmit to resolve
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await Promise.resolve();
+
+    expect(emitSpy).toHaveBeenCalledWith(
+      'task_event',
+      expect.objectContaining({ kind: 'admit' }),
+    );
+  });
+
+  it('test_emit_fires_after_commit: emit NOT called if admission is rejected (cap reached)', async () => {
+    setupDb();
+    seedAgentGroup('ag-caller');
+    seedSession('sess-caller', 'ag-caller');
+    grantOrchestratorCap1('ag-caller');
+
+    // Fill cap
+    insertActiveTask('task-existing', 'k-other', 'sess-caller', 'ag-caller');
+
+    const { emitDashboardEvent } = await import('../../dashboard/api/events.js');
+    vi.mocked(emitDashboardEvent).mockClear();
+
+    const caller = makeCallerSession();
+    await applySpawnTask({ content: 'New work', idempotency_key: 'd6-k2' }, caller);
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await Promise.resolve();
+
+    // No task was admitted — emit should NOT have been called with kind='admit' for a new task
+    const admitCalls = vi.mocked(emitDashboardEvent).mock.calls.filter(
+      ([_kind, payload]) => (payload as { kind?: string }).kind === 'admit',
+    );
+    expect(admitCalls.length).toBe(0);
+  });
+});
+
 // Re-export an unused import to silence linter for createSession (kept in import list for parity).
 void createSession;
