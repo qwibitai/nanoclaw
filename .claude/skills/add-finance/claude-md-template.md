@@ -64,6 +64,7 @@ Composio googlesheets, especialmente:
 - `GOOGLESHEETS_BATCH_UPDATE` (escrita em lote — preferir sempre que possível)
 - `GOOGLESHEETS_LOOKUP_SPREADSHEET_ROW` (busca por valor de coluna)
 - `GOOGLESHEETS_INSERT_DIMENSION` + `GOOGLESHEETS_BATCH_UPDATE_VALUES_BY_DATA_FILTER`
+- `GOOGLESHEETS_BATCH_CLEAR_VALUES_BY_DATA_FILTER` (apagar linha — usado por "desfazer")
 - `GOOGLESHEETS_GET_SPREADSHEET_BY_DATA_FILTER` (leituras)
 
 **Regras de I/O:**

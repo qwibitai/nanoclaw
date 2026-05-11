@@ -240,7 +240,7 @@ This creates the MCP session and writes its URL into `agent_groups.finance.conta
 **Verify:**
 
 ```bash
-sqlite3 ~/.nanoclaw/state.db "SELECT json_extract(container_config, '$.mcpServers.composio') FROM agent_groups WHERE id='finance';"
+sqlite3 data/v2.db "SELECT json_extract(container_config, '$.mcpServers.composio') FROM agent_groups WHERE id='finance';"
 ```
 
 Expected: a `https://backend.composio.dev/tool_router/...` URL.
@@ -300,7 +300,7 @@ Expected: lines show actual ID and URL (no `__...__` placeholders).
 Claude does this. Forces the agent to re-read its CLAUDE.md with the SHEET_ID now baked in.
 
 ```bash
-sqlite3 ~/.nanoclaw/state.db "DELETE FROM sessions WHERE agent_group_id='finance';"
+sqlite3 data/v2.db "DELETE FROM sessions WHERE agent_group_id='finance';"
 ```
 
 Next message to the bot starts a fresh session that loads CLAUDE.md fresh.
