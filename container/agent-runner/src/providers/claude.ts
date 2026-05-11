@@ -4,6 +4,8 @@ import path from 'path';
 import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
+import { writeMessageOut } from '../db/messages-out.js';
+import { getSessionRouting } from '../db/session-routing.js';
 import { registerProvider } from './provider-registry.js';
 import type { AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 
@@ -192,6 +194,23 @@ function createPreCompactHook(assistantName?: string): HookCallback {
   return async (input) => {
     const preCompact = input as PreCompactHookInput;
     const { transcript_path: transcriptPath, session_id: sessionId } = preCompact;
+
+    // Notify the active channel before compaction so users know a delay is coming.
+    try {
+      const routing = getSessionRouting();
+      if (routing.channel_type && routing.platform_id) {
+        writeMessageOut({
+          id: `compact-notify-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          kind: 'chat',
+          platform_id: routing.platform_id,
+          channel_type: routing.channel_type,
+          thread_id: routing.thread_id,
+          content: JSON.stringify({ text: 'Compacting context — brief processing delay expected.' }),
+        });
+      }
+    } catch (err) {
+      log(`PreCompact: failed to send notification: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     if (!transcriptPath || !fs.existsSync(transcriptPath)) {
       log('No transcript found for archiving');
