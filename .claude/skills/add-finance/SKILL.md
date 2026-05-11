@@ -55,13 +55,15 @@ if (existing) {
 }
 
 // Create agent group
-await createAgentGroup({
+// NOTE: agent_provider is intentionally OMITTED (NULL). The agent-runner only
+// recognizes empty/null and dispatches to its default provider. Passing
+// 'anthropic' literally crashes with "Unknown provider: anthropic".
+createAgentGroup({
   id: 'finance',
-  name: 'Finance',
+  name: 'Finance', // internal name — different from persona name (Step 9)
   folder: 'finance',
-  agent_provider: 'anthropic',
   container_config: JSON.stringify({
-    mcpServers: {} // composio session URL added by provision-sessions step later
+    mcpServers: {}, // composio session URL added in Step 7
   }),
   created_at: new Date().toISOString(),
 });
@@ -130,73 +132,150 @@ Wait for operator to paste the token before proceeding. Store it in memory of th
 
 Claude does this.
 
-> **⚠️ Pre-check (load-bearing):** confirm that `src/channels/telegram.ts` and `src/channels/channel-registry.ts` support **multiple Telegram bots via per-bot env var** (e.g., `TELEGRAM_BOT_TOKEN_<NAME>`). If the codebase only supports a single `TELEGRAM_BOT_TOKEN`, you must extend the channel adapter first OR check whether `/add-telegram-swarm` already added this support. **Do not proceed until this is confirmed.** Read both files; if there's no enumeration of multiple tokens, this is a code-change blocker — surface to operator and pause Plan 1.
+**Real pattern (verified in `src/channels/telegram.ts:222-260`):** Secondary Telegram bots are NOT loaded from per-bot env vars. They are loaded from each agent group's `container_config.telegramBotToken` field. On startup, `registerSecondaryBots()` scans `agent_groups`, finds those with a `telegramBotToken`, and registers an adapter named `telegram-<folder>` for each.
 
-Once multi-bot support is confirmed:
+So you write the token directly into the DB:
 
-Edit `.env`, add (or update if exists):
+```typescript
+// scripts/finance/_set-token.ts (one-shot, delete after)
+import path from 'path';
+import { initDb, getDb } from '../../src/db/connection.js';
+import { getAgentGroup } from '../../src/db/agent-groups.js';
+import { runMigrations } from '../../src/db/migrations/index.js';
 
-```env
-TELEGRAM_BOT_TOKEN_FINANCE=<token from operator>
+const dbPath = path.join(process.cwd(), 'data', 'v2.db');
+const db = initDb(dbPath);
+runMigrations(db);
+
+const TOKEN = '<token from operator>'; // from BotFather
+
+const ag = getAgentGroup('finance');
+if (!ag) {
+  console.error('❌ Agent group "finance" not found. Run Step 2 first.');
+  process.exit(1);
+}
+
+const cfg = ag.container_config ? JSON.parse(ag.container_config) : {};
+cfg.telegramBotToken = TOKEN;
+
+getDb()
+  .prepare('UPDATE agent_groups SET container_config=? WHERE id=?')
+  .run(JSON.stringify(cfg), 'finance');
+
+console.log('✅ Token wired into agent_groups.finance.container_config');
 ```
 
-Then restart NanoClaw to pick up the env change:
+Run it:
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
+npx tsx scripts/finance/_set-token.ts
+```
+
+Then restart NanoClaw to pick up the new secondary bot:
+
+```bash
+systemctl restart nanoclaw          # Linux (system service)
 # or
-systemctl --user restart nanoclaw                  # Linux
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 ```
 
-**Verify:** check logs that the new bot started. The exact log path depends on your service config — for launchd, look at the `StandardOutPath` in `~/Library/LaunchAgents/com.nanoclaw.plist`; for systemd, `journalctl --user -u nanoclaw`.
+**Verify:** the secondary bot was registered and started:
 
 ```bash
-# example, adapt to your log path
-journalctl --user -u nanoclaw -n 100 | grep -iE 'telegram.*finance|JonasFinanceBot'
+grep -E 'agentGroup="finance"|channel="telegram-finance"' /root/nanoclaw/logs/nanoclaw.log | tail -5
 ```
+
+Expected lines (in order):
+- `Registering secondary Telegram bot agentGroup="finance" folder="finance" channelType="telegram-finance"`
+- `Telegram adapter initialized { botUserId: '<numeric>', userName: '<botname>_bot' }`
+- `Channel adapter started channel="telegram-finance"`
 
 ---
 
 ## Step 6 — Wire Telegram bot to agent group `finance`
 
-Claude does this. Need a messaging group + an agent route.
+Claude does this. Need a `messaging_groups` row (the DM channel) + a `messaging_group_agents` row (the wiring).
 
-The cleanest way: invoke `/manage-channels` (it knows the messaging_group / messaging_group_agent flow) and tell it: "wire the new Telegram bot for `finance` as DM-only, exclusive route, session_mode=shared."
+**Schema reality (verified — table column names matter):**
+- `messaging_groups`: `(id, channel_type, platform_id, name, is_group, unknown_sender_policy, created_at)` with `UNIQUE(channel_type, platform_id)`
+- `messaging_group_agents`: `(id, messaging_group_id, agent_group_id, trigger_rules, response_scope, session_mode, priority, created_at)` with `UNIQUE(messaging_group_id, agent_group_id)`
 
-Alternative (manual, if `/manage-channels` doesn't fit): write another one-shot script:
+For the new secondary bot, `channel_type='telegram-finance'` (matches `telegram-<folder>` from Step 5). `platform_id='telegram:<operator_user_id>'` — the operator's own Telegram user ID, which is the same as their DM chat ID. You can get it from existing wiring of another agent (e.g., Naia):
 
-```typescript
-// scripts/finance/_wire-bot.ts
-import { createMessagingGroup } from '../../src/db/messaging-groups';
-import { createMessagingGroupAgent } from '../../src/db/messaging-groups';
-
-const messagingGroupId = 'mg-finance-tg';
-
-await createMessagingGroup({
-  id: messagingGroupId,
-  channel: 'telegram',
-  external_id: '<operator's Telegram user ID>', // DM only — operator's own user ID, not a group ID
-  name: 'Finance DM',
-  created_at: new Date().toISOString(),
-});
-
-await createMessagingGroupAgent({
-  id: 'mga-finance',
-  messaging_group_id: messagingGroupId,
-  agent_group_id: 'finance',
-  trigger_rules: null, // catch-all in this DM
-  response_scope: 'all',
-  session_mode: 'shared',
-  priority: 0,
-  created_at: new Date().toISOString(),
-});
-
-console.log('✅ Telegram bot wired to agent group finance');
+```bash
+sqlite3 data/v2.db "SELECT DISTINCT platform_id FROM messaging_groups WHERE channel_type LIKE 'telegram-%' AND is_group=0;"
 ```
 
-Operator's Telegram user ID: ask operator to send `/start` to the bot. Server logs will show their user ID. Update `external_id` accordingly and rerun.
+Or have operator send any message to a known bot and grep logs for `userId="telegram:<NUMERIC>"`.
 
-**Verify:** Operator sends "oi" to the bot. Bot should respond with the system prompt's persona-introduction line OR at minimum the agent should be invoked (check logs).
+Script:
+
+```typescript
+// scripts/finance/_wire-messaging.ts (one-shot, delete after)
+import path from 'path';
+import { initDb, getDb } from '../../src/db/connection.js';
+import { runMigrations } from '../../src/db/migrations/index.js';
+
+const dbPath = path.join(process.cwd(), 'data', 'v2.db');
+const db = initDb(dbPath);
+runMigrations(db);
+
+const CHANNEL_TYPE = 'telegram-finance';
+const PLATFORM_ID = '<telegram:OPERATOR_USER_ID>'; // e.g. telegram:8557164566
+const MG_ID = 'mg-finance-dm';
+const MGA_ID = 'mga-finance';
+const sqlite = getDb();
+
+const existingMg = sqlite
+  .prepare('SELECT id FROM messaging_groups WHERE channel_type=? AND platform_id=?')
+  .get(CHANNEL_TYPE, PLATFORM_ID) as { id: string } | undefined;
+
+let mgId: string;
+if (existingMg) {
+  mgId = existingMg.id;
+  console.log(`ℹ️  messaging_group already exists: ${mgId}`);
+} else {
+  sqlite
+    .prepare(
+      `INSERT INTO messaging_groups (id, channel_type, platform_id, name, is_group, unknown_sender_policy, created_at)
+       VALUES (?, ?, ?, ?, 0, 'strict', ?)`
+    )
+    .run(MG_ID, CHANNEL_TYPE, PLATFORM_ID, '<AgentName> DM', new Date().toISOString());
+  mgId = MG_ID;
+  console.log(`✅ messaging_group created: ${mgId}`);
+}
+
+const existingMga = sqlite
+  .prepare('SELECT id FROM messaging_group_agents WHERE messaging_group_id=? AND agent_group_id=?')
+  .get(mgId, 'finance') as { id: string } | undefined;
+
+if (!existingMga) {
+  sqlite
+    .prepare(
+      `INSERT INTO messaging_group_agents
+       (id, messaging_group_id, agent_group_id, trigger_rules, response_scope, session_mode, priority, created_at)
+       VALUES (?, ?, ?, NULL, 'all', 'shared', 0, ?)`
+    )
+    .run(MGA_ID, mgId, 'finance', new Date().toISOString());
+  console.log(`✅ messaging_group_agent created: ${MGA_ID}`);
+} else {
+  console.log(`ℹ️  messaging_group_agent already exists: ${existingMga.id}`);
+}
+```
+
+Run it:
+
+```bash
+npx tsx scripts/finance/_wire-messaging.ts
+```
+
+**Verify:** Operator sends "oi" to the new bot. Check logs:
+
+```bash
+grep -E 'sess-.*agentGroupId="finance"|Message routed.*agentGroup="finance"' /root/nanoclaw/logs/nanoclaw.log | tail -5
+```
+
+Expected: log entries showing the session was created and routed to `agentGroup="finance"`. The bot should respond with the persona's intro line (e.g. "Oi, Jonas! Meu nome é Levis...").
 
 ---
 
@@ -278,20 +357,25 @@ Claude does this.
 ```bash
 SHEET_ID="<id from operator>"
 SHEET_URL="https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit"
+AGENT_NAME="<persona name the bot uses, e.g. Levis>"  # ask operator: usually = the BotFather display name
 
-sed -i.bak "s|__SHEET_ID__|${SHEET_ID}|g; s|__SHEET_URL__|${SHEET_URL}|g" groups/finance/CLAUDE.md
-rm groups/finance/CLAUDE.md.bak
+sed -i.bak \
+  -e "s|__SHEET_ID__|${SHEET_ID}|g" \
+  -e "s|__SHEET_URL__|${SHEET_URL}|g" \
+  -e "s|__AGENT_NAME__|${AGENT_NAME}|g" \
+  groups/finance/CLAUDE.md groups/finance/system-prompt.md
+rm -f groups/finance/CLAUDE.md.bak groups/finance/system-prompt.md.bak
 ```
 
-(macOS sed needs `-i.bak`; Linux can use `-i ''`.)
+(BSD sed on macOS uses `-i.bak`; GNU sed on Linux is compatible with the same syntax. Either works.)
 
 **Verify:**
 
 ```bash
-grep -E 'SHEET_ID|SHEET_URL' groups/finance/CLAUDE.md
+grep -c '__SHEET_ID__\|__SHEET_URL__\|__AGENT_NAME__' groups/finance/CLAUDE.md groups/finance/system-prompt.md
 ```
 
-Expected: lines show actual ID and URL (no `__...__` placeholders).
+Expected: `0` for both files (no remaining placeholders).
 
 ---
 
