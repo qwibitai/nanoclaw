@@ -61,23 +61,14 @@ responsible for selecting the right one at request time.
 
 ## Phase 2: Apply Code Changes
 
-### Step 1: Merge this branch
+### Step 1: Install the container MCP tools
 
-This skill ships container MCP tools at
-`container/agent-runner/src/mcp-tools/google-auth.ts`. To install them
-into your local NanoClaw checkout once `skill/add-google-auth` exists:
-
-```bash
-git fetch origin skill/add-google-auth
-git merge --no-ff origin/skill/add-google-auth
-```
-
-> **Note (pre-split state):** as of 2026-05-11 the working branch is
-> `feat/add-google-auth-v2`. The split into `skill/add-google-auth` (fork
-> install target) and `add-google-auth-upstream` (PR source for
-> nanocoai/nanoclaw) is deferred to the next session pending
-> `/zenodotus --personas drive-by-contributor` review per `AGENTS.md`.
-> Until the split lands, install by fetching the working branch directly.
+This skill ships two container MCP tools at
+`container/agent-runner/src/mcp-tools/google-auth.ts` and a test file
+alongside it. On a fresh NanoClaw checkout the files arrive with the
+clone — no branch merge needed. On an existing checkout that predates
+this skill, `git pull` on `main` picks them up; proceed to Phase 4 to
+rebuild and reload.
 
 ### Step 2: Confirm the tools registered
 
@@ -236,13 +227,10 @@ To remove:
 ## Credits & references
 
 - **OneCLI Agent Vault:** `https://onecli.sh` — the canonical credential
-  store and proxy. The full pattern is documented in [skill patterns for
-  NanoClaw v2 — API skills](../../docs/skill-patterns-v2.md) (available on
-  the `feat/skill-patterns-v2-doc` branch as of 2026-05-11).
-- **Container MCP tool layout:** modeled on `self-mod.ts` per the v2
-  skill-patterns doc; barrel-imported in
+  store and proxy.
+- **Container MCP tool layout:** modeled on the existing `self-mod.ts`
+  MCP-tool module; barrel-imported in
   `container/agent-runner/src/mcp-tools/index.ts`.
-- **Downstream consumers:** `/add-gmail-tool`, `/add-gcal-tool`,
-  `/add-sheets-tool` (planned, #53), `/add-contacts-tool` (planned, #52),
-  `/add-calendar-mgmt` (planned, #55).
-- **Issue tracker:** `nanocoai/nanoclaw#50`.
+- **Downstream consumers:** future per-API skills (Gmail, Calendar,
+  Sheets, Contacts) depend on this foundation skill and are out of scope
+  for this PR.
