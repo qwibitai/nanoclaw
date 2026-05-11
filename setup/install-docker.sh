@@ -32,7 +32,7 @@ case "$(uname -s)" in
   Linux)
     if command -v dnf >/dev/null 2>&1; then
       echo "STEP: dnf-install-podman"
-      sudo dnf install -y podman podman-docker docker-compose
+      sudo dnf install -y podman podman-docker docker-compose util-linux-script slirp4netns
       # podman-compose lacks --wait; remove it if pulled in as a weak dep
       sudo dnf remove -y podman-compose 2>/dev/null || true
       echo "STEP: enable-podman-socket"

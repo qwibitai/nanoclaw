@@ -153,9 +153,10 @@ function installOnecli(): { stdout: string; ok: boolean } {
   const cleanup = removeLegacyOnecliContainers();
   if (cleanup) stdout += cleanup + '\n';
 
-  // On podman systems, default ONECLI_BIND_HOST to 127.0.0.1: the compose file
-  // binds to this by default, and the installer rejects a missing bind address
-  // on machines where it can't auto-detect a Docker bridge interface.
+  // On Podman systems the installer can't auto-detect a Docker bridge interface,
+  // so it rejects a missing bind address. Bind to 127.0.0.1; containers reach
+  // the host via slirp4netns (allow_host_loopback=true) which translates the
+  // container-side gateway (10.0.2.2) to the host's loopback.
   const gwEnv =
     getPlatform() === 'linux' && commandExists('podman') && !process.env.ONECLI_BIND_HOST
       ? { ...process.env, ONECLI_BIND_HOST: '127.0.0.1' }

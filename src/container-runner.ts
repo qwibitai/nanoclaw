@@ -3,7 +3,7 @@
  * Spawns agent containers with session folder + agent group folder mounts.
  * The container runs the v2 agent-runner which polls the session DB.
  */
-import { ChildProcess, execSync, spawn } from 'child_process';
+import { ChildProcess, execSync, spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -22,7 +22,15 @@ import {
 import { materializeContainerJson } from './container-config.js';
 import { getContainerConfig } from './db/container-configs.js';
 import { updateContainerConfigScalars, updateContainerConfigJson } from './db/container-configs.js';
-import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import {
+  CONTAINER_RUNTIME_BIN,
+  hostGatewayArgs,
+  isPodman,
+  isSelinuxEnforcing,
+  readonlyMountArgs,
+  selinuxMountSuffix,
+  stopContainer,
+} from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
@@ -105,6 +113,26 @@ export function wakeContainer(session: Session): Promise<boolean> {
   return promise;
 }
 
+/**
+ * Relabel OneCLI CA cert files in /tmp with container_file_t so that
+ * container processes can read them under SELinux enforcing.
+ *
+ * OneCLI writes these files with user_tmp_t, which container_t cannot read.
+ * We can't add :z to OneCLI-injected mounts, so we relabel the source files
+ * on the host immediately before each container spawn.
+ */
+function relabelOnecliCerts(): void {
+  if (!isSelinuxEnforcing()) return;
+  try {
+    const result = spawnSync('chcon', ['-t', 'container_file_t', '/tmp/onecli-combined-ca.pem', '/tmp/onecli-proxy-ca.pem'], {
+      stdio: 'ignore',
+    });
+    if (result.error) log.warn('chcon for OneCLI certs failed', { err: result.error });
+  } catch (err) {
+    log.warn('relabelOnecliCerts failed', { err });
+  }
+}
+
 async function spawnContainer(session: Session): Promise<void> {
   const agentGroup = getAgentGroup(session.agent_group_id);
   if (!agentGroup) {
@@ -145,6 +173,10 @@ async function spawnContainer(session: Session): Promise<void> {
     contribution,
     agentIdentifier,
   );
+
+  // OneCLI writes CA cert files to /tmp with user_tmp_t. On SELinux enforcing
+  // systems container_t cannot read user_tmp_t, so relabel them before spawn.
+  relabelOnecliCerts();
 
   log.info('Spawning container', { sessionId: session.id, agentGroup: agentGroup.name, containerName });
 
@@ -405,7 +437,16 @@ async function buildContainerArgs(
   providerContribution: ProviderContainerContribution,
   agentIdentifier?: string,
 ): Promise<string[]> {
-  const args: string[] = ['run', '--rm', '--name', containerName, '--label', CONTAINER_INSTALL_LABEL];
+  const args: string[] = [
+    'run',
+    '--rm',
+    '--name',
+    containerName,
+    '--label',
+    CONTAINER_INSTALL_LABEL,
+    '--workdir',
+    '/workspace/agent',
+  ];
 
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
@@ -436,19 +477,28 @@ async function buildContainerArgs(
   args.push(...hostGatewayArgs());
 
   // User mapping
+  //
+  // Podman rootless: --userns=keep-id preserves the host UID inside the
+  // container, so the process owns the session files it needs to read/write.
+  // Without it, --user HOST_UID maps to a sub-UID that doesn't own the files.
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+    if (isPodman()) {
+      args.push('--userns=keep-id');
+    }
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
   }
 
-  // Volume mounts
+  // Volume mounts — append :z suffix on SELinux enforcing systems to relabel
+  // host directories with container_file_t, allowing shared host+container access.
+  const selinuxSuffix = selinuxMountSuffix();
   for (const mount of mounts) {
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
     } else {
-      args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
+      args.push('-v', `${mount.hostPath}:${mount.containerPath}${selinuxSuffix}`);
     }
   }
 
