@@ -87,11 +87,9 @@ export const exchangeHandler: Handler = async (req) => {
   const isLoopbackHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
   const requestIsHttps = xfp === 'https' || isLoopbackHost;
 
-  const cookie = buildSetCookie(
-    { user_id: record.user_id, expires_at: record.expires_at },
-    serverKey,
-    { secure: requestIsHttps },
-  );
+  const cookie = buildSetCookie({ user_id: record.user_id, expires_at: record.expires_at }, serverKey, {
+    secure: requestIsHttps,
+  });
 
   return new Response(JSON.stringify({ user_id: record.user_id, expires_at: record.expires_at }), {
     status: 200,

@@ -51,11 +51,7 @@ export function resolveServerKey(): Buffer {
  * passes the right value. Default `true` preserves the security-strict
  * behavior for HTTPS deployments and localhost.
  */
-export function buildSetCookie(
-  payload: CookiePayload,
-  serverKey: Buffer,
-  options: { secure?: boolean } = {},
-): string {
+export function buildSetCookie(payload: CookiePayload, serverKey: Buffer, options: { secure?: boolean } = {}): string {
   const payloadJson = JSON.stringify(payload);
   const payloadB64 = Buffer.from(payloadJson).toString('base64');
   const hmac = crypto.createHmac('sha256', serverKey).update(payloadB64).digest('base64');
