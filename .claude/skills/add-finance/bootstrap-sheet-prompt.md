@@ -53,11 +53,11 @@ Use `GOOGLESHEETS_BATCH_UPDATE`:
 }
 ```
 
-## Passo 3 — Criar as 9 abas
+## Passo 3 — Criar as 12 abas
 
 A spreadsheet vem com uma aba `Sheet1` por default. Você vai:
 1. Renomear `Sheet1` → `Dashboard`
-2. Adicionar as outras 8 abas
+2. Adicionar as outras 11 abas
 
 Use um único `GOOGLESHEETS_BATCH_UPDATE` com este `requests`:
 
@@ -71,6 +71,9 @@ Use um único `GOOGLESHEETS_BATCH_UPDATE` com este `requests`:
   {"addSheet": {"properties": {"title": "Projeção"}}},
   {"addSheet": {"properties": {"title": "Lembretes"}}},
   {"addSheet": {"properties": {"title": "Categorias"}}},
+  {"addSheet": {"properties": {"title": "Contas"}}},
+  {"addSheet": {"properties": {"title": "MeiosPagamento"}}},
+  {"addSheet": {"properties": {"title": "Recebiveis"}}},
   {"addSheet": {"properties": {"title": "_Log"}}}
 ]
 ```
@@ -83,13 +86,16 @@ Use `GOOGLESHEETS_BATCH_UPDATE_VALUES_BY_DATA_FILTER` (ou múltiplos `BATCH_UPDA
 
 | Aba | Range | Linha 1 (cabeçalhos) |
 |---|---|---|
-| `Lançamentos-PF` | `A1:I1` | `id`, `data`, `tipo`, `valor`, `categoria`, `descricao`, `origem`, `recorrente_id`, `criado_em` |
-| `Lançamentos-PJ` | `A1:I1` | mesma coisa |
+| `Lançamentos-PF` | `A1:L1` | `id`, `data`, `tipo`, `valor`, `categoria`, `descricao`, `origem`, `recorrente_id`, `criado_em`, `conta_origem`, `conta_destino`, `meio_pagamento` |
+| `Lançamentos-PJ` | `A1:L1` | mesma coisa |
 | `Recorrentes` | `A1:K1` | `id`, `escopo`, `nome`, `tipo`, `valor`, `categoria`, `frequencia`, `dia_do_mes`, `proxima_data`, `pago_no_mes`, `ativo` |
 | `Orçamento` | `A1:F1` | `escopo`, `categoria`, `teto_mensal`, `gasto_no_mes`, `pct_usado`, `status` |
 | `Projeção` | `A1:E1` | `mes`, `receitas_recorrentes`, `despesas_recorrentes`, `saldo_mes`, `saldo_acumulado` |
 | `Lembretes` | `A1:E1` | `id`, `quando`, `mensagem`, `linhagem`, `enviado_em` |
 | `Categorias` | `A1:C1` | `escopo`, `categoria`, `ativo` |
+| `Contas` | `A1:F1` | `id`, `escopo`, `nome`, `saldo_inicial`, `saldo_atual`, `ativo` |
+| `MeiosPagamento` | `A1:D1` | `id`, `nome`, `vinculado_a_conta`, `ativo` |
+| `Recebiveis` | `A1:G1` | `id`, `descricao`, `valor`, `conta_destino`, `data_prevista`, `status`, `criado_em` |
 | `_Log` | `A1:E1` | `timestamp`, `job`, `status`, `qtd_processada`, `detalhes` |
 
 Para `Dashboard`: deixa A1:A1 com "Finance — Jonas" e a partir de A3 a estrutura virá no Passo 9.
@@ -114,7 +120,7 @@ Use `GOOGLESHEETS_BATCH_UPDATE` com 2 tipos de request por aba (exceto Dashboard
 
 ## Passo 6 — Formatação numérica BRL na coluna `valor`
 
-Para `Lançamentos-PF`, `Lançamentos-PJ` (coluna D), `Recorrentes` (coluna E), `Orçamento` (colunas C e D):
+Para `Lançamentos-PF`, `Lançamentos-PJ` (coluna D), `Recorrentes` (coluna E), `Orçamento` (colunas C e D), `Contas` (colunas D e E), `Recebiveis` (coluna C):
 
 ```json
 {"repeatCell": {
@@ -126,6 +132,7 @@ Para `Lançamentos-PF`, `Lançamentos-PJ` (coluna D), `Recorrentes` (coluna E), 
 
 Para `Orçamento.pct_usado` (coluna E): `"type": "PERCENT", "pattern": "0.00%"`.
 Para `Projeção` valores (B, C, D, E): `CURRENCY` BRL.
+Para `Recebiveis.data_prevista` (coluna E): `"type": "DATE", "pattern": "dd/mm/yyyy"`.
 
 ## Passo 7 — Data validation (dropdowns)
 
@@ -163,6 +170,13 @@ Use `setDataValidation`:
 **`Orçamento.escopo` (col A):** dropdown PF/PJ.
 **`Categorias.escopo` (col A):** dropdown PF/PJ.
 **`Categorias.ativo` (col C):** checkbox.
+**`Contas.escopo` (col B):** dropdown PF/PJ.
+**`Contas.ativo` (col F):** checkbox.
+**`MeiosPagamento.ativo` (col D):** checkbox.
+**`Recebiveis.status` (col F):** dropdown ONE_OF_LIST `["esperado", "recebido", "atrasado", "cancelado"]`.
+**`Lançamentos-{PF,PJ}.conta_origem` (col J, rows 2-10000):** dropdown ONE_OF_RANGE `=Contas!$C$2:$C` (nomes das contas).
+**`Lançamentos-{PF,PJ}.conta_destino` (col K, rows 2-10000):** dropdown ONE_OF_RANGE `=Contas!$C$2:$C`.
+**`Lançamentos-{PF,PJ}.meio_pagamento` (col L, rows 2-10000):** dropdown ONE_OF_RANGE `=MeiosPagamento!$B$2:$B`.
 
 ## Passo 8 — Fórmulas
 
@@ -244,6 +258,30 @@ Crie célula `Projeção!H1` com label "Saldo inicial:" em G1 e valor 0 em H1. D
 }}
 ```
 
+### `Contas.saldo_atual` (col E, ROW 2 a 1000)
+
+```
+=ARRAYFORMULA(IF(C2:C1000="";"";
+  D2:D1000
+  + SUMIFS(IF(B2:B1000="PF";'Lançamentos-PF'!D:D;'Lançamentos-PJ'!D:D);
+           IF(B2:B1000="PF";'Lançamentos-PF'!K:K;'Lançamentos-PJ'!K:K); C2:C1000;
+           IF(B2:B1000="PF";'Lançamentos-PF'!C:C;'Lançamentos-PJ'!C:C); "receita")
+  - SUMIFS(IF(B2:B1000="PF";'Lançamentos-PF'!D:D;'Lançamentos-PJ'!D:D);
+           IF(B2:B1000="PF";'Lançamentos-PF'!J:J;'Lançamentos-PJ'!J:J); C2:C1000;
+           IF(B2:B1000="PF";'Lançamentos-PF'!C:C;'Lançamentos-PJ'!C:C); "despesa")
+))
+```
+
+**ARRAYFORMULA com IF condicional pra escopo PF/PJ.** Se complicar, faça per-row (NÃO use ARRAYFORMULA) — escreva fórmula simples por linha pra cada conta:
+
+```
+Linha 2 (assumindo PF):
+=D2 + SUMIFS('Lançamentos-PF'!D:D; 'Lançamentos-PF'!K:K; C2; 'Lançamentos-PF'!C:C; "receita")
+   - SUMIFS('Lançamentos-PF'!D:D; 'Lançamentos-PF'!J:J; C2; 'Lançamentos-PF'!C:C; "despesa")
+```
+
+⚠️ LOCALE pt-BR: separadores `;`, não `,`.
+
 ## Passo 9 — Layout do Dashboard
 
 Aba `Dashboard`. Em cada bloco, A=label, B=valor.
@@ -263,12 +301,18 @@ Aba `Dashboard`. Em cada bloco, A=label, B=valor.
 | B8 | `=SUMIFS('Lançamentos-PJ'!D:D, 'Lançamentos-PJ'!C:C, "despesa", 'Lançamentos-PJ'!B:B, ">="&DATE(YEAR(TODAY()),MONTH(TODAY()),1))` |
 | A9 | `Saldo PJ (mês)` |
 | B9 | `=B7-B8` |
-| A11 | `Próximas contas (7d)` |
-| A12 | `=QUERY({Recorrentes!B:I}, "select Col2,Col4,Col8 where Col10=FALSE and Col9 >= date '"&TEXT(TODAY(),"yyyy-mm-dd")&"' and Col9 <= date '"&TEXT(TODAY()+7,"yyyy-mm-dd")&"' order by Col8", 0)` |
-| A18 | `Saldo projetado (+3m)` |
-| B18 | `=INDEX(Projeção!E:E, 4)` |
-| A19 | `Saldo projetado (+6m)` |
-| B19 | `=INDEX(Projeção!E:E, 7)` |
+| A11 | `Saldos PF` |
+| A12 | `=QUERY({Contas!B:E}; "select Col2,Col4 where Col1='PF' and Col2 is not null"; 0)` |
+| A16 | `Saldos PJ` |
+| A17 | `=QUERY({Contas!B:E}; "select Col2,Col4 where Col1='PJ' and Col2 is not null"; 0)` |
+| A21 | `Próximas contas (7d)` |
+| A22 | `=QUERY({Recorrentes!B:I}, "select Col2,Col4,Col8 where Col10=FALSE and Col9 >= date '"&TEXT(TODAY(),"yyyy-mm-dd")&"' and Col9 <= date '"&TEXT(TODAY()+7,"yyyy-mm-dd")&"' order by Col8", 0)` |
+| A28 | `Saldo projetado (+3m)` |
+| B28 | `=INDEX(Projeção!E:E, 4)` |
+| A29 | `Saldo projetado (+6m)` |
+| B29 | `=INDEX(Projeção!E:E, 7)` |
+
+⚠️ Dentro da string da query do `QUERY(...)`, `,` é da linguagem QUERY — mantém `,`. Fora da string (separador entre args da função QUERY), usa `;` (pt-BR).
 
 (Top 5 categorias, lembretes pendentes, etc. ficam pra v2 do dashboard — MVP cobre o essencial.)
 
@@ -314,6 +358,36 @@ Inserir 15 linhas em `Categorias!A2:C16` (use os dados de `categorias-seed.json`
   ["PJ", "Marketing", true],
   ["PJ", "Impostos", true],
   ["PJ", "Outros", true]
+]
+```
+
+## Passo 11.5 — Seed Contas e MeiosPagamento
+
+### Contas (6 linhas em `Contas!A2:F7`)
+
+```
+[
+  ["conta-btgd",    "PF", "BTG D",   0, "", true],
+  ["conta-inter",   "PF", "Inter",   0, "", true],
+  ["conta-next",    "PF", "Next",    0, "", true],
+  ["conta-btg",     "PJ", "BTG",     0, "", true],
+  ["conta-hotmart", "PJ", "Hotmart", 0, "", true],
+  ["conta-c6",      "PJ", "C6",      0, "", true]
+]
+```
+
+(`saldo_atual` = vazio — a fórmula do Passo 8 preenche automaticamente)
+
+### MeiosPagamento (6 linhas em `MeiosPagamento!A2:D7`)
+
+```
+[
+  ["mp-pix",      "PIX",        "",        true],
+  ["mp-boleto",   "Boleto",     "",        true],
+  ["mp-dinheiro", "Dinheiro",   "",        true],
+  ["mp-c1",       "Cartão C1",  "Hotmart", true],
+  ["mp-c2",       "Cartão C2",  "Hotmart", true],
+  ["mp-c3",       "Cartão C3",  "Hotmart", true]
 ]
 ```
 
