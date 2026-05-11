@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { deleteOrphanProcessingClaims, getProcessingClaims } from './db/session-db.js';
+import { closeDb, initTestDb, runMigrations } from './db/index.js';
 import {
   ABSOLUTE_CEILING_MS,
   CLAIM_STUCK_MS,
@@ -17,7 +18,9 @@ import {
   _sweepTaskWatchdogForTesting,
   decideStuckAction,
   parseSqliteUtc,
+  pruneSteerIdempotency,
 } from './host-sweep.js';
+import { getDb } from './db/connection.js';
 import type { Session } from './types.js';
 
 // ─── Module mocks for C3 watchdog integration tests ──────────────────────────
@@ -728,4 +731,84 @@ describe('sweepTaskWatchdog (C3)', () => {
       );
     },
   );
+});
+
+// ── D7: pruneSteerIdempotency ─────────────────────────────────────────────────
+
+describe('pruneSteerIdempotency — D7', () => {
+  beforeEach(() => {
+    const db = initTestDb();
+    db.pragma('foreign_keys = ON');
+    runMigrations(db);
+    // Seed a user required by FK
+    getDb()
+      .prepare(
+        "INSERT OR IGNORE INTO users (id, kind, display_name, created_at) VALUES ('u1', 'test', NULL, datetime('now'))",
+      )
+      .run();
+  });
+
+  afterEach(() => {
+    closeDb();
+  });
+
+  it('test_prune_removes_old_applied', () => {
+    // applied row 2 min ago — should be deleted
+    getDb()
+      .prepare(
+        `INSERT INTO steer_idempotency (user_id, idempotency_key, task_id, message_id, text, request_hash, reserved_at, status, echo_attempted, applied_at)
+       VALUES ('u1', 'key-old', 'task-1', 'msg-1', 'hi', 'h1', datetime('now', '-3 minutes'), 'applied', 1, datetime('now', '-2 minutes'))`,
+      )
+      .run();
+    // applied row 30 sec ago — should remain
+    getDb()
+      .prepare(
+        `INSERT INTO steer_idempotency (user_id, idempotency_key, task_id, message_id, text, request_hash, reserved_at, status, echo_attempted, applied_at)
+       VALUES ('u1', 'key-fresh', 'task-1', 'msg-2', 'hi', 'h2', datetime('now', '-31 seconds'), 'applied', 1, datetime('now', '-30 seconds'))`,
+      )
+      .run();
+
+    pruneSteerIdempotency();
+
+    const rows = getDb().prepare("SELECT idempotency_key FROM steer_idempotency WHERE status = 'applied'").all() as {
+      idempotency_key: string;
+    }[];
+    expect(rows.map((r) => r.idempotency_key)).not.toContain('key-old');
+    expect(rows.map((r) => r.idempotency_key)).toContain('key-fresh');
+  });
+
+  it('test_prune_removes_old_pending', () => {
+    getDb()
+      .prepare(
+        `INSERT INTO steer_idempotency (user_id, idempotency_key, task_id, message_id, text, request_hash, reserved_at, status, echo_attempted)
+       VALUES ('u1', 'pend-old', 'task-2', 'msg-3', 'hi', 'h3', datetime('now', '-10 minutes'), 'pending', 0)`,
+      )
+      .run();
+
+    pruneSteerIdempotency();
+
+    const rows = getDb().prepare("SELECT idempotency_key FROM steer_idempotency WHERE status = 'pending'").all();
+    expect(rows.length).toBe(0);
+  });
+
+  it('test_prune_preserves_recent_pending', () => {
+    getDb()
+      .prepare(
+        `INSERT INTO steer_idempotency (user_id, idempotency_key, task_id, message_id, text, request_hash, reserved_at, status, echo_attempted)
+       VALUES ('u1', 'pend-new', 'task-3', 'msg-4', 'hi', 'h4', datetime('now', '-1 minute'), 'pending', 0)`,
+      )
+      .run();
+
+    pruneSteerIdempotency();
+
+    const rows = getDb()
+      .prepare("SELECT idempotency_key FROM steer_idempotency WHERE idempotency_key = 'pend-new'")
+      .all();
+    expect(rows.length).toBe(1);
+  });
+
+  it('test_sweep_calls_prune: pruneSteerIdempotency is exported and callable', () => {
+    // Verify the function is exported and can be called without error on an empty table
+    expect(() => pruneSteerIdempotency()).not.toThrow();
+  });
 });

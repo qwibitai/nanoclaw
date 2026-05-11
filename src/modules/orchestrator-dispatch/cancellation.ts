@@ -44,6 +44,19 @@ export async function applySpawnCancel(content: Record<string, unknown>, callerS
       return;
     }
 
+    // Dashboard SSE emit (post-build drift fix B5)
+    void import('../../dashboard/api/events.js')
+      .then((mod) =>
+        mod.emitDashboardEvent('task_event', {
+          task_id: taskId,
+          kind: 'cancel',
+          agent_group_id: task.parent_agent_group_id,
+        }),
+      )
+      .catch(() => {
+        /* dashboard module may not be initialized in tests */
+      });
+
     if (task.status === 'running' && task.child_session_id) {
       // Write _spawn_cancel envelope to child's inbound (cycle-3 S26)
       const childSession = getSession(task.child_session_id);

@@ -83,3 +83,11 @@ export function getAdminsOfAgentGroup(agentGroupId: string): UserRole[] {
     .prepare('SELECT * FROM user_roles WHERE role = ? AND agent_group_id = ? ORDER BY granted_at')
     .all('admin', agentGroupId) as UserRole[];
 }
+
+/** True if the user has any admin role: owner or admin (global or scoped). */
+export function isAnyAdmin(userId: string): boolean {
+  const row = getDb()
+    .prepare("SELECT 1 FROM user_roles WHERE user_id = ? AND role IN ('owner', 'admin') LIMIT 1")
+    .get(userId);
+  return !!row;
+}

@@ -19,7 +19,8 @@
  */
 import { persistInboundAttachments } from './attachment-downloader.js';
 import { getChannelAdapter } from './channels/channel-registry.js';
-import { gateCommand } from './command-gate.js';
+import { gateCommand, preFanoutGate, getInterceptHandler } from './command-gate.js';
+import type { InterceptContext } from './command-gate.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { recordDroppedMessage } from './db/dropped-messages.js';
 import {
@@ -422,6 +423,53 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   //    side effect so later role/access lookups find a real record).
   //    Without the module, userId is null — downstream tolerates it.
   const userId: string | null = senderResolver ? senderResolver(event) : null;
+
+  // 2b. Pre-fan-out intercept gate: runs ONCE per inbound, before agents
+  //     are resolved. Handles /dashboard-token and other INTERCEPT_COMMANDS.
+  //     FILTERED commands are dropped. Unknown/ADMIN commands fall through.
+  if (userId !== null && (event.message.kind === 'chat' || event.message.kind === 'chat-sdk')) {
+    const preGate = preFanoutGate(event.message.content, userId);
+    if (preGate.action === 'intercept') {
+      const handler = getInterceptHandler(preGate.handlerName);
+      if (handler) {
+        const ctx: InterceptContext = {
+          userId,
+          replyMessagingGroupId: mg.id,
+          command: preGate.command,
+          args: preGate.args,
+        };
+        try {
+          await Promise.race([
+            handler(ctx),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('intercept handler timeout')), 5000)),
+          ]);
+        } catch (err) {
+          const isTimeout = err instanceof Error && err.message === 'intercept handler timeout';
+          if (isTimeout) {
+            log.warn('Intercept handler timed out', { handlerName: preGate.handlerName, command: preGate.command });
+          } else {
+            log.error('Intercept handler threw', {
+              handlerName: preGate.handlerName,
+              command: preGate.command,
+              err: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      } else {
+        log.warn('No intercept handler registered', { handlerName: preGate.handlerName });
+      }
+      return;
+    }
+    if (preGate.action === 'filter') {
+      log.debug('Pre-fanout filtered command dropped');
+      return;
+    }
+    if (preGate.action === 'deny') {
+      log.info('Pre-fanout intercept denied (not admin)', { command: preGate.command, userId });
+      return;
+    }
+    // 'pass' — fall through to fan-out
+  }
 
   // 3. Fetch wired agents in full (we already know the count is > 0; now
   //    we need their actual rows for fan-out).

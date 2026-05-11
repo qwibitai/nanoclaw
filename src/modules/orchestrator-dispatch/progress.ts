@@ -36,11 +36,26 @@ export async function applySpawnProgress(content: Record<string, unknown>, calle
     // Status guard — only update on active tasks. A late progress message on an
     // already-terminal task should not pollute timestamps post-dating cancelled_at /
     // completed_at / failed_at, which would break the lifecycle invariant.
-    getDb()
+    const result = getDb()
       .prepare(
         `UPDATE tasks SET last_progress_at = ?, last_progress_message = ? WHERE task_id = ? AND status IN ('pending', 'running')`,
       )
       .run(now, truncated, taskId);
+
+    // Dashboard SSE emit only on actual UPDATE (skip late-progress no-ops)
+    if (result.changes > 0) {
+      void import('../../dashboard/api/events.js')
+        .then((mod) =>
+          mod.emitDashboardEvent('task_event', {
+            task_id: taskId,
+            kind: 'progress',
+            agent_group_id: task.parent_agent_group_id,
+          }),
+        )
+        .catch(() => {
+          /* dashboard module may not be initialized in tests */
+        });
+    }
   } catch (err) {
     log.warn('applySpawnProgress: DB update failed — silently swallowing', { taskId, err });
   }

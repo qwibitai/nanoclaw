@@ -55,6 +55,7 @@ import {
 } from './session-manager.js';
 import { getContainerSpawnedAt, isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
 import type { Session } from './types.js';
+import { getDb } from './db/connection.js';
 import { getActiveTasks, transitionToTerminal } from './modules/orchestrator-dispatch/db/tasks.js';
 import { getCapabilityConfig } from './modules/orchestrator-dispatch/db/agent-group-capabilities.js';
 import { runReconcilerSweep } from './modules/orchestrator-dispatch/reconciler.js';
@@ -184,6 +185,16 @@ async function sweep(): Promise<void> {
   // MODULE-HOOK:orchestrator-dispatch:reconciler — complete admitted-but-incomplete tasks.
   // Runs after per-session sweeps so container state is current.
   runReconcilerSweep();
+
+  // Prune steer_idempotency rows: applied rows older than 60s, pending rows older than 5min.
+  pruneSteerIdempotency();
+
+  // Prune dashboard_tokens rows past expiry + 1d grace (post-build QA fix SF-6).
+  void import('./dashboard/db/dashboard-tokens.js')
+    .then((mod) => mod.pruneDashboardTokens())
+    .catch(() => {
+      /* dashboard module may not be initialized in tests */
+    });
 
   // MODULE-HOOK:orchestrator-dispatch:watchdog — reap tasks that have exceeded
   // their deadline, spawn window, no-progress timeout, or whose child container exited.
@@ -331,6 +342,19 @@ async function sweepTaskWatchdog(): Promise<void> {
         continue;
       }
 
+      // Dashboard SSE emit (post-build drift fix B5 — watchdog-fail emit callsite)
+      void import('./dashboard/api/events.js')
+        .then((mod) =>
+          mod.emitDashboardEvent('task_event', {
+            task_id: task.task_id,
+            kind: 'failed',
+            agent_group_id: task.parent_agent_group_id,
+          }),
+        )
+        .catch(() => {
+          /* dashboard module may not be initialized in tests */
+        });
+
       log.warn('Task watchdog: reaped task', {
         taskId: task.task_id,
         reason: decision.action,
@@ -361,6 +385,22 @@ async function sweepTaskWatchdog(): Promise<void> {
     } catch (err) {
       log.error('Task watchdog: error processing task', { taskId: task.task_id, err });
     }
+  }
+}
+
+export function pruneSteerIdempotency(): void {
+  try {
+    const db = getDb();
+    // Delete applied rows older than 60 seconds
+    db.prepare(
+      `DELETE FROM steer_idempotency WHERE status = 'applied' AND applied_at < datetime('now', '-60 seconds')`,
+    ).run();
+    // Delete pending rows older than 5 minutes (crash-recovery window expires)
+    db.prepare(
+      `DELETE FROM steer_idempotency WHERE status = 'pending' AND reserved_at < datetime('now', '-300 seconds')`,
+    ).run();
+  } catch (err) {
+    log.warn('pruneSteerIdempotency: failed', { err });
   }
 }
 
