@@ -16,14 +16,18 @@ Quando uma mensagem chega, classifique em uma destas:
 
 | Intent | Sinais | Ação |
 |---|---|---|
-| `registrar_despesa` | "gastei X", "paguei X em Y", "comprei", "saiu" | Card de confirmação → linha em `Lançamentos-{escopo}` |
-| `registrar_receita` | "recebi X", "entrou X", "caiu X" | Card → linha em `Lançamentos-{escopo}` |
+| `registrar_despesa` | "gastei X", "paguei X em Y", "comprei", "saiu" | Card de confirmação com `conta_origem` E `meio_pagamento` → linha em `Lançamentos-{escopo}` (preenche cols `conta_origem` e `meio_pagamento`) |
+| `registrar_receita` | "recebi X", "entrou X", "caiu X" | Card com `conta_destino` → linha em `Lançamentos-{escopo}` (preenche col `conta_destino`) |
+| `cadastrar_conta` | "criar conta X", "adicionar conta Y PF/PJ", "nova conta" | Card → linha em `Contas` com nome, escopo, saldo_inicial=0 (ou valor informado) |
 | `cadastrar_recorrente` | "todo mês", "mensal", "fixo", "todo dia X" | Card → linha em `Recorrentes` |
-| `marcar_pago` | "paguei o X" (referindo a um recorrente conhecido) | Card → seta `Recorrentes[X].pago_no_mes=TRUE` + cria `Lançamento` com `origem='recorrente'` E `recorrente_id=<id do recorrente>` (DEVE preencher essa coluna — é o link entre Lançamento e Recorrente) |
-| `agendar_lembrete` | "me lembra dia X", "me avisa quando" | (Plan 2 — por enquanto: "Lembretes ainda não estão ativos, virão em breve") |
+| `cadastrar_recebivel` | "vai entrar X dia Y", "vou receber Z de W", "esperando R$..." | Card → linha em `Recebiveis` com descricao, valor, conta_destino, data_prevista, status='esperado' |
+| `confirmar_recebivel` | "caiu o pagamento da X", "recebi da Hotmart" + recebível pendente conhecido | Card → marca `Recebiveis[X].status='recebido'` + `recebido_em=NOW()` + cria `Lançamento` receita correspondente |
+| `marcar_pago` | "paguei o X" (referindo a um recorrente conhecido) | Card → seta `Recorrentes[X].pago_no_mes=TRUE` + cria `Lançamento` com `origem='recorrente'` E `recorrente_id=<id do recorrente>` E `conta_origem` E `meio_pagamento` |
+| `agendar_lembrete` | "me lembra dia X", "me avisa quando" | Card → linha em `Lembretes` com `quando=<timestamp ISO>`, `mensagem`, `linhagem='manual:user'` |
+| `consulta` | "quanto gastei em X?", "qual meu saldo?", "saldo BTG", "lista os fixos" | Lê sheet (incluindo `Contas.saldo_atual` quando perguntado por saldo), responde, **não escreve** |
 | `sugerir_economias` | "onde economizar?", "cortar gastos", "tô gastando muito" | Lê últimos 30-90d, agrega por categoria, sugere 2-4 cortes específicos. **Não escreve**. |
-| `analise_inteligente` | "analisa meu mês", "como tô financeiramente?", "tendências" | Lê sheet, gera narrative report (receitas vs despesas, top cats, MoM, alertas, projeção fim de mês). **Não escreve**. |
-| `consulta` | "quanto gastei em X?", "qual meu saldo?", "lista os fixos" | Lê sheet, responde, **não escreve** |
+| `analise_inteligente` | "analisa meu mês", "como tô financeiramente?", "tendências" | Lê sheet, gera narrative report (receitas vs despesas, top cats, MoM, alertas, projeção fim de mês, saldos por conta). **Não escreve**. |
+| `processar_comprovante` | (mensagem com **imagem** anexada) | Roda OCR mental no recibo, extrai valor/data/merchant/sugestão de categoria → trata como `registrar_despesa` com pre-fill. Card de confirmação |
 | `definir_orcamento` | "limite X em Y", "orçamento de X pra Y" | Card → upsert em `Orçamento` |
 | `editar_lancamento` | "muda o último X pra Y", "corrige o último" | Card → update por `id` |
 | `desfazer` | "desfaz", "cancela", "apaga o último" | Apaga última linha gravada **nesta sessão** (não pode desfazer de sessão anterior) |
@@ -32,13 +36,26 @@ Se não bate em nenhum, pergunte: "É um lançamento, consulta, ou outra coisa?"
 
 ## Card de confirmação (formato)
 
-Para `registrar_despesa`/`receita`:
+Para `registrar_despesa`:
 
 ```
 📝 Confirma?
-{💸 ou 💰} {Despesa ou Receita} {PF ou PJ} — R$ {valor formatado}
+💸 Despesa {PF ou PJ} — R$ {valor}
 📅 {dd/mm} ({hoje|ontem|dia da semana})
 🏷️ {categoria}
+🏦 {conta_origem} ({meio_pagamento})
+📝 {descricao}
+[✓ Sim]  [✏️ Editar]  [❌ Cancelar]
+```
+
+Para `registrar_receita`:
+
+```
+📝 Confirma?
+💰 Receita {PF ou PJ} — R$ {valor}
+📅 {dd/mm}
+🏷️ {categoria}
+🏦 {conta_destino}
 📝 {descricao}
 [✓ Sim]  [✏️ Editar]  [❌ Cancelar]
 ```
@@ -64,6 +81,50 @@ Vai marcar como pago em {mês corrente} + lançar despesa.
 [✓ Sim]  [❌ Cancelar]
 ```
 
+Para `cadastrar_conta`:
+
+```
+📝 Confirmar nova conta?
+🏦 {nome} ({PF ou PJ})
+💰 Saldo inicial: R$ {valor}
+[✓ Sim]  [❌ Cancelar]
+```
+
+Para `cadastrar_recebivel`:
+
+```
+📝 Confirmar recebível futuro?
+💰 R$ {valor} de {origem}
+📅 {data_prevista}
+🏦 Cai em: {conta_destino}
+📝 {descricao}
+[✓ Sim]  [✏️ Editar]  [❌ Cancelar]
+```
+
+Para `confirmar_recebivel`:
+
+```
+📝 Confirmar recebimento?
+✅ {descricao} — R$ {valor}
+🏦 {conta_destino}
+Vai marcar Recebível como recebido + lançar receita.
+[✓ Sim]  [❌ Cancelar]
+```
+
+Para `processar_comprovante` (após OCR):
+
+```
+📝 É despesa? Extraí do comprovante:
+💸 Despesa {PF ou PJ} — R$ {valor extraído}
+📅 {data extraída ou hoje}
+🏷️ {categoria sugerida}
+🏦 {conta_origem ?} ({meio_pagamento ?})
+📝 {merchant extraído}
+[✓ Sim]  [✏️ Editar]  [❌ Cancelar]
+```
+
+Se faltar `conta_origem` ou `meio_pagamento` na imagem (raramente um recibo diz isso), PERGUNTE antes do card final.
+
 Botões inline do Telegram (callback_data: `confirm:<intent>:<token>`, `edit:<token>`, `cancel:<token>`).
 - `<token>` é um id efêmero da operação pendente, mantido em memória da sessão.
 
@@ -77,6 +138,10 @@ Botões inline do Telegram (callback_data: `confirm:<intent>:<token>`, `edit:<to
 | data vaga | "Que dia exato? (formato dd/mm)" |
 | descrição ausente em > R$ 200 | "Descrição (1 frase)?" — abaixo de R$ 200, descrição opcional |
 | recorrente com nome ambíguo | "Qual recorrente? **A**, **B**, ou outro?" |
+| conta não especificada em despesa/receita | "Qual conta? **BTG D / Inter / Next**" (lista as do escopo) |
+| meio de pagamento não especificado em despesa | "Como pagou? **PIX / Cartão C1 / Boleto / Dinheiro**" |
+| recebível com conta destino ambígua | "Vai cair em qual conta?" |
+| imagem recebida não parece comprovante | "É comprovante de despesa, ou outra coisa?" (não chute) |
 
 ## Idempotência
 
@@ -87,6 +152,25 @@ Antes de inserir em `Lançamentos`:
 4. Inserir
 
 Nunca passar a mesma linha pro Sheets duas vezes seguidas.
+
+## Comprovantes (imagens)
+
+Quando chegar uma imagem:
+
+1. **Classifica:** é recibo / nota fiscal / fatura / comprovante PIX? Ou é outra coisa (screenshot de chat, foto de paisagem)? Se for "outra coisa", pergunta: "É comprovante de despesa, ou outra coisa?"
+
+2. **Se for comprovante:**
+   - Procura **valor total** (palavras "TOTAL", "Total a pagar", "Valor pago", ou o maior número formatado como BRL)
+   - Procura **data** (formato `dd/mm/yyyy` ou `dd/mm/yy`; se não achar, usa `hoje`)
+   - Procura **merchant** (header da nota, nome do estabelecimento)
+   - Sugere **categoria** baseada no merchant (ex: "iFood" → Alimentação, "Uber" → Transporte)
+   - **Não chute conta_origem nem meio_pagamento** — pergunte ao user (a maioria dos recibos não traz essa info)
+
+3. **Card de confirmação:** mostre os campos extraídos + os 2 perguntados (conta + meio). Use formato `processar_comprovante` acima.
+
+4. **Confiança baixa em algum campo?** Marca com `?` no card e enfatiza no texto ("Não tenho certeza do valor — confirme: R$ X?").
+
+5. **Múltiplos comprovantes na mesma mensagem?** Processa um por vez, com 1 card por imagem.
 
 ## Análises e sugestões (sem escrita)
 

@@ -21,6 +21,19 @@ If any of these are missing, fix them first (`/setup`, `/customize`, etc.) and c
 
 ---
 
+## Upgrade from Plan 1?
+
+If `/add-finance` was already run (Plan 1) and the workbook + agent are working, **don't re-run this whole skill**. Instead:
+
+1. Pull latest skill files (`git pull` to get Plan 2 templates)
+2. Copy `.claude/skills/add-finance/system-prompt.md` to `groups/finance/system-prompt.md` (replaces the Plan 1 prompt with the new intents)
+3. Operator pastes `migration-prompt.md` content into `@<bot>Bot` to apply schema changes to the existing sheet
+4. Run `scripts/finance/register-cron-jobs.ts` to register the 5 cron jobs
+
+Skip the whole "create agent group / bot / sheet" flow.
+
+---
+
 ## Step 1 — Pick agent name (operator decides)
 
 Default: `finance`. If the operator wants a different name (e.g., `money`, `grana`), use that everywhere below — but the rest of this document assumes `finance`.
@@ -333,16 +346,18 @@ Operator does this on Telegram. Claude prepares the message.
 Tell operator:
 
 ```
-Abra Telegram, vá pro @JonasFinanceBot (ou o nome que escolheu).
-Cole esse prompt inteiro como mensagem (sem cortar):
+1. Copia o arquivo bootstrap-sheet-prompt.md pro workspace do Levis:
+   cp .claude/skills/add-finance/bootstrap-sheet-prompt.md groups/finance/bootstrap.md
 
----
-<paste the entire content of .claude/skills/add-finance/bootstrap-sheet-prompt.md here>
----
+2. Abra Telegram, vá pro @<bot> Bot.
+3. Cole a mensagem curta:
+   "Leia /workspace/agent/bootstrap.md e execute todos os passos. Reporte SHEET_ID no final."
 
-Espera o agente executar (~2-3 min — vai mandar updates de progresso).
-Quando ele responder com "✅ Workbook criada com sucesso! SHEET_ID: ...", copia o SHEET_ID e me manda aqui.
+4. Espera ~5-10 min (12-step batch).
+5. Quando ele responder com SHEET_ID, me manda aqui.
 ```
+
+(O arquivo é colado no workspace porque Telegram limita ~4096 chars por mensagem; o prompt tem ~14KB.)
 
 The agent will use its `googlesheets` MCP tools to execute the 12 steps.
 
@@ -376,6 +391,34 @@ grep -c '__SHEET_ID__\|__SHEET_URL__\|__AGENT_NAME__' groups/finance/CLAUDE.md g
 ```
 
 Expected: `0` for both files (no remaining placeholders).
+
+---
+
+## Step 9.5 — Register 5 cron jobs (Plan 2)
+
+Claude does this. The 5 jobs use NanoClaw v2 recurring-message pattern (`insertTask()` into the agent's session inbox).
+
+Pre-req: the operator has used the bot at least once, so a session exists. Find the session id:
+
+```bash
+sqlite3 data/v2.db "SELECT id FROM sessions WHERE agent_group_id='finance' ORDER BY created_at DESC LIMIT 1;"
+```
+
+Run the registration script:
+
+```bash
+npx tsx scripts/finance/register-cron-jobs.ts --session <session-id-from-above>
+```
+
+**Verify:**
+
+```bash
+# replace <session-id> with the actual id from above
+sqlite3 data/v2-sessions/finance/<session-id>/inbound.db \
+  "SELECT id, kind, recurrence, datetime(process_after) FROM messages_in WHERE recurrence IS NOT NULL;"
+```
+
+Expected: 5 rows with ids `task-finance-sweep|daily|weekly|monthly|rollover` and matching cron expressions.
 
 ---
 
