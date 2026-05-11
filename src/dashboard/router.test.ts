@@ -12,14 +12,7 @@ vi.mock('./auth/compute-scopes.js', () => ({
   })),
 }));
 
-import {
-  pathMatch,
-  register,
-  requireAuth,
-  dispatch,
-  registerCookieVerifier,
-  clearCookieVerifier,
-} from './router.js';
+import { pathMatch, register, requireAuth, dispatch, registerCookieVerifier, clearCookieVerifier } from './router.js';
 import * as scopesMod from './auth/compute-scopes.js';
 
 function makeNodeReq(overrides: Partial<http.IncomingMessage> = {}): http.IncomingMessage {
@@ -155,17 +148,15 @@ describe('requireAuth and dispatch', () => {
     const nodeRes = makeNodeRes();
     let rawNodeResWritten = false;
 
-    const handler = vi.fn().mockImplementation(
-      async (
-        _req: Request,
-        _params: Record<string, string>,
-        ctx: { rawNodeRes?: http.ServerResponse },
-      ) => {
-        ctx.rawNodeRes?.write('data: keep-alive\n\n');
-        rawNodeResWritten = true;
-        return null;
-      },
-    );
+    const handler = vi
+      .fn()
+      .mockImplementation(
+        async (_req: Request, _params: Record<string, string>, ctx: { rawNodeRes?: http.ServerResponse }) => {
+          ctx.rawNodeRes?.write('data: keep-alive\n\n');
+          rawNodeResWritten = true;
+          return null;
+        },
+      );
 
     register('GET', '/test-null', handler);
 

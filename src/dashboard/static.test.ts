@@ -64,7 +64,9 @@ describe('indexHtmlHandler — D2', () => {
   });
 
   it('returns 404 when index.html missing', async () => {
-    mockStatSync.mockImplementation(() => { throw new Error('ENOENT'); });
+    mockStatSync.mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
     const resp = await indexHtmlHandler(makeReq(), {}, makeCtx());
     expect(resp!.status).toBe(404);
   });

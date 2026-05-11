@@ -234,9 +234,7 @@ export async function applySteer(
   }
 
   // Wake container
-  void wakeContainer(childSession).catch((err) =>
-    log.warn('steer: wakeContainer failed', { taskId, err }),
-  );
+  void wakeContainer(childSession).catch((err) => log.warn('steer: wakeContainer failed', { taskId, err }));
 
   const steerResponse = {
     task_id: taskId,
@@ -346,7 +344,16 @@ export const steerHandler: AuthHandler = async (req, params, ctx) => {
   const taskId = params['id'] ?? '';
   const result = await applySteer(taskId, { idempotency_key: body.idempotency_key, text: body.text ?? '' }, ctx);
 
-  const statusMap: Record<number, number> = { 202: 202, 400: 400, 403: 403, 404: 404, 409: 409, 422: 422, 429: 429, 503: 503 };
+  const statusMap: Record<number, number> = {
+    202: 202,
+    400: 400,
+    403: 403,
+    404: 404,
+    409: 409,
+    422: 422,
+    429: 429,
+    503: 503,
+  };
   const httpStatus = statusMap[result.status] ?? 500;
 
   return new Response(JSON.stringify(result.body), {

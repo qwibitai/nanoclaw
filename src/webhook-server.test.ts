@@ -26,20 +26,20 @@ afterEach(async () => {
 
 async function httpGet(port: number, path: string): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
-    http.get({ hostname: '127.0.0.1', port, path }, (res) => {
-      let data = '';
-      res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }));
-      res.on('error', reject);
-    }).on('error', reject);
+    http
+      .get({ hostname: '127.0.0.1', port, path }, (res) => {
+        let data = '';
+        res.on('data', (chunk: Buffer) => {
+          data += chunk.toString();
+        });
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }));
+        res.on('error', reject);
+      })
+      .on('error', reject);
   });
 }
 
-async function httpPost(
-  port: number,
-  path: string,
-  body: string,
-): Promise<{ status: number; body: string }> {
+async function httpPost(port: number, path: string, body: string): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const opts: http.RequestOptions = {
       hostname: '127.0.0.1',
@@ -50,7 +50,9 @@ async function httpPost(
     };
     const req = http.request(opts, (res) => {
       let data = '';
-      res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+      res.on('data', (chunk: Buffer) => {
+        data += chunk.toString();
+      });
       res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }));
       res.on('error', reject);
     });

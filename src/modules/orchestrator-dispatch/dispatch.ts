@@ -5,8 +5,10 @@ import { getChannelAdapter } from '../../channels/channel-registry.js';
 import { getDb } from '../../db/connection.js';
 // Lazy import to avoid module-init cycle (events.ts imports nothing from dispatch.ts).
 // The import() call is memoized by Node's module cache after the first resolution.
-let _emitDashboardEvent: typeof import('../../dashboard/api/events.js')['emitDashboardEvent'] | null = null;
-async function lazyEmit(...args: Parameters<typeof import('../../dashboard/api/events.js')['emitDashboardEvent']>): Promise<void> {
+let _emitDashboardEvent: (typeof import('../../dashboard/api/events.js'))['emitDashboardEvent'] | null = null;
+async function lazyEmit(
+  ...args: Parameters<(typeof import('../../dashboard/api/events.js'))['emitDashboardEvent']>
+): Promise<void> {
   if (!_emitDashboardEvent) {
     try {
       const mod = await import('../../dashboard/api/events.js');

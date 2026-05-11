@@ -111,49 +111,51 @@ export function startSSEFeed(): void {
   }, KEEPALIVE_INTERVAL_MS);
   keepaliveTimer.unref();
 
-  void import('chokidar').then(({ watch }) => {
-    // ignored function accepts both inbound.db and outbound.db (M4-c2)
-    // returning false = DO watch the file; returning true = ignore
-    watcher = watch(SESSIONS_ROOT, {
-      ignoreInitial: true,
-      awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
-      // ignored: return true = skip the path; return false = watch it.
-      // Accept inbound.db and outbound.db (M4-c2). Accept directories so
-      // chokidar can traverse them. Ignore everything else.
-      ignored: (filePath: string) => {
-        const base = path.basename(filePath);
-        // Always watch the sessions root dir itself
-        if (filePath === SESSIONS_ROOT) return false;
-        // Accept the two DB files we care about
-        if (base === 'inbound.db' || base === 'outbound.db') return false;
-        // Accept intermediate directory segments (no extension = directory-like)
-        if (!base.includes('.')) return false;
-        return true;
-      },
-    });
+  void import('chokidar')
+    .then(({ watch }) => {
+      // ignored function accepts both inbound.db and outbound.db (M4-c2)
+      // returning false = DO watch the file; returning true = ignore
+      watcher = watch(SESSIONS_ROOT, {
+        ignoreInitial: true,
+        awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
+        // ignored: return true = skip the path; return false = watch it.
+        // Accept inbound.db and outbound.db (M4-c2). Accept directories so
+        // chokidar can traverse them. Ignore everything else.
+        ignored: (filePath: string) => {
+          const base = path.basename(filePath);
+          // Always watch the sessions root dir itself
+          if (filePath === SESSIONS_ROOT) return false;
+          // Accept the two DB files we care about
+          if (base === 'inbound.db' || base === 'outbound.db') return false;
+          // Accept intermediate directory segments (no extension = directory-like)
+          if (!base.includes('.')) return false;
+          return true;
+        },
+      });
 
-    // Post-build QA fix SF-9: chokidar emits `error` events; without a handler
-    // they propagate as unhandled `EventEmitter` errors and crash the process on
-    // newer Node.js versions. Common trigger: SESSIONS_ROOT doesn't exist on first
-    // run before any sessions have been created. Log and continue — the SSE feed
-    // remains functional via programmatic emitDashboardEvent calls.
-    watcher.on('error', (err) => {
-      log.warn('chokidar SSE watcher error', { err });
-    });
+      // Post-build QA fix SF-9: chokidar emits `error` events; without a handler
+      // they propagate as unhandled `EventEmitter` errors and crash the process on
+      // newer Node.js versions. Common trigger: SESSIONS_ROOT doesn't exist on first
+      // run before any sessions have been created. Log and continue — the SSE feed
+      // remains functional via programmatic emitDashboardEvent calls.
+      watcher.on('error', (err) => {
+        log.warn('chokidar SSE watcher error', { err });
+      });
 
-    watcher.on('change', (filePath: string) => {
-      const rel = path.relative(SESSIONS_ROOT, filePath);
-      const parts = rel.split(path.sep);
-      if (parts.length < 3) return;
-      const [agentGroupId, sessionId, filename] = parts;
-      if (!agentGroupId || !sessionId) return;
-      if (filename !== 'inbound.db' && filename !== 'outbound.db') return;
+      watcher.on('change', (filePath: string) => {
+        const rel = path.relative(SESSIONS_ROOT, filePath);
+        const parts = rel.split(path.sep);
+        if (parts.length < 3) return;
+        const [agentGroupId, sessionId, filename] = parts;
+        if (!agentGroupId || !sessionId) return;
+        if (filename !== 'inbound.db' && filename !== 'outbound.db') return;
 
-      _emitInboundChangeEvent(agentGroupId, sessionId, filePath);
+        _emitInboundChangeEvent(agentGroupId, sessionId, filePath);
+      });
+    })
+    .catch(() => {
+      // chokidar unavailable — SSE feed works without filesystem watch
     });
-  }).catch(() => {
-    // chokidar unavailable — SSE feed works without filesystem watch
-  });
 }
 
 function _emitInboundChangeEvent(agentGroupId: string, sessionId: string, filePath: string): void {
@@ -233,10 +235,7 @@ export const eventsHandler: AuthHandler = async (_req, _params, ctx) => {
     'X-Accel-Buffering': 'no',
   });
 
-  const connId = createHash('sha256')
-    .update(`${userId}:${Date.now()}:${Math.random()}`)
-    .digest('hex')
-    .slice(0, 16);
+  const connId = createHash('sha256').update(`${userId}:${Date.now()}:${Math.random()}`).digest('hex').slice(0, 16);
 
   const conn: SseConnection = {
     id: connId,

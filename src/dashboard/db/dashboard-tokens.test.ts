@@ -8,9 +8,7 @@ function now(): string {
 }
 
 function seedUser(id: string): void {
-  getDb()
-    .prepare("INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'test', NULL, ?)")
-    .run(id, now());
+  getDb().prepare("INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'test', NULL, ?)").run(id, now());
 }
 
 beforeEach(() => {
@@ -32,9 +30,9 @@ describe('dashboard_tokens DAO', () => {
     expect(record.used_at).toBeNull();
     expect(record.id).toBeGreaterThan(0);
 
-    const row = getDb()
-      .prepare('SELECT * FROM dashboard_tokens WHERE token_hmac = ?')
-      .get('hmac-abc') as { user_id: string; used_at: string | null } | undefined;
+    const row = getDb().prepare('SELECT * FROM dashboard_tokens WHERE token_hmac = ?').get('hmac-abc') as
+      | { user_id: string; used_at: string | null }
+      | undefined;
     expect(row?.user_id).toBe('u1');
     expect(row?.used_at).toBeNull();
   });
@@ -51,9 +49,9 @@ describe('dashboard_tokens DAO', () => {
     expect(record!.user_id).toBe('u1');
     expect(record!.used_at).not.toBeNull();
 
-    const row = getDb()
-      .prepare('SELECT used_at FROM dashboard_tokens WHERE token_hmac = ?')
-      .get('hmac-x') as { used_at: string | null } | undefined;
+    const row = getDb().prepare('SELECT used_at FROM dashboard_tokens WHERE token_hmac = ?').get('hmac-x') as
+      | { used_at: string | null }
+      | undefined;
     expect(row?.used_at).not.toBeNull();
   });
 

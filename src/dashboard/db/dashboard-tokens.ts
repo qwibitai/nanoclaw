@@ -19,7 +19,12 @@ export function issueDashboardToken(userId: string, tokenHmac: string, ttlHours:
        VALUES (@user_id, @token_hmac, @issued_at, @expires_at)
        RETURNING *`,
     )
-    .get({ user_id: userId, token_hmac: tokenHmac, issued_at: issuedAt, expires_at: expiresAt }) as DashboardTokenRecord;
+    .get({
+      user_id: userId,
+      token_hmac: tokenHmac,
+      issued_at: issuedAt,
+      expires_at: expiresAt,
+    }) as DashboardTokenRecord;
 }
 
 export function consumeDashboardToken(tokenHmac: string): DashboardTokenRecord | null {
@@ -47,7 +52,5 @@ export function consumeDashboardToken(tokenHmac: string): DashboardTokenRecord |
  * issued; production cookies are tied to fresh tokens that get consumed quickly.
  */
 export function pruneDashboardTokens(): void {
-  getDb()
-    .prepare(`DELETE FROM dashboard_tokens WHERE expires_at < datetime('now', '-1 day')`)
-    .run();
+  getDb().prepare(`DELETE FROM dashboard_tokens WHERE expires_at < datetime('now', '-1 day')`).run();
 }

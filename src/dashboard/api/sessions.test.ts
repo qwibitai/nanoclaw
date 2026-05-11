@@ -18,7 +18,9 @@ vi.mock('../../session-manager.js', async (importOriginal) => {
 vi.mock('fs', async () => {
   return {
     default: {
-      statSync: vi.fn().mockImplementation(() => { throw new Error('ENOENT'); }),
+      statSync: vi.fn().mockImplementation(() => {
+        throw new Error('ENOENT');
+      }),
       existsSync: vi.fn().mockReturnValue(false),
     },
   };
@@ -32,7 +34,10 @@ function now(): string {
   return new Date().toISOString();
 }
 
-function makeCtx(userId: string, opts: { no_filter?: boolean; allowed_group_ids?: string[] } = {}): AuthedRequestContext {
+function makeCtx(
+  userId: string,
+  opts: { no_filter?: boolean; allowed_group_ids?: string[] } = {},
+): AuthedRequestContext {
   return {
     user: { id: userId, kind: 'dashboard', display_name: userId, created_at: now() },
     scopes: {
@@ -61,7 +66,9 @@ function seedAgentGroup(id: string): void {
 
 function insertSession(sessId: string, agId: string, mgId: string | null = null): void {
   getDb()
-    .prepare("INSERT OR IGNORE INTO sessions (id, agent_group_id, messaging_group_id, status, created_at) VALUES (?, ?, ?, 'active', ?)")
+    .prepare(
+      "INSERT OR IGNORE INTO sessions (id, agent_group_id, messaging_group_id, status, created_at) VALUES (?, ?, ?, 'active', ?)",
+    )
     .run(sessId, agId, mgId, now());
 }
 
@@ -70,7 +77,9 @@ function insertSession(sessId: string, agId: string, mgId: string | null = null)
 describe('sessionsHandler — D4', () => {
   beforeEach(() => {
     vi.mocked(fs.statSync).mockReset();
-    vi.mocked(fs.statSync).mockImplementation(() => { throw new Error('ENOENT'); });
+    vi.mocked(fs.statSync).mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
     setupDb();
     seedAgentGroup('ag-1');
     seedAgentGroup('ag-2');
@@ -88,7 +97,7 @@ describe('sessionsHandler — D4', () => {
     const ctx = makeCtx('u1', { no_filter: true });
     const resp = await sessionsHandler(makeReq(), {}, ctx);
     expect(resp!.status).toBe(200);
-    const body = await resp!.json() as { sessions: unknown[] };
+    const body = (await resp!.json()) as { sessions: unknown[] };
     expect(body.sessions.length).toBe(3);
   });
 
@@ -97,7 +106,7 @@ describe('sessionsHandler — D4', () => {
     insertSession('sess-2', 'ag-2');
     const ctx = makeCtx('u1', { allowed_group_ids: ['ag-1'] });
     const resp = await sessionsHandler(makeReq(), {}, ctx);
-    const body = await resp!.json() as { sessions: Array<{ agent_group_id: string }> };
+    const body = (await resp!.json()) as { sessions: Array<{ agent_group_id: string }> };
     expect(body.sessions.every((s) => s.agent_group_id === 'ag-1')).toBe(true);
   });
 
@@ -118,7 +127,7 @@ describe('sessionsHandler — D4', () => {
 
     const ctx = makeCtx('u1', { no_filter: true });
     const resp = await sessionsHandler(makeReq(), {}, ctx);
-    const body = await resp!.json() as { sessions: Array<{ session_id: string; container_status: string }> };
+    const body = (await resp!.json()) as { sessions: Array<{ session_id: string; container_status: string }> };
 
     const find = (id: string) => body.sessions.find((s) => s.session_id === id);
     expect(find('sess-running')?.container_status).toBe('running');
@@ -132,7 +141,7 @@ describe('sessionsHandler — D4', () => {
     insertSession('sess-2', 'ag-2');
     const ctx = makeCtx('u1', { allowed_group_ids: ['ag-1'] });
     const resp = await sessionsHandler(makeReq(), {}, ctx);
-    const body = await resp!.json() as { sessions: unknown[] };
+    const body = (await resp!.json()) as { sessions: unknown[] };
     expect(body.sessions.length).toBe(1);
   });
 });

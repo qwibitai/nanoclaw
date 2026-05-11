@@ -1,12 +1,7 @@
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 
 import { closeDb, getDb, initTestDb, runMigrations } from '../../db/index.js';
-import {
-  IdempotencyConflict,
-  applyIdempotency,
-  markEchoAttempted,
-  reserveIdempotency,
-} from './steer-idempotency.js';
+import { IdempotencyConflict, applyIdempotency, markEchoAttempted, reserveIdempotency } from './steer-idempotency.js';
 import type { SteerResponse } from './steer-idempotency.js';
 
 function now(): string {
@@ -14,9 +9,7 @@ function now(): string {
 }
 
 function seedUser(id: string): void {
-  getDb()
-    .prepare("INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'test', NULL, ?)")
-    .run(id, now());
+  getDb().prepare("INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'test', NULL, ?)").run(id, now());
 }
 
 beforeEach(() => {
@@ -52,9 +45,9 @@ describe('steer_idempotency DAO', () => {
 
   it('test_reserve_task_id_conflict', () => {
     reserveIdempotency('u1', 'key-1', 'spawn-abc', 'msg-1', 'hello', 'hash-h');
-    expect(() =>
-      reserveIdempotency('u1', 'key-1', 'spawn-OTHER', 'msg-2', 'hello', 'hash-h'),
-    ).toThrow(IdempotencyConflict);
+    expect(() => reserveIdempotency('u1', 'key-1', 'spawn-OTHER', 'msg-2', 'hello', 'hash-h')).toThrow(
+      IdempotencyConflict,
+    );
     try {
       reserveIdempotency('u1', 'key-1', 'spawn-OTHER', 'msg-2', 'hello', 'hash-h');
     } catch (e) {
@@ -78,7 +71,9 @@ describe('steer_idempotency DAO', () => {
     applyIdempotency('u1', 'key-1', makeResponse());
 
     const row = getDb()
-      .prepare("SELECT status, applied_at, cached_response FROM steer_idempotency WHERE user_id = 'u1' AND idempotency_key = 'key-1'")
+      .prepare(
+        "SELECT status, applied_at, cached_response FROM steer_idempotency WHERE user_id = 'u1' AND idempotency_key = 'key-1'",
+      )
       .get() as { status: string; applied_at: string | null; cached_response: string | null } | undefined;
 
     expect(row?.status).toBe('applied');
@@ -101,9 +96,9 @@ describe('steer_idempotency DAO', () => {
     const reserved = reserveIdempotency('u1', 'key-1', 'spawn-abc', 'msg-1', 'hello', 'hash-h');
     markEchoAttempted(reserved.id);
 
-    const row = getDb()
-      .prepare('SELECT echo_attempted FROM steer_idempotency WHERE id = ?')
-      .get(reserved.id) as { echo_attempted: number } | undefined;
+    const row = getDb().prepare('SELECT echo_attempted FROM steer_idempotency WHERE id = ?').get(reserved.id) as
+      | { echo_attempted: number }
+      | undefined;
     expect(row?.echo_attempted).toBe(1);
   });
 });

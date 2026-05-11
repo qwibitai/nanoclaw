@@ -21,7 +21,6 @@ const mockGetChannelAdapter = vi.mocked(_gcaRaw);
 const mockGetMessagingGroup = vi.mocked(_gmgRaw);
 const mockEmitDashboardEvent = vi.mocked(_edeRaw);
 
-
 // ── Mocks ────────────────────────────────────────────────────────────────────
 // Simple synchronous factories — vi.fn() created inside factory to avoid TDZ.
 
@@ -72,7 +71,6 @@ vi.mock('./api/events.js', () => ({
   stopSSEFeed: vi.fn(),
 }));
 
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function now(): string {
@@ -97,19 +95,25 @@ function seedUser(id: string): void {
 
 function grantOwner(userId: string): void {
   getDb()
-    .prepare("INSERT OR IGNORE INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, 'owner', NULL, NULL, ?)")
+    .prepare(
+      "INSERT OR IGNORE INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, 'owner', NULL, NULL, ?)",
+    )
     .run(userId, now());
 }
 
 function grantAdmin(userId: string, agId: string): void {
   getDb()
-    .prepare("INSERT OR IGNORE INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, 'admin', ?, NULL, ?)")
+    .prepare(
+      "INSERT OR IGNORE INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, 'admin', ?, NULL, ?)",
+    )
     .run(userId, agId, now());
 }
 
 function grantMember(userId: string, agId: string): void {
   getDb()
-    .prepare("INSERT OR IGNORE INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, NULL, ?)")
+    .prepare(
+      'INSERT OR IGNORE INTO agent_group_members (user_id, agent_group_id, added_by, added_at) VALUES (?, ?, NULL, ?)',
+    )
     .run(userId, agId, now());
 }
 
@@ -117,7 +121,9 @@ function seedSession(sessId: string, agId: string, threadId: string | null = nul
   // Use sessId as thread_id to avoid the UNIQUE(agent_group_id, messaging_group_id, thread_id) conflict
   // when multiple sessions share the same agent_group and no messaging_group
   getDb()
-    .prepare("INSERT OR IGNORE INTO sessions (id, agent_group_id, messaging_group_id, thread_id, status, created_at) VALUES (?, ?, NULL, ?, 'active', ?)")
+    .prepare(
+      "INSERT OR IGNORE INTO sessions (id, agent_group_id, messaging_group_id, thread_id, status, created_at) VALUES (?, ?, NULL, ?, 'active', ?)",
+    )
     .run(sessId, agId, threadId ?? sessId, now());
 }
 
@@ -131,24 +137,38 @@ function insertRunningTask(
   // Disable FK for insert to avoid cross-module-instance DB isolation issues in vitest
   const db = getDb();
   db.pragma('foreign_keys = OFF');
-  db.prepare(`
+  db.prepare(
+    `
     INSERT OR IGNORE INTO tasks (
       task_id, idempotency_key, parent_session_id, parent_agent_group_id,
       child_session_id, status, task_content, request_hash, admitted_at, started_at,
       dispatch_completion_attempts, surface_mode, created_at,
       child_messaging_group_id, child_platform_thread_id
     ) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)
-  `).run(
-    taskId, taskId, sessId, agId,
-    childSessId, 'running', 'do something', 'hash-x',
-    now(), now(),
-    opts.surface_mode ?? 'headless', now(),
-    opts.child_mgid ?? null, opts.child_thread ?? null,
+  `,
+  ).run(
+    taskId,
+    taskId,
+    sessId,
+    agId,
+    childSessId,
+    'running',
+    'do something',
+    'hash-x',
+    now(),
+    now(),
+    opts.surface_mode ?? 'headless',
+    now(),
+    opts.child_mgid ?? null,
+    opts.child_thread ?? null,
   );
   db.pragma('foreign_keys = ON');
 }
 
-function makeCtx(userId: string, opts: { no_filter?: boolean; allowed_group_ids?: string[] } = {}): AuthedRequestContext {
+function makeCtx(
+  userId: string,
+  opts: { no_filter?: boolean; allowed_group_ids?: string[] } = {},
+): AuthedRequestContext {
   return {
     user: { id: userId, kind: 'dashboard', display_name: `user-${userId}`, created_at: now() },
     scopes: {
@@ -193,8 +213,16 @@ describe('applySteer — D5', () => {
     grantMember('member-1', 'ag-1');
     // Pre-seed messaging groups for FK satisfaction in native_thread tests
     const dbForMg = getDb();
-    dbForMg.prepare(`INSERT OR IGNORE INTO messaging_groups (id, channel_type, platform_id, name, is_group, unknown_sender_policy, created_at) VALUES ('mg-1','slack','C-1','test-ch',1,'public',datetime('now'))`).run();
-    dbForMg.prepare(`INSERT OR IGNORE INTO messaging_groups (id, channel_type, platform_id, name, is_group, unknown_sender_policy, created_at) VALUES ('mg-slack','slack','C-slack','slack-ch',1,'public',datetime('now'))`).run();
+    dbForMg
+      .prepare(
+        `INSERT OR IGNORE INTO messaging_groups (id, channel_type, platform_id, name, is_group, unknown_sender_policy, created_at) VALUES ('mg-1','slack','C-1','test-ch',1,'public',datetime('now'))`,
+      )
+      .run();
+    dbForMg
+      .prepare(
+        `INSERT OR IGNORE INTO messaging_groups (id, channel_type, platform_id, name, is_group, unknown_sender_policy, created_at) VALUES ('mg-slack','slack','C-slack','slack-ch',1,'public',datetime('now'))`,
+      )
+      .run();
     // Verify mg-1 was actually inserted (debug)
     const mgCheck = dbForMg.prepare("SELECT id FROM messaging_groups WHERE id='mg-1'").get();
     if (!mgCheck) throw new Error('mg-1 INSERT failed in beforeEach');
@@ -256,10 +284,13 @@ describe('applySteer — D5', () => {
 
     expect(mockWriteSessionMessage).toHaveBeenCalledOnce();
     expect(mockWakeContainer).toHaveBeenCalled();
-    expect(mockEmitDashboardEvent).toHaveBeenCalledWith('inbound_message', expect.objectContaining({
-      task_id: 'spawn-abc',
-      child_session_id: 'sess-child',
-    }));
+    expect(mockEmitDashboardEvent).toHaveBeenCalledWith(
+      'inbound_message',
+      expect.objectContaining({
+        task_id: 'spawn-abc',
+        child_session_id: 'sess-child',
+      }),
+    );
   });
 
   it('test_steer_replay_returns_cached_202', async () => {
@@ -439,7 +470,9 @@ describe('applySteer — D5', () => {
     const deliverMock = vi.fn().mockResolvedValue('msg-id');
 
     // Use module-level mock stubs directly
-    mockGetChannelAdapter.mockReturnValue({ deliver: deliverMock } as unknown as import('../channels/adapter.js').ChannelAdapter);
+    mockGetChannelAdapter.mockReturnValue({
+      deliver: deliverMock,
+    } as unknown as import('../channels/adapter.js').ChannelAdapter);
     mockGetMessagingGroup.mockReturnValue({
       id: 'mg-slack',
       channel_type: 'slack',

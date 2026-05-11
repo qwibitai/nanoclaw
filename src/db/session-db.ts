@@ -451,11 +451,7 @@ export function getMostRecentPeerSourceSessionId(db: Database.Database, peerAgen
  * Open-read-close per call — same discipline as all other inbound.db ops.
  * Returns false if the DB file does not exist (session not yet initialised).
  */
-export function sessionInboundHasMessage(
-  agentGroupId: string,
-  sessionId: string,
-  messageId: string,
-): boolean {
+export function sessionInboundHasMessage(agentGroupId: string, sessionId: string, messageId: string): boolean {
   const dbPath = path.join(DATA_DIR, 'v2-sessions', agentGroupId, sessionId, 'inbound.db');
   if (!fs.existsSync(dbPath)) return false;
   const db = new Database(dbPath);

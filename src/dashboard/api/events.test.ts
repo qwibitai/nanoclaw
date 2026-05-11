@@ -1,12 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import http from 'http';
 
-import {
-  startSSEFeed,
-  stopSSEFeed,
-  emitDashboardEvent,
-  eventsHandler,
-} from './events.js';
+import { startSSEFeed, stopSSEFeed, emitDashboardEvent, eventsHandler } from './events.js';
 import type { AuthedRequestContext } from '../router.js';
 
 // ── chokidar mock ────────────────────────────────────────────────────────────

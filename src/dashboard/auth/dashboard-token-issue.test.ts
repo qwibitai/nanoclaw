@@ -82,7 +82,11 @@ describe('dashboardTokenIssue', () => {
     await dashboardTokenIssue(makeCtx());
 
     expect(issueDashboardToken).toHaveBeenCalledOnce();
-    const [calledUserId, calledHmac, calledTtl] = vi.mocked(issueDashboardToken).mock.calls[0] as [string, string, number];
+    const [calledUserId, calledHmac, calledTtl] = vi.mocked(issueDashboardToken).mock.calls[0] as [
+      string,
+      string,
+      number,
+    ];
     expect(calledUserId).toBe('u1');
     expect(calledTtl).toBe(12); // 12h matches Set-Cookie Max-Age=43200 (post-build QA fix MF-2)
 

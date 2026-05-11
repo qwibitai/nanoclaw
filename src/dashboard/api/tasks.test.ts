@@ -16,7 +16,10 @@ function now(): string {
   return new Date().toISOString();
 }
 
-function makeCtx(userId: string, opts: { no_filter?: boolean; allowed_group_ids?: string[] } = {}): AuthedRequestContext {
+function makeCtx(
+  userId: string,
+  opts: { no_filter?: boolean; allowed_group_ids?: string[] } = {},
+): AuthedRequestContext {
   return {
     user: { id: userId, kind: 'dashboard', display_name: userId, created_at: now() },
     scopes: {
@@ -80,7 +83,9 @@ function seedAgentGroup(id: string): void {
 
 function seedSession(sessId: string, agId: string): void {
   getDb()
-    .prepare('INSERT OR IGNORE INTO sessions (id, agent_group_id, messaging_group_id, created_at) VALUES (?, ?, NULL, ?)')
+    .prepare(
+      'INSERT OR IGNORE INTO sessions (id, agent_group_id, messaging_group_id, created_at) VALUES (?, ?, NULL, ?)',
+    )
     .run(sessId, agId, now());
 }
 
@@ -107,7 +112,7 @@ describe('tasksListHandler — D3', () => {
     const ctx = makeCtx('u1', { no_filter: true });
     const resp = await tasksListHandler(makeReq(), {}, ctx);
     expect(resp!.status).toBe(200);
-    const body = await resp!.json() as { tasks: unknown[] };
+    const body = (await resp!.json()) as { tasks: unknown[] };
     expect(body.tasks.length).toBe(2);
   });
 
@@ -116,7 +121,7 @@ describe('tasksListHandler — D3', () => {
     insertTask('t2', 'ag-2', 'sess-2');
     const ctx = makeCtx('u1', { allowed_group_ids: ['ag-1'] });
     const resp = await tasksListHandler(makeReq(), {}, ctx);
-    const body = await resp!.json() as { tasks: Array<{ task_id: string }> };
+    const body = (await resp!.json()) as { tasks: Array<{ task_id: string }> };
     expect(body.tasks.length).toBe(1);
     expect(body.tasks[0].task_id).toBe('t1');
   });
@@ -127,7 +132,7 @@ describe('tasksListHandler — D3', () => {
     insertTask('t3', 'ag-1', 'sess-1', 'completed');
     const ctx = makeCtx('u1', { no_filter: true });
     const resp = await tasksListHandler(makeReq('http://localhost/dashboard/api/tasks?status=running'), {}, ctx);
-    const body = await resp!.json() as { tasks: Array<{ status: string }> };
+    const body = (await resp!.json()) as { tasks: Array<{ status: string }> };
     expect(body.tasks.every((t) => t.status === 'running')).toBe(true);
     expect(body.tasks.length).toBe(2);
   });
@@ -153,7 +158,7 @@ describe('tasksDetailHandler — D3', () => {
     const ctx = makeCtx('u1', { no_filter: true });
     const resp = await tasksDetailHandler(makeReq(), { id: 'spawn-abc' }, ctx);
     expect(resp!.status).toBe(200);
-    const body = await resp!.json() as { task: { task_id: string }; transcript: unknown[] };
+    const body = (await resp!.json()) as { task: { task_id: string }; transcript: unknown[] };
     expect(body.task.task_id).toBe('spawn-abc');
     expect(Array.isArray(body.transcript)).toBe(true);
   });
@@ -163,7 +168,7 @@ describe('tasksDetailHandler — D3', () => {
     const ctx = makeCtx('u1', { allowed_group_ids: ['ag-1'] });
     const resp = await tasksDetailHandler(makeReq(), { id: 'spawn-abc' }, ctx);
     expect(resp!.status).toBe(404);
-    const body = await resp!.json() as { error: string };
+    const body = (await resp!.json()) as { error: string };
     expect(body.error).toBe('task_not_found');
   });
 
@@ -183,7 +188,7 @@ describe('tasksDetailHandler — D3', () => {
     const ctx = makeCtx('u1', { no_filter: true });
     const resp = await tasksDetailHandler(makeReq(), { id: 'spawn-def' }, ctx);
     expect(resp!.status).toBe(200);
-    const body = await resp!.json() as { transcript: unknown[] };
+    const body = (await resp!.json()) as { transcript: unknown[] };
     // No session DBs exist (fs.existsSync returns false), so transcript is empty
     expect(body.transcript.length).toBe(0);
   });

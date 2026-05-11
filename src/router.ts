@@ -441,9 +441,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
         try {
           await Promise.race([
             handler(ctx),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('intercept handler timeout')), 5000),
-            ),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('intercept handler timeout')), 5000)),
           ]);
         } catch (err) {
           const isTimeout = err instanceof Error && err.message === 'intercept handler timeout';

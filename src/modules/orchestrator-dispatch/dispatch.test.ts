@@ -670,10 +670,7 @@ describe('D6: emitDashboardEvent emits after apply functions commit', () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     await Promise.resolve();
 
-    expect(emitSpy).toHaveBeenCalledWith(
-      'task_event',
-      expect.objectContaining({ kind: 'admit' }),
-    );
+    expect(emitSpy).toHaveBeenCalledWith('task_event', expect.objectContaining({ kind: 'admit' }));
   });
 
   it('test_emit_fires_after_commit: emit NOT called if admission is rejected (cap reached)', async () => {
@@ -695,9 +692,9 @@ describe('D6: emitDashboardEvent emits after apply functions commit', () => {
     await Promise.resolve();
 
     // No task was admitted — emit should NOT have been called with kind='admit' for a new task
-    const admitCalls = vi.mocked(emitDashboardEvent).mock.calls.filter(
-      ([_kind, payload]) => (payload as { kind?: string }).kind === 'admit',
-    );
+    const admitCalls = vi
+      .mocked(emitDashboardEvent)
+      .mock.calls.filter(([_kind, payload]) => (payload as { kind?: string }).kind === 'admit');
     expect(admitCalls.length).toBe(0);
   });
 });

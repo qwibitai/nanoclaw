@@ -85,7 +85,13 @@ function _loadTranscript(agentGroupId: string, sessionId: string): TranscriptEnt
       try {
         const rows = db
           .prepare('SELECT id, seq, kind, timestamp, content FROM messages_in ORDER BY seq DESC LIMIT ?')
-          .all(TRANSCRIPT_LIMIT) as Array<{ id: string; seq: number; kind: string; timestamp: string; content: string | null }>;
+          .all(TRANSCRIPT_LIMIT) as Array<{
+          id: string;
+          seq: number;
+          kind: string;
+          timestamp: string;
+          content: string | null;
+        }>;
         for (const row of rows) {
           const { parsed, ok } = _parseContent(row.content);
           if (!ok) log.warn('tasks: unparseable inbound content', { id: row.id });
@@ -118,7 +124,13 @@ function _loadTranscript(agentGroupId: string, sessionId: string): TranscriptEnt
       try {
         const rows = db
           .prepare('SELECT id, seq, kind, timestamp, content FROM messages_out ORDER BY seq DESC LIMIT ?')
-          .all(TRANSCRIPT_LIMIT) as Array<{ id: string; seq: number; kind: string; timestamp: string; content: string | null }>;
+          .all(TRANSCRIPT_LIMIT) as Array<{
+          id: string;
+          seq: number;
+          kind: string;
+          timestamp: string;
+          content: string | null;
+        }>;
         for (const row of rows) {
           const { parsed, ok } = _parseContent(row.content);
           if (!ok) log.warn('tasks: unparseable outbound content', { id: row.id });
@@ -188,7 +200,9 @@ export const tasksListHandler: AuthHandler = async (req, _params, ctx) => {
 
   let rows: TaskSummary[];
   try {
-    rows = getDb().prepare(sql).all(...(values as Parameters<ReturnType<ReturnType<typeof getDb>['prepare']>['all']>)) as TaskSummary[];
+    rows = getDb()
+      .prepare(sql)
+      .all(...(values as Parameters<ReturnType<ReturnType<typeof getDb>['prepare']>['all']>)) as TaskSummary[];
   } catch (err) {
     log.warn('tasksListHandler: DB error', { err });
     return new Response(JSON.stringify({ error: 'internal_error' }), {
@@ -199,7 +213,7 @@ export const tasksListHandler: AuthHandler = async (req, _params, ctx) => {
 
   const hasMore = rows.length > limit;
   const tasks = hasMore ? rows.slice(0, limit) : rows;
-  const cursor = hasMore ? tasks[tasks.length - 1]?.admitted_at ?? null : null;
+  const cursor = hasMore ? (tasks[tasks.length - 1]?.admitted_at ?? null) : null;
 
   return new Response(JSON.stringify({ tasks, cursor }), {
     status: 200,
@@ -212,9 +226,9 @@ export const tasksDetailHandler: AuthHandler = async (_req, params, ctx) => {
 
   let task: (TaskSummary & { child_session_id: string | null }) | null;
   try {
-    task = getDb()
-      .prepare('SELECT * FROM tasks WHERE task_id = ?')
-      .get(taskId) as (TaskSummary & { child_session_id: string | null }) | null;
+    task = getDb().prepare('SELECT * FROM tasks WHERE task_id = ?').get(taskId) as
+      | (TaskSummary & { child_session_id: string | null })
+      | null;
   } catch (err) {
     log.warn('tasksDetailHandler: DB error', { err });
     return new Response(JSON.stringify({ error: 'internal_error' }), {

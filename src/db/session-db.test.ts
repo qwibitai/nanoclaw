@@ -10,7 +10,12 @@ import fs from 'fs';
 import path from 'path';
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { getInboundSourceSessionId, migrateMessagesInTable, sessionInboundHasMessage, upsertSessionRouting } from './session-db.js';
+import {
+  getInboundSourceSessionId,
+  migrateMessagesInTable,
+  sessionInboundHasMessage,
+  upsertSessionRouting,
+} from './session-db.js';
 import { INBOUND_SCHEMA } from './schema.js';
 import { DATA_DIR } from '../config.js';
 

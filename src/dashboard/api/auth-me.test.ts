@@ -32,18 +32,22 @@ function insertUser(id: string): void {
 
 function insertAgentGroup(id: string): void {
   getDb()
-    .prepare("INSERT OR IGNORE INTO agent_groups (id, name, folder, created_at) VALUES (?, ?, ?, ?)")
+    .prepare('INSERT OR IGNORE INTO agent_groups (id, name, folder, created_at) VALUES (?, ?, ?, ?)')
     .run(id, id, id, now());
 }
 
 function insertRole(userId: string, role: string, agentGroupId: string | null): void {
   if (agentGroupId !== null) {
     getDb()
-      .prepare('INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, ?, ?, NULL, ?)')
+      .prepare(
+        'INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, ?, ?, NULL, ?)',
+      )
       .run(userId, role, agentGroupId, now());
   } else {
     getDb()
-      .prepare('INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, ?, NULL, NULL, ?)')
+      .prepare(
+        'INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, ?, NULL, NULL, ?)',
+      )
       .run(userId, role, now());
   }
 }
@@ -94,7 +98,10 @@ describe('authMeHandler', () => {
     const req = makeReq('spawn_board=token');
     const res = await authedHandler(req, {}, makeNodeCtx());
     expect(res!.status).toBe(200);
-    const body = (await res!.json()) as { user_id: string; scopes: { role: string; no_filter: boolean; allowed_group_ids: string[] } };
+    const body = (await res!.json()) as {
+      user_id: string;
+      scopes: { role: string; no_filter: boolean; allowed_group_ids: string[] };
+    };
     expect(body.user_id).toBe('u1');
     expect(body.scopes.role).toBe('owner');
     expect(body.scopes.no_filter).toBe(true);
@@ -123,7 +130,9 @@ describe('authMeHandler', () => {
     insertAgentGroup('ag-1');
     // 'member' is not a valid UserRoleKind but we insert directly to test the handler
     getDb()
-      .prepare('INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, ?, ?, NULL, ?)')
+      .prepare(
+        'INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, ?, ?, NULL, ?)',
+      )
       .run('u1', 'member', 'ag-1', now());
     registerCookieVerifier(() => ({ user_id: 'u1', expires_at: '2099-01-01T00:00:00Z' }));
     vi.mocked(accessMod.canAccessAgentGroup).mockReturnValue({ allowed: false, reason: 'not_member' });
@@ -131,7 +140,10 @@ describe('authMeHandler', () => {
     const req = makeReq('spawn_board=token');
     const res = await authedHandler(req, {}, makeNodeCtx());
     expect(res!.status).toBe(200);
-    const body = (await res!.json()) as { user_id: string; scopes: { role: string; allowed_group_ids: string[]; no_filter: boolean } };
+    const body = (await res!.json()) as {
+      user_id: string;
+      scopes: { role: string; allowed_group_ids: string[]; no_filter: boolean };
+    };
     expect(body.scopes.role).toBe('member');
     expect(body.scopes.allowed_group_ids).toEqual(['ag-1']);
     expect(body.scopes.no_filter).toBe(false);

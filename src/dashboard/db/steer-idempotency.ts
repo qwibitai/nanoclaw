@@ -109,9 +109,7 @@ export function applyIdempotency(userId: string, idempotencyKey: string, respons
 }
 
 export function markEchoAttempted(idempotencyRowId: number): void {
-  getDb()
-    .prepare('UPDATE steer_idempotency SET echo_attempted = 1 WHERE id = ?')
-    .run(idempotencyRowId);
+  getDb().prepare('UPDATE steer_idempotency SET echo_attempted = 1 WHERE id = ?').run(idempotencyRowId);
 }
 
 /**

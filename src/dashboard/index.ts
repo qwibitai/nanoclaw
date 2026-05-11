@@ -14,9 +14,9 @@ import { sessionsHandler } from './api/sessions.js';
 import { steerHandler } from './steer.js';
 
 // Side-effect imports — these files register their routes/handlers at module load
-import './auth/exchange.js';               // POST /dashboard/api/auth/exchange
-import './api/auth-me.js';                 // GET /dashboard/api/auth/me
-import './auth/dashboard-token-issue.js';  // registers 'dashboard_token_issue' intercept handler
+import './auth/exchange.js'; // POST /dashboard/api/auth/exchange
+import './api/auth-me.js'; // GET /dashboard/api/auth/me
+import './auth/dashboard-token-issue.js'; // registers 'dashboard_token_issue' intercept handler
 
 let started = false;
 
@@ -28,9 +28,7 @@ export function startDashboard(): void {
   import('./auth/cookie.js')
     .then((cookieMod) => {
       const serverKey = cookieMod.resolveServerKey();
-      registerCookieVerifier((cookieHeader) =>
-        cookieMod.parseAndVerifyCookie(cookieHeader, serverKey),
-      );
+      registerCookieVerifier((cookieHeader) => cookieMod.parseAndVerifyCookie(cookieHeader, serverKey));
     })
     .catch((err) => {
       console.error('Failed to wire cookie verifier', err);

@@ -88,7 +88,14 @@ vi.mock('./modules/permissions/db/user-roles.js', () => ({
 
 // ── Imports after mocks ──
 
-import { routeInbound, setSenderResolver, setAccessGate, setUnwiredChannelResolver, setChannelRequestGate, setMessageInterceptor } from './router.js';
+import {
+  routeInbound,
+  setSenderResolver,
+  setAccessGate,
+  setUnwiredChannelResolver,
+  setChannelRequestGate,
+  setMessageInterceptor,
+} from './router.js';
 import { getMessagingGroupWithAgentCount, getMessagingGroupAgents } from './db/messaging-groups.js';
 import { writeSessionMessage, writeOutboundDirect, resolveSession } from './session-manager.js';
 import { wakeContainer } from './container-runner.js';
@@ -189,7 +196,10 @@ describe('C2: pre-fanout intercept dispatch', () => {
   it('test_routeInbound_intercept_fanout_with_multiple_agents', async () => {
     const mg = makeMg();
     vi.mocked(getMessagingGroupWithAgentCount).mockReturnValue({ mg, agentCount: 2 });
-    vi.mocked(getMessagingGroupAgents).mockReturnValue([makeAgent({ id: 'mga-1', agent_group_id: 'ag-1' }), makeAgent({ id: 'mga-2', agent_group_id: 'ag-2' })]);
+    vi.mocked(getMessagingGroupAgents).mockReturnValue([
+      makeAgent({ id: 'mga-1', agent_group_id: 'ag-1' }),
+      makeAgent({ id: 'mga-2', agent_group_id: 'ag-2' }),
+    ]);
 
     const handlerSpy = vi.fn().mockResolvedValue(undefined);
     registerInterceptHandler('dashboard_token_issue', handlerSpy);

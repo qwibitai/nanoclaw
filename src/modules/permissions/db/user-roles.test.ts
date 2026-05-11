@@ -8,19 +8,21 @@ function now(): string {
 }
 
 function insertUser(id: string): void {
-  getDb()
-    .prepare("INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'test', NULL, ?)")
-    .run(id, now());
+  getDb().prepare("INSERT INTO users (id, kind, display_name, created_at) VALUES (?, 'test', NULL, ?)").run(id, now());
 }
 
 function insertRole(userId: string, role: 'owner' | 'admin', agentGroupId: string | null): void {
   if (agentGroupId) {
     getDb()
-      .prepare('INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, ?, ?, NULL, ?)')
+      .prepare(
+        'INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, ?, ?, NULL, ?)',
+      )
       .run(userId, role, agentGroupId, now());
   } else {
     getDb()
-      .prepare('INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, ?, NULL, NULL, ?)')
+      .prepare(
+        'INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, ?, NULL, NULL, ?)',
+      )
       .run(userId, role, now());
   }
 }
@@ -64,7 +66,9 @@ describe('isAnyAdmin', () => {
       .run(now());
     // member is not a valid UserRoleKind — insert directly and verify isAnyAdmin returns false
     getDb()
-      .prepare('INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, ?, ?, NULL, ?)')
+      .prepare(
+        'INSERT INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at) VALUES (?, ?, ?, NULL, ?)',
+      )
       .run('u4', 'member', 'ag-2', now());
     expect(isAnyAdmin('u4')).toBe(false);
   });

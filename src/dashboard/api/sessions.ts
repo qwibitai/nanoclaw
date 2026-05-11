@@ -42,7 +42,7 @@ export const sessionsHandler: AuthHandler = async (req, _params, ctx) => {
   const url = new URL(req.url);
   const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '100', 10) || 100, 500);
 
-  const conditions: string[] = ['status = \'active\''];
+  const conditions: string[] = ["status = 'active'"];
   const values: unknown[] = [];
 
   if (!ctx.scopes.no_filter) {
@@ -75,7 +75,9 @@ export const sessionsHandler: AuthHandler = async (req, _params, ctx) => {
   }>;
 
   try {
-    rows = getDb().prepare(sql).all(...(values as Parameters<ReturnType<ReturnType<typeof getDb>['prepare']>['all']>)) as typeof rows;
+    rows = getDb()
+      .prepare(sql)
+      .all(...(values as Parameters<ReturnType<ReturnType<typeof getDb>['prepare']>['all']>)) as typeof rows;
   } catch (err) {
     log.warn('sessionsHandler: DB error', { err });
     return new Response(JSON.stringify({ error: 'internal_error' }), {
