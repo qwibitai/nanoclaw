@@ -18,6 +18,7 @@ import path from 'path';
 
 import { log } from '../src/log.js';
 import { emitStatus } from './status.js';
+import { getPlatform, commandExists, hasSystemd } from './platform.js';
 
 const LOCAL_BIN = path.join(os.homedir(), '.local', 'bin');
 
@@ -433,6 +434,37 @@ export async function run(args: string[]): Promise<void> {
 
   writeEnvOnecliUrl(url);
   log.info('Wrote ONECLI_URL to .env', { url });
+
+  if (getPlatform() === 'linux' && commandExists('podman') && hasSystemd()) {
+    const unitDir = path.join(os.homedir(), '.config', 'systemd', 'user');
+    const unitPath = path.join(unitDir, 'onecli-compose.service');
+    const workDir = path.join(os.homedir(), '.onecli');
+    const unitContent = [
+      '[Unit]',
+      'Description=OneCLI gateway (docker compose)',
+      'After=podman.socket',
+      'Requires=podman.socket',
+      '',
+      '[Service]',
+      'Type=oneshot',
+      'RemainAfterExit=yes',
+      `WorkingDirectory=${workDir}`,
+      'ExecStart=docker compose up -d --wait',
+      'ExecStop=docker compose stop',
+      '',
+      '[Install]',
+      'WantedBy=default.target',
+    ].join('\n') + '\n';
+    fs.mkdirSync(unitDir, { recursive: true });
+    fs.writeFileSync(unitPath, unitContent);
+    try {
+      execSync('systemctl --user daemon-reload', { stdio: 'ignore' });
+      execSync('systemctl --user enable onecli-compose.service', { stdio: 'ignore' });
+      log.info('Enabled onecli-compose.service for podman');
+    } catch (err) {
+      log.warn('Could not enable onecli-compose.service', { err });
+    }
+  }
 
   const healthy = await pollHealth(url, 15000);
 

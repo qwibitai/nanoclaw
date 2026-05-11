@@ -38,10 +38,23 @@ else
       brew install node@22
       ;;
     Linux)
-      echo "STEP: nodesource-setup"
-      curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-      echo "STEP: apt-install-nodejs"
-      sudo apt-get install -y nodejs
+      if command -v apt-get >/dev/null 2>&1; then
+        echo "STEP: nodesource-setup"
+        curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+        echo "STEP: apt-install-nodejs"
+        sudo apt-get install -y nodejs
+      elif command -v dnf >/dev/null 2>&1; then
+        echo "STEP: dnf-install-nodejs"
+        sudo dnf install -y nodejs
+      elif command -v yum >/dev/null 2>&1; then
+        echo "STEP: yum-install-nodejs"
+        sudo yum install -y nodejs
+      else
+        echo "STATUS: failed"
+        echo "ERROR: No supported package manager found (apt-get, dnf, yum)."
+        echo "=== END ==="
+        exit 1
+      fi
       ;;
     *)
       echo "STATUS: failed"
