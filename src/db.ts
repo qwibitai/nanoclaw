@@ -650,6 +650,22 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   if (!isValidGroupFolder(group.folder)) {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
+  // Invariant: non-main groups MUST require an explicit trigger to fire the agent.
+  // Otherwise every inbound non-bot message auto-fires the agent. Mirrors the
+  // Relay-side post-cleanup-5 fix.
+  let effectiveRequiresTrigger: 0 | 1;
+  if (group.isMain) {
+    effectiveRequiresTrigger =
+      group.requiresTrigger === undefined ? 0 : group.requiresTrigger ? 1 : 0;
+  } else {
+    effectiveRequiresTrigger = 1;
+    if (group.requiresTrigger === false) {
+      logger.warn(
+        { jid, folder: group.folder },
+        'setRegisteredGroup: coerced requires_trigger=false to true for non-main group',
+      );
+    }
+  }
   db.prepare(
     `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, allow_bots, smart_trigger)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -660,7 +676,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.trigger,
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
-    group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
+    effectiveRequiresTrigger,
     group.isMain ? 1 : 0,
     group.allowBots ? 1 : 0,
     group.smartTrigger ? 1 : 0,
