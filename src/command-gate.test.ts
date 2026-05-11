@@ -102,3 +102,32 @@ describe('gateCommand (unchanged regression tests)', () => {
     expect(result).toEqual({ action: 'pass' });
   });
 });
+
+describe('stripLeadingMentions integration via preFanoutGate', () => {
+  it('test_preFanoutGate_intercept_with_discord_mention_prefix', () => {
+    // Discord formal mention prefix on /dashboard-token must still intercept.
+    const owner = 'discord:owner-1';
+    insertUser(owner);
+    insertRole(owner, 'owner', null);
+    const result = preFanoutGate(JSON.stringify({ text: '<@1496115500214911006> /dashboard-token' }), owner);
+    expect(result).toEqual({ action: 'intercept', handlerName: 'dashboard_token_issue', command: '/dashboard-token', args: '' });
+  });
+
+  it('test_preFanoutGate_intercept_with_slack_mention_prefix_with_alias', () => {
+    // Slack mention with display-name alias `<@U_ID|name>` must still intercept.
+    const owner = 'slack-illysium:owner-2';
+    insertUser(owner);
+    insertRole(owner, 'owner', null);
+    const result = preFanoutGate(JSON.stringify({ text: '<@U08H7SULNER|illie> /dashboard-token' }), owner);
+    expect(result).toEqual({ action: 'intercept', handlerName: 'dashboard_token_issue', command: '/dashboard-token', args: '' });
+  });
+
+  it('test_preFanoutGate_intercept_with_bare_at_mention', () => {
+    // Bare @bot prefix (some clients send plain text rather than formal tags).
+    const owner = 'discord:owner-3';
+    insertUser(owner);
+    insertRole(owner, 'owner', null);
+    const result = preFanoutGate(JSON.stringify({ text: '@axie /dashboard-token' }), owner);
+    expect(result).toEqual({ action: 'intercept', handlerName: 'dashboard_token_issue', command: '/dashboard-token', args: '' });
+  });
+});

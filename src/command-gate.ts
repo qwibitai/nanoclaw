@@ -48,6 +48,27 @@ const FILTERED_COMMANDS = new Set(['/help', '/login', '/logout', '/doctor', '/co
 const ADMIN_COMMANDS = new Set(['/clear', '/compact', '/context', '/cost', '/files']);
 
 /**
+ * Strip leading mention tokens from message text. Discord/Slack inboxes deliver
+ * messages like `<@U123> /dashboard-token` or `@bot /clear` — the slash command
+ * is the second token, not the first. Without stripping, both gates' first-char
+ * check would mis-classify these as plain prose and route them to the agent.
+ *
+ * Strips both formal (`<@123>`, `<@!123>`, `<@U08H7SULNER|name>`) and bare
+ * (`@bot ` followed by whitespace) mention prefixes. Iterates so that multi-
+ * mention prefixes (`@bot1 @bot2 /command`) all get stripped.
+ */
+function stripLeadingMentions(text: string): string {
+  let prev: string;
+  let cur = text;
+  do {
+    prev = cur;
+    cur = cur.replace(/^\s*<@[!&]?[\w-]+(\|[^>]*)?>\s*/, ''); // Discord/Slack formal mention
+    cur = cur.replace(/^\s*@[\w-]+\s+/, ''); // bare @name followed by whitespace
+  } while (prev !== cur);
+  return cur;
+}
+
+/**
  * Pre-fan-out gate: runs ONCE per inbound message, before the agent fan-out loop.
  * Handles INTERCEPT_COMMANDS (e.g. /dashboard-token) and FILTERED_COMMANDS.
  * ADMIN_COMMANDS are NOT intercepted here — they flow through to gateCommand at fan-out.
@@ -60,6 +81,8 @@ export function preFanoutGate(content: string, userId: string): GateResult {
   } catch {
     text = content.trim();
   }
+
+  text = stripLeadingMentions(text);
 
   if (!text.startsWith('/')) return { action: 'pass' };
 
@@ -94,6 +117,8 @@ export function gateCommand(content: string, userId: string | null, agentGroupId
   } catch {
     text = content.trim();
   }
+
+  text = stripLeadingMentions(text);
 
   if (!text.startsWith('/')) return { action: 'pass' };
 
