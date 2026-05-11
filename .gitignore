@@ -38,3 +38,10 @@ groups/global/*
 agents-sdk-docs
 __pycache__/
 *.bak.*
+
+# Runtime-regenerated cross-channel context (auto-rewritten by agent every invocation)
+shared/cross-channel/*.md
+
+# Never commit env backups
+.env.bak*
+*.env.bak*
