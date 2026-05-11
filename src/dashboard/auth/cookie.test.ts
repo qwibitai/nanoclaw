@@ -21,7 +21,21 @@ describe('cookie sign/verify', () => {
     const setCookie = buildSetCookie(payload, serverKey);
     expect(setCookie).toContain('spawn_board=');
     expect(setCookie).toContain('HttpOnly');
-    expect(setCookie).toContain('Secure');
+    expect(setCookie).toContain('Secure'); // default secure: true
+    expect(setCookie).toContain('SameSite=Strict');
+    expect(setCookie).toContain('Max-Age=43200');
+    expect(setCookie).toContain('Path=/dashboard');
+  });
+
+  it('test_buildSetCookie_omits_secure_when_explicit_false', () => {
+    // Plain HTTP from non-loopback hosts: cookie must NOT include Secure or
+    // browsers refuse to set it (post-merge ergonomics fix for LAN/WAN access).
+    const serverKey = crypto.randomBytes(32);
+    const payload = { user_id: 'u1', expires_at: futureIso() };
+    const setCookie = buildSetCookie(payload, serverKey, { secure: false });
+    expect(setCookie).toContain('spawn_board=');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).not.toContain('Secure');
     expect(setCookie).toContain('SameSite=Strict');
     expect(setCookie).toContain('Max-Age=43200');
     expect(setCookie).toContain('Path=/dashboard');

@@ -22,13 +22,21 @@ export async function dashboardTokenIssue(ctx: InterceptContext): Promise<void> 
   // expiry and client-side cookie deletion must end at the same wall-clock time.
   issueDashboardToken(ctx.userId, tokenHmac, 12);
 
-  const host = process.env.NANOCLAW_DASHBOARD_HOST ?? 'localhost';
-  const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '::1';
-  const protocol = isLoopback ? 'http' : 'https';
-  // WEBHOOK_PORT env governs server port (webhook-server.ts default 3000); reflect that
-  // in the URL we hand the user (post-build QA fix MF-6).
-  const port = process.env.WEBHOOK_PORT ?? '3000';
-  const dashboardUrl = `${protocol}://${host}:${port}/dashboard/`;
+  // Build the URL to send to the user. Three env vars give precise control:
+  //   NANOCLAW_DASHBOARD_URL      — full URL (e.g. https://dash.example.com); takes precedence
+  //   NANOCLAW_DASHBOARD_HOST     — hostname (default 'localhost')
+  //   NANOCLAW_DASHBOARD_PROTOCOL — 'http' | 'https' (default: derived from host — http for loopback, http for direct LAN/WAN access without TLS, https only when explicitly set)
+  //   WEBHOOK_PORT                — port (default 3000)
+  // Default protocol is http because the host bind is plain HTTP. Set NANOCLAW_DASHBOARD_PROTOCOL=https
+  // when terminating TLS upstream (Cloudflare Tunnel, Caddy, nginx, Tailscale Funnel, etc.).
+  const dashboardUrl = (() => {
+    const fullUrl = process.env.NANOCLAW_DASHBOARD_URL;
+    if (fullUrl) return fullUrl.replace(/\/+$/, '') + '/dashboard/';
+    const host = process.env.NANOCLAW_DASHBOARD_HOST ?? 'localhost';
+    const port = process.env.WEBHOOK_PORT ?? '3000';
+    const protocol = process.env.NANOCLAW_DASHBOARD_PROTOCOL ?? 'http';
+    return `${protocol}://${host}:${port}/dashboard/`;
+  })();
 
   const adapter = getDeliveryAdapter();
   if (adapter) {

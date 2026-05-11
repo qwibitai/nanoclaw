@@ -76,7 +76,22 @@ export const exchangeHandler: Handler = async (req) => {
     });
   }
 
-  const cookie = buildSetCookie({ user_id: record.user_id, expires_at: record.expires_at }, serverKey);
+  // Detect whether the request was made over HTTPS or to a loopback host.
+  // Browsers refuse Secure cookies over plain HTTP for non-loopback hosts; if
+  // the dashboard is reached at http://<lan-ip>:3000, we must omit Secure or
+  // the cookie silently doesn't get set and the user loops back to AuthGate.
+  // Reverse proxies set X-Forwarded-Proto when terminating TLS in front of us.
+  const xfp = req.headers.get('x-forwarded-proto');
+  const hostHeader = req.headers.get('host') ?? '';
+  const hostname = hostHeader.split(':')[0] ?? '';
+  const isLoopbackHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  const requestIsHttps = xfp === 'https' || isLoopbackHost;
+
+  const cookie = buildSetCookie(
+    { user_id: record.user_id, expires_at: record.expires_at },
+    serverKey,
+    { secure: requestIsHttps },
+  );
 
   return new Response(JSON.stringify({ user_id: record.user_id, expires_at: record.expires_at }), {
     status: 200,
