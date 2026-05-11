@@ -57,6 +57,16 @@ export interface QueryInput {
   systemContext?: {
     instructions?: string;
   };
+
+  /**
+   * Per-query reasoning-effort override. When set, takes precedence over the
+   * provider's constructor-time `effort`. The poll-loop sets this when a
+   * batch contains a heavy-lift command (`/council`, `/build`, `/think`) so
+   * that one container can serve both light and heavy turns without
+   * burning `max` effort on every reply. If omitted, the provider's default
+   * effort applies.
+   */
+  effortOverride?: string;
 }
 
 export interface McpServerConfig {

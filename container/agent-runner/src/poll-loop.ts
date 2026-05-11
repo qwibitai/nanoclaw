@@ -18,6 +18,18 @@ import type { AgentProvider, AgentQuery, ProviderEvent } from './providers/types
 const POLL_INTERVAL_MS = 1000;
 const ACTIVE_POLL_INTERVAL_MS = 500;
 
+/**
+ * Slash commands that warrant the highest reasoning-effort tier for the
+ * turn they appear in. Single static container effort is wasteful when most
+ * turns are quick chat replies but a few — multi-agent council synthesis,
+ * deliberate reasoning runs, multi-file build orchestration — genuinely
+ * benefit from `max`. If any message in the current batch starts with one
+ * of these, the poll-loop hands `effortOverride: 'max'` to the provider so
+ * the SDK reasoning budget scales for that turn only. All other turns fall
+ * back to the group's configured default.
+ */
+const HEAVY_EFFORT_COMMANDS = new Set(['/council', '/build', '/think']);
+
 function log(msg: string): void {
   console.error(`[poll-loop] ${msg}`);
 }
@@ -165,13 +177,18 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // provider natively handles slash commands), others get XML.
     const prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
 
-    log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
+    const effortOverride = detectEffortOverride(keep);
+    log(
+      `Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}` +
+        (effortOverride ? ` (effort override: ${effortOverride})` : ''),
+    );
 
     const query = config.provider.query({
       prompt,
       continuation,
       cwd: config.cwd,
       systemContext: config.systemContext,
+      effortOverride,
     });
 
     // Process the query while concurrently polling for new messages
@@ -251,6 +268,27 @@ function formatMessagesWithCommands(messages: MessageInRow[], nativeSlashCommand
   }
 
   return parts.join('\n\n');
+}
+
+/**
+ * Walk the kept-batch messages, classify each chat slash-command via the
+ * shared formatter, and if any command is in HEAVY_EFFORT_COMMANDS, return
+ * `'max'` as the override. Returns `undefined` when no heavy command is
+ * present, so the provider falls through to its constructor-time effort.
+ *
+ * Conservative on purpose: any single heavy command in the batch lifts the
+ * whole turn, since the kept messages are already merged into one prompt
+ * and the SDK applies one effort per query.
+ */
+export function detectEffortOverride(messages: MessageInRow[]): string | undefined {
+  for (const msg of messages) {
+    if (msg.kind !== 'chat' && msg.kind !== 'chat-sdk') continue;
+    const info = categorizeMessage(msg);
+    if (info.category === 'passthrough' && HEAVY_EFFORT_COMMANDS.has(info.command)) {
+      return 'max';
+    }
+  }
+  return undefined;
 }
 
 interface QueryResult {
