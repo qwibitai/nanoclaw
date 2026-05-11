@@ -110,7 +110,12 @@ describe('stripLeadingMentions integration via preFanoutGate', () => {
     insertUser(owner);
     insertRole(owner, 'owner', null);
     const result = preFanoutGate(JSON.stringify({ text: '<@1496115500214911006> /dashboard-token' }), owner);
-    expect(result).toEqual({ action: 'intercept', handlerName: 'dashboard_token_issue', command: '/dashboard-token', args: '' });
+    expect(result).toEqual({
+      action: 'intercept',
+      handlerName: 'dashboard_token_issue',
+      command: '/dashboard-token',
+      args: '',
+    });
   });
 
   it('test_preFanoutGate_intercept_with_slack_mention_prefix_with_alias', () => {
@@ -119,7 +124,12 @@ describe('stripLeadingMentions integration via preFanoutGate', () => {
     insertUser(owner);
     insertRole(owner, 'owner', null);
     const result = preFanoutGate(JSON.stringify({ text: '<@U08H7SULNER|illie> /dashboard-token' }), owner);
-    expect(result).toEqual({ action: 'intercept', handlerName: 'dashboard_token_issue', command: '/dashboard-token', args: '' });
+    expect(result).toEqual({
+      action: 'intercept',
+      handlerName: 'dashboard_token_issue',
+      command: '/dashboard-token',
+      args: '',
+    });
   });
 
   it('test_preFanoutGate_intercept_with_bare_at_mention', () => {
@@ -128,6 +138,50 @@ describe('stripLeadingMentions integration via preFanoutGate', () => {
     insertUser(owner);
     insertRole(owner, 'owner', null);
     const result = preFanoutGate(JSON.stringify({ text: '@axie /dashboard-token' }), owner);
-    expect(result).toEqual({ action: 'intercept', handlerName: 'dashboard_token_issue', command: '/dashboard-token', args: '' });
+    expect(result).toEqual({
+      action: 'intercept',
+      handlerName: 'dashboard_token_issue',
+      command: '/dashboard-token',
+      args: '',
+    });
+  });
+});
+
+describe('threaded inbound — extractUserMessage', () => {
+  it('test_preFanoutGate_intercept_when_wrapped_in_thread_context', () => {
+    // chat-sdk wraps Slack DM thread replies with "[Thread context]\n...\n[Latest message]\n<user>".
+    // preFanoutGate must classify the user's last message, not the prior assistant context.
+    const owner = 'slack-illysium:U08H7SULNER';
+    insertUser(owner);
+    insertRole(owner, 'owner', null);
+    const wrapped = `[Thread context]\nassistant: prior message about something\n[Latest message]\n@U0AKALV5HRP /dashboard-token`;
+    const result = preFanoutGate(JSON.stringify({ text: wrapped }), owner);
+    expect(result).toEqual({
+      action: 'intercept',
+      handlerName: 'dashboard_token_issue',
+      command: '/dashboard-token',
+      args: '',
+    });
+  });
+
+  it('test_preFanoutGate_intercept_thread_context_no_mention', () => {
+    // Same as above but the user typed `/dashboard-token` directly without @ prefix.
+    const owner = 'discord:plain-thread';
+    insertUser(owner);
+    insertRole(owner, 'owner', null);
+    const wrapped = `[Thread context]\nassistant: hello\n[Latest message]\n/dashboard-token`;
+    const result = preFanoutGate(JSON.stringify({ text: wrapped }), owner);
+    expect(result.action).toBe('intercept');
+  });
+
+  it('test_preFanoutGate_pass_when_user_text_in_thread_is_not_command', () => {
+    // The wrapped portion is not a command — should still pass.
+    const result = preFanoutGate(
+      JSON.stringify({
+        text: `[Thread context]\nassistant: /dashboard-token (false hit in context)\n[Latest message]\nthanks`,
+      }),
+      'any-user',
+    );
+    expect(result).toEqual({ action: 'pass' });
   });
 });

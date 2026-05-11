@@ -48,6 +48,21 @@ const FILTERED_COMMANDS = new Set(['/help', '/login', '/logout', '/doctor', '/co
 const ADMIN_COMMANDS = new Set(['/clear', '/compact', '/context', '/cost', '/files']);
 
 /**
+ * For threaded chat-sdk inbounds, the message text the agent sees is wrapped
+ * with prior thread context:
+ *   `[Thread context]\nassistant: <prev>\n[Latest message]\n<user text>`
+ * The gate functions classify the USER's text, not the wrapped form, so peel
+ * off everything before the final `[Latest message]\n` marker. Plain (non-
+ * threaded) inbounds have no marker and pass through unchanged.
+ */
+function extractUserMessage(text: string): string {
+  const marker = '[Latest message]\n';
+  const idx = text.lastIndexOf(marker);
+  if (idx === -1) return text;
+  return text.substring(idx + marker.length).trim();
+}
+
+/**
  * Strip leading mention tokens from message text. Discord/Slack inboxes deliver
  * messages like `<@U123> /dashboard-token` or `@bot /clear` — the slash command
  * is the second token, not the first. Without stripping, both gates' first-char
@@ -82,6 +97,7 @@ export function preFanoutGate(content: string, userId: string): GateResult {
     text = content.trim();
   }
 
+  text = extractUserMessage(text);
   text = stripLeadingMentions(text);
 
   if (!text.startsWith('/')) return { action: 'pass' };
@@ -118,6 +134,7 @@ export function gateCommand(content: string, userId: string | null, agentGroupId
     text = content.trim();
   }
 
+  text = extractUserMessage(text);
   text = stripLeadingMentions(text);
 
   if (!text.startsWith('/')) return { action: 'pass' };
