@@ -30,9 +30,13 @@ export interface TranscriptEntry {
 export interface TaskDetail extends TaskSummary {
   started_at?: string;
   completed_at?: string;
+  failed_at?: string;
   // Backend SELECT * on detail returns child_session_id; SPA uses it to filter
   // chokidar-emitted SSE inbound_message events (post-build QA fix SF-8).
   child_session_id?: string | null;
+  // Set by the child via spawn_complete / spawn_failed. Empty for tasks the
+  // watchdog reaped before the child got a chance to emit a terminal action.
+  result_summary?: string | null;
 }
 
 export interface SessionSummary {
@@ -134,5 +138,18 @@ export async function postSteer(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }
+  );
+}
+
+export interface RetryResponse {
+  status: 'admitted';
+  original_task_id: string;
+  idempotency_key: string;
+}
+
+export async function retryTask(taskId: string): Promise<RetryResponse> {
+  return apiFetch<RetryResponse>(
+    `/dashboard/api/tasks/${encodeURIComponent(taskId)}/retry`,
+    { method: 'POST' }
   );
 }

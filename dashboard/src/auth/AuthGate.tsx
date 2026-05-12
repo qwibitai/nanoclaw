@@ -33,13 +33,13 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
 
   return (
     <div role="main" style={{ maxWidth: 400, margin: '80px auto', padding: '0 16px' }}>
-      <h1 style={{ fontSize: 20, marginBottom: 8 }}>Spawn Board</h1>
-      <p style={{ marginBottom: 16, color: '#666' }}>
+      <h1 style={{ fontSize: 22, marginBottom: 8, marginTop: 0 }}>Spawn Board</h1>
+      <p style={{ marginBottom: 20, color: 'var(--text-secondary)' }}>
         Paste your one-time access token to continue.
       </p>
       <form onSubmit={(e) => void handleSubmit(e)}>
         <div style={{ marginBottom: 12 }}>
-          <label htmlFor="token-input" style={{ display: 'block', marginBottom: 4 }}>
+          <label htmlFor="token-input" style={{ display: 'block', marginBottom: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
             Token
           </label>
           <input
@@ -48,20 +48,20 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
             value={token}
             onChange={(e) => setToken(e.target.value)}
             placeholder="Paste token here"
-            style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+            style={{ width: '100%', padding: '10px', boxSizing: 'border-box' }}
             autoComplete="off"
             autoFocus
           />
         </div>
         {error && (
-          <p role="alert" style={{ color: '#c00', marginBottom: 12 }}>
+          <p role="alert" style={{ color: 'var(--status-failed)', marginBottom: 12, fontSize: 13 }}>
             {error}
           </p>
         )}
         <button
           type="submit"
           disabled={loading || !token.trim()}
-          style={{ padding: '8px 16px' }}
+          style={{ padding: '8px 18px', fontSize: 14 }}
         >
           {loading ? 'Verifying…' : 'Submit'}
         </button>

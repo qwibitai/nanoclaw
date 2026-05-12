@@ -1,0 +1,214 @@
+/*
+ * Spawn Board — global theme.
+ *
+ * Default to dark mode (color-scheme: dark sets browser-rendered form
+ * controls, scrollbars, and autofill backgrounds to match). Light mode is
+ * available behind `prefers-color-scheme: light` for users who explicitly
+ * opt out at the OS level — overriding requires no JS toggle, no
+ * localStorage; the OS-level preference is the single source of truth.
+ *
+ * All theme colors live in custom properties so per-component inline styles
+ * can reference them via `var(--name)`. This keeps the component code
+ * shape-preserving (still inline-styled) while making the theme swappable.
+ */
+:root {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg-page: #0e1116;
+  --bg-card: #161b22;
+  --bg-lane: #11161d;
+  --bg-input: #0d1117;
+  --bg-message-agent: #1c2128;
+  --bg-message-dashboard: #1c2434;
+  --bg-message-system: #2a2419;
+
+  /* text */
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+
+  /* borders + accents */
+  --border: #30363d;
+  --border-strong: #484f58;
+  --link: #58a6ff;
+  --link-hover: #79b8ff;
+
+  /* status semantics (lane colors — dark-mode tuned) */
+  --status-pending: #d29922;
+  --status-running: #58a6ff;
+  --status-completed: #56d364;
+  --status-failed: #f85149;
+  --status-cancelled: #8b949e;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    --bg-page: #ffffff;
+    --bg-card: #ffffff;
+    --bg-lane: #fafafa;
+    --bg-input: #ffffff;
+    --bg-message-agent: #f9f9f9;
+    --bg-message-dashboard: #f0f4ff;
+    --bg-message-system: #fff8e1;
+
+    --text-primary: #1f2328;
+    --text-secondary: #57606a;
+    --text-muted: #8c959f;
+
+    --border: #d0d7de;
+    --border-strong: #afb8c1;
+    --link: #0969da;
+    --link-hover: #0860ca;
+
+    --status-pending: #b08800;
+    --status-running: #4a90e2;
+    --status-completed: #417505;
+    --status-failed: #d0021b;
+    --status-cancelled: #9b9b9b;
+  }
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue',
+    Helvetica, Arial, system-ui, 'Noto Sans', sans-serif,
+    'Apple Color Emoji', 'Segoe UI Emoji';
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: var(--link);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+
+input, textarea, button, select {
+  font-family: inherit;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--link);
+}
+button:not(:disabled) {
+  cursor: pointer;
+  background: var(--bg-card);
+}
+button:not(:disabled):hover {
+  border-color: var(--border-strong);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/*
+ * Markdown rendered into cards / task detail / thread bubbles. We mark the
+ * container with `.md` and constrain block defaults so headings don't blow
+ * out card heights and code stays readable on dark.
+ */
+.md {
+  line-height: 1.45;
+  word-wrap: break-word;
+}
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+  line-height: 1.25;
+}
+.md h1 { font-size: 1.25em; }
+.md h2 { font-size: 1.15em; }
+.md h3 { font-size: 1.05em; }
+.md h4, .md h5, .md h6 { font-size: 1em; }
+.md p { margin: 0.4em 0; }
+.md ul, .md ol { margin: 0.4em 0; padding-left: 1.5em; }
+.md li { margin: 0.15em 0; }
+.md code {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.05em 0.35em;
+  font-size: 0.9em;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
+}
+.md pre {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 0.9em;
+}
+.md pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+.md blockquote {
+  margin: 0.4em 0;
+  padding: 0 0.8em;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+.md a { color: var(--link); }
+.md a:hover { color: var(--link-hover); text-decoration: underline; }
+.md table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+}
+.md th, .md td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+}
+.md th {
+  background: var(--bg-lane);
+}
+
+/*
+ * Card-preview markdown: same shape but tighter and capped so a long
+ * heading or list doesn't blow out a kanban card.
+ */
+.md-preview {
+  font-size: inherit;
+}
+.md-preview h1, .md-preview h2, .md-preview h3,
+.md-preview h4, .md-preview h5, .md-preview h6 {
+  font-size: 1em;
+  margin: 0.1em 0;
+}
+.md-preview p { margin: 0.1em 0; }
+.md-preview ul, .md-preview ol { padding-left: 1.2em; margin: 0.1em 0; }
+.md-preview pre,
+.md-preview blockquote { display: none; }
+
+/*
+ * Status pill for the failure-reason badge etc. Background + text color
+ * are set inline by the consumer (so they can mirror lane semantics).
+ */
+.pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+}

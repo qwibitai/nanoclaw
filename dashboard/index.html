@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Spawn Board</title>
+    <!--
+      color-scheme on the root element + the matching background color avoids
+      a white flash before the bundled stylesheet (and React) mount. Browsers
+      use the meta to pick scrollbar / form-control palette; the inline body
+      bg matches the dark token in styles.css so first paint is dark.
+    -->
+    <meta name="color-scheme" content="dark light" />
+    <style>
+      html, body { background: #0e1116; color: #e6edf3; margin: 0; }
+      @media (prefers-color-scheme: light) {
+        html, body { background: #ffffff; color: #1f2328; }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

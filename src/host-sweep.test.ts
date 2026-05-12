@@ -35,6 +35,7 @@ const mockPendingTerminalDispatchOutboundSeenAt = vi.fn();
 const mockWriteSessionMessage = vi.fn();
 const mockWakeContainer = vi.fn();
 const mockIsContainerRunning = vi.fn();
+const mockHasContainerEverRun = vi.fn();
 const mockGetSession = vi.fn();
 const mockRunReconcilerSweep = vi.fn();
 
@@ -70,6 +71,7 @@ vi.mock('./container-runner.js', async (importOriginal) => {
   return {
     ...real,
     isContainerRunning: (...args: unknown[]) => mockIsContainerRunning(...args),
+    hasContainerEverRun: (...args: unknown[]) => mockHasContainerEverRun(...args),
     wakeContainer: (...args: unknown[]) => mockWakeContainer(...args),
   };
 });
@@ -534,6 +536,9 @@ describe('sweepTaskWatchdog (C3)', () => {
     vi.clearAllMocks();
     mockGetSession.mockReturnValue(fakeParentSession());
     mockIsContainerRunning.mockReturnValue(true);
+    // Default: container has been observed running. Individual tests that
+    // need the "never started yet" case override per-call.
+    mockHasContainerEverRun.mockReturnValue(true);
     mockWakeContainer.mockResolvedValue(true);
     mockWriteSessionMessage.mockResolvedValue(undefined);
     mockGetCapabilityConfig.mockReturnValue(null); // use defaults
@@ -561,11 +566,24 @@ describe('sweepTaskWatchdog (C3)', () => {
       'failed',
       expect.objectContaining({ fail_reason: 'no_progress_timeout' }),
     );
+    // Watchdog now writes kind='chat' so the orchestrator surfaces the
+    // failure to the user via a normal turn input (the prior `kind='system'`
+    // envelope had no consumer and sat silently in the inbound).
     expect(mockWriteSessionMessage).toHaveBeenCalledWith(
       task.parent_agent_group_id,
       task.parent_session_id,
-      expect.objectContaining({ kind: 'system' }),
+      expect.objectContaining({ kind: 'chat' }),
     );
+    const writeCallArgs = mockWriteSessionMessage.mock.calls[0]?.[2];
+    const parsed = writeCallArgs ? JSON.parse(writeCallArgs.content) : {};
+    expect(parsed.text).toContain('Task failed (watchdog)');
+    expect(parsed.text).toContain('no_progress_timeout');
+    expect(parsed._task_update).toMatchObject({
+      task_id: task.task_id,
+      status: 'failed',
+      fail_reason: 'no_progress_timeout',
+      source: 'watchdog',
+    });
     expect(mockWakeContainer).toHaveBeenCalled();
   });
 
@@ -717,6 +735,10 @@ describe('sweepTaskWatchdog (C3)', () => {
       mockTransitionToTerminal.mockReturnValue(true);
       if (childContainerStopped) {
         mockIsContainerRunning.mockReturnValue(false);
+        // Sticky bit: container WAS observed running, now stopped — the
+        // case `fail-container-exit` is designed for. Without this the
+        // bug-fix logic treats the child as "never started" and returns ok.
+        mockHasContainerEverRun.mockReturnValue(true);
       }
 
       vi.useFakeTimers();
@@ -731,6 +753,41 @@ describe('sweepTaskWatchdog (C3)', () => {
       );
     },
   );
+
+  it('test_watchdog_does_not_reap_container_exit_before_container_ever_started', async () => {
+    // Regression: under concurrency cap the 4th-of-4 spawned child created
+    // its session row immediately but waited 78s for an actual container.
+    // The watchdog ran during the gap, saw `isContainerRunning(child) === false`,
+    // and reaped as `fail-container-exit` — terminally failing a task before
+    // it had a chance to start. Observed against the spawn-board build for
+    // task spawn-80a5ba9b2f8b532b at 01:53:10 UTC on 2026-05-11; the
+    // container then actually spawned, the child completed the work, and
+    // its `spawn_complete` was discarded because the task was already
+    // terminal.
+    //
+    // Correct behavior: when the container has never been observed running,
+    // `childContainerStatus` is null, not 'stopped', and the watchdog must
+    // not reap as container_exit. (Other reapers — no_progress_timeout,
+    // spawn_deadline — still cover legitimate stuck-spawn failure modes.)
+    const task = makeTask({
+      child_session_id: 'child-sess-queued',
+      last_progress_at: new Date(NOW - 30 * 1000).toISOString(), // 30s old, well within timeout
+    });
+    mockGetActiveTasks.mockReturnValue([task]);
+    mockIsContainerRunning.mockReturnValue(false);
+    mockHasContainerEverRun.mockReturnValue(false); // critical: never started
+
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    await _sweepTaskWatchdogForTesting();
+
+    expect(mockTransitionToTerminal).not.toHaveBeenCalledWith(
+      task.task_id,
+      'failed',
+      expect.objectContaining({ fail_reason: 'container_exit' }),
+    );
+  });
 });
 
 // ── D7: pruneSteerIdempotency ─────────────────────────────────────────────────

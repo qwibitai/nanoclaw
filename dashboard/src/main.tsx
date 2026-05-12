@@ -7,6 +7,7 @@ import { SessionList } from './views/SessionList.js';
 import { authMe as fetchAuthMe } from './lib/api.js';
 import { startSSE } from './lib/sse.ts';
 import type { AuthMe } from './lib/api.js';
+import './styles.css';
 
 function parseHash(): { route: string; taskId?: string } {
   const hash = location.hash.slice(1) || '/board';
@@ -54,20 +55,38 @@ function App() {
   }, []);
 
   if (authState === 'loading') {
-    return <div style={{ padding: 32, color: '#666' }}>Loading…</div>;
+    return <div style={{ padding: 32, color: 'var(--text-secondary)' }}>Loading…</div>;
   }
 
   if (authState === 'unauthenticated') {
     return <AuthGate onAuthenticated={handleAuthenticated} />;
   }
 
+  // Mobile-first: the app's root is a natural document. Body scrolls; no
+  // `height: 100vh` lock, no nested `overflow: hidden` chain (those clipped
+  // content past the fold on phone viewports — only the inner divs could
+  // scroll, and only the desktop split-pane layout exposed those scroll
+  // boundaries with visible chrome). Nav uses `position: sticky` so it
+  // stays accessible while the page scrolls. Views opt into desktop-style
+  // fixed-pane layouts themselves via media queries.
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <nav style={{ padding: '8px 16px', borderBottom: '1px solid #e0e0e0', display: 'flex', gap: 16 }}>
-        <a href="#/board" style={{ fontSize: 14, textDecoration: hashState.route === 'board' ? 'underline' : 'none' }}>Board</a>
-        <a href="#/sessions" style={{ fontSize: 14, textDecoration: hashState.route === 'sessions' ? 'underline' : 'none' }}>Sessions</a>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <nav
+        style={{
+          padding: '10px 16px',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          gap: 16,
+          background: 'var(--bg-card)',
+          position: 'sticky',
+          top: 0,
+          zIndex: 10,
+        }}
+      >
+        <a href="#/board" style={{ fontSize: 14, fontWeight: hashState.route === 'board' ? 600 : 400 }}>Board</a>
+        <a href="#/sessions" style={{ fontSize: 14, fontWeight: hashState.route === 'sessions' ? 600 : 400 }}>Sessions</a>
       </nav>
-      <div style={{ flex: 1, overflow: 'hidden' }}>
+      <div style={{ flex: 1 }}>
         {hashState.route === 'board' && me && <KanbanBoard authMe={me} />}
         {hashState.route === 'task' && hashState.taskId && me && (
           <TaskDetail authMe={me} taskId={hashState.taskId} />

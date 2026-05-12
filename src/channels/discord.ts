@@ -187,6 +187,22 @@ export interface DiscordRestClient {
 }
 
 /**
+ * Strip the `discord:` scheme prefix and leading `guildId:` segment from a
+ * NanoClaw platform_id, leaving the raw Discord channel ID that the REST API
+ * expects. Tolerates `discord:guildId:channelId`, `discord:guildId:channelId:threadId`,
+ * and bare `channelId` (test inputs). The host's regular delivery path
+ * normalizes via the chat-sdk bridge — these helpers are called from
+ * orchestrator-dispatch directly and need to do their own normalization or
+ * the REST call hits `/channels/discord:.../messages` and returns 404.
+ */
+export function extractDiscordChannelId(platformId: string): string {
+  if (!platformId.startsWith('discord:')) return platformId;
+  const parts = platformId.split(':');
+  // discord:{guildId}:{channelId}[:{threadId}] — the channel id we want is index 2
+  return parts[2] ?? platformId;
+}
+
+/**
  * Post a message to the top level of a Discord channel.
  * Exported for unit testing.
  */
@@ -195,7 +211,8 @@ export async function discordPostParent(
   platformId: string,
   text: string,
 ): Promise<{ messageId: string }> {
-  const msg = (await rest.post(Routes.channelMessages(platformId), {
+  const channelId = extractDiscordChannelId(platformId);
+  const msg = (await rest.post(Routes.channelMessages(channelId), {
     body: { content: text },
   })) as { id: string };
   return { messageId: msg.id };
@@ -212,7 +229,8 @@ export async function discordCreateThread(
   title: string,
   firstMessage: string,
 ): Promise<{ threadId: string; messageId: string }> {
-  const thread = (await rest.post(Routes.threads(platformId, parentMessageId), {
+  const channelId = extractDiscordChannelId(platformId);
+  const thread = (await rest.post(Routes.threads(channelId, parentMessageId), {
     body: { name: title },
   })) as { id: string };
   const firstMsg = (await rest.post(Routes.channelMessages(thread.id), {

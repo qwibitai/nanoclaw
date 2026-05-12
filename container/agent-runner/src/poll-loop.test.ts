@@ -4,7 +4,7 @@ import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '
 import { getPendingMessages, markCompleted } from './db/messages-in.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
-import { dispatchResultText, isAdmissibleTrigger, selectInTurnFollowUps } from './poll-loop.js';
+import { dispatchResultText, isAdmissibleTrigger, isAupRefusal, selectInTurnFollowUps } from './poll-loop.js';
 import { MockProvider } from './providers/mock.js';
 
 beforeEach(() => {
@@ -768,5 +768,28 @@ describe('processQuery done-flag invariant (codex F4 regression guard)', () => {
       })
       .join('\n');
     expect(codeOnly).not.toContain('done = true');
+  });
+});
+
+describe('isAupRefusal', () => {
+  it('test_isAupRefusal_matches_canonical_anthropic_envelope', () => {
+    const refusal =
+      'API Error: Claude Code is unable to respond to this request, which appears to violate our Usage Policy ' +
+      '(https://www.anthropic.com/legal/aup). Try rephrasing the request or attempting a different approach. ' +
+      'If you are seeing this refusal repeatedly, try running /model claude-sonnet-4-20250514 to switch models.';
+    expect(isAupRefusal(refusal)).toBe(true);
+  });
+
+  it('test_isAupRefusal_does_not_match_legitimate_prose_about_policy', () => {
+    // Discussion of the policy URL alone shouldn't trip the detector — both
+    // anchors are required.
+    expect(isAupRefusal('See https://www.anthropic.com/legal/aup for details on the usage policy.')).toBe(false);
+    expect(isAupRefusal('Claude Code is unable to respond when offline.')).toBe(false);
+  });
+
+  it('test_isAupRefusal_returns_false_for_empty_and_short_text', () => {
+    expect(isAupRefusal('')).toBe(false);
+    expect(isAupRefusal('Done.')).toBe(false);
+    expect(isAupRefusal('API Error: rate limit exceeded.')).toBe(false);
   });
 });

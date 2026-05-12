@@ -15,18 +15,18 @@ export const SessionList: React.FC<SessionListProps> = ({ authMe: _authMe }) => 
   if (sessions.length === 0) {
     return (
       <div style={{ padding: 16 }}>
-        <h2 style={{ fontSize: 16, marginBottom: 12 }}>Sessions</h2>
-        <p style={{ color: '#666' }}>No live sessions</p>
+        <h2 style={{ fontSize: 16, marginBottom: 12, marginTop: 0 }}>Sessions</h2>
+        <p style={{ color: 'var(--text-muted)' }}>No live sessions</p>
       </div>
     );
   }
 
   return (
     <div style={{ padding: 16, overflowX: 'auto' }}>
-      <h2 style={{ fontSize: 16, marginBottom: 12 }}>Sessions</h2>
+      <h2 style={{ fontSize: 16, marginBottom: 12, marginTop: 0 }}>Sessions</h2>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
-          <tr style={{ borderBottom: '2px solid #e0e0e0' }}>
+          <tr style={{ borderBottom: '2px solid var(--border)' }}>
             <Th>Agent Group ID</Th>
             <Th>Session ID</Th>
             <Th>Last Active</Th>
@@ -37,7 +37,7 @@ export const SessionList: React.FC<SessionListProps> = ({ authMe: _authMe }) => 
         </thead>
         <tbody>
           {sessions.map((s) => (
-            <tr key={s.session_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+            <tr key={s.session_id} style={{ borderBottom: '1px solid var(--border)' }}>
               <Td mono>{s.agent_group_id}</Td>
               <Td mono>{s.session_id}</Td>
               <Td>{s.last_active ?? '—'}</Td>
@@ -54,7 +54,7 @@ export const SessionList: React.FC<SessionListProps> = ({ authMe: _authMe }) => 
 
 function Th({ children }: { children: React.ReactNode }) {
   return (
-    <th style={{ textAlign: 'left', padding: '6px 10px', color: '#666', fontWeight: 600 }}>
+    <th style={{ textAlign: 'left', padding: '8px 10px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', fontSize: 11, letterSpacing: '0.04em' }}>
       {children}
     </th>
   );
@@ -65,8 +65,9 @@ function Td({ children, mono }: { children: React.ReactNode; mono?: boolean }) {
     <td
       style={{
         padding: '6px 10px',
-        fontFamily: mono ? 'monospace' : undefined,
+        fontFamily: mono ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : undefined,
         fontSize: mono ? 11 : undefined,
+        color: 'var(--text-primary)',
       }}
     >
       {children}

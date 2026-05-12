@@ -341,10 +341,22 @@ async function _runThreadedPath(task: Task, childAgentGroupId: string): Promise<
     if (!current || current.status !== 'pending') return;
 
     if (current.child_session_id === null) {
+      // chat-sdk encodes thread IDs as `<scheme>:<channel>:<thread>` (Slack)
+      // or `<scheme>:<guild>:<channel>:<thread>` (Discord). createThread
+      // returns the BARE thread id (parent message ts on Slack), which is
+      // what `child_platform_thread_id` stores for direct adapter calls.
+      // For session routing the chat-sdk adapter needs the encoded form, or
+      // the bridge rejects every outbound with "Invalid Slack thread ID"
+      // and child status/chat messages never reach the spawn thread.
+      // mg.platform_id already contains the scheme+channel prefix.
+      const bareThreadId = current.child_platform_thread_id!;
+      const encodedThreadId = bareThreadId.includes(':')
+        ? bareThreadId
+        : `${mg.platform_id}:${bareThreadId}`;
       const { session: childSession } = resolveSession(
         childAgentGroupId,
         task.parent_messaging_group_id,
-        current.child_platform_thread_id!,
+        encodedThreadId,
         'per-thread',
       );
 
@@ -361,11 +373,25 @@ async function _runThreadedPath(task: Task, childAgentGroupId: string): Promise<
       // b. Write spawn_task_id to child's inbound.db session_routing
       _writeSpawnTaskIdToRouting(childSession.agent_group_id, childSession.id, taskId);
 
-      // c. Write first inbound to child
+      // c. Write first inbound to child — stamp the spawn thread's routing
+      // onto the brief inbound. The agent-runner's per-destination thread
+      // resolver (poll-loop.ts `resolveDestinationThread`) looks up the
+      // most-recent inbound matching channelType+platformId to find the
+      // thread the child should reply into. Without these fields the
+      // lookup misses and the child's chat outbound lands at channel root
+      // instead of in its spawn thread — invisible to anyone watching the
+      // thread, so all per-task progress/results stayed in the dark.
+      //
+      // threadId stored here is the chat-sdk encoded form (computed above)
+      // so the value the child stamps on its outbound matches what the
+      // delivery bridge expects.
       await writeSessionMessage(childSession.agent_group_id, childSession.id, {
         id: randomUUID(),
         kind: 'chat',
         timestamp: now,
+        channelType: mg.channel_type,
+        platformId: mg.platform_id,
+        threadId: encodedThreadId,
         content: JSON.stringify({ _spawn: { task_id: taskId }, text: task.task_content }),
       });
 

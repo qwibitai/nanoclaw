@@ -12,6 +12,7 @@ import { indexHtmlHandler, staticHandler } from './static.js';
 import { tasksListHandler, tasksDetailHandler } from './api/tasks.js';
 import { sessionsHandler } from './api/sessions.js';
 import { steerHandler } from './steer.js';
+import { retryHandler } from './api/retry.js';
 
 // Side-effect imports — these files register their routes/handlers at module load
 import './auth/exchange.js'; // POST /dashboard/api/auth/exchange
@@ -43,6 +44,7 @@ export function startDashboard(): void {
   register('GET', '/dashboard/api/tasks/:id', requireAuth(tasksDetailHandler));
   register('GET', '/dashboard/api/sessions', requireAuth(sessionsHandler));
   register('POST', '/dashboard/api/tasks/:id/message', requireAuth(steerHandler));
+  register('POST', '/dashboard/api/tasks/:id/retry', requireAuth(retryHandler));
 
   // Static assets — public, no auth (design §6). Splat must be LAST.
   register('GET', '/dashboard/', indexHtmlHandler);

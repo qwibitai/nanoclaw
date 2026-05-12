@@ -5,6 +5,7 @@ import {
   rewriteDiscordLinks,
   discordPostParent,
   discordCreateThread,
+  extractDiscordChannelId,
   type DiscordRestClient,
 } from './discord.js';
 
@@ -72,6 +73,21 @@ describe('isUserMessage (Discord inbound filter)', () => {
   });
 });
 
+describe('extractDiscordChannelId', () => {
+  it('test_extract_channel_id_from_canonical_platform_id', () => {
+    expect(extractDiscordChannelId('discord:1148697867268497441:1149005423567294624')).toBe('1149005423567294624');
+  });
+
+  it('test_extract_channel_id_when_thread_segment_present', () => {
+    // discord:guildId:channelId:threadId — channelId is still index 2
+    expect(extractDiscordChannelId('discord:guildA:channelB:threadC')).toBe('channelB');
+  });
+
+  it('test_returns_raw_id_when_no_prefix', () => {
+    expect(extractDiscordChannelId('channel-id-X')).toBe('channel-id-X');
+  });
+});
+
 describe('discordPostParent', () => {
   it('test_post_parent_returns_message_id: returns {messageId} from REST response', async () => {
     const mockRest: DiscordRestClient = {
@@ -79,6 +95,18 @@ describe('discordPostParent', () => {
     };
     const result = await discordPostParent(mockRest, 'channel-id-X', 'launched');
     expect(result).toEqual({ messageId: 'msg-abc' });
+  });
+
+  it('test_post_parent_strips_discord_prefix_before_routes_call', async () => {
+    // Regression: orchestrator-dispatch's threaded path passes raw
+    // messaging_groups.platform_id (`discord:guildId:channelId`); Discord's
+    // REST API needs the bare channel id or it 404s.
+    const post = vi.fn().mockResolvedValue({ id: 'msg-1' });
+    const mockRest: DiscordRestClient = { post };
+    await discordPostParent(mockRest, 'discord:guildA:1149005423567294624', 'spawned');
+    const route = post.mock.calls[0][0] as string;
+    expect(route).toContain('/channels/1149005423567294624/messages');
+    expect(route).not.toContain('discord:');
   });
 });
 
@@ -98,5 +126,14 @@ describe('discordCreateThread', () => {
     // First call: thread creation with name and startMessage (via Routes.threads)
     expect(postSpy.mock.calls[0][1]).toEqual({ body: { name: 'My Task Name' } });
     expect(postSpy.mock.calls[0][0]).toContain('/channels/channel/messages/parent/threads');
+  });
+
+  it('test_create_thread_strips_discord_prefix_before_routes_call', async () => {
+    const postSpy = vi.fn().mockResolvedValueOnce({ id: 'thread-id' }).mockResolvedValueOnce({ id: 'first-msg' });
+    const mockRest: DiscordRestClient = { post: postSpy };
+    await discordCreateThread(mockRest, 'discord:guildA:1149005423567294624', 'parent-msg', 'T', 'first');
+    const route = postSpy.mock.calls[0][0] as string;
+    expect(route).toContain('/channels/1149005423567294624/messages/parent-msg/threads');
+    expect(route).not.toContain('discord:');
   });
 });

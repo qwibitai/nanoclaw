@@ -53,7 +53,13 @@ import {
   heartbeatPath,
   writeSessionMessage,
 } from './session-manager.js';
-import { getContainerSpawnedAt, isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
+import {
+  getContainerSpawnedAt,
+  hasContainerEverRun,
+  isContainerRunning,
+  killContainer,
+  wakeContainer,
+} from './container-runner.js';
 import type { Session } from './types.js';
 import { getDb } from './db/connection.js';
 import { getActiveTasks, transitionToTerminal } from './modules/orchestrator-dispatch/db/tasks.js';
@@ -295,9 +301,25 @@ async function sweepTaskWatchdog(): Promise<void> {
   for (const task of tasks) {
     try {
       // Get child container status from in-memory container set.
+      //
+      // Three-state, not two. `'stopped'` means "ran and has since exited" —
+      // ONLY then is `fail-container-exit` a correct reap. `null` covers two
+      // legitimately-not-failed cases: (a) container hasn't been spawned yet
+      // because the orchestrator's concurrency cap is queueing it, (b) wake
+      // is in flight. Both look identical to `isContainerRunning` (returns
+      // false) but neither should reap. `hasContainerEverRun` is the sticky
+      // signal that disambiguates — set when activeContainers.add fires,
+      // never cleared, so true iff this host has observed the container
+      // running at some point in this process lifetime.
       let childContainerStatus: 'running' | 'stopped' | null = null;
       if (task.child_session_id !== null) {
-        childContainerStatus = isContainerRunning(task.child_session_id) ? 'running' : 'stopped';
+        if (isContainerRunning(task.child_session_id)) {
+          childContainerStatus = 'running';
+        } else if (hasContainerEverRun(task.child_session_id)) {
+          childContainerStatus = 'stopped';
+        } else {
+          childContainerStatus = null;
+        }
       }
 
       // Check child's outbound.db for pending terminal spawn actions (drain-first guard).
@@ -366,14 +388,28 @@ async function sweepTaskWatchdog(): Promise<void> {
       if (!parentSession) continue;
 
       try {
+        // Mirror applySpawnFailed's notify shape — kind='chat' with visible
+        // `text` so the orchestrator sees a normal turn input and reports
+        // the failure to the user. The prior `kind='system'` envelope
+        // (action `spawn_task_watchdog_fail`) had no consumer anywhere in
+        // the codebase — it sat silently in the parent's inbound and no
+        // human was ever told the task failed. The `_task_update` envelope
+        // keeps the machine-readable surface for any future consumer that
+        // wants to react to status transitions without parsing the text.
         await writeSessionMessage(task.parent_agent_group_id, task.parent_session_id, {
           id: randomUUID(),
-          kind: 'system',
+          kind: 'chat',
           timestamp: nowIso,
           content: JSON.stringify({
-            action: 'spawn_task_watchdog_fail',
-            task_id: task.task_id,
-            fail_reason: failReason,
+            text:
+              `Task failed (watchdog): ${task.task_id}. Reason: ${failReason}. ` +
+              `The orchestrator should notify the user and decide whether to re-spawn.`,
+            _task_update: {
+              task_id: task.task_id,
+              status: 'failed',
+              fail_reason: failReason,
+              source: 'watchdog',
+            },
           }),
         });
         void wakeContainer(parentSession).catch((err) =>

@@ -26,8 +26,32 @@ import { upsertArchiveMessage } from './message-archive.js';
 import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles } from './session-manager.js';
 import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
+import { getTaskByChildSession } from './modules/orchestrator-dispatch/db/tasks.js';
 import type { OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
+
+/**
+ * A session is a spawn-task child when a row in the `tasks` table names it
+ * as `child_session_id`. For these sessions the dashboard becomes a
+ * persistent work log: thinking blocks render as fresh, durable messages in
+ * the spawn thread rather than the ephemeral post-then-edit-then-delete
+ * pattern that chat UX uses. Without this, only the final answer survives
+ * in the thread and all in-flight progress vanishes when the answer posts.
+ *
+ * The cache is per-host-process and never invalidated — once a session is a
+ * spawn child, it stays one for its entire lifetime, so a single positive
+ * result is permanent. Negative results (regular chat session) are cached
+ * too because we'd otherwise hit the central DB on every status delivery
+ * for every chat session.
+ */
+const spawnChildSessionCache = new Map<string, boolean>();
+function isSpawnChildSession(sessionId: string): boolean {
+  const cached = spawnChildSessionCache.get(sessionId);
+  if (cached !== undefined) return cached;
+  const isChild = getTaskByChildSession(sessionId) !== null;
+  spawnChildSessionCache.set(sessionId, isChild);
+  return isChild;
+}
 
 const ACTIVE_POLL_MS = 1000;
 const SWEEP_POLL_MS = 60_000;
@@ -234,6 +258,29 @@ async function drainSession(session: Session): Promise<void> {
     // Ensure platform_message_id column exists (migration for existing sessions)
     migrateDeliveredTable(inDb);
 
+    // Bump `tasks.last_progress_at` once per drain if this session is a
+    // spawn-task child. Only `spawn_progress` MCP calls update that column
+    // today, so an agent that's actively thinking, posting status, and
+    // running tool calls but hasn't explicitly pinged `spawn_progress`
+    // within 30 minutes gets reaped by the no-progress watchdog as if it
+    // were stuck. Observed against spawn-9048e8cfbcc024c2 (XZO-61) at
+    // 20:11:05 UTC on 2026-05-11: the watchdog reaped exactly 33 seconds
+    // before the child called spawn_complete — the agent was delivering
+    // status messages within the same second. Counting any outbound row as
+    // "progress" makes the no-progress timer mean what it says.
+    if (isSpawnChildSession(session.id)) {
+      try {
+        getDb()
+          .prepare(`UPDATE tasks SET last_progress_at = ? WHERE child_session_id = ?`)
+          .run(new Date().toISOString(), session.id);
+      } catch (err) {
+        log.warn('Failed to bump last_progress_at for spawn child', {
+          sessionId: session.id,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     for (const msg of undelivered) {
       try {
         const result = await deliverMessage(msg, session, inDb);
@@ -371,12 +418,18 @@ async function deliverMessage(
   // posts a fresh line; subsequent statuses edit it in place. The tracking
   // clears when a real chat message delivers (handled at the end), so the
   // next turn starts with a new status line instead of clobbering history.
+  //
+  // EXCEPTION: spawn-task child sessions render their thread as a durable
+  // work log — every thinking block is a fresh, persistent message in the
+  // spawn thread. Edit-in-place and the on-chat orphan delete are bypassed
+  // so progress survives the final answer.
   if (msg.kind === 'status') {
     if (!msg.channel_type || !msg.platform_id) {
       log.warn('Status message missing routing fields, dropping', { id: msg.id });
       return {};
     }
-    const existing = statusTracking.get(session.id);
+    const appendMode = isSpawnChildSession(session.id);
+    const existing = appendMode ? undefined : statusTracking.get(session.id);
     let outbound = scrubSecrets(msg.content);
     if (existing) {
       const parsed = JSON.parse(outbound);
@@ -393,7 +446,7 @@ async function deliverMessage(
       msg.kind,
       outbound,
     );
-    if (platformMsgId && !existing) {
+    if (platformMsgId && !existing && !appendMode) {
       // Pin the route at post-time. The cleanup branch on chat delivery uses
       // *this* route to delete the orphan, NOT the chat-final's route — the
       // agent's send_message MCP tool can target a different channel/thread,
@@ -501,7 +554,13 @@ async function deliverMessage(
   // markDelivered for the chat reply itself — that would cause retry/
   // duplicate of the real answer.
   if (msg.kind === 'chat') {
-    const orphan = statusTracking.get(session.id);
+    // Skip orphan delete for spawn-task children — they were posted in
+    // append mode (durable work log), so there's no orphan to clean up.
+    // The statusTracking map is also untouched in append mode, but call
+    // `delete` anyway as a defensive no-op in case a regular chat row ever
+    // got tracked before the session was classified as a spawn child.
+    const isSpawnChild = isSpawnChildSession(session.id);
+    const orphan = isSpawnChild ? undefined : statusTracking.get(session.id);
     if (orphan && deliveryAdapter.deleteMessage) {
       try {
         await deliveryAdapter.deleteMessage(orphan.channelType, orphan.platformId, orphan.threadId, orphan.messageId);

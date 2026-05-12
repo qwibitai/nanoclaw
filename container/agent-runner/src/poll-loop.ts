@@ -1,6 +1,7 @@
 import { findByName, findByRouting, getAllDestinations, type DestinationEntry } from './destinations.js';
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
+import { getSessionSpawnTaskId } from './db/session-routing.js';
 import { getInboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import {
   clearContinuation,
@@ -36,6 +37,19 @@ function log(msg: string): void {
 
 function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * True when the model's final response text is Anthropic's standard AUP
+ * refusal envelope. Match conservatively on BOTH anchor phrases (the
+ * Claude Code prefix and the policy URL) — checking just one risks false
+ * positives on legitimate prose discussing AUP, and Anthropic has
+ * historically kept this exact message format stable.
+ *
+ * Exported for unit testing.
+ */
+export function isAupRefusal(text: string): boolean {
+  return text.includes('Claude Code is unable to respond') && text.includes('anthropic.com/legal/aup');
 }
 
 export interface PollLoopConfig {
@@ -648,6 +662,38 @@ async function processQuery(
         // way the per-turn work for these rows is finished.
         markCompleted(initialBatchIds);
         if (event.text) {
+          // AUP refusal fast-fail: when Anthropic's content policy filter
+          // fires mid-task, the SDK returns a terminal chat response with
+          // the literal "API Error: Claude Code is unable to respond...
+          // violates our Usage Policy" text. The agent has no further turn
+          // and falls silent. If this is a spawned child, sit-and-wait
+          // until the parent's no-progress watchdog reaps the task — which
+          // it does after 30 minutes, burning real wallclock for no reason
+          // and surfacing the failure as the opaque `no_progress_timeout`
+          // rather than the actual cause. Emit spawn_failed here so the
+          // parent knows immediately and the dashboard card reflects the
+          // real reason. Match conservatively: require both anchor phrases
+          // (Claude Code prefix + Usage Policy URL) so legitimate prose
+          // discussing policy doesn't trip the detector.
+          if (isAupRefusal(event.text)) {
+            const taskId = getSessionSpawnTaskId();
+            if (taskId !== null) {
+              log(`AUP refusal detected — emitting spawn_failed for ${taskId}`);
+              writeMessageOut({
+                id: generateId(),
+                kind: 'system',
+                content: JSON.stringify({
+                  action: 'spawn_failed',
+                  task_id: taskId,
+                  fail_reason: 'aup_refusal',
+                  summary:
+                    "Anthropic's Usage Policy filter refused this task mid-stream. " +
+                    'Retry as-is (filters are probabilistic), reword the brief to avoid trigger phrasing, ' +
+                    'or do the task manually outside the spawn flow.',
+                }),
+              });
+            }
+          }
           dispatchResultText(event.text, routing);
         }
       } else if (event.type === 'compacted') {

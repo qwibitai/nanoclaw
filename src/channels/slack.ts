@@ -82,6 +82,19 @@ export interface SlackPostMessageClient {
 }
 
 /**
+ * Strip the `slack:` scheme prefix from a NanoClaw platform_id, leaving the
+ * raw Slack channel ID the Web API expects. Tolerates both prefixed
+ * (`slack:C0AJA89MN2E`, the canonical messaging_groups.platform_id form) and
+ * raw (`C0AJA89MN2E`, used in unit tests) inputs. The host's regular delivery
+ * path normalizes via the chat-sdk bridge — these helpers are called from
+ * orchestrator-dispatch directly and need to do their own normalization or
+ * Slack returns `channel_not_found`.
+ */
+export function extractSlackChannelId(platformId: string): string {
+  return platformId.startsWith('slack:') ? platformId.slice('slack:'.length) : platformId;
+}
+
+/**
  * Post a message to the top level of a Slack channel.
  * Exported for unit testing.
  */
@@ -90,7 +103,8 @@ export async function slackPostParent(
   platformId: string,
   text: string,
 ): Promise<{ messageId: string }> {
-  const response = await client.chat.postMessage({ channel: platformId, text });
+  const channel = extractSlackChannelId(platformId);
+  const response = await client.chat.postMessage({ channel, text });
   return { messageId: response.ts as string };
 }
 
@@ -106,8 +120,9 @@ export async function slackCreateThread(
   _title: string,
   firstMessage: string,
 ): Promise<{ threadId: string; messageId: string }> {
+  const channel = extractSlackChannelId(platformId);
   const reply = await client.chat.postMessage({
-    channel: platformId,
+    channel,
     thread_ts: parentMessageId,
     text: firstMessage,
   });

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { parseSlackWorkspaces, slackPostParent, slackCreateThread, type SlackPostMessageClient } from './slack.js';
+import {
+  extractSlackChannelId,
+  parseSlackWorkspaces,
+  slackPostParent,
+  slackCreateThread,
+  type SlackPostMessageClient,
+} from './slack.js';
 
 describe('parseSlackWorkspaces', () => {
   it('returns an empty list when no credentials present', () => {
@@ -52,6 +58,16 @@ describe('parseSlackWorkspaces', () => {
   });
 });
 
+describe('extractSlackChannelId', () => {
+  it('test_strip_slack_prefix_from_canonical_platform_id', () => {
+    expect(extractSlackChannelId('slack:C0AJA89MN2E')).toBe('C0AJA89MN2E');
+  });
+
+  it('test_returns_raw_id_when_no_prefix', () => {
+    expect(extractSlackChannelId('C0AJA89MN2E')).toBe('C0AJA89MN2E');
+  });
+});
+
 describe('slackPostParent', () => {
   it('test_post_parent_returns_ts: returns {messageId} from response.ts', async () => {
     const mockClient: SlackPostMessageClient = {
@@ -62,6 +78,17 @@ describe('slackPostParent', () => {
     const result = await slackPostParent(mockClient, 'C0', 'launched task');
     expect(result).toEqual({ messageId: 'parent-1234.5678' });
     expect(mockClient.chat.postMessage).toHaveBeenCalledWith({ channel: 'C0', text: 'launched task' });
+  });
+
+  it('test_post_parent_strips_slack_prefix_before_api_call', async () => {
+    // Regression: orchestrator-dispatch's threaded path passes the raw
+    // messaging_groups.platform_id (`slack:CHANNEL`) — Slack's API needs the
+    // bare channel ID or returns channel_not_found. Observed in production
+    // when first attempting to spawn into Slack.
+    const postMessage = vi.fn().mockResolvedValue({ ts: 'parent-ts', ok: true });
+    const mockClient: SlackPostMessageClient = { chat: { postMessage } };
+    await slackPostParent(mockClient, 'slack:C0AJA89MN2E', 'spawned task');
+    expect(postMessage).toHaveBeenCalledWith({ channel: 'C0AJA89MN2E', text: 'spawned task' });
   });
 });
 
@@ -84,6 +111,17 @@ describe('slackCreateThread', () => {
       channel: 'C0',
       thread_ts: 'parent-X',
       text: 'msg',
+    });
+  });
+
+  it('test_create_thread_strips_slack_prefix_before_api_call', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ts: 'reply-ts', ok: true });
+    const mockClient: SlackPostMessageClient = { chat: { postMessage } };
+    await slackCreateThread(mockClient, 'slack:C0AJA89MN2E', 'parent-ts', 'Task', 'first');
+    expect(postMessage).toHaveBeenCalledWith({
+      channel: 'C0AJA89MN2E',
+      thread_ts: 'parent-ts',
+      text: 'first',
     });
   });
 });

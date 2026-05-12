@@ -99,6 +99,12 @@ vi.mock('../../container-runner.js', () => ({
   wakeContainer: vi.fn().mockResolvedValue(true),
   killContainer: vi.fn(),
   isContainerRunning: vi.fn().mockReturnValue(false),
+  // Sticky-flag: when isContainerRunning is false, this tells the watchdog
+  // whether the container ever ran. In this integration test the no-progress
+  // case wants `fail-no-progress` to fire — that requires the container to
+  // have been observed running (otherwise childContainerStatus is null and
+  // container-exit reap is suppressed, leaving only the no-progress timer).
+  hasContainerEverRun: vi.fn().mockReturnValue(true),
   getContainerSpawnedAt: vi.fn().mockReturnValue(null),
 }));
 
