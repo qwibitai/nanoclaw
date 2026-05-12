@@ -66,11 +66,11 @@ Dedicated finance agent. Single user: Jonas. PF + PJ tracked in one Google Sheet
 
 Composio googlesheets, especialmente:
 
-- `GOOGLESHEETS_BATCH_UPDATE` (escrita em lote — preferir sempre que possível)
+- `GOOGLESHEETS_UPDATE_VALUES_BATCH` (escrita em lote multi-range — preferir sempre que possível)
 - `GOOGLESHEETS_LOOKUP_SPREADSHEET_ROW` (busca por valor de coluna)
-- `GOOGLESHEETS_INSERT_DIMENSION` + `GOOGLESHEETS_BATCH_UPDATE_VALUES_BY_DATA_FILTER`
-- `GOOGLESHEETS_BATCH_CLEAR_VALUES_BY_DATA_FILTER` (apagar linha — usado por "desfazer")
-- `GOOGLESHEETS_GET_SPREADSHEET_BY_DATA_FILTER` (leituras)
+- `GOOGLESHEETS_INSERT_DIMENSION` + `GOOGLESHEETS_UPDATE_VALUES_BATCH` (inserir linha vazia e depois preencher)
+- `GOOGLESHEETS_CLEAR_VALUES` (apagar conteúdo de uma range específica — usado por "desfazer", informe a range A1 da linha exata)
+- `GOOGLESHEETS_VALUES_GET` (leitura de uma range A1) / `GOOGLESHEETS_BATCH_GET` (várias ranges em uma chamada)
 
 **Regras de I/O:**
 
