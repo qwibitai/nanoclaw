@@ -42,6 +42,7 @@ import { isSafeAttachmentName } from '../attachment-safety.js';
 import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, DATA_DIR } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
+import { transcribeAudioFile, TRANSCRIPTION_FALLBACK } from '../transcription.js';
 import { registerChannelAdapter } from './channel-registry.js';
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
 import type { ChannelAdapter, ChannelSetup, ConversationInfo, InboundMessage, OutboundMessage } from './adapter.js';
@@ -572,6 +573,17 @@ registerChannelAdapter('whatsapp', {
 
             // Download media attachments (images, video, audio, documents)
             const attachments = await downloadInboundMedia(msg, normalized);
+
+            // Voice message transcription via OpenAI Whisper. Prepend transcript
+            // (or fallback) to content so the agent sees the spoken text inline.
+            if (normalized.audioMessage) {
+              const audio = attachments.find((a) => a.type === 'audio');
+              if (audio) {
+                const transcript = await transcribeAudioFile(audio.localPath);
+                const prefix = transcript ?? TRANSCRIPTION_FALLBACK;
+                content = content ? `${prefix}\n${content}` : prefix;
+              }
+            }
 
             // Skip empty protocol messages (no text and no attachments)
             if (!content && attachments.length === 0) continue;
