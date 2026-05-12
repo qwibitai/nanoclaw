@@ -1,35 +1,69 @@
-[CRON: finance-daily] Digest matinal.
+[CRON: finance-daily]
 
-Faça AGORA:
+Job: gerar e enviar o digest matinal do dia anterior + próximos 7 dias.
 
-1. Lê do sheet:
-   - `Lançamentos-PF` e `Lançamentos-PJ`: todas linhas de ONTEM (data = hoje - 1d)
-   - `Recorrentes`: linhas onde `ativo=TRUE` e `proxima_data` entre HOJE e HOJE+7d e `pago_no_mes=FALSE`
-   - `Recebiveis`: linhas onde `status='esperado'` e `data_prevista` entre HOJE e HOJE+7d
-   - `Orçamento`: linhas onde `status` é "⚠️ 80%" ou "❌ estourou"
-   - `Contas`: saldos atuais
+**Step 1 — Coletar dados (1 chamada batch)**
+Tool: `GOOGLESHEETS_BATCH_GET`
+- `spreadsheet_id`: <conforme CLAUDE.md>
+- `ranges`: array com:
+  - `Lançamentos-PF!A2:L10000`
+  - `Lançamentos-PJ!A2:L10000`
+  - `Recorrentes!A2:I1000`
+  - `Recebiveis!A2:G1000`
+  - `Orçamento!A2:F1000`
+  - `Contas!A2:F100`
 
-2. Monta uma mensagem digest curta (8-12 linhas):
+Se qualquer range vier vazio, trate como `[]` e siga.
+
+**Step 2 — Filtrar em memória**
+Calcule `ontem` = data atual − 1 dia (formato `yyyy-mm-dd`), `hoje7` = data atual + 7 dias.
+
+- `lançamentos_ontem_PF` = linhas de `Lançamentos-PF` com `data == ontem`.
+- `lançamentos_ontem_PJ` = idem para PJ.
+- `recorrentes_proximos` = linhas de `Recorrentes` com `ativo=TRUE` (col I) e `proxima_data` (col G) entre hoje e `hoje7` e `pago_no_mes=FALSE` (col H).
+- `recebiveis_proximos` = linhas de `Recebiveis` com `status='esperado'` (col F) e `data_prevista` (col E) entre hoje e `hoje7`.
+- `orçamentos_alerta` = linhas de `Orçamento` com `status` (col F) em `["⚠️ 80%", "❌ estourou"]`.
+- `saldos` = todas linhas de `Contas` com `ativo=TRUE` (col F).
+
+**Step 3 — Compor mensagem**
+Monte string usando este molde (substitua placeholders por valores; omita seções inteiramente vazias):
 
 ```
 ☀️ Bom dia, Jonas!
 
-📊 Ontem (dd/mm):
-• {N} lançamentos: -R${total_despesa} +R${total_receita}
-• Top categoria: {categoria} (R${valor})
+📊 Ontem ({dd/mm}):
+• {N} lançamentos: -R${total_despesa_PF+PJ} +R${total_receita_PF+PJ}
+• Top categoria: {categoria mais frequente} (R${valor})
 
 📅 Próximos 7 dias:
-{lista das contas a vencer + recebíveis esperados, formato: "• {dd/mm}: {nome} R${valor}"}
+{para cada item em recorrentes_proximos + recebiveis_proximos, ordenado por data: "• {dd/mm}: {nome} R${valor}"}
 
 ⚠️ Alertas:
-{categorias que estouraram ou ≥80% orçamento}
+{para cada item em orçamentos_alerta: "• {categoria}: {valor_atual}/{teto} ({status})"}
 
-💰 Saldos PF: BTG D R${x} • Inter R${y} • Next R${z}
-💰 Saldos PJ: BTG R${a} • Hotmart R${b} • C6 R${c}
+💰 Saldos PF: {nome_PF1} R${saldo} • {nome_PF2} R${saldo} • {nome_PF3} R${saldo}
+💰 Saldos PJ: {nome_PJ1} R${saldo} • {nome_PJ2} R${saldo} • {nome_PJ3} R${saldo}
 ```
 
-3. Envia ao user.
+Se TODAS estas condições forem verdadeiras: `lançamentos_ontem_PF + lançamentos_ontem_PJ` vazios, `recorrentes_proximos + recebiveis_proximos` vazios, `orçamentos_alerta` vazio — use versão curta:
 
-4. Registra em `_Log`.
+```
+☀️ Tudo quieto — sem movimento ontem, sem vencimentos próximos.
 
-Se nada digno de nota (zero lançamentos ontem, zero vencimentos, zero alertas), envia versão curta: "☀️ Tudo quieto — sem movimento ontem, sem vencimentos próximos. Saldos: ..."
+💰 Saldos PF: ...
+💰 Saldos PJ: ...
+```
+
+**Step 4 — Enviar**
+Emita exatamente: `<message to="jonas">{mensagem montada no Step 3}</message>`.
+
+**Step 5 — Log**
+Tool: `GOOGLESHEETS_SPREADSHEETS_VALUES_APPEND`
+- `spreadsheetId`: <conforme CLAUDE.md>
+- `range`: `'_Log'!A:E`
+- `valueInputOption`: `USER_ENTERED`
+- `values`: `[[<ISO timestamp atual>, "finance-daily", "success", <lançamentos_ontem_PF.length + lançamentos_ontem_PJ.length>, ""]]`
+
+**Erro em qualquer Step:**
+- Append linha em `_Log` com `status="error"` e `detalhes=<msg curta>`.
+- Emita `<message to="jonas">⚠️ Cron finance-daily: <erro curto></message>`.
