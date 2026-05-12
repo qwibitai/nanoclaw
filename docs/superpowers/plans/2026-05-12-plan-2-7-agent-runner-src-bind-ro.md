@@ -659,20 +659,20 @@ git commit -m "chore(plans): mark Plan 2.7 complete"
 
 ## Acceptance criteria
 
-- [ ] `buildAgentRunnerMounts(projectRoot: string): VolumeMount[]` exported in `src/container-runner.ts`
-- [ ] Returned mount has `hostPath: '<projectRoot>/container/agent-runner/src'`, `containerPath: '/app/src'`, `readonly: true`
-- [ ] `buildMounts` in `src/container-runner.ts` calls `buildAgentRunnerMounts(process.cwd())` instead of the inline per-session block (lines 211-214 removed)
-- [ ] `VolumeMount` interface is exported (was previously local) so the test can import its type
-- [ ] Block `// 3. data/v2-sessions/<id>/agent-runner-src/ — per-group source copy` removed from `src/group-init.ts`
-- [ ] `src/v1/container-runner.ts` unchanged
-- [ ] 3 new tests in `src/container-runner.test.ts` (T1 paths, T2 readonly, T3 regression guard) — all green
-- [ ] Full vitest suite green (439 pre-2.7 baseline + 3 new = 442 expected, ± any churn from Phase 1)
-- [ ] `npm run build` produces a clean `dist/`
-- [ ] `dist/container-runner.js` and `dist/group-init.js` contain no live references to `agent-runner-src` (comments stripped — string just doesn't appear)
-- [ ] Post-deploy Smoke S1: `/clear` on a respawned Telegram-attached agent returns `Session cleared.` (Plan 2.6 regression check holds)
-- [ ] Post-deploy Smoke S2 (optional): `docker exec <container> touch /app/src/test-ro` fails with read-only filesystem error
-- [ ] Post-deploy Smoke S3 (optional): creating a new agent group does NOT create `data/v2-sessions/<new-id>/agent-runner-src/`
-- [ ] `scripts/cleanup-stale-agent-runner-src.ts` runs idempotently; second run reports 0 removed
+- [x] `buildAgentRunnerMounts(projectRoot: string): VolumeMount[]` exported in `src/container-runner.ts`
+- [x] Returned mount has `hostPath: '<projectRoot>/container/agent-runner/src'`, `containerPath: '/app/src'`, `readonly: true`
+- [x] `buildMounts` in `src/container-runner.ts` calls `buildAgentRunnerMounts(process.cwd())` instead of the inline per-session block (lines 211-214 removed)
+- [x] `VolumeMount` interface is exported (was previously local) so the test can import its type
+- [x] Block `// 3. data/v2-sessions/<id>/agent-runner-src/ — per-group source copy` removed from `src/group-init.ts`
+- [x] `src/v1/container-runner.ts` unchanged
+- [x] 3 new tests in `src/container-runner.test.ts` (T1 paths, T2 readonly, T3 regression guard) — all green
+- [x] Full vitest suite green (442 passing — 439 pre-2.7 baseline + 3 new)
+- [x] `npm run build` produces a clean `dist/`
+- [x] `dist/group-init.js` has 0 references to `agent-runner-src`; `dist/container-runner.js` has only a JSDoc comment reference (preserved by tsc, not a live code path)
+- [x] Post-deploy Smoke S1: `/clear` on the respawned Levis Telegram bot returned `Session cleared.` (Plan 2.6 regression check holds)
+- [x] Post-deploy Smoke S2: `docker exec nanoclaw-v2-finance-1778598010645 touch /app/src/test-ro` failed with `Read-only file system`; `mount` confirms `/app/src ext4 (ro,relatime)`; `md5sum /app/src/formatter.ts` matches upstream `container/agent-runner/src/formatter.ts` exactly
+- [x] Post-deploy Smoke S3: empirical check — `data/v2-sessions/finance/agent-runner-src` was deleted by cleanup script before `/clear` respawned the Levis container; `initGroupFilesystem` did NOT recreate it (directory still absent after respawn)
+- [x] `scripts/cleanup-stale-agent-runner-src.ts` ran idempotently: first run removed 7 orphaned dirs, second run reported `Removed 0 stale agent-runner-src directories`
 
 ---
 
