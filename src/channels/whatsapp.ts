@@ -598,13 +598,25 @@ registerChannelAdapter('whatsapp', {
             // Filter bot's own messages to prevent echo loops.
             // In self-chat (user messaging their own number), all messages have
             // fromMe=true — use sentMessageCache to distinguish bot echoes from
-            // user-typed messages. For all other chats, the blanket fromMe
-            // filter is correct since the user's phone messages shouldn't wake
-            // the agent in third-party conversations.
+            // user-typed messages.
+            //
+            // In dedicated-number mode (ASSISTANT_HAS_OWN_NUMBER=true): any fromMe
+            // message in non-self-chat is the bot's own outbound — skip.
+            //
+            // In shared-number mode (ASSISTANT_HAS_OWN_NUMBER=false): the bot
+            // shares the user's WhatsApp number. The bot prefixes its outbound
+            // with `${ASSISTANT_NAME}:`. Only filter fromMe messages that:
+            //   (a) hit sentMessageCache (we sent them just now), OR
+            //   (b) start with the assistant prefix (older bot echo)
+            // Otherwise it's the user typing on the shared phone — process it.
             if (fromMe) {
               const isSelfChat = botPhoneJid && chatJid === botPhoneJid;
-              if (!isSelfChat) continue;
               if (sentMessageCache.has(msg.key.id || '')) continue;
+              if (ASSISTANT_HAS_OWN_NUMBER) {
+                if (!isSelfChat) continue;
+              } else {
+                if (!isSelfChat && content.startsWith(`${ASSISTANT_NAME}:`)) continue;
+              }
             }
 
             const isBotMessage = ASSISTANT_HAS_OWN_NUMBER ? false : content.startsWith(`${ASSISTANT_NAME}:`);
