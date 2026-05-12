@@ -8,6 +8,7 @@
  *   - Never writes to outbound.db — preserves single-writer-per-file invariant
  */
 import type Database from 'better-sqlite3';
+import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
 import { getActiveSessions, updateSession } from './db/sessions.js';
@@ -23,6 +24,7 @@ import {
   insertRecurrence,
   clearRecurrence,
 } from './db/session-db.js';
+import { toSqliteUtc } from './db/sqlite-utc.js';
 import { log } from './log.js';
 import { openInboundDb, openOutboundDb, inboundDbPath, outboundDbPath, heartbeatPath } from './session-manager.js';
 import { wakeContainer, isContainerRunning } from './container-runner.js';
@@ -150,15 +152,22 @@ function detectStaleContainers(
   }
 }
 
-/** Insert next occurrence for completed recurring messages. */
-async function handleRecurrence(inDb: Database.Database, session: Session): Promise<void> {
+/**
+ * Insert the next occurrence for each completed recurring message. Synchronous
+ * because the caller (sweepSession) closes inDb in its finally — if this was
+ * async with an unawaited dynamic import, inDb would close mid-call and
+ * insertRecurrence would throw "database connection is not open". See Plan 2.6
+ * spec §2 (Bug B) for the original failure mode.
+ *
+ * Exported so src/host-sweep.test.ts can test it directly.
+ */
+export function handleRecurrence(inDb: Database.Database, session: Session): void {
   const recurring = getCompletedRecurring(inDb);
 
   for (const msg of recurring) {
     try {
-      const { CronExpressionParser } = await import('cron-parser');
       const interval = CronExpressionParser.parse(msg.recurrence);
-      const nextRun = interval.next().toISOString();
+      const nextRun = toSqliteUtc(interval.next().toDate());
       const newId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
       insertRecurrence(inDb, msg, newId, nextRun);
