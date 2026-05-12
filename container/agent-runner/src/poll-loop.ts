@@ -453,7 +453,7 @@ function dispatchResultText(text: string, routing: RoutingContext): void {
     log(`[scratchpad] ${scratchpad.slice(0, 500)}${scratchpad.length > 500 ? '…' : ''}`);
   }
 
-  if (sent === 0 && text.trim()) {
+  if (sent === 0 && scratchpad) {
     log(`WARNING: agent output had no <message to="..."> blocks — nothing was sent`);
   }
 }
