@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { extractImageAttachments } from './formatter.js';
+import { extractImageAttachments, categorizeMessage } from './formatter.js';
 import type { MessageInRow } from './db/messages-in.js';
 
-function row(content: object): MessageInRow {
+function row(content: object, overrides: Partial<MessageInRow> = {}): MessageInRow {
   return {
     id: 'id',
     seq: 1,
@@ -16,6 +16,7 @@ function row(content: object): MessageInRow {
     channel_type: null,
     thread_id: null,
     content: JSON.stringify(content),
+    ...overrides,
   } as MessageInRow;
 }
 
@@ -92,5 +93,43 @@ describe('extractImageAttachments', () => {
   it('handles malformed content JSON gracefully', () => {
     const bad = { ...row({}), content: 'not valid json' } as MessageInRow;
     expect(extractImageAttachments([bad])).toEqual([]);
+  });
+});
+
+describe('categorizeMessage senderId normalization', () => {
+  it('WhatsApp native: composes senderId with whatsapp: prefix when content.sender lacks prefix', () => {
+    const msg = row({ text: '/clear', sender: '17865189131' }, { channel_type: 'whatsapp' });
+    const result = categorizeMessage(msg);
+    expect(result.senderId).toBe('whatsapp:17865189131');
+  });
+
+  it('Chat SDK (no swarm): composes senderId with telegram: prefix from content.author.userId', () => {
+    const msg = row(
+      { text: '/clear', author: { userId: '8557164566', userName: 'jonas' } },
+      { channel_type: 'telegram' },
+    );
+    const result = categorizeMessage(msg);
+    expect(result.senderId).toBe('telegram:8557164566');
+  });
+
+  it('Chat SDK with swarm suffix: strips the suffix (telegram-finance → telegram)', () => {
+    const msg = row(
+      { text: '/clear', author: { userId: '8557164566', userName: 'jonas' } },
+      { channel_type: 'telegram-finance' },
+    );
+    const result = categorizeMessage(msg);
+    expect(result.senderId).toBe('telegram:8557164566');
+  });
+
+  it('already-prefixed content.senderId passes through unchanged', () => {
+    const msg = row({ text: '/clear', senderId: 'telegram:8557164566' }, { channel_type: 'telegram' });
+    const result = categorizeMessage(msg);
+    expect(result.senderId).toBe('telegram:8557164566');
+  });
+
+  it('empty content / no sender info returns null senderId', () => {
+    const msg = row({}, { channel_type: 'telegram' });
+    const result = categorizeMessage(msg);
+    expect(result.senderId).toBeNull();
   });
 });
