@@ -2,35 +2,35 @@
   "jobs": [
     {
       "id": "task-finance-sweep",
-      "kind": "scheduled",
+      "kind": "task",
       "recurrence": "0 8-22 * * *",
       "promptFile": "sweep-reminder.md",
       "firstRunOffsetMs": 60000
     },
     {
       "id": "task-finance-daily",
-      "kind": "scheduled",
+      "kind": "task",
       "recurrence": "0 8 * * *",
       "promptFile": "daily-digest.md",
       "firstRunOffsetMs": 60000
     },
     {
       "id": "task-finance-weekly",
-      "kind": "scheduled",
+      "kind": "task",
       "recurrence": "0 19 * * 0",
       "promptFile": "weekly-closing.md",
       "firstRunOffsetMs": 60000
     },
     {
       "id": "task-finance-monthly",
-      "kind": "scheduled",
+      "kind": "task",
       "recurrence": "0 21 28-31 * *",
       "promptFile": "monthly-closing.md",
       "firstRunOffsetMs": 60000
     },
     {
       "id": "task-finance-rollover",
-      "kind": "scheduled",
+      "kind": "task",
       "recurrence": "30 0 1 * *",
       "promptFile": "rollover.md",
       "firstRunOffsetMs": 60000
