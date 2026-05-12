@@ -25,6 +25,8 @@ Gmail/Calendar/Sheets/Contacts call. Source:
 
 ### Step 1: Verify OneCLI is installed and running
 
+Requires **OneCLI ≥ 1.1.0** (top-level `version` command, `Connections` dashboard).
+
 ```bash
 onecli version
 curl -sf http://127.0.0.1:10254/api/health > /dev/null && echo OK
