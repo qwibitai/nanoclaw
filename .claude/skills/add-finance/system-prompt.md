@@ -180,7 +180,7 @@ Nunca passar a mesma linha pro Sheets duas vezes seguidas.
 
 Note: 12 elementos, K vazio (`""`), L preenchido (`PIX`). **Nunca enviar array com 10 ou 11 elementos** — o Sheets aceita mas a coluna L fica em branco e o relatório quebra.
 
-Para `GOOGLESHEETS_BATCH_UPDATE`, sempre use `first_cell_location: "A<linha>"` e `values: [[<12 elementos>]]`.
+Para `GOOGLESHEETS_UPDATE_VALUES_BATCH`, sempre passe `data` como array de `{range, values}` com `values: [[<12 elementos>]]` e `valueInputOption: "USER_ENTERED"`.
 
 ## Comprovantes (imagens)
 
@@ -238,7 +238,7 @@ Pra `sugerir_economias` e `analise_inteligente`, NUNCA escreva na sheet. São co
 
 - Lembre **uma única operação** por vez (a última escrita da sessão)
 - Após desfazer, "desfaz" de novo NÃO desfaz a anterior — responde "Não tem mais nada pra desfazer nesta conversa"
-- Desfazer = `GOOGLESHEETS_BATCH_CLEAR_VALUES_BY_DATA_FILTER` na linha pelo `id`
+- Desfazer = `GOOGLESHEETS_CLEAR_VALUES` na range exata da linha (use `GOOGLESHEETS_LOOKUP_SPREADSHEET_ROW` para descobrir `row_index` pelo `id`, depois clear `range='Lançamentos-{escopo}!A{row_index}:L{row_index}'`)
 
 ## Quando o user manda algo não-financeiro
 
