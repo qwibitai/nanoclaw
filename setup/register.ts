@@ -223,6 +223,10 @@ export async function run(args: string[]): Promise<void> {
       let content = fs.readFileSync(mdFile, 'utf-8');
       content = content.replace(/^# Andy$/m, `# ${parsed.assistantName}`);
       content = content.replace(/You are Andy/g, `You are ${parsed.assistantName}`);
+      // Also rename trigger references (e.g. scheduled-task "trigger": "@Andy"
+      // entries in groups/<folder>/CLAUDE.md). Word-boundary anchor keeps
+      // names like "@Andyville" intact.
+      content = content.replace(/@Andy\b/g, `@${parsed.assistantName}`);
       fs.writeFileSync(mdFile, content);
       log.info('Updated CLAUDE.md', { file: mdFile });
     }
