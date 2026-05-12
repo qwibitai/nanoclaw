@@ -28,7 +28,24 @@ export interface CommandInfo {
 export function categorizeMessage(msg: MessageInRow): CommandInfo {
   const content = parseContent(msg.content);
   const text = (content.text || '').trim();
-  const senderId = content.senderId || content.author?.userId || null;
+  // Compose senderId with channel prefix so admin checks match the prefixed
+  // entries in NANOCLAW_ADMIN_USER_IDS (e.g. 'telegram:8557164566').
+  // Strip swarm suffix (e.g. 'telegram-finance' → 'telegram') the same way
+  // router.ts:extractAndUpsertUser does. WhatsApp native adapters set
+  // content.sender; Chat SDK bridge sets content.author.userId; either form
+  // (or an already-prefixed content.senderId) works.
+  const rawSender =
+    (typeof content.senderId === 'string' && content.senderId) ||
+    (typeof content.author?.userId === 'string' && content.author.userId) ||
+    (typeof content.sender === 'string' && content.sender) ||
+    null;
+  const userKind = (msg.channel_type || '').split('-')[0];
+  const senderId =
+    rawSender === null
+      ? null
+      : rawSender.includes(':') || !userKind
+        ? rawSender
+        : `${userKind}:${rawSender}`;
 
   if (!text.startsWith('/')) {
     return { category: 'none', command: '', text, senderId };
