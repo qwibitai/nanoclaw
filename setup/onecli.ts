@@ -21,6 +21,15 @@ import { emitStatus } from './status.js';
 
 const LOCAL_BIN = path.join(os.homedir(), '.local', 'bin');
 
+// Path where the upstream OneCLI installer writes the generated compose file.
+// Both the installer and `docker compose` commands operate on this path.
+const ONECLI_COMPOSE_PATH = path.join(os.homedir(), '.onecli', 'docker-compose.yml');
+
+// Marker comment we write into the compose file so re-running setup detects
+// our prior rewrite and no-ops instead of re-patching (or worse, double-patching).
+// References the upstream issue so anyone reading the file can find context.
+const NANOCLAW_HARDEN_MARKER = '# nanoclaw: admin+postgres pinned to loopback (onecli/onecli#268)';
+
 function childEnv(): NodeJS.ProcessEnv {
   const parts = [LOCAL_BIN];
   if (process.env.PATH) parts.push(process.env.PATH);
@@ -144,6 +153,103 @@ function removeLegacyOnecliContainers(): string {
     }
   }
   return out.join('\n');
+}
+
+/**
+ * Rewrite the OneCLI-generated docker-compose so the admin API (:10254) and
+ * Postgres (:5432) bind to 127.0.0.1, while the proxy gateway (:10255) keeps
+ * whatever the installer chose. On bare-metal Linux the installer auto-picks
+ * the docker0 bridge IP, which makes the admin API and Postgres reachable
+ * from every container on the host's default bridge — see onecli/onecli#268.
+ *
+ * The rewrite is a targeted regex on lines we recognize, with a marker comment
+ * for idempotency. If the upstream compose shape changes in a way we don't
+ * recognize, we warn and no-op rather than corrupt the file.
+ *
+ * `composePath` is an optional override for tests; production code uses the
+ * module-level ONECLI_COMPOSE_PATH constant.
+ */
+export function hardenOneCliBinds(
+  composePath: string = ONECLI_COMPOSE_PATH,
+): { changed: boolean; reason?: string } {
+  if (!fs.existsSync(composePath)) {
+    log.warn('OneCLI compose file not found — skipping bind hardening', { composePath });
+    return { changed: false, reason: 'compose_missing' };
+  }
+
+  const original = fs.readFileSync(composePath, 'utf-8');
+  if (original.includes(NANOCLAW_HARDEN_MARKER)) {
+    return { changed: false, reason: 'already_patched' };
+  }
+
+  // Match the three port lines we expect from upstream's compose. The bind
+  // host is captured in group 1 so we can decide what to swap. We only rewrite
+  // admin (:10254) and postgres (:5432); the gateway (:10255) is left alone
+  // because the bridge IP is the *correct* bind there.
+  const adminRe = /^(\s*-\s*)"\$\{ONECLI_BIND_HOST:-127\.0\.0\.1\}:\$\{ONECLI_APP_PORT:-10254\}:10254"\s*$/m;
+  const pgRe = /^(\s*-\s*)"\$\{ONECLI_BIND_HOST:-127\.0\.0\.1\}:\$\{POSTGRES_PORT:-5432\}:5432"\s*$/m;
+
+  if (!adminRe.test(original) || !pgRe.test(original)) {
+    log.warn('OneCLI compose layout not recognized — leaving file untouched', { composePath });
+    return { changed: false, reason: 'layout_unrecognized' };
+  }
+
+  let patched = original.replace(
+    adminRe,
+    `$1"127.0.0.1:\${ONECLI_APP_PORT:-10254}:10254"`,
+  );
+  patched = patched.replace(
+    pgRe,
+    `$1"127.0.0.1:\${POSTGRES_PORT:-5432}:5432"`,
+  );
+
+  // Prepend the marker so a re-run is a no-op. Keep it as the very first line
+  // so `head -1` / quick visual inspection finds it.
+  patched = `${NANOCLAW_HARDEN_MARKER}\n${patched}`;
+
+  fs.writeFileSync(composePath, patched);
+  log.info('Pinned OneCLI admin API and Postgres to 127.0.0.1', { composePath });
+  return { changed: true };
+}
+
+/**
+ * After rewriting the compose file, ask docker to reconcile the running
+ * containers with the new port mappings. `up -d` is the right verb here:
+ * it stops and recreates only the services whose effective config changed,
+ * and leaves the rest alone. We don't fail the install if this errors —
+ * the rewrite already landed and a `docker compose up -d` on next boot will
+ * pick it up.
+ */
+function applyHardenedCompose(composePath: string = ONECLI_COMPOSE_PATH): void {
+  try {
+    execSync(`docker compose -f ${JSON.stringify(composePath)} up -d`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    log.warn('docker compose up -d after bind hardening failed (will apply on next boot)', { err });
+  }
+}
+
+/**
+ * --reuse mode helper: detect whether an existing OneCLI install has the
+ * admin port bound to anything other than loopback, so we can warn without
+ * rewriting someone else's file. We check the compose marker first (our own
+ * patch), then the installer's .env for ONECLI_BIND_HOST. Returns the unsafe
+ * bind value if detected, otherwise null.
+ */
+function detectUnsafeOneCliBinds(composePath: string = ONECLI_COMPOSE_PATH): string | null {
+  if (!fs.existsSync(composePath)) return null;
+  const composeContent = fs.readFileSync(composePath, 'utf-8');
+  if (composeContent.includes(NANOCLAW_HARDEN_MARKER)) return null;
+
+  const envPath = path.join(path.dirname(composePath), '.env');
+  if (!fs.existsSync(envPath)) return null;
+  const envContent = fs.readFileSync(envPath, 'utf-8');
+  const m = envContent.match(/^\s*ONECLI_BIND_HOST\s*=\s*(.+?)\s*$/m);
+  if (!m) return null;
+  const bind = m[1].replace(/^["']|["']$/g, '');
+  if (!bind || bind === '127.0.0.1' || bind === 'localhost') return null;
+  return bind;
 }
 
 function installOnecli(): { stdout: string; ok: boolean } {
@@ -376,12 +482,23 @@ export async function run(args: string[]): Promise<void> {
     }
     writeEnvOnecliUrl(url);
     log.info('Reusing existing OneCLI', { url });
+    const unsafeBind = detectUnsafeOneCliBinds();
+    if (unsafeBind) {
+      log.warn(
+        'Existing OneCLI binds admin API and Postgres on a non-loopback address. ' +
+          'Containers on that network can reach the admin API and Postgres directly. ' +
+          'See onecli/onecli#268. To remediate: stop the gateway, re-run setup without --reuse, ' +
+          'or manually pin :10254 and :5432 to 127.0.0.1 in ~/.onecli/docker-compose.yml.',
+        { bind: unsafeBind },
+      );
+    }
     const healthy = await pollHealth(url, 5000);
     emitStatus('ONECLI', {
       INSTALLED: true,
       REUSED: true,
       ONECLI_URL: url,
       HEALTHY: healthy,
+      ...(unsafeBind ? { UNSAFE_BIND: unsafeBind, HARDEN_NOTE: 'admin_api_and_postgres_exposed_on_bridge' } : {}),
       STATUS: 'success',
       LOG: 'logs/setup.log',
     });
@@ -409,6 +526,14 @@ export async function run(args: string[]): Promise<void> {
     });
     process.exit(1);
   }
+
+  // Pin admin API (:10254) and Postgres (:5432) to 127.0.0.1 before we hand
+  // back to the rest of setup. The upstream installer picks the docker0
+  // bridge IP as ONECLI_BIND_HOST on bare-metal Linux, which makes both
+  // services reachable from any container on the host's default bridge.
+  // See onecli/onecli#268.
+  const harden = hardenOneCliBinds();
+  if (harden.changed) applyHardenedCompose();
 
   const url = extractUrlFromOutput(res.stdout);
   if (!url) {
@@ -440,6 +565,10 @@ export async function run(args: string[]): Promise<void> {
     INSTALLED: true,
     ONECLI_URL: url,
     HEALTHY: healthy,
+    HARDENED: harden.changed,
+    HARDEN_NOTE: harden.changed
+      ? 'admin_api_and_postgres_pinned_to_loopback'
+      : harden.reason ?? 'no_change',
     // Install succeeded regardless — a failed health poll often just means
     // the endpoint is auth-gated or the gateway hasn't finished warming up.
     // The next step (auth) will surface a genuinely broken gateway via
