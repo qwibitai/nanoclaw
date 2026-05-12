@@ -45,15 +45,15 @@ ARG INSTALL_CJK_FONTS=false
 # Pin CLI versions for reproducibility. Bump deliberately — unpinned installs
 # mean every rebuild silently picks up the latest and can break in lockstep
 # across all users.
-ARG CLAUDE_CODE_VERSION=2.1.119
-ARG AGENT_BROWSER_VERSION=latest
+ARG CLAUDE_CODE_VERSION=2.1.139
+ARG AGENT_BROWSER_VERSION=0.27.0
 ARG VERCEL_VERSION=52.2.1
-ARG GITNEXUS_VERSION=latest
+ARG GITNEXUS_VERSION=1.6.4
 ARG BUN_VERSION=1.3.13
-ARG MMDC_VERSION=11.12.0
+ARG MMDC_VERSION=11.14.0
 ARG GWS_VERSION=0.22.5
-ARG CODEX_VERSION=0.124.0
-ARG DBT_MCP_VERSION=1.15.0
+ARG CODEX_VERSION=0.130.0
+ARG DBT_MCP_VERSION=1.18.0
 
 # ---- System dependencies -----------------------------------------------------
 # tini: correct PID 1 / signal forwarding so outbound.db writes finalize on
@@ -112,12 +112,12 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 #   /opt/dbt-venv/bin/dbt → /usr/local/bin/dbt
 RUN python3 -m venv /opt/snow-venv \
     && /opt/snow-venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && /opt/snow-venv/bin/pip install --no-cache-dir snowflake-cli==3.16.0 \
+    && /opt/snow-venv/bin/pip install --no-cache-dir snowflake-cli==3.17.0 \
     && ln -sf /opt/snow-venv/bin/snow /usr/local/bin/snow
 
 RUN python3 -m venv /opt/dbt-venv \
     && /opt/dbt-venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && /opt/dbt-venv/bin/pip install --no-cache-dir dbt-core==1.11.8 dbt-snowflake==1.11.4 \
+    && /opt/dbt-venv/bin/pip install --no-cache-dir dbt-core==1.11.9 dbt-snowflake==1.11.4 \
     && ln -sf /opt/dbt-venv/bin/dbt /usr/local/bin/dbt
 
 # sooperset/mcp-atlassian — stdio MCP server for Jira + Confluence (72 tools).
@@ -162,9 +162,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends gnupg \
     && rm -rf /var/lib/apt/lists/*
 
 # Render / Railway / Supabase CLIs (released as prebuilt binaries)
-ARG RENDER_VERSION=2.15.1
-ARG RAILWAY_VERSION=4.42.0
-ARG SUPABASE_VERSION=2.90.0
+ARG RENDER_VERSION=2.16.0
+ARG RAILWAY_VERSION=4.57.4
+ARG SUPABASE_VERSION=2.98.2
 RUN DPKG_ARCH=$(dpkg --print-architecture) && UARCH=$(uname -m) \
     && curl -fsSL "https://github.com/render-oss/cli/releases/download/v${RENDER_VERSION}/cli_${RENDER_VERSION}_linux_${DPKG_ARCH}.zip" \
        -o /tmp/render.zip \
@@ -185,9 +185,9 @@ COPY --from=mcp-toolbox-src /toolbox /usr/local/bin/toolbox
 
 # Pinned mnemon binary — auto-tracked by /update-container audit.
 # Per-arch SHA256 from https://github.com/mnemon-dev/mnemon/releases/download/v0.1.2/checksums.txt
-ARG MNEMON_VERSION=0.1.2
-ARG MNEMON_SHA256_arm64=e9acb178843605a813520dacce10f8f3b3608df65841c238f0b3b768b74cd025
-ARG MNEMON_SHA256_amd64=a18aa4304e4d904cb80e46a099efbd95bf0b1486381757be89cd234844603347
+ARG MNEMON_VERSION=0.1.3
+ARG MNEMON_SHA256_arm64=31a1088803a6ea2c0a0b3417828f55dbddd7a773fbfe44e0e79d071e7a0e2700
+ARG MNEMON_SHA256_amd64=dfca47f5834d4afd32c9c76e7e876abc9fbca1fac8e50166f6a9ba3673ce41b0
 
 RUN ARCH=$(dpkg --print-architecture) \
     && SHA=$(if [ "$ARCH" = "arm64" ]; then echo "$MNEMON_SHA256_arm64"; else echo "$MNEMON_SHA256_amd64"; fi) \
@@ -211,9 +211,9 @@ RUN chmod +x /usr/local/bin/mnemon-wrapper.sh \
 # pinned per-arch — bump the version + recompute both via:
 #   curl -sL https://github.com/hex-inc/hex-cli/releases/download/v$V/hex-aarch64-unknown-linux-gnu.tar.xz | sha256sum
 #   curl -sL https://github.com/hex-inc/hex-cli/releases/download/v$V/hex-x86_64-unknown-linux-gnu.tar.xz  | sha256sum
-ARG HEX_CLI_VERSION=1.2.2
-ARG HEX_CLI_SHA256_arm64=d560af1ac9f8b2cc8f1729d02fe900be3db7a412482fd960d9097f03719de14a
-ARG HEX_CLI_SHA256_amd64=5ab71cecc3da7ee5a5e290f9bf96ed87c49792ac70ecac56335238c95d66186b
+ARG HEX_CLI_VERSION=1.3.0
+ARG HEX_CLI_SHA256_arm64=d45c4f70d2a36da2af0d99139265f0d2409b7a2ba15a5e9ad66b9bc8d4fcb79d
+ARG HEX_CLI_SHA256_amd64=dc6ed4d0a367472387aae0f36198d92a13a5b8431aeeda1202393bced7df0de6
 
 RUN ARCH=$(dpkg --print-architecture) \
     && case "$ARCH" in \
@@ -284,7 +284,7 @@ ENV PATH="$PNPM_HOME:$PATH"
 # installed". 10.x also avoids pnpm 11's `blockExoticSubdeps=true` default
 # which rejects git-resolved subdeps like `tree-sitter-dart` inside gitnexus.
 # Keep this in lockstep with package.json's `packageManager`.
-ARG PNPM_VERSION=10.33.0
+ARG PNPM_VERSION=10.33.4
 RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
