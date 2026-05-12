@@ -203,7 +203,12 @@ function originAttr(msg: MessageInRow): string {
 function formatTaskMessage(msg: MessageInRow): string {
   const content = parseContent(msg.content);
   const from = originAttr(msg);
-  const time = formatLocalTime(msg.timestamp, TIMEZONE);
+  // Use process_after (scheduled run time) rather than timestamp (row creation
+  // time). For recurring tasks, timestamp is when the recurrence row was inserted
+  // (often the previous day), not when the task was due — misleading the agent
+  // into thinking the occurrence already happened or belongs to the wrong day.
+  const displayTime = msg.process_after ?? msg.timestamp;
+  const time = formatLocalTime(displayTime, TIMEZONE);
   const parts: string[] = [];
   if (content.scriptOutput) {
     parts.push('Script output:', JSON.stringify(content.scriptOutput, null, 2), '');
