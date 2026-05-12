@@ -18,6 +18,7 @@ import path from 'path';
 
 import { log } from '../src/log.js';
 import { emitStatus } from './status.js';
+import { getPlatform, commandExists, hasSystemd } from './platform.js';
 
 const LOCAL_BIN = path.join(os.homedir(), '.local', 'bin');
 
@@ -152,8 +153,17 @@ function installOnecli(): { stdout: string; ok: boolean } {
   const cleanup = removeLegacyOnecliContainers();
   if (cleanup) stdout += cleanup + '\n';
 
+  // On Podman systems the installer can't auto-detect a Docker bridge interface,
+  // so it rejects a missing bind address. Bind to 127.0.0.1; containers reach
+  // the host via slirp4netns (allow_host_loopback=true) which translates the
+  // container-side gateway (10.0.2.2) to the host's loopback.
+  const gwEnv =
+    getPlatform() === 'linux' && commandExists('podman') && !process.env.ONECLI_BIND_HOST
+      ? { ...process.env, ONECLI_BIND_HOST: '127.0.0.1' }
+      : undefined;
+
   // Gateway install (docker-compose based, no rate-limit concerns).
-  const gw = runInstall('curl -fsSL onecli.sh/install | sh');
+  const gw = runInstall('curl -fsSL onecli.sh/install | sh', gwEnv);
   stdout += gw.stdout;
   if (!gw.ok) {
     log.error('OneCLI gateway install failed', { stderr: gw.stderr });
@@ -183,11 +193,15 @@ function installOnecli(): { stdout: string; ok: boolean } {
   return { stdout, ok: true };
 }
 
-function runInstall(cmd: string): { stdout: string; stderr?: string; ok: boolean } {
+function runInstall(
+  cmd: string,
+  env?: NodeJS.ProcessEnv,
+): { stdout: string; stderr?: string; ok: boolean } {
   try {
     const stdout = execSync(cmd, {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      ...(env ? { env } : {}),
     });
     return { stdout, ok: true };
   } catch (err) {
@@ -433,6 +447,37 @@ export async function run(args: string[]): Promise<void> {
 
   writeEnvOnecliUrl(url);
   log.info('Wrote ONECLI_URL to .env', { url });
+
+  if (getPlatform() === 'linux' && commandExists('podman') && hasSystemd()) {
+    const unitDir = path.join(os.homedir(), '.config', 'systemd', 'user');
+    const unitPath = path.join(unitDir, 'onecli-compose.service');
+    const workDir = path.join(os.homedir(), '.onecli');
+    const unitContent = [
+      '[Unit]',
+      'Description=OneCLI gateway (docker compose)',
+      'After=podman.socket',
+      'Requires=podman.socket',
+      '',
+      '[Service]',
+      'Type=oneshot',
+      'RemainAfterExit=yes',
+      `WorkingDirectory=${workDir}`,
+      'ExecStart=docker compose up -d --wait',
+      'ExecStop=docker compose stop',
+      '',
+      '[Install]',
+      'WantedBy=default.target',
+    ].join('\n') + '\n';
+    fs.mkdirSync(unitDir, { recursive: true });
+    fs.writeFileSync(unitPath, unitContent);
+    try {
+      execSync('systemctl --user daemon-reload', { stdio: 'ignore' });
+      execSync('systemctl --user enable onecli-compose.service', { stdio: 'ignore' });
+      log.info('Enabled onecli-compose.service for podman');
+    } catch (err) {
+      log.warn('Could not enable onecli-compose.service', { err });
+    }
+  }
 
   const healthy = await pollHealth(url, 15000);
 

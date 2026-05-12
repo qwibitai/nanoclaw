@@ -30,11 +30,28 @@ case "$(uname -s)" in
     brew install --cask docker
     ;;
   Linux)
-    echo "STEP: docker-get-script"
-    curl -fsSL https://get.docker.com | sh
-    echo "STEP: usermod-docker-group"
-    sudo usermod -aG docker "$USER"
-    echo "NOTE: you may need to log out and back in for docker group membership to take effect"
+    if command -v dnf >/dev/null 2>&1; then
+      echo "STEP: dnf-install-podman"
+      sudo dnf install -y podman podman-docker docker-compose util-linux-script slirp4netns
+      # podman-compose lacks --wait; remove it if pulled in as a weak dep
+      sudo dnf remove -y podman-compose 2>/dev/null || true
+      echo "STEP: enable-podman-socket"
+      systemctl --user enable --now podman.socket
+      echo "NOTE: using podman with docker compatibility shim and docker-compose v2"
+    elif command -v yum >/dev/null 2>&1; then
+      echo "STEP: yum-install-podman"
+      sudo yum install -y podman podman-docker docker-compose
+      sudo yum remove -y podman-compose 2>/dev/null || true
+      echo "STEP: enable-podman-socket"
+      systemctl --user enable --now podman.socket
+      echo "NOTE: using podman with docker compatibility shim and docker-compose v2"
+    else
+      echo "STEP: docker-get-script"
+      curl -fsSL https://get.docker.com | sh
+      echo "STEP: usermod-docker-group"
+      sudo usermod -aG docker "$USER"
+      echo "NOTE: you may need to log out and back in for docker group membership to take effect"
+    fi
     ;;
   *)
     echo "STATUS: failed"

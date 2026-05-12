@@ -11,18 +11,75 @@ import { log } from './log.js';
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'docker';
 
-/** CLI args needed for the container to resolve the host gateway. */
-export function hostGatewayArgs(): string[] {
-  // On Linux, host.docker.internal isn't built-in — add it explicitly
-  if (os.platform() === 'linux') {
-    return ['--add-host=host.docker.internal:host-gateway'];
+/**
+ * Returns true when the docker CLI is actually the Podman shim.
+ * Cached after the first call.
+ */
+let _isPodman: boolean | undefined;
+export function isPodman(): boolean {
+  if (_isPodman !== undefined) return _isPodman;
+  try {
+    const out = execSync('docker version', {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5000,
+    });
+    _isPodman = /podman/i.test(out);
+  } catch {
+    _isPodman = false;
   }
-  return [];
+  return _isPodman;
 }
 
-/** Returns CLI args for a readonly bind mount. */
+let _selinuxEnforcing: boolean | undefined;
+function isSelinuxEnforcing(): boolean {
+  if (_selinuxEnforcing !== undefined) return _selinuxEnforcing;
+  if (os.platform() !== 'linux') return (_selinuxEnforcing = false);
+  try {
+    const result = execSync('getenforce', {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
+    });
+    _selinuxEnforcing = result.trim() === 'Enforcing';
+  } catch {
+    _selinuxEnforcing = false;
+  }
+  return _selinuxEnforcing;
+}
+
+/** Returns true when SELinux is enforcing on this host. */
+export { isSelinuxEnforcing };
+
+/**
+ * Returns ':z' when SELinux is enforcing, otherwise ''.
+ *
+ * Append to a bind-mount spec to relabel the host directory with the shared
+ * container_file_t label, allowing both the host process and multiple
+ * containers to access it while SELinux enforcement stays active.
+ * On non-SELinux systems this suffix is ignored by the runtime.
+ */
+export function selinuxMountSuffix(): string {
+  return isSelinuxEnforcing() ? ':z' : '';
+}
+
+/** CLI args needed for the container to resolve the host gateway. */
+export function hostGatewayArgs(): string[] {
+  if (os.platform() !== 'linux') return [];
+  if (isPodman()) {
+    // slirp4netns with allow_host_loopback=true puts the host at 10.0.2.2,
+    // allowing containers to reach services bound to 127.0.0.1 on the host.
+    // pasta (the default) cannot reach the host's loopback from containers.
+    return ['--network=slirp4netns:allow_host_loopback=true', '--add-host=host.docker.internal:10.0.2.2'];
+  }
+  // Docker: host.docker.internal isn't built-in on Linux — add it explicitly.
+  return ['--add-host=host.docker.internal:host-gateway'];
+}
+
+/** Returns CLI args for a readonly bind mount, with SELinux relabeling if enforcing. */
 export function readonlyMountArgs(hostPath: string, containerPath: string): string[] {
-  return ['-v', `${hostPath}:${containerPath}:ro`];
+  const z = isSelinuxEnforcing() ? ',z' : '';
+  return ['-v', `${hostPath}:${containerPath}:ro${z}`];
 }
 
 /** Stop a container by name. Uses execFileSync to avoid shell injection. */
