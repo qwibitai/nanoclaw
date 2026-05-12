@@ -64,14 +64,25 @@ async function probeUserinfo(): Promise<
   };
 }
 
+/**
+ * Probe Google's `tokeninfo` endpoint to surface granted scopes + expiry.
+ *
+ * OneCLI contract: the literal `access_token=onecli-managed` is the
+ * placeholder the OneCLI gateway recognizes and rewrites in flight,
+ * substituting the real bearer it holds for this agent. Nothing in this
+ * container ever sees a real token — the placeholder is intentional and
+ * load-bearing. If the gateway is not wired (or this container's traffic
+ * is not flowing through the OneCLI proxy), Google rejects the
+ * placeholder with HTTP 400, which is the diagnostic signal the operator
+ * needs to re-run `/add-google-auth`.
+ *
+ * Same literal appears in every downstream Google MCP credential stub
+ * (e.g. `~/.gmail-mcp/credentials.json`); see `add-google-auth` SKILL.md
+ * Phase 3 Step 2.
+ */
 async function probeTokeninfo(): Promise<
   { ok: true; scopes: string[]; expiresIn?: number } | { ok: false; status: number; body: string }
 > {
-  // tokeninfo wants the access_token as a query param OR header. With
-  // OneCLI in front, we pass a placeholder query value; the gateway
-  // rewrites it. If the gateway is not wired, Google rejects the
-  // placeholder with 400, which is the signal the operator needs to
-  // run `/add-google-auth` (or whatever the install skill is named).
   const url = `${TOKENINFO_URL}?access_token=onecli-managed`;
   const res = await _fetch(url, { method: 'GET' });
   if (!res.ok) {

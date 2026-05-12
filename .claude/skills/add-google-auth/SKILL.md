@@ -26,7 +26,7 @@ Gmail/Calendar/Sheets/Contacts call. Source:
 ### Step 1: Verify OneCLI is installed and running
 
 ```bash
-onecli --version
+onecli version
 curl -sf http://127.0.0.1:10254/api/health > /dev/null && echo OK
 ```
 
@@ -36,21 +36,32 @@ If either fails, run `/init-onecli` first.
 
 NanoClaw does NOT do the OAuth dance — OneCLI does. Tell the operator:
 
-> Open `http://127.0.0.1:10254` in a browser, go to **Apps → Google**, and
-> click **Connect**. Sign in with the Google account the agent should act
-> as. Grant every scope you might ever need from this account — Gmail
-> read+modify+send, Calendar read+events, Sheets, Contacts (People API).
-> Re-connecting later to widen scopes is supported but requires user
-> interaction; granting up front avoids interruptions.
+> Open `http://127.0.0.1:10254` in a browser, go to **Connections**, and
+> click **Connect** on each Google service the agent needs — typically
+> **Google Calendar**, **Gmail**, **Google Drive**, **Google Sheets**,
+> **Google Contacts**. Sign in with the Google account the agent should
+> act as. Grant every scope you might ever need from this account; widen
+> later by reconnecting, but each reconnect requires user interaction so
+> granting up front avoids interruptions.
+
+OneCLI's dashboard groups OAuth by Google service (one Connect button per
+API), not by Google account. To connect a second account (work +
+personal), click **Connect** again on the same service tile and sign in
+with the other account — OneCLI distinguishes per-app connections by
+identifier; the downstream skill (e.g. `add-gmail-tool`) selects the
+right one at request time.
 
 Verify the connection:
 
 ```bash
-onecli apps get --provider google
+curl -s http://127.0.0.1:10254/api/connections \
+  | jq '[.[] | select(.provider | test("(?i)google"))] | map({provider, status, scopes})'
 ```
 
-Expected: `"connection": { "status": "connected" }` with the scopes you
-granted listed.
+Expected: a non-empty array with `"status": "connected"` for each Google
+service you connected, and a `scopes` field listing what was granted.
+An empty array (`[]`) means the OAuth dance has not completed — re-open
+the dashboard and finish the Connect flow.
 
 ### Step 3: Decide on per-account scoping (optional, multi-account)
 
