@@ -21,6 +21,7 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { toSqliteUtc } from '../../src/db/sqlite-utc.js';
 
 export interface RegisterOptions {
   inboundDbPath: string;
@@ -48,10 +49,6 @@ export function registerCronJobs(opts: RegisterOptions): void {
   let seq = maxSeq < 2 ? 2 : maxSeq + 2 - (maxSeq % 2);
 
   const now = Date.now();
-
-  // SQLite-friendly UTC datetime: 'YYYY-MM-DD HH:MM:SS' (matches datetime('now')).
-  // CRITICAL: do NOT use Date.toISOString() — 'T' > ' ' breaks process_after comparisons.
-  const toSqliteUtc = (d: Date): string => d.toISOString().slice(0, 19).replace('T', ' ');
 
   for (const job of config.jobs) {
     const procedural = fs.readFileSync(path.join(opts.promptsDir, job.promptFile), 'utf8');
