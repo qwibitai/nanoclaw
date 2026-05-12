@@ -17,6 +17,7 @@ registerChannelAdapter('slack', {
       signingSecret: env.SLACK_SIGNING_SECRET,
     });
     const bridge = createChatSdkBridge({ adapter: slackAdapter, concurrency: 'concurrent', supportsThreads: true });
+    bridge.shouldUseThreadsFor = (platformId: string) => !platformId.startsWith('D');
     bridge.resolveChannelName = async (platformId: string) => {
       try {
         const info = await slackAdapter.fetchThread(platformId);
