@@ -81,8 +81,10 @@ export async function runSlackChannel(displayName: string): Promise<ChannelFlowR
     );
   }
 
-  const ownerUserId = await collectSlackUserId();
-  const dmChannelId = await openDmChannel(token, ownerUserId);
+  const pastedUserId = await collectSlackUserId();
+  const dmOutcome = await openDmChannel(token, pastedUserId, displayName);
+  if (dmOutcome === BACK_TO_CHANNEL_SELECTION) return BACK_TO_CHANNEL_SELECTION;
+  const { userId: ownerUserId, dmChannelId } = dmOutcome;
   const platformId = `slack:${dmChannelId}`;
 
   const role = await askOperatorRole('Slack');
@@ -341,10 +343,130 @@ async function collectSlackUserId(): Promise<string> {
   return id;
 }
 
-async function openDmChannel(token: string, userId: string): Promise<string> {
+interface SlackMember {
+  id: string;
+  name: string;
+  real_name?: string;
+  profile?: { display_name?: string; email?: string };
+  deleted?: boolean;
+  is_bot?: boolean;
+}
+
+async function listWorkspaceMembers(token: string): Promise<SlackMember[]> {
+  const res = await fetch(`${SLACK_API}/users.list?limit=200`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = (await res.json()) as {
+    ok?: boolean;
+    members?: SlackMember[];
+    error?: string;
+  };
+  if (!data.ok || !data.members) {
+    throw new Error(data.error ?? `HTTP ${res.status}`);
+  }
+  return data.members.filter(
+    (u) => !u.deleted && !u.is_bot && u.id !== 'USLACKBOT',
+  );
+}
+
+function scoreMember(u: SlackMember, q: string): number {
+  const ql = q.toLowerCase();
+  const fields = [
+    u.real_name,
+    u.profile?.display_name,
+    u.name,
+    u.profile?.email,
+  ]
+    .filter((s): s is string => Boolean(s))
+    .map((s) => s.toLowerCase());
+  let best = 0;
+  for (const f of fields) {
+    if (f === ql) best = Math.max(best, 100);
+    else if (f.startsWith(ql)) best = Math.max(best, 80);
+    else if (f.includes(ql)) best = Math.max(best, 50);
+  }
+  return best;
+}
+
+/**
+ * Workspace-member lookup for the `user_not_found` fallback. Calls
+ * users.list, asks for the user's name/email, and offers a brightSelect
+ * over the top matches. Returns the chosen member ID, or null if the
+ * user opts out (no matches, none-of-these, or API error).
+ */
+async function lookupSlackUserId(
+  token: string,
+  displayName: string,
+): Promise<{ id: string; label: string } | 'manual' | 'back'> {
   const s = p.spinner();
   const start = Date.now();
-  s.start('Opening a DM channel…');
+  s.start('Loading workspace members…');
+  let members: SlackMember[];
+  try {
+    members = await listWorkspaceMembers(token);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    s.stop(`Couldn't load members: ${msg}`, 1);
+    setupLog.step('slack-id-lookup', 'failed', Date.now() - start, { ERROR: msg });
+    return 'manual';
+  }
+  s.stop(
+    `${members.length} members loaded. ${k.dim(`(${fmtDuration(Date.now() - start)})`)}`,
+  );
+  setupLog.step('slack-id-lookup', 'success', Date.now() - start, {
+    MEMBER_COUNT: String(members.length),
+  });
+
+  const query = ensureAnswer(
+    await p.text({
+      message: "What's your name (or email) in this Slack?",
+      placeholder: displayName || 'e.g. Ali, ali@qwibit.ai',
+      defaultValue: displayName || '',
+    }),
+  ) as string;
+
+  const ranked = members
+    .map((u) => ({ u, score: scoreMember(u, query.trim()) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+
+  if (ranked.length === 0) {
+    p.log.warn(`No matches for "${query}".`);
+    return 'manual';
+  }
+
+  const choice = ensureAnswer(
+    await brightSelect<string>({
+      message: 'Which one is you?',
+      options: [
+        ...ranked.map(({ u }) => ({
+          value: u.id,
+          label: u.real_name || u.profile?.display_name || u.name,
+          hint: `${u.id}${u.profile?.email ? '  ·  ' + u.profile.email : ''}`,
+        })),
+        { value: '__manual__', label: 'None of these — let me paste it manually' },
+        { value: '__back__', label: '← Back to channel selection' },
+      ],
+    }),
+  ) as string;
+
+  if (choice === '__manual__') return 'manual';
+  if (choice === '__back__') return 'back';
+  const picked = ranked.find((x) => x.u.id === choice);
+  const label =
+    picked?.u.real_name || picked?.u.profile?.display_name || picked?.u.name || choice;
+  setupLog.userInput('slack_user_id_via_lookup', choice);
+  return { id: choice, label };
+}
+
+interface OpenDmResult {
+  ok: boolean;
+  channelId?: string;
+  error?: string;
+}
+
+async function tryOpenDm(token: string, userId: string): Promise<OpenDmResult> {
   try {
     const res = await fetch(`${SLACK_API}/conversations.open`, {
       method: 'POST',
@@ -360,17 +482,51 @@ async function openDmChannel(token: string, userId: string): Promise<string> {
       error?: string;
     };
     if (data.ok && data.channel?.id) {
+      return { ok: true, channelId: data.channel.id };
+    }
+    return { ok: false, error: data.error ?? `HTTP ${res.status}` };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Open a DM channel with the operator. On `user_not_found`, branch into
+ * the lookup-or-retype fallback instead of aborting setup. Other errors
+ * (missing_scope, network, etc.) bail like before. Returns the eventual
+ * member ID and DM channel ID — the member ID may differ from the one
+ * the user originally pasted if they used the lookup branch.
+ */
+async function openDmChannel(
+  token: string,
+  initialUserId: string,
+  displayName: string,
+): Promise<
+  { userId: string; dmChannelId: string } | typeof BACK_TO_CHANNEL_SELECTION
+> {
+  const MAX_ATTEMPTS = 3;
+  let userId = initialUserId;
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const s = p.spinner();
+    const start = Date.now();
+    s.start('Opening a DM channel…');
+    const result = await tryOpenDm(token, userId);
+    if (result.ok && result.channelId) {
       s.stop(`DM channel ready. ${k.dim(`(${fmtDuration(Date.now() - start)})`)}`);
       setupLog.step('slack-open-dm', 'success', Date.now() - start, {
-        DM_CHANNEL_ID: data.channel.id,
+        DM_CHANNEL_ID: result.channelId,
+        ATTEMPTS: String(attempt + 1),
       });
-      return data.channel.id;
+      return { userId, dmChannelId: result.channelId };
     }
-    const reason = data.error ?? `HTTP ${res.status}`;
+    const reason = result.error ?? 'unknown';
     s.stop(`Couldn't open a DM channel: ${reason}`, 1);
     setupLog.step('slack-open-dm', 'failed', Date.now() - start, {
       ERROR: reason,
+      ATTEMPT: String(attempt + 1),
     });
+
     if (reason === 'missing_scope') {
       await fail(
         'slack-open-dm',
@@ -378,23 +534,64 @@ async function openDmChannel(token: string, userId: string): Promise<string> {
         'Go to OAuth & Permissions in your Slack app settings, add the im:write scope, reinstall the app, then retry setup.',
       );
     }
-    await fail(
-      'slack-open-dm',
-      "Couldn't open a DM channel with you.",
-      `Slack said "${reason}". Check the member ID and app permissions, then retry.`,
+    if (reason !== 'user_not_found') {
+      await fail(
+        'slack-open-dm',
+        "Couldn't open a DM channel with you.",
+        `Slack said "${reason}". Check the member ID and app permissions, then retry.`,
+      );
+    }
+    if (attempt === MAX_ATTEMPTS - 1) {
+      await fail(
+        'slack-open-dm',
+        "Couldn't open a DM channel with you.",
+        `Slack didn't recognize the member ID after ${MAX_ATTEMPTS} attempts. Check that you're copying it from the same workspace your bot is installed in, then retry setup.`,
+      );
+    }
+
+    const next = ensureAnswer(
+      await brightSelect<'lookup' | 'retype' | 'back'>({
+        message: "Slack didn't recognize that ID. What now?",
+        options: [
+          { value: 'lookup', label: 'Look it up for me', hint: 'search by name or email' },
+          { value: 'retype', label: 'Paste a different ID' },
+          { value: 'back', label: '← Back to channel selection' },
+        ],
+        initialValue: 'lookup',
+      }),
     );
-  } catch (err) {
-    s.stop(`Couldn't reach Slack. ${k.dim(`(${fmtDuration(Date.now() - start)})`)}`, 1);
-    const message = err instanceof Error ? err.message : String(err);
-    setupLog.step('slack-open-dm', 'failed', Date.now() - start, {
-      ERROR: message,
-    });
-    await fail(
-      'slack-open-dm',
-      "Couldn't reach Slack.",
-      'Check your internet connection and retry setup.',
-    );
+
+    if (next === 'back') {
+      setupLog.step('slack-open-dm', 'aborted', 0, { REASON: 'user_back_to_channels' });
+      return BACK_TO_CHANNEL_SELECTION;
+    }
+    if (next === 'lookup') {
+      const found = await lookupSlackUserId(token, displayName);
+      if (found === 'back') {
+        setupLog.step('slack-open-dm', 'aborted', 0, {
+          REASON: 'user_back_to_channels',
+        });
+        return BACK_TO_CHANNEL_SELECTION;
+      }
+      if (found !== 'manual') {
+        const confirmed = ensureAnswer(
+          await p.confirm({
+            message: `Wire this agent to ${found.label} (${found.id})? They'll get a welcome DM.`,
+            initialValue: true,
+          }),
+        );
+        if (confirmed) {
+          userId = found.id;
+          continue;
+        }
+        // not confirmed — fall through to manual paste so they can correct.
+      }
+      // 'manual' or rejected confirmation → fall through to retype.
+    }
+    userId = await collectSlackUserId();
   }
+  // unreachable — fail() exits before we get here
+  throw new Error('exhausted DM open attempts');
 }
 
 async function resolveAgentName(): Promise<string> {
