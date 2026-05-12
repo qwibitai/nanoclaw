@@ -541,16 +541,6 @@ export class SourceIngester {
 
     for (let factIndex = 0; factIndex < output.facts.length; factIndex++) {
       const rawFact = output.facts[factIndex];
-      // Mirror the chat-pair classifier's importance gate (classifier.ts:364)
-      // so source-ingested facts (CC turn-pair captures, container-agent tool
-      // fetches: web/Granola/Pocket/attachments/etc.) get the same retention
-      // bar as message-stream facts. Without this filter, source paths stored
-      // 1-5 while chat stored only 4-5, polluting recall with low-signal noise.
-      if (rawFact.importance < MIN_FACT_IMPORTANCE) {
-        factsDroppedForImportance++;
-        if (health) health.recordLowImportanceDropped(agentGroupId);
-        continue;
-      }
       const factInput: FactInput = {
         content: rawFact.content,
         category: rawFact.category,
@@ -563,11 +553,26 @@ export class SourceIngester {
         },
       };
 
+      // Redaction runs BEFORE the importance gate to match classifier.ts:340.
+      // Secret-shaped content is always counted in health.recordRedaction, even
+      // when the fact would have been dropped for being low-signal. Audit signal
+      // > store-write savings.
       const redactionResult = redactSecrets(factInput);
       if (!redactionResult.shouldStore) {
         if (health) {
           health.recordRedaction(agentGroupId, redactionResult.reason ?? 'unknown');
         }
+        continue;
+      }
+
+      // Mirror the chat-pair classifier's importance gate (classifier.ts:364)
+      // so source-ingested facts (CC turn-pair captures, container-agent tool
+      // fetches: web/Granola/Pocket/attachments/etc.) get the same retention
+      // bar as message-stream facts. Without this filter, source paths stored
+      // 1-5 while chat stored only 4-5, polluting recall with low-signal noise.
+      if (rawFact.importance < MIN_FACT_IMPORTANCE) {
+        factsDroppedForImportance++;
+        if (health) health.recordLowImportanceDropped(agentGroupId);
         continue;
       }
 

@@ -379,6 +379,72 @@ describe('SourceIngester', () => {
     ingestDb.close();
   });
 
+  it('test_processInboxFile_redaction_runs_before_importance_gate — low-importance secret-shaped facts are counted as redactions, not importance drops (parity with classifier.ts:340)', async () => {
+    const ingestDb = makeIngestDb();
+    setIngestDb(ingestDb);
+    setDeadLettersDb(ingestDb);
+
+    // A fact with importance=1 (would be dropped by the importance gate) that
+    // ALSO contains a secret-shape string. With redaction running first, this
+    // must increment recordRedaction, not recordLowImportanceDropped — so the
+    // operator-facing redaction telemetry doesn't go dark for low-signal
+    // source-ingested content that happens to leak secrets.
+    vi.mocked(callClassifier).mockResolvedValue({
+      worth_storing: true,
+      facts: [
+        {
+          content: 'low signal that leaks sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFF',
+          category: 'fact',
+          importance: 1,
+          entities: [],
+          source_role: 'external',
+        },
+        { content: 'kept fact D', category: 'fact', importance: 4, entities: [], source_role: 'external' },
+      ],
+    });
+
+    const agentGroupId = 'ag-test-redaction-order';
+    const sourcesBasePath = '/test/test-group';
+    const fileContent = 'A source document mixing a low-importance secret with a real fact.';
+    const filePath = '/tmp/mixed-redaction-order.txt';
+
+    stubProcessInboxFileValidation(filePath, sourcesBasePath, fileContent);
+    const mkdirSpy = vi.spyOn(fs, 'mkdirSync').mockImplementation(() => undefined);
+    const renameSpy = vi.spyOn(fs, 'renameSync').mockImplementation(() => undefined);
+
+    const ingester = new SourceIngester();
+    const store = makeStore();
+    const health = makeHealth();
+
+    const result = await ingester.processInboxFile(agentGroupId, sourcesBasePath, filePath, store, health);
+
+    // Only the non-secret importance>=4 fact gets written.
+    expect(result.factsWritten).toBe(1);
+    expect(result.failed).toBe(false);
+    expect(store.remember).toHaveBeenCalledTimes(1);
+
+    // The secret-shape fact MUST be counted as a redaction, not as a
+    // low-importance drop. This is the parity guarantee — if the order ever
+    // flips back, this test catches it.
+    expect(health.recordRedaction).toHaveBeenCalledTimes(1);
+    expect(health.recordRedaction).toHaveBeenCalledWith(agentGroupId, expect.any(String));
+    expect(health.recordLowImportanceDropped).not.toHaveBeenCalled();
+
+    // facts_dropped_low_importance must be 0 — the redacted fact was filtered
+    // before reaching the importance gate, so the counter doesn't fire.
+    const psRow = ingestDb
+      .prepare(`SELECT facts_written, facts_emitted, facts_dropped_low_importance FROM processed_sources`)
+      .get() as { facts_written: number; facts_emitted: number; facts_dropped_low_importance: number };
+    expect(psRow).toBeTruthy();
+    expect(psRow.facts_written).toBe(1);
+    expect(psRow.facts_emitted).toBe(2);
+    expect(psRow.facts_dropped_low_importance).toBe(0);
+
+    mkdirSpy.mockRestore();
+    renameSpy.mockRestore();
+    ingestDb.close();
+  });
+
   it('test_processInboxFile_success_clears_dead_letters — pre-existing dead_letters row is deleted in same txn as processed_sources INSERT', async () => {
     const ingestDb = makeIngestDb();
     setIngestDb(ingestDb);
