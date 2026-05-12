@@ -350,9 +350,7 @@ async function _runThreadedPath(task: Task, childAgentGroupId: string): Promise<
       // and child status/chat messages never reach the spawn thread.
       // mg.platform_id already contains the scheme+channel prefix.
       const bareThreadId = current.child_platform_thread_id!;
-      const encodedThreadId = bareThreadId.includes(':')
-        ? bareThreadId
-        : `${mg.platform_id}:${bareThreadId}`;
+      const encodedThreadId = bareThreadId.includes(':') ? bareThreadId : `${mg.platform_id}:${bareThreadId}`;
       const { session: childSession } = resolveSession(
         childAgentGroupId,
         task.parent_messaging_group_id,
