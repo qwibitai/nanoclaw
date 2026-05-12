@@ -32,6 +32,7 @@ import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { startWorktreeCleanup, stopWorktreeCleanup } from './worktree-cleanup.js';
 import { startPluginUpdater, stopPluginUpdater } from './plugin-updater.js';
 import { startCommitScan, stopCommitScan } from './commit-scan.js';
+import { startDailySummary, stopDailySummary } from './daily-summary.js';
 import { restoreRemoteControl } from './remote-control.js';
 import { startDiscordSlashCommands, stopDiscordSlashCommands } from './channels/discord-slash-commands.js';
 import { routeInbound } from './router.js';
@@ -314,7 +315,16 @@ async function main(): Promise<void> {
   startCommitScan();
   log.info('Commit scan started');
 
-  // 10. Restore any Remote Control session that was running before restart
+  // 10. Daily summary digest (5min tick; fires at DAILY_SUMMARY_HOUR in
+  //     DAILY_SUMMARY_TZ once per day, posts per-group activity to the
+  //     primary wired channel — or container.json's dailySummary
+  //     override). Set DAILY_SUMMARY_ENABLED=0 to disable.
+  if (process.env.DAILY_SUMMARY_ENABLED !== '0') {
+    startDailySummary();
+    log.info('Daily summary started');
+  }
+
+  // 11. Restore any Remote Control session that was running before restart
   restoreRemoteControl();
 
   // 10. Start Discord slash-command client (gated on
@@ -341,6 +351,7 @@ async function shutdown(signal: string): Promise<void> {
   stopWorktreeCleanup();
   stopPluginUpdater();
   stopCommitScan();
+  stopDailySummary();
   await stopDiscordSlashCommands();
   try {
     await teardownChannelAdapters();

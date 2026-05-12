@@ -1,33 +1,82 @@
-# Daily Digest Pattern (Phase 5.4)
+# Daily Digest
 
-## Why there's no "daily digest feature" in v2
+v2 supports daily digests two ways: a built-in host-side default (covers
+ship_log + backlog automatically for every wired group) and an agent-driven
+pattern (richer per-group content via `schedule_task`). They coexist —
+pick the one that fits the use case, or run both.
 
-v1 shipped a dedicated host-side `daily-notifications.ts` module that
-read from two bespoke tables (`backlog`, `ship_log`) and emitted a
-hardcoded summary at 8am Eastern. That tied the digest's content shape
-to a specific persistence schema and required a host code change for
-any content change.
+## Path A — Host-side daily summary (default)
 
-v2 replaces the hardcoded feature with a composition of existing
-primitives:
+Shipped at `src/daily-summary.ts`. Runs a 5-min tick on the host; fires
+once a day per agent group at the configured hour-in-TZ, posts a digest
+to the group's wired channel. Skips groups with no recent activity. No
+per-group setup required — runs out of the box for every agent group
+already wired to a channel.
 
-- **Scheduling** — `schedule_task` MCP tool (cron-style recurrence via
-  the host's task scheduler).
-- **Data sources** — the agent has access to: `search_threads` (cross-
-  thread FTS), auto-memories (Claude Code native), `git log` + `gh pr
-  list` inside cloned repos (Phase 2.11), MCP tools per group.
-- **Delivery** — the agent's chat output naturally goes to whatever
-  chat it was scheduled in.
+**What it includes:**
 
-The agent composes the digest at runtime from whatever sources are
-relevant. When v2 ships a new data source, it's automatically
-available to the digest without a code change.
+- **🤖 Agent Shipped** — `ship_log` entries (last 24h), grouped by repo.
+  Populated by `commit-scan` (host-side, default-branch commits in cloned
+  repos) and the `add_ship_log` MCP tool agents call inline.
+- **✅ Resolved** — backlog items with `status IN ('resolved','wont_fix')`
+  and `resolved_at >= since`.
+- **📌 Open Backlog** — all `open` + `in_progress` backlog items, with
+  priority emoji + an `[in progress]` suffix.
 
-## How to set up a daily digest
+**Sections are omitted when empty.** A group whose all-three are empty
+gets no message that day.
 
-Pick whichever agent group should produce it (usually main/Axie for a
-personal digest, or a group agent for team digests). In the chat where
-you want the digest delivered, say something like:
+**What it does NOT include** (vs v1):
+
+- GitHub team-PR section (`fetchGithubMergedPRs`) — skipped at port
+  time. `commit-scan` already covers default-branch shipping in locally
+  cloned repos; the gap is non-cloned team repos + author attribution.
+  Add by porting v1's `fetchGithubMergedPRs` if/when it matters.
+
+**Config — env vars (set on the host service):**
+
+| Var | Default | Purpose |
+|---|---|---|
+| `DAILY_SUMMARY_ENABLED` | `1` | Set to `0` to disable host-side digest entirely. |
+| `DAILY_SUMMARY_HOUR` | `8` | Local hour (0–23) in `DAILY_SUMMARY_TZ`. |
+| `DAILY_SUMMARY_TZ` | `America/New_York` | IANA TZ string. |
+
+**Config — per-group override:** by default the digest goes to the
+agent group's primary wired channel (highest `mga.priority`, oldest
+tiebreak). To target a different wired channel, set
+`dailySummary.messagingGroupId` in the group's `container.json`:
+
+```json
+"dailySummary": {
+  "messagingGroupId": "mg-1776735605486-p87hha2"
+}
+```
+
+Look up the id via:
+
+```sql
+SELECT id, channel_type, platform_id, name FROM messaging_groups
+WHERE name LIKE '%channel-name%';
+```
+
+Example: illysium's `container.json` routes the digest to Slack
+`#agents-xzo` even though Discord is the primary wiring.
+
+**State:** `data/daily-summary-state.json` tracks the
+`lastFiredDateKey` (YYYY-MM-DD in TZ) so a host restart on the same day
+doesn't re-fire.
+
+**Lifecycle:** `startDailySummary()` boots from `src/index.ts` after
+commit-scan; `stopDailySummary()` runs in `shutdown()` alongside other
+host-side timers.
+
+## Path B — Agent-driven digest (richer content)
+
+The host-side default covers `ship_log` + `backlog`. If you want the
+digest to pull from other sources — auto-memories, recent threads, `git
+log`, `gh pr list`, MCP tools — schedule it through the agent instead.
+
+In the chat where you want the digest delivered, say something like:
 
 > Schedule a recurring task to run at 8am America/New_York every day.
 > When it runs, search my recent threads and memories for what I
@@ -36,40 +85,35 @@ you want the digest delivered, say something like:
 > line summary. Skip the message entirely on days with nothing
 > noteworthy — don't send "nothing happened" filler.
 
-The agent will call `schedule_task` with:
-- `processAfter` — next 8am in the given timezone
-- `recurrence` — `0 8 * * *`
-- `prompt` — something like the above
+The agent calls `schedule_task` with `processAfter` = next 8am in TZ,
+`recurrence = '0 8 * * *'`, and the prompt. When the task fires, the
+agent re-runs, pulls from whatever tools it has access to, composes
+the summary, and replies in the same chat.
 
-When the task fires, the agent re-runs with that prompt. It pulls from
-whatever tools it has access to, composes the summary, and replies in
-the same chat.
+**Variations:**
 
-## Variations
+- **Per-project:** schedule inside the project's thread; the agent
+  scopes itself by context.
+- **Weekly:** swap cron to `0 8 * * 1`.
+- **Different content:** re-run `schedule_task` (or `update_task`) with
+  a new prompt — no code change.
+- **Team digests:** the agent runs the summary prompt and cross-posts
+  via the agent-to-agent messaging primitive (when wired).
 
-**Per-project digests:** schedule inside the project's thread. The
-agent has context for which repo / workspace / channel this is about,
-so the summary scopes itself.
+**Cost:** each agent run costs tokens; host-side path costs nothing per
+fire. If the content stays simple (ship_log + backlog), prefer Path A.
+Use Path B when you need narrative summarization or sources the host
+doesn't read.
 
-**Weekly instead of daily:** change the cron to `0 8 * * 1` (Monday
-8am) and tweak the prompt.
+## When to pick which
 
-**Different content:** re-run the `schedule_task` with a new prompt.
-No code change. The scheduler `update_task` tool also works for
-editing an existing series.
+| Need | Path |
+|---|---|
+| Default coverage for all groups, zero setup | A |
+| Custom prompt per group | B |
+| Sources beyond ship_log + backlog (memories, threads, git, gh) | B |
+| Strict cost ceiling (no agent tokens per fire) | A |
+| Skip-empty without agent judgment | A |
+| Narrative phrasing, "what mattered" framing | B |
 
-**Team digests:** have the agent run the summary prompt and cross-post
-it to other groups via the agent-to-agent messaging primitive (if
-destinations are wired).
-
-## Why not a `/daily-digest` slash command or first-class host feature?
-
-Every slash command / host module is maintenance. The same capability
-is already covered by `schedule_task` + the agent's tool surface.
-Adding a parallel hardcoded path would be v1-style; v2's direction is
-"compose from primitives, not special-case features."
-
-If a digest pattern becomes ubiquitous and Dave ends up setting it up
-the same way in every group, the right evolution is to add a small
-helper (e.g. a `setup-daily-digest` skill) that prompts the agent with
-the canonical schedule+prompt — still zero new host modules.
+Running both for the same group is fine — they're independent posts.

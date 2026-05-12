@@ -200,6 +200,17 @@ export interface ContainerConfig {
    * `docs/memory.md` § Architecture and `data/systemd/nanoclaw-memory-daemon.service`.
    */
   memory?: MemoryConfig;
+
+  /**
+   * Per-group daily summary digest config. The host-side daily-summary timer
+   * (src/daily-summary.ts) posts a per-group activity digest once a day; by
+   * default it targets the primary wired channel (highest mga.priority,
+   * oldest-wired tiebreak). Set `messagingGroupId` to override — e.g. send
+   * illysium's digest to a Slack channel even though Discord is the primary.
+   */
+  dailySummary?: {
+    messagingGroupId?: string;
+  };
 }
 
 function emptyConfig(): ContainerConfig {
@@ -267,6 +278,7 @@ export function readContainerConfig(folder: string): ContainerConfig {
       tools: raw.tools,
       providerConfig: raw.providerConfig,
       memory: (raw as Record<string, unknown>).memory as MemoryConfig | undefined,
+      dailySummary: raw.dailySummary,
     };
   } catch (err) {
     console.error(`[container-config] failed to parse ${p}: ${String(err)}`);
