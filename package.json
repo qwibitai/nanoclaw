@@ -21,6 +21,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@slack/bolt": "^4.3.0",
+    "@slack/types": "^2.15.0",
     "better-sqlite3": "^11.8.1",
     "grammy": "^1.39.3",
     "cron-parser": "^5.5.0",

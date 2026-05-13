@@ -87,7 +87,7 @@ describe('storeMessage', () => {
     expect(messages).toHaveLength(0);
   });
 
-  it('stores is_from_me flag', () => {
+  it('excludes is_from_me messages from getMessagesSince (self-loop guard)', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
     store({
@@ -100,13 +100,14 @@ describe('storeMessage', () => {
       is_from_me: true,
     });
 
-    // Message is stored (we can retrieve it — is_from_me doesn't affect retrieval)
+    // is_from_me messages are filtered out so the agent does not see its
+    // own output in the prompt context (would feedback-loop).
     const messages = getMessagesSince(
       'group@g.us',
       '2024-01-01T00:00:00.000Z',
       'Andy',
     );
-    expect(messages).toHaveLength(1);
+    expect(messages).toHaveLength(0);
   });
 
   it('upserts on duplicate id+chat_jid', () => {
@@ -169,6 +170,7 @@ describe('getMessagesSince', () => {
       sender_name: 'Bot',
       content: 'bot reply',
       timestamp: '2024-01-01T00:00:03.000Z',
+      is_from_me: true,
       is_bot_message: true,
     });
     store({
@@ -192,19 +194,19 @@ describe('getMessagesSince', () => {
     expect(msgs[0].content).toBe('third');
   });
 
-  it('excludes bot messages via is_bot_message flag', () => {
+  it('excludes self messages (is_from_me) so the agent does not see its own output', () => {
     const msgs = getMessagesSince(
       'group@g.us',
       '2024-01-01T00:00:00.000Z',
       'Andy',
     );
-    const botMsgs = msgs.filter((m) => m.content === 'bot reply');
-    expect(botMsgs).toHaveLength(0);
+    const ownMsgs = msgs.filter((m) => m.content === 'bot reply');
+    expect(ownMsgs).toHaveLength(0);
   });
 
-  it('returns all non-bot messages when sinceTimestamp is empty', () => {
+  it('returns all non-self messages when sinceTimestamp is empty', () => {
     const msgs = getMessagesSince('group@g.us', '', 'Andy');
-    // 3 user messages (bot message excluded)
+    // 3 user messages (m3 self-message excluded)
     expect(msgs).toHaveLength(3);
   });
 
