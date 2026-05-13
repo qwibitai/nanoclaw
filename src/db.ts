@@ -311,15 +311,18 @@ export function getNewMessages(
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
   const placeholders = jids.map(() => '?').join(',');
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
+  // Filter messages WE sent (self-loop guard so the agent doesn't see its own
+  // output in context). External bot messages — e.g., AI-to-AI peers like
+  // Chanhyeok-AI in #ai-comms — must flow through so they can trigger the
+  // agent. The content-prefix `NOT LIKE` is a legacy backstop for rows written
+  // before is_from_me was reliable. Mirrors getMessagesSince's filter logic.
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
       SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
-        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND is_from_me = 0 AND content NOT LIKE ?
         AND content != '' AND content IS NOT NULL
       ORDER BY timestamp DESC
       LIMIT ?

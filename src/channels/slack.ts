@@ -35,6 +35,7 @@ export class SlackChannel implements Channel {
   private botUserId: string | undefined;
   private botUserName: string | undefined;
   private botDisplayName: string | undefined;
+  private botId: string | undefined;
   private connected = false;
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
@@ -101,7 +102,13 @@ export class SlackChannel implements Channel {
       // e.g., another AI-to-AI peer like Chanhyeok-AI). Separating these lets
       // external-bot mentions trigger the agent while still guarding against
       // self-loops.
-      const isFromSelf = msg.user === this.botUserId;
+      //
+      // Slack `bot_message` events sometimes carry `bot_id` without a `user`
+      // field (e.g., legacy webhook-style posts), so we match self by EITHER
+      // user_id OR bot_id to keep the self-loop guard tight.
+      const isFromSelf =
+        (this.botUserId !== undefined && msg.user === this.botUserId) ||
+        (this.botId !== undefined && msg.bot_id === this.botId);
       const isBotMessage = !!msg.bot_id || isFromSelf;
 
       let senderName: string;
@@ -161,6 +168,7 @@ export class SlackChannel implements Channel {
       const auth = await this.app.client.auth.test();
       this.botUserId = auth.user_id as string;
       this.botUserName = auth.user as string | undefined;
+      this.botId = (auth as { bot_id?: string }).bot_id;
 
       // Fetch the bot's display name (e.g. "Will-AI") so we can also accept
       // literal `@<displayName>` triggers. auth.test().user gives the
@@ -170,9 +178,7 @@ export class SlackChannel implements Channel {
           user: this.botUserId,
         });
         this.botDisplayName =
-          info.user?.real_name ||
-          info.user?.profile?.display_name ||
-          undefined;
+          info.user?.real_name || info.user?.profile?.display_name || undefined;
       } catch (err) {
         logger.warn(
           { err, botUserId: this.botUserId },
@@ -185,14 +191,12 @@ export class SlackChannel implements Channel {
           botUserId: this.botUserId,
           botUserName: this.botUserName,
           botDisplayName: this.botDisplayName,
+          botId: this.botId,
         },
         'Connected to Slack',
       );
     } catch (err) {
-      logger.warn(
-        { err },
-        'Connected to Slack but failed to get bot user ID',
-      );
+      logger.warn({ err }, 'Connected to Slack but failed to get bot user ID');
     }
 
     this.connected = true;
@@ -292,9 +296,7 @@ export class SlackChannel implements Channel {
     }
   }
 
-  private async resolveUserName(
-    userId: string,
-  ): Promise<string | undefined> {
+  private async resolveUserName(userId: string): Promise<string | undefined> {
     if (!userId) return undefined;
 
     const cached = this.userNameCache.get(userId);

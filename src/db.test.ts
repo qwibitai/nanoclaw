@@ -259,6 +259,7 @@ describe('getNewMessages', () => {
       sender_name: 'User',
       content: 'bot reply',
       timestamp: '2024-01-01T00:00:03.000Z',
+      is_from_me: true,
       is_bot_message: true,
     });
     store({
