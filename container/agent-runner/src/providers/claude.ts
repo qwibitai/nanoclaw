@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
+import Langfuse from 'langfuse';
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import { registerProvider } from './provider-registry.js';
@@ -9,6 +10,24 @@ import type { AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, Provide
 
 function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
+}
+
+// ── LangFuse singleton ──────────────────────────────────────────────────────
+
+// Three states: undefined = not yet initialized, null = disabled, instance = enabled.
+let _langfuse: Langfuse | null | undefined = undefined;
+
+function getLangfuse(): Langfuse | null {
+  if (_langfuse !== undefined) return _langfuse;
+  if (!process.env.LANGFUSE_ENABLED || process.env.LANGFUSE_ENABLED === 'false') {
+    return (_langfuse = null);
+  }
+  _langfuse = new Langfuse({
+    publicKey: process.env.LANGFUSE_PUBLIC_KEY ?? '',
+    secretKey: process.env.LANGFUSE_SECRET_KEY ?? '',
+    baseUrl: process.env.LANGFUSE_HOST,  // undefined → SDK uses cloud default
+  });
+  return _langfuse;
 }
 
 // Deferred SDK builtins that either sidestep nanoclaw's own scheduling or
@@ -151,43 +170,6 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
   return lines.join('\n');
 }
 
-/**
- * PreToolUse hook: record the current tool + its declared timeout so the host
- * sweep can widen its stuck tolerance while Bash is running a long-declared
- * script. Defense-in-depth: if SDK_DISALLOWED_TOOLS slips through somehow,
- * block the call here instead of letting the agent hang.
- */
-const preToolUseHook: HookCallback = async (input) => {
-  const i = input as { tool_name?: string; tool_input?: Record<string, unknown> };
-  const toolName = i.tool_name ?? '';
-  if (SDK_DISALLOWED_TOOLS.includes(toolName)) {
-    return {
-      decision: 'block',
-      stopReason: `Tool '${toolName}' is not available in this environment — use the nanoclaw equivalent.`,
-    } as unknown as ReturnType<HookCallback>;
-  }
-  // Bash exposes its timeout via the tool_input.timeout field (ms). Any other
-  // tool: no declared timeout.
-  const declaredTimeoutMs =
-    toolName === 'Bash' && typeof i.tool_input?.timeout === 'number' ? (i.tool_input.timeout as number) : null;
-  try {
-    setContainerToolInFlight(toolName, declaredTimeoutMs);
-  } catch (err) {
-    log(`PreToolUse: failed to record container_state: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  return { continue: true };
-};
-
-/** Clear in-flight tool on PostToolUse / PostToolUseFailure. */
-const postToolUseHook: HookCallback = async () => {
-  try {
-    clearContainerToolInFlight();
-  } catch (err) {
-    log(`PostToolUse: failed to clear container_state: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  return { continue: true };
-};
-
 function createPreCompactHook(assistantName?: string): HookCallback {
   return async (input) => {
     const preCompact = input as PreCompactHookInput;
@@ -279,6 +261,55 @@ export class ClaudeProvider implements AgentProvider {
 
     const instructions = input.systemContext?.instructions;
 
+    // LangFuse per-query state. Hooks and translateEvents() share these via closure.
+    const lf = getLangfuse();
+    const groupId = path.basename(input.cwd);
+    const startTime = new Date();
+    const toolStartTimes = new Map<string, Date>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let lfTrace: any = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let lfGeneration: any = null;
+
+    // Hooks are defined inside query() to close over toolStartTimes and lfTrace.
+    const preToolUseHook: HookCallback = async (hookInput) => {
+      const i = hookInput as { tool_name?: string; tool_input?: Record<string, unknown> };
+      const toolName = i.tool_name ?? '';
+      if (SDK_DISALLOWED_TOOLS.includes(toolName)) {
+        return {
+          decision: 'block',
+          stopReason: `Tool '${toolName}' is not available in this environment — use the nanoclaw equivalent.`,
+        } as unknown as ReturnType<HookCallback>;
+      }
+      const declaredTimeoutMs =
+        toolName === 'Bash' && typeof i.tool_input?.timeout === 'number' ? (i.tool_input.timeout as number) : null;
+      try {
+        setContainerToolInFlight(toolName, declaredTimeoutMs);
+      } catch (err) {
+        log(`PreToolUse: failed to record container_state: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      toolStartTimes.set(toolName, new Date());
+      return { continue: true };
+    };
+
+    const postToolUseHook: HookCallback = async (hookInput) => {
+      const i = hookInput as { tool_name?: string };
+      const toolName = i.tool_name ?? '';
+      try {
+        clearContainerToolInFlight();
+      } catch (err) {
+        log(`PostToolUse: failed to clear container_state: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      const toolStart = toolStartTimes.get(toolName);
+      if (lfTrace && toolStart) {
+        try {
+          lfTrace.span({ name: `tool:${toolName}`, startTime: toolStart, endTime: new Date() });
+        } catch { /* never fail the session */ }
+        toolStartTimes.delete(toolName);
+      }
+      return { continue: true };
+    };
+
     const sdkResult = sdkQuery({
       prompt: stream,
       options: {
@@ -310,29 +341,61 @@ export class ClaudeProvider implements AgentProvider {
 
     async function* translateEvents(): AsyncGenerator<ProviderEvent> {
       let messageCount = 0;
-      for await (const message of sdkResult) {
-        if (aborted) return;
-        messageCount++;
+      try {
+        for await (const message of sdkResult) {
+          if (aborted) return;
+          messageCount++;
 
-        // Yield activity for every SDK event so the poll loop knows the agent is working
-        yield { type: 'activity' };
+          // Yield activity for every SDK event so the poll loop knows the agent is working
+          yield { type: 'activity' };
 
-        if (message.type === 'system' && message.subtype === 'init') {
-          yield { type: 'init', continuation: message.session_id };
-        } else if (message.type === 'result') {
-          const text = 'result' in message ? (message as { result?: string }).result ?? null : null;
-          yield { type: 'result', text };
-        } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'api_retry') {
-          yield { type: 'error', message: 'API retry', retryable: true };
-        } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'rate_limit_event') {
-          yield { type: 'error', message: 'Rate limit', retryable: false, classification: 'quota' };
-        } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'compact_boundary') {
-          const meta = (message as { compact_metadata?: { pre_tokens?: number } }).compact_metadata;
-          const detail = meta?.pre_tokens ? ` (${meta.pre_tokens.toLocaleString()} tokens compacted)` : '';
-          yield { type: 'compacted', text: `Context compacted${detail}.` };
-        } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
-          const tn = message as { summary?: string };
-          yield { type: 'progress', message: tn.summary || 'Task notification' };
+          if (message.type === 'system' && message.subtype === 'init') {
+            if (lf) {
+              try {
+                lfTrace = lf.trace({
+                  id: message.session_id,
+                  name: 'agent-query',
+                  userId: groupId,
+                  sessionId: groupId,
+                  metadata: { fresh: !input.continuation },
+                  tags: ['nanoclaw'],
+                });
+                lfGeneration = lfTrace.generation({
+                  name: 'claude-query',
+                  model: process.env.ANTHROPIC_MODEL ?? 'claude',
+                  startTime,
+                });
+              } catch { /* never fail the session */ }
+            }
+            yield { type: 'init', continuation: message.session_id };
+          } else if (message.type === 'result') {
+            const text = 'result' in message ? (message as { result?: string }).result ?? null : null;
+            if (lfGeneration) {
+              try {
+                lfGeneration.end({ endTime: new Date(), metadata: { messageCount, resultLength: text?.length ?? 0 } });
+              } catch { /* never fail */ }
+            }
+            yield { type: 'result', text };
+          } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'api_retry') {
+            try { lfTrace?.event({ name: 'api-retry', level: 'WARNING' }); } catch { /* ignore */ }
+            yield { type: 'error', message: 'API retry', retryable: true };
+          } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'rate_limit_event') {
+            try { lfTrace?.event({ name: 'rate-limit', level: 'ERROR' }); } catch { /* ignore */ }
+            yield { type: 'error', message: 'Rate limit', retryable: false, classification: 'quota' };
+          } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'compact_boundary') {
+            const meta = (message as { compact_metadata?: { pre_tokens?: number } }).compact_metadata;
+            const preTokens = meta?.pre_tokens;
+            try { lfTrace?.event({ name: 'compact', metadata: { preTokens } }); } catch { /* ignore */ }
+            const detail = preTokens ? ` (${preTokens.toLocaleString()} tokens compacted)` : '';
+            yield { type: 'compacted', text: `Context compacted${detail}.` };
+          } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
+            const tn = message as { summary?: string };
+            yield { type: 'progress', message: tn.summary || 'Task notification' };
+          }
+        }
+      } finally {
+        if (lf) {
+          try { await lf.flushAsync(); } catch { /* best-effort */ }
         }
       }
       log(`Query completed after ${messageCount} SDK messages`);
