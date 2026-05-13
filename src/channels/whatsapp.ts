@@ -37,6 +37,7 @@ import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
 import { registerChannelAdapter } from './channel-registry.js';
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
+import { trackDecryptFailure, type DecryptFailureState } from './whatsapp-decrypt-tracker.js';
 import type { ChannelAdapter, ChannelSetup, ConversationInfo, InboundMessage, OutboundMessage } from './adapter.js';
 
 // Baileys v6 bug: getPlatformId sends charCode (49) instead of enum value (1).
@@ -190,6 +191,10 @@ registerChannelAdapter('whatsapp', {
     let lastGroupSync = 0;
     let groupSyncTimerStarted = false;
 
+    // Per-sender decrypt-failure tracker — surfaces silent Bad MAC drops
+    // (Signal ratchet desync) as an operator DM via a healthy session.
+    const decryptFailures = new Map<string, DecryptFailureState>();
+
     // First-connect promise
     let resolveFirstOpen: (() => void) | undefined;
     let rejectFirstOpen: ((err: Error) => void) | undefined;
@@ -342,6 +347,51 @@ registerChannelAdapter('whatsapp', {
         log.warn('Failed to send, message queued', { jid, err, queueSize: outgoingQueue.length });
         return undefined;
       }
+    }
+
+    /**
+     * Record a decrypt failure for `senderJid` and, if the threshold trips,
+     * DM the operator on a healthy session (the bot's own phone JID, which
+     * uses a different Signal ratchet than the failing peer).
+     */
+    function handleDecryptFailure(senderJid: string): void {
+      const now = Date.now();
+      const result = trackDecryptFailure(decryptFailures.get(senderJid), now);
+      decryptFailures.set(senderJid, result.state);
+
+      log.warn('WhatsApp message failed to decrypt', {
+        senderJid,
+        count: result.state.count,
+        windowSec: Math.round((now - result.state.firstAt) / 1000),
+      });
+
+      if (!result.shouldAlert) return;
+
+      const phoneUser = sock.user?.id?.split(':')[0];
+      const botPhoneJid = phoneUser ? `${phoneUser}@s.whatsapp.net` : undefined;
+      if (!botPhoneJid) {
+        log.warn('Decrypt-failure alert skipped: bot phone JID not available', { senderJid });
+        return;
+      }
+      if (botPhoneJid === senderJid) {
+        log.warn('Decrypt-failure alert skipped: alert recipient equals failing sender', { senderJid });
+        return;
+      }
+
+      const windowSec = Math.round((now - result.state.firstAt) / 1000);
+      const text =
+        `⚠️ ${result.state.count} WhatsApp messages from ${senderJid} failed to decrypt in the last ${windowSec}s.\n\n` +
+        `Likely cause: Signal ratchet desync after a socket reconnect. Those messages are lost and any further inbound from this sender will keep dropping silently until the session re-keys.\n\n` +
+        `Recover: launchctl kickstart -k gui/$(id -u)/com.nanoclaw`;
+
+      log.warn('Sending decrypt-failure alert to operator', {
+        senderJid,
+        count: result.state.count,
+        botPhoneJid,
+      });
+      sendRawMessage(botPhoneJid, text).catch((err) =>
+        log.error('Failed to send decrypt-failure alert', { err, senderJid }),
+      );
     }
 
     // --- Socket creation ---
@@ -501,6 +551,14 @@ registerChannelAdapter('whatsapp', {
       sock.ev.on('messages.upsert', async ({ messages }) => {
         for (const msg of messages) {
           try {
+            // Decrypt-failure stub: Baileys emits this when libsignal can't
+            // decrypt (Bad MAC, missing session, etc.). The plaintext is lost;
+            // count the failure and possibly alert.
+            if (msg.messageStubType === proto.WebMessageInfo.StubType.CIPHERTEXT) {
+              const senderJid = msg.key.participant || msg.key.remoteJid;
+              if (senderJid) handleDecryptFailure(senderJid);
+              continue;
+            }
             if (!msg.message) continue;
             const normalized = normalizeMessageContent(msg.message);
             if (!normalized) continue;
