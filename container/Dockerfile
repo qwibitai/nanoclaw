@@ -23,6 +23,11 @@ ARG CLAUDE_CODE_VERSION=2.1.128
 ARG AGENT_BROWSER_VERSION=latest
 ARG VERCEL_VERSION=52.2.1
 ARG BUN_VERSION=1.3.12
+# audit-website skill stack — pin exact versions, must be ≥3 days old per
+# pnpm-workspace.yaml minimumReleaseAge: 4320.
+ARG LIGHTHOUSE_VERSION=13.3.0
+ARG AXE_CLI_VERSION=4.11.3
+ARG LINKINATOR_VERSION=7.6.1
 
 # ---- System dependencies -----------------------------------------------------
 # tini: correct PID 1 / signal forwarding so outbound.db writes finalize on
@@ -109,6 +114,17 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+# ---- audit-website skill stack -----------------------------------------------
+# Lighthouse, axe-core CLI, and linkinator power the audit-website skill
+# (.claude/skills/audit-website/). Lighthouse drives Chromium directly, so it
+# reuses the system Chromium installed above. All three are pinned and bump
+# deliberately — replace by editing the ARG block at the top of this file.
+RUN --mount=type=cache,target=/root/.cache/pnpm \
+    pnpm install -g \
+        "lighthouse@${LIGHTHOUSE_VERSION}" \
+        "@axe-core/cli@${AXE_CLI_VERSION}" \
+        "linkinator@${LINKINATOR_VERSION}"
 
 # ---- ncl CLI wrapper ----------------------------------------------------------
 # Actual script lives in the mounted source at /app/src/cli/ncl.ts.
