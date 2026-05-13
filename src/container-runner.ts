@@ -11,6 +11,7 @@ import { OneCLI } from '@onecli-sh/sdk';
 
 import { CONTAINER_IMAGE, DATA_DIR, GROUPS_DIR, ONECLI_API_KEY, ONECLI_URL, TIMEZONE } from './config.js';
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
+import { readEnvFile } from './env.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
@@ -372,6 +373,36 @@ function ensureRuntimeFields(
   }
 }
 
+/**
+ * Scan a container.json for `${VAR}` / `$VAR` placeholders inside stdio MCP
+ * `env` blocks, then read those variables from the host `.env` and return
+ * the values to forward to the container. The agent-runner inside the
+ * container substitutes the placeholders before spawning the MCP process.
+ *
+ * Escape hatch for stdio MCPs that read their API key directly (e.g.
+ * `SERPER_API_KEY` for the Serper MCP). HTTP MCPs should rely on the
+ * OneCLI proxy injection path instead.
+ */
+function collectMcpEnvPassthrough(
+  containerConfig: import('./container-config.js').ContainerConfig,
+): Record<string, string> {
+  const placeholderRe = /\$\{([A-Z_][A-Z0-9_]*)\}|\$([A-Z_][A-Z0-9_]*)/g;
+  const wanted = new Set<string>();
+  for (const server of Object.values(containerConfig.mcpServers ?? {})) {
+    if (!server.env) continue;
+    for (const value of Object.values(server.env)) {
+      for (const m of value.matchAll(placeholderRe)) wanted.add(m[1] || m[2]);
+    }
+  }
+  if (wanted.size === 0) return {};
+  const values = readEnvFile([...wanted]);
+  const missing = [...wanted].filter((k) => !values[k]);
+  if (missing.length > 0) {
+    log.warn('MCP env passthrough: missing keys in .env', { missing, groupName: containerConfig.groupName });
+  }
+  return values;
+}
+
 async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
@@ -392,6 +423,16 @@ async function buildContainerArgs(
     for (const [key, value] of Object.entries(providerContribution.env)) {
       args.push('-e', `${key}=${value}`);
     }
+  }
+
+  // MCP env passthrough: stdio MCPs that bake their API key into outgoing
+  // requests can't use the OneCLI proxy injection path — they read a key
+  // from process.env at startup. Scan container.json mcpServers for any
+  // `${VAR}` placeholders, read those vars from .env, and forward them.
+  // The agent-runner inside the container does the actual substitution
+  // before spawning the MCP child — see container/agent-runner/src/index.ts.
+  for (const [key, value] of Object.entries(collectMcpEnvPassthrough(containerConfig))) {
+    args.push('-e', `${key}=${value}`);
   }
 
   // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls

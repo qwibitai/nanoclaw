@@ -39,6 +39,21 @@ function log(msg: string): void {
 
 const CWD = '/workspace/agent';
 
+/**
+ * Expand `${VAR}` / `$VAR` placeholders in a stdio MCP's `env` block against
+ * the container's `process.env`. Used for stdio MCPs that read their API key
+ * directly (e.g. SERPER_API_KEY) — the host forwards the value via `-e` and
+ * we wire it into the SDK-spawned MCP child here.
+ */
+function expandMcpEnv(env: Record<string, string>): Record<string, string> {
+  const placeholderRe = /\$\{([A-Z_][A-Z0-9_]*)\}|\$([A-Z_][A-Z0-9_]*)/g;
+  const expanded: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(env)) {
+    expanded[key] = raw.replace(placeholderRe, (_, braced, bare) => process.env[braced || bare] ?? '');
+  }
+  return expanded;
+}
+
 async function main(): Promise<void> {
   const config = loadConfig();
   const providerName = config.provider.toLowerCase() as ProviderName;
@@ -82,7 +97,7 @@ async function main(): Promise<void> {
   };
 
   for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
-    mcpServers[name] = serverConfig;
+    mcpServers[name] = { ...serverConfig, env: expandMcpEnv(serverConfig.env ?? {}) };
     log(`Additional MCP server: ${name} (${serverConfig.command})`);
   }
 
