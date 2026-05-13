@@ -60,17 +60,13 @@ export async function transcribeAudioBuffer(audioBuffer: Buffer): Promise<string
 
     // whisper.cpp expects 16 kHz mono WAV. Run ffmpeg to normalize regardless
     // of the input container so we don't have to special-case ogg/mp3/m4a/etc.
-    await execFileAsync(
-      'ffmpeg',
-      ['-i', tmpIn, '-ar', '16000', '-ac', '1', '-f', 'wav', '-y', tmpWav],
-      { timeout: FFMPEG_TIMEOUT_MS },
-    );
+    await execFileAsync('ffmpeg', ['-i', tmpIn, '-ar', '16000', '-ac', '1', '-f', 'wav', '-y', tmpWav], {
+      timeout: FFMPEG_TIMEOUT_MS,
+    });
 
-    const { stdout } = await execFileAsync(
-      bin,
-      ['-m', whisperModel(), '-f', tmpWav, '--no-timestamps', '-nt'],
-      { timeout: WHISPER_TIMEOUT_MS },
-    );
+    const { stdout } = await execFileAsync(bin, ['-m', whisperModel(), '-f', tmpWav, '--no-timestamps', '-nt'], {
+      timeout: WHISPER_TIMEOUT_MS,
+    });
 
     const transcript = stdout.trim();
     return transcript || null;
