@@ -229,9 +229,9 @@ describe('handleRecurrence', () => {
 
     handleRecurrence(db, stubSession);
 
-    const respawn = db
-      .prepare("SELECT process_after FROM messages_in WHERE id != 'orig-tz'")
-      .get() as { process_after: string };
+    const respawn = db.prepare("SELECT process_after FROM messages_in WHERE id != 'orig-tz'").get() as {
+      process_after: string;
+    };
 
     // 12:30 BRT = 15:30 UTC year-round (Brazil has no DST since 2019).
     expect(respawn.process_after).toMatch(/ 15:30:00$/);

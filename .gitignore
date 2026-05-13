@@ -42,4 +42,8 @@ groups/global/*
 # Skills system (local per-installation state)
 .nanoclaw/
 
+# Claude Code session-local state (PIDs, locks, ephemeral memory)
+.claude/scheduled_tasks.lock
+.claude/projects/
+
 agents-sdk-docs
