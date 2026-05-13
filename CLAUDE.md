@@ -99,6 +99,8 @@ A second tier (direct source-level self-edits via a draft/activate flow) is plan
 
 API keys, OAuth tokens, and auth credentials are managed by the OneCLI gateway. Secrets are injected into per-agent containers at request time — none are passed in env vars or through chat context. `src/onecli-approvals.ts`, `ensureAgent()` in `container-runner.ts`. Run `onecli --help`.
 
+For a vault inventory (every secret, its hostPattern / header / value-format, and which agents consume it), see [docs/onecli-secrets.md](docs/onecli-secrets.md). Refresh that doc when you add or remove a secret.
+
 ### Gotcha: auto-created agents start in `selective` secret mode
 
 When the host first spawns a session for a new agent group, `container-runner.ts:385` calls `onecli.ensureAgent({ name, identifier })`. The OneCLI `POST /api/agents` endpoint creates the agent in **`selective`** secret mode — meaning **no secrets are assigned to it by default**, even if the secrets exist in the vault and have host patterns that would otherwise match.
