@@ -1,0 +1,22 @@
+{
+  "jobs": [
+    {
+      "id": "task-lili-toque-matinal",
+      "kind": "task",
+      "recurrence": "0 7 * * *",
+      "promptFile": "toque-matinal.md"
+    },
+    {
+      "id": "task-lili-ritual-noturno",
+      "kind": "task",
+      "recurrence": "30 18 * * *",
+      "promptFile": "ritual-noturno.md"
+    },
+    {
+      "id": "task-lili-revisao-semanal",
+      "kind": "task",
+      "recurrence": "0 16 * * 0",
+      "promptFile": "revisao-semanal.md"
+    }
+  ]
+}
