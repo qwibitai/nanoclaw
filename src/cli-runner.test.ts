@@ -9,6 +9,7 @@ import {
   buildMcpConfig,
   mapToContainerOutput,
   buildCliEnv,
+  type ContainerOutput,
 } from '../container/agent-runner/src/cli-runner.js';
 
 // ---- P0: parseStreamJsonLine ----
@@ -210,9 +211,9 @@ describe('buildCliArgs', () => {
 // ---- P0: mapToContainerOutput ----
 
 describe('mapToContainerOutput', () => {
-  it('system init 返回 null（session_id 由调用方提取）', () => {
+  it('system init 返回空数组（session_id 由调用方提取）', () => {
     const msg = { type: 'system' as const, subtype: 'init', session_id: 'sess-1' };
-    expect(mapToContainerOutput(msg)).toBeNull();
+    expect(mapToContainerOutput(msg)).toEqual([]);
   });
 
   it('assistant tool_use 映射为 progress', () => {
@@ -222,12 +223,12 @@ describe('mapToContainerOutput', () => {
         content: [{ type: 'tool_use', name: 'Bash', input: { command: 'echo hello' } }],
       },
     };
-    const output = mapToContainerOutput(msg);
-    expect(output).not.toBeNull();
-    expect(output!.status).toBe('progress');
-    expect(output!.progressType).toBe('tool_use');
-    expect(output!.result).toContain('Bash');
-    expect(output!.result).toContain('echo hello');
+    const outputs = mapToContainerOutput(msg);
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0].status).toBe('progress');
+    expect(outputs[0].progressType).toBe('tool_use');
+    expect(outputs[0].result).toContain('Bash');
+    expect(outputs[0].result).toContain('echo hello');
   });
 
   it('assistant text 映射为 thinking progress', () => {
@@ -237,11 +238,11 @@ describe('mapToContainerOutput', () => {
         content: [{ type: 'text', text: '我来分析一下这个问题，需要先检查日志' }],
       },
     };
-    const output = mapToContainerOutput(msg);
-    expect(output).not.toBeNull();
-    expect(output!.status).toBe('progress');
-    expect(output!.progressType).toBe('thinking');
-    expect(output!.result).toContain('💭');
+    const outputs = mapToContainerOutput(msg);
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0].status).toBe('progress');
+    expect(outputs[0].progressType).toBe('thinking');
+    expect(outputs[0].result).toContain('💭');
   });
 
   it('短文本（<=5字符）不产生输出', () => {
@@ -251,7 +252,7 @@ describe('mapToContainerOutput', () => {
         content: [{ type: 'text', text: 'OK' }],
       },
     };
-    expect(mapToContainerOutput(msg)).toBeNull();
+    expect(mapToContainerOutput(msg)).toEqual([]);
   });
 
   it('result 映射为 success + usage', () => {
@@ -269,12 +270,12 @@ describe('mapToContainerOutput', () => {
       num_turns: 5,
       duration_ms: 10000,
     };
-    const output = mapToContainerOutput(msg, 'sess-old');
-    expect(output).not.toBeNull();
-    expect(output!.status).toBe('success');
-    expect(output!.result).toBe('任务完成');
-    expect(output!.newSessionId).toBe('sess-new');
-    expect(output!.usage).toEqual({
+    const outputs = mapToContainerOutput(msg, 'sess-old');
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0].status).toBe('success');
+    expect(outputs[0].result).toBe('任务完成');
+    expect(outputs[0].newSessionId).toBe('sess-new');
+    expect(outputs[0].usage).toEqual({
       inputTokens: 1000,
       outputTokens: 200,
       cacheReadInputTokens: 500,
@@ -288,32 +289,54 @@ describe('mapToContainerOutput', () => {
 
   it('result 无 session_id 时回退到传入的 sessionId', () => {
     const msg = { type: 'result' as const, result: 'done' };
-    const output = mapToContainerOutput(msg, 'fallback-sess');
-    expect(output!.newSessionId).toBe('fallback-sess');
+    const outputs = mapToContainerOutput(msg, 'fallback-sess');
+    expect(outputs[0].newSessionId).toBe('fallback-sess');
   });
 
   it('result 无 usage 时 usage 为 undefined', () => {
     const msg = { type: 'result' as const, result: 'done' };
-    const output = mapToContainerOutput(msg);
-    expect(output!.usage).toBeUndefined();
+    const outputs = mapToContainerOutput(msg);
+    expect(outputs[0].usage).toBeUndefined();
   });
 
   it('system error 映射为 error', () => {
     const msg = { type: 'system' as const, subtype: 'error', message: 'Something went wrong' };
-    const output = mapToContainerOutput(msg);
-    expect(output).not.toBeNull();
-    expect(output!.status).toBe('error');
-    expect(output!.error).toBe('Something went wrong');
+    const outputs = mapToContainerOutput(msg);
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0].status).toBe('error');
+    expect(outputs[0].error).toBe('Something went wrong');
   });
 
-  it('未知类型返回 null', () => {
-    expect(mapToContainerOutput({ type: 'rate_limit_event' as any })).toBeNull();
-    expect(mapToContainerOutput({ type: 'stream_event' as any })).toBeNull();
+  it('system error 非字符串 message 回退为默认', () => {
+    const msg = { type: 'system' as const, subtype: 'error', message: { role: 'error', content: [] } };
+    const outputs = mapToContainerOutput(msg as any);
+    expect(outputs[0].error).toBe('CLI error');
   });
 
-  it('assistant 无 content 返回 null', () => {
+  it('未知类型返回空数组', () => {
+    expect(mapToContainerOutput({ type: 'rate_limit_event' as any })).toEqual([]);
+    expect(mapToContainerOutput({ type: 'stream_event' as any })).toEqual([]);
+  });
+
+  it('assistant 无 content 返回空数组', () => {
     const msg = { type: 'assistant' as const, message: {} };
-    expect(mapToContainerOutput(msg)).toBeNull();
+    expect(mapToContainerOutput(msg)).toEqual([]);
+  });
+
+  it('assistant 混合 text + tool_use 全部返回', () => {
+    const msg = {
+      type: 'assistant' as const,
+      message: {
+        content: [
+          { type: 'text', text: '让我来检查一下这个文件的内容' },
+          { type: 'tool_use', name: 'Read', input: { file_path: '/tmp/test.ts' } },
+        ],
+      },
+    };
+    const outputs = mapToContainerOutput(msg);
+    expect(outputs).toHaveLength(2);
+    expect(outputs[0].progressType).toBe('thinking');
+    expect(outputs[1].progressType).toBe('tool_use');
   });
 
   it('工具名 emoji 映射正确', () => {
@@ -331,8 +354,8 @@ describe('mapToContainerOutput', () => {
         type: 'assistant' as const,
         message: { content: [{ type: 'tool_use', name, input: {} }] },
       };
-      const output = mapToContainerOutput(msg);
-      expect(output!.result).toContain(emoji);
+      const outputs = mapToContainerOutput(msg);
+      expect(outputs[0].result).toContain(emoji);
     }
   });
 });
@@ -391,7 +414,7 @@ describe('CLI 模式集成场景', () => {
     ];
 
     let sessionId: string | undefined;
-    const outputs: ReturnType<typeof mapToContainerOutput>[] = [];
+    const allOutputs: ContainerOutput[] = [];
 
     for (const line of lines) {
       const msg = parseStreamJsonLine(line);
@@ -401,16 +424,16 @@ describe('CLI 模式集成场景', () => {
         sessionId = msg!.session_id;
       }
 
-      const output = mapToContainerOutput(msg!, sessionId);
-      if (output) outputs.push(output);
+      const outputs = mapToContainerOutput(msg!, sessionId);
+      allOutputs.push(...outputs);
     }
 
     expect(sessionId).toBe('s1');
-    expect(outputs).toHaveLength(3); // thinking + tool_use + result
-    expect(outputs[0]!.progressType).toBe('thinking');
-    expect(outputs[1]!.progressType).toBe('tool_use');
-    expect(outputs[2]!.status).toBe('success');
-    expect(outputs[2]!.result).toBe('完成');
+    expect(allOutputs).toHaveLength(3); // thinking + tool_use + result
+    expect(allOutputs[0].progressType).toBe('thinking');
+    expect(allOutputs[1].progressType).toBe('tool_use');
+    expect(allOutputs[2].status).toBe('success');
+    expect(allOutputs[2].result).toBe('完成');
   });
 
   it('buildCliArgs + buildMcpConfig 组合使用', () => {

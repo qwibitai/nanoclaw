@@ -36,6 +36,7 @@ export interface CliStreamMessage {
   [key: string]: unknown;
 }
 
+/** 与 index.ts 中的 ContainerOutput 保持一致 */
 export interface ContainerOutput {
   status: 'success' | 'error' | 'progress';
   result: string | null;
@@ -51,6 +52,7 @@ export interface ContainerOutput {
     numTurns: number;
     durationMs: number;
     totalCostUsd: number;
+    modelContextWindows?: Record<string, number>;
     model?: string;
   };
 }
@@ -161,20 +163,21 @@ export function buildCliArgs(config: {
 }
 
 /**
- * 将 CliStreamMessage 映射为 ContainerOutput
- * 只处理我们关心的消息类型，其他返回 null
+ * 将 CliStreamMessage 映射为 ContainerOutput 数组
+ * assistant 消息可能产生多个输出（text + tool_use），全部返回
+ * 其他类型最多返回一个
  */
 export function mapToContainerOutput(
   msg: CliStreamMessage,
   sessionId?: string,
-): ContainerOutput | null {
+): ContainerOutput[] {
   // system init — 提取 session_id
   if (msg.type === 'system' && msg.subtype === 'init') {
     // 不产生输出，session_id 由调用方提取
-    return null;
+    return [];
   }
 
-  // assistant 消息 — 提取工具调用和文本
+  // assistant 消息 — 提取工具调用和文本，全部返回
   if (msg.type === 'assistant' && msg.message?.content) {
     const content = msg.message.content;
     const outputs: ContainerOutput[] = [];
@@ -213,8 +216,7 @@ export function mapToContainerOutput(
       }
     }
 
-    // 返回最后一个输出（简化处理，实际可能产生多个）
-    return outputs.length > 0 ? outputs[outputs.length - 1] : null;
+    return outputs;
   }
 
   // result — 最终结果
@@ -231,24 +233,26 @@ export function mapToContainerOutput(
       model: msg.message?.model,
     } : undefined;
 
-    return {
-      status: 'success',
+    return [{
+      status: 'success' as const,
       result: (msg.result as string) || null,
       newSessionId: (msg.session_id as string) || sessionId,
       usage,
-    };
+    }];
   }
 
   // system error
   if (msg.type === 'system' && msg.subtype === 'error') {
-    return {
-      status: 'error',
+    const rawMsg = (msg as Record<string, unknown>).message;
+    const errorText = typeof rawMsg === 'string' ? rawMsg : 'CLI error';
+    return [{
+      status: 'error' as const,
       result: null,
-      error: (msg as Record<string, unknown>).message as string || 'CLI error',
-    };
+      error: errorText,
+    }];
   }
 
-  return null;
+  return [];
 }
 
 /**
@@ -342,15 +346,15 @@ export async function runCliQuery(
           log(`[cli-runner] session: ${newSessionId}`);
         }
 
-        // 映射为 ContainerOutput 并发送
-        const output = mapToContainerOutput(msg, newSessionId);
-        if (output) {
-          // result 消息中提取 session_id
-          if (msg.type === 'result' && msg.session_id) {
-            newSessionId = msg.session_id;
-          }
-          writeOutput(output);
+        // result 消息中提取 session_id
+        if (msg.type === 'result' && msg.session_id) {
+          newSessionId = msg.session_id;
+        }
 
+        // 映射为 ContainerOutput 并发送（可能产生多个）
+        const outputs = mapToContainerOutput(msg, newSessionId);
+        for (const output of outputs) {
+          writeOutput(output);
           if (output.status === 'success') {
             resultText = output.result || undefined;
           }
@@ -368,11 +372,11 @@ export async function runCliQuery(
       if (lineBuffer.trim()) {
         const msg = parseStreamJsonLine(lineBuffer);
         if (msg) {
-          const output = mapToContainerOutput(msg, newSessionId);
-          if (output) {
-            if (msg.type === 'result' && msg.session_id) {
-              newSessionId = msg.session_id;
-            }
+          if (msg.type === 'result' && msg.session_id) {
+            newSessionId = msg.session_id;
+          }
+          const outputs = mapToContainerOutput(msg, newSessionId);
+          for (const output of outputs) {
             writeOutput(output);
             if (output.status === 'success') {
               resultText = output.result || undefined;

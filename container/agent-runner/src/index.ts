@@ -1205,8 +1205,10 @@ async function main(): Promise<void> {
           break;
         }
 
-        // 发送 session 更新
-        writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+        // runCliQuery 内部已发送 success result，这里只发 session 更新（result=null 表示仅更新 session）
+        if (sessionId && !cliResult.result) {
+          writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+        }
 
         log('[cli-mode] Query ended, waiting for next IPC message...');
 
