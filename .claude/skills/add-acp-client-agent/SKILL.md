@@ -130,6 +130,8 @@ node -e "console.log('ag-' + Date.now() + '-' + Math.random().toString(36).slice
 
 ### 4. Set the provider in the database
 
+Run this from the **project root** (the directory containing `data/` and `node_modules/`):
+
 ```bash
 node -e "
 const db = require('./node_modules/better-sqlite3')('./data/v2.db');

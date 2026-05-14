@@ -176,12 +176,14 @@ beforeEach(() => {
   process.env.ACP_CLIENT_CMD = JSON.stringify(['fake-agent']);
   delete process.env.ACP_CLIENT_HOST;
   delete process.env.ACP_CLIENT_PORT;
+  delete process.env.ACP_CLIENT_IDLE_TIMEOUT_MS;
 });
 
 afterEach(() => {
   delete process.env.ACP_CLIENT_CMD;
   delete process.env.ACP_CLIENT_HOST;
   delete process.env.ACP_CLIENT_PORT;
+  delete process.env.ACP_CLIENT_IDLE_TIMEOUT_MS;
 });
 
 // ── AcpClientProvider — constructor ─────────────────────────────────────────
@@ -244,7 +246,12 @@ describe('AcpClientProvider.query(): successful turn', () => {
     ]);
     _test.createTransport = async () => transport;
 
-    const events = await collectEvents(new AcpClientProvider(), baseInput);
+    const q = new AcpClientProvider().query(baseInput);
+    const events: ProviderEvent[] = [];
+    for await (const e of q.events) {
+      events.push(e);
+      if (e.type === 'result') { q.end(); }
+    }
     expect(events.find(e => e.type === 'init')).toMatchObject({ type: 'init', continuation: 'sess-1' });
   });
 
@@ -260,7 +267,12 @@ describe('AcpClientProvider.query(): successful turn', () => {
     ]);
     _test.createTransport = async () => transport;
 
-    const events = await collectEvents(new AcpClientProvider(), baseInput);
+    const q = new AcpClientProvider().query(baseInput);
+    const events: ProviderEvent[] = [];
+    for await (const e of q.events) {
+      events.push(e);
+      if (e.type === 'result') { q.end(); }
+    }
     expect(events.find(e => e.type === 'result')).toMatchObject({ type: 'result', text: 'Hello from agent!' });
   });
 
@@ -273,7 +285,12 @@ describe('AcpClientProvider.query(): successful turn', () => {
     ]);
     _test.createTransport = async () => transport;
 
-    const events = await collectEvents(new AcpClientProvider(), baseInput);
+    const q = new AcpClientProvider().query(baseInput);
+    const events: ProviderEvent[] = [];
+    for await (const e of q.events) {
+      events.push(e);
+      if (e.type === 'result') { q.end(); }
+    }
     expect(events.some(e => e.type === 'activity')).toBe(true);
   });
 
@@ -290,7 +307,12 @@ describe('AcpClientProvider.query(): successful turn', () => {
     ]);
     _test.createTransport = async () => transport;
 
-    const events = await collectEvents(new AcpClientProvider(), baseInput);
+    const q = new AcpClientProvider().query(baseInput);
+    const events: ProviderEvent[] = [];
+    for await (const e of q.events) {
+      events.push(e);
+      if (e.type === 'result') { q.end(); }
+    }
     const result = events.find(e => e.type === 'result') as { type: 'result'; text: string } | undefined;
     expect(result?.text).toBe('Part1 Part2');
   });
@@ -304,7 +326,12 @@ describe('AcpClientProvider.query(): successful turn', () => {
     ]);
     _test.createTransport = async () => transport;
 
-    const events = await collectEvents(new AcpClientProvider(), baseInput);
+    const q = new AcpClientProvider().query(baseInput);
+    const events: ProviderEvent[] = [];
+    for await (const e of q.events) {
+      events.push(e);
+      if (e.type === 'result') { q.end(); }
+    }
     expect(events.find(e => e.type === 'result')).toMatchObject({ type: 'result', text: 'Inline answer' });
   });
 });
@@ -378,7 +405,10 @@ describe('AcpClientProvider: fs/ request handling', () => {
     ]);
     _test.createTransport = async () => transport;
 
-    await collectEvents(new AcpClientProvider(), baseInput);
+    const q = new AcpClientProvider().query(baseInput);
+    for await (const e of q.events) {
+      if (e.type === 'result') { q.end(); }
+    }
 
     // Wait for fs/ response to be written (async handler)
     await new Promise(r => setTimeout(r, 10));
@@ -402,12 +432,242 @@ describe('AcpClientProvider: fs/ request handling', () => {
     ]);
     _test.createTransport = async () => transport;
 
-    await collectEvents(new AcpClientProvider(), baseInput);
+    const q = new AcpClientProvider().query(baseInput);
+    for await (const e of q.events) {
+      if (e.type === 'result') { q.end(); }
+    }
     await new Promise(r => setTimeout(r, 10));
 
     const termResp = transport.writes
       .map(w => JSON.parse(w) as { id?: number; error?: { code: number } })
       .find(w => w.id === 88);
     expect(termResp?.error?.code).toBe(-32601);
+  });
+});
+
+// ── AcpClientProvider — session resume (continuation) ───────────────────────
+
+describe('AcpClientProvider.query(): session resume', () => {
+  it('skips session/new and uses continuation as sessionId', async () => {
+    const transport = createMockTransport();
+    // Only 2 requests: initialize + session/prompt (no session/new)
+    autoScript(transport, [
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: initResult })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'Resumed!' }], stopReason: 'done' } })),
+    ]);
+    _test.createTransport = async () => transport;
+
+    const input: QueryInput = { prompt: 'follow up', cwd: '/workspace', continuation: 'existing-sess' };
+    const q = new AcpClientProvider().query(input);
+    const events: ProviderEvent[] = [];
+    for await (const e of q.events) {
+      events.push(e);
+      if (e.type === 'result') { q.end(); }
+    }
+
+    // init should reflect the resumed sessionId
+    expect(events.find(e => e.type === 'init')).toMatchObject({ continuation: 'existing-sess' });
+    expect(events.find(e => e.type === 'result')).toMatchObject({ text: 'Resumed!' });
+
+    // Verify session/new was never sent
+    const methods = transport.writes
+      .map(w => (JSON.parse(w) as { method?: string }).method)
+      .filter(Boolean);
+    expect(methods).not.toContain('session/new');
+    expect(methods).toContain('session/prompt');
+  });
+});
+
+// ── AcpClientProvider — systemContext forwarding ─────────────────────────────
+
+describe('AcpClientProvider.query(): systemContext forwarding', () => {
+  it('prepends system instructions to the prompt content', async () => {
+    const transport = createMockTransport();
+    autoScript(transport, [
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: initResult })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { sessionId: 'sys-sess' } })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [], stopReason: 'done' } })),
+    ]);
+    _test.createTransport = async () => transport;
+
+    const input: QueryInput = {
+      prompt: 'Hello',
+      cwd: '/workspace',
+      systemContext: { instructions: 'You are a helpful assistant.' },
+    };
+    const q = new AcpClientProvider().query(input);
+    for await (const e of q.events) {
+      if (e.type === 'result') { q.end(); }
+    }
+
+    const promptMsg = transport.writes
+      .map(w => JSON.parse(w) as { method?: string; params?: { content?: Array<{ text?: string }> } })
+      .find(w => w.method === 'session/prompt');
+    const text = promptMsg?.params?.content?.[0]?.text ?? '';
+    expect(text).toContain('<system>');
+    expect(text).toContain('You are a helpful assistant.');
+    expect(text).toContain('Hello');
+  });
+
+  it('sends plain prompt when no systemContext', async () => {
+    const transport = createMockTransport();
+    autoScript(transport, [
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: initResult })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { sessionId: 'plain-sess' } })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [], stopReason: 'done' } })),
+    ]);
+    _test.createTransport = async () => transport;
+
+    const q = new AcpClientProvider().query(baseInput);
+    for await (const e of q.events) {
+      if (e.type === 'result') { q.end(); }
+    }
+
+    const promptMsg = transport.writes
+      .map(w => JSON.parse(w) as { method?: string; params?: { content?: Array<{ text?: string }> } })
+      .find(w => w.method === 'session/prompt');
+    expect(promptMsg?.params?.content?.[0]?.text).toBe('Hello agent');
+  });
+});
+
+// ── AcpClientProvider — multi-turn (push) ────────────────────────────────────
+
+describe('AcpClientProvider.query(): multi-turn via push()', () => {
+  it('sends a second session/prompt on push() without reconnecting', async () => {
+    const transport = createMockTransport();
+    autoScript(transport, [
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: initResult })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { sessionId: 'mt-sess' } })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'Turn 1' }], stopReason: 'done' } })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'Turn 2' }], stopReason: 'done' } })),
+    ]);
+    _test.createTransport = async () => transport;
+
+    const q = new AcpClientProvider().query(baseInput);
+    const results: string[] = [];
+
+    for await (const e of q.events) {
+      if (e.type === 'result') {
+        results.push((e as { type: 'result'; text: string | null }).text ?? '');
+        if (results.length === 1) {
+          q.push('follow-up message');
+        } else {
+          q.end();
+        }
+      }
+    }
+
+    expect(results).toEqual(['Turn 1', 'Turn 2']);
+
+    // Exactly 2 session/prompt calls on the same transport
+    const promptCalls = transport.writes
+      .map(w => JSON.parse(w) as { method?: string })
+      .filter(w => w.method === 'session/prompt');
+    expect(promptCalls).toHaveLength(2);
+  });
+
+  it('second turn uses the same sessionId', async () => {
+    const transport = createMockTransport();
+    autoScript(transport, [
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: initResult })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { sessionId: 'shared-sess' } })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [], stopReason: 'done' } })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [], stopReason: 'done' } })),
+    ]);
+    _test.createTransport = async () => transport;
+
+    const q = new AcpClientProvider().query(baseInput);
+    let turn = 0;
+    for await (const e of q.events) {
+      if (e.type === 'result') {
+        turn++;
+        if (turn === 1) q.push('turn 2');
+        else q.end();
+      }
+    }
+
+    const promptMsgs = transport.writes
+      .map(w => JSON.parse(w) as { method?: string; params?: { sessionId?: string } })
+      .filter(w => w.method === 'session/prompt');
+    expect(promptMsgs[0]?.params?.sessionId).toBe('shared-sess');
+    expect(promptMsgs[1]?.params?.sessionId).toBe('shared-sess');
+  });
+
+  it('second turn chunks are independent from first turn', async () => {
+    const transport = createMockTransport();
+    autoScript(transport, [
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: initResult })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { sessionId: 'chunk-sess' } })),
+      id => {
+        transport.enqueue(JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { update: { kind: 'agent_message_chunk', content: { content: [{ type: 'text', text: 'First' }] } } } }));
+        transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [], stopReason: 'done' } }));
+      },
+      id => {
+        transport.enqueue(JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { update: { kind: 'agent_message_chunk', content: { content: [{ type: 'text', text: 'Second' }] } } } }));
+        transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [], stopReason: 'done' } }));
+      },
+    ]);
+    _test.createTransport = async () => transport;
+
+    const q = new AcpClientProvider().query(baseInput);
+    const results: (string | null)[] = [];
+    for await (const e of q.events) {
+      if (e.type === 'result') {
+        results.push((e as { type: 'result'; text: string | null }).text);
+        if (results.length === 1) q.push('turn 2');
+        else q.end();
+      }
+    }
+
+    // Each turn should only have its own chunks, not accumulated from prior turns
+    expect(results[0]).toBe('First');
+    expect(results[1]).toBe('Second');
+  });
+});
+
+// ── AcpClientProvider — abort ────────────────────────────────────────────────
+
+describe('AcpClientProvider.query(): abort()', () => {
+  it('abort() while waiting for push stops the generator cleanly', async () => {
+    const transport = createMockTransport();
+    autoScript(transport, [
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: initResult })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { sessionId: 'ab-sess' } })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [], stopReason: 'done' } })),
+    ]);
+    _test.createTransport = async () => transport;
+
+    const q = new AcpClientProvider().query(baseInput);
+    const events: ProviderEvent[] = [];
+    for await (const e of q.events) {
+      events.push(e);
+      if (e.type === 'result') {
+        // Abort instead of push/end — generator should exit without error
+        q.abort();
+      }
+    }
+
+    expect(events.some(e => e.type === 'result')).toBe(true);
+    expect(events.filter(e => e.type === 'error')).toHaveLength(0);
+  });
+});
+
+// ── AcpClientProvider — idle timeout ────────────────────────────────────────
+
+describe('AcpClientProvider.query(): idle timeout', () => {
+  it('closes connection and emits error after ACP_CLIENT_IDLE_TIMEOUT_MS of silence', async () => {
+    process.env.ACP_CLIENT_IDLE_TIMEOUT_MS = '50'; // very short for test
+
+    const transport = createMockTransport();
+    autoScript(transport, [
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: initResult })),
+      id => transport.enqueue(JSON.stringify({ jsonrpc: '2.0', id, result: { sessionId: 'timeout-sess' } })),
+      // session/prompt step: respond very slowly (simulated by not responding — idle timer fires)
+      _id => { /* no response — timeout will close transport */ },
+    ]);
+    _test.createTransport = async () => transport;
+
+    const events = await collectEvents(new AcpClientProvider(), baseInput, 20);
+    expect(events.some(e => e.type === 'error')).toBe(true);
   });
 });
