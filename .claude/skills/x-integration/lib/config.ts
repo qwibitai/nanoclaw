@@ -6,6 +6,7 @@
  */
 
 import path from 'path';
+import { detectChromePath } from './chrome-detect.js';
 
 // Project root - can be overridden for different deployments
 const PROJECT_ROOT = process.env.NANOCLAW_ROOT || process.cwd();
@@ -14,10 +15,10 @@ const PROJECT_ROOT = process.env.NANOCLAW_ROOT || process.cwd();
  * Configuration object with all settings
  */
 export const config = {
-  // Chrome executable path
-  // Default: standard macOS Chrome location
-  // Override: CHROME_PATH environment variable
-  chromePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  // Chrome executable path. Resolution: CHROME_PATH env > platform probe.
+  // Throws at first access if no Chrome is installed — fail loud so the
+  // user sees an install hint instead of a silent Playwright launch error.
+  chromePath: detectChromePath(),
 
   // Browser profile directory for persistent login sessions
   browserDataDir: path.join(PROJECT_ROOT, 'data', 'x-browser-profile'),
@@ -41,10 +42,27 @@ export const config = {
     pageLoad: 3000,
   },
 
-  // X character limits
+  // X character limits + per-tool result caps
   limits: {
     tweetMaxLength: 280,
+    /** Direct-message body cap (X allows up to 10,000 chars in DMs). */
+    dmMaxLength: 10000,
+    /** Cap on items returned by each read tool — protects against
+     * runaway scrolls and stays comfortably under the 120s timeout. */
+    readMax: 50,
+    /** Cap on attached images per tweet (X UI allows 4). */
+    mediaMaxPerTweet: 4,
   },
+
+  // Pacing — minimum wall-clock spacing between sequential X actions.
+  // Enforced by host.ts's pacedRun() mutex, NOT by per-script sleep
+  // (sleep can't enforce delay across separate subprocess invocations).
+  pacing: {
+    actionDelayMs: 10000,
+  },
+
+  // Where script failures dump screenshots + DOM snapshots for debugging.
+  failureDumpDir: path.join(PROJECT_ROOT, 'logs', 'x-failures'),
 
   // Chrome launch arguments
   chromeArgs: [

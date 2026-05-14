@@ -1,6 +1,6 @@
 #!/usr/bin/env pnpm exec tsx
 /**
- * X like — like a tweet.
+ * X unbookmark — remove a bookmark.
  */
 
 import { getBrowserContext, navigateToTweet, runScript, config, ScriptResult, ensureLoggedIn, captureFailure } from '../lib/browser.js';
@@ -8,7 +8,7 @@ import { X_SELECTORS } from '../lib/locators.js';
 
 interface Input { tweetUrl: string }
 
-async function likeTweet(input: Input): Promise<ScriptResult> {
+async function unbookmark(input: Input): Promise<ScriptResult> {
   if (!input.tweetUrl) return { success: false, message: 'tweetUrl required.' };
 
   const context = await getBrowserContext();
@@ -19,23 +19,23 @@ async function likeTweet(input: Input): Promise<ScriptResult> {
     if (auth) return auth;
 
     const article = nav.page.locator(X_SELECTORS.tweet).first();
-    if (await article.locator(X_SELECTORS.unlike).isVisible().catch(() => false)) {
-      return { success: true, message: 'Already liked (no-op).' };
+    if (await article.locator(X_SELECTORS.bookmark).isVisible().catch(() => false)) {
+      return { success: true, message: 'Not bookmarked (no-op).' };
     }
-    const btn = article.locator(X_SELECTORS.like);
+    const btn = article.locator(X_SELECTORS.removeBookmark);
     await btn.waitFor({ timeout: config.timeouts.elementWait });
     await btn.click();
     await nav.page.waitForTimeout(config.timeouts.afterClick);
-    if (await article.locator(X_SELECTORS.unlike).isVisible().catch(() => false)) {
-      return { success: true, message: 'Liked.' };
+    if (await article.locator(X_SELECTORS.bookmark).isVisible().catch(() => false)) {
+      return { success: true, message: 'Unbookmarked.' };
     }
-    await captureFailure(nav.page, 'like-no-verify');
-    return { success: false, message: 'Click registered but unlike-state not visible — verify manually.' };
+    await captureFailure(nav.page, 'unbookmark-no-verify');
+    return { success: false, message: 'Click registered but bookmark state not visible — verify manually.' };
   } catch (err) {
-    return { success: false, message: `like error: ${err instanceof Error ? err.message : String(err)}` };
+    return { success: false, message: `unbookmark error: ${err instanceof Error ? err.message : String(err)}` };
   } finally {
     await context.close();
   }
 }
 
-runScript<Input>(likeTweet);
+runScript<Input>(unbookmark);

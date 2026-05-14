@@ -6,7 +6,7 @@
  * Interactive script - opens browser for manual login
  */
 
-import { chromium } from 'playwright';
+import { chromium } from 'playwright-core';
 import * as readline from 'readline';
 import fs from 'fs';
 import path from 'path';

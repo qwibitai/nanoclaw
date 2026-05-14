@@ -1,62 +1,50 @@
 #!/usr/bin/env pnpm exec tsx
 /**
- * X Integration - Retweet
- * Usage: echo '{"tweetUrl":"https://x.com/user/status/123"}' | pnpm exec tsx retweet.ts
+ * X retweet — retweet a tweet (no comment).
+ *
+ * Flow: click retweet button → menu opens → click "Repost" / confirm.
  */
 
-import { getBrowserContext, navigateToTweet, runScript, config, ScriptResult } from '../lib/browser.js';
+import { getBrowserContext, navigateToTweet, runScript, config, ScriptResult, ensureLoggedIn, captureFailure } from '../lib/browser.js';
+import { X_SELECTORS } from '../lib/locators.js';
 
-interface RetweetInput {
-  tweetUrl: string;
-}
+interface Input { tweetUrl: string }
 
-async function retweet(input: RetweetInput): Promise<ScriptResult> {
-  const { tweetUrl } = input;
+async function retweet(input: Input): Promise<ScriptResult> {
+  if (!input.tweetUrl) return { success: false, message: 'tweetUrl required.' };
 
-  if (!tweetUrl) {
-    return { success: false, message: 'Please provide a tweet URL' };
-  }
-
-  let context = null;
+  const context = await getBrowserContext();
   try {
-    context = await getBrowserContext();
-    const { page, success, error } = await navigateToTweet(context, tweetUrl);
+    const nav = await navigateToTweet(context, input.tweetUrl);
+    if (!nav.success) return { success: false, message: nav.error || 'Navigation failed.' };
+    const auth = await ensureLoggedIn(nav.page);
+    if (auth) return auth;
 
-    if (!success) {
-      return { success: false, message: error || 'Navigation failed' };
+    const article = nav.page.locator(X_SELECTORS.tweet).first();
+    if (await article.locator(X_SELECTORS.unretweet).isVisible().catch(() => false)) {
+      return { success: true, message: 'Already retweeted (no-op).' };
     }
+    const rtBtn = article.locator(X_SELECTORS.retweet);
+    await rtBtn.waitFor({ timeout: config.timeouts.elementWait });
+    await rtBtn.click();
+    await nav.page.waitForTimeout(config.timeouts.afterClick);
 
-    const tweet = page.locator('article[data-testid="tweet"]').first();
-    const unretweetButton = tweet.locator('[data-testid="unretweet"]');
-    const retweetButton = tweet.locator('[data-testid="retweet"]');
+    // Confirm in popup
+    const confirm = nav.page.locator(X_SELECTORS.retweetConfirm);
+    await confirm.waitFor({ timeout: config.timeouts.elementWait });
+    await confirm.click();
+    await nav.page.waitForTimeout(config.timeouts.afterSubmit);
 
-    // Check if already retweeted
-    const alreadyRetweeted = await unretweetButton.isVisible().catch(() => false);
-    if (alreadyRetweeted) {
-      return { success: true, message: 'Tweet already retweeted' };
+    if (await article.locator(X_SELECTORS.unretweet).isVisible().catch(() => false)) {
+      return { success: true, message: 'Retweeted.' };
     }
-
-    await retweetButton.waitFor({ timeout: config.timeouts.elementWait });
-    await retweetButton.click();
-    await page.waitForTimeout(config.timeouts.afterClick);
-
-    // Click retweet confirm option
-    const retweetConfirm = page.locator('[data-testid="retweetConfirm"]');
-    await retweetConfirm.waitFor({ timeout: config.timeouts.elementWait });
-    await retweetConfirm.click();
-    await page.waitForTimeout(config.timeouts.afterClick * 2);
-
-    // Verify
-    const nowRetweeted = await unretweetButton.isVisible().catch(() => false);
-    if (nowRetweeted) {
-      return { success: true, message: 'Retweet successful' };
-    }
-
-    return { success: false, message: 'Retweet action completed but could not verify success' };
-
+    await captureFailure(nav.page, 'retweet-no-verify');
+    return { success: false, message: 'Click sequence completed but unretweet-state not visible — verify manually.' };
+  } catch (err) {
+    return { success: false, message: `retweet error: ${err instanceof Error ? err.message : String(err)}` };
   } finally {
-    if (context) await context.close();
+    await context.close();
   }
 }
 
-runScript<RetweetInput>(retweet);
+runScript<Input>(retweet);

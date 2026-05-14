@@ -1,417 +1,289 @@
 ---
 name: x-integration
-description: X (Twitter) integration for NanoClaw. Post tweets, like, reply, retweet, and quote. Use for setup, testing, or troubleshooting X functionality. Triggers on "setup x", "x integration", "twitter", "post tweet", "tweet".
+description: Read, post, and engage with X (Twitter) via your real Chromium-based browser. Triggers on "setup x", "x integration", "twitter", "post tweet", "tweet", "dm", "export bookmarks".
 ---
 
 # X (Twitter) Integration
 
-Browser automation for X interactions via WhatsApp.
+MCP tools that automate every common X action through *your real browser* (Chrome, Brave, or Chromium — whichever you have installed). Drives the user's logged-in profile so X's bot detection sees a normal session. Channel-agnostic: works with whatever channel adapter you have wired (Signal, Discord, Slack, etc.).
 
-> **Compatibility:** NanoClaw v1.0.0. Directory structure may change in future versions.
+> **Compatibility:** NanoClaw v2. Cross-platform: macOS and Linux.
+>
+> **Delete safety:** `x_delete_tweet` requires the caller to pass a substring of the tweet body as `text_must_match`. The host script reads the live tweet first and refuses to delete unless the substring is present — guards against URL hallucinations and copy-paste mistakes without adding an approval gate.
 
-## Features
+## Tool catalog
 
-| Action | Tool | Description |
-|--------|------|-------------|
-| Post | `x_post` | Publish new tweets |
-| Like | `x_like` | Like any tweet |
-| Reply | `x_reply` | Reply to tweets |
-| Retweet | `x_retweet` | Retweet without comment |
-| Quote | `x_quote` | Quote tweet with comment |
+### Read (8)
+| Tool | Args | What it does |
+|------|------|--------------|
+| `x_read_tweet` | `tweet_url` | Fetch a single tweet (text, author, timestamp, image alt-text, engagement counts). The "what do you think of this link" workflow. |
+| `x_read_thread` | `tweet_url`, `limit?` | Tweet plus its replies. For summarizing discussions. |
+| `x_read_user` | `handle`, `limit?` | A user's recent tweets. "What's @foo been saying lately." |
+| `x_read_bookmarks` | `limit?` (≤100), `cursor?` | Your bookmarked tweets, newest first. To walk full history, chain calls: pass back the `NEXT_CURSOR` value emitted in each response as `cursor` until no more cursor returned. Higher cap than other read tools (100 vs 50) because each paginated call re-scrolls past prior items. |
+| `x_read_list` | `list_url`, `limit?` | Tweets in any X list. "What's on Robert Scoble's AI list." |
+| `x_read_timeline` | `limit?` | Your home timeline (For You / Following). |
+| `x_read_notifications` | `limit?` | Your mentions/replies feed. |
+| `x_search` | `query`, `latest?`, `limit?` | Search X for tweets. |
+
+### Compose (3) — with optional media + native scheduling
+| Tool | Args | What it does |
+|------|------|--------------|
+| `x_post` | `content`, `media?[]`, `schedule_at?` | Post a tweet. Optionally attach up to 4 images. Optionally `schedule_at` (ISO 8601 with timezone) — uses X's native scheduler so the tweet sits in X's queue regardless of NanoClaw uptime. |
+| `x_reply` | `tweet_url`, `content`, `media?[]`, `schedule_at?` | Reply to a tweet. Same media + schedule support. |
+| `x_quote` | `tweet_url`, `comment`, `media?[]`, `schedule_at?` | Quote-tweet with a comment. Same media + schedule support. |
+
+### Engagement (9) — toggles + delete
+| Tool | Args |
+|------|------|
+| `x_like` / `x_unlike` | `tweet_url` |
+| `x_retweet` / `x_unretweet` | `tweet_url` |
+| `x_bookmark` / `x_unbookmark` | `tweet_url` |
+| `x_follow` / `x_unfollow` | `handle` |
+| `x_delete_tweet` | `tweet_url`, `text_must_match` (≥5-char substring of tweet body — safety guard) |
+
+### Scheduling queue (2)
+| Tool | Args | What it does |
+|------|------|--------------|
+| `x_list_scheduled` | — | List your pending scheduled tweets in X's queue. |
+| `x_cancel_scheduled` | `index?` or `text_match?` | Cancel a scheduled tweet. Pass the 1-based index from `x_list_scheduled` or a substring of the body. |
+
+### DMs (3)
+| Tool | Args | What it does |
+|------|------|--------------|
+| `x_read_dm_inbox` | `limit?` | List of DM conversations (handles, unread state, last-message preview). Does **not** mark anything read. |
+| `x_read_dm_thread` | `handle`, `limit?` | Messages in one DM conversation. **CAVEAT:** opens the thread, which marks unread messages as read on X. Unavoidable. Don't call casually on threads with unread context the user wants to see fresh. |
+| `x_send_dm` | `handle`, `content` | Send a DM to a single user. |
+
+### Bulk export (1)
+| Tool | Args | What it does |
+|------|------|--------------|
+| `x_export_bookmarks` | `reset?` | Resumable bulk-dump of all bookmarks to CSV at `/workspace/group/captures/bookmarks.csv`. Each call scrolls for ~75 seconds (well under the 120s host script timeout) and appends new rows; a sidecar `.progress.json` file records the last exported tweet ID. For users with thousands of bookmarks, the agent calls this in a loop until the response says "End of bookmarks reached." Pass `reset=true` to truncate the CSV and start fresh. CSV columns: `id, url, author_handle, author_name, timestamp, text, image_alt_texts, likes, retweets, replies, is_reply, is_retweet`. RFC 4180 quoting. |
+
+## How it works
+
+| Layer | Where | What |
+|-------|-------|------|
+| Container MCP tool | `container/agent-runner/src/mcp-tools/x-integration.ts` | Each tool writes a `kind:'system'` row to `messages_out` with `{ action, requestId, ...args }` and returns immediately ("submitted; result will arrive shortly"). |
+| Host delivery action | `src/modules/x-integration/index.ts` | `registerDeliveryAction('x_*', …)` for 24 actions. Each handler routes through `pacedRun()` (a single host-process Promise chain that enforces a **10-second floor between any two X actions** — protects the account from anti-spam tripping). Then spawns the matching `scripts/<name>.ts` via `tsx`, awaits exit, calls `notifyAgent(session, result)` to write the outcome back into `inbound.db` (which also wakes the container). |
+| Browser scripts | `.claude/skills/x-integration/scripts/<name>.ts` | Playwright + your persistent browser profile at `data/x-browser-profile/`. Reads JSON from stdin, writes a `ScriptResult` JSON line to stdout. |
+| DOM glue | `lib/locators.ts`, `lib/extract.ts` | Every CSS / data-testid selector AND every tweet/profile/DM parser is centralized. When X breaks something, *that's* the only place to update. |
+
+The agent UX is async: one "submitted" reply, then a follow-up message ~10–60s later with the result. This is the v2 idiom (no sync request-response on system actions).
 
 ## Prerequisites
 
-Before using this skill, ensure:
+1. **A Chromium-based browser** on the host. Bundled Chromium does **not** work — X bot-detection blocks it.
+   - **Linux:** `command -v google-chrome-stable google-chrome chromium-browser chromium brave-browser` should return a path. If not:
+     - Chrome: `sudo apt install google-chrome-stable`
+     - Brave: add the Brave repo, then `sudo apt install brave-browser`
+     - Chromium: `sudo apt install chromium-browser`
+   - **macOS:** `mdfind "kMDItemCFBundleIdentifier == 'com.google.Chrome'" | head -1` (or `com.brave.Browser` for Brave). If not, install from <https://www.google.com/chrome/> or <https://brave.com/download/>.
+   - **Pin a specific browser:** `CHROME_PATH=/usr/bin/brave-browser` in `.env` overrides auto-detection.
+2. **Desktop session** for the one-time interactive login (`DISPLAY=:1` or similar). Truly headless servers: run setup on a workstation and rsync `data/x-browser-profile/` to the server.
+3. **NanoClaw v2** with the host running and channel adapter wired.
 
-1. **NanoClaw is installed and running** - WhatsApp connected, service active
-2. **Dependencies installed**:
-   ```bash
-   pnpm ls playwright dotenv-cli || pnpm install playwright dotenv-cli
-   ```
-3. **CHROME_PATH configured** in `.env` (if Chrome is not at default location):
-   ```bash
-   # Find your Chrome path
-   mdfind "kMDItemCFBundleIdentifier == 'com.google.Chrome'" 2>/dev/null | head -1
-   # Add to .env
-   CHROME_PATH=/path/to/Google Chrome.app/Contents/MacOS/Google Chrome
-   ```
+## Install
 
-## Quick Start
+All paths relative to NanoClaw repo root.
 
-```bash
-# 1. Setup authentication (interactive)
-pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/setup.ts
-# Verify: data/x-auth.json should exist after successful login
-
-# 2. Rebuild container to include skill
-./container/build.sh
-# Verify: Output shows "COPY .claude/skills/x-integration/agent.ts"
-
-# 3. Rebuild host and restart service
-pnpm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
-# Verify: launchctl list | grep nanoclaw (macOS) or systemctl --user status nanoclaw (Linux)
-```
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CHROME_PATH` | `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` | Chrome executable path |
-| `NANOCLAW_ROOT` | `process.cwd()` | Project root directory |
-| `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error) |
-
-Set in `.env` file (loaded via `dotenv-cli` at runtime):
+### 1. Verify a browser
 
 ```bash
-# .env
-CHROME_PATH=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+# Linux
+command -v google-chrome-stable google-chrome chromium-browser chromium brave-browser
+
+# macOS
+mdfind "kMDItemCFBundleIdentifier == 'com.google.Chrome'" | head -1
+mdfind "kMDItemCFBundleIdentifier == 'com.brave.Browser'" | head -1
 ```
 
-### Configuration File
+### 2. Install host dep
 
-Edit `lib/config.ts` to modify defaults:
+The skill uses `playwright-core` (not `playwright`) — we point `executablePath` at your real browser, so the bundled-browser auto-download is wasted bandwidth.
 
-```typescript
-export const config = {
-    // Browser viewport
-    viewport: { width: 1280, height: 800 },
-
-    // Timeouts (milliseconds)
-    timeouts: {
-        navigation: 30000,    // Page navigation
-        elementWait: 5000,    // Wait for element
-        afterClick: 1000,     // Delay after click
-        afterFill: 1000,      // Delay after form fill
-        afterSubmit: 3000,    // Delay after submit
-        pageLoad: 3000,       // Initial page load
-    },
-
-    // Tweet limits
-    limits: {
-        tweetMaxLength: 280,
-    },
-};
-```
-
-### Data Directories
-
-Paths relative to project root:
-
-| Path | Purpose | Git |
-|------|---------|-----|
-| `data/x-browser-profile/` | Chrome profile with X session | Ignored |
-| `data/x-auth.json` | Auth state marker | Ignored |
-| `logs/nanoclaw.log` | Service logs (contains X operation logs) | Ignored |
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Container (Linux VM)                                       │
-│  └── agent.ts → MCP tool definitions (x_post, etc.)    │
-│      └── Writes IPC request to /workspace/ipc/tasks/       │
-└──────────────────────┬──────────────────────────────────────┘
-                       │ IPC (file system)
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Host (macOS)                                               │
-│  └── src/ipc.ts → processTaskIpc()                         │
-│      └── host.ts → handleXIpc()                         │
-│          └── spawn subprocess → scripts/*.ts               │
-│              └── Playwright → Chrome → X Website           │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Why This Design?
-
-- **API is expensive** - X official API requires paid subscription ($100+/month) for posting
-- **Bot browsers get blocked** - X detects and bans headless browsers and common automation fingerprints
-- **Must use user's real browser** - Reuses the user's actual Chrome on Host with real browser fingerprint to avoid detection
-- **One-time authorization** - User logs in manually once, session persists in Chrome profile for future use
-
-### File Structure
-
-```
-.claude/skills/x-integration/
-├── SKILL.md          # This documentation
-├── host.ts           # Host-side IPC handler
-├── agent.ts          # Container-side MCP tool definitions
-├── lib/
-│   ├── config.ts     # Centralized configuration
-│   └── browser.ts    # Playwright utilities
-└── scripts/
-    ├── setup.ts      # Interactive login
-    ├── post.ts       # Post tweet
-    ├── like.ts       # Like tweet
-    ├── reply.ts      # Reply to tweet
-    ├── retweet.ts    # Retweet
-    └── quote.ts      # Quote tweet
-```
-
-### Integration Points
-
-To integrate this skill into NanoClaw, make the following modifications:
-
----
-
-**1. Host side: `src/ipc.ts`**
-
-Add import after other local imports:
-```typescript
-import { handleXIpc } from '../.claude/skills/x-integration/host.js';
-```
-
-Modify `processTaskIpc` function's switch statement default case:
-```typescript
-// Find:
-default:
-logger.warn({ type: data.type }, 'Unknown IPC task type');
-
-// Replace with:
-default:
-const handled = await handleXIpc(data, sourceGroup, isMain, DATA_DIR);
-if (!handled) {
-    logger.warn({ type: data.type }, 'Unknown IPC task type');
-}
-```
-
----
-
-**2. Container side: `container/agent-runner/src/ipc-mcp.ts`**
-
-Add import after `cron-parser` import:
-```typescript
-// @ts-ignore - Copied during Docker build from .claude/skills/x-integration/
-import { createXTools } from './skills/x-integration/agent.js';
-```
-
-Add to the end of tools array (before the closing `]`):
-```typescript
-    ...createXTools({ groupFolder, isMain })
-```
-
----
-
-**3. Build script: `container/build.sh`**
-
-Change build context from `container/` to project root (required to access `.claude/skills/`):
-```bash
-# Find:
-docker build -t "${IMAGE_NAME}:${TAG}" .
-
-# Replace with:
-cd "$SCRIPT_DIR/.."
-docker build -t "${IMAGE_NAME}:${TAG}" -f container/Dockerfile .
-```
-
----
-
-**4. Dockerfile: `container/Dockerfile`**
-
-First, update the build context paths (required to access `.claude/skills/` from project root):
-```dockerfile
-# Find:
-COPY agent-runner/package*.json ./
-...
-COPY agent-runner/ ./
-
-# Replace with:
-COPY container/agent-runner/package*.json ./
-...
-COPY container/agent-runner/ ./
-```
-
-Then add COPY line after `COPY container/agent-runner/ ./` and before `RUN pnpm run build`:
-```dockerfile
-# Copy skill MCP tools
-COPY .claude/skills/x-integration/agent.ts ./src/skills/x-integration/
-```
-
-## Setup
-
-All paths below are relative to project root (`NANOCLAW_ROOT`).
-
-### 1. Check Chrome Path
+Pin a version that's at least 3 days old (NanoClaw's pnpm policy: `minimumReleaseAge: 4320`):
 
 ```bash
-# Check if Chrome exists at configured path
-cat .env | grep CHROME_PATH
-ls -la "$(grep CHROME_PATH .env | cut -d= -f2)" 2>/dev/null || \
-echo "Chrome not found - update CHROME_PATH in .env"
+pnpm view playwright-core time | tail -10
+# Pick a version stamped ≥3 days ago, then:
+pnpm add playwright-core@<that-version>
 ```
 
-### 2. Run Authentication
+### 3. Install the container MCP tool
 
 ```bash
-pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/setup.ts
+cp .claude/skills/x-integration/agent.ts \
+   container/agent-runner/src/mcp-tools/x-integration.ts
+
+grep -q "x-integration" container/agent-runner/src/mcp-tools/index.ts \
+  || sed -i.bak "/^import { startMcpServer }/i\\
+import './x-integration.js';" container/agent-runner/src/mcp-tools/index.ts \
+  && rm -f container/agent-runner/src/mcp-tools/index.ts.bak
 ```
 
-This opens Chrome for manual X login. Session saved to `data/x-browser-profile/`.
+`/app/src` is bind-mounted RO from `container/agent-runner/src/`, so this file goes live on the next session spawn — no Docker rebuild.
 
-**Verify success:**
+### 4. Install the host module
+
 ```bash
-cat data/x-auth.json  # Should show {"authenticated": true, ...}
+mkdir -p src/modules/x-integration
+cp .claude/skills/x-integration/host.ts src/modules/x-integration/index.ts
+
+grep -q "x-integration" src/modules/index.ts \
+  || echo "import './x-integration/index.js';" >> src/modules/index.ts
 ```
 
-### 3. Rebuild Container
+### 5. Run interactive login (one-time)
+
+Opens your browser on the desktop. Log in to X. Return to terminal, press Enter. Session saves to `data/x-browser-profile/`.
 
 ```bash
-./container/build.sh
+pnpm exec tsx --env-file=.env .claude/skills/x-integration/scripts/setup.ts
 ```
 
-**Verify success:**
+Verify:
+
 ```bash
-./container/build.sh 2>&1 | grep -i "agent.ts"  # Should show COPY line
+test -f data/x-auth.json && echo "logged in" || echo "run setup again"
 ```
 
-### 4. Restart Service
+### 6. Build the host
 
 ```bash
 pnpm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
 ```
 
-**Verify success:**
-```bash
-launchctl list | grep nanoclaw  # macOS — should show PID and exit code 0 or -
-# Linux: systemctl --user status nanoclaw
-```
-
-## Usage via WhatsApp
-
-Replace `@Assistant` with your configured trigger name (`ASSISTANT_NAME` in `.env`):
-
-```
-@Assistant post a tweet: Hello world!
-
-@Assistant like this tweet https://x.com/user/status/123
-
-@Assistant reply to https://x.com/user/status/123 with: Great post!
-
-@Assistant retweet https://x.com/user/status/123
-
-@Assistant quote https://x.com/user/status/123 with comment: Interesting
-```
-
-**Note:** Only the main group can use X tools. Other groups will receive an error.
-
-## Testing
-
-Scripts require environment variables from `.env`. Use `dotenv-cli` to load them:
-
-### Check Authentication Status
+### 7. Restart the service
 
 ```bash
-# Check if auth file exists and is valid
-cat data/x-auth.json 2>/dev/null && echo "Auth configured" || echo "Auth not configured"
+# Linux
+systemctl --user restart nanoclaw
 
-# Check if browser profile exists
-ls -la data/x-browser-profile/ 2>/dev/null | head -5
+# macOS
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```
 
-### Re-authenticate (if expired)
+## Usage examples
 
-```bash
-pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/setup.ts
+Address your assistant by name (`ASSISTANT_NAME` in `.env`):
+
+```
+What's in my bookmarks lately?
+What do you think of https://x.com/karpathy/status/<id>?
+Summarize this thread: https://x.com/<user>/status/<id>
+What's @scoble been posting on AI?
+Search X for "noumenon" — top 10.
+
+Post a tweet: gm. Sovereignty is a daily practice.
+Reply to https://x.com/<id> with: this matches my experience.
+Like https://x.com/<id>
+Bookmark https://x.com/<id>
+Follow @karpathy
+
+Schedule this for tomorrow 9am PT: <text>
+What scheduled tweets do I have?
+Cancel scheduled tweet #2.
+
+What DMs are in my inbox?
+Read my DM thread with @<friend>.
+DM @<friend>: thanks for the link earlier.
 ```
 
-### Test Post (will actually post)
+Each command produces (a) one acknowledgment from the agent, (b) a follow-up with the result ~10–60s later.
 
-```bash
-echo '{"content":"Test tweet - please ignore"}' | pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/post.ts
-```
+## Pacing
 
-### Test Like
-
-```bash
-echo '{"tweetUrl":"https://x.com/user/status/123"}' | pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/like.ts
-```
-
-Or export `CHROME_PATH` manually before running:
-
-```bash
-export CHROME_PATH="/path/to/chrome"
-echo '{"content":"Test"}' | pnpm exec tsx .claude/skills/x-integration/scripts/post.ts
-```
+The host serializes all X actions through a 10-second-minimum mutex. If the agent fires "like 5 tweets in a row," they'll execute sequentially with at least 10s between each — which keeps your account well below X's anti-spam thresholds. Knob lives at `lib/config.ts`'s `pacing.actionDelayMs`; raise it if you ever start seeing X warnings.
 
 ## Troubleshooting
 
-### Authentication Expired
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| "No Chromium-family browser found" | None installed | Install Chrome / Brave / Chromium (see Prerequisites). |
+| "X login expired" in result | Session aged out / X forced re-auth | Re-run setup; no service restart needed. |
+| Tool returns "submitted" but no follow-up | Host delivery action not registered | Check `src/modules/index.ts` has `import './x-integration/index.js';`, ran `pnpm run build`, restarted. |
+| MCP tool not visible to agent | Container barrel not updated | Check `container/agent-runner/src/mcp-tools/index.ts` has the import; kill the agent's container — next user message respawns on new source. |
+| `SingletonLock` errors | Stale browser-profile lock | Auto-cleaned next run; if persistent: `rm data/x-browser-profile/Singleton*` |
+| Setup hangs at "Press Enter when logged in" | `DISPLAY` unset / no GUI | Run setup on a workstation, rsync `data/x-browser-profile/` to server. |
+| One specific tool returns "Could not find X" | X UI changed and that selector broke | Check `logs/x-failures/` for screenshot + DOM snapshot; update the relevant entry in `lib/locators.ts`. The selectors most likely to break first: scheduling, DM compose, scheduled-tweets queue. |
+| Bot-detection warnings on the account | Pacing too tight (shouldn't happen at 10s) | Raise `pacing.actionDelayMs` in `lib/config.ts` to 20000 or 30000; rebuild + restart. |
+
+Logs:
 
 ```bash
-pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/setup.ts
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+grep -i "x-integration\|x_post\|x_like\|x_read\|x_send_dm" logs/nanoclaw.log | tail -30
+ls -la logs/x-failures/   # screenshots + DOM dumps from script failures
 ```
 
-### Browser Lock Files
+## Privacy
 
-If Chrome fails to launch:
+DMs are sensitive. Three protections shipped:
 
-```bash
-rm -f data/x-browser-profile/SingletonLock
-rm -f data/x-browser-profile/SingletonSocket
-rm -f data/x-browser-profile/SingletonCookie
+- `x_send_dm` / `x_read_dm_inbox` / `x_read_dm_thread` log only the action + requestId, **not** message bodies, into `nanoclaw.log`.
+- `x_read_dm_inbox` does not open individual threads — read receipts only fire on `x_read_dm_thread`.
+- `x_read_dm_thread`'s tool description tells the agent that opening a thread marks unread messages as read; the agent should not call it casually.
+
+## Configuration
+
+| Knob | Where | Default |
+|------|-------|---------|
+| `CHROME_PATH` | `.env` | Auto-detected (CHROME_PATH override > Chrome > Brave > Chromium). Pin to force a specific browser. |
+| Browser profile dir | `lib/config.ts` `browserDataDir` | `data/x-browser-profile/` |
+| Auth marker file | `lib/config.ts` `authPath` | `data/x-auth.json` |
+| Tweet char limit | `lib/config.ts` `limits.tweetMaxLength` | 280 |
+| DM char limit | `lib/config.ts` `limits.dmMaxLength` | 10000 |
+| Read result cap | `lib/config.ts` `limits.readMax` | 50 |
+| Media per tweet | `lib/config.ts` `limits.mediaMaxPerTweet` | 4 |
+| **Action pacing** | `lib/config.ts` `pacing.actionDelayMs` | **10000 (10s)** |
+| Per-action timeout | `host.ts` `SCRIPT_TIMEOUT_MS` | 120s |
+| Failure dump dir | `lib/config.ts` `failureDumpDir` | `logs/x-failures/` |
+
+## File map
+
 ```
-
-### Check Logs
-
-```bash
-# Host logs (relative to project root)
-grep -i "x_post\|x_like\|x_reply\|handleXIpc" logs/nanoclaw.log | tail -20
-
-# Script errors
-grep -i "error\|failed" logs/nanoclaw.log | tail -20
-```
-
-### Script Timeout
-
-Default timeout is 2 minutes (120s). Increase in `host.ts`:
-
-```typescript
-const timer = setTimeout(() => {
-  proc.kill('SIGTERM');
-  resolve({ success: false, message: 'Script timed out (120s)' });
-}, 120000);  // ← Increase this value
-```
-
-### X UI Selector Changes
-
-If X updates their UI, selectors in scripts may break. Current selectors:
-
-| Element | Selector |
-|---------|----------|
-| Tweet input | `[data-testid="tweetTextarea_0"]` |
-| Post button | `[data-testid="tweetButtonInline"]` |
-| Reply button | `[data-testid="reply"]` |
-| Like | `[data-testid="like"]` |
-| Unlike | `[data-testid="unlike"]` |
-| Retweet | `[data-testid="retweet"]` |
-| Unretweet | `[data-testid="unretweet"]` |
-| Confirm retweet | `[data-testid="retweetConfirm"]` |
-| Modal dialog | `[role="dialog"][aria-modal="true"]` |
-| Modal submit | `[data-testid="tweetButton"]` |
-
-### Container Build Issues
-
-If MCP tools not found in container:
-
-```bash
-# Verify build copies skill
-./container/build.sh 2>&1 | grep -i skill
-
-# Check container has the file
-docker run nanoclaw-agent ls -la /app/src/skills/
+.claude/skills/x-integration/
+├── SKILL.md                  # this file
+├── agent.ts                  # template → container/agent-runner/src/mcp-tools/x-integration.ts
+├── host.ts                   # template → src/modules/x-integration/index.ts
+├── lib/
+│   ├── chrome-detect.ts      # CHROME_PATH > Chrome > Brave > Chromium > throw
+│   ├── config.ts             # config object (limits, pacing, paths)
+│   ├── browser.ts            # Playwright wrappers, ensureLoggedIn, captureFailure, runScript harness
+│   ├── locators.ts           # ALL CSS / data-testid selectors (single source of truth)
+│   └── extract.ts            # parseTweetCard, collectTweets, DM parsers, renderers
+└── scripts/
+    ├── setup.ts              # one-time interactive login
+    ├── read-tweet.ts         # x_read_tweet
+    ├── read-thread.ts        # x_read_thread
+    ├── read-user.ts          # x_read_user
+    ├── read-bookmarks.ts     # x_read_bookmarks
+    ├── read-list.ts          # x_read_list
+    ├── read-timeline.ts      # x_read_timeline
+    ├── read-notifications.ts # x_read_notifications
+    ├── search.ts             # x_search
+    ├── post.ts               # x_post (media + schedule)
+    ├── reply.ts              # x_reply (media + schedule)
+    ├── quote.ts              # x_quote (media + schedule)
+    ├── like.ts               # x_like
+    ├── unlike.ts             # x_unlike
+    ├── retweet.ts            # x_retweet
+    ├── unretweet.ts          # x_unretweet
+    ├── bookmark.ts           # x_bookmark
+    ├── unbookmark.ts         # x_unbookmark
+    ├── follow.ts             # x_follow
+    ├── unfollow.ts           # x_unfollow
+    ├── delete-tweet.ts       # x_delete_tweet (text-echo safety guard)
+    ├── list-scheduled.ts     # x_list_scheduled
+    ├── cancel-scheduled.ts   # x_cancel_scheduled
+    ├── read-dm-inbox.ts      # x_read_dm_inbox
+    ├── read-dm-thread.ts     # x_read_dm_thread
+    └── send-dm.ts            # x_send_dm
 ```
 
 ## Security
 
-- `data/x-browser-profile/` - Contains X session cookies (in `.gitignore`)
-- `data/x-auth.json` - Auth state marker (in `.gitignore`)
-- Only main group can use X tools (enforced in `agent.ts` and `host.ts`)
-- Scripts run as subprocesses with limited environment
+- `data/x-browser-profile/` and `data/x-auth.json` are gitignored — session cookies never enter version control.
+- `x_delete_tweet` is the only irreversible action with a built-in safety guard: the caller must pass a substring of the tweet body as `text_must_match`, and the host script reads the live tweet to verify the substring is present before clicking delete. This catches URL hallucinations and copy-paste mistakes without adding an approval round-trip.
+- DM bodies are redacted from `nanoclaw.log`.
+- Posting / liking / following / deleting are not approval-gated. If you want admin approval gating per action, model it as a separate skill that wraps these tools — don't add an approval flag here.
+- The MCP tools ship via the runner once installed, so all agent groups see them. Finer-grained per-group gating is a future addition.

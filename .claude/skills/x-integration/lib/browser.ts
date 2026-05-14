@@ -3,10 +3,11 @@
  * Used by all X scripts
  */
 
-import { chromium, BrowserContext, Page } from 'playwright';
+import { chromium, BrowserContext, Page } from 'playwright-core';
 import fs from 'fs';
 import path from 'path';
 import { config } from './config.js';
+import { X_SELECTORS } from './locators.js';
 
 export { config };
 
@@ -65,6 +66,58 @@ export function validateContent(content: string | undefined, type = 'Tweet'): Sc
     return { success: false, message: `${type} exceeds ${config.limits.tweetMaxLength} character limit (current: ${content.length})` };
   }
   return null; // Valid
+}
+
+/**
+ * Validate DM content (10k char cap, much higher than tweet).
+ */
+export function validateDmContent(content: string | undefined): ScriptResult | null {
+  if (!content || content.length === 0) {
+    return { success: false, message: 'DM content cannot be empty' };
+  }
+  if (content.length > config.limits.dmMaxLength) {
+    return { success: false, message: `DM exceeds ${config.limits.dmMaxLength} character limit (current: ${content.length})` };
+  }
+  return null;
+}
+
+/**
+ * Verify the page is in a logged-in state. Side-nav account switcher is
+ * the canonical "you are logged in" element on every X page after the
+ * initial load. If it's missing AND the login form is present, the
+ * session has aged out and the user must re-run setup.
+ */
+export async function ensureLoggedIn(page: Page): Promise<ScriptResult | null> {
+  const switcher = await page.locator(X_SELECTORS.accountSwitcher).first().isVisible().catch(() => false);
+  if (switcher) return null;
+  const loginForm = await page.locator(X_SELECTORS.loginUsernameInput).first().isVisible().catch(() => false);
+  if (loginForm) {
+    return { success: false, message: 'X login expired. Re-run interactive setup: pnpm exec tsx --env-file=.env .claude/skills/x-integration/scripts/setup.ts' };
+  }
+  // Neither marker visible — could be a transient load issue. Wait a beat and retry once.
+  await page.waitForTimeout(2000);
+  const switcherRetry = await page.locator(X_SELECTORS.accountSwitcher).first().isVisible().catch(() => false);
+  if (switcherRetry) return null;
+  return { success: false, message: 'X login state could not be verified (account-switcher missing). Page may have failed to load — retry, or re-run setup.' };
+}
+
+/**
+ * On error, dump a screenshot + DOM snapshot to logs/x-failures/ for
+ * post-mortem. The agent never sees this — it's host-side debug aid for
+ * Scott when a selector breaks.
+ */
+export async function captureFailure(page: Page, label: string): Promise<string> {
+  try {
+    fs.mkdirSync(config.failureDumpDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const base = path.join(config.failureDumpDir, `${stamp}-${label}`);
+    await page.screenshot({ path: `${base}.png`, fullPage: true }).catch(() => {});
+    const html = await page.content().catch(() => '');
+    if (html) fs.writeFileSync(`${base}.html`, html);
+    return base;
+  } catch {
+    return '';
+  }
 }
 
 /**
