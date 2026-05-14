@@ -201,6 +201,9 @@ registerChannelAdapter('whatsapp', {
 
     // Pairing code file for the setup skill to poll
     const pairingCodeFile = path.join(process.cwd(), 'store', 'pairing-code.txt');
+    // Flag file written on a logged-out (reason=401) close, cleared on next open.
+    // Lets operator tooling surface the dead-credential state without scraping logs.
+    const loggedOutFile = path.join(process.cwd(), 'store', 'whatsapp-logged-out.txt');
 
     // --- Helpers ---
 
@@ -379,10 +382,13 @@ registerChannelAdapter('whatsapp', {
       }
 
       const windowSec = Math.round((now - result.state.firstAt) / 1000);
+      // Baileys' on-disk session filename is session-<userPart>.<device>.json,
+      // where userPart is everything before '@' in the JID.
+      const sessionPrefix = senderJid.split('@')[0];
       const text =
-        `⚠️ ${result.state.count} WhatsApp messages from ${senderJid} failed to decrypt in the last ${windowSec}s.\n\n` +
-        `Likely cause: Signal ratchet desync after a socket reconnect. Those messages are lost and any further inbound from this sender will keep dropping silently until the session re-keys.\n\n` +
-        `Recover: launchctl kickstart -k gui/$(id -u)/com.nanoclaw`;
+        `⚠️ ${result.state.count} WhatsApp messages from ${senderJid} failed to decrypt in the last ${windowSec}s. Those messages are lost.\n\n` +
+        `Cause: Signal ratchet desync. The session usually self-heals on the next inbound from this sender — give it a moment before acting.\n\n` +
+        `If drops continue, a restart alone won't fix it (the corrupted session lives on disk). Stop NanoClaw, delete store/auth/session-${sessionPrefix}*.json, then restart.`;
 
       log.warn('Sending decrypt-failure alert to operator', {
         senderJid,
@@ -471,7 +477,20 @@ registerChannelAdapter('whatsapp', {
               }, RECONNECT_DELAY_MS);
             });
           } else {
-            log.info('WhatsApp logged out');
+            log.warn(
+              'WhatsApp logged out — credentials invalidated, no auto-reconnect. ' +
+                'Re-pair via the setup flow (delete store/auth/ and restart with WHATSAPP_PHONE_NUMBER set, ' +
+                'or scan a QR on next launch).',
+            );
+            try {
+              fs.writeFileSync(
+                loggedOutFile,
+                `${new Date().toISOString()}\nreason=${reason ?? 'unknown'} (DisconnectReason.loggedOut)\n`,
+                'utf-8',
+              );
+            } catch (err) {
+              log.warn('Failed to write logged-out flag file', { err, loggedOutFile });
+            }
             if (rejectFirstOpen) {
               rejectFirstOpen(new Error('WhatsApp logged out'));
               rejectFirstOpen = undefined;
@@ -485,6 +504,12 @@ registerChannelAdapter('whatsapp', {
           // Clean up pairing code file after successful connection
           try {
             if (fs.existsSync(pairingCodeFile)) fs.unlinkSync(pairingCodeFile);
+          } catch {
+            /* ignore */
+          }
+          // Clear the logged-out flag — we successfully reconnected.
+          try {
+            if (fs.existsSync(loggedOutFile)) fs.unlinkSync(loggedOutFile);
           } catch {
             /* ignore */
           }
