@@ -90,9 +90,72 @@ function readAgentAndGlobalClaudeMd(): string | undefined {
   return parts.length > 0 ? parts.join('\n\n---\n\n') : undefined;
 }
 
+/**
+ * Build a discovery list of skills available to this group. Mirrors what
+ * Claude Code surfaces natively via its `Skill` tool — name + one-line
+ * description per skill, scoped to the per-group symlinks at
+ * `/home/node/.claude/skills/` (which respects `container.json`'s skill
+ * selection, so groups that opted out won't see disabled skills here).
+ *
+ * The result is a single markdown section the model treats as part of its
+ * system prompt. We deliberately don't inline each SKILL.md's full body —
+ * that's tens of KB across the catalog and most won't apply to any given
+ * turn. Instead we tell the model: "When a description matches, Read the
+ * full SKILL.md before acting." That mirrors Claude Code's discoverable-
+ * skill model and keeps prompt overhead proportional to skill count.
+ */
+export function composeAvailableSkills(skillsDir = '/home/node/.claude/skills'): string | undefined {
+  if (!fs.existsSync(skillsDir)) return undefined;
+
+  const entries: { name: string; description: string }[] = [];
+  for (const dirent of fs.readdirSync(skillsDir).sort()) {
+    const skillMdPath = path.join(skillsDir, dirent, 'SKILL.md');
+    if (!fs.existsSync(skillMdPath)) continue;
+    const raw = fs.readFileSync(skillMdPath, 'utf-8');
+    const fm = parseFrontmatter(raw);
+    const name = fm.name ?? dirent;
+    const description = fm.description?.trim();
+    if (!description) continue;
+    entries.push({ name, description });
+  }
+  if (entries.length === 0) return undefined;
+
+  const list = entries.map((e) => `- **${e.name}** — ${e.description}`).join('\n');
+  return [
+    '# Available skills',
+    '',
+    "When the user's request matches a skill below, your first action is to `Read /app/skills/<name>/SKILL.md` and follow the recipe inside before doing the work. The skill's instructions take precedence over your defaults for the task it covers.",
+    '',
+    list,
+  ].join('\n');
+}
+
+/**
+ * Minimal YAML frontmatter parser — extracts `key: value` pairs from an
+ * opening `---`/`---` block. Good enough for the SKILL.md schema (flat
+ * scalar fields). Doesn't handle nested objects or multiline strings; if
+ * a skill grows those, expand here.
+ */
+function parseFrontmatter(content: string): Record<string, string> {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+  if (!match) return {};
+  const out: Record<string, string> = {};
+  for (const line of match[1].split(/\r?\n/)) {
+    const m = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+    if (!m) continue;
+    let value = m[2];
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    out[m[1]] = value;
+  }
+  return out;
+}
+
 function composeBaseInstructions(promptAddendum: string | undefined): string | undefined {
   const claudeMd = readAgentAndGlobalClaudeMd();
-  const pieces = [claudeMd, promptAddendum].filter((s): s is string => Boolean(s));
+  const skills = composeAvailableSkills();
+  const pieces = [claudeMd, skills, promptAddendum].filter((s): s is string => Boolean(s));
   return pieces.length > 0 ? pieces.join('\n\n---\n\n') : undefined;
 }
 
