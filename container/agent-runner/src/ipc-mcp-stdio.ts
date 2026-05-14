@@ -11,6 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
+import { transcribeAudio } from './audio.js';
 
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -411,6 +412,20 @@ server.tool(
 );
 
 // --- Direct Slack channel post ---
+
+
+server.tool(
+  'transcribe_audio',
+  'Transcribe a Telegram voice message or audio file using Groq Whisper. Pass the telegram_file_id from the voice message placeholder.',
+  {
+    telegram_file_id: z.string().optional().describe('Telegram file_id from a voice or audio message'),
+    audio_url: z.string().optional().describe('Direct URL to audio file (if not using Telegram file_id)'),
+  },
+  async (args) => {
+    const result = await transcribeAudio(args.audio_url ?? '', args.telegram_file_id);
+    return { content: [{ type: 'text' as const, text: result }] };
+  },
+);
 
 server.tool(
   'slack_post_to_channel',
