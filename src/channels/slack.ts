@@ -25,6 +25,19 @@ registerChannelAdapter('slack', {
         return null;
       }
     };
+    // Slack encodes top-level posts with an empty thread_ts (see
+    // ChannelAdapter.rewriteThreadIdForSession for why this matters). Mint
+    // a per-message id by re-encoding with the message ts as thread_ts;
+    // in-thread events already carry a real thread_ts so we no-op.
+    bridge.rewriteThreadIdForSession = (threadId: string, messageId: string): string => {
+      try {
+        const decoded = slackAdapter.decodeThreadId(threadId);
+        if (decoded.threadTs) return threadId;
+        return slackAdapter.encodeThreadId({ channel: decoded.channel, threadTs: messageId });
+      } catch {
+        return threadId;
+      }
+    };
     return bridge;
   },
 });
