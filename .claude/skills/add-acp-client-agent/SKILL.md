@@ -141,9 +141,12 @@ console.log('updated:', db.prepare(
 "
 ```
 
-### 5. Wire a trigger pattern (optional)
+### 5. Choose routing mode
 
-To route messages with a specific prefix (e.g. `acp:`) to this group:
+Ask the user how they want messages routed to this agent, then run the matching commands.
+
+**Option A — Trigger prefix** (share a channel with the main agent)
+Only messages starting with a specific prefix go to this agent. Ask the user for their preferred prefix (e.g. `groq:`, `agent:`, `a2a:`).
 
 ```bash
 node -e "
@@ -155,8 +158,8 @@ db.prepare(\`INSERT INTO messaging_group_agents
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\`)
   .run('mga-' + Date.now(), 'YOUR-MESSAGING-GROUP-ID', ag.id,
        'per-thread', 20, new Date().toISOString(),
-       'pattern', '^acp:', 'all', 'drop');
-console.log('wired trigger: ^acp:');
+       'pattern', '^PREFIX:', 'all', 'drop');
+console.log('wired trigger: ^PREFIX:');
 "
 ```
 
@@ -168,13 +171,35 @@ const db = require('./node_modules/better-sqlite3')('./data/v2.db');
 const row = db.prepare(
   'SELECT id, engage_pattern FROM messaging_group_agents WHERE agent_group_id = ?'
 ).get('YOUR-MAIN-AGENT-GROUP-ID');
-const updated = row.engage_pattern.replace(')', '|acp:)');
+const updated = row.engage_pattern.replace(')', '|PREFIX:)');
 db.prepare('UPDATE messaging_group_agents SET engage_pattern = ? WHERE id = ?')
   .run(updated, row.id);
 console.log('main agent pattern updated:', updated);
 "
 ```
 
+**Option B — Default agent** (this agent handles all messages in the channel)
+No prefix needed. Wire with `engage_mode = 'always'`.
+
+```bash
+node -e "
+const db = require('./node_modules/better-sqlite3')('./data/v2.db');
+const ag = db.prepare('SELECT id FROM agent_groups WHERE folder = ?').get('YOUR-FOLDER');
+db.prepare(\`INSERT INTO messaging_group_agents
+  (id, messaging_group_id, agent_group_id, session_mode, priority,
+   created_at, engage_mode, engage_pattern, sender_scope, ignored_message_policy)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\`)
+  .run('mga-' + Date.now(), 'YOUR-MESSAGING-GROUP-ID', ag.id,
+       'per-thread', 20, new Date().toISOString(),
+       'always', null, 'all', 'drop');
+console.log('wired as default agent');
+"
+```
+
+If a main Claude agent is already wired to this messaging group, ask the user whether to remove it or keep it at a lower priority as a fallback.
+
+**Option C — Dedicated channel**
+The user will use a separate chat or channel exclusively for this agent. No wiring needed now — when the dedicated channel is set up, use Option B for it.
 ## Running an ACP agent for testing
 
 ### Option A — Groq test agent (subprocess mode, no server needed)
