@@ -12,3 +12,5 @@ export {
   registerNetworkPolicyProvider,
   resetNetworkPolicyProviderForTests,
 } from './registry.js';
+
+import './squid-policy-provider.js';

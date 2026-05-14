@@ -1,10 +1,19 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   getNetworkPolicyProvider,
   registerNetworkPolicyProvider,
   resetNetworkPolicyProviderForTests,
 } from './index.js';
+
+// The squid-policy-provider self-registers at module-import time. Other
+// test files in this suite import it for unit tests of its pure helpers,
+// which leaks the registration into shared module state. Reset both
+// before and after every test in this file so the "no provider"
+// assertions are deterministic regardless of test load order.
+beforeEach(() => {
+  resetNetworkPolicyProviderForTests();
+});
 
 afterEach(() => {
   resetNetworkPolicyProviderForTests();
