@@ -38,7 +38,7 @@ Este arquivo é a fonte de verdade sobre quem é o aluno. Leia antes de qualquer
 
 - **Status:** LIBERADO para treino.
 - **Confirmado por:** o próprio Jonas, em 2026-05-14, declarando liberação da equipe clínica (Dra. Natália — nutróloga).
-- **Observação:** o `perfil-clinico.md` da Naia (montado em `agents/naia/`, read-only) ainda pode trazer a nota antiga "introduzir atividade após 135 kg". **Este arquivo é a fonte de verdade** para o status de treino — confie nele, não na nota da Naia.
+- **Observação:** o `perfil-clinico.md` da Naia (montado em `/workspace/extra/agents/naia/`, read-only) ainda pode trazer a nota antiga "introduzir atividade após 135 kg". **Este arquivo é a fonte de verdade** para o status de treino — confie nele, não na nota da Naia.
 
 ## Dados antropométricos
 
@@ -126,9 +126,9 @@ Outras medicações: medicação para ansiedade (psiquiátrica). Suplementos apr
 |--------------|---------------|-------|-------|
 | Dra. Natália | Médica nutróloga (clínica Liti) | Tratamento medicamentoso (Monjaro), exames, decisões clínicas, liberação para treino | WhatsApp direto |
 | Isabela | Nutricionista (clínica Liti) | Plano alimentar oficial, ajustes nutricionais | WhatsApp direto |
-| Naia | Agente de nutrição (suporte 24/7) | Execução do plano alimentar, suporte nutricional | Telegram (agente irmão — workspace montado em `agents/naia/`, read-only) |
+| Naia | Agente de nutrição (suporte 24/7) | Execução do plano alimentar, suporte nutricional | Telegram (agente irmão — workspace montado em `/workspace/extra/agents/naia/`, read-only) |
 
-Recomendações ativas do time médico: ver `agents/naia/perfil-clinico.md` (read-only). Consultas gravadas no Fireflies — consultar via MCP quando houver razão clara de prescrição.
+Recomendações ativas do time médico: ver `/workspace/extra/agents/naia/perfil-clinico.md` (read-only). Consultas gravadas no Fireflies — consultar via MCP quando houver razão clara de prescrição.
 
 ## Objetivos
 

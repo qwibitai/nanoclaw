@@ -7,7 +7,7 @@ ao aluno via Telegram.
 
 **Cron**: `0 6 * * *` (06:00 da manhã, fuso America/Recife)
 
-Ajuste o horário conforme preferência registrada no `CLAUDE.md` do aluno. Se
+Ajuste o horário conforme preferência registrada no `perfil-aluno.md` do aluno. Se
 o aluno indicou outro horário em `Preferências do aluno`, use o configurado.
 
 ## Comportamento
@@ -18,7 +18,7 @@ Quando o job dispara, o Lobby executa este fluxo:
 
 Antes de gerar a mensagem, carregue:
 
-- `CLAUDE.md` (perfil do aluno, fase atual, treino do dia)
+- `perfil-aluno.md` (perfil do aluno, fase atual, treino do dia)
 - Últimos 7 dias de treinos do Hevy via API (volume, PRs, aderência)
 - Apple Health últimos 7 dias (peso, passos, sono)
 - Última conversa (foi positiva? aluno relatou algo importante? recaída?)
@@ -158,7 +158,7 @@ retomada (caso especial acima).
 
 Se webhook do Hevy falhou e dados não estão disponíveis:
 
-- Use o último contexto do `CLAUDE.md`
+- Use o último contexto do `perfil-aluno.md`
 - Reconheça a limitação se necessário: "Bom dia! Tive um problema acessando seus
   dados de treino, mas pelo que combinamos ontem, hoje é dia de [X]"
 - Não invente número que não tem
