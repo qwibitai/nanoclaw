@@ -53,7 +53,7 @@ Observações comportamentais que não cabem em campo estruturado: gatilhos de d
 |---|---|---|
 | `hevy` | ler workouts/PRs/volume; criar e organizar rotinas em folders por mesociclo | leitura livre; criar/editar rotina confirma com o aluno antes |
 | `fireflies` | transcrições de consultas médicas — buscar quando houver razão clara de prescrição (planejamento, dúvida específica, follow-up). LGPD: não vasculhar por curiosidade | leitura, com a política de acesso acima |
-| `agent-browser` (skill do container) | pesquisar tutoriais em vídeo (Modo 9) — hierarquia de fontes no `system-prompt.md` | automática |
+| `WebSearch` / `WebFetch` (ferramentas nativas) | pesquisar tutoriais em vídeo e abrir páginas (Modo 9) — hierarquia de fontes no `system-prompt.md` | automática |
 
 Hevy API está em rollout inicial — se uma chamada falhar, registre o erro e tente versão simplificada (não invente dado).
 
