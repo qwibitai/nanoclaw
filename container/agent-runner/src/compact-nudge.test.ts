@@ -67,11 +67,17 @@ describe('buildNudgeReminder', () => {
     expect(text).toContain('200,000');
   });
 
-  it('tells the agent to ignore if mid-task and is explicit it is one-shot per cycle', () => {
+  it('mentions /compact and the instructions argument', () => {
+    const text = buildNudgeReminder(150_000, 200_000);
+    expect(text).toContain('/compact');
+    expect(text).toContain('instructions');
+  });
+
+  it('tells the agent to ignore if mid-task and is explicit it is one-shot', () => {
     const text = buildNudgeReminder(150_000, 200_000);
     expect(text).toContain('natural pause');
     expect(text).toContain('mid-task');
-    expect(text).toContain('next compaction cycle');
+    expect(text).toContain('one-shot');
   });
 });
 
@@ -80,55 +86,45 @@ describe('createNudgeTracker', () => {
 
   it('does not arm before the threshold', () => {
     const t = createNudgeTracker(cfg);
-    t.onUsage({ inputTokens: 100_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 });
-    expect(t.consumePending()).toBeNull();
+    const result = t.onUsage({ inputTokens: 100_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 });
+    expect(result).toBeNull();
   });
 
-  it('arms exactly once at the threshold and consumes the reminder', () => {
+  it('returns reminder text exactly once when crossing the threshold', () => {
     const t = createNudgeTracker(cfg);
-    t.onUsage({ inputTokens: 100_000, cacheReadInputTokens: 50_000, cacheCreationInputTokens: 0 });
-    const reminder = t.consumePending();
+    const reminder = t.onUsage({ inputTokens: 100_000, cacheReadInputTokens: 50_000, cacheCreationInputTokens: 0 });
     expect(reminder).not.toBeNull();
     expect(reminder).toContain('<system-reminder>');
-    // Second consume yields nothing — already drained.
-    expect(t.consumePending()).toBeNull();
+    expect(reminder).toContain('/compact');
   });
 
   it('does not re-arm on further usage in the same compact cycle', () => {
     const t = createNudgeTracker(cfg);
-    t.onUsage({ inputTokens: 150_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 });
-    expect(t.consumePending()).not.toBeNull();
+    expect(t.onUsage({ inputTokens: 150_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 })).not.toBeNull();
     // Another assistant turn pushes usage even higher — must NOT re-arm.
-    t.onUsage({ inputTokens: 160_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 });
-    expect(t.consumePending()).toBeNull();
+    expect(t.onUsage({ inputTokens: 160_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 })).toBeNull();
   });
 
   it('re-arms after a compact_boundary if usage crosses again', () => {
     const t = createNudgeTracker(cfg);
-    t.onUsage({ inputTokens: 150_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 });
-    expect(t.consumePending()).not.toBeNull();
+    expect(t.onUsage({ inputTokens: 150_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 })).not.toBeNull();
     t.onCompactBoundary();
     // Post-compact, usage drops, climbs again, crosses the threshold again.
-    t.onUsage({ inputTokens: 50_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 });
-    expect(t.consumePending()).toBeNull();
-    t.onUsage({ inputTokens: 160_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 });
-    expect(t.consumePending()).not.toBeNull();
+    expect(t.onUsage({ inputTokens: 50_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 })).toBeNull();
+    expect(t.onUsage({ inputTokens: 160_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 })).not.toBeNull();
   });
 
   it('is inert when disabled', () => {
     const disabled = { ...cfg, enabled: false };
     const t = createNudgeTracker(disabled);
-    t.onUsage({ inputTokens: 1_000_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 });
-    expect(t.consumePending()).toBeNull();
+    expect(t.onUsage({ inputTokens: 1_000_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 })).toBeNull();
   });
 
   it('reports state for inspection', () => {
     const t = createNudgeTracker(cfg);
     t.onUsage({ inputTokens: 160_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 });
-    expect(t.state()).toEqual({ lastEffective: 160_000, pending: true, sent: true });
-    t.consumePending();
-    expect(t.state()).toEqual({ lastEffective: 160_000, pending: false, sent: true });
+    expect(t.state()).toEqual({ lastEffective: 160_000, sent: true });
     t.onCompactBoundary();
-    expect(t.state()).toEqual({ lastEffective: 0, pending: false, sent: false });
+    expect(t.state()).toEqual({ lastEffective: 0, sent: false });
   });
 });

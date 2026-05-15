@@ -1,15 +1,15 @@
 ---
 name: add-early-compact-nudge
-description: Inject a one-shot system-reminder before the next user turn when context usage crosses a configurable fraction of the SDK auto-compact ceiling. Suggests the agent run /compact at a natural pause instead of letting the SDK auto-compact mid-task.
+description: Push a one-shot system-reminder into the active SDK query when context usage crosses a configurable fraction of the auto-compact ceiling. The agent must acknowledge and reply, so it verbalizes whether to run /compact at a natural pause point or stay on task.
 ---
 
 # Add Early Compaction Nudge
 
 When the Claude Agent SDK's `CLAUDE_CODE_AUTO_COMPACT_WINDOW` is configured, the SDK will auto-compact history once effective context exceeds the ceiling. Auto-compaction picks an arbitrary point — frequently mid-task — and the resulting summary tends to drop load-bearing details of the work in progress.
 
-This skill installs an opt-in nudge: when effective context (input + cache_read + cache_creation) crosses a configurable ratio of the ceiling (default 75%), the next user prompt is prefixed with a `<system-reminder>` block that tells the agent it's near the ceiling and suggests running `/compact` at a natural pause. One-shot per compact cycle; resets automatically when the SDK auto-compacts.
+This skill installs an opt-in nudge: when effective context (input + cache_read + cache_creation) crosses a configurable ratio of the ceiling (default 75%), a `<system-reminder>` block is pushed into the active SDK query as a synthetic user message. The reminder suggests running `/compact` at a natural pause point and strongly recommends passing an `instructions` argument so load-bearing details survive the boundary. One-shot per compact cycle; resets automatically when the SDK auto-compacts.
 
-This is structurally different from PR #2327, which pushed a synthetic message into a live query. The agent treated it as a user turn and replied to it. This implementation attaches the reminder as plain context on the *next* `provider.query()` call, so the agent reads it as system context and can act on it (or ignore it) without round-tripping.
+The push is deliberate: delivering the nudge as a user message forces the agent to acknowledge it and verbalize whether the current moment is a natural pause point or whether it's mid-task. That surfaces the compaction decision in the conversation rather than letting the agent silently ignore a context note. The latch + post-compact reset keep it to one nudge per cycle.
 
 ## Install
 
@@ -81,21 +81,21 @@ export COMPACT_NUDGE_RATIO=0
 ## How it works
 
 1. The Claude provider emits a `usage` event after every assistant turn, carrying `input_tokens`, `cache_read_input_tokens`, and `cache_creation_input_tokens` from the SDK.
-2. The poll loop's nudge tracker sums those into effective context. If it crosses `ceiling * ratio` for the first time in the current compact cycle, the latch arms.
-3. Before the *next* `provider.query()` call, the tracker is drained: the reminder text is prepended to the prompt as plain context — not pushed mid-stream, not formatted as a user message.
+2. The poll loop's nudge tracker sums those into effective context. If it crosses `ceiling * ratio` for the first time in the current compact cycle, the tracker returns the reminder text from `onUsage()`.
+3. The poll loop pushes that text into the active SDK query via `query.push(text)`. The SDK delivers it as a synthetic user message in the same turn — the agent acknowledges it and decides aloud whether to `/compact` or stay on task.
 4. When the SDK auto-compacts, the Claude provider emits a `compact_boundary` event. The tracker resets, ready to arm again if usage climbs back over the threshold.
 
-State machine and reminder text live in `container/agent-runner/src/compact-nudge.ts`. Unit tests in `compact-nudge.test.ts` cover threshold arming, one-shot semantics, and post-compact re-arming. Integration tests in `integration.test.ts` cover the wiring through the poll loop.
+State machine and reminder text live in `container/agent-runner/src/compact-nudge.ts`. Unit tests in `compact-nudge.test.ts` cover threshold arming, one-shot semantics, and post-compact re-arming. Integration tests in `integration.test.ts` cover the push wiring through the poll loop.
 
 ## Verify
 
 After install, the next time context approaches the ceiling you should see this in container logs:
 
 ```
-[poll-loop] Prepended early-compaction nudge to prompt
+[poll-loop] Pushing early-compaction nudge into active query
 ```
 
-And in the next assistant turn, the prompt the SDK received will start with the `<system-reminder>` block.
+In the next assistant message you will see the agent acknowledge the reminder and either invoke `/compact` (typically with an `instructions` payload) or explicitly say it's mid-task and will compact at the next pause.
 
 ## Uninstall
 

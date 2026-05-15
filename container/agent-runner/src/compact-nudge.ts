@@ -1,16 +1,16 @@
 // Early-compaction nudge: when effective context crosses a configurable ratio
-// of the SDK auto-compact ceiling, schedule a one-shot <system-reminder> to
-// prepend to the *next* user prompt. The reminder asks the agent to consider
-// running /compact at a natural pause point — never mid-task.
+// of the SDK auto-compact ceiling, push a one-shot reminder into the active
+// SDK query as a synthetic user message. The reminder asks the agent to
+// consider running /compact at a natural pause point, and strongly suggests
+// passing an `instructions` payload so load-bearing details survive the
+// compaction boundary.
 //
-// Why a separate state machine: PR #2327 tried injecting a reminder into the
-// live query post-compact via `query.push()`. The SDK treated it as a synthetic
-// user turn and the agent replied to it. The fix is to attach the reminder as
-// context on the *next user prompt*, before the next `provider.query()` call —
-// not pushed into an active stream.
-//
-// One-shot per compact cycle: latch on usage, clear on observed compact_boundary
-// so a session that grows past the ratio again gets re-nudged.
+// Why push as a user message instead of attaching as plain context: pushing
+// makes the agent acknowledge and reply, which surfaces its reasoning about
+// whether this is a natural pause point or it's mid-task. A silent context
+// note lets the agent ignore the question entirely. PR #2327's mechanism is
+// reused here deliberately — a one-shot latch + post-compact reset keep it
+// from spamming the conversation.
 
 export interface NudgeConfig {
   enabled: boolean;
@@ -51,57 +51,54 @@ export function effectiveContext(u: UsageSample): number {
   return (u.inputTokens || 0) + (u.cacheReadInputTokens || 0) + (u.cacheCreationInputTokens || 0);
 }
 
-/**
- * The reminder text. Framed as plain context for the next turn — never as a
- * synthetic user message. The agent should ignore it if mid-task; act on it
- * at a natural pause point.
- */
 export function buildNudgeReminder(used: number, ceiling: number): string {
+  const usedStr = used.toLocaleString();
+  const ceilingStr = ceiling.toLocaleString();
   return [
     '<system-reminder>',
-    `Context usage is at ~${used.toLocaleString()} tokens of ~${ceiling.toLocaleString()} before auto-compaction. `,
-    'If you are at a natural pause point, consider running /compact to summarize history before the SDK auto-compacts at an arbitrary point. ',
-    'If you are mid-task, ignore this — it will not be repeated until the next compaction cycle.',
+    `Context usage is now ${usedStr} tokens (auto-compact ceiling: ${ceilingStr}). `,
+    'If you are at a natural pause point (between tasks, after a deliverable, not mid-edit or mid-investigation), ',
+    'consider running `/compact` now — and STRONGLY PREFER passing an instructions argument so load-bearing details survive ',
+    '(specific identifiers, exact phrasing, the open question, the next pending step). ',
+    "Ignore if you're mid-task; this nudge is one-shot per compact cycle.",
     '</system-reminder>',
   ].join('');
 }
 
 export interface NudgeTracker {
-  onUsage(sample: UsageSample): void;
+  /**
+   * Record a usage sample. Returns the reminder text to push into the active
+   * query when usage first crosses the threshold in the current compact
+   * cycle; returns null otherwise (under threshold, already fired, or
+   * disabled).
+   */
+  onUsage(sample: UsageSample): string | null;
+  /** Reset the latch — call when the SDK emits a `compact_boundary` event. */
   onCompactBoundary(): void;
-  /** Returns reminder text if one is pending, then clears the pending flag. */
-  consumePending(): string | null;
   /** Test/inspection accessor. */
-  state(): { lastEffective: number; pending: boolean; sent: boolean };
+  state(): { lastEffective: number; sent: boolean };
 }
 
 export function createNudgeTracker(config: NudgeConfig = readNudgeConfig()): NudgeTracker {
   let lastEffective = 0;
-  let pending = false;
   let sent = false;
 
   return {
     onUsage(sample) {
-      if (!config.enabled) return;
+      if (!config.enabled) return null;
       const used = effectiveContext(sample);
       if (used > lastEffective) lastEffective = used;
-      if (!sent && used >= config.threshold) {
-        pending = true;
-        sent = true;
-      }
+      if (sent) return null;
+      if (used < config.threshold) return null;
+      sent = true;
+      return buildNudgeReminder(used, config.ceiling);
     },
     onCompactBoundary() {
       sent = false;
-      pending = false;
       lastEffective = 0;
     },
-    consumePending() {
-      if (!pending) return null;
-      pending = false;
-      return buildNudgeReminder(lastEffective, config.ceiling);
-    },
     state() {
-      return { lastEffective, pending, sent };
+      return { lastEffective, sent };
     },
   };
 }

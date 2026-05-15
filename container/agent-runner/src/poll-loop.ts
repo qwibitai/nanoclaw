@@ -174,18 +174,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     // Format messages: passthrough commands get raw text (only if the
     // provider natively handles slash commands), others get XML.
-    let prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
-
-    // Early-compaction nudge: if the prior turn's usage crossed the threshold,
-    // attach a one-shot <system-reminder> to this prompt before sending. The
-    // reminder is plain context for the next user turn — NOT a synthetic user
-    // message and NOT pushed into a live query (see PR #2327 for why those
-    // failed).
-    const nudge = nudgeTracker.consumePending();
-    if (nudge) {
-      prompt = `${nudge}\n\n${prompt}`;
-      log('Prepended early-compaction nudge to prompt');
-    }
+    const prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
 
     log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
 
@@ -389,11 +378,15 @@ async function processQuery(
       touchHeartbeat();
 
       if (event.type === 'usage') {
-        nudgeTracker.onUsage({
+        const nudge = nudgeTracker.onUsage({
           inputTokens: event.inputTokens,
           cacheReadInputTokens: event.cacheReadInputTokens,
           cacheCreationInputTokens: event.cacheCreationInputTokens,
         });
+        if (nudge) {
+          log('Pushing early-compaction nudge into active query');
+          query.push(nudge);
+        }
       } else if (event.type === 'compact_boundary') {
         nudgeTracker.onCompactBoundary();
       } else if (event.type === 'init') {
