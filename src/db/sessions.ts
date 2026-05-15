@@ -68,7 +68,9 @@ export function getActiveSessions(): Session[] {
 }
 
 export function getRunningSessions(): Session[] {
-  return getDb().prepare("SELECT * FROM sessions WHERE container_status IN ('running', 'idle')").all() as Session[];
+  return getDb()
+    .prepare("SELECT * FROM sessions WHERE status = 'active' AND container_status IN ('running', 'idle')")
+    .all() as Session[];
 }
 
 export function updateSession(

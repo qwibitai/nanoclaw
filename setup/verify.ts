@@ -22,11 +22,18 @@ import {
   isRoot,
 } from './platform.js';
 import { emitStatus } from './status.js';
+import {
+  ensureBunPathInProcessEnv,
+  getBunVersion,
+  readPinnedBunVersion,
+  resolveBunCommand,
+} from './lib/bun.js';
 
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
   const platform = getPlatform();
   const homeDir = os.homedir();
+  const expectedBunVersion = readPinnedBunVersion(projectRoot);
 
   log.info('Starting verification');
 
@@ -134,17 +141,28 @@ export async function run(_args: string[]): Promise<void> {
     // Docker not running
   }
 
-  // 3. Check credentials
+  // 3. Check host Bun runtime used for local agent-runner tests
+  ensureBunPathInProcessEnv();
+  const bunCommand = resolveBunCommand();
+  const bunVersion = bunCommand ? getBunVersion(bunCommand) : null;
+  const bun =
+    bunVersion === expectedBunVersion
+      ? 'configured'
+      : bunVersion
+        ? 'version_mismatch'
+        : 'missing';
+
+  // 4. Check credentials
   let credentials = 'missing';
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ONECLI_URL)=/m.test(envContent)) {
+    if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|ONECLI_URL)=/m.test(envContent)) {
       credentials = 'configured';
     }
   }
 
-  // 4. Check channel auth (detect configured channels by credentials)
+  // 5. Check channel auth (detect configured channels by credentials)
   const envVars = readEnvFile([
     'TELEGRAM_BOT_TOKEN',
     'SLACK_BOT_TOKEN',
@@ -187,7 +205,7 @@ export async function run(_args: string[]): Promise<void> {
 
   const configuredChannels = Object.keys(channelAuth);
 
-  // 5. Check registered groups in v2 central DB (agent_groups + messaging_group_agents)
+  // 6. Check registered groups in v2 central DB (agent_groups + messaging_group_agents)
   let registeredGroups = 0;
   const dbPath = path.join(DATA_DIR, 'v2.db');
   if (fs.existsSync(dbPath)) {
@@ -207,7 +225,7 @@ export async function run(_args: string[]): Promise<void> {
     }
   }
 
-  // 6. Check mount allowlist
+  // 7. Check mount allowlist
   let mountAllowlist = 'missing';
   if (
     fs.existsSync(
@@ -221,6 +239,7 @@ export async function run(_args: string[]): Promise<void> {
   // proved the agent round-trip works; verify is a static health check.
   const status = determineVerifyStatus({
     service,
+    bun,
     credentials,
     registeredGroups,
   });
@@ -230,6 +249,9 @@ export async function run(_args: string[]): Promise<void> {
   emitStatus('VERIFY', {
     SERVICE: service,
     CONTAINER_RUNTIME: containerRuntime,
+    BUN: bun,
+    BUN_VERSION: bunVersion ?? 'missing',
+    EXPECTED_BUN_VERSION: expectedBunVersion,
     CREDENTIALS: credentials,
     CONFIGURED_CHANNELS: configuredChannels.join(','),
     CHANNEL_AUTH: JSON.stringify(channelAuth),
@@ -244,10 +266,12 @@ export async function run(_args: string[]): Promise<void> {
 
 export function determineVerifyStatus(input: {
   service: 'not_found' | 'stopped' | 'running' | 'running_other_checkout';
+  bun: string;
   credentials: string;
   registeredGroups: number;
 }): 'success' | 'failed' {
   return input.service === 'running' &&
+    input.bun === 'configured' &&
     input.credentials !== 'missing' &&
     input.registeredGroups > 0
     ? 'success'

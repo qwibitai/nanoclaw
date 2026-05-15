@@ -18,8 +18,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { GROUPS_DIR } from './config.js';
-import type { McpServerConfig } from './container-config.js';
-import { getContainerConfig } from './db/container-configs.js';
+import { readContainerConfig } from './container-config.js';
 import { log } from './log.js';
 import type { AgentGroup } from './types.js';
 
@@ -55,17 +54,23 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
   }
 
   // Desired fragment set.
-  const configRow = getContainerConfig(group.id);
-  const mcpServers: Record<string, McpServerConfig> = configRow
-    ? (JSON.parse(configRow.mcp_servers) as Record<string, McpServerConfig>)
-    : {};
+  const config = readContainerConfig(group.folder);
   const desired = new Map<string, { type: 'symlink' | 'inline'; content: string }>();
 
-  // Skill fragments — every skill that ships an `instructions.md`.
-  // TODO (shared-source refactor): respect `container.json` skill selection.
+  // Skill fragments — only the skills enabled in container.json.
   const skillsHostDir = path.join(process.cwd(), 'container', 'skills');
   if (fs.existsSync(skillsHostDir)) {
-    for (const skillName of fs.readdirSync(skillsHostDir)) {
+    const skillNames =
+      config.skills === 'all'
+        ? fs.readdirSync(skillsHostDir).filter((entry) => {
+            try {
+              return fs.statSync(path.join(skillsHostDir, entry)).isDirectory();
+            } catch {
+              return false;
+            }
+          })
+        : config.skills;
+    for (const skillName of skillNames) {
       const hostFragment = path.join(skillsHostDir, skillName, 'instructions.md');
       if (fs.existsSync(hostFragment)) {
         desired.set(`skill-${skillName}.md`, {
@@ -79,15 +84,13 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
   // Built-in module fragments — every MCP tool source file that ships a
   // sibling `<name>.instructions.md`. These describe how the agent should
   // use that module's MCP tools (schedule_task, install_packages, etc.).
-  // Skip cli.instructions.md when cli_scope is disabled.
-  const cliDisabled = configRow?.cli_scope === 'disabled';
+  // Always included — these are built-in, not toggleable.
   const mcpToolsHostDir = path.join(process.cwd(), MCP_TOOLS_HOST_SUBPATH);
   if (fs.existsSync(mcpToolsHostDir)) {
     for (const entry of fs.readdirSync(mcpToolsHostDir)) {
       const match = entry.match(/^(.+)\.instructions\.md$/);
       if (!match) continue;
       const moduleName = match[1];
-      if (moduleName === 'cli' && cliDisabled) continue;
       desired.set(`module-${moduleName}.md`, {
         type: 'symlink',
         content: `${SHARED_MCP_TOOLS_CONTAINER_BASE}/${entry}`,
@@ -97,7 +100,7 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
 
   // MCP server fragments — inline instructions from container.json for
   // user-added external MCP servers.
-  for (const [name, mcp] of Object.entries(mcpServers)) {
+  for (const [name, mcp] of Object.entries(config.mcpServers)) {
     if (mcp.instructions) {
       desired.set(`mcp-${name}.md`, {
         type: 'inline',
@@ -126,13 +129,29 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
   for (const name of [...desired.keys()].sort()) {
     imports.push(`@./.claude-fragments/${name}`);
   }
+  // Per-group memory — auto-import the three hot-memory files so their
+  // content is part of the system prompt every turn (without the agent having
+  // to actively Read them). Empty files are fine — Claude Code's @-import is
+  // tolerant of empty included files.
+  //
+  // CLAUDE.local.md   = rules, persona, configs (rarely changes)
+  // STANDING_FACTS.md = curated facts with provenance + TTL (changes nightly)
+  // OPEN_TASKS.md     = today's plan only (replaced wholesale daily)
+  //
+  // Journals (journal/<date>.md) and archives (archive/) are NOT auto-imported.
+  // The agent reads them only via explicit Read/Grep when answering historical
+  // questions. This keeps transient notes from recursively becoming current
+  // context on every fresh spawn.
+  for (const memFile of ['CLAUDE.local.md', 'STANDING_FACTS.md', 'OPEN_TASKS.md']) {
+    const filePath = path.join(groupDir, memFile);
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, '');
+    }
+    imports.push(`@./${memFile}`);
+  }
+
   const body = [COMPOSED_HEADER, ...imports, ''].join('\n');
   writeAtomic(path.join(groupDir, 'CLAUDE.md'), body);
-
-  const localFile = path.join(groupDir, 'CLAUDE.local.md');
-  if (!fs.existsSync(localFile)) {
-    fs.writeFileSync(localFile, '');
-  }
 }
 
 /**

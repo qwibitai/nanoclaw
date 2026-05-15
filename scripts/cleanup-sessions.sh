@@ -1,24 +1,25 @@
 #!/bin/bash
 #
-# Prune stale session artifacts (JSONLs, debug logs, todos, telemetry, group logs).
-# Safe to run while NanoClaw is live — active sessions are read from the DB.
+# Prune stale v2 session artifacts.
+# Safe to run while NanoClaw is live: active sessions are read from data/v2.db
+# and are always kept.
 #
 # Usage:  ./scripts/cleanup-sessions.sh [--dry-run]
 #
 # Retention:
-#   Session JSONLs + tool-results:  7 days  (active session always kept)
-#   Debug logs:                     3 days
-#   Todo files:                     3 days
-#   Telemetry:                      7 days
-#   Group logs:                     7 days
+#   Closed/ended session folders:  7 days
+#   Claude debug logs:            3 days
+#   Claude todo files:            3 days
+#   Claude telemetry:             7 days
+#   Group logs:                   7 days
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-STORE_DB="$PROJECT_ROOT/store/messages.db"
-SESSIONS_DIR="$PROJECT_ROOT/data/sessions"
+CENTRAL_DB="$PROJECT_ROOT/data/v2.db"
+SESSIONS_DIR="$PROJECT_ROOT/data/v2-sessions"
 GROUPS_DIR="$PROJECT_ROOT/groups"
 
 DRY_RUN=false
@@ -30,121 +31,99 @@ log() { echo "[cleanup] $*"; }
 
 remove() {
   local target="$1"
+  local size
+  size=$(du -sk "$target" 2>/dev/null | awk '{print $1}')
+  size=${size:-0}
+
+  TOTAL_FREED=$((TOTAL_FREED + size))
   if $DRY_RUN; then
-    if [ -d "$target" ]; then
-      size=$(du -sk "$target" 2>/dev/null | cut -f1)
-    else
-      size=$(wc -c < "$target" 2>/dev/null || echo 0)
-      size=$((size / 1024))
-    fi
-    TOTAL_FREED=$((TOTAL_FREED + size))
     log "would remove: $target (${size}K)"
   else
-    if [ -d "$target" ]; then
-      size=$(du -sk "$target" 2>/dev/null | cut -f1)
-      rm -rf "$target"
-    else
-      size=$(wc -c < "$target" 2>/dev/null || echo 0)
-      size=$((size / 1024))
-      rm -f "$target"
-    fi
-    TOTAL_FREED=$((TOTAL_FREED + size))
+    rm -rf "$target"
   fi
 }
 
-# --- Collect active session IDs from the database ---
+is_older_than() {
+  local target="$1"
+  local days="$2"
+  [ -n "$(find "$target" -prune -mtime +"$days" -print 2>/dev/null)" ]
+}
 
-if [ ! -f "$STORE_DB" ]; then
-  log "ERROR: database not found at $STORE_DB"
+prune_files() {
+  local dir="$1"
+  local days="$2"
+  [ -d "$dir" ] || return 0
+
+  while IFS= read -r -d '' f; do
+    remove "$f"
+  done < <(find "$dir" -type f -mtime +"$days" -print0 2>/dev/null)
+}
+
+if [ ! -f "$CENTRAL_DB" ]; then
+  log "ERROR: central database not found at $CENTRAL_DB"
   exit 1
 fi
 
-ACTIVE_IDS=$(sqlite3 "$STORE_DB" "SELECT session_id FROM sessions;" 2>/dev/null || true)
+if ! command -v sqlite3 >/dev/null 2>&1; then
+  log "ERROR: sqlite3 CLI is required for session cleanup"
+  exit 1
+fi
 
-is_active() {
-  echo "$ACTIVE_IDS" | grep -qF "$1"
+ACTIVE_SESSION_KEYS=$(
+  sqlite3 "$CENTRAL_DB" \
+    "SELECT agent_group_id || '/' || id FROM sessions WHERE status = 'active';" \
+    2>/dev/null || true
+)
+
+is_active_session() {
+  printf '%s\n' "$ACTIVE_SESSION_KEYS" | grep -Fxq "$1"
 }
 
-# --- Prune session JSONLs and tool-results dirs ---
+# --- Prune inactive session folders ---
 
-for group_dir in "$SESSIONS_DIR"/*/; do
-  [ -d "$group_dir" ] || continue
-  jsonl_dir="$group_dir/.claude/projects/-workspace-group"
-  [ -d "$jsonl_dir" ] || continue
+if [ -d "$SESSIONS_DIR" ]; then
+  for agent_dir in "$SESSIONS_DIR"/*; do
+    [ -d "$agent_dir" ] || continue
+    agent_group_id="$(basename "$agent_dir")"
 
-  for jsonl in "$jsonl_dir"/*.jsonl; do
-    [ -f "$jsonl" ] || continue
-    id=$(basename "$jsonl" .jsonl)
+    for session_dir in "$agent_dir"/sess-*; do
+      [ -d "$session_dir" ] || continue
+      session_id="$(basename "$session_dir")"
+      key="$agent_group_id/$session_id"
 
-    # Never delete the active session
-    if is_active "$id"; then
-      continue
-    fi
+      if is_active_session "$key"; then
+        continue
+      fi
 
-    # Only delete if older than 7 days
-    if [ -n "$(find "$jsonl" -mtime +7 2>/dev/null)" ]; then
-      remove "$jsonl"
-      # Remove matching tool-results directory
-      [ -d "$jsonl_dir/$id" ] && remove "$jsonl_dir/$id"
-    fi
+      if is_older_than "$session_dir" 7; then
+        remove "$session_dir"
+      fi
+    done
   done
-done
+fi
 
-# --- Prune debug logs (>3 days, skip files named after active sessions) ---
+# --- Prune Claude's shared per-agent diagnostic files ---
 
-for group_dir in "$SESSIONS_DIR"/*/; do
-  debug_dir="$group_dir/.claude/debug"
-  [ -d "$debug_dir" ] || continue
-  while IFS= read -r -d '' f; do
-    fname=$(basename "$f" .txt)
-    is_active "$fname" && continue
-    remove "$f"
-  done < <(find "$debug_dir" -type f -mtime +3 ! -name "latest" -print0 2>/dev/null)
-done
-
-# --- Prune todo files (>3 days, skip files named after active sessions) ---
-
-for group_dir in "$SESSIONS_DIR"/*/; do
-  todos_dir="$group_dir/.claude/todos"
-  [ -d "$todos_dir" ] || continue
-  while IFS= read -r -d '' f; do
-    fname=$(basename "$f" .json)
-    # Todo filenames are like {session_id}-agent-{session_id}.json
-    for aid in $ACTIVE_IDS; do
-      if [[ "$fname" == *"$aid"* ]]; then
-        continue 2
-      fi
-    done
-    remove "$f"
-  done < <(find "$todos_dir" -type f -mtime +3 -print0 2>/dev/null)
-done
-
-# --- Prune telemetry (>7 days, skip files named after active sessions) ---
-
-for group_dir in "$SESSIONS_DIR"/*/; do
-  telem_dir="$group_dir/.claude/telemetry"
-  [ -d "$telem_dir" ] || continue
-  while IFS= read -r -d '' f; do
-    fname=$(basename "$f")
-    for aid in $ACTIVE_IDS; do
-      if [[ "$fname" == *"$aid"* ]]; then
-        continue 2
-      fi
-    done
-    remove "$f"
-  done < <(find "$telem_dir" -type f -mtime +7 -print0 2>/dev/null)
-done
+if [ -d "$SESSIONS_DIR" ]; then
+  for shared_dir in "$SESSIONS_DIR"/*/.claude-shared; do
+    [ -d "$shared_dir" ] || continue
+    prune_files "$shared_dir/debug" 3
+    prune_files "$shared_dir/todos" 3
+    prune_files "$shared_dir/telemetry" 7
+  done
+fi
 
 # --- Prune group logs (>7 days) ---
 
-while IFS= read -r -d '' f; do
-  remove "$f"
-done < <(find "$GROUPS_DIR"/*/logs -type f -mtime +7 -print0 2>/dev/null)
+for logs_dir in "$GROUPS_DIR"/*/logs; do
+  [ -d "$logs_dir" ] || continue
+  prune_files "$logs_dir" 7
+done
 
 # --- Summary ---
 
 if $DRY_RUN; then
-  log "DRY RUN complete — would free ~${TOTAL_FREED}K"
+  log "DRY RUN complete - would free ~${TOTAL_FREED}K"
 else
-  log "Done — freed ~${TOTAL_FREED}K"
+  log "Done - freed ~${TOTAL_FREED}K"
 fi

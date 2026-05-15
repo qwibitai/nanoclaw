@@ -64,6 +64,10 @@ interface PendingNameInput {
 }
 const awaitingNameInput = new Map<string, PendingNameInput>();
 
+function isGroupConversation(event: InboundEvent): boolean {
+  return event.message.isGroup === true || event.threadId !== null;
+}
+
 function extractAndUpsertUser(event: InboundEvent): string | null {
   let content: Record<string, unknown>;
   try {
@@ -227,14 +231,11 @@ async function handleSenderApprovalResponse(payload: ResponsePayload): Promise<b
   if (!row) return false;
 
   // payload.userId is the raw platform userId (e.g. "6037840640"); namespace it
-  // with the channel type so it matches users(id) format. Some platforms
-  // (e.g. Teams "29:xxx") already include a colon — mirror resolveOrCreateUser
-  // logic and only prefix when the raw id has no colon.
-  const clickerId = payload.userId
-    ? payload.userId.includes(':')
-      ? payload.userId
-      : `${payload.channelType}:${payload.userId}`
-    : null;
+  // with the channel type so it matches users(id) format. Then verify the
+  // clicker is the designated approver OR has owner/admin privilege over this
+  // agent group — any other click is rejected so random users can't self-admit
+  // via stolen card forwarding.
+  const clickerId = payload.userId ? `${payload.channelType}:${payload.userId}` : null;
   const isAuthorized =
     clickerId !== null && (clickerId === row.approver_user_id || hasAdminPrivilege(clickerId, row.agent_group_id));
   if (!isAuthorized) {
@@ -311,11 +312,7 @@ async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<
   const row = getPendingChannelApproval(payload.questionId);
   if (!row) return false;
 
-  const clickerId = payload.userId
-    ? payload.userId.includes(':')
-      ? payload.userId
-      : `${payload.channelType}:${payload.userId}`
-    : null;
+  const clickerId = payload.userId ? `${payload.channelType}:${payload.userId}` : null;
   const isAuthorized =
     clickerId !== null && (clickerId === row.approver_user_id || hasAdminPrivilege(clickerId, row.agent_group_id));
   if (!isAuthorized) {
@@ -459,7 +456,7 @@ async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<
     return true;
   }
 
-  const isGroup = event.threadId !== null;
+  const isGroup = isGroupConversation(event);
   const engageMode: MessagingGroupAgent['engage_mode'] = isGroup ? 'mention-sticky' : 'pattern';
   const engagePattern = isGroup ? null : '.';
 
@@ -559,7 +556,7 @@ setMessageInterceptor(async (event: InboundEvent): Promise<boolean> => {
     return true;
   }
 
-  const isGroup = originalEvent.threadId !== null;
+  const isGroup = isGroupConversation(originalEvent);
   const engageMode: MessagingGroupAgent['engage_mode'] = isGroup ? 'mention-sticky' : 'pattern';
   const engagePattern = isGroup ? null : '.';
 

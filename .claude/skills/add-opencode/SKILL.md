@@ -132,15 +132,12 @@ Credentials: register provider API keys in OneCLI with the matching `--host-patt
 
 After adding a secret, **grant the agent access** — agents in `selective` mode only receive secrets they've been explicitly assigned:
 
-Use the safe merge pattern — `set-secrets` replaces the entire list, so always read first:
-
 ```bash
-AGENT_ID=$(onecli agents list | jq -r '.data[] | select(.identifier=="<agentGroupId>") | .id')
-CURRENT=$(onecli agents secrets --id "$AGENT_ID" | jq -r '[.data[]] | join(",")')
-MERGED=$(printf '%s' "$CURRENT,<new-secret-id>" | tr ',' '\n' | sort -u | paste -sd ',' -)
-onecli agents set-secrets --id "$AGENT_ID" --secret-ids "$MERGED"
-onecli agents secrets --id "$AGENT_ID"
+# Find the agent id and secret id, then:
+onecli agents set-secrets --id <agent-id> --secret-ids <existing-ids>,<new-secret-id>
 ```
+
+Always include existing secret IDs in the list — `set-secrets` replaces, not appends.
 
 #### Example: DeepSeek
 

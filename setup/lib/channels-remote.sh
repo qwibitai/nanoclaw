@@ -6,7 +6,7 @@
 # `upstream`, with `origin` pointing at the user's fork. The channels branch
 # only lives upstream, so a hardcoded `git fetch origin channels` fails for
 # forks. This helper walks `git remote -v`, picks the remote whose URL points
-# at nanocoai/nanoclaw, and prints its name.
+# at nanocoai/nanoclaw (or the old qwibitai redirect), and prints its name.
 #
 # Fallback: if no existing remote matches, add `upstream` pointing at
 # github.com/nanocoai/nanoclaw and return that — keeps forks without an
@@ -23,7 +23,7 @@ resolve_channels_remote() {
   local remote url
   while IFS=$'\t' read -r remote url; do
     case "$url" in
-      *qwibitai/nanoclaw*|*nanocoai/nanoclaw*)
+      *nanocoai/nanoclaw*|*qwibitai/nanoclaw*)
         printf '%s' "$remote"
         return 0
         ;;

@@ -1,18 +1,13 @@
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
-import { getInboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
-import { clearContinuation, migrateLegacyContinuation, setContinuation } from './db/session-state.js';
-import { clearCurrentInReplyTo, setCurrentInReplyTo } from './current-batch.js';
+import { touchHeartbeat, clearStaleProcessingAcks, getInboundDb } from './db/connection.js';
 import {
-  formatMessages,
-  extractRouting,
-  categorizeMessage,
-  isClearCommand,
-  isRunnerCommand,
-  stripInternalTags,
-  type RoutingContext,
-} from './formatter.js';
+  clearContinuation,
+  migrateLegacyContinuation,
+  setContinuation,
+} from './db/session-state.js';
+import { formatMessages, extractRouting, categorizeMessage, isClearCommand, stripInternalTags, type RoutingContext } from './formatter.js';
 import type { AgentProvider, AgentQuery, ProviderEvent } from './providers/types.js';
 
 const POLL_INTERVAL_MS = 1000;
@@ -102,6 +97,17 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     const routing = extractRouting(messages);
 
+    // Cascade guard: if THIS turn is the agent's response to an error packet
+    // routed from another agent, suppress any error-packet emission from
+    // dispatchResultText / the catch path below. Without this, an
+    // `<internal>`-only "no need to reply" — or any other delivery oddity —
+    // produced a fresh packet back to thedius, which woke thedius, which
+    // sometimes also replied with internal-only, fanning out across all peers
+    // in a single minute (real incident 2026-05-14 05:21).
+    const isErrorPacketTurn = messages.some(
+      (m) => (m.kind === 'chat' || m.kind === 'chat-sdk') && isErrorPacketContent(m.content),
+    );
+
     // Command handling: the host router gates filtered and unauthorized
     // admin commands before they reach the container. The only command
     // the runner handles directly is /clear (session reset).
@@ -177,11 +183,8 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // Process the query while concurrently polling for new messages
     const skippedSet = new Set(skipped);
     const processingIds = ids.filter((id) => !commandIds.includes(id) && !skippedSet.has(id));
-    // Publish the batch's in_reply_to so MCP tools (send_message, send_file)
-    // can stamp it on outbound rows — needed for a2a return-path routing.
-    setCurrentInReplyTo(routing.inReplyTo);
     try {
-      const result = await processQuery(query, routing, processingIds, config.providerName);
+      const result = await processQuery(query, routing, processingIds, config.providerName, isErrorPacketTurn);
       if (result.continuation && result.continuation !== continuation) {
         continuation = result.continuation;
         setContinuation(config.providerName, continuation);
@@ -199,17 +202,26 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         clearContinuation(config.providerName);
       }
 
-      // Write error response so the user knows something went wrong
-      writeMessageOut({
-        id: generateId(),
-        kind: 'chat',
-        platform_id: routing.platformId,
-        channel_type: routing.channelType,
-        thread_id: routing.threadId,
-        content: JSON.stringify({ text: `Error: ${errMsg}` }),
-      });
-    } finally {
-      clearCurrentInReplyTo();
+      if (isSilentTaskBatch(keep)) {
+        log(`Silent task query error suppressed from chat: ${errMsg}`);
+      } else {
+        // Write error response so the user knows something went wrong.
+        writeMessageOut({
+          id: generateId(),
+          kind: 'chat',
+          platform_id: routing.platformId,
+          channel_type: routing.channelType,
+          thread_id: routing.threadId,
+          content: JSON.stringify({ text: `Error: ${errMsg}` }),
+        });
+      }
+      // Cascade guard: don't escalate back to thedius when we're already
+      // mid-cascade. Real runner failures during normal turns still escalate.
+      if (!isErrorPacketTurn) {
+        sendErrorPacketToThedius('Runner query failed', errMsg, routing);
+      } else {
+        log(`Suppressed error-packet escalation: this turn is itself a cascade response`);
+      }
     }
 
     // Ensure completed even if processQuery ended without a result event
@@ -262,52 +274,36 @@ async function processQuery(
   routing: RoutingContext,
   initialBatchIds: string[],
   providerName: string,
+  isErrorPacketTurn: boolean,
 ): Promise<QueryResult> {
   let queryContinuation: string | undefined;
   let done = false;
-  let unwrappedNudged = false;
 
   // Concurrent polling: push follow-ups into the active query as they arrive.
-  // We do NOT force-end the stream on silence — keeping the query open avoids
-  // re-spawning the SDK subprocess (~few seconds) and re-loading the .jsonl
-  // transcript on every turn. The Anthropic prompt cache is server-side with
-  // a 5-min TTL keyed on prefix hash, so stream lifecycle does NOT affect
-  // cache lifetime — close+reopen within 5 min still gets cache hits.
+  // We do NOT force-end the stream on silence — keeping the query open is
+  // strictly cheaper than close+reopen (no cold prompt cache, no reconnect).
   // Stream liveness is decided host-side via the heartbeat file + processing
   // claim age (see src/host-sweep.ts); if something is truly stuck, the host
   // will kill the container and messages get reset to pending.
   let pollInFlight = false;
-  let endedForCommand = false;
   const pollHandle = setInterval(() => {
-    if (done || pollInFlight || endedForCommand) return;
+    if (done || pollInFlight) return;
     pollInFlight = true;
 
     void (async () => {
       try {
-        const pending = getPendingMessages();
-
-        // Slash commands need a fresh query: /clear resets the SDK's
-        // resume id (fixed at sdkQuery() time); admin/passthrough commands
-        // (/compact, /cost, …) only dispatch when they're the first input
-        // of a query — pushed mid-stream they arrive as plain text and
-        // the SDK never runs them. End the stream and leave the rows
-        // pending; the outer loop handles them on next iteration via the
-        // canonical command path + formatMessagesWithCommands.
-        if (pending.some((m) => isRunnerCommand(m))) {
-          log('Pending slash command — ending stream so outer loop can process');
-          endedForCommand = true;
-          query.end();
-          return;
-        }
-
-        // Skip system messages (MCP tool responses).
+        // Skip system messages (MCP tool responses) and /clear (needs fresh query).
         // Thread routing is the router's concern — if a message landed in this
         // session, the agent should see it. Per-thread sessions already isolate
         // threads into separate containers; shared sessions intentionally merge
         // everything. Filtering on thread_id here caused deadlocks when the
         // initial batch and follow-ups had mismatched thread_ids (e.g. a
         // host-generated welcome trigger with null thread vs a Discord DM reply).
-        const newMessages = pending.filter((m) => m.kind !== 'system');
+        const newMessages = getPendingMessages().filter((m) => {
+          if (m.kind === 'system') return false;
+          if ((m.kind === 'chat' || m.kind === 'chat-sdk') && isClearCommand(m)) return false;
+          return true;
+        });
         if (newMessages.length === 0) return;
 
         const newIds = newMessages.map((m) => m.id);
@@ -339,7 +335,6 @@ async function processQuery(
         const keptIds = keep.map((m) => m.id);
         const prompt = formatMessages(keep);
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
-        unwrappedNudged = false;
         query.push(prompt);
         markCompleted(keptIds);
       } catch (err) {
@@ -378,18 +373,7 @@ async function processQuery(
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
         if (event.text) {
-          const { hasUnwrapped } = dispatchResultText(event.text, routing);
-          if (hasUnwrapped && !unwrappedNudged) {
-            unwrappedNudged = true;
-            const destinations = getAllDestinations();
-            const names = destinations.map((d) => d.name).join(', ');
-            query.push(
-              `<system>Your response was not delivered — it was not wrapped in <message to="name">...</message> blocks. ` +
-                `All output must be wrapped: use <message to="name"> for content to send, or <internal> for scratchpad. ` +
-                `Your destinations: ${names}. ` +
-                `Please re-send your response with the correct wrapping.</system>`,
-            );
-          }
+          dispatchResultText(event.text, routing, isErrorPacketTurn);
         }
       }
     }
@@ -410,9 +394,7 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       log(`Result: ${event.text ? event.text.slice(0, 200) : '(empty)'}`);
       break;
     case 'error':
-      log(
-        `Error: ${event.message} (retryable: ${event.retryable}${event.classification ? `, ${event.classification}` : ''})`,
-      );
+      log(`Error: ${event.message} (retryable: ${event.retryable}${event.classification ? `, ${event.classification}` : ''})`);
       break;
     case 'progress':
       log(`Progress: ${event.message}`);
@@ -423,18 +405,52 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
 /**
  * Parse the agent's final text for <message to="name">...</message> blocks
  * and dispatch each one to its resolved destination. Text outside of blocks
- * (including <internal>...</internal>) is scratchpad — logged but not sent.
+ * (including <internal>...</internal>) is normally scratchpad — logged but
+ * not sent.
  *
- * The agent must always wrap output in <message to="name">...</message>
- * blocks, even with a single destination. Bare text is scratchpad only.
+ * Single-destination shortcut: if the agent has exactly one configured
+ * destination AND the output contains zero <message> blocks, the entire
+ * cleaned text (with <internal> tags stripped) is sent to that destination.
+ * This preserves the simple case of one user on one channel — the agent
+ * doesn't need to know about wrapping syntax at all.
+ *
+ * Error-packet emission rules:
+ * - At most ONE error packet per call (deduped). A bad turn produces one
+ *   alert, not N.
+ * - Suppressed entirely when `isErrorPacketTurn` is true — i.e. the inbound
+ *   that triggered this turn was itself an error packet. Prevents the runner
+ *   from cascading errors back to thedius while thedius is already
+ *   processing an error packet.
+ * - The bare-prose check uses `stripInternalTags(text).trim()` rather than
+ *   `text.trim()`. An `<internal>`-only response is the supported way for an
+ *   agent to say "I intentionally chose not to reply" and must not be flagged
+ *   as a delivery failure.
  */
-function dispatchResultText(text: string, routing: RoutingContext): { sent: number; hasUnwrapped: boolean } {
+export function dispatchResultText(
+  text: string,
+  routing: RoutingContext,
+  isErrorPacketTurn: boolean = false,
+): void {
   const MESSAGE_RE = /<message\s+to="([^"]+)"\s*>([\s\S]*?)<\/message>/g;
 
   let match: RegExpExecArray | null;
   let sent = 0;
   let lastIndex = 0;
   const scratchpadParts: string[] = [];
+  let escalated = false;
+
+  const escalate = (whatFailed: string, evidence: string, userImpact: string): void => {
+    if (isErrorPacketTurn) {
+      log(`Suppressed error-packet escalation ("${whatFailed}"): this turn is itself a cascade response`);
+      return;
+    }
+    if (escalated) {
+      log(`Suppressed error-packet escalation ("${whatFailed}"): already escalated once this turn`);
+      return;
+    }
+    escalated = true;
+    sendErrorPacketToThedius(whatFailed, evidence, routing, userImpact);
+  };
 
   while ((match = MESSAGE_RE.exec(text)) !== null) {
     if (match.index > lastIndex) {
@@ -448,6 +464,11 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
     if (!dest) {
       log(`Unknown destination in <message to="${toName}">, dropping block`);
       scratchpadParts.push(`[dropped: unknown destination "${toName}"] ${body}`);
+      escalate(
+        `Unknown destination "${toName}"`,
+        body.slice(0, 500),
+        'The agent tried to send a message to a destination that is not wired in this session.',
+      );
       continue;
     }
     sendToDestination(dest, body, routing);
@@ -459,24 +480,73 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
 
   const scratchpad = stripInternalTags(scratchpadParts.join(''));
 
+  // Single-destination shortcut: the agent wrote plain text — send to
+  // the session's originating channel (from session_routing) if available,
+  // otherwise fall back to the single destination.
+  if (sent === 0 && scratchpad) {
+    if (routing.channelType && routing.platformId) {
+      // Reply to the channel/thread the message came from
+      writeMessageOut({
+        id: generateId(),
+        in_reply_to: routing.inReplyTo,
+        kind: 'chat',
+        platform_id: routing.platformId,
+        channel_type: routing.channelType,
+        thread_id: routing.threadId,
+        content: JSON.stringify({ text: scratchpad }),
+      });
+      return;
+    }
+    const all = getAllDestinations();
+    if (all.length === 1) {
+      sendToDestination(all[0], scratchpad, routing);
+      return;
+    }
+  }
+
   if (scratchpad) {
     log(`[scratchpad] ${scratchpad.slice(0, 500)}${scratchpad.length > 500 ? '…' : ''}`);
   }
 
-  const hasUnwrapped = sent === 0 && !!scratchpad;
-  if (hasUnwrapped) {
+  // Real delivery failure: agent produced non-internal prose but didn't wrap
+  // it in any <message to="..."> block. `<internal>`-only output is
+  // intentional silence and does NOT trip this branch (post-fix 2026-05-14).
+  if (sent === 0 && stripInternalTags(text).trim()) {
     log(`WARNING: agent output had no <message to="..."> blocks — nothing was sent`);
+    escalate(
+      'Agent response was not delivered',
+      stripInternalTags(text).slice(0, 500),
+      'The agent produced text without a valid destination block while multiple or zero destinations were configured.',
+    );
   }
-  return { sent, hasUnwrapped };
+}
+
+/**
+ * Detect whether a chat-kind inbound row is an error packet emitted by the
+ * runner itself (see `sendErrorPacketToThedius`). Used by the poll loop to
+ * suppress further error-packet emissions when responding to one — this is
+ * the cascade guard that prevents a single delivery oddity from fanning out
+ * across all peer agents.
+ */
+export function isErrorPacketContent(content: string): boolean {
+  let text = '';
+  try {
+    const parsed = JSON.parse(content) as { text?: unknown; markdown?: unknown };
+    if (typeof parsed.text === 'string') text = parsed.text;
+    else if (typeof parsed.markdown === 'string') text = parsed.markdown;
+  } catch {
+    text = content;
+  }
+  return text.trimStart().startsWith('Error packet — Agent runner');
 }
 
 function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {
   const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
   const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
-  // Resolve thread_id per-destination from the most recent inbound message
-  // that came from this same channel+platform. In agent-shared sessions,
-  // different destinations have different thread contexts — using a single
-  // routing.threadId would stamp one channel's thread onto another.
+  // Resolve thread_id per destination from the most recent inbound message
+  // from this same channel/platform. In shared sessions, different
+  // destinations can have different thread contexts; using one routing.threadId
+  // would stamp one channel's thread onto another.
   const destRouting = resolveDestinationThread(channelType, platformId);
   writeMessageOut({
     id: generateId(),
@@ -489,10 +559,6 @@ function sendToDestination(dest: DestinationEntry, body: string, routing: Routin
   });
 }
 
-/**
- * Find the thread_id and message id from the most recent inbound message
- * matching the given channel+platform. Returns null if no match found.
- */
 function resolveDestinationThread(
   channelType: string,
   platformId: string,
@@ -511,6 +577,55 @@ function resolveDestinationThread(
     log(`resolveDestinationThread error: ${err instanceof Error ? err.message : String(err)}`);
   }
   return null;
+}
+
+function sendErrorPacketToThedius(
+  whatFailed: string,
+  evidence: string,
+  routing: RoutingContext,
+  userImpact = 'A user-visible bot response or task may not have been delivered correctly.',
+): void {
+  const dest = findByName('thedius') ?? findByName('ilan');
+  if (!dest) return;
+
+  sendToDestination(
+    dest,
+    [
+      'Error packet — Agent runner',
+      `What failed: ${whatFailed}`,
+      `User impact: ${userImpact}`,
+      `Evidence: ${evidence || '(none)'}`,
+      'What I tried: Captured the failure from the runner and escalated it automatically.',
+      'Suggested next step: Check the affected session logs and repair the destination/task if needed.',
+    ].join('\n'),
+    routing,
+  );
+}
+
+function isSilentTaskBatch(messages: MessageInRow[]): boolean {
+  if (messages.length === 0) return false;
+  return messages.every((msg) => msg.kind === 'task' && taskContentRequestsSilence(msg.content));
+}
+
+function taskContentRequestsSilence(content: string): boolean {
+  const prompt = extractTaskPromptText(content).toLowerCase();
+  return (
+    /\bsilent\b/.test(prompt) &&
+    /(?:send no telegram message|no telegram output|do not send a telegram message|send no chat message|no chat message|no reply)/.test(
+      prompt,
+    )
+  );
+}
+
+function extractTaskPromptText(content: string): string {
+  try {
+    const parsed = JSON.parse(content) as { prompt?: unknown; text?: unknown };
+    if (typeof parsed.prompt === 'string') return parsed.prompt;
+    if (typeof parsed.text === 'string') return parsed.text;
+  } catch {
+    /* fall through */
+  }
+  return content;
 }
 
 function sleep(ms: number): Promise<void> {

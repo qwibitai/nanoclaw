@@ -10,6 +10,7 @@ import { log } from '../src/log.js';
 import { getDefaultContainerImage } from '../src/install-slug.js';
 import { commandExists, getPlatform } from './platform.js';
 import { emitStatus } from './status.js';
+import { readPinnedBunVersion } from './lib/bun.js';
 
 type DockerStatus = 'ok' | 'no-permission' | 'no-daemon' | 'other';
 
@@ -171,9 +172,11 @@ export async function run(args: string[]): Promise<void> {
   const buildCmd = 'docker build';
   const runCmd = 'docker';
 
-  // Build-args from .env. Only INSTALL_CJK_FONTS is passed through today.
-  // Keeps /setup and ./container/build.sh in sync — both read the same source.
-  const buildArgs: string[] = [];
+  // Build-args from repo config + .env. Keeps /setup and ./container/build.sh
+  // in sync - both read the same sources.
+  const buildArgs: string[] = [
+    `--build-arg BUN_VERSION=${readPinnedBunVersion(projectRoot)}`,
+  ];
   try {
     const fs = await import('fs');
     const envPath = path.join(projectRoot, '.env');

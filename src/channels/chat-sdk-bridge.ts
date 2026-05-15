@@ -42,8 +42,7 @@ export interface ReplyContext {
 }
 
 /** Extract reply context from a platform-specific raw message. Return null if no reply. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type ReplyContextExtractor = (raw: Record<string, any>) => ReplyContext | null;
+export type ReplyContextExtractor = (raw: Record<string, unknown>) => ReplyContext | null;
 
 export interface ChatSdkBridgeConfig {
   adapter: Adapter;
@@ -74,6 +73,21 @@ export interface ChatSdkBridgeConfig {
    * and reactions still target the head of the reply.
    */
   maxTextLength?: number;
+  /**
+   * Maximum caption length the underlying adapter accepts when the message
+   * also carries a file attachment. Lower than `maxTextLength` on platforms
+   * like Telegram (1024-char caption vs 4096-char message). When set and the
+   * caption-with-file would exceed this, the bridge sends the file with the
+   * first split chunk as caption and the remainder as follow-up text-only
+   * messages. Without this, the adapter character-truncates the caption
+   * mid-entity and Telegram rejects the message with a parse error.
+   */
+  maxCaptionLength?: number;
+  /**
+   * Optional unique webhook route name for multiple Chat instances using the
+   * same underlying adapter name, e.g. two Telegram bots.
+   */
+  webhookRouteName?: string;
 }
 
 /**
@@ -117,6 +131,10 @@ export function splitForLimit(text: string, limit: number): string[] {
   }
   if (remaining.length > 0) chunks.push(remaining);
   return chunks;
+}
+
+function resolveDeliveryThreadId(platformId: string, threadId: string | null): string {
+  return threadId && threadId.length > 0 ? threadId : platformId;
 }
 
 export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter {
@@ -163,8 +181,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
 
     // Extract reply context via platform-specific hook
     if (config.extractReplyContext && message.raw) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const replyTo = config.extractReplyContext(message.raw as Record<string, any>);
+      const replyTo = config.extractReplyContext(message.raw as Record<string, unknown>);
       if (replyTo) serialized.replyTo = replyTo;
     }
 
@@ -241,10 +258,11 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // is_group=0 short-circuit.
       chat.onDirectMessage(async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
+        const author = message.author as { fullName?: string; userId?: string } | null | undefined;
         log.info('Inbound DM received', {
           adapter: adapter.name,
           channelId,
-          sender: (message.author as any)?.fullName ?? (message.author as any)?.userId ?? 'unknown',
+          sender: author?.fullName ?? author?.userId ?? 'unknown',
           threadId: thread.id,
         });
         await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, true, false));
@@ -257,6 +275,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // onNewMention; unsubscribed+pattern-match → onNewMessage. Registering
       // with `/[\s\S]*/` lets the router see every plain message (including
       // media-only messages with empty text) on every unsubscribed thread the
+      // bot can see. The router short-circuits via
       // getMessagingGroupWithAgentCount (~1 DB read) for unwired channels,
       // so forwarding every one is cheap enough to not need a bridge-side
       // flood gate.
@@ -307,14 +326,8 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         // Start local HTTP server to receive forwarded Gateway events (including interactions)
         const webhookUrl = await startLocalWebhookServer(gatewayAdapter, setupConfig, config.botToken);
 
-        // Exponential backoff capped at 1h. Without this, an unrecoverable
-        // failure (e.g., TokenInvalid) restarts ~10×/sec and Discord's
-        // Cloudflare layer issues a multi-hour IP block. A run that lasts
-        // longer than 5 minutes counts as healthy and resets the counter.
-        let consecutiveFailures = 0;
         const startGateway = () => {
           if (gatewayAbort?.signal.aborted) return;
-          const startedAt = Date.now();
           // Capture the long-running listener promise via waitUntil
           let listenerPromise: Promise<unknown> | undefined;
           gatewayAdapter.startGatewayListener!(
@@ -329,37 +342,28 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           ).then(() => {
             // startGatewayListener resolves immediately with a Response;
             // the actual work is in the listenerPromise passed to waitUntil
-            if (!listenerPromise) return;
-            const reschedule = (err?: unknown) => {
-              if (gatewayAbort?.signal.aborted) return;
-              const ranForMs = Date.now() - startedAt;
-              if (ranForMs > 5 * 60 * 1000) consecutiveFailures = 0;
-              else consecutiveFailures++;
-              const delayMs = Math.min(60 * 60 * 1000, 2 ** consecutiveFailures * 1000);
-              if (err) {
-                log.error('Gateway listener error, retrying', {
-                  adapter: adapter.name,
-                  err,
-                  consecutiveFailures,
-                  delayMs,
+            if (listenerPromise) {
+              listenerPromise
+                .then(() => {
+                  if (!gatewayAbort?.signal.aborted) {
+                    log.info('Gateway listener expired, restarting', { adapter: adapter.name });
+                    startGateway();
+                  }
+                })
+                .catch((err) => {
+                  if (!gatewayAbort?.signal.aborted) {
+                    log.error('Gateway listener error, restarting in 5s', { adapter: adapter.name, err });
+                    setTimeout(startGateway, 5000);
+                  }
                 });
-              } else {
-                log.info('Gateway listener expired, restarting', {
-                  adapter: adapter.name,
-                  consecutiveFailures,
-                  delayMs,
-                });
-              }
-              setTimeout(startGateway, delayMs);
-            };
-            listenerPromise.then(() => reschedule()).catch(reschedule);
+            }
           });
         };
         startGateway();
         log.info('Gateway listener started', { adapter: adapter.name });
       } else {
         // Non-gateway adapters (Slack, Teams, GitHub, etc.) — register on the shared webhook server
-        registerWebhookAdapter(chat, adapter.name);
+        registerWebhookAdapter(chat, adapter.name, config.webhookRouteName ?? adapter.name);
       }
 
       log.info('Chat SDK bridge initialized', { adapter: adapter.name });
@@ -368,7 +372,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     async deliver(platformId: string, threadId: string | null, message): Promise<string | undefined> {
       // platformId is already in the adapter's encoded format (e.g. "telegram:6037840640",
       // "discord:guildId:channelId") — use it directly as the thread ID
-      const tid = threadId ?? platformId;
+      const tid = resolveDeliveryThreadId(platformId, threadId);
       const content = message.content as Record<string, unknown>;
 
       if (content.operation === 'edit' && content.messageId) {
@@ -417,8 +421,8 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       }
 
       // Display card (send_card MCP tool) — returns immediately, no callback flow.
-      // Non-URL actions are dropped: send_card's contract is fire-and-forget, so a
-      // callback button would have nowhere to land. URL actions render as link buttons.
+      // Non-URL actions are dropped: send_card is fire-and-forget, so a
+      // callback button would have nowhere to land. URL actions render as links.
       if (content.type === 'card' && content.card && typeof content.card === 'object') {
         const cardSpec = content.card as Record<string, unknown>;
         const title = (cardSpec.title as string) || '';
@@ -480,10 +484,30 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         }));
         // Split if over the adapter's max length. Files ride on the first
         // chunk so the head of the reply still carries them.
-        const chunks =
-          config.maxTextLength && text.length > config.maxTextLength
-            ? splitForLimit(text, config.maxTextLength)
-            : [text];
+        //
+        // Caption-aware split: when files are attached and the platform's
+        // caption limit is lower than the message limit (Telegram: 1024 vs
+        // 4096), the first chunk must fit the caption — otherwise the
+        // adapter character-truncates mid-entity and the platform rejects
+        // the message under its Markdown parser. The remainder is sent as
+        // follow-up text messages split at the larger message limit.
+        const hasFile = !!fileUploads && fileUploads.length > 0;
+        const firstChunkLimit = hasFile && config.maxCaptionLength ? config.maxCaptionLength : config.maxTextLength;
+        let chunks: string[];
+        if (firstChunkLimit && text.length > firstChunkLimit) {
+          const headSplit = splitForLimit(text, firstChunkLimit);
+          const head = headSplit[0];
+          const tail = text.slice(head.length).trimStart();
+          if (tail.length === 0) {
+            chunks = [head];
+          } else {
+            const tailLimit = config.maxTextLength ?? tail.length;
+            const tailChunks = tail.length > tailLimit ? splitForLimit(tail, tailLimit) : [tail];
+            chunks = [head, ...tailChunks];
+          }
+        } else {
+          chunks = [text];
+        }
         let firstId: string | undefined;
         for (let i = 0; i < chunks.length; i++) {
           const chunk = chunks[i];
@@ -507,7 +531,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     },
 
     async setTyping(platformId: string, threadId: string | null) {
-      const tid = threadId ?? platformId;
+      const tid = resolveDeliveryThreadId(platformId, threadId);
       await adapter.startTyping(tid);
     },
 

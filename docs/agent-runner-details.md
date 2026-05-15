@@ -100,7 +100,7 @@ Wraps `@anthropic-ai/claude-agent-sdk`'s `query()`.
 ```typescript
 class ClaudeProvider implements AgentProvider {
   query(input: QueryInput): AgentQuery {
-    const stream = new MessageStream();  // AsyncIterable<SDKUserMessage>
+    const stream = new MessageStream(); // AsyncIterable<SDKUserMessage>
     stream.push(input.prompt);
 
     const sdkQuery = query({
@@ -112,7 +112,7 @@ class ClaudeProvider implements AgentProvider {
         systemPrompt: input.systemPrompt
           ? { type: 'preset', preset: 'claude_code', append: input.systemPrompt }
           : undefined,
-        mcpServers: input.mcpServers,  // already the right shape
+        mcpServers: input.mcpServers, // already the right shape
         additionalDirectories: input.additionalDirectories,
         env: input.env,
         allowedTools: NANOCLAW_TOOL_ALLOWLIST,
@@ -136,6 +136,7 @@ class ClaudeProvider implements AgentProvider {
 ```
 
 `translateClaudeEvents` is an async generator that maps SDK messages to `ProviderEvent`:
+
 - `message.type === 'system' && message.subtype === 'init'` → `{ type: 'init', sessionId }`
 - `message.type === 'result'` → `{ type: 'result', text }`
 - `message.type === 'system' && message.subtype === 'api_retry'` → `{ type: 'error', retryable: true }`
@@ -144,6 +145,7 @@ class ClaudeProvider implements AgentProvider {
 - Everything else → logged, not emitted
 
 **Claude-specific features preserved inside the provider:**
+
 - `MessageStream` for async iterable input (push-based)
 - `resumeSessionAt` for resume at specific message UUID
 - PreCompact hook for transcript archiving
@@ -173,7 +175,9 @@ class CodexProvider implements AgentProvider {
         pendingFollowUp = msg;
         abortController.abort();
       },
-      end: () => { /* no-op — Codex turns end naturally */ },
+      end: () => {
+        /* no-op — Codex turns end naturally */
+      },
       abort: () => abortController.abort(),
       events: this.run(thread, input.prompt, abortController, () => pendingFollowUp),
     };
@@ -231,6 +235,7 @@ class CodexProvider implements AgentProvider {
 ```
 
 **Codex-specific behavior inside the provider:**
+
 - `developer_instructions` for system prompt (loaded from CLAUDE.md)
 - `git init` in workspace (Codex requires a git repo)
 - Abort+restart pattern for follow-up messages
@@ -254,10 +259,15 @@ class OpenCodeProvider implements AgentProvider {
     return {
       push: (msg) => {
         pendingFollowUp = msg;
-        server.close();  // interrupt current query
+        server.close(); // interrupt current query
       },
-      end: () => { /* no-op */ },
-      abort: () => { aborted = true; server.close(); },
+      end: () => {
+        /* no-op */
+      },
+      abort: () => {
+        aborted = true;
+        server.close();
+      },
       events: this.run(client, server, stream, input, () => pendingFollowUp),
     };
   }
@@ -299,6 +309,7 @@ class OpenCodeProvider implements AgentProvider {
 ```
 
 **OpenCode-specific behavior inside the provider:**
+
 - Local gRPC/HTTP server lifecycle (`server.close()`)
 - SSE event stream for output
 - Provider/model selection via config (`OPENCODE_PROVIDER`, `OPENCODE_MODEL`)
@@ -345,6 +356,7 @@ Everything below is handled by the agent-runner, not the provider.
 **Idle behavior:** When no messages are pending and no query is active, the agent-runner sleeps briefly (1s) and re-polls. The container stays warm until the host kills it (idle timeout).
 
 **Idle detection exceptions:** The container should NOT be considered idle when:
+
 - An `ask_user_question` tool call is pending (waiting for user response in messages_in)
 - The agent is actively working (tool calls in progress, subagents running)
 
@@ -359,6 +371,7 @@ The agent-runner transforms messages_in rows into a prompt string. The provider 
 **Single message formatting by kind:**
 
 - **`chat`** — format into message XML:
+
   ```xml
   <message sender="John" time="2024-01-01 10:00">
     Check this PR
@@ -366,15 +379,18 @@ The agent-runner transforms messages_in rows into a prompt string. The provider 
   ```
 
 - **`chat-sdk`** — extract fields from serialized Chat SDK message:
+
   ```xml
   <message sender="John (john@slack)" time="2024-01-01 10:00">
     Check this PR
     [image: screenshot.png — https://signed-url...]
   </message>
   ```
+
   Attachments are listed inline. Images/PDFs that Claude handles natively are passed as content blocks (see Media Handling below).
 
 - **`task`** — task prompt, optionally with script output:
+
   ```
   [SCHEDULED TASK]
 
@@ -386,6 +402,7 @@ The agent-runner transforms messages_in rows into a prompt string. The provider 
   ```
 
 - **`webhook`** — webhook payload:
+
   ```
   [WEBHOOK: github/pull_request]
 
@@ -393,6 +410,7 @@ The agent-runner transforms messages_in rows into a prompt string. The provider 
   ```
 
 - **`system`** — host action result (response to an earlier system request):
+
   ```
   [SYSTEM RESPONSE]
 
@@ -424,7 +442,7 @@ interface RoutingContext {
   platformId: string | null;
   channelType: string | null;
   threadId: string | null;
-  inReplyTo: string | null;  // messages_in.id of the triggering message
+  inReplyTo: string | null; // messages_in.id of the triggering message
 }
 ```
 
@@ -434,22 +452,30 @@ MCP tools that target a different destination (e.g., `send_to_agent`, `send_mess
 
 ### Status Management
 
-The agent-runner manages the `status` and `status_changed` fields on messages_in:
+The agent-runner never writes to `messages_in` directly. It records processing
+state in `outbound.db` via `processing_ack`, and the host reconciles that back
+to `inbound.db`:
 
 ```
-pending → processing → completed
-                    → failed (if provider returns error and max retries exhausted)
+messages_in.status='pending'
+  -> processing_ack.status='processing'
+  -> processing_ack.status='completed' | 'failed'
+  -> host sync updates messages_in.status / retry timing
 ```
 
-- **Pick up:** `UPDATE messages_in SET status = 'processing', status_changed = now(), tries = tries + 1 WHERE id IN (...)`
-- **Complete:** `UPDATE messages_in SET status = 'completed', status_changed = now() WHERE id IN (...)`
-- **Error:** Agent-runner does NOT set `failed` — it leaves the message as `processing`. The host detects stale processing via `status_changed` and handles retry logic (reset to pending with backoff). This keeps retry policy on the host side.
+- **Pick up:** insert or replace `processing_ack` rows with `status='processing'`.
+- **Complete:** update `processing_ack` rows to `status='completed'`.
+- **Error:** update `processing_ack` rows to `status='failed'`; retry policy stays on the host side.
 
 ### MCP Tools
 
-The agent-runner runs an MCP server that exposes NanoClaw tools to the agent. All tools write to the session DB.
+The agent-runner runs an MCP server that exposes NanoClaw tools to the agent.
+Tools write to the container-owned `outbound.db` or read projections from the
+host-owned `inbound.db`.
 
-**DB path:** The MCP server receives the session DB path via environment variable. It opens a second connection to the same SQLite file (WAL mode allows concurrent access).
+**DB paths:** The container uses fixed paths: `/workspace/inbound.db` and
+`/workspace/outbound.db`. There is no shared writable session DB and no WAL;
+each file has exactly one writer.
 
 #### send_message
 
@@ -485,6 +511,7 @@ Send a file to the current conversation.
 ```
 
 Implementation:
+
 1. Generate a message ID
 2. Create `outbox/{messageId}/` directory
 3. Copy the file into the outbox directory
@@ -523,6 +550,7 @@ Send an interactive question and wait for the user's response. This is a **block
 ```
 
 Implementation:
+
 1. Generate a `questionId`
 2. Write a `messages_out` row with `operation: 'ask_question'`, the question, options, and questionId
 3. Poll `messages_in` for a row with matching `questionId` in content
@@ -655,12 +683,12 @@ The agent-runner inspects attachments in chat/chat-sdk messages and handles them
 
 **Provider-native content blocks:**
 
-| Type | Claude | Codex / OpenCode |
-|------|--------|------------------|
-| Images (JPEG, PNG, GIF, WebP) | Native image content block | Save to disk |
-| PDFs | Native document content block | Save to disk |
-| Audio | Native audio content block | Save to disk |
-| Other files (code, data, video, archives) | Save to disk | Save to disk |
+| Type                                      | Claude                        | Codex / OpenCode |
+| ----------------------------------------- | ----------------------------- | ---------------- |
+| Images (JPEG, PNG, GIF, WebP)             | Native image content block    | Save to disk     |
+| PDFs                                      | Native document content block | Save to disk     |
+| Audio                                     | Native audio content block    | Save to disk     |
+| Other files (code, data, video, archives) | Save to disk                  | Save to disk     |
 
 **"Save to disk"** means: download to `/workspace/downloads/{messageId}/`, reference in the prompt text:
 
@@ -712,9 +740,9 @@ These are ephemeral to the container's lifetime. When the container is killed an
 
 The agent-runner receives configuration via:
 
-- **Environment variables:** `AGENT_PROVIDER` (claude/codex/opencode), `NANOCLAW_ADMIN_USER_ID`, provider-specific vars (API keys, model overrides), `TZ`
-- **Fixed mount paths:** Session DB at `/workspace/session.db`. Agent group folder at `/workspace/agent/`. System prompt from `/workspace/agent/CLAUDE.md` and `/workspace/global/CLAUDE.md`.
-- **Optional startup config:** Some config may be passed as a JSON file at a fixed path (e.g., `/workspace/config.json`) for things like the session ID to resume, assistant name, and admin user ID. This avoids overloading environment variables.
+- **Container config:** `/workspace/agent/container.json` carries provider, assistant name, enabled skills, MCP servers, and explicit env pass-through allowlists.
+- **Fixed mount paths:** Inbound DB at `/workspace/inbound.db`, outbound DB at `/workspace/outbound.db`, heartbeat at `/workspace/.heartbeat`, agent group folder at `/workspace/agent/`, shared runner source at `/app/src/`, shared skills at `/app/skills/`, and shared base prompt at `/app/CLAUDE.md`.
+- **Environment variables:** `TZ`, OneCLI proxy/cert wiring, and only the provider/model variables explicitly contributed by host provider config or `container.json` `envPassThrough`.
 
 The agent-runner reads config, creates the provider, and enters the poll loop. No stdin, no initial prompt — messages are already in the session DB.
 

@@ -8,13 +8,20 @@ Be concise — every message costs the reader's attention. Prefer outcomes over 
 
 Files you create are saved in `/workspace/agent/`. Use this for notes, research, or anything that should persist across turns in this group.
 
-The file `CLAUDE.local.md` in your workspace is your per-group memory. Record things there that you'll want to remember in future sessions — user preferences, project context, recurring facts. Keep entries short and structured.
+The file `CLAUDE.local.md` is your per-group operating manual: stable rules, persona, routing, and reading order. Treat it as slow-moving configuration, not a scratchpad.
 
 ## Memory
 
-When the user shares any substantive information with you, it must be stored somewhere you can retrieve it when relevant. If it's information that is pertinent to every single conversation turn it should be put into CLAUDE.local.md. Otherwise, create a system for storing the information depending on its type - e.g. create a file of people that the user mentions so you can keep track or a file of projects. For every file you create, add a concise reference in your CLAUDE.local.md so you'll be able to find it in future conversations. 
+Default to the hot-file model:
 
-A core part of your job and the main thing that defines how useful you are to the user is how well you do in creating these systems for organizing information. These are your systems that help you do your job well. Evolve them over time as needed.
+- `CLAUDE.local.md` - durable rules and rare configuration changes.
+- `STANDING_FACTS.md` - curated durable facts, promoted by consolidation.
+- `OPEN_TASKS.md` - today's active plan, replaced regularly.
+- `journal/<YYYY-MM-DD>.md` - free-form notes from the current day.
+
+When the user shares substantive information, write it to today's journal unless your local instructions say otherwise. The nightly consolidation pass promotes only facts that are still useful into `STANDING_FACTS.md` or updates `OPEN_TASKS.md`. Do not auto-read old journals at startup; search them only when the current task explicitly needs history.
+
+For larger structured memory, create focused files or folders, then add only a short pointer to the relevant hot file. Avoid duplicating the same fact across multiple always-loaded files.
 
 ## Conversation history
 

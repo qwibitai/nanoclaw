@@ -103,37 +103,12 @@ export interface RoutableAgentMessage {
   platform_id: string | null;
   content: string;
   /**
-   * For replies, the id of the inbound message being replied to. The
-   * container's formatter sets this from the first inbound in the batch
-   * (`container/agent-runner/src/formatter.ts`). Used here to route the
-   * reply back to the originating session — see `resolveTargetSession`.
+   * For replies, the id of the inbound message being replied to. Used to
+   * route the reply back to the originating session.
    */
   in_reply_to: string | null;
 }
 
-/**
- * Pick which session of `targetAgentGroupId` should receive this a2a message.
- *
- * Three layers, highest-fidelity first:
- *
- * 1. **Direct return-path** (in_reply_to lookup): if the message is a reply
- *    (`in_reply_to` set), open the source agent's inbound DB and read the
- *    triggering row's `source_session_id`. That column was stamped when the
- *    original outbound was routed — it's the session that started the
- *    conversation, and replies should land there even when the target has
- *    multiple active sessions.
- *
- * 2. **Peer-affinity fallback**: if (1) misses (in_reply_to is null or the
- *    referenced row isn't an a2a inbound), look up the most recent a2a
- *    inbound *from the target agent group* in source's inbound and use its
- *    `source_session_id`. The intuition: the last time this peer talked to
- *    me, which target session was driving? Route the reply there, since
- *    that's the session most plausibly in active conversation.
- *
- * 3. **Newest active session**: legacy heuristic. Used when no prior a2a
- *    has been recorded with `source_session_id` (e.g. fresh installs,
- *    pre-migration data).
- */
 function resolveTargetSession(msg: RoutableAgentMessage, sourceSession: Session, targetAgentGroupId: string): Session {
   const srcDb = openInboundDb(sourceSession.agent_group_id, sourceSession.id);
   let originSessionId: string | null = null;
@@ -142,9 +117,6 @@ function resolveTargetSession(msg: RoutableAgentMessage, sourceSession: Session,
       originSessionId = getInboundSourceSessionId(srcDb, msg.in_reply_to);
     }
     if (!originSessionId) {
-      // Peer-affinity fallback — covers the case where the container's
-      // outbound write didn't carry in_reply_to (e.g. legacy MCP send_message
-      // path, container running pre-fix code).
       originSessionId = getMostRecentPeerSourceSessionId(srcDb, targetAgentGroupId);
     }
   } finally {

@@ -4,6 +4,7 @@ import { determineVerifyStatus } from './verify.js';
 
 const healthyBase = {
   service: 'running' as const,
+  bun: 'configured',
   credentials: 'configured',
   registeredGroups: 1,
 };
@@ -36,6 +37,15 @@ describe('determineVerifyStatus', () => {
       determineVerifyStatus({
         ...healthyBase,
         credentials: 'missing',
+      }),
+    ).toBe('failed');
+  });
+
+  it('fails when Bun is missing or on the wrong version', () => {
+    expect(
+      determineVerifyStatus({
+        ...healthyBase,
+        bun: 'missing',
       }),
     ).toBe('failed');
   });

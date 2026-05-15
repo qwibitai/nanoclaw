@@ -19,13 +19,12 @@ import {
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
-import { materializeContainerJson } from './container-config.js';
-import { getContainerConfig } from './db/container-configs.js';
-import { updateContainerConfigScalars, updateContainerConfigJson } from './db/container-configs.js';
+import { readContainerConfig, writeContainerConfig } from './container-config.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
+import { readEnvFile } from './env.js';
 import { initGroupFilesystem } from './group-init.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
@@ -49,8 +48,26 @@ import type { AgentGroup, Session } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 
+interface ActiveContainer {
+  process: ChildProcess;
+  containerName: string;
+  agentGroupId: string;
+  sessionId: string;
+  logDir: string;
+  stdoutLogPath: string;
+  stderrLogPath: string;
+  metadataPath: string;
+  exitPath: string;
+  killPath: string;
+  stdoutStream: fs.WriteStream;
+  stderrStream: fs.WriteStream;
+  startedAt: string;
+  killedReason?: string;
+  logsFinalized: boolean;
+}
+
 /** Active containers tracked by session ID. */
-const activeContainers = new Map<string, { process: ChildProcess; containerName: string }>();
+const activeContainers = new Map<string, ActiveContainer>();
 
 /**
  * In-flight wake promises, keyed by session id. Deduplicates concurrent
@@ -121,15 +138,18 @@ async function spawnContainer(session: Session): Promise<void> {
   }
   writeSessionRouting(agentGroup.id, session.id);
 
-  // Materialize container.json from DB — writes fresh file and returns
-  // the config object, threaded through provider resolution, buildMounts,
-  // and buildContainerArgs so we don't re-read.
-  const containerConfig = materializeContainerJson(agentGroup.id);
+  // Read container config once — threaded through provider resolution,
+  // buildMounts, and buildContainerArgs so we don't re-read the file.
+  const containerConfig = readContainerConfig(agentGroup.folder);
+
+  // Ensure container.json has the agent group identity fields the runner needs.
+  // Written at spawn time so the runner can read them from the RO mount.
+  ensureRuntimeFields(containerConfig, agentGroup);
 
   // Resolve the effective provider + any host-side contribution it declares
   // (extra mounts, env passthrough). Computed once and threaded through both
   // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
-  const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
+  const { contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
 
   const mounts = buildMounts(agentGroup, session, containerConfig, contribution);
   const containerName = `nanoclaw-v2-${agentGroup.folder}-${Date.now()}`;
@@ -137,16 +157,53 @@ async function spawnContainer(session: Session): Promise<void> {
   // sessions and reversible via getAgentGroup() for approval routing.
   const agentIdentifier = agentGroup.id;
   const args = await buildContainerArgs(
+    session.id,
     mounts,
     containerName,
     agentGroup,
     containerConfig,
-    provider,
     contribution,
     agentIdentifier,
   );
 
   log.info('Spawning container', { sessionId: session.id, agentGroup: agentGroup.name, containerName });
+
+  const logFiles = createContainerLogFiles(session, agentGroup, containerName);
+  writeJsonFile(logFiles.metadataPath, {
+    version: 1,
+    startedAt: logFiles.startedAt,
+    session: {
+      id: session.id,
+      messagingGroupId: session.messaging_group_id,
+      threadId: session.thread_id,
+      agentProvider: session.agent_provider,
+    },
+    agentGroup: {
+      id: agentGroup.id,
+      name: agentGroup.name,
+      folder: agentGroup.folder,
+      agentProvider: agentGroup.agent_provider,
+    },
+    container: {
+      name: containerName,
+      runtime: CONTAINER_RUNTIME_BIN,
+      imageTag: containerConfig.imageTag || CONTAINER_IMAGE,
+    },
+    logs: {
+      directory: logFiles.logDir,
+      stdout: logFiles.stdoutLogPath,
+      stderr: logFiles.stderrLogPath,
+      exit: logFiles.exitPath,
+      kill: logFiles.killPath,
+    },
+    envKeys: extractEnvKeys(args),
+    mounts: mounts.map((mount) => ({
+      hostPath: mount.hostPath,
+      containerPath: mount.containerPath,
+      readonly: mount.readonly,
+    })),
+    dockerArgs: sanitizeDockerArgs(args),
+  });
 
   // Clear any orphan heartbeat from a previous container instance — the
   // sweep's ceiling check treats a missing file as "fresh spawn, give grace"
@@ -155,37 +212,57 @@ async function spawnContainer(session: Session): Promise<void> {
   fs.rmSync(heartbeatPath(agentGroup.id, session.id), { force: true });
 
   const container = spawn(CONTAINER_RUNTIME_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const entry: ActiveContainer = {
+    process: container,
+    containerName,
+    agentGroupId: agentGroup.id,
+    sessionId: session.id,
+    ...logFiles,
+    stdoutStream: fs.createWriteStream(logFiles.stdoutLogPath, { flags: 'a' }),
+    stderrStream: fs.createWriteStream(logFiles.stderrLogPath, { flags: 'a' }),
+    logsFinalized: false,
+  };
+  attachLogStreamErrorHandlers(entry);
 
-  activeContainers.set(session.id, { process: container, containerName });
+  activeContainers.set(session.id, entry);
   markContainerRunning(session.id);
 
   // Log stderr
   container.stderr?.on('data', (data) => {
+    entry.stderrStream.write(data);
     for (const line of data.toString().trim().split('\n')) {
       if (line) log.debug(line, { container: agentGroup.folder });
     }
   });
 
-  // stdout is unused in v2 (all IO is via session DB)
-  container.stdout?.on('data', () => {});
+  // stdout is unused for live IO in v2 (all IO is via session DB), but it is
+  // retained for post-mortems when a runner exits before writing outbound.db.
+  container.stdout?.on('data', (data) => {
+    entry.stdoutStream.write(data);
+  });
 
   // No host-side idle timeout. Stale/stuck detection is driven by the host
   // sweep reading heartbeat mtime + processing_ack claim age + container_state
   // (see src/host-sweep.ts). This avoids killing long-running legitimate work
   // on a wall-clock timer.
 
-  container.on('close', (code) => {
+  container.on('close', (code, signal) => {
     activeContainers.delete(session.id);
+    finalizeContainerLogs(entry, { event: 'close', code, signal });
     markContainerStopped(session.id);
     stopTypingRefresh(session.id);
-    log.info('Container exited', { sessionId: session.id, code, containerName });
+    log.info('Container exited', { sessionId: session.id, code, signal, containerName, logDir: entry.logDir });
   });
 
   container.on('error', (err) => {
     activeContainers.delete(session.id);
+    finalizeContainerLogs(entry, {
+      event: 'error',
+      error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
+    });
     markContainerStopped(session.id);
     stopTypingRefresh(session.id);
-    log.error('Container spawn error', { sessionId: session.id, err });
+    log.error('Container spawn error', { sessionId: session.id, err, logDir: entry.logDir });
   });
 }
 
@@ -199,6 +276,13 @@ export function killContainer(sessionId: string, reason: string, onExit?: () => 
   }
 
   log.info('Killing container', { sessionId, reason, containerName: entry.containerName });
+  entry.killedReason = reason;
+  writeJsonFile(entry.killPath, {
+    killedAt: new Date().toISOString(),
+    reason,
+    sessionId,
+    containerName: entry.containerName,
+  });
   try {
     stopContainer(entry.containerName);
   } catch {
@@ -206,20 +290,138 @@ export function killContainer(sessionId: string, reason: string, onExit?: () => 
   }
 }
 
+type ContainerLogFiles = Pick<
+  ActiveContainer,
+  'logDir' | 'stdoutLogPath' | 'stderrLogPath' | 'metadataPath' | 'exitPath' | 'killPath' | 'startedAt'
+>;
+
+function createContainerLogFiles(session: Session, agentGroup: AgentGroup, containerName: string): ContainerLogFiles {
+  const startedAt = new Date().toISOString();
+  const safeStartedAt = startedAt.replace(/[:.]/g, '-');
+  const logDir = path.join(sessionDir(agentGroup.id, session.id), 'logs');
+  fs.mkdirSync(logDir, { recursive: true });
+  const prefix = `container-${safeStartedAt}-${process.pid}-${containerName}`;
+
+  return {
+    startedAt,
+    logDir,
+    stdoutLogPath: path.join(logDir, `${prefix}.stdout.log`),
+    stderrLogPath: path.join(logDir, `${prefix}.stderr.log`),
+    metadataPath: path.join(logDir, `${prefix}.meta.json`),
+    exitPath: path.join(logDir, `${prefix}.exit.json`),
+    killPath: path.join(logDir, `${prefix}.kill.json`),
+  };
+}
+
+function attachLogStreamErrorHandlers(entry: ActiveContainer): void {
+  entry.stdoutStream.on('error', (err) => {
+    log.warn('Container stdout log write failed', { sessionId: entry.sessionId, filePath: entry.stdoutLogPath, err });
+  });
+  entry.stderrStream.on('error', (err) => {
+    log.warn('Container stderr log write failed', { sessionId: entry.sessionId, filePath: entry.stderrLogPath, err });
+  });
+}
+
+function finalizeContainerLogs(entry: ActiveContainer, detail: Record<string, unknown>): void {
+  if (entry.logsFinalized) return;
+  entry.logsFinalized = true;
+  const stoppedAt = new Date().toISOString();
+  const startedMs = Date.parse(entry.startedAt);
+  const stoppedMs = Date.parse(stoppedAt);
+  writeJsonFile(entry.exitPath, {
+    ...detail,
+    sessionId: entry.sessionId,
+    agentGroupId: entry.agentGroupId,
+    containerName: entry.containerName,
+    startedAt: entry.startedAt,
+    stoppedAt,
+    durationMs: Number.isFinite(startedMs) && Number.isFinite(stoppedMs) ? stoppedMs - startedMs : null,
+    killedReason: entry.killedReason ?? null,
+    logs: {
+      stdout: entry.stdoutLogPath,
+      stderr: entry.stderrLogPath,
+      metadata: entry.metadataPath,
+      kill: entry.killPath,
+    },
+  });
+  entry.stdoutStream.end();
+  entry.stderrStream.end();
+}
+
+function writeJsonFile(filePath: string, value: unknown): void {
+  try {
+    fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+  } catch (err) {
+    log.warn('Failed to write container post-mortem JSON', { filePath, err });
+  }
+}
+
+function extractEnvKeys(args: string[]): string[] {
+  const keys = new Set<string>();
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '-e' || arg === '--env') {
+      const raw = args[i + 1];
+      if (raw) keys.add(envKey(raw));
+      i++;
+    } else if (arg.startsWith('-e') && arg.length > 2) {
+      keys.add(envKey(arg.slice(2)));
+    } else if (arg.startsWith('--env=')) {
+      keys.add(envKey(arg.slice('--env='.length)));
+    }
+  }
+  return [...keys].sort();
+}
+
+function sanitizeDockerArgs(args: string[]): string[] {
+  const sanitized: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '-e' || arg === '--env') {
+      sanitized.push(arg);
+      const raw = args[i + 1];
+      if (raw !== undefined) {
+        sanitized.push(sanitizeEnvValue(raw));
+        i++;
+      }
+    } else if (arg.startsWith('-e') && arg.length > 2) {
+      sanitized.push(`-e${sanitizeEnvValue(arg.slice(2))}`);
+    } else if (arg.startsWith('--env=')) {
+      sanitized.push(`--env=${sanitizeEnvValue(arg.slice('--env='.length))}`);
+    } else {
+      sanitized.push(arg);
+    }
+  }
+  return sanitized;
+}
+
+function envKey(raw: string): string {
+  const eq = raw.indexOf('=');
+  return eq === -1 ? raw : raw.slice(0, eq);
+}
+
+function sanitizeEnvValue(raw: string): string {
+  const key = envKey(raw);
+  return raw.includes('=') ? `${key}=<redacted>` : key;
+}
+
 /**
- * Resolve the provider name for a session:
+ * Resolve the provider name for a session using the precedence documented in
+ * the provider-install skills:
  *
  *   sessions.agent_provider
- *     → container_configs.provider
+ *     → agent_groups.agent_provider
+ *     → container.json `provider`
  *     → 'claude'
  *
  * Pure so the precedence can be unit-tested without a DB or filesystem.
  */
 export function resolveProviderName(
   sessionProvider: string | null | undefined,
+  agentGroupProvider: string | null | undefined,
   containerConfigProvider: string | null | undefined,
 ): string {
-  return (sessionProvider || containerConfigProvider || 'claude').toLowerCase();
+  return (sessionProvider || agentGroupProvider || containerConfigProvider || 'claude').toLowerCase();
 }
 
 function resolveProviderContribution(
@@ -227,7 +429,7 @@ function resolveProviderContribution(
   agentGroup: AgentGroup,
   containerConfig: import('./container-config.js').ContainerConfig,
 ): { provider: string; contribution: ProviderContainerContribution } {
-  const provider = resolveProviderName(session.agent_provider, containerConfig.provider);
+  const provider = resolveProviderName(session.agent_provider, agentGroup.agent_provider, containerConfig.provider);
   const fn = getProviderContainerConfig(provider);
   const contribution = fn
     ? fn({
@@ -252,9 +454,11 @@ function buildMounts(
   // is a no-op for groups that have spawned before.
   initGroupFilesystem(agentGroup);
 
+  const groupDir = path.resolve(GROUPS_DIR, agentGroup.folder);
+
   // Sync skill symlinks based on container.json selection before mounting.
   const claudeDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id, '.claude-shared');
-  syncSkillSymlinks(claudeDir, containerConfig);
+  syncSkillSymlinks(claudeDir, containerConfig, groupDir);
 
   // Compose CLAUDE.md fresh every spawn from the shared base, enabled skill
   // fragments, and MCP server instructions. See `claude-md-compose.ts`.
@@ -262,8 +466,6 @@ function buildMounts(
 
   const mounts: VolumeMount[] = [];
   const sessDir = sessionDir(agentGroup.id, session.id);
-  const groupDir = path.resolve(GROUPS_DIR, agentGroup.folder);
-
   // Session folder at /workspace (contains inbound.db, outbound.db, outbox/, .claude/)
   mounts.push({ hostPath: sessDir, containerPath: '/workspace', readonly: false });
 
@@ -291,12 +493,6 @@ function buildMounts(
   const fragmentsDir = path.join(groupDir, '.claude-fragments');
   if (fs.existsSync(fragmentsDir)) {
     mounts.push({ hostPath: fragmentsDir, containerPath: '/workspace/agent/.claude-fragments', readonly: true });
-  }
-
-  // Global memory directory — always read-only.
-  const globalDir = path.join(GROUPS_DIR, 'global');
-  if (fs.existsSync(globalDir)) {
-    mounts.push({ hostPath: globalDir, containerPath: '/workspace/global', readonly: true });
   }
 
   // Shared CLAUDE.md — read-only, imported by the composed entry point via
@@ -339,19 +535,23 @@ function buildMounts(
  * selection. Each symlink points to a container path (/app/skills/<name>)
  * so it's dangling on the host but valid inside the container.
  */
-function syncSkillSymlinks(claudeDir: string, containerConfig: import('./container-config.js').ContainerConfig): void {
+function syncSkillSymlinks(
+  claudeDir: string,
+  containerConfig: import('./container-config.js').ContainerConfig,
+  groupDir: string,
+): void {
   const skillsDir = path.join(claudeDir, 'skills');
   if (!fs.existsSync(skillsDir)) {
     fs.mkdirSync(skillsDir, { recursive: true });
   }
 
-  // Determine desired skill set
+  // Determine desired shared skill set.
   const projectRoot = process.cwd();
   const sharedSkillsDir = path.join(projectRoot, 'container', 'skills');
-  let desired: string[];
+  let sharedDesired: string[];
   if (containerConfig.skills === 'all') {
     // Recompute from shared dir — newly-added upstream skills appear automatically
-    desired = fs.existsSync(sharedSkillsDir)
+    sharedDesired = fs.existsSync(sharedSkillsDir)
       ? fs.readdirSync(sharedSkillsDir).filter((e) => {
           try {
             return fs.statSync(path.join(sharedSkillsDir, e)).isDirectory();
@@ -361,10 +561,42 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
         })
       : [];
   } else {
-    desired = containerConfig.skills;
+    sharedDesired = containerConfig.skills;
   }
 
-  const desiredSet = new Set(desired);
+  const desired = new Map<string, string>();
+  for (const skill of sharedDesired) {
+    desired.set(skill, `/app/skills/${skill}`);
+  }
+
+  // Add per-group local skills. A local skill must be a directory with a
+  // SKILL.md and a safe slug. Local/shared collisions are skipped for now so
+  // a group-created skill cannot unexpectedly shadow a bundled skill.
+  const localSkillsDir = path.join(groupDir, 'skills');
+  if (!fs.existsSync(localSkillsDir)) {
+    fs.mkdirSync(localSkillsDir, { recursive: true });
+  }
+  for (const entry of fs.readdirSync(localSkillsDir)) {
+    if (entry.startsWith('.')) continue;
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(entry)) continue;
+    const localSkillDir = path.join(localSkillsDir, entry);
+    try {
+      if (!fs.statSync(localSkillDir).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    if (!fs.existsSync(path.join(localSkillDir, 'SKILL.md'))) continue;
+    if (desired.has(entry)) {
+      log.warn('Skipping local skill because it collides with a shared skill', {
+        skill: entry,
+        groupDir,
+      });
+      continue;
+    }
+    desired.set(entry, `/workspace/agent/skills/${entry}`);
+  }
+
+  const desiredSet = new Set(desired.keys());
 
   // Remove symlinks not in the desired set
   for (const entry of fs.readdirSync(skillsDir)) {
@@ -381,31 +613,76 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
   }
 
   // Create symlinks for desired skills (container path targets)
-  for (const skill of desired) {
+  for (const [skill, target] of desired) {
     const linkPath = path.join(skillsDir, skill);
-    let exists = false;
+    let currentTarget: string | null = null;
     try {
-      fs.lstatSync(linkPath);
-      exists = true;
+      const stat = fs.lstatSync(linkPath);
+      if (!stat.isSymbolicLink()) continue;
+      currentTarget = fs.readlinkSync(linkPath);
     } catch {
       /* missing */
     }
-    if (!exists) {
-      fs.symlinkSync(`/app/skills/${skill}`, linkPath);
+    if (currentTarget !== target) {
+      try {
+        fs.unlinkSync(linkPath);
+      } catch {
+        /* missing */
+      }
+      fs.symlinkSync(target, linkPath);
     }
   }
 }
 
+/**
+ * Ensure container.json has the runtime identity fields the runner needs.
+ * Written at spawn time so they're always current even if the DB values
+ * change (e.g. group rename). Only writes if values differ to avoid
+ * unnecessary file churn.
+ */
+function ensureRuntimeFields(
+  containerConfig: import('./container-config.js').ContainerConfig,
+  agentGroup: AgentGroup,
+): void {
+  let dirty = false;
+  if (containerConfig.agentGroupId !== agentGroup.id) {
+    containerConfig.agentGroupId = agentGroup.id;
+    dirty = true;
+  }
+  if (containerConfig.groupName !== agentGroup.name) {
+    containerConfig.groupName = agentGroup.name;
+    dirty = true;
+  }
+  if (containerConfig.assistantName !== agentGroup.name) {
+    containerConfig.assistantName = agentGroup.name;
+    dirty = true;
+  }
+  if (dirty) {
+    writeContainerConfig(agentGroup.folder, containerConfig);
+  }
+}
+
 async function buildContainerArgs(
+  sessionId: string,
   mounts: VolumeMount[],
   containerName: string,
   agentGroup: AgentGroup,
   containerConfig: import('./container-config.js').ContainerConfig,
-  provider: string,
   providerContribution: ProviderContainerContribution,
   agentIdentifier?: string,
 ): Promise<string[]> {
-  const args: string[] = ['run', '--rm', '--name', containerName, '--label', CONTAINER_INSTALL_LABEL];
+  const args: string[] = [
+    'run',
+    '--rm',
+    '--name',
+    containerName,
+    '--label',
+    CONTAINER_INSTALL_LABEL,
+    '--label',
+    `nanoclaw-session=${sessionId}`,
+    '--label',
+    `nanoclaw-agent-group=${agentGroup.id}`,
+  ];
 
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
@@ -415,6 +692,17 @@ async function buildContainerArgs(
   if (providerContribution.env) {
     for (const [key, value] of Object.entries(providerContribution.env)) {
       args.push('-e', `${key}=${value}`);
+    }
+  }
+
+  // Per-group env passthrough. Values are read from the host environment first,
+  // then from the project .env file. Keep the allowlist in container.json so
+  // only explicitly configured groups receive specific secrets.
+  if (containerConfig.envPassThrough && containerConfig.envPassThrough.length > 0) {
+    const dotenv = readEnvFile(containerConfig.envPassThrough);
+    for (const key of containerConfig.envPassThrough) {
+      const value = process.env[key] || dotenv[key];
+      if (value) args.push('-e', `${key}=${value}`);
     }
   }
 
@@ -469,10 +757,10 @@ export async function buildAgentGroupImage(agentGroupId: string): Promise<void> 
   const agentGroup = getAgentGroup(agentGroupId);
   if (!agentGroup) throw new Error('Agent group not found');
 
-  const configRow = getContainerConfig(agentGroup.id);
-  if (!configRow) throw new Error('Container config not found');
-  const aptPackages = JSON.parse(configRow.packages_apt) as string[];
-  const npmPackages = JSON.parse(configRow.packages_npm) as string[];
+  const containerConfig = readContainerConfig(agentGroup.folder);
+  const aptPackages = containerConfig.packages.apt;
+  const npmPackages = containerConfig.packages.npm;
+
   if (aptPackages.length === 0 && npmPackages.length === 0) {
     throw new Error('No packages to install. Use install_packages first.');
   }
@@ -502,14 +790,15 @@ export async function buildAgentGroupImage(agentGroupId: string): Promise<void> 
     execSync(`${CONTAINER_RUNTIME_BIN} build -t ${imageTag} -f ${tmpDockerfile} .`, {
       cwd: DATA_DIR,
       stdio: 'pipe',
-      timeout: 900_000,
+      timeout: 300_000,
     });
   } finally {
     fs.unlinkSync(tmpDockerfile);
   }
 
-  // Store the image tag in the DB
-  updateContainerConfigScalars(agentGroup.id, { image_tag: imageTag });
+  // Store the image tag in groups/<folder>/container.json
+  containerConfig.imageTag = imageTag;
+  writeContainerConfig(agentGroup.folder, containerConfig);
 
   log.info('Per-agent-group image built', { agentGroupId, imageTag });
 }

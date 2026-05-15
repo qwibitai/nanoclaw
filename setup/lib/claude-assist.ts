@@ -43,7 +43,7 @@ export interface AssistContext {
  * rather than us stuffing contents into the prompt. Keys are step names as
  * they appear in fail() calls; values are repo-relative paths.
  */
-export const STEP_FILES: Record<string, string[]> = {
+const STEP_FILES: Record<string, string[]> = {
   bootstrap: ['setup.sh', 'setup/install-node.sh', 'nanoclaw.sh'],
   environment: ['setup/environment.ts'],
   container: [
@@ -81,7 +81,7 @@ export const STEP_FILES: Record<string, string[]> = {
   ],
 };
 
-export const BIG_PICTURE_FILES = ['README.md', 'setup/auto.ts'];
+const BIG_PICTURE_FILES = ['README.md', 'setup/auto.ts'];
 
 /**
  * Returns `true` if the user ran a Claude-suggested fix command; callers
@@ -150,7 +150,7 @@ function isClaudeAuthenticated(): boolean {
   }
 }
 
-export async function ensureClaudeReady(projectRoot: string): Promise<boolean> {
+async function ensureClaudeReady(projectRoot: string): Promise<boolean> {
   if (!isClaudeInstalled()) {
     const install = ensureAnswer(
       await p.confirm({

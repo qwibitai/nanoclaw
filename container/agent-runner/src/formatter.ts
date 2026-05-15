@@ -4,7 +4,7 @@ import { TIMEZONE, formatLocalTime } from './timezone.js';
 
 /**
  * Command categories for messages starting with '/'.
- * - admin: sender must be in NANOCLAW_ADMIN_USER_IDS
+ * - admin: host-side router should gate before the message reaches the runner
  * - filtered: silently drop (mark completed without processing)
  * - passthrough: pass raw to the agent (no XML wrapping)
  * - none: not a command — format normally
@@ -25,12 +25,9 @@ export interface CommandInfo {
  * Categorize a message as a command or not.
  * Only applies to chat/chat-sdk messages.
  *
- * The extracted `senderId` is compared against `NANOCLAW_ADMIN_USER_IDS`
- * which stores ids in the namespaced form `<channel_type>:<raw>` (see
- * src/db/users.ts). chat-sdk-bridge serializes `author.userId` as a raw
- * platform id with no prefix, so we prefix it here. If the id already
- * contains a `:` we assume it's pre-namespaced (non-chat-sdk adapters
- * that populate `senderId` directly) and leave it alone.
+ * The runner still preserves sender IDs for diagnostics and any provider-side
+ * formatting decisions. Host-side command gating uses the persisted
+ * `user_roles` table before messages reach this point.
  */
 export function categorizeMessage(msg: MessageInRow): CommandInfo {
   const content = parseContent(msg.content);
@@ -64,18 +61,6 @@ export function isClearCommand(msg: MessageInRow): boolean {
   const content = parseContent(msg.content);
   const text = (content.text || '').trim();
   return text.toLowerCase().startsWith('/clear');
-}
-
-/**
- * True for any chat that needs the outer loop's command path: /clear plus
- * admin/passthrough slash commands the SDK can only dispatch when they are
- * a query's first input. Used by the follow-up poller to bail out and let
- * the outer loop reopen the query.
- */
-export function isRunnerCommand(msg: MessageInRow): boolean {
-  if (msg.kind !== 'chat' && msg.kind !== 'chat-sdk') return false;
-  const cat = categorizeMessage(msg).category;
-  return cat === 'admin' || cat === 'passthrough';
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -177,49 +162,40 @@ function formatSingleChat(msg: MessageInRow): string {
   const replyPrefix = formatReplyContext(content.replyTo);
   const attachmentsSuffix = formatAttachments(content.attachments);
 
-  const fromAttr = originAttr(msg);
+  // Look up the destination name for the origin (reverse map lookup).
+  // If not found, fall back to a raw channel:platform_id marker so nothing
+  // gets silently dropped — this should only happen if the destination was
+  // removed between when the message was received and when it's being processed.
+  const fromDest = findByRouting(msg.channel_type, msg.platform_id);
+  const fromAttr = fromDest
+    ? ` from="${escapeXml(fromDest.name)}"`
+    : msg.channel_type || msg.platform_id
+      ? ` from="unknown:${escapeXml(msg.channel_type || '')}:${escapeXml(msg.platform_id || '')}"`
+      : '';
 
   return `<message${idAttr}${fromAttr} sender="${escapeXml(sender)}" time="${escapeXml(time)}"${replyAttr}>${replyPrefix}${escapeXml(text)}${attachmentsSuffix}</message>`;
 }
 
-/**
- * Build a ` from="destination_name"` attribute string from a message's routing
- * fields. Shared by all formatters so the agent always knows where a message
- * originated — critical for explicit addressing.
- */
-function originAttr(msg: MessageInRow): string {
-  const fromDest = findByRouting(msg.channel_type, msg.platform_id);
-  if (fromDest) return ` from="${escapeXml(fromDest.name)}"`;
-  if (msg.channel_type || msg.platform_id) {
-    return ` from="unknown:${escapeXml(msg.channel_type || '')}:${escapeXml(msg.platform_id || '')}"`;
-  }
-  return '';
-}
-
 function formatTaskMessage(msg: MessageInRow): string {
   const content = parseContent(msg.content);
-  const from = originAttr(msg);
-  const time = formatLocalTime(msg.timestamp, TIMEZONE);
-  const parts: string[] = [];
+  const parts = ['[SCHEDULED TASK]'];
   if (content.scriptOutput) {
-    parts.push('Script output:', JSON.stringify(content.scriptOutput, null, 2), '');
+    parts.push('', 'Script output:', JSON.stringify(content.scriptOutput, null, 2));
   }
-  parts.push('Instructions:', content.prompt || '');
-  return `<task${from} time="${escapeXml(time)}">${parts.join('\n')}</task>`;
+  parts.push('', 'Instructions:', content.prompt || '');
+  return parts.join('\n');
 }
 
 function formatWebhookMessage(msg: MessageInRow): string {
   const content = parseContent(msg.content);
   const source = content.source || 'unknown';
   const event = content.event || 'unknown';
-  const from = originAttr(msg);
-  return `<webhook${from} source="${escapeXml(source)}" event="${escapeXml(event)}">${JSON.stringify(content.payload || content, null, 2)}</webhook>`;
+  return `[WEBHOOK: ${source}/${event}]\n\n${JSON.stringify(content.payload || content, null, 2)}`;
 }
 
 function formatSystemMessage(msg: MessageInRow): string {
   const content = parseContent(msg.content);
-  const from = originAttr(msg);
-  return `<system_response${from} action="${escapeXml(content.action || 'unknown')}" status="${escapeXml(content.status || 'unknown')}">${JSON.stringify(content.result || null)}</system_response>`;
+  return `[SYSTEM RESPONSE]\n\nAction: ${content.action || 'unknown'}\nStatus: ${content.status || 'unknown'}\nResult: ${JSON.stringify(content.result || null)}`;
 }
 
 /**

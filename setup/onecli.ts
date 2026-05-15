@@ -116,11 +116,6 @@ function installOnecliCliOnly(): { stdout: string; ok: boolean } {
   return { stdout: upstream.stdout + (upstream.stderr ?? '') + '\n' + fallback.stdout, ok: fallback.ok };
 }
 
-// Remove containers in the "onecli" compose project whose service name isn't
-// in the v2 set. Pre-v2 OneCLI used service "app" (container onecli-app-1);
-// v2 uses "onecli". Compose flags the old container as an orphan but won't
-// stop it without --remove-orphans, leaving port 10254 bound and crashing
-// the new bring-up. Filed upstream; this is the downstream workaround.
 function removeLegacyOnecliContainers(): string {
   const out: string[] = [];
   let list = '';

@@ -10,9 +10,11 @@ dist/
 store/
 data/
 logs/
+backups/
 
-# Groups - per-installation state, not tracked
-groups/*
+# Groups - per-installation state, not tracked by the core repo.
+# The directory may be its own git repo for memory/version history.
+groups/
 
 # Composer-managed CLAUDE.md artifacts (regenerated every spawn) and
 # per-group memory (CLAUDE.local.md) must never be committed.
@@ -39,3 +41,4 @@ groups/*
 .nanoclaw/
 
 agents-sdk-docs
+.archive/

@@ -10,9 +10,6 @@
 import { getConfig } from '../config.js';
 import { openInboundDb, getOutboundDb } from './connection.js';
 
-// Cache whether inbound.db has the on_wake column (added in v2.0.48).
-// The container opens inbound.db read-only, so it can't ALTER —
-// gracefully degrade when running against an older session DB.
 let _hasOnWake: boolean | null = null;
 function hasOnWakeColumn(db: ReturnType<typeof openInboundDb>): boolean {
   if (_hasOnWake !== null) return _hasOnWake;
@@ -163,4 +160,3 @@ export function findQuestionResponse(questionId: string): MessageInRow | undefin
     inbound.close();
   }
 }
-

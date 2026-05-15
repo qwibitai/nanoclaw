@@ -27,7 +27,6 @@ import * as p from '@clack/prompts';
 import k from 'kleur';
 
 import * as setupLog from '../logs.js';
-import { BACK_TO_CHANNEL_SELECTION, type ChannelFlowResult } from '../lib/back-nav.js';
 import { brightSelect } from '../lib/bright-select.js';
 import { confirmThenOpen, formatNoteLink } from '../lib/browser.js';
 import { askOperatorRole } from '../lib/role-prompt.js';
@@ -49,10 +48,8 @@ interface AppInfo {
   owner: { id: string; username: string } | null;
 }
 
-export async function runDiscordChannel(displayName: string): Promise<ChannelFlowResult> {
-  const choice = await askHasBotToken();
-  if (choice === 'back') return BACK_TO_CHANNEL_SELECTION;
-  const hasBot = choice === 'yes';
+export async function runDiscordChannel(displayName: string): Promise<void> {
+  const hasBot = await askHasBotToken();
   if (!hasBot) {
     await walkThroughBotCreation();
   }
@@ -145,18 +142,17 @@ export async function runDiscordChannel(displayName: string): Promise<ChannelFlo
   }
 }
 
-async function askHasBotToken(): Promise<'yes' | 'no' | 'back'> {
+async function askHasBotToken(): Promise<boolean> {
   const answer = ensureAnswer(
     await brightSelect({
       message: 'Do you already have a Discord bot?',
       options: [
         { value: 'yes', label: 'Yes, I have a bot token ready' },
         { value: 'no', label: "No, walk me through creating one" },
-        { value: 'back', label: '← Back to channel selection' },
       ],
     }),
   );
-  return answer as 'yes' | 'no' | 'back';
+  return answer === 'yes';
 }
 
 async function walkThroughBotCreation(): Promise<void> {
