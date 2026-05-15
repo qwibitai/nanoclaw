@@ -6,6 +6,7 @@ import { getPendingMessages } from './db/messages-in.js';
 import { getContinuation, setContinuation } from './db/session-state.js';
 import { MockProvider } from './providers/mock.js';
 import { runPollLoop } from './poll-loop.js';
+import type { AgentProvider, ProviderEvent } from './providers/types.js';
 
 beforeEach(() => {
   initTestSessionDb();
@@ -298,12 +299,13 @@ describe('poll loop integration', () => {
 });
 
 // Helper: run poll loop until aborted or timeout
-async function runPollLoopWithTimeout(provider: MockProvider, signal: AbortSignal, timeoutMs: number): Promise<void> {
+async function runPollLoopWithTimeout(provider: AgentProvider, signal: AbortSignal, timeoutMs: number): Promise<void> {
   return Promise.race([
     runPollLoop({
       provider,
       providerName: 'mock',
       cwd: '/tmp',
+      signal,
     }),
     new Promise<void>((_, reject) => {
       signal.addEventListener('abort', () => reject(new Error('aborted')));
@@ -462,3 +464,158 @@ class InvalidSessionProvider {
     };
   }
 }
+
+// ── Early-compaction nudge ──────────────────────────────────────────────────
+//
+// A scripted provider that lets each test queue per-call event scripts and
+// captures the prompt string each query was started with. Used to prove that
+// once a `usage` event crosses the threshold, the *next* prompt has the nudge
+// prepended, and that a `compact_boundary` event re-arms the latch.
+
+type ScriptedEvent =
+  | { type: 'usage'; inputTokens: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number }
+  | { type: 'compact_boundary' }
+  | { type: 'result'; text: string };
+
+class ScriptedProvider implements AgentProvider {
+  readonly supportsNativeSlashCommands = false;
+  readonly receivedPrompts: string[] = [];
+  private scripts: ScriptedEvent[][];
+  private callCount = 0;
+
+  constructor(scripts: ScriptedEvent[][]) {
+    this.scripts = scripts;
+  }
+
+  isSessionInvalid(): boolean {
+    return false;
+  }
+
+  query(input: { prompt: string }): {
+    push: (m: string) => void;
+    end: () => void;
+    abort: () => void;
+    events: AsyncIterable<ProviderEvent>;
+  } {
+    this.receivedPrompts.push(input.prompt);
+    const script = this.scripts[this.callCount] ?? this.scripts[this.scripts.length - 1] ?? [];
+    this.callCount++;
+
+    const events: AsyncIterable<ProviderEvent> = {
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'activity' };
+        yield { type: 'init', continuation: `scripted-${Date.now()}` };
+        for (const ev of script) {
+          yield { type: 'activity' };
+          if (ev.type === 'usage') {
+            yield {
+              type: 'usage',
+              inputTokens: ev.inputTokens,
+              cacheReadInputTokens: ev.cacheReadInputTokens ?? 0,
+              cacheCreationInputTokens: ev.cacheCreationInputTokens ?? 0,
+            };
+          } else if (ev.type === 'compact_boundary') {
+            yield { type: 'compact_boundary' };
+          } else if (ev.type === 'result') {
+            yield { type: 'result', text: ev.text };
+          }
+        }
+      },
+    };
+
+    return { push() {}, end() {}, abort() {}, events };
+  }
+}
+
+describe('poll loop — early-compaction nudge', () => {
+  async function waitForPrompts(provider: ScriptedProvider, n: number, timeoutMs: number): Promise<void> {
+    const start = Date.now();
+    while (provider.receivedPrompts.length < n) {
+      if (Date.now() - start > timeoutMs) throw new Error(`waitForPrompts(${n}) timeout — got ${provider.receivedPrompts.length}`);
+      await sleep(20);
+    }
+  }
+
+  it('prepends the nudge to the second prompt after a usage event crosses the threshold', async () => {
+    // 150k usage exceeds the default-ratio threshold of either 165k or 200k ceilings.
+    const provider = new ScriptedProvider([
+      // First turn: usage at 150k crosses the threshold → arm the nudge.
+      [
+        { type: 'usage', inputTokens: 150_000 },
+        { type: 'result', text: '<message to="discord-test">one</message>' },
+      ],
+      // Second turn: agent doesn't matter, we just want to inspect its prompt.
+      [{ type: 'result', text: '<message to="discord-test">two</message>' }],
+    ]);
+
+    insertMessage('m1', { sender: 'Alice', text: 'first' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 4000);
+
+    try {
+      await waitForPrompts(provider, 1, 2000);
+      insertMessage('m2', { sender: 'Alice', text: 'second' }, { platformId: 'chan-1', channelType: 'discord' });
+      await waitForPrompts(provider, 2, 3000);
+    } finally {
+      controller.abort();
+      await loopPromise.catch(() => {});
+    }
+
+    // First prompt: no nudge (latch wasn't armed yet).
+    expect(provider.receivedPrompts[0]).not.toContain('<system-reminder>');
+    // Second prompt: nudge prepended, then the actual user content.
+    expect(provider.receivedPrompts[1]).toContain('<system-reminder>');
+    expect(provider.receivedPrompts[1]).toContain('150,000');
+    expect(provider.receivedPrompts[1]).toContain('second');
+  }, 8000);
+
+  it('one-shot per cycle and re-arms after compact_boundary', async () => {
+    const provider = new ScriptedProvider([
+      // Turn 1: cross threshold → arm.
+      [
+        { type: 'usage', inputTokens: 150_000 },
+        { type: 'result', text: '<message to="discord-test">one</message>' },
+      ],
+      // Turn 2: usage even higher, but already-sent — must NOT re-arm. Then compact_boundary fires (mid-stream auto-compact). Latch resets.
+      [
+        { type: 'usage', inputTokens: 160_000 },
+        { type: 'compact_boundary' },
+        { type: 'result', text: '<message to="discord-test">two</message>' },
+      ],
+      // Turn 3: post-compact usage well above threshold → arm again.
+      [
+        { type: 'usage', inputTokens: 150_000 },
+        { type: 'result', text: '<message to="discord-test">three</message>' },
+      ],
+      // Turn 4: nothing — we just need the prompt.
+      [{ type: 'result', text: '<message to="discord-test">four</message>' }],
+    ]);
+
+    insertMessage('m1', { sender: 'Alice', text: 'first' }, { platformId: 'chan-1', channelType: 'discord' });
+
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 12000);
+
+    try {
+      await waitForPrompts(provider, 1, 2000);
+      insertMessage('m2', { sender: 'Alice', text: 'second' }, { platformId: 'chan-1', channelType: 'discord' });
+      await waitForPrompts(provider, 2, 3000);
+      insertMessage('m3', { sender: 'Alice', text: 'third' }, { platformId: 'chan-1', channelType: 'discord' });
+      await waitForPrompts(provider, 3, 3000);
+      insertMessage('m4', { sender: 'Alice', text: 'fourth' }, { platformId: 'chan-1', channelType: 'discord' });
+      await waitForPrompts(provider, 4, 3000);
+    } finally {
+      controller.abort();
+      await loopPromise.catch(() => {});
+    }
+
+    // Prompt 2 has the nudge (armed by turn 1's usage).
+    expect(provider.receivedPrompts[1]).toContain('<system-reminder>');
+    // Prompt 3 does NOT have a nudge — already sent once.
+    expect(provider.receivedPrompts[2]).not.toContain('<system-reminder>');
+    // Prompt 4 has the nudge again — turn 3's post-compact usage(150k) crossed
+    // the freshly-reset threshold (compact_boundary in turn 2 reset the latch).
+    expect(provider.receivedPrompts[3]).toContain('<system-reminder>');
+  }, 18000);
+});
