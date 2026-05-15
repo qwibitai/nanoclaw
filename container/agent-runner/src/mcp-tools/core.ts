@@ -9,7 +9,6 @@
 import fs from 'fs';
 import path from 'path';
 
-import { getCurrentInReplyTo } from '../current-batch.js';
 import { findByName, getAllDestinations } from '../destinations.js';
 import { getMessageIdBySeq, getRoutingBySeq, writeMessageOut } from '../db/messages-out.js';
 import { getSessionRouting } from '../db/session-routing.js';
@@ -22,6 +21,13 @@ function log(msg: string): void {
 
 function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isSafeAttachmentName(name: string): boolean {
+  if (typeof name !== 'string' || name.length === 0) return false;
+  if (name === '.' || name === '..') return false;
+  if (/[\\/\0]/.test(name)) return false;
+  return path.basename(name) === name;
 }
 
 function ok(text: string) {
@@ -118,7 +124,6 @@ export const sendMessage: McpToolDefinition = {
     const id = generateId();
     const seq = writeMessageOut({
       id,
-      in_reply_to: getCurrentInReplyTo(),
       kind: 'chat',
       platform_id: routing.platform_id,
       channel_type: routing.channel_type,
@@ -158,6 +163,9 @@ export const sendFile: McpToolDefinition = {
 
     const id = generateId();
     const filename = (args.filename as string) || path.basename(resolvedPath);
+    if (!isSafeAttachmentName(filename)) {
+      return err(`Unsafe filename: ${filename}`);
+    }
 
     const outboxDir = path.join('/workspace/outbox', id);
     fs.mkdirSync(outboxDir, { recursive: true });
@@ -165,7 +173,6 @@ export const sendFile: McpToolDefinition = {
 
     writeMessageOut({
       id,
-      in_reply_to: getCurrentInReplyTo(),
       kind: 'chat',
       platform_id: routing.platform_id,
       channel_type: routing.channel_type,

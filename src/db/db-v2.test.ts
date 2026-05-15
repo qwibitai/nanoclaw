@@ -350,6 +350,13 @@ describe('sessions', () => {
   it('should list running sessions', () => {
     createSession({ ...sess(), container_status: 'running' });
     createSession({ ...sess(), id: 'sess-idle', container_status: 'idle', thread_id: 'thread-1' });
+    createSession({
+      ...sess(),
+      id: 'sess-ended-running',
+      status: 'ended',
+      container_status: 'running',
+      thread_id: 'thread-3',
+    });
     createSession({ ...sess(), id: 'sess-stopped', container_status: 'stopped', thread_id: 'thread-2' });
     expect(getRunningSessions()).toHaveLength(2);
   });

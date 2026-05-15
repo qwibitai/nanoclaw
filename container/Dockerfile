@@ -19,8 +19,8 @@ ARG INSTALL_CJK_FONTS=false
 # Pin CLI versions for reproducibility. Bump deliberately — unpinned installs
 # mean every rebuild silently picks up the latest and can break in lockstep
 # across all users.
-ARG CLAUDE_CODE_VERSION=2.1.128
-ARG AGENT_BROWSER_VERSION=latest
+ARG CLAUDE_CODE_VERSION=2.1.116
+ARG AGENT_BROWSER_VERSION=0.26.0
 ARG VERCEL_VERSION=52.2.1
 ARG BUN_VERSION=1.3.12
 
@@ -90,14 +90,8 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 #     binary (linux-arm64 variant on our image). Without the allowlist
 #     the SDK fails at spawn time with "native binary not found".
 ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-# Pin pnpm to match the host (package.json packageManager). pnpm 11 stopped
-# honoring `only-built-dependencies[]=` in .npmrc for global installs, which
-# silently skips claude-code's native-binary postinstall and agent-browser's
-# bin chmod — the agent then crashes at runtime with "native binary not
-# installed". Keep this in lockstep with package.json's `packageManager`.
-ARG PNPM_VERSION=10.33.0
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"
+RUN corepack enable
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     echo "only-built-dependencies[]=agent-browser" > /root/.npmrc && \
@@ -108,24 +102,21 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "agent-browser@${AGENT_BROWSER_VERSION}"
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
-    pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-
-# ---- ncl CLI wrapper ----------------------------------------------------------
-# Actual script lives in the mounted source at /app/src/cli/ncl.ts.
-RUN printf '#!/bin/sh\nexec bun /app/src/cli/ncl.ts "$@"\n' > /usr/local/bin/ncl && \
-    chmod +x /usr/local/bin/ncl
+    pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && \
+    INSTALL_CJS="$(find -L /pnpm/global -name install.cjs -path '*@anthropic-ai/claude-code*' 2>/dev/null | head -1)" && \
+    test -n "$INSTALL_CJS" && node "$INSTALL_CJS"
 
 # ---- Entrypoint --------------------------------------------------------------
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # ---- Workspace + permissions -------------------------------------------------
-RUN mkdir -p /workspace/group /workspace/extra && \
+RUN mkdir -p /workspace/agent /workspace/extra && \
     chown -R node:node /workspace && \
     chmod 777 /home/node
 
 USER node
-WORKDIR /workspace/group
+WORKDIR /workspace/agent
 
 # tini is PID 1, reaps zombies, forwards signals cleanly. entrypoint.sh does
 # `exec bun ...` so bun runs as tini's direct child.

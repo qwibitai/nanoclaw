@@ -18,12 +18,12 @@
 import * as p from '@clack/prompts';
 import k from 'kleur';
 
-import { offerClaudeOnFailure } from './claude-handoff.js';
+import { offerClaudeAssist } from './claude-assist.js';
 import { emit as phEmit } from './diagnostics.js';
 import type { StepResult, SpinnerLabels } from './runner.js';
 import { dumpTranscriptOnFailure, spawnStep, writeStepEntry } from './runner.js';
 import * as setupLog from '../logs.js';
-import { brandBody, fitToWidth, fmtDuration } from './theme.js';
+import { brandBody, fitToWidth } from './theme.js';
 
 const WINDOW_SIZE = 3;
 const SPINNER_FRAMES = ['◒', '◐', '◓', '◑'];
@@ -85,8 +85,9 @@ async function runUnderWindow(
   const redraw = (): void => {
     if (stallPromptActive) return;
     out.write(`\x1b[${WINDOW_SIZE + 1}A`);
+    const elapsed = Math.round((Date.now() - start) / 1000);
     const icon = SPINNER_FRAMES[frameIdx % SPINNER_FRAMES.length];
-    const suffix = ` (${fmtDuration(Date.now() - start)})`;
+    const suffix = ` (${elapsed}s)`;
     const header = fitToWidth(labels.running, suffix);
     out.write(`\x1b[2K${k.cyan(icon)}  ${header}${k.dim(suffix)}\n`);
 
@@ -163,7 +164,8 @@ async function runUnderWindow(
   out.write(SHOW_CURSOR);
   process.off('exit', restoreCursorOnExit);
 
-  const suffix = ` (${fmtDuration(Date.now() - start)})`;
+  const elapsed = Math.round((Date.now() - start) / 1000);
+  const suffix = ` (${elapsed}s)`;
   if (result.ok) {
     const isSkipped = result.terminal?.fields.STATUS === 'skipped';
     const msg = isSkipped && labels.skipped ? labels.skipped : labels.done;
@@ -212,7 +214,7 @@ async function handleStall(
     // offerClaudeAssist runs its own spinner and may propose a fix command.
     // We don't attempt to restart the stalled build from here — if Claude
     // proposes a command the user accepts, they can retry setup afterwards.
-    await offerClaudeOnFailure({
+    await offerClaudeAssist({
       stepName,
       msg: `The ${stepName} step has produced no output for 60 seconds.`,
       hint: 'It may be hung on a slow network pull or a failing Dockerfile step.',

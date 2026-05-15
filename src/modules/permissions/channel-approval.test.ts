@@ -113,13 +113,30 @@ function groupMention(platformId: string, text = '@bot hello') {
   return {
     channelType: 'telegram',
     platformId,
-    threadId: 'thread-1', // non-null → is_group=true per channel-approval default-picker logic
+    threadId: 'thread-1',
     message: {
       id: `msg-${Math.random().toString(36).slice(2, 8)}`,
       kind: 'chat' as const,
       content: JSON.stringify({ senderId: 'caller', senderName: 'Caller', text }),
       timestamp: now(),
       isMention: true,
+      isGroup: true,
+    },
+  };
+}
+
+function nonThreadedGroupMention(platformId: string, text = '@bot hello') {
+  return {
+    channelType: 'telegram',
+    platformId,
+    threadId: null,
+    message: {
+      id: `msg-${Math.random().toString(36).slice(2, 8)}`,
+      kind: 'chat' as const,
+      content: JSON.stringify({ senderId: 'caller', senderName: 'Caller', text }),
+      timestamp: now(),
+      isMention: true,
+      isGroup: true,
     },
   };
 }
@@ -246,6 +263,37 @@ describe('unknown-channel registration flow', () => {
       .c;
     expect(stillPending).toBe(0);
     expect(wakeContainer).toHaveBeenCalled();
+  });
+
+  it('approve on a non-threaded group still wires mention-sticky', async () => {
+    const { routeInbound } = await import('../../router.js');
+    const { getResponseHandlers } = await import('../../response-registry.js');
+
+    await routeInbound(nonThreadedGroupMention('chat-non-threaded-group'));
+    await new Promise((r) => setTimeout(r, 10));
+
+    const { getDb } = await import('../../db/connection.js');
+    const pending = getDb().prepare('SELECT messaging_group_id FROM pending_channel_approvals').get() as {
+      messaging_group_id: string;
+    };
+
+    for (const handler of getResponseHandlers()) {
+      const claimed = await handler({
+        questionId: pending.messaging_group_id,
+        value: 'connect:ag-1',
+        userId: 'owner',
+        channelType: 'telegram',
+        platformId: 'dm-owner',
+        threadId: null,
+      });
+      if (claimed) break;
+    }
+
+    const mga = getDb()
+      .prepare('SELECT engage_mode, engage_pattern FROM messaging_group_agents WHERE messaging_group_id = ?')
+      .get(pending.messaging_group_id) as { engage_mode: string; engage_pattern: string | null };
+    expect(mga.engage_mode).toBe('mention-sticky');
+    expect(mga.engage_pattern).toBeNull();
   });
 
   it('approve on a DM wires with pattern="." defaults', async () => {

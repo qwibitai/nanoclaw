@@ -5,11 +5,35 @@ import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import { registerProvider } from './provider-registry.js';
-import type { AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
+import type {
+  AgentProvider,
+  AgentQuery,
+  McpServerConfig,
+  ProviderEvent,
+  ProviderOptions,
+  QueryInput,
+} from './types.js';
 
 function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
 }
+
+// Locate the Claude Code binary. Prefer the native installer location
+// (/pnpm/bin/claude, populated by the post-install step in the current
+// Dockerfile). Fall back to the pnpm shim at /pnpm/claude so per-agent-group
+// images built before the install.cjs step still work without a rebuild.
+function resolveClaudeBinary(): string {
+  const candidates = ['/pnpm/bin/claude', '/pnpm/claude'];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch {
+      /* ignore */
+    }
+  }
+  return candidates[0];
+}
+const CLAUDE_BINARY_PATH = resolveClaudeBinary();
 
 // Deferred SDK builtins that either sidestep nanoclaw's own scheduling or
 // don't fit our async message-passing model (they're designed for Claude
@@ -34,11 +58,7 @@ const SDK_DISALLOWED_TOOLS = [
   'ExitWorktree',
 ];
 
-// Tool allowlist for NanoClaw agent containers. MCP-tool entries are derived
-// at the call site from the registered `mcpServers` map so that any server
-// added via `add_mcp_server` (or wired in container.json directly) is
-// reachable to the agent — without this, the SDK's allowedTools filter
-// silently drops every MCP namespace not listed here.
+// Tool allowlist for NanoClaw agent containers
 const TOOL_ALLOWLIST = [
   'Bash',
   'Read',
@@ -58,14 +78,8 @@ const TOOL_ALLOWLIST = [
   'ToolSearch',
   'Skill',
   'NotebookEdit',
+  'mcp__nanoclaw__*',
 ];
-
-// MCP server names are sanitized by the SDK when forming tool prefixes:
-// any character outside [A-Za-z0-9_-] becomes '_'. Mirror that here so our
-// allowlist patterns match what the SDK actually exposes.
-function mcpAllowPattern(serverName: string): string {
-  return `mcp__${serverName.replace(/[^a-zA-Z0-9_-]/g, '_')}__*`;
-}
 
 interface SDKUserMessage {
   type: 'user';
@@ -125,10 +139,15 @@ function parseTranscript(content: string): ParsedMessage[] {
     try {
       const entry = JSON.parse(line);
       if (entry.type === 'user' && entry.message?.content) {
-        const text = typeof entry.message.content === 'string' ? entry.message.content : entry.message.content.map((c: { text?: string }) => c.text || '').join('');
+        const text =
+          typeof entry.message.content === 'string'
+            ? entry.message.content
+            : entry.message.content.map((c: { text?: string }) => c.text || '').join('');
         if (text) messages.push({ role: 'user', content: text });
       } else if (entry.type === 'assistant' && entry.message?.content) {
-        const textParts = entry.message.content.filter((c: { type: string }) => c.type === 'text').map((c: { text: string }) => c.text);
+        const textParts = entry.message.content
+          .filter((c: { type: string }) => c.type === 'text')
+          .map((c: { text: string }) => c.text);
         const text = textParts.join('');
         if (text) messages.push({ role: 'assistant', content: text });
       }
@@ -141,7 +160,13 @@ function parseTranscript(content: string): ParsedMessage[] {
 
 function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null, assistantName?: string): string {
   const now = new Date();
-  const dateStr = now.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+  const dateStr = now.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
   const lines = [`# ${title || 'Conversation'}`, '', `Archived: ${dateStr}`, '', '---', ''];
   for (const msg of messages) {
     const sender = msg.role === 'user' ? 'User' : assistantName || 'Assistant';
@@ -209,20 +234,29 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       if (fs.existsSync(indexPath)) {
         try {
           const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-          summary = index.entries?.find((e: { sessionId: string; summary?: string }) => e.sessionId === sessionId)?.summary;
+          summary = index.entries?.find(
+            (e: { sessionId: string; summary?: string }) => e.sessionId === sessionId,
+          )?.summary;
         } catch {
           /* ignore */
         }
       }
 
       const name = summary
-        ? summary.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50)
+        ? summary
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 50)
         : `conversation-${new Date().getHours().toString().padStart(2, '0')}${new Date().getMinutes().toString().padStart(2, '0')}`;
 
       const conversationsDir = '/workspace/agent/conversations';
       fs.mkdirSync(conversationsDir, { recursive: true });
       const filename = `${new Date().toISOString().split('T')[0]}-${name}.md`;
-      fs.writeFileSync(path.join(conversationsDir, filename), formatTranscriptMarkdown(messages, summary, assistantName));
+      fs.writeFileSync(
+        path.join(conversationsDir, filename),
+        formatTranscriptMarkdown(messages, summary, assistantName),
+      );
       log(`Archived conversation to ${filename}`);
     } catch (err) {
       log(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
@@ -238,17 +272,48 @@ function createPreCompactHook(assistantName?: string): HookCallback {
  * the generic bootstrap doesn't need to know about Claude-specific env vars.
  *
  * Operator override: set CLAUDE_CODE_AUTO_COMPACT_WINDOW in the host env to
- * raise or lower the threshold without editing source — useful when running
- * with a 1M-context model variant or when emergency-tuning a deployment.
+ * raise or lower the threshold without editing source. The default tracks
+ * the selected model: 850k for 1M-context models, 165k for 200k models.
  */
-const CLAUDE_CODE_AUTO_COMPACT_WINDOW = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW || '165000';
+const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-7[1m]';
+const AUTO_COMPACT_WINDOW_1M = '850000';
+const AUTO_COMPACT_WINDOW_200K = '165000';
+
+function resolveClaudeModel(env: Record<string, string | undefined>): string {
+  return env.ANTHROPIC_MODEL || process.env.ANTHROPIC_MODEL || DEFAULT_CLAUDE_MODEL;
+}
+
+function resolveAutoCompactWindow(env: Record<string, string | undefined>): string {
+  if (env.CLAUDE_CODE_AUTO_COMPACT_WINDOW || process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW) {
+    return (
+      env.CLAUDE_CODE_AUTO_COMPACT_WINDOW || process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW || AUTO_COMPACT_WINDOW_200K
+    );
+  }
+  return modelHasExtendedContext(resolveClaudeModel(env)) ? AUTO_COMPACT_WINDOW_1M : AUTO_COMPACT_WINDOW_200K;
+}
+
+function modelHasExtendedContext(model: string): boolean {
+  const normalized = model.toLowerCase();
+  return (
+    normalized.includes('[1m]') ||
+    normalized.includes('claude-opus-4-7') ||
+    normalized.includes('claude-opus-4-6') ||
+    normalized.includes('claude-sonnet-4-6') ||
+    normalized.includes('claude-mythos')
+  );
+}
 
 /**
  * Stale-session detection. Matches Claude Code's error text when a
  * resumed session can't be found — missing transcript .jsonl, unknown
- * session ID, etc.
+ * session ID, etc. Also treats local SQLite/storage failures as session
+ * invalidation signals. Those errors are often tied to Claude Code's
+ * per-session state rather than NanoClaw's inbound/outbound DB files, so the
+ * least surprising recovery is to clear the continuation and let the next turn
+ * start a fresh Claude session.
  */
-const STALE_SESSION_RE = /no conversation found|ENOENT.*\.jsonl|session.*not found/i;
+const STALE_SESSION_RE =
+  /no conversation found|ENOENT.*\.jsonl|session.*not found|disk I\/O error|SQLITE_IOERR|attempt to write a readonly database|SQLITE_READONLY|database disk image is malformed/i;
 
 export class ClaudeProvider implements AgentProvider {
   readonly supportsNativeSlashCommands = true;
@@ -257,18 +322,15 @@ export class ClaudeProvider implements AgentProvider {
   private mcpServers: Record<string, McpServerConfig>;
   private env: Record<string, string | undefined>;
   private additionalDirectories?: string[];
-  private model?: string;
-  private effort?: string;
 
   constructor(options: ProviderOptions = {}) {
     this.assistantName = options.assistantName;
     this.mcpServers = options.mcpServers ?? {};
     this.additionalDirectories = options.additionalDirectories;
-    this.model = options.model;
-    this.effort = options.effort;
+    const env = { ...(options.env ?? {}) };
+    env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = resolveAutoCompactWindow(env);
     this.env = {
-      ...(options.env ?? {}),
-      CLAUDE_CODE_AUTO_COMPACT_WINDOW,
+      ...env,
     };
   }
 
@@ -283,23 +345,24 @@ export class ClaudeProvider implements AgentProvider {
 
     const instructions = input.systemContext?.instructions;
 
+    // Pin to Opus 4.7 with Claude Code's 1M-context suffix unless explicitly
+    // overridden via ANTHROPIC_MODEL in the container env.
+    const model = resolveClaudeModel(this.env);
+
     const sdkResult = sdkQuery({
       prompt: stream,
       options: {
         cwd: input.cwd,
         additionalDirectories: this.additionalDirectories,
         resume: input.continuation,
-        pathToClaudeCodeExecutable: '/pnpm/claude',
-        systemPrompt: instructions ? { type: 'preset' as const, preset: 'claude_code' as const, append: instructions } : undefined,
-        allowedTools: [
-          ...TOOL_ALLOWLIST,
-          ...Object.keys(this.mcpServers).map(mcpAllowPattern),
-        ],
+        pathToClaudeCodeExecutable: CLAUDE_BINARY_PATH,
+        systemPrompt: instructions
+          ? { type: 'preset' as const, preset: 'claude_code' as const, append: instructions }
+          : undefined,
+        model,
+        allowedTools: TOOL_ALLOWLIST,
         disallowedTools: SDK_DISALLOWED_TOOLS,
         env: this.env,
-        model: this.model,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        effort: this.effort as any,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         settingSources: ['project', 'user'],
@@ -327,7 +390,7 @@ export class ClaudeProvider implements AgentProvider {
         if (message.type === 'system' && message.subtype === 'init') {
           yield { type: 'init', continuation: message.session_id };
         } else if (message.type === 'result') {
-          const text = 'result' in message ? (message as { result?: string }).result ?? null : null;
+          const text = 'result' in message ? ((message as { result?: string }).result ?? null) : null;
           yield { type: 'result', text };
         } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'api_retry') {
           yield { type: 'error', message: 'API retry', retryable: true };
@@ -336,7 +399,7 @@ export class ClaudeProvider implements AgentProvider {
         } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'compact_boundary') {
           const meta = (message as { compact_metadata?: { pre_tokens?: number } }).compact_metadata;
           const detail = meta?.pre_tokens ? ` (${meta.pre_tokens.toLocaleString()} tokens compacted)` : '';
-          yield { type: 'result', text: `Context compacted${detail}.` };
+          yield { type: 'progress', message: `Context compacted${detail}.` };
         } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
           const tn = message as { summary?: string };
           yield { type: 'progress', message: tn.summary || 'Task notification' };

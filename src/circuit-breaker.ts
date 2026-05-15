@@ -37,10 +37,11 @@ function getDelay(attempt: number): number {
 }
 
 export function resetCircuitBreaker(): void {
-  try {
-    fs.unlinkSync(CB_PATH);
+  const existed = fs.existsSync(CB_PATH);
+  fs.rmSync(CB_PATH, { force: true });
+  if (existed) {
     log.info('Circuit breaker reset on clean shutdown');
-  } catch {}
+  }
 }
 
 export async function enforceStartupBackoff(): Promise<void> {

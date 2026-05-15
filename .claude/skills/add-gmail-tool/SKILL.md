@@ -82,14 +82,11 @@ For each target agent group, confirm OneCLI will inject Gmail secrets into its c
 onecli agents list
 ```
 
-If that agent's `secretMode` is `all`, you're done — Gmail secrets (identified by OneCLI's Gmail hostPattern) will auto-inject. If it's `selective`, explicitly assign the Gmail secrets using the safe merge pattern (`set-secrets` replaces the entire list — always read first):
+If that agent's `secretMode` is `all`, you're done — Gmail secrets (identified by OneCLI's Gmail hostPattern) will auto-inject. If it's `selective`, explicitly assign the Gmail secrets:
 
 ```bash
-GMAIL_IDS=$(onecli secrets list | jq -r '[.data[] | select(.name | test("(?i)gmail")) | .id] | join(",")')
-CURRENT=$(onecli agents secrets --id <agent-id> | jq -r '[.data[]] | join(",")')
-MERGED=$(printf '%s' "$CURRENT,$GMAIL_IDS" | tr ',' '\n' | sort -u | paste -sd ',' -)
-onecli agents set-secrets --id <agent-id> --secret-ids "$MERGED"
-onecli agents secrets --id <agent-id>
+onecli secrets list     # find Gmail secret IDs (OneCLI creates one per connected app)
+onecli agents set-secrets --id <agent-id> --secret-ids <gmail-secret-id>
 ```
 
 ## Phase 2: Apply Code Changes
@@ -228,5 +225,5 @@ Common signals:
 - **MCP server:** [`@gongrzhe/server-gmail-autoauth-mcp`](https://github.com/GongRzhe/Gmail-MCP-Server) by GongRzhe — MIT-licensed.
 - **OneCLI credential stubs:** pattern documented at `https://onecli.sh/docs/guides/credential-stubs/gmail.md`.
 - **Skill pattern:** modeled on [`add-atomic-chat-tool`](../add-atomic-chat-tool/SKILL.md) and [`add-vercel`](../add-vercel/SKILL.md).
-- **Addresses:** [issue #1500](https://github.com/nanocoai/nanoclaw/issues/1500) (proxy Gmail/Calendar OAuth tokens through credential proxy) for the Gmail side.
-- **Related PRs:** [#1810](https://github.com/nanocoai/nanoclaw/pull/1810) (pre-install Gmail/Notion MCP) overlaps on the "install the MCP server in the image" idea but bundles many unrelated changes; this skill is the focused OneCLI-native version.
+- **Addresses:** [issue #1500](https://github.com/qwibitai/nanoclaw/issues/1500) (proxy Gmail/Calendar OAuth tokens through credential proxy) for the Gmail side.
+- **Related PRs:** [#1810](https://github.com/qwibitai/nanoclaw/pull/1810) (pre-install Gmail/Notion MCP) overlaps on the "install the MCP server in the image" idea but bundles many unrelated changes; this skill is the focused OneCLI-native version.

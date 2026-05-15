@@ -4,6 +4,7 @@ import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '
 import { getPendingMessages, markCompleted } from './db/messages-in.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
+import { dispatchResultText, isErrorPacketContent } from './poll-loop.js';
 import { MockProvider } from './providers/mock.js';
 
 beforeEach(() => {
@@ -14,18 +15,13 @@ afterEach(() => {
   closeSessionDb();
 });
 
-function insertMessage(
-  id: string,
-  kind: string,
-  content: object,
-  opts?: { processAfter?: string; trigger?: 0 | 1; onWake?: 0 | 1 },
-) {
+function insertMessage(id: string, kind: string, content: object, opts?: { processAfter?: string; trigger?: 0 | 1 }) {
   getInboundDb()
     .prepare(
-      `INSERT INTO messages_in (id, kind, timestamp, status, process_after, trigger, on_wake, content)
-     VALUES (?, ?, datetime('now'), 'pending', ?, ?, ?, ?)`,
+      `INSERT INTO messages_in (id, kind, timestamp, status, process_after, trigger, content)
+     VALUES (?, ?, datetime('now'), 'pending', ?, ?, ?)`,
     )
-    .run(id, kind, opts?.processAfter ?? null, opts?.trigger ?? 1, opts?.onWake ?? 0, JSON.stringify(content));
+    .run(id, kind, opts?.processAfter ?? null, opts?.trigger ?? 1, JSON.stringify(content));
 }
 
 describe('formatter', () => {
@@ -52,7 +48,7 @@ describe('formatter', () => {
     insertMessage('m1', 'task', { prompt: 'Review open PRs' });
     const messages = getPendingMessages();
     const prompt = formatMessages(messages);
-    expect(prompt).toContain('<task');
+    expect(prompt).toContain('[SCHEDULED TASK]');
     expect(prompt).toContain('Review open PRs');
   });
 
@@ -60,17 +56,15 @@ describe('formatter', () => {
     insertMessage('m1', 'webhook', { source: 'github', event: 'push', payload: { ref: 'main' } });
     const messages = getPendingMessages();
     const prompt = formatMessages(messages);
-    expect(prompt).toContain('<webhook');
-    expect(prompt).toContain('source="github"');
-    expect(prompt).toContain('event="push"');
+    expect(prompt).toContain('[WEBHOOK: github/push]');
   });
 
   it('should format system messages', () => {
     insertMessage('m1', 'system', { action: 'register_group', status: 'success', result: { id: 'ag-1' } });
     const messages = getPendingMessages();
     const prompt = formatMessages(messages);
-    expect(prompt).toContain('<system_response');
-    expect(prompt).toContain('action="register_group"');
+    expect(prompt).toContain('[SYSTEM RESPONSE]');
+    expect(prompt).toContain('register_group');
   });
 
   it('should handle mixed kinds', () => {
@@ -79,7 +73,7 @@ describe('formatter', () => {
     const messages = getPendingMessages();
     const prompt = formatMessages(messages);
     expect(prompt).toContain('sender="John"');
-    expect(prompt).toContain('<system_response');
+    expect(prompt).toContain('[SYSTEM RESPONSE]');
   });
 
   it('should escape XML in content', () => {
@@ -136,58 +130,6 @@ describe('accumulate gate (trigger column)', () => {
   });
 });
 
-describe('on_wake filtering', () => {
-  it('first poll returns on_wake=1 messages', () => {
-    insertMessage('m1', 'chat', { sender: 'system', text: 'Resuming.' }, { onWake: 1 });
-    const messages = getPendingMessages(true);
-    expect(messages).toHaveLength(1);
-    expect(messages[0].id).toBe('m1');
-  });
-
-  it('subsequent polls skip on_wake=1 messages', () => {
-    insertMessage('m1', 'chat', { sender: 'system', text: 'Resuming.' }, { onWake: 1 });
-    const messages = getPendingMessages(false);
-    expect(messages).toHaveLength(0);
-  });
-
-  it('normal messages returned regardless of isFirstPoll', () => {
-    insertMessage('m1', 'chat', { sender: 'A', text: 'hello' });
-    expect(getPendingMessages(true)).toHaveLength(1);
-
-    // Reset: mark completed so we can re-test with a fresh message
-    markCompleted(['m1']);
-    insertMessage('m2', 'chat', { sender: 'A', text: 'hello again' });
-    expect(getPendingMessages(false)).toHaveLength(1);
-  });
-
-  it('mixed batch: first poll returns both normal and on_wake messages', () => {
-    insertMessage('m1', 'chat', { sender: 'A', text: 'user msg' });
-    insertMessage('m2', 'chat', { sender: 'system', text: 'Resuming.' }, { onWake: 1 });
-    const messages = getPendingMessages(true);
-    expect(messages).toHaveLength(2);
-    expect(messages.map((m) => m.id).sort()).toEqual(['m1', 'm2']);
-  });
-
-  it('mixed batch: subsequent poll returns only normal messages', () => {
-    insertMessage('m1', 'chat', { sender: 'A', text: 'user msg' });
-    insertMessage('m2', 'chat', { sender: 'system', text: 'Resuming.' }, { onWake: 1 });
-    const messages = getPendingMessages(false);
-    expect(messages).toHaveLength(1);
-    expect(messages[0].id).toBe('m1');
-  });
-
-  it('on_wake defaults to 0 for inserts without explicit value', () => {
-    getInboundDb()
-      .prepare(
-        `INSERT INTO messages_in (id, kind, timestamp, status, content)
-         VALUES ('m1', 'chat', datetime('now'), 'pending', '{"text":"hi"}')`,
-      )
-      .run();
-    // Should be returned even on non-first poll (on_wake=0)
-    expect(getPendingMessages(false)).toHaveLength(1);
-  });
-});
-
 describe('routing', () => {
   it('should extract routing from messages', () => {
     getInboundDb()
@@ -203,76 +145,6 @@ describe('routing', () => {
     expect(routing.channelType).toBe('discord');
     expect(routing.threadId).toBe('thread-456');
     expect(routing.inReplyTo).toBe('m1');
-  });
-});
-
-describe('origin metadata (from= attribute)', () => {
-  function seedDestination(name: string, channelType: string, platformId: string): void {
-    getInboundDb()
-      .prepare(
-        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
-         VALUES (?, ?, 'channel', ?, ?, NULL)`,
-      )
-      .run(name, name, channelType, platformId);
-  }
-
-  function insertWithRouting(id: string, kind: string, content: object, channelType: string | null, platformId: string | null): void {
-    getInboundDb()
-      .prepare(
-        `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
-         VALUES (?, ?, datetime('now'), 'pending', ?, ?, ?)`,
-      )
-      .run(id, kind, platformId, channelType, JSON.stringify(content));
-  }
-
-  it('chat message includes from= when destination matches', () => {
-    seedDestination('discord-main', 'discord', 'chan-1');
-    insertWithRouting('m1', 'chat', { sender: 'Alice', text: 'hi' }, 'discord', 'chan-1');
-    const prompt = formatMessages(getPendingMessages());
-    expect(prompt).toContain('from="discord-main"');
-  });
-
-  it('chat message falls back to raw routing when no destination matches', () => {
-    insertWithRouting('m1', 'chat', { sender: 'Alice', text: 'hi' }, 'telegram', 'chat-999');
-    const prompt = formatMessages(getPendingMessages());
-    expect(prompt).toContain('from="unknown:telegram:chat-999"');
-  });
-
-  it('chat message omits from= when routing is null', () => {
-    insertMessage('m1', 'chat', { sender: 'Alice', text: 'hi' });
-    const prompt = formatMessages(getPendingMessages());
-    expect(prompt).not.toContain('from=');
-  });
-
-  it('task message includes from= when destination matches', () => {
-    seedDestination('slack-ops', 'slack', 'C-OPS');
-    insertWithRouting('t1', 'task', { prompt: 'check status' }, 'slack', 'C-OPS');
-    const prompt = formatMessages(getPendingMessages());
-    expect(prompt).toContain('<task');
-    expect(prompt).toContain('from="slack-ops"');
-  });
-
-  it('task message omits from= when routing is null', () => {
-    insertMessage('t1', 'task', { prompt: 'check status' });
-    const prompt = formatMessages(getPendingMessages());
-    expect(prompt).toContain('<task');
-    expect(prompt).not.toContain('from=');
-  });
-
-  it('webhook message includes from= when destination matches', () => {
-    seedDestination('github-ch', 'github', 'repo-1');
-    insertWithRouting('w1', 'webhook', { source: 'github', event: 'push', payload: {} }, 'github', 'repo-1');
-    const prompt = formatMessages(getPendingMessages());
-    expect(prompt).toContain('<webhook');
-    expect(prompt).toContain('from="github-ch"');
-  });
-
-  it('system message includes from= when destination matches', () => {
-    seedDestination('discord-main', 'discord', 'chan-1');
-    insertWithRouting('s1', 'system', { action: 'test', status: 'ok', result: null }, 'discord', 'chan-1');
-    const prompt = formatMessages(getPendingMessages());
-    expect(prompt).toContain('<system_response');
-    expect(prompt).toContain('from="discord-main"');
   });
 });
 
@@ -373,5 +245,110 @@ describe('end-to-end with mock provider', () => {
     expect(outMessages).toHaveLength(1);
     expect(JSON.parse(outMessages[0].content).text).toBe('The answer is 4');
     expect(outMessages[0].in_reply_to).toBe('m1');
+  });
+});
+
+describe('dispatchResultText — error-packet emission rules', () => {
+  // Seed destinations so multi-destination mode is active and the single-
+  // destination fallback path doesn't catch every case. Includes a `thedius`
+  // destination so error-packet escalation has somewhere to go.
+  function seedMultiDestinations() {
+    const db = getInboundDb();
+    db.prepare('DELETE FROM destinations').run();
+    const stmt = db.prepare(
+      `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    stmt.run('thedius', 'Thedius', 'agent', null, null, 'ag-test-thedius');
+    stmt.run('analyst', 'Analyst', 'agent', null, null, 'ag-test-analyst');
+    stmt.run('builder', 'Builder', 'agent', null, null, 'ag-test-builder');
+  }
+
+  // Routing context with NO originating channel/platform — forces dispatch
+  // to evaluate the multi-destination / error-packet path rather than the
+  // session_routing single-channel fallback.
+  const noChannelRouting = {
+    platformId: null,
+    channelType: null,
+    threadId: null,
+    inReplyTo: 'inbound-1',
+  };
+
+  it('internal-only output is intentional silence — no warning, no error packet, no outbound', () => {
+    seedMultiDestinations();
+    dispatchResultText('<internal>Empty inbound — no reply needed.</internal>', noChannelRouting);
+    expect(getUndeliveredMessages()).toHaveLength(0);
+  });
+
+  it('bare prose with no <message> block and multi-destinations emits ONE error packet', () => {
+    seedMultiDestinations();
+    dispatchResultText('I forgot to wrap this in a message block.', noChannelRouting);
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toContain('Error packet — Agent runner');
+    expect(JSON.parse(out[0].content).text).toContain('Agent response was not delivered');
+  });
+
+  it('multiple unknown destinations in one turn produce ONLY ONE error packet (dedupe)', () => {
+    seedMultiDestinations();
+    const text =
+      '<message to="ghost-a">first</message>\n<message to="ghost-b">second</message>\n<message to="ghost-c">third</message>';
+    dispatchResultText(text, noChannelRouting);
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toContain('Error packet — Agent runner');
+  });
+
+  it('cascade guard: when isErrorPacketTurn=true, no error packet fires even on bare prose', () => {
+    seedMultiDestinations();
+    dispatchResultText('Still no message block here.', noChannelRouting, true);
+    expect(getUndeliveredMessages()).toHaveLength(0);
+  });
+
+  it('cascade guard: when isErrorPacketTurn=true, no error packet fires for unknown destinations either', () => {
+    seedMultiDestinations();
+    dispatchResultText('<message to="ghost-x">payload</message>', noChannelRouting, true);
+    expect(getUndeliveredMessages()).toHaveLength(0);
+  });
+
+  it('valid <message> blocks still deliver normally regardless of cascade flag', () => {
+    seedMultiDestinations();
+    dispatchResultText('<message to="analyst">payload</message>', noChannelRouting, true);
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toBe('payload');
+    // Outbound goes to the analyst agent destination, not user chat
+    expect(out[0].platform_id).toBe('ag-test-analyst');
+    expect(out[0].channel_type).toBe('agent');
+  });
+});
+
+describe('isErrorPacketContent', () => {
+  it('detects JSON {text: "Error packet — Agent runner..."}', () => {
+    const content = JSON.stringify({ text: 'Error packet — Agent runner\nWhat failed: ...' });
+    expect(isErrorPacketContent(content)).toBe(true);
+  });
+
+  it('detects JSON {markdown: "Error packet — Agent runner..."}', () => {
+    const content = JSON.stringify({ markdown: 'Error packet — Agent runner\nWhat failed: ...' });
+    expect(isErrorPacketContent(content)).toBe(true);
+  });
+
+  it('detects raw (non-JSON) error-packet content', () => {
+    expect(isErrorPacketContent('Error packet — Agent runner\nWhat failed: ...')).toBe(true);
+  });
+
+  it('tolerates leading whitespace', () => {
+    const content = JSON.stringify({ text: '   \n\n  Error packet — Agent runner\n' });
+    expect(isErrorPacketContent(content)).toBe(true);
+  });
+
+  it('does NOT match normal chat content that happens to mention "error packet"', () => {
+    const content = JSON.stringify({ text: 'I got an error packet earlier today, see logs.' });
+    expect(isErrorPacketContent(content)).toBe(false);
+  });
+
+  it('does NOT match arbitrary content', () => {
+    expect(isErrorPacketContent(JSON.stringify({ text: 'Hello world' }))).toBe(false);
   });
 });

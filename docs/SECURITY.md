@@ -2,33 +2,36 @@
 
 ## Trust Model
 
-| Entity | Trust Level | Rationale |
-|--------|-------------|-----------|
-| Main group | Trusted | Private self-chat, admin control |
-| Non-main groups | Untrusted | Other users may be malicious |
-| Container agents | Sandboxed | Isolated execution environment |
-| Incoming messages | User input | Potential prompt injection |
+| Entity            | Trust Level | Rationale                        |
+| ----------------- | ----------- | -------------------------------- |
+| Main group        | Trusted     | Private self-chat, admin control |
+| Non-main groups   | Untrusted   | Other users may be malicious     |
+| Container agents  | Sandboxed   | Isolated execution environment   |
+| Incoming messages | User input  | Potential prompt injection       |
 
 ## Security Boundaries
 
 ### 1. Container Isolation (Primary Boundary)
 
 Agents execute in containers (lightweight Linux VMs), providing:
+
 - **Process isolation** - Container processes cannot affect the host
 - **Filesystem isolation** - Only explicitly mounted directories are visible
 - **Non-root execution** - Runs as unprivileged `node` user (uid 1000)
-- **Ephemeral containers** - Fresh environment per invocation (`--rm`)
+- **Ephemeral containers** - Fresh environment per invocation (`--rm`), with host-retained post-mortem logs under `data/v2-sessions/<agent-group>/<session>/logs/`
 
 This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted.
 
 ### 2. Mount Security
 
 **External Allowlist** - Mount permissions stored at `~/.config/nanoclaw/mount-allowlist.json`, which is:
+
 - Outside project root
 - Never mounted into containers
 - Cannot be modified by agents
 
 **Default Blocked Patterns:**
+
 ```
 .ssh, .gnupg, .aws, .azure, .gcloud, .kube, .docker,
 credentials, .env, .netrc, .npmrc, id_rsa, id_ed25519,
@@ -36,39 +39,42 @@ private_key, .secret
 ```
 
 **Protections:**
+
 - Symlink resolution before validation (prevents traversal attacks)
 - Container path validation (rejects `..` and absolute paths)
 - `nonMainReadOnly` option forces read-only for non-main groups
 
 **Read-Only Project Root:**
 
-The main group's project root is mounted read-only. Writable paths the agent needs (store, group folder, IPC, `.claude/`) are mounted separately. This prevents the agent from modifying host application code (`src/`, `dist/`, `package.json`, etc.) which would bypass the sandbox entirely on next restart. The `store/` directory is mounted read-write so the main agent can access the SQLite database directly.
+The project root is not mounted as a writable application tree. Writable paths the agent needs are mounted explicitly: its agent group folder, its session folder, and per-agent Claude state. Composer-managed prompt files and container config are mounted read-only. This prevents the agent from modifying host application code (`src/`, `dist/`, `package.json`, etc.) which would bypass the sandbox entirely on next restart. Channel auth state and the central database remain host-only.
 
 ### 3. Session Isolation
 
-Each group has isolated Claude sessions at `data/sessions/{group}/.claude/`:
+Each agent group has isolated Claude state at `data/v2-sessions/<agent_group_id>/.claude-shared/`, and each runtime session has its own DB pair at `data/v2-sessions/<agent_group_id>/<session_id>/`:
+
 - Groups cannot see other groups' conversation history
-- Session data includes full message history and file contents read
+- Session data includes inbound/outbound DBs, heartbeat, inbox, and outbox files
 - Prevents cross-group information disclosure
 
-### 4. IPC Authorization
+### 4. Host Action Authorization
 
-Messages and task operations are verified against group identity:
+Messages, task operations, and structured host actions are verified against group identity before the host executes them:
 
-| Operation | Main Group | Non-Main Group |
-|-----------|------------|----------------|
-| Send message to own chat | ✓ | ✓ |
-| Send message to other chats | ✓ | ✗ |
-| Schedule task for self | ✓ | ✓ |
-| Schedule task for others | ✓ | ✗ |
-| View all tasks | ✓ | Own only |
-| Manage other groups | ✓ | ✗ |
+| Operation                   | Main Group | Non-Main Group |
+| --------------------------- | ---------- | -------------- |
+| Send message to own chat    | ✓          | ✓              |
+| Send message to other chats | ✓          | ✗              |
+| Schedule task for self      | ✓          | ✓              |
+| Schedule task for others    | ✓          | ✗              |
+| View all tasks              | ✓          | Own only       |
+| Manage other groups         | ✓          | ✗              |
 
 ### 5. Credential Isolation (OneCLI Agent Vault)
 
 Real API credentials **never enter containers**. NanoClaw uses [OneCLI's Agent Vault](https://github.com/onecli/onecli) to proxy outbound requests and inject credentials at the gateway level.
 
 **How it works:**
+
 1. Credentials are registered once with `onecli secrets create`, stored and managed by OneCLI
 2. When NanoClaw spawns a container, it calls `applyContainerConfig()` to route outbound HTTPS through the OneCLI gateway
 3. The gateway matches requests by host and path, injects the real credential, and forwards
@@ -78,6 +84,7 @@ Real API credentials **never enter containers**. NanoClaw uses [OneCLI's Agent V
 Each NanoClaw group gets its own OneCLI agent identity. This allows different credential policies per group (e.g. your sales agent vs. support agent). OneCLI supports rate limits, and time-bound access and approval flows are on the roadmap.
 
 **NOT Mounted:**
+
 - Channel auth sessions (`store/auth/`) — host only
 - Mount allowlist — external, never mounted
 - Any credentials matching blocked patterns
@@ -85,15 +92,16 @@ Each NanoClaw group gets its own OneCLI agent identity. This allows different cr
 
 ## Privilege Comparison
 
-| Capability | Main Group | Non-Main Group |
-|------------|------------|----------------|
-| Project root access | `/workspace/project` (ro) | None |
-| Store (SQLite DB) | `/workspace/project/store` (rw) | None |
-| Group folder | `/workspace/group` (rw) | `/workspace/group` (rw) |
-| Global memory | Implicit via project | `/workspace/global` (ro) |
-| Additional mounts | Configurable | Read-only unless allowed |
-| Network access | Unrestricted | Unrestricted |
-| MCP tools | All | All |
+| Capability                | Main Group                                                         | Non-Main Group              |
+| ------------------------- | ------------------------------------------------------------------ | --------------------------- |
+| Project root access       | `/workspace/project` (ro)                                          | None                        |
+| Central DB / channel auth | Host-only                                                          | Host-only                   |
+| Session DBs               | `/workspace/inbound.db` (read-only), `/workspace/outbound.db` (rw) | Same, scoped to own session |
+| Group folder              | `/workspace/agent` (rw)                                            | `/workspace/agent` (rw)     |
+| Shared base prompt        | `/app/CLAUDE.md` (ro)                                              | `/app/CLAUDE.md` (ro)       |
+| Additional mounts         | Configurable                                                       | Read-only unless allowed    |
+| Network access            | Unrestricted                                                       | Unrestricted                |
+| MCP tools                 | All                                                                | All                         |
 
 ## Security Architecture Diagram
 
@@ -107,7 +115,7 @@ Each NanoClaw group gets its own OneCLI agent identity. This allows different cr
 ┌──────────────────────────────────────────────────────────────────┐
 │                     HOST PROCESS (TRUSTED)                        │
 │  • Message routing                                                │
-│  • IPC authorization                                              │
+│  • DB action authorization                                        │
 │  • Mount validation (external allowlist)                          │
 │  • Container lifecycle                                            │
 │  • OneCLI Agent Vault (injects credentials, enforces policies)   │
@@ -140,7 +148,7 @@ This should be rare. When a zero-day fix or critical dependency requires an imme
 2. The entry must pin the **exact version** being excluded — never a range or wildcard
    ```yaml
    minimumReleaseAgeExclude:
-     some-package: "1.2.3"  # Approved by @user, 2026-04-14 — CVE-XXXX-YYYY fix
+     some-package: '1.2.3' # Approved by @user, 2026-04-14 — CVE-XXXX-YYYY fix
    ```
 3. The exclusion should be removed once the version ages past the threshold (i.e. after 3 days)
 4. Automated agents (Claude, CI bots) must never add exclusions without human sign-off

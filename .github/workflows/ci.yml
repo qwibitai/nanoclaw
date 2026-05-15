@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   ci:
     runs-on: ubuntu-latest
@@ -16,11 +19,21 @@ jobs:
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.12
+          bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
       - name: Install agent-runner deps (Bun)
         working-directory: container/agent-runner
         run: bun install --frozen-lockfile
+
+      - name: Host dependency audit
+        run: pnpm audit --prod
+
+      - name: Dockerfile pin guard
+        run: |
+          if grep -nE '^ARG [A-Z0-9_]+_VERSION=latest$' container/Dockerfile; then
+            echo "::error::Dockerfile runtime versions must be pinned, not latest"
+            exit 1
+          fi
 
       - name: Format check
         run: pnpm run format:check

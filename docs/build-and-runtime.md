@@ -14,7 +14,7 @@ Host and container each have their own package tree:
   pnpm-lock.yaml              host deps (channels, Chat SDK, Baileys, better-sqlite3, etc.)
   pnpm-workspace.yaml         minimumReleaseAge + onlyBuiltDependencies policy
 
-/container/agent-runner/      Bun 1.3+
+/container/agent-runner/      Bun pinned by /.bun-version
   bun.lock                    agent-runner runtime deps (Claude Agent SDK, MCP SDK, zod, etc.)
   package.json                @types/bun, typescript devDeps for type-checking
 ```
@@ -23,17 +23,19 @@ The container image also has pnpm + Node inside for global CLIs (`@anthropic-ai/
 
 ## Lockfiles
 
-| Tree | Lockfile | Manager | Regenerate after dep change |
-|------|----------|---------|----------------------------|
-| Host | `pnpm-lock.yaml` | pnpm 10 | `pnpm install` |
-| Agent-runner | `container/agent-runner/bun.lock` | Bun 1.3+ | `cd container/agent-runner && bun install` |
+| Tree         | Lockfile                          | Manager                      | Regenerate after dep change                |
+| ------------ | --------------------------------- | ---------------------------- | ------------------------------------------ |
+| Host         | `pnpm-lock.yaml`                  | pnpm 10                      | `pnpm install`                             |
+| Agent-runner | `container/agent-runner/bun.lock` | Bun pinned by `.bun-version` | `cd container/agent-runner && bun install` |
 
 Both are committed. CI and the Dockerfile run `--frozen-lockfile` variants — any drift between `package.json` and lockfile fails the build.
 
 ## Supply chain
 
 - **Host + global CLIs** (pnpm): `minimumReleaseAge: 4320` (3-day hold on new versions), `onlyBuiltDependencies` allowlist for postinstall scripts. See `pnpm-workspace.yaml` and `docs/SECURITY.md`.
-- **Agent-runner** (Bun): no release-age policy — Bun doesn't have an equivalent today. The defenses are `bun.lock` pinning plus version-pinned CLIs/Bun itself via Dockerfile ARGs. When bumping `@anthropic-ai/claude-agent-sdk` or any runtime dep, review the release date on npm and bump deliberately, not via `bun update`.
+- **Agent-runner** (Bun): no release-age policy — Bun doesn't have an equivalent today. The defenses are `bun.lock` pinning plus `.bun-version`/Dockerfile ARG pinning. When bumping `@anthropic-ai/claude-agent-sdk` or any runtime dep, review the release date on npm and bump deliberately, not via `bun update`.
+- **CI guardrails**: PRs run `pnpm audit --prod` for host production deps and fail if a Dockerfile runtime `*_VERSION` ARG is set to `latest`.
+- **Dependabot**: weekly checks cover GitHub Actions, the host npm tree, and the agent-runner npm metadata so dependency bumps arrive as reviewable PRs.
 
 ## Image build surface
 
@@ -59,11 +61,13 @@ Both paths end with Bun running the same source file from `/app/src/index.ts`.
 
 1. `pnpm install --frozen-lockfile` (host)
 2. `bun install --frozen-lockfile` in `container/agent-runner/` (container)
-3. `pnpm run format:check`
-4. `pnpm exec tsc --noEmit` (host typecheck)
-5. `pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit` (container typecheck)
-6. `pnpm exec vitest run` (host tests)
-7. `bun test` in `container/agent-runner/` (container tests)
+3. `pnpm audit --prod` (host production dependency audit)
+4. Dockerfile runtime version pin guard (`ARG *_VERSION=latest` fails)
+5. `pnpm run format:check`
+6. `pnpm exec tsc --noEmit` (host typecheck)
+7. `pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit` (container typecheck)
+8. `pnpm exec vitest run` (host tests)
+9. `bun test` in `container/agent-runner/` (container tests)
 
 Any failure fails the PR.
 
@@ -74,6 +78,7 @@ Any failure fails the PR.
 - **Agent-runner tests run under `bun:test`, not vitest.** `vitest.config.ts` excludes the `container/agent-runner/` tree because vitest runs on Node and can't load `bun:sqlite`.
 - **No tsc build step in the container image.** Re-adding one would reintroduce the ~200-500ms per-session-wake cost we removed.
 - **Global container CLIs stay on pnpm, not Bun.** `agent-browser`, `@anthropic-ai/claude-code`, `vercel` and any future Node CLIs the agent invokes should be pinned versions under the Dockerfile's pnpm global-install block. `bun install -g` would bypass the pnpm supply-chain policy.
+- **Dockerfile runtime versions are exact pins.** Do not use `latest`; CI blocks it.
 
 ## Migration history
 

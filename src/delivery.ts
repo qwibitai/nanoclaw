@@ -24,6 +24,7 @@ import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles } from './session-manager.js';
 import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
+import { isPhantomOutboundContent } from './phantom-filter.js';
 import type { OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
 
@@ -239,7 +240,6 @@ async function deliverMessage(
     channel_type: string | null;
     thread_id: string | null;
     content: string;
-    in_reply_to: string | null;
   },
   session: Session,
   inDb: Database.Database,
@@ -267,6 +267,16 @@ async function deliverMessage(
     }
     const { routeAgentMessage } = await import('./modules/agent-to-agent/agent-route.js');
     await routeAgentMessage(msg, session);
+    return;
+  }
+
+  const phantom = isPhantomOutboundContent(content);
+  if (phantom.phantom) {
+    log.warn('Phantom outbound message dropped before delivery', {
+      id: msg.id,
+      sessionId: session.id,
+      matched: phantom.matched,
+    });
     return;
   }
 

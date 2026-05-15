@@ -33,7 +33,6 @@ import * as p from '@clack/prompts';
 import k from 'kleur';
 
 import * as setupLog from '../logs.js';
-import { BACK_TO_CHANNEL_SELECTION, type ChannelFlowResult } from '../lib/back-nav.js';
 import { brightSelect } from '../lib/bright-select.js';
 import { getLaunchdLabel, getSystemdUnit } from '../../src/install-slug.js';
 import {
@@ -54,9 +53,8 @@ const AUTH_CREDS_PATH = path.join(process.cwd(), 'store', 'auth', 'creds.json');
 
 type AuthMethod = 'qr' | 'pairing-code';
 
-export async function runWhatsAppChannel(displayName: string): Promise<ChannelFlowResult> {
+export async function runWhatsAppChannel(displayName: string): Promise<void> {
   const method = await askAuthMethod();
-  if (method === 'back') return BACK_TO_CHANNEL_SELECTION;
   const phone = method === 'pairing-code' ? await askPhoneNumber() : undefined;
 
   const install = await runQuietChild(
@@ -150,7 +148,7 @@ export async function runWhatsAppChannel(displayName: string): Promise<ChannelFl
   }
 }
 
-async function askAuthMethod(): Promise<AuthMethod | 'back'> {
+async function askAuthMethod(): Promise<AuthMethod> {
   const choice = ensureAnswer(
     await brightSelect({
       message: 'How would you like to authenticate with WhatsApp?',
@@ -165,14 +163,10 @@ async function askAuthMethod(): Promise<AuthMethod | 'back'> {
           label: 'Enter a pairing code on your phone',
           hint: 'no camera needed',
         },
-        {
-          value: 'back',
-          label: '← Back to channel selection',
-        },
       ],
     }),
-  ) as AuthMethod | 'back';
-  if (choice !== 'back') setupLog.userInput('whatsapp_auth_method', choice);
+  ) as AuthMethod;
+  setupLog.userInput('whatsapp_auth_method', choice);
   return choice;
 }
 
@@ -318,7 +312,7 @@ async function renderQr(qr: string): Promise<string[]> {
     const QRCode = await import('qrcode');
     const qrText = await QRCode.toString(qr, { type: 'terminal', small: true });
     const caption = k.dim(
-      '   Open WhatsApp → You / Settings → Linked Devices → Link a Device → scan.',
+      '   Open WhatsApp → Settings → Linked Devices → Link a Device → scan.',
     );
     return [...qrText.trimEnd().split('\n'), '', caption];
   } catch {
@@ -334,7 +328,7 @@ function formatPairingCard(code: string): string {
     '',
     `   ${brandBold(spaced)}`,
     '',
-    k.dim('   Open WhatsApp → You / Settings → Linked Devices → Link a Device'),
+    k.dim('   Open WhatsApp → Settings → Linked Devices → Link a Device'),
     k.dim('   → "Link with phone number instead" → enter this code.'),
     k.dim('   It expires in ~60 seconds.'),
   ].join('\n');

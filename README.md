@@ -26,35 +26,12 @@ NanoClaw provides that same core functionality, but in a codebase small enough t
 ## Quick Start
 
 ```bash
-git clone https://github.com/nanocoai/nanoclaw.git nanoclaw-v2
+git clone https://github.com/qwibitai/nanoclaw.git nanoclaw-v2
 cd nanoclaw-v2
 bash nanoclaw.sh
 ```
 
 `nanoclaw.sh` walks you from a fresh machine to a named agent you can message. It installs Node, pnpm, and Docker if missing, registers your Anthropic credential with OneCLI, builds the agent container, and pairs your first channel (Telegram, Discord, WhatsApp, or a local CLI). If a step fails, Claude Code is invoked automatically to diagnose and resume from where it broke.
-
-<details>
-<summary><strong>Migrating from NanoClaw v1?</strong></summary>
-
-Run from a fresh v2 checkout next to your v1 install:
-
-```bash
-git clone https://github.com/nanocoai/nanoclaw.git nanoclaw-v2
-cd nanoclaw-v2
-bash migrate-v2.sh
-```
-
-`migrate-v2.sh` finds your v1 install (sibling directory, or `NANOCLAW_V1_PATH=/path/to/nanoclaw`), migrates state into the v2 checkout, then `exec`s into Claude Code to finish the parts that need judgment (owner seeding, CLAUDE.local.md cleanup, fork-customisation replay).
-
-Run the script directly, not from inside a Claude session — the deterministic side needs interactive prompts and real shell I/O for Node/pnpm bootstrap, Docker, OneCLI, and the container build.
-
-**What it does:** merges `.env`, seeds the v2 DB from `registered_groups`, copies group folders + session data + scheduled tasks, installs the channel adapters you select, copies channel auth state (including Baileys keystore + LID mappings for WhatsApp), builds the agent container.
-
-**What it doesn't:** flip the system service. Pick *"switch to v2"* at the prompt, or do it manually after testing — your v1 install is left untouched.
-
-See [docs/v1-to-v2-changes.md](docs/v1-to-v2-changes.md) for what's different and [docs/migration-dev.md](docs/migration-dev.md) for development notes.
-
-</details>
 
 ## Philosophy
 
@@ -131,6 +108,7 @@ Skills we'd like to see:
 
 - macOS or Linux (Windows via WSL2)
 - Node.js 20+ and pnpm 10+ (the installer will install both if missing)
+- Bun pinned by `.bun-version` for local agent-runner tests (the installer will install it if missing)
 - [Docker Desktop](https://docker.com/products/docker-desktop) (macOS/Windows) or Docker Engine (Linux)
 - [Claude Code](https://claude.ai/download) for `/customize`, `/debug`, error recovery during setup, and all `/add-<channel>` skills
 
@@ -215,5 +193,3 @@ See [CHANGELOG.md](CHANGELOG.md) for breaking changes, or the [full release hist
 ## License
 
 MIT
-
-<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=47894bd5-353b-42fe-bb97-74144e6df0bf" />

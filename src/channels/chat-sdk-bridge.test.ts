@@ -1,25 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Adapter, AdapterPostableMessage, RawMessage } from 'chat';
+import type { Adapter } from 'chat';
 
 import { createChatSdkBridge, splitForLimit } from './chat-sdk-bridge.js';
 
 function stubAdapter(partial: Partial<Adapter>): Adapter {
   return { name: 'stub', ...partial } as unknown as Adapter;
-}
-
-interface PostCall {
-  threadId: string;
-  message: AdapterPostableMessage;
-}
-
-function makePostCapture() {
-  const calls: PostCall[] = [];
-  const postMessage = async (threadId: string, message: AdapterPostableMessage): Promise<RawMessage<unknown>> => {
-    calls.push({ threadId, message });
-    return { id: 'msg-stub', threadId, raw: {} };
-  };
-  return { calls, postMessage };
 }
 
 describe('splitForLimit', () => {
@@ -91,117 +77,93 @@ describe('createChatSdkBridge', () => {
     });
     expect(typeof bridge.subscribe).toBe('function');
   });
-});
 
-describe('createChatSdkBridge.deliver — display cards (send_card)', () => {
-  // The send_card MCP tool writes outbound rows with `{ type: 'card', card, fallbackText }`.
-  // Before this branch existed the bridge silently dropped them: cards have no
-  // `text` / `markdown`, so the trailing fallback `if (text)` was false and the
-  // function returned without calling the adapter. These tests pin the contract
-  // for the dedicated card branch.
-
-  it('renders title, description, and string children, then posts via the adapter', async () => {
-    const { calls, postMessage } = makePostCapture();
+  it('splits caption at maxCaptionLength when files are attached', async () => {
+    // Reproduces the real Telegram failure: a 1108-char reply with a file
+    // attachment was sent as caption, character-truncated to 1024 mid-code-span,
+    // and rejected by Telegram with "Can't find end of the entity starting at
+    // byte offset N". The bridge must split BEFORE the adapter truncates so
+    // each post fits the platform's caption / message limits cleanly.
+    const posts: Array<{ threadId: string; markdown: string; files?: unknown[] }> = [];
     const bridge = createChatSdkBridge({
-      adapter: stubAdapter({ postMessage }),
-      supportsThreads: false,
-    });
-    const id = await bridge.deliver('telegram:42', null, {
-      kind: 'chat-sdk',
-      content: {
-        type: 'card',
-        card: {
-          title: 'Daily',
-          description: 'Your plate today',
-          children: ['• item one', '• item two'],
+      adapter: stubAdapter({
+        postMessage: async (threadId: string, msg: unknown) => {
+          const m = msg as { markdown?: string; files?: unknown[] };
+          posts.push({ threadId, markdown: m.markdown ?? '', files: m.files });
+          return { id: `m-${posts.length}`, raw: {}, threadId };
         },
-        fallbackText: 'Daily: your plate',
-      },
+      }),
+      supportsThreads: false,
+      maxTextLength: 4000,
+      maxCaptionLength: 1024,
     });
-    expect(id).toBe('msg-stub');
-    expect(calls).toHaveLength(1);
-    const msg = calls[0].message as { card?: unknown; fallbackText?: string };
-    expect(msg.fallbackText).toBe('Daily: your plate');
-    expect(msg.card).toBeDefined();
+
+    const para = 'a'.repeat(800);
+    const longText = `${para}\n\n${para}`; // 1602 chars; one \n\n splits it
+    await bridge.deliver('telegram:1', null, {
+      kind: 'chat',
+      content: { text: longText },
+      files: [{ data: Buffer.from('x'), filename: 'f.mp4' }],
+    } as never);
+
+    expect(posts.length).toBeGreaterThanOrEqual(2);
+    expect(posts[0].markdown.length).toBeLessThanOrEqual(1024);
+    expect(posts[0].files).toBeDefined();
+    for (let i = 1; i < posts.length; i++) {
+      expect(posts[i].files).toBeUndefined();
+      expect(posts[i].markdown.length).toBeLessThanOrEqual(4000);
+    }
   });
 
-  it('drops actions without url (send_card is fire-and-forget; non-URL buttons would have nowhere to land)', async () => {
-    const { calls, postMessage } = makePostCapture();
+  it('does not split file caption when text fits the caption limit', async () => {
+    const posts: Array<{ markdown: string; files?: unknown[] }> = [];
     const bridge = createChatSdkBridge({
-      adapter: stubAdapter({ postMessage }),
-      supportsThreads: false,
-    });
-    await bridge.deliver('discord:guild:chan', null, {
-      kind: 'chat-sdk',
-      content: {
-        type: 'card',
-        card: {
-          title: 'Card',
-          description: 'has only label-only actions',
-          actions: [{ label: 'Add' }, { label: 'Skip' }],
+      adapter: stubAdapter({
+        postMessage: async (_t: string, msg: unknown) => {
+          const m = msg as { markdown?: string; files?: unknown[] };
+          posts.push({ markdown: m.markdown ?? '', files: m.files });
+          return { id: 'm-1', raw: {}, threadId: _t };
         },
-      },
+      }),
+      supportsThreads: false,
+      maxTextLength: 4000,
+      maxCaptionLength: 1024,
     });
-    expect(calls).toHaveLength(1);
-    // Cast through the public Card shape to read the children we set
-    const msg = calls[0].message as { card?: { children?: Array<{ type?: string }> } };
-    const childTypes = (msg.card?.children ?? []).map((c) => c.type);
-    expect(childTypes).not.toContain('actions');
+
+    await bridge.deliver('telegram:1', null, {
+      kind: 'chat',
+      content: { text: 'short caption' },
+      files: [{ data: Buffer.from('x'), filename: 'f.mp4' }],
+    } as never);
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0].markdown).toBe('short caption');
+    expect(posts[0].files).toBeDefined();
   });
 
-  it('renders url actions as link buttons inside an Actions row', async () => {
-    const { calls, postMessage } = makePostCapture();
+  it('falls back to platformId when outbound threadId is an empty string', async () => {
+    const deliveredTo: string[] = [];
+    const typedIn: string[] = [];
     const bridge = createChatSdkBridge({
-      adapter: stubAdapter({ postMessage }),
-      supportsThreads: false,
-    });
-    await bridge.deliver('discord:guild:chan', null, {
-      kind: 'chat-sdk',
-      content: {
-        type: 'card',
-        card: {
-          title: 'Docs',
-          actions: [{ label: 'Open', url: 'https://example.com' }, { label: 'No-link' }],
+      adapter: stubAdapter({
+        postMessage: async (threadId: string) => {
+          deliveredTo.push(threadId);
+          return { id: 'm-1', raw: {}, threadId };
         },
-      },
-    });
-    const msg = calls[0].message as {
-      card?: { children?: Array<{ type?: string; children?: Array<{ type?: string; url?: string }> }> };
-    };
-    const actionsRow = msg.card?.children?.find((c) => c.type === 'actions');
-    expect(actionsRow).toBeDefined();
-    const buttons = actionsRow?.children ?? [];
-    expect(buttons).toHaveLength(1);
-    expect(buttons[0].type).toBe('link-button');
-    expect(buttons[0].url).toBe('https://example.com');
-  });
-
-  it('skips delivery when the card has neither title nor body content', async () => {
-    const { calls, postMessage } = makePostCapture();
-    const bridge = createChatSdkBridge({
-      adapter: stubAdapter({ postMessage }),
+        startTyping: async (threadId: string) => {
+          typedIn.push(threadId);
+        },
+      }),
       supportsThreads: false,
     });
-    const id = await bridge.deliver('telegram:42', null, {
-      kind: 'chat-sdk',
-      content: { type: 'card', card: {} },
-    });
-    expect(id).toBeUndefined();
-    expect(calls).toHaveLength(0);
-  });
 
-  it('falls through to the text branch for non-card chat-sdk payloads (no regression)', async () => {
-    const { calls, postMessage } = makePostCapture();
-    const bridge = createChatSdkBridge({
-      adapter: stubAdapter({ postMessage }),
-      supportsThreads: false,
+    await bridge.deliver('telegram:1594196884', '', {
+      kind: 'chat',
+      content: { text: 'hello' },
     });
-    await bridge.deliver('telegram:42', null, {
-      kind: 'chat-sdk',
-      content: { text: 'plain hello' },
-    });
-    expect(calls).toHaveLength(1);
-    const msg = calls[0].message as { markdown?: string };
-    expect(msg.markdown).toBe('plain hello');
+    await bridge.setTyping?.('telegram:1594196884', '');
+
+    expect(deliveredTo).toEqual(['telegram:1594196884']);
+    expect(typedIn).toEqual(['telegram:1594196884']);
   });
 });

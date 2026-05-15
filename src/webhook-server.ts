@@ -20,6 +20,12 @@ interface WebhookEntry {
   adapterName: string;
 }
 
+interface WebhookOptions {
+  waitUntil?: (task: Promise<unknown>) => void;
+}
+
+type WebhookHandler = (request: Request, options?: WebhookOptions) => Promise<Response>;
+
 const routes = new Map<string, WebhookEntry>();
 let server: http.Server | null = null;
 
@@ -70,16 +76,17 @@ async function fromWebResponse(webRes: Response, nodeRes: http.ServerResponse): 
  * Register a webhook adapter on the shared server.
  * Starts the server lazily on first call.
  */
-export function registerWebhookAdapter(chat: Chat, adapterName: string): void {
-  routes.set(adapterName, { chat, adapterName });
+export function registerWebhookAdapter(chat: Chat, adapterName: string, routeName = adapterName): void {
+  routes.set(routeName, { chat, adapterName });
   ensureServer();
-  log.info('Webhook adapter registered', { adapter: adapterName, path: `/webhook/${adapterName}` });
+  log.info('Webhook adapter registered', { adapter: adapterName, route: routeName, path: `/webhook/${routeName}` });
 }
 
 function ensureServer(): void {
   if (server) return;
 
   const port = parseInt(process.env.WEBHOOK_PORT || String(DEFAULT_PORT), 10);
+  const host = process.env.WEBHOOK_HOST || '127.0.0.1';
 
   server = http.createServer(async (req, res) => {
     const url = req.url || '/';
@@ -102,8 +109,7 @@ function ensureServer(): void {
 
     try {
       const webReq = await toWebRequest(req);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const webhooks = entry.chat.webhooks as Record<string, (r: Request, opts?: any) => Promise<Response>>;
+      const webhooks = entry.chat.webhooks as Record<string, WebhookHandler>;
       const handler = webhooks[entry.adapterName];
       const webRes = await handler(webReq, {
         waitUntil: (p: Promise<unknown>) => {
@@ -118,8 +124,8 @@ function ensureServer(): void {
     }
   });
 
-  server.listen(port, '0.0.0.0', () => {
-    log.info('Webhook server started', { port, adapters: [...routes.keys()] });
+  server.listen(port, host, () => {
+    log.info('Webhook server started', { host, port, adapters: [...routes.keys()] });
   });
 }
 

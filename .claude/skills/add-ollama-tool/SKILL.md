@@ -54,7 +54,7 @@ git remote -v
 If `upstream` is missing, add it:
 
 ```bash
-git remote add upstream https://github.com/nanocoai/nanoclaw.git
+git remote add upstream https://github.com/qwibitai/nanoclaw.git
 ```
 
 ### Merge the skill branch

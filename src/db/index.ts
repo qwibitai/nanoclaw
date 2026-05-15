@@ -14,6 +14,7 @@ export {
   getMessagingGroupByPlatform,
   getAllMessagingGroups,
   getMessagingGroupsByChannel,
+  getMessagingGroupsByAgentGroup,
   updateMessagingGroup,
   deleteMessagingGroup,
   createMessagingGroupAgent,
@@ -43,11 +44,10 @@ export {
   getPendingApprovalsByAction,
 } from './sessions.js';
 export {
-  getContainerConfig,
-  getAllContainerConfigs,
-  createContainerConfig,
-  ensureContainerConfig,
-  updateContainerConfigScalars,
-  updateContainerConfigJson,
-  deleteContainerConfig,
-} from './container-configs.js';
+  createDestination,
+  getDestinations,
+  getDestinationByName,
+  getDestinationByTarget,
+  hasDestination,
+  deleteDestination,
+} from '../modules/agent-to-agent/db/agent-destinations.js';

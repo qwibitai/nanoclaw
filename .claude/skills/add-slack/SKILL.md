@@ -44,7 +44,7 @@ import './slack.js';
 ### 4. Install the adapter package (pinned)
 
 ```bash
-pnpm install @chat-adapter/slack@4.27.0
+pnpm install @chat-adapter/slack@4.26.0
 ```
 
 ### 5. Build
@@ -60,7 +60,7 @@ pnpm run build
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App** > **From scratch**
 2. Name it (e.g., "NanoClaw") and select your workspace
 3. Go to **OAuth & Permissions** and add Bot Token Scopes:
-   - `chat:write`, `im:write`, `channels:history`, `groups:history`, `im:history`, `channels:read`, `groups:read`, `users:read`, `reactions:write`, `files:read`, `files:write`
+   - `chat:write`, `im:write`, `channels:history`, `groups:history`, `im:history`, `channels:read`, `groups:read`, `users:read`, `reactions:write`
 4. Click **Install to Workspace** and copy the **Bot User OAuth Token** (`xoxb-...`)
 5. Go to **Basic Information** and copy the **Signing Secret**
 

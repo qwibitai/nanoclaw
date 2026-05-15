@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nanoclaw.agentmail-sync-morning</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/ilansolot/nanoclaw-v2/scripts/research/run-agentmail-sync-morning.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/ilansolot/nanoclaw-v2</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>7</integer>
+    <key>Minute</key>
+    <integer>20</integer>
+  </dict>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NANOCLAW_ROOT</key>
+    <string>/Users/ilansolot/nanoclaw-v2</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/ilansolot/nanoclaw-v2/logs/research/agentmail-sync-morning.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/ilansolot/nanoclaw-v2/logs/research/agentmail-sync-morning.err.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

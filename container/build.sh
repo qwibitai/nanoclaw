@@ -1,7 +1,8 @@
 #!/bin/bash
 # Build the NanoClaw agent container image.
 #
-# Reads one optional build flag from ../.env:
+# Reads the Bun runtime pin from ../.bun-version and one optional build flag
+# from ../.env:
 #   INSTALL_CJK_FONTS=true   — add Chinese/Japanese/Korean fonts (~200MB)
 # setup/container.ts reads the same file, so both build paths stay in sync.
 # Callers can also override by exporting INSTALL_CJK_FONTS directly.
@@ -27,6 +28,13 @@ if [ -z "${INSTALL_CJK_FONTS:-}" ] && [ -f "../.env" ]; then
 fi
 
 BUILD_ARGS=()
+if [ -f "$PROJECT_ROOT/.bun-version" ]; then
+    BUN_VERSION="$(tr -d '[:space:]' < "$PROJECT_ROOT/.bun-version")"
+    if [[ "$BUN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+        BUILD_ARGS+=(--build-arg "BUN_VERSION=$BUN_VERSION")
+    fi
+fi
+
 if [ "${INSTALL_CJK_FONTS:-false}" = "true" ]; then
     echo "CJK fonts: enabled (adds ~200MB)"
     BUILD_ARGS+=(--build-arg INSTALL_CJK_FONTS=true)
