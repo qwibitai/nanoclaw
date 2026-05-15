@@ -242,7 +242,10 @@ export class SlackChannel implements Channel {
         message?: string;
       };
       const errorCode =
-        slackErr?.data?.error ?? slackErr?.code ?? slackErr?.message ?? 'unknown_error';
+        slackErr?.data?.error ??
+        slackErr?.code ??
+        slackErr?.message ??
+        'unknown_error';
       const hints: Record<string, string> = {
         not_in_channel: `Ask the human operator to /invite this bot to ${channel}, or use send_message to a peer who is in it.`,
         channel_not_found: `Channel "${channel}" does not exist or the bot can't see it. Verify the ID/name and that the bot is in the same workspace.`,
@@ -257,7 +260,9 @@ export class SlackChannel implements Channel {
         ok: false,
         channel,
         error: errorCode,
-        hint: hints[errorCode] ?? `Slack API returned "${errorCode}". Check Slack logs.`,
+        hint:
+          hints[errorCode] ??
+          `Slack API returned "${errorCode}". Check Slack logs.`,
       };
     }
   }

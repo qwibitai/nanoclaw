@@ -770,7 +770,7 @@ async function main(): Promise<void> {
       writeGroupsSnapshot(gf, im, ag, rj),
     postToSlackChannel: (channel, text, threadTs) => {
       const slackCh = channels.find((c) => c.name === 'slack') as
-        | (typeof channels[number] & {
+        | ((typeof channels)[number] & {
             postToChannel?: (
               ch: string,
               t: string,
