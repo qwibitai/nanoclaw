@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-type ConfigCallback = (ctx: { agentGroupId: string; hostEnv: Record<string, string> }) => { env: Record<string, string> };
+type ConfigCallback = (ctx: { agentGroupId: string; hostEnv: Record<string, string> }) => {
+  env: Record<string, string>;
+};
 
 // vi.hoisted runs in the hoisted scope so the reference is available when vi.mock factories run
 const captured = vi.hoisted(() => ({ callback: null as ConfigCallback | null }));
@@ -13,8 +15,14 @@ vi.mock('./provider-container-registry.js', () => ({
   }),
 }));
 vi.mock('fs', () => ({
-  default: { readFileSync: vi.fn(() => { throw new Error('ENOENT'); }) },
-  readFileSync: vi.fn(() => { throw new Error('ENOENT'); }),
+  default: {
+    readFileSync: vi.fn(() => {
+      throw new Error('ENOENT');
+    }),
+  },
+  readFileSync: vi.fn(() => {
+    throw new Error('ENOENT');
+  }),
 }));
 
 // Import module — triggers registerProviderContainerConfig side-effect
@@ -29,7 +37,9 @@ const ctx = (hostEnv: Record<string, string> = {}, agentGroupId = 'grp-1') => ({
 
 beforeEach(() => {
   vi.mocked(getAgentGroup).mockReturnValue(undefined as any);
-  vi.mocked(fs.readFileSync).mockImplementation(() => { throw new Error('ENOENT'); });
+  vi.mocked(fs.readFileSync).mockImplementation(() => {
+    throw new Error('ENOENT');
+  });
 });
 
 describe('acp-client host-side container config', () => {
@@ -74,9 +84,7 @@ describe('acp-client host-side container config', () => {
 describe('acp-client host-side: group config (acp-client.json)', () => {
   it('uses command from group config over env var', () => {
     vi.mocked(getAgentGroup).mockReturnValue({ folder: 'my-group' } as any);
-    vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ command: ['group-agent', '--mode', 'fast'] }) as any,
-    );
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ command: ['group-agent', '--mode', 'fast'] }) as any);
 
     const env = captured.callback!(ctx({ ACP_CLIENT_CMD: '["env-agent"]' })).env;
     expect(env.ACP_CLIENT_CMD).toBe(JSON.stringify(['group-agent', '--mode', 'fast']));
@@ -84,9 +92,7 @@ describe('acp-client host-side: group config (acp-client.json)', () => {
 
   it('uses host+port from group config over env var', () => {
     vi.mocked(getAgentGroup).mockReturnValue({ folder: 'grp' } as any);
-    vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ host: 'group-host', port: 9999 }) as any,
-    );
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ host: 'group-host', port: 9999 }) as any);
 
     const env = captured.callback!(ctx({ ACP_CLIENT_HOST: 'env-host', ACP_CLIENT_PORT: '1111' })).env;
     expect(env.ACP_CLIENT_HOST).toBe('group-host');

@@ -288,14 +288,10 @@ export class AcpClientProvider implements AgentProvider {
 
   query(input: QueryInput): AgentQuery {
     let aborted = false;
-    const pending: string[] = [input.prompt];
-    let waitKick: (() => void) | null = null;
-    let ended = false;
     let activeTransport: AcpTransport | null = null;
 
     const { cmd, host, port } = this;
     const systemInstructions = input.systemContext?.instructions;
-    const IDLE_TIMEOUT_MS = Number(process.env.ACP_CLIENT_IDLE_TIMEOUT_MS) || 60_000;
 
     async function* gen(): AsyncGenerator<ProviderEvent> {
       if (aborted) return;
@@ -329,12 +325,9 @@ export class AcpClientProvider implements AgentProvider {
         return {};
       });
 
-      // Per-turn state: reset before each session/prompt call
-      let currentChunks: string[] = [];
-      let lastEventAt = Date.now();
-
+      // Accumulate streamed message chunks from session/update notifications
+      const chunks: string[] = [];
       rpc.onNotification('session/update', (params) => {
-        lastEventAt = Date.now();
         const p = params as { update?: { kind: string; content?: unknown } };
         if (p?.update?.kind !== 'agent_message_chunk') return;
         const c = p.update.content as { content?: Array<{ type: string; text?: string }> } | undefined;
@@ -342,15 +335,15 @@ export class AcpClientProvider implements AgentProvider {
           .filter(b => b.type === 'text')
           .map(b => b.text ?? '')
           .join('');
-        if (text) currentChunks.push(text);
+        if (text) chunks.push(text);
       });
 
-      // Start pump loop — runs concurrently with all request awaits below
+      // Start pump loop — runs concurrently with the request awaits below
       rpc.pumpLoop().catch(() => {});
 
       try {
         // ── initialize ────────────────────────────────────────────────────
-        if (aborted) return;
+        if (aborted) { transport.close(); return; }
         yield { type: 'activity' };
 
         await rpc.request('initialize', {
@@ -365,7 +358,7 @@ export class AcpClientProvider implements AgentProvider {
         });
 
         // ── session: resume or new ────────────────────────────────────────
-        if (aborted) return;
+        if (aborted) { transport.close(); return; }
 
         let sessionId: string;
         if (input.continuation) {
@@ -378,59 +371,48 @@ export class AcpClientProvider implements AgentProvider {
         }
         yield { type: 'init', continuation: sessionId };
 
-        // ── Turn loop ─────────────────────────────────────────────────────
-        while (!aborted) {
-          // Wait for a pending prompt or end signal
-          while (pending.length === 0 && !ended && !aborted) {
-            await new Promise<void>(resolve => { waitKick = resolve; });
-            waitKick = null;
-          }
+        // ── session/prompt ────────────────────────────────────────────────
+        if (aborted) { transport.close(); return; }
+        yield { type: 'activity' };
 
-          if (aborted) return;
-          if (pending.length === 0 && ended) return;
-
-          const promptText = pending.shift()!;
-          yield { type: 'activity' };
-
-          // Reset per-turn state
-          currentChunks = [];
-          lastEventAt = Date.now();
-
-          // Idle timeout: close the transport if the agent goes silent mid-turn.
-          // Check interval is at most 5s but capped to the timeout so short
-          // timeouts (e.g. in tests) fire without waiting the full 5s.
-          const idleCheckInterval = Math.min(5000, IDLE_TIMEOUT_MS);
-          const idleCheck = setInterval(() => {
-            if (Date.now() - lastEventAt > IDLE_TIMEOUT_MS) {
-              log(`ACP idle timeout (${IDLE_TIMEOUT_MS}ms) — closing connection`);
-              transport.close();
-            }
-          }, idleCheckInterval);
-
-          try {
-            const promptResult = (await rpc.request('session/prompt', {
+        let promptResult: { content?: Array<{ type: string; text?: string }>; stopReason: string };
+        try {
+          promptResult = (await rpc.request('session/prompt', {
+            sessionId,
+            content: [{ type: 'text', text: buildPromptText(input.prompt, systemInstructions) }],
+          })) as typeof promptResult;
+        } catch (e) {
+          // Stale continuation — server restarted and lost the session.
+          // Fall back transparently to a fresh session.
+          if (input.continuation && e instanceof Error && /session.*not found|no conversation/i.test(e.message)) {
+            log(`session ${sessionId} not found on server — creating fresh session`);
+            const sessionResult = (await rpc.request('session/new', { cwd: WORKSPACE })) as { sessionId: string };
+            sessionId = sessionResult.sessionId;
+            log(`fresh session created: ${sessionId}`);
+            yield { type: 'init', continuation: sessionId };
+            promptResult = (await rpc.request('session/prompt', {
               sessionId,
-              content: [{ type: 'text', text: buildPromptText(promptText, systemInstructions) }],
-            })) as { content?: Array<{ type: string; text?: string }>; stopReason: string };
-
-            if (promptResult.stopReason === 'cancelled') {
-              yield { type: 'error', message: 'ACP session prompt was cancelled', retryable: false };
-              return;
-            }
-
-            // Merge streamed chunks + any inline text in the final response
-            const inlineText = (promptResult.content ?? [])
-              .filter(b => b.type === 'text')
-              .map(b => b.text ?? '')
-              .join('');
-
-            const fullText = [...currentChunks, inlineText].join('').trim() || null;
-            log(`session ${sessionId} turn done (${promptResult.stopReason}), ${fullText?.length ?? 0} chars`);
-            yield { type: 'result', text: fullText };
-          } finally {
-            clearInterval(idleCheck);
+              content: [{ type: 'text', text: buildPromptText(input.prompt, systemInstructions) }],
+            })) as typeof promptResult;
+          } else {
+            throw e;
           }
         }
+
+        if (promptResult.stopReason === 'cancelled') {
+          yield { type: 'error', message: 'ACP session prompt was cancelled', retryable: false };
+          return;
+        }
+
+        // Merge streamed chunks + any inline text in the final response
+        const inlineText = (promptResult.content ?? [])
+          .filter(b => b.type === 'text')
+          .map(b => b.text ?? '')
+          .join('');
+
+        const fullText = [...chunks, inlineText].join('').trim() || null;
+        log(`session ${sessionId} done (${promptResult.stopReason}), ${fullText?.length ?? 0} chars`);
+        yield { type: 'result', text: fullText };
       } catch (e) {
         if (!aborted) {
           yield {
@@ -446,16 +428,12 @@ export class AcpClientProvider implements AgentProvider {
     }
 
     return {
-      push: (message: string) => {
-        pending.push(message);
-        waitKick?.();
-      },
-      end: () => { ended = true; waitKick?.(); },
+      push: () => { log('push() is a no-op on acp-client — each turn opens a fresh connection'); },
+      end: () => {},
       events: gen(),
       abort: () => {
         aborted = true;
         activeTransport?.close();
-        waitKick?.();
       },
     };
   }
