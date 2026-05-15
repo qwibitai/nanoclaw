@@ -202,6 +202,7 @@ If a main Claude agent is already wired to this messaging group, ask the user wh
 
 **Option C — Dedicated channel**
 The user will use a separate chat or channel exclusively for this agent. No wiring needed now — when the dedicated channel is set up, use Option B for it.
+
 ## Running an ACP agent for testing
 
 ### Option A — Groq test agent (subprocess mode, no server needed)

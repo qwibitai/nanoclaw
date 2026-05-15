@@ -240,6 +240,23 @@ function resolveWorkspacePath(filePath: string): string | null {
 // "done" is not in the spec but our test server uses it for compat.
 const STOP_REASON_SUCCESS = new Set(['end_turn', 'done', 'max_tokens', 'max_turn_requests']);
 
+// ── XML stripping ──────────────────────────────────────────────────────────
+// NanoClaw formats conversation history as XML for Claude. External ACP agents
+// are not Claude — strip to plain text so they see a clean conversation.
+function stripXmlMessages(prompt: string): string {
+  if (!prompt.includes('<message') && !prompt.includes('<context')) return prompt;
+  const lines: string[] = [];
+  const messageRe = /<message[^>]*\ssender="([^"]*)"[^>]*>([\s\S]*?)<\/message>/g;
+  let match: RegExpExecArray | null;
+  while ((match = messageRe.exec(prompt)) !== null) {
+    const text = match[2].replace(/<[^>]+>/g, '').trim();
+    if (text) lines.push(text);
+  }
+  if (lines.length === 0) return prompt;
+  const TRIGGER_RE = /^[a-z][a-z0-9_-]*:\s*/i;
+  return lines.map((l) => l.replace(TRIGGER_RE, '')).join('\n');
+}
+
 // ── Injectable transport factory (overridden in tests) ──────────────────────
 
 export const _test = {
@@ -347,7 +364,7 @@ export class AcpClientProvider implements AgentProvider {
         if (text) chunks.push(text);
       });
 
-      rpc.pumpLoop().catch(() => {});
+      rpc.pumpLoop().catch(e => log(`pumpLoop closed: ${e instanceof Error ? e.message : String(e)}`));
 
       try {
         // ── initialize ────────────────────────────────────────────────────
@@ -369,6 +386,9 @@ export class AcpClientProvider implements AgentProvider {
           return;
         }
 
+        // We serve fs/ requests regardless of what the agent declares — the agent
+        // calls US for file access, not the other way around. Warn if the agent
+        // didn't advertise fs support so unexpected rejections are easier to diagnose.
         const agentCaps = initResult.agentCapabilities as { fs?: { readTextFile?: boolean; writeTextFile?: boolean } } | undefined;
         if (agentCaps && !agentCaps.fs?.readTextFile && !agentCaps.fs?.writeTextFile) {
           log('Warning: agent did not declare fs capabilities — fs/ calls may be rejected');
@@ -377,9 +397,21 @@ export class AcpClientProvider implements AgentProvider {
         // ── session: resume or new ────────────────────────────────────────
         if (aborted) { transport.close(); return; }
 
+        // Strip NanoClaw XML conversation format — external agents are not Claude
+        // and don't understand the XML wrapper. System instructions are injected
+        // as a plain <system> block that the test server (and real agents) can parse.
+        const cleanPrompt = stripXmlMessages(input.prompt);
+        const promptText = systemInstructions
+          ? `<system>\n${systemInstructions}\n</system>\n\n${cleanPrompt}`
+          : cleanPrompt;
+
+        // ── session: resume or new ────────────────────────────────────────
+        if (aborted) { transport.close(); return; }
+
         let sessionId: string;
-        if (input.continuation) {
-          sessionId = input.continuation;
+        const isResume = !!input.continuation;
+        if (isResume) {
+          sessionId = input.continuation!;
           log(`resuming session: ${sessionId}`);
         } else {
           const sessionResult = (await rpc.request('session/new', {
@@ -388,16 +420,14 @@ export class AcpClientProvider implements AgentProvider {
           })) as { sessionId: string };
           sessionId = sessionResult.sessionId;
           log(`session created: ${sessionId}`);
+          // Emit init immediately so the poll-loop persists the sessionId even
+          // if the container dies before the prompt response arrives.
+          yield { type: 'init', continuation: sessionId };
         }
-        yield { type: 'init', continuation: sessionId };
 
         // ── session/prompt ────────────────────────────────────────────────
         if (aborted) { transport.close(); return; }
         yield { type: 'activity' };
-
-        const promptText = systemInstructions
-          ? `<system>\n${systemInstructions}\n</system>\n\n${input.prompt}`
-          : input.prompt;
 
         let promptResult: { content?: Array<{ type: string; text?: string }>; stopReason: string };
         try {
@@ -405,10 +435,12 @@ export class AcpClientProvider implements AgentProvider {
             sessionId,
             prompt: [{ type: 'text', text: promptText }],
           })) as typeof promptResult;
+          // Resume succeeded — emit init with the resumed session id.
+          if (isResume) yield { type: 'init', continuation: sessionId };
         } catch (e) {
           // Stale continuation — agent lost the session (e.g. server restarted).
-          // Transparently create a fresh session and retry.
-          if (input.continuation && e instanceof Error && /session.*not found|no conversation/i.test(e.message)) {
+          // Transparently create a fresh session and retry without surfacing an error.
+          if (isResume && e instanceof Error && /session.*not found|no conversation/i.test(e.message)) {
             log(`session ${sessionId} not found — creating fresh session`);
             const sessionResult = (await rpc.request('session/new', {
               cwd: WORKSPACE,
@@ -451,7 +483,8 @@ export class AcpClientProvider implements AgentProvider {
         const fullText = [...chunks, inlineText].join('').trim() || null;
         log(`session ${sessionId} done (${stopReason}), ${fullText?.length ?? 0} chars`);
 
-        // ── session/close — best-effort, don't block on it ────────────────
+        // Best-effort close: transport shuts down immediately after, so the
+        // agent may not receive this if it's slow. Intentional — we don't block.
         rpc.request('session/close', { sessionId }).catch(() => {});
 
         yield { type: 'result', text: fullText };
