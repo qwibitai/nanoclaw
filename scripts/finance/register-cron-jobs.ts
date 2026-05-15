@@ -92,6 +92,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   registerCronJobs({ inboundDbPath, configPath, promptsDir });
 
-  console.log(`✅ 5 cron jobs registered in ${inboundDbPath}`);
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { jobs: unknown[] };
+  console.log(`✅ ${config.jobs.length} cron jobs registered in ${inboundDbPath}`);
   console.log('   Verify: sqlite3 ' + inboundDbPath + ' "SELECT id, kind, recurrence, datetime(process_after) FROM messages_in WHERE recurrence IS NOT NULL;"');
 }
