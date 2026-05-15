@@ -12,6 +12,8 @@ import {
   CardText,
   Actions,
   Button,
+  LinkButton,
+  type CardChild,
   type Adapter,
   type ConcurrencyStrategy,
   type Message as ChatMessage,
@@ -271,12 +273,13 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // Chat SDK dispatch (handling-events.mdx §"Handler dispatch order") is
       // exclusive: subscribed → onSubscribedMessage; unsubscribed+mention →
       // onNewMention; unsubscribed+pattern-match → onNewMessage. Registering
-      // with `/./` lets the router see every plain message on every
-      // unsubscribed thread the bot can see. The router short-circuits via
+      // with `/[\s\S]*/` lets the router see every plain message (including
+      // media-only messages with empty text) on every unsubscribed thread the
+      // bot can see. The router short-circuits via
       // getMessagingGroupWithAgentCount (~1 DB read) for unwired channels,
       // so forwarding every one is cheap enough to not need a bridge-side
       // flood gate.
-      chat.onNewMessage(/./, async (thread, message) => {
+      chat.onNewMessage(/[\s\S]*/, async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
         await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, false, true));
       });
@@ -414,6 +417,59 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           card,
           fallbackText: `${title}\n\n${question}\nOptions: ${options.map((o) => o.label).join(', ')}`,
         });
+        return result?.id;
+      }
+
+      // Display card (send_card MCP tool) — returns immediately, no callback flow.
+      // Non-URL actions are dropped: send_card is fire-and-forget, so a
+      // callback button would have nowhere to land. URL actions render as links.
+      if (content.type === 'card' && content.card && typeof content.card === 'object') {
+        const cardSpec = content.card as Record<string, unknown>;
+        const title = (cardSpec.title as string) || '';
+        const fallbackText = (content.fallbackText as string) || (cardSpec.description as string) || title || '';
+
+        const cardChildren: CardChild[] = [];
+        if (typeof cardSpec.description === 'string' && cardSpec.description) {
+          cardChildren.push(CardText(cardSpec.description));
+        }
+        if (Array.isArray(cardSpec.children)) {
+          for (const child of cardSpec.children) {
+            if (typeof child === 'string' && child) {
+              cardChildren.push(CardText(child));
+            } else if (
+              child &&
+              typeof child === 'object' &&
+              typeof (child as Record<string, unknown>).text === 'string'
+            ) {
+              cardChildren.push(CardText((child as Record<string, string>).text));
+            }
+          }
+        }
+        if (Array.isArray(cardSpec.actions)) {
+          const linkButtons = (cardSpec.actions as Array<Record<string, unknown>>)
+            .filter((a) => typeof a.url === 'string' && a.url && typeof a.label === 'string' && a.label)
+            .map((a) => {
+              const style = a.style;
+              const safeStyle: 'primary' | 'danger' | 'default' | undefined =
+                style === 'primary' || style === 'danger' || style === 'default' ? style : undefined;
+              return LinkButton({
+                label: a.label as string,
+                url: a.url as string,
+                style: safeStyle,
+              });
+            });
+          if (linkButtons.length > 0) {
+            cardChildren.push(Actions(linkButtons));
+          }
+        }
+
+        if (cardChildren.length === 0 && !title) {
+          log.warn('send_card payload empty, skipping delivery');
+          return;
+        }
+
+        const card = Card({ title, children: cardChildren });
+        const result = await adapter.postMessage(tid, { card, fallbackText });
         return result?.id;
       }
 

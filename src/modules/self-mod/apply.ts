@@ -12,8 +12,9 @@
  *   MCP wiring change needs nothing more than a process restart.
  */
 import { updateContainerConfig } from '../../container-config.js';
-import { buildAgentGroupImage, killContainer } from '../../container-runner.js';
+import { buildAgentGroupImage, killContainer, wakeContainer } from '../../container-runner.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
+import { getSession } from '../../db/sessions.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import type { ApprovalHandler } from '../approvals/index.js';
@@ -36,9 +37,6 @@ export const applyInstallPackages: ApprovalHandler = async ({ session, payload, 
   log.info('Package install approved', { agentGroupId: session.agent_group_id, userId });
   try {
     await buildAgentGroupImage(session.agent_group_id);
-    killContainer(session.id, 'rebuild applied');
-    // Schedule a follow-up prompt a few seconds after kill so the host sweep
-    // respawns the container on the new image and the agent verifies + reports.
     writeSessionMessage(session.agent_group_id, session.id, {
       id: `appr-note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       kind: 'chat',
@@ -51,10 +49,11 @@ export const applyInstallPackages: ApprovalHandler = async ({ session, payload, 
         sender: 'system',
         senderId: 'system',
       }),
-      processAfter: new Date(Date.now() + 5000)
-        .toISOString()
-        .replace('T', ' ')
-        .replace(/\.\d+Z$/, ''),
+      onWake: 1,
+    });
+    killContainer(session.id, 'rebuild applied', () => {
+      const fresh = getSession(session.id);
+      if (fresh) void wakeContainer(fresh);
     });
     log.info('Container rebuild completed (bundled with install)', { agentGroupId: session.agent_group_id });
   } catch (e) {
@@ -79,7 +78,23 @@ export const applyAddMcpServer: ApprovalHandler = async ({ session, payload, use
     };
   });
 
-  killContainer(session.id, 'mcp server added');
-  notify(`MCP server "${payload.name}" added. Your container will restart with it on the next message.`);
+  writeSessionMessage(session.agent_group_id, session.id, {
+    id: `appr-note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    kind: 'chat',
+    timestamp: new Date().toISOString(),
+    platformId: session.agent_group_id,
+    channelType: 'agent',
+    threadId: null,
+    content: JSON.stringify({
+      text: `MCP server "${payload.name}" added. Verify it's available (e.g. list your tools) and report the result to the user.`,
+      sender: 'system',
+      senderId: 'system',
+    }),
+    onWake: 1,
+  });
+  killContainer(session.id, 'mcp server added', () => {
+    const fresh = getSession(session.id);
+    if (fresh) void wakeContainer(fresh);
+  });
   log.info('MCP server add approved', { agentGroupId: session.agent_group_id, userId });
 };

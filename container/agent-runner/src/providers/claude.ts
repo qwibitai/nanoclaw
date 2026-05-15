@@ -58,7 +58,9 @@ const SDK_DISALLOWED_TOOLS = [
   'ExitWorktree',
 ];
 
-// Tool allowlist for NanoClaw agent containers
+// Tool allowlist for NanoClaw agent containers. MCP-tool entries are derived
+// at the call site from the registered `mcpServers` map so any server added
+// via `add_mcp_server` or container.json is reachable to the agent.
 const TOOL_ALLOWLIST = [
   'Bash',
   'Read',
@@ -78,8 +80,14 @@ const TOOL_ALLOWLIST = [
   'ToolSearch',
   'Skill',
   'NotebookEdit',
-  'mcp__nanoclaw__*',
 ];
+
+// MCP server names are sanitized by the SDK when forming tool prefixes:
+// any character outside [A-Za-z0-9_-] becomes '_'. Mirror that here so our
+// allowlist patterns match what the SDK actually exposes.
+function mcpAllowPattern(serverName: string): string {
+  return `mcp__${serverName.replace(/[^a-zA-Z0-9_-]/g, '_')}__*`;
+}
 
 interface SDKUserMessage {
   type: 'user';
@@ -360,7 +368,7 @@ export class ClaudeProvider implements AgentProvider {
           ? { type: 'preset' as const, preset: 'claude_code' as const, append: instructions }
           : undefined,
         model,
-        allowedTools: TOOL_ALLOWLIST,
+        allowedTools: [...TOOL_ALLOWLIST, ...Object.keys(this.mcpServers).map(mcpAllowPattern)],
         disallowedTools: SDK_DISALLOWED_TOOLS,
         env: this.env,
         permissionMode: 'bypassPermissions',

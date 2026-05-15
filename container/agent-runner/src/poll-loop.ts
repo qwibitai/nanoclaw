@@ -1,7 +1,7 @@
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
 import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
-import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
+import { touchHeartbeat, clearStaleProcessingAcks, getInboundDb } from './db/connection.js';
 import {
   clearContinuation,
   migrateLegacyContinuation,
@@ -62,9 +62,11 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   clearStaleProcessingAcks();
 
   let pollCount = 0;
+  let isFirstPoll = true;
   while (true) {
     // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
-    const messages = getPendingMessages().filter((m) => m.kind !== 'system');
+    const messages = getPendingMessages(isFirstPoll).filter((m) => m.kind !== 'system');
+    isFirstPoll = false;
     pollCount++;
 
     // Periodic heartbeat so we know the loop is alive
@@ -541,18 +543,40 @@ export function isErrorPacketContent(content: string): boolean {
 function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {
   const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
   const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
-  // Inherit thread_id from the inbound routing context so replies land in the
-  // same thread the conversation is in. For non-threaded adapters the router
-  // strips thread_id at ingest, so this will already be null.
+  // Resolve thread_id per destination from the most recent inbound message
+  // from this same channel/platform. In shared sessions, different
+  // destinations can have different thread contexts; using one routing.threadId
+  // would stamp one channel's thread onto another.
+  const destRouting = resolveDestinationThread(channelType, platformId);
   writeMessageOut({
     id: generateId(),
-    in_reply_to: routing.inReplyTo,
+    in_reply_to: destRouting?.inReplyTo ?? routing.inReplyTo,
     kind: 'chat',
     platform_id: platformId,
     channel_type: channelType,
-    thread_id: routing.threadId,
+    thread_id: destRouting?.threadId ?? null,
     content: JSON.stringify({ text: body }),
   });
+}
+
+function resolveDestinationThread(
+  channelType: string,
+  platformId: string,
+): { threadId: string | null; inReplyTo: string | null } | null {
+  try {
+    const db = getInboundDb();
+    const row = db
+      .prepare(
+        `SELECT thread_id, id FROM messages_in
+         WHERE channel_type = ? AND platform_id = ?
+         ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(channelType, platformId) as { thread_id: string | null; id: string } | undefined;
+    if (row) return { threadId: row.thread_id, inReplyTo: row.id };
+  } catch (err) {
+    log(`resolveDestinationThread error: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return null;
 }
 
 function sendErrorPacketToThedius(

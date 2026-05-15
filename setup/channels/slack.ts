@@ -131,7 +131,7 @@ async function walkThroughAppCreation(): Promise<void> {
       '  2. OAuth & Permissions → add Bot Token Scopes:',
       '     chat:write, im:write, channels:history, groups:history,',
       '     im:history, channels:read, groups:read, users:read,',
-      '     reactions:write',
+      '     reactions:write, files:read, files:write',
       '  3. App Home → enable "Messages Tab" and "Allow users to send',
       '     slash commands and messages from the messages tab"',
       '  4. Basic Information → copy the "Signing Secret"',

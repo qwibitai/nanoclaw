@@ -171,7 +171,12 @@ CREATE TABLE IF NOT EXISTS messages_in (
   platform_id    TEXT,
   channel_type   TEXT,
   thread_id      TEXT,
-  content        TEXT NOT NULL
+  content        TEXT NOT NULL,
+  -- For agent-to-agent inbound: source session that emitted the triggering
+  -- outbound. Used as a return path when the target replies.
+  source_session_id TEXT,
+  on_wake        INTEGER NOT NULL DEFAULT 0
+                 -- 1 = only deliver on the container's first poll.
 );
 CREATE INDEX IF NOT EXISTS idx_messages_in_series ON messages_in(series_id);
 

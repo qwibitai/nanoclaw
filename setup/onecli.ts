@@ -105,6 +105,7 @@ function writeEnvOnecliUrl(url: string): void {
 // Last-known-good CLI release. Used only if BOTH the upstream installer
 // and the redirect-based version probe fail. Bump deliberately when a
 // new CLI release ships.
+const ONECLI_GATEWAY_VERSION = '1.23.0';
 const ONECLI_CLI_FALLBACK_VERSION = '1.3.0';
 const ONECLI_CLI_REPO = 'onecli/onecli-cli';
 
@@ -115,11 +116,40 @@ function installOnecliCliOnly(): { stdout: string; ok: boolean } {
   return { stdout: upstream.stdout + (upstream.stderr ?? '') + '\n' + fallback.stdout, ok: fallback.ok };
 }
 
+function removeLegacyOnecliContainers(): string {
+  const out: string[] = [];
+  let list = '';
+  try {
+    list = execSync(
+      `docker ps -a --filter "label=com.docker.compose.project=onecli" --format '{{.Names}}|{{.Label "com.docker.compose.service"}}'`,
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] },
+    ).trim();
+  } catch {
+    return '';
+  }
+  if (!list) return '';
+  const v2Services = new Set(['onecli', 'postgres']);
+  for (const line of list.split('\n')) {
+    const [name, service] = line.split('|');
+    if (!name || !service || v2Services.has(service)) continue;
+    out.push(`Removing legacy OneCLI container: ${name} (service=${service})`);
+    try {
+      execSync(`docker rm -f ${JSON.stringify(name)}`, { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err) {
+      out.push(`  rm failed (continuing): ${(err as Error).message}`);
+    }
+  }
+  return out.join('\n');
+}
+
 function installOnecli(): { stdout: string; ok: boolean } {
   let stdout = '';
 
+  const cleanup = removeLegacyOnecliContainers();
+  if (cleanup) stdout += cleanup + '\n';
+
   // Gateway install (docker-compose based, no rate-limit concerns).
-  const gw = runInstall('curl -fsSL onecli.sh/install | sh');
+  const gw = runInstall(`export ONECLI_VERSION=${ONECLI_GATEWAY_VERSION} && curl -fsSL onecli.sh/install | sh`);
   stdout += gw.stdout;
   if (!gw.ok) {
     log.error('OneCLI gateway install failed', { stderr: gw.stderr });

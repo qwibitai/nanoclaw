@@ -23,10 +23,11 @@ import path from 'path';
 
 import { isSafeAttachmentName } from '../../attachment-safety.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
+import { getInboundSourceSessionId, getMostRecentPeerSourceSessionId } from '../../db/session-db.js';
 import { getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
 import { log } from '../../log.js';
-import { resolveSession, sessionDir, writeSessionMessage } from '../../session-manager.js';
+import { openInboundDb, resolveSession, sessionDir, writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { hasDestination } from './db/agent-destinations.js';
 
@@ -101,6 +102,33 @@ export interface RoutableAgentMessage {
   id: string;
   platform_id: string | null;
   content: string;
+  /**
+   * For replies, the id of the inbound message being replied to. Used to
+   * route the reply back to the originating session.
+   */
+  in_reply_to: string | null;
+}
+
+function resolveTargetSession(msg: RoutableAgentMessage, sourceSession: Session, targetAgentGroupId: string): Session {
+  const srcDb = openInboundDb(sourceSession.agent_group_id, sourceSession.id);
+  let originSessionId: string | null = null;
+  try {
+    if (msg.in_reply_to) {
+      originSessionId = getInboundSourceSessionId(srcDb, msg.in_reply_to);
+    }
+    if (!originSessionId) {
+      originSessionId = getMostRecentPeerSourceSessionId(srcDb, targetAgentGroupId);
+    }
+  } finally {
+    srcDb.close();
+  }
+  if (originSessionId) {
+    const candidate = getSession(originSessionId);
+    if (candidate && candidate.agent_group_id === targetAgentGroupId && candidate.status === 'active') {
+      return candidate;
+    }
+  }
+  return resolveSession(targetAgentGroupId, null, null, 'agent-shared').session;
 }
 
 export async function routeAgentMessage(msg: RoutableAgentMessage, session: Session): Promise<void> {
@@ -119,7 +147,7 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
   if (!getAgentGroup(targetAgentGroupId)) {
     throw new Error(`target agent group ${targetAgentGroupId} not found for message ${msg.id}`);
   }
-  const { session: targetSession } = resolveSession(targetAgentGroupId, null, null, 'agent-shared');
+  const targetSession = resolveTargetSession(msg, session, targetAgentGroupId);
   const a2aMsgId = `a2a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // If the source message references files (via `send_file`), forward the
@@ -137,6 +165,7 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
     channelType: 'agent',
     threadId: null,
     content: forwardedContent,
+    sourceSessionId: session.id,
   });
   log.info('Agent message routed', {
     from: session.agent_group_id,

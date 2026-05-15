@@ -267,9 +267,13 @@ async function spawnContainer(session: Session): Promise<void> {
 }
 
 /** Kill a container for a session. */
-export function killContainer(sessionId: string, reason: string): void {
+export function killContainer(sessionId: string, reason: string, onExit?: () => void): void {
   const entry = activeContainers.get(sessionId);
   if (!entry) return;
+
+  if (onExit) {
+    entry.process.once('close', onExit);
+  }
 
   log.info('Killing container', { sessionId, reason, containerName: entry.containerName });
   entry.killedReason = reason;

@@ -8,7 +8,7 @@ on:
 
 jobs:
   update-tokens:
-    if: github.repository == 'qwibitai/nanoclaw'
+    if: github.repository == 'nanocoai/nanoclaw'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/create-github-app-token@v1

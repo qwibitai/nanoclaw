@@ -26,7 +26,7 @@ NanoClaw 用一个您能轻松理解的代码库提供了同样的核心功能�
 ## 快速开始
 
 ```bash
-git clone https://github.com/qwibitai/nanoclaw.git nanoclaw-v2
+git clone https://github.com/nanocoai/nanoclaw.git nanoclaw-v2
 cd nanoclaw-v2
 bash nanoclaw.sh
 ```

@@ -19,6 +19,7 @@ import {
   markDelivered,
   markDeliveryFailed,
   migrateDeliveredTable,
+  type OutboundMessage,
 } from './db/session-db.js';
 import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
@@ -233,14 +234,7 @@ async function drainSession(session: Session): Promise<void> {
 }
 
 async function deliverMessage(
-  msg: {
-    id: string;
-    kind: string;
-    platform_id: string | null;
-    channel_type: string | null;
-    thread_id: string | null;
-    content: string;
-  },
+  msg: OutboundMessage,
   session: Session,
   inDb: Database.Database,
 ): Promise<string | undefined> {

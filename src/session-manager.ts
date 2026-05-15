@@ -209,6 +209,10 @@ export function writeSessionMessage(
      * a trigger-1 message does arrive.
      */
     trigger?: 0 | 1;
+    /** Return path for agent-to-agent messages. NULL on channel-side inbound. */
+    sourceSessionId?: string | null;
+    /** 1 = deliver only on a fresh container's first poll. */
+    onWake?: 0 | 1;
   },
 ): void {
   // Extract base64 attachment data, save to inbox, replace with file paths
@@ -227,6 +231,8 @@ export function writeSessionMessage(
       processAfter: message.processAfter ?? null,
       recurrence: message.recurrence ?? null,
       trigger: message.trigger ?? 1,
+      sourceSessionId: message.sourceSessionId ?? null,
+      onWake: message.onWake ?? 0,
     });
   } finally {
     db.close();
