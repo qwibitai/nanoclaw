@@ -334,7 +334,11 @@ export class AcpClientProvider implements AgentProvider {
       rpc.onNotification('session/update', (params) => {
         const p = params as { update?: { sessionUpdate?: string; kind?: string; content?: unknown } };
         const updateType = p?.update?.sessionUpdate ?? p?.update?.kind;
-        if (updateType !== 'agent_message_chunk') return;
+        if (updateType !== 'agent_message_chunk') {
+          // plan, tool_call, tool_call_update — log but do not error
+          if (updateType) log(`session/update: ${updateType} (not collected)`);
+          return;
+        }
         const c = p.update!.content as { content?: Array<{ type: string; text?: string }> } | undefined;
         const text = (c?.content ?? [])
           .filter(b => b.type === 'text')
@@ -363,6 +367,11 @@ export class AcpClientProvider implements AgentProvider {
         if (initResult.protocolVersion !== undefined && initResult.protocolVersion !== 1) {
           yield { type: 'error', message: `ACP agent uses unsupported protocol version ${initResult.protocolVersion}`, retryable: false };
           return;
+        }
+
+        const agentCaps = initResult.agentCapabilities as { fs?: { readTextFile?: boolean; writeTextFile?: boolean } } | undefined;
+        if (agentCaps && !agentCaps.fs?.readTextFile && !agentCaps.fs?.writeTextFile) {
+          log('Warning: agent did not declare fs capabilities — fs/ calls may be rejected');
         }
 
         // ── session: resume or new ────────────────────────────────────────
