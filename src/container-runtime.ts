@@ -25,12 +25,18 @@ export function readonlyMountArgs(hostPath: string, containerPath: string): stri
   return ['-v', `${hostPath}:${containerPath}:ro`];
 }
 
-/** Stop a container by name. Uses execFileSync to avoid shell injection. */
+/**
+ * Stop a container by name. Grace window is 10s before SIGKILL so the
+ * agent-runner's SIGTERM handler has time to close bun:sqlite cleanly —
+ * 1s wasn't enough for SQLite to flush the page cache and release the file
+ * lock on macOS gRPC-FUSE bind mounts, which is what caused recurring
+ * "disk I/O error" / "readonly database" wedges on session DBs.
+ */
 export function stopContainer(name: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
     throw new Error(`Invalid container name: ${name}`);
   }
-  execSync(`${CONTAINER_RUNTIME_BIN} stop -t 1 ${name}`, { stdio: 'pipe' });
+  execSync(`${CONTAINER_RUNTIME_BIN} stop -t 10 ${name}`, { stdio: 'pipe' });
 }
 
 /** Ensure the container runtime is running, starting it if needed. */

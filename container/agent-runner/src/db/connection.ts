@@ -115,6 +115,27 @@ export function clearContainerToolInFlight(): void {
 }
 
 /**
+ * Close both session DBs. Called from the signal handler in index.ts on
+ * SIGTERM/SIGINT so any in-flight write is flushed and the file lock is
+ * released before the process exits. Idempotent — safe to call twice if
+ * both SIGTERM and SIGINT arrive.
+ */
+export function closeSessionDbs(): void {
+  try {
+    _outbound?.close();
+  } catch {
+    /* already closed */
+  }
+  _outbound = null;
+  try {
+    _inbound?.close();
+  } catch {
+    /* already closed */
+  }
+  _inbound = null;
+}
+
+/**
  * Touch the heartbeat file — replaces the old touchProcessing() DB writes.
  * The host checks this file's mtime for stale container detection.
  * A file touch is cheaper and avoids cross-boundary DB write contention.

@@ -26,6 +26,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { loadConfig } from './config.js';
+import { closeSessionDbs } from './db/connection.js';
 import { buildSystemPromptAddendum } from './destinations.js';
 // Providers barrel — each enabled provider self-registers on import.
 // Provider skills append imports to providers/index.ts.
@@ -38,6 +39,25 @@ function log(msg: string): void {
 }
 
 const CWD = '/workspace/agent';
+
+// Graceful shutdown: when the host's host-sweep decides this container is
+// stale (heartbeat-staleness ceiling) it runs `docker stop`, which sends
+// SIGTERM. Without a handler, Bun exits without closing bun:sqlite — any
+// write in flight gets truncated and the file lock isn't released cleanly,
+// which on macOS gRPC-FUSE bind mounts can leave outbound.db in a state
+// where the next container sees "attempt to write a readonly database" or
+// the host sees "disk I/O error" on PRAGMA. Closing both DBs flushes the
+// page cache and releases the lock so the next session inherits a clean file.
+let shuttingDown = false;
+function shutdown(signal: NodeJS.Signals): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log(`Received ${signal}, closing session DBs and exiting`);
+  closeSessionDbs();
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 async function main(): Promise<void> {
   const config = loadConfig();
