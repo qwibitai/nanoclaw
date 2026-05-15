@@ -774,3 +774,30 @@ Plan complete and saved to `docs/superpowers/plans/2026-05-15-finance-plan3-pr1-
 2. **Inline Execution** — Execute tasks in this session using executing-plans, batch execution with checkpoints.
 
 Which approach?
+
+---
+
+## Post-execution note — gitignore pivot
+
+During execution, discovered that `groups/finance/` is gitignored (privacy protection — workbook contains personal salaries, balances, medication costs). The committed artifacts had to land in the **skill template** (`.claude/skills/add-finance/`), not in the live install path that this plan originally pointed to.
+
+Resulting commit structure (5 commits on `feature/finance-plan3-pr1`):
+
+1. `docs(specs): ...` — Plan 3 design spec (pre-execution)
+2. `docs(plans): ...` — this plan doc (pre-execution)
+3. `docs(add-finance): bump claude-md-template to Plan 3 schema` — replaces Task 2 (was: `groups/finance/CLAUDE.md`)
+4. `docs(add-finance): rewrite migration-prompt for Plan 2.5 → Plan 3` — replaces Task 3 (was: `groups/finance/migration.md`)
+5. `docs(add-finance): document Plan 2.5 → Plan 3 upgrade path in SKILL.md` — new (operator-facing upgrade instructions)
+
+Task 1 (move `Controle_Despesas_Jonas_DOC.md` into workspace) was executed but NOT committed — the doc has personal data and `groups/finance/` is gitignored. The file lives on the operator's disk only.
+
+Operator post-merge workflow (now documented in `SKILL.md` "From Plan 2.5 → Plan 3" section):
+1. `git pull`
+2. `cp .claude/skills/add-finance/claude-md-template.md groups/finance/CLAUDE.md`
+3. `cp .claude/skills/add-finance/migration-prompt.md groups/finance/migration.md`
+4. Move local doc to `groups/finance/` (if not already there)
+5. Paste `groups/finance/migration.md` into the bot
+6. Validate via checklist
+7. DON'T `/clear` yet — PR 2 will trigger that
+
+See spec §11 ("Implementation pivot — gitignore protection") for the full rationale.

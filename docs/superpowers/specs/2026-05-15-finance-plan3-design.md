@@ -400,4 +400,31 @@ Each PR is independent: validated, mergeable, and rollback-safe. Ordering matter
 
 ---
 
+---
+
+## 11. Implementation pivot — gitignore protection (2026-05-15, post-spec)
+
+Discovered during PR 1 execution: `groups/finance/` is gitignored by design (`.gitignore` line 13: `groups/*` with allowlist for `groups/main/`, `groups/global/`, `groups/lobby/` only). This is intentional privacy protection — the Finance workbook reflects Jonas's personal salaries, balances, medication costs, family details, etc. Committing those values would expose them in the public GitHub repo.
+
+**Effect on this spec:**
+
+Every reference in §3, §4, §5, §7, §8 to files at `groups/finance/<file>` should be read as:
+
+- **Committed artifact:** `.claude/skills/add-finance/<file>` (the generic skill template — no per-operator data)
+- **Local install file:** `groups/finance/<file>` (operator's copy — gitignored, contains real values)
+
+The reform itself is unchanged — schema, intents, crons, exportar_doc, etc. all stand. Only the *delivery mechanism* changed:
+
+| Concept (spec) | Where it lives (committed) | Where the operator uses it (local, gitignored) |
+|---|---|---|
+| `groups/finance/CLAUDE.md` schema description | `.claude/skills/add-finance/claude-md-template.md` | `groups/finance/CLAUDE.md` (cp from template) |
+| `groups/finance/migration.md` (Plan 2.5 → 3 prompt) | `.claude/skills/add-finance/migration-prompt.md` | `groups/finance/migration.md` (cp from template) |
+| `Controle_Despesas_Jonas_DOC.md` (Jonas's data) | (not committed — privacy) | `groups/finance/Controle_Despesas_Jonas_DOC.md` |
+| `groups/finance/system-prompt.md` (PR 2 changes) | `.claude/skills/add-finance/system-prompt.md` | `groups/finance/system-prompt.md` (cp from template) |
+| `scheduled-jobs/*.md` (PR 3 cron prompts) | `.claude/skills/add-finance/scheduled-jobs/*.md` | `groups/finance/scheduled-jobs/*.md` (cp) |
+
+The migration prompt (Step D) reads the operator's local canonical doc via `Read` from `/workspace/agent/` — so per-operator bootstrap data flows through the agent's runtime workspace, never through git.
+
+PR 2 and PR 3 follow the same pattern: ship template, operator `cp`s to local, runs.
+
 **End of design.**
