@@ -19,6 +19,7 @@ import { log } from '../../log.js';
 import { ensureHealthMonitorSetup } from './setup.js';
 import { checkTokenExpiry, checkSilentFail } from './checks.js';
 import { postAlert, injectTask } from './alert.js';
+import { tryRefreshOauthToken } from './token-refresh.js';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1_000;
 const ALERT_COOLDOWN_MS = 60 * 60 * 1_000;
@@ -33,21 +34,36 @@ function shouldAlert(key: string): boolean {
 }
 
 async function runChecks(): Promise<void> {
-  // Check 1: OAuth token near-expiry
+  // Check 1: OAuth token near-expiry — attempt auto-refresh first, only alert if it fails
   for (const { agentGroupId, minutesLeft } of checkTokenExpiry()) {
     const key = `token:${agentGroupId}`;
     if (!shouldAlert(key)) continue;
-    const msg =
-      `⚠️ **OAuth token expiring** — agent group \`${agentGroupId}\` expires in ${minutesLeft} min. ` +
-      `Pre-spawn refresh should handle it; alerting as belt-and-suspenders.`;
-    log.warn('[health-monitor] Token near-expiry', { agentGroupId, minutesLeft });
-    await postAlert(msg);
-    await injectTask(
-      `OAuth token for agent group "${agentGroupId}" expires in ${minutesLeft} minutes. ` +
-        `Verify the pre-spawn Keychain refresh is working: check the expiresAt in ` +
-        `data/v2-sessions/${agentGroupId}/claude.json against the current time. ` +
-        `If stale, read fresh token: security find-generic-password -s "Claude Code-credentials" -w`,
-    );
+
+    log.warn('[health-monitor] Token near-expiry, attempting auto-refresh', { agentGroupId, minutesLeft });
+    const result = await tryRefreshOauthToken(agentGroupId);
+
+    if (result === 'refreshed') {
+      await postAlert(
+        `✅ **OAuth token auto-refreshed** — agent group \`${agentGroupId}\` was expiring in ${minutesLeft} min. ` +
+          `New token written to claude.json and Keychain. No action needed.`,
+      );
+    } else {
+      const reason =
+        result === 'no-token'
+          ? 'no refresh token found in claude.json'
+          : 'refresh token rejected by Anthropic (likely expired)';
+      const msg =
+        `⚠️ **OAuth token expiring** — agent group \`${agentGroupId}\` expires in ${minutesLeft} min. ` +
+        `Auto-refresh failed (${reason}). Run \`claude login\` on the host to re-authenticate.`;
+      log.warn('[health-monitor] Token auto-refresh failed', { agentGroupId, result });
+      await postAlert(msg);
+      await injectTask(
+        `OAuth token for agent group "${agentGroupId}" expires in ${minutesLeft} minutes and auto-refresh failed (${reason}). ` +
+          `Check the current token status:\n` +
+          `python3 -c "import json,datetime; d=json.load(open('/workspace/extra/nanoclaw-data/v2-sessions/${agentGroupId}/claude.json')); o=d.get('claudeAiOauth',{}); ts=o.get('expiresAt',0)/1000; exp=datetime.datetime.utcfromtimestamp(ts); print('expires (UTC):', exp, '— EXPIRED' if __import__('datetime').datetime.utcnow() > exp else '— VALID')"\n` +
+          `Then notify the user: they need to run 'claude login' on the host machine to re-authenticate.`,
+      );
+    }
   }
 
   // Check 2: Silent-fail pattern per active session
