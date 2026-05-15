@@ -23,7 +23,7 @@ If any of these are missing, fix them first (`/setup`, `/customize`, etc.) and c
 
 ## Upgrade from previous Plan?
 
-If `/add-finance` was already run (Plan 1 or Plan 2) and the workbook + agent are working, **don't re-run this whole skill**. Instead:
+If `/add-finance` was already run (Plan 1, Plan 2, or Plan 2.5) and the workbook + agent are working, **don't re-run this whole skill**. Instead:
 
 ### From Plan 1 → current
 1. `git pull` to get the latest skill templates.
@@ -40,6 +40,18 @@ If `/add-finance` was already run (Plan 1 or Plan 2) and the workbook + agent ar
 4. `cp .claude/skills/add-finance/system-prompt.md groups/finance/system-prompt.md` (full overwrite — the live file is a mirror, not a customization).
 5. Run `scripts/finance/unregister-cron-jobs.ts` then `scripts/finance/register-cron-jobs.ts` to replace the 5 `kind='scheduled'` rows with `kind='task'` rows.
 6. In Telegram, send `/clear` to the bot.
+
+### From Plan 2.5 → Plan 3 (PR 1 — schema + bootstrap)
+
+> Plan 3 lands in three PRs: **PR 1 (this step — schema + bootstrap)**, PR 2 (system-prompt update — new intents + sensibilidade rules), PR 3 (three new crons + skill template polish for new installs). After PR 1 the agent still operates in Plan 2.5 chat mode (new columns exist in the planilha but aren't used) — that's intentional; PR 2 activates them.
+
+1. `git pull` to get the latest skill templates.
+2. `cp .claude/skills/add-finance/claude-md-template.md groups/finance/CLAUDE.md` (full overwrite — describes Plan 3 schema).
+3. `cp .claude/skills/add-finance/migration-prompt.md groups/finance/migration.md` (full overwrite — Plan 2.5 → Plan 3 prompt).
+4. (Optional, recommended) If you maintain a `Controle_Despesas_Jonas_DOC.md` or equivalent canonical doc with your recorrentes, place it at `groups/finance/Controle_Despesas_Jonas_DOC.md` (gitignored — stays local). Step D of the migration uses it to bootstrap recorrentes; if the doc isn't present, that step is skipped silently and the planilha is migrated without the bootstrap (you cadastra recorrentes manually via chat afterwards).
+5. Operator pastes `groups/finance/migration.md` content into `@<bot>` to apply Plan 3 (new tabs `Subcategorias`+`Decisoes`, +7 cols in Recorrentes, +1 col in each Lançamentos, taxonomy seed, optional bootstrap, optional decisions seed). **Idempotent — safe to re-run.**
+6. After the bot reports success, walk the validation checklist at the end of `migration.md`. Expect: 14 tabs, 3 Categorias, 13 Subcategorias, every Recorrentes row with `status` set, 1 `Decisoes` row with `tipo=migracao`, 1 `_Log` entry.
+7. **Do NOT** restart the bot or run `/clear` yet — PR 1 doesn't update `system-prompt.md`. Defer the `/clear` to PR 2's rollout.
 
 Skip the whole "create agent group / bot / sheet" flow.
 
