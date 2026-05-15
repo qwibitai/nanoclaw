@@ -234,11 +234,19 @@ Or have operator send any message to a known bot and grep logs for `userId="tele
 
 Script:
 
+> ⚠️ **Use the helper functions, not raw SQL.** `createMessagingGroupAgent()` in `src/db/messaging-groups.ts` auto-creates the matching `agent_destinations` row so delivery's ACL doesn't block outbound traffic to this chat. Skipping it (by inserting via raw `db.prepare('INSERT INTO messaging_group_agents …')`) leaves the agent unable to deliver `<message to="…">` blocks and its cron firings silently no-op with `Unknown destination ... dropping block` warnings.
+
 ```typescript
 // scripts/finance/_wire-messaging.ts (one-shot, delete after)
 import path from 'path';
-import { initDb, getDb } from '../../src/db/connection.js';
+import { initDb } from '../../src/db/connection.js';
 import { runMigrations } from '../../src/db/migrations/index.js';
+import {
+  createMessagingGroup,
+  createMessagingGroupAgent,
+  getMessagingGroupByPlatform,
+  getMessagingGroupAgentByPair,
+} from '../../src/db/messaging-groups.js';
 
 const dbPath = path.join(process.cwd(), 'data', 'v2.db');
 const db = initDb(dbPath);
@@ -248,40 +256,43 @@ const CHANNEL_TYPE = 'telegram-finance';
 const PLATFORM_ID = '<telegram:OPERATOR_USER_ID>'; // e.g. telegram:8557164566
 const MG_ID = 'mg-finance-dm';
 const MGA_ID = 'mga-finance';
-const sqlite = getDb();
+const NOW = new Date().toISOString();
 
-const existingMg = sqlite
-  .prepare('SELECT id FROM messaging_groups WHERE channel_type=? AND platform_id=?')
-  .get(CHANNEL_TYPE, PLATFORM_ID) as { id: string } | undefined;
-
+// 1. messaging_groups row (the DM channel) — idempotent
+const existingMg = getMessagingGroupByPlatform(CHANNEL_TYPE, PLATFORM_ID);
 let mgId: string;
 if (existingMg) {
   mgId = existingMg.id;
   console.log(`ℹ️  messaging_group already exists: ${mgId}`);
 } else {
-  sqlite
-    .prepare(
-      `INSERT INTO messaging_groups (id, channel_type, platform_id, name, is_group, unknown_sender_policy, created_at)
-       VALUES (?, ?, ?, ?, 0, 'strict', ?)`
-    )
-    .run(MG_ID, CHANNEL_TYPE, PLATFORM_ID, '<AgentName> DM', new Date().toISOString());
+  createMessagingGroup({
+    id: MG_ID,
+    channel_type: CHANNEL_TYPE,
+    platform_id: PLATFORM_ID,
+    name: '<AgentName> DM',
+    is_group: 0,
+    unknown_sender_policy: 'strict',
+    created_at: NOW,
+  });
   mgId = MG_ID;
   console.log(`✅ messaging_group created: ${mgId}`);
 }
 
-const existingMga = sqlite
-  .prepare('SELECT id FROM messaging_group_agents WHERE messaging_group_id=? AND agent_group_id=?')
-  .get(mgId, 'finance') as { id: string } | undefined;
-
+// 2. messaging_group_agents row (the wiring) — auto-creates the matching
+//    agent_destinations row via createMessagingGroupAgent's side effect.
+const existingMga = getMessagingGroupAgentByPair(mgId, 'finance');
 if (!existingMga) {
-  sqlite
-    .prepare(
-      `INSERT INTO messaging_group_agents
-       (id, messaging_group_id, agent_group_id, trigger_rules, response_scope, session_mode, priority, created_at)
-       VALUES (?, ?, ?, NULL, 'all', 'shared', 0, ?)`
-    )
-    .run(MGA_ID, mgId, 'finance', new Date().toISOString());
-  console.log(`✅ messaging_group_agent created: ${MGA_ID}`);
+  createMessagingGroupAgent({
+    id: MGA_ID,
+    messaging_group_id: mgId,
+    agent_group_id: 'finance',
+    trigger_rules: null,
+    response_scope: 'all',
+    session_mode: 'shared',
+    priority: 0,
+    created_at: NOW,
+  });
+  console.log(`✅ messaging_group_agent + agent_destinations created: ${MGA_ID}`);
 } else {
   console.log(`ℹ️  messaging_group_agent already exists: ${existingMga.id}`);
 }

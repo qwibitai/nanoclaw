@@ -546,6 +546,12 @@ Paste the operator's token into `TOKEN` before running.
 import path from 'path';
 import { initDb, getDb } from '../../src/db/connection.js';
 import { getAgentGroup } from '../../src/db/agent-groups.js';
+import {
+  createMessagingGroup,
+  createMessagingGroupAgent,
+  getMessagingGroupByPlatform,
+  getMessagingGroupAgentByPair,
+} from '../../src/db/messaging-groups.js';
 import { runMigrations } from '../../src/db/migrations/index.js';
 
 const TOKEN = '<PASTE BOTFATHER TOKEN HERE>';
@@ -567,45 +573,49 @@ cfg.telegramBotToken = TOKEN;
 getDb().prepare('UPDATE agent_groups SET container_config=? WHERE id=?').run(JSON.stringify(cfg), 'lobby');
 console.log('✅ Token wired into agent_groups.lobby.container_config');
 
-const sqlite = getDb();
 const CHANNEL_TYPE = 'telegram-lobby';
 const MG_ID = 'mg-lobby-dm';
 const MGA_ID = 'mga-lobby';
+const NOW = new Date().toISOString();
 
-// 2. messaging_groups row (the DM channel)
-const existingMg = sqlite
-  .prepare('SELECT id FROM messaging_groups WHERE channel_type=? AND platform_id=?')
-  .get(CHANNEL_TYPE, PLATFORM_ID) as { id: string } | undefined;
-
+// 2. messaging_groups row (the DM channel) — idempotent
+const existingMg = getMessagingGroupByPlatform(CHANNEL_TYPE, PLATFORM_ID);
 let mgId: string;
 if (existingMg) {
   mgId = existingMg.id;
   console.log(`ℹ️  messaging_group already exists: ${mgId}`);
 } else {
-  sqlite
-    .prepare(
-      `INSERT INTO messaging_groups (id, channel_type, platform_id, name, is_group, unknown_sender_policy, created_at)
-       VALUES (?, ?, ?, ?, 0, 'strict', ?)`,
-    )
-    .run(MG_ID, CHANNEL_TYPE, PLATFORM_ID, 'Lobby DM', new Date().toISOString());
+  createMessagingGroup({
+    id: MG_ID,
+    channel_type: CHANNEL_TYPE,
+    platform_id: PLATFORM_ID,
+    name: 'Lobby DM',
+    is_group: 0,
+    unknown_sender_policy: 'strict',
+    created_at: NOW,
+  });
   mgId = MG_ID;
   console.log(`✅ messaging_group created: ${mgId}`);
 }
 
-// 3. messaging_group_agents row (the wiring) — session_mode='shared' matches Naia + Finance DM agents
-const existingMga = sqlite
-  .prepare('SELECT id FROM messaging_group_agents WHERE messaging_group_id=? AND agent_group_id=?')
-  .get(mgId, 'lobby') as { id: string } | undefined;
-
+// 3. messaging_group_agents row (the wiring) — session_mode='shared' matches
+//    Naia + Finance DM agents. createMessagingGroupAgent() also auto-creates
+//    the matching agent_destinations row; without it, the agent's outbound
+//    <message to="..."> blocks (and cron firings that use them) are silently
+//    dropped with "Unknown destination" warnings — see commit e0dfdec.
+const existingMga = getMessagingGroupAgentByPair(mgId, 'lobby');
 if (!existingMga) {
-  sqlite
-    .prepare(
-      `INSERT INTO messaging_group_agents
-       (id, messaging_group_id, agent_group_id, trigger_rules, response_scope, session_mode, priority, created_at)
-       VALUES (?, ?, ?, NULL, 'all', 'shared', 0, ?)`,
-    )
-    .run(MGA_ID, mgId, 'lobby', new Date().toISOString());
-  console.log(`✅ messaging_group_agent created: ${MGA_ID}`);
+  createMessagingGroupAgent({
+    id: MGA_ID,
+    messaging_group_id: mgId,
+    agent_group_id: 'lobby',
+    trigger_rules: null,
+    response_scope: 'all',
+    session_mode: 'shared',
+    priority: 0,
+    created_at: NOW,
+  });
+  console.log(`✅ messaging_group_agent + agent_destinations created: ${MGA_ID}`);
 } else {
   console.log(`ℹ️  messaging_group_agent already exists: ${existingMga.id}`);
 }
@@ -614,7 +624,7 @@ if (!existingMga) {
 - [ ] **Step 2: Run the script**
 
 Run: `cd /root/nanoclaw && npx tsx scripts/lobby/_wire-bot.ts`
-Expected three lines: `✅ Token wired...`, `✅ messaging_group created: mg-lobby-dm`, `✅ messaging_group_agent created: mga-lobby`.
+Expected three lines: `✅ Token wired...`, `✅ messaging_group created: mg-lobby-dm`, `✅ messaging_group_agent + agent_destinations created: mga-lobby`.
 
 - [ ] **Step 3: Verify the rows**
 
