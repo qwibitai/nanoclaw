@@ -41,15 +41,14 @@ export async function tryRefreshOauthToken(agentGroupId: string): Promise<'refre
 
   let resp: Response;
   try {
-    // RFC 6749 token endpoint: form-encoded body
     resp = await fetch(TOKEN_ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'claude-code/1.0' },
+      body: JSON.stringify({
         grant_type: 'refresh_token',
         refresh_token: current.refreshToken,
         client_id: CLIENT_ID,
-      }).toString(),
+      }),
     });
   } catch (err) {
     log.warn('[health-monitor] Token refresh network error', { err, agentGroupId });
