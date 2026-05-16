@@ -42,26 +42,25 @@ async function runChecks(): Promise<void> {
     log.warn('[health-monitor] Token near-expiry, attempting auto-refresh', { agentGroupId, minutesLeft });
     const result = await tryRefreshOauthToken(agentGroupId);
 
+    const timeDesc =
+      minutesLeft < 0 ? `already expired ${Math.abs(minutesLeft)} min ago` : `expires in ${minutesLeft} min`;
+
     if (result === 'refreshed') {
       await postAlert(
-        `✅ **OAuth token auto-refreshed** — agent group \`${agentGroupId}\` was expiring in ${minutesLeft} min. ` +
+        `✅ **OAuth token auto-refreshed** — agent group \`${agentGroupId}\` (${timeDesc}). ` +
           `New token written to claude.json and Keychain. No action needed.`,
       );
     } else {
+      // Cause is known: refresh_token expired or missing. No point asking the agent
+      // to investigate — just tell the user what to do.
       const reason =
         result === 'no-token'
           ? 'no refresh token found in claude.json'
           : 'refresh token rejected by Anthropic (likely expired)';
-      const msg =
-        `⚠️ **OAuth token expiring** — agent group \`${agentGroupId}\` expires in ${minutesLeft} min. ` +
-        `Auto-refresh failed (${reason}). Run \`claude login\` on the host to re-authenticate.`;
       log.warn('[health-monitor] Token auto-refresh failed', { agentGroupId, result });
-      await postAlert(msg);
-      await injectTask(
-        `OAuth token for agent group "${agentGroupId}" expires in ${minutesLeft} minutes and auto-refresh failed (${reason}). ` +
-          `Check the current token status:\n` +
-          `python3 -c "import json,datetime; d=json.load(open('/workspace/extra/nanoclaw-data/v2-sessions/${agentGroupId}/claude.json')); o=d.get('claudeAiOauth',{}); ts=o.get('expiresAt',0)/1000; exp=datetime.datetime.utcfromtimestamp(ts); print('expires (UTC):', exp, '— EXPIRED' if __import__('datetime').datetime.utcnow() > exp else '— VALID')"\n` +
-          `Then notify the user: they need to run 'claude login' on the host machine to re-authenticate.`,
+      await postAlert(
+        `⚠️ **OAuth token expiring** — agent group \`${agentGroupId}\` ${timeDesc}. ` +
+          `Auto-refresh failed (${reason}). Run \`claude login\` on the host to re-authenticate.`,
       );
     }
   }
