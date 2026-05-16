@@ -6,14 +6,17 @@ import { log } from '../../log.js';
 import { resolveSession, writeSessionMessage } from '../../session-manager.js';
 import { wakeContainer } from '../../container-runner.js';
 
-const KEEPALIVE_CHANNEL_ID = '1504851855111356628';
 export const HEALTH_MONITOR_AGENT_ID = 'health-monitor';
 const HEALTH_MONITOR_MG_ID = 'mg-health-monitor';
 
 export async function postAlert(message: string): Promise<void> {
-  const env = readEnvFile(['DISCORD_BOT_TOKEN']);
+  const env = readEnvFile(['DISCORD_BOT_TOKEN', 'HEALTH_MONITOR_KEEPALIVE_CHANNEL_ID']);
   if (!env.DISCORD_BOT_TOKEN) {
     log.warn('[health-monitor] No DISCORD_BOT_TOKEN — cannot post alert', { message });
+    return;
+  }
+  if (!env.HEALTH_MONITOR_KEEPALIVE_CHANNEL_ID) {
+    log.warn('[health-monitor] No HEALTH_MONITOR_KEEPALIVE_CHANNEL_ID — cannot post alert', { message });
     return;
   }
 
@@ -22,7 +25,7 @@ export async function postAlert(message: string): Promise<void> {
     const req = https.request(
       {
         hostname: 'discord.com',
-        path: `/api/v10/channels/${KEEPALIVE_CHANNEL_ID}/messages`,
+        path: `/api/v10/channels/${env.HEALTH_MONITOR_KEEPALIVE_CHANNEL_ID}/messages`,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
