@@ -2,13 +2,19 @@
  * One-time idempotent setup for the health-monitor agent group.
  * Creates agent group, messaging group for the keepalive channel, and wires them.
  * Safe to call on every startup — skips rows that already exist.
+ *
+ * Required .env keys:
+ *   HEALTH_MONITOR_DISCORD_GUILD_ID    — Discord server (guild) ID
+ *   HEALTH_MONITOR_KEEPALIVE_CHANNEL_ID — Channel ID for alert delivery
+ *
+ * If either key is missing, the agent group is still created but Discord
+ * wiring is skipped (alerts will be suppressed with a warning).
  */
 import { getDb } from '../../db/connection.js';
+import { readEnvFile } from '../../env.js';
 import { log } from '../../log.js';
 import { HEALTH_MONITOR_AGENT_ID } from './alert.js';
 
-const DISCORD_GUILD_ID = '1244869806671265844';
-const KEEPALIVE_CHANNEL_ID = '1504851855111356628';
 const HEALTH_MONITOR_MG_ID = 'mg-health-monitor';
 
 export function ensureHealthMonitorSetup(): void {
@@ -24,8 +30,16 @@ export function ensureHealthMonitorSetup(): void {
     log.info('[health-monitor] Created agent group');
   }
 
+  const env = readEnvFile(['HEALTH_MONITOR_DISCORD_GUILD_ID', 'HEALTH_MONITOR_KEEPALIVE_CHANNEL_ID']);
+  if (!env.HEALTH_MONITOR_DISCORD_GUILD_ID || !env.HEALTH_MONITOR_KEEPALIVE_CHANNEL_ID) {
+    log.warn(
+      '[health-monitor] HEALTH_MONITOR_DISCORD_GUILD_ID or HEALTH_MONITOR_KEEPALIVE_CHANNEL_ID not set in .env — Discord wiring skipped',
+    );
+    return;
+  }
+
   // Messaging group for the keepalive Discord channel
-  const platformId = `discord:${DISCORD_GUILD_ID}:${KEEPALIVE_CHANNEL_ID}`;
+  const platformId = `discord:${env.HEALTH_MONITOR_DISCORD_GUILD_ID}:${env.HEALTH_MONITOR_KEEPALIVE_CHANNEL_ID}`;
   const existingMg = db.prepare('SELECT id FROM messaging_groups WHERE id = ?').get(HEALTH_MONITOR_MG_ID);
   if (!existingMg) {
     db.prepare(
