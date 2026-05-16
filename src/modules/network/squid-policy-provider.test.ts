@@ -11,6 +11,7 @@ const {
   effectiveAllowList,
   toDstdomainEntry,
   generateSquidConfig,
+  generateSocatForwardsConfig,
   generateDnsmasqConfig,
   rewriteProxyEnv,
   monthKey,
@@ -486,6 +487,94 @@ describe('squid-policy-provider helpers', () => {
       const before = [...args];
       rewriteProxyEnv(args);
       expect(args).toEqual(before);
+    });
+  });
+
+  describe('generateSocatForwardsConfig', () => {
+    const agentA: AgentGroup = {
+      ...baseAgent,
+      id: 'ag-a',
+      name: 'A',
+      folder: 'a',
+      internet_access_policy: JSON.stringify({ bucket: 'full', cdpPort: 9222 }),
+    };
+    const agentB: AgentGroup = {
+      ...baseAgent,
+      id: 'ag-b',
+      name: 'B',
+      folder: 'b',
+      internet_access_policy: JSON.stringify({ bucket: 'full', cdpPort: 9223 }),
+    };
+    const ips = { 'ag-a': '172.30.0.3', 'ag-b': '172.30.0.4' };
+
+    it('emits one forward per agent with a cdpPort', () => {
+      const conf = generateSocatForwardsConfig([agentA, agentB], ips);
+      const lines = conf.split('\n').filter((l) => l && !l.startsWith('#'));
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toBe('9222 172.30.0.3/32 host.docker.internal 9222');
+      expect(lines[1]).toBe('9223 172.30.0.4/32 host.docker.internal 9222');
+    });
+
+    it('upstream port is the host port (default 9222), not the listen port', () => {
+      // The bug this regression-tests: multiple agents with distinct cdpPorts
+      // need unique container-side LISTEN ports (so source-IP filters can
+      // isolate them), but they all forward to the SAME host-side Chrome.
+      // If the upstream port mirrored cdpPort, only agent A (cdpPort=9222)
+      // would actually reach a Chrome.
+      const conf = generateSocatForwardsConfig([agentB], ips);
+      expect(conf).toContain('9223 172.30.0.4/32 host.docker.internal 9222');
+      expect(conf).not.toContain('9223 172.30.0.4/32 host.docker.internal 9223');
+    });
+
+    it('honors cdpHostPort override when set', () => {
+      const agentC: AgentGroup = {
+        ...baseAgent,
+        id: 'ag-c',
+        name: 'C',
+        folder: 'c',
+        internet_access_policy: JSON.stringify({
+          bucket: 'full',
+          cdpPort: 9224,
+          cdpHostPort: 19222,
+        }),
+      };
+      const conf = generateSocatForwardsConfig([agentC], { 'ag-c': '172.30.0.5' });
+      expect(conf).toContain('9224 172.30.0.5/32 host.docker.internal 19222');
+    });
+
+    it('skips agents without cdpPort', () => {
+      const noBrowserAgent: AgentGroup = {
+        ...baseAgent,
+        id: 'ag-x',
+        folder: 'x',
+        name: 'X',
+        internet_access_policy: JSON.stringify({ bucket: 'full' }),
+      };
+      const conf = generateSocatForwardsConfig([noBrowserAgent], { 'ag-x': '172.30.0.5' });
+      const lines = conf.split('\n').filter((l) => l && !l.startsWith('#'));
+      expect(lines).toHaveLength(0);
+    });
+
+    it('skips agents without an IP allocation', () => {
+      const conf = generateSocatForwardsConfig([agentA], {
+        /* no entry for ag-a */
+      });
+      const lines = conf.split('\n').filter((l) => l && !l.startsWith('#'));
+      expect(lines).toHaveLength(0);
+    });
+  });
+
+  describe('parsePolicy with cdpHostPort', () => {
+    it('reads cdpHostPort from JSON when present', () => {
+      const policy = parsePolicy(JSON.stringify({ bucket: 'full', cdpPort: 9223, cdpHostPort: 19222 }));
+      expect(policy.cdpPort).toBe(9223);
+      expect(policy.cdpHostPort).toBe(19222);
+    });
+
+    it('omits cdpHostPort when not in JSON', () => {
+      const policy = parsePolicy(JSON.stringify({ bucket: 'full', cdpPort: 9223 }));
+      expect(policy.cdpPort).toBe(9223);
+      expect(policy.cdpHostPort).toBeUndefined();
     });
   });
 });

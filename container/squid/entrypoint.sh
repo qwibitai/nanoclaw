@@ -22,11 +22,28 @@ set -e
 
 mkdir -p /var/log/squid
 
+# Squid 6 dropped `dns_v4_first` and follows the system resolver's address
+# ordering. On Docker Desktop, `host.docker.internal` resolves to both an
+# IPv6 ULA and an IPv4 — and the IPv6 is returned first. OneCLI binds only
+# to IPv4, so Squid's first cache_peer attempt silently fails on the IPv6
+# address and the peer is marked DEAD — every CONNECT then 500s.
+# Resolve to IPv4 here, copy the mounted config to a writable location
+# with the literal IPv4 substituted in, and run squid against the copy.
+HOST_V4=$(getent ahostsv4 host.docker.internal 2>/dev/null | awk 'NR==1 {print $1}')
+if [ -n "$HOST_V4" ]; then
+  cp /etc/squid/squid.conf /tmp/squid.conf
+  sed -i "s/host\.docker\.internal/$HOST_V4/g" /tmp/squid.conf
+  SQUID_CONF=/tmp/squid.conf
+else
+  echo "entrypoint: warning — host.docker.internal didn't resolve to IPv4; using config as-is" >&2
+  SQUID_CONF=/etc/squid/squid.conf
+fi
+
 # dnsmasq config is mounted by the host along with squid.conf.
 dnsmasq --keep-in-foreground --conf-file=/etc/dnsmasq.conf &
 DNSMASQ_PID=$!
 
-squid -N -f /etc/squid/squid.conf &
+squid -N -f "$SQUID_CONF" &
 SQUID_PID=$!
 
 # CDP TCP-forwarders.
