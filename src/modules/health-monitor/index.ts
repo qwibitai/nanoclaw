@@ -19,6 +19,7 @@ import { log } from '../../log.js';
 import { ensureHealthMonitorSetup } from './setup.js';
 import { checkTokenExpiry, checkSilentFail } from './checks.js';
 import { postAlert, injectTask } from './alert.js';
+import { tryRefreshOauthToken } from './token-refresh.js';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1_000;
 const ALERT_COOLDOWN_MS = 60 * 60 * 1_000;
@@ -33,21 +34,35 @@ function shouldAlert(key: string): boolean {
 }
 
 async function runChecks(): Promise<void> {
-  // Check 1: OAuth token near-expiry
+  // Check 1: OAuth token near-expiry — attempt auto-refresh first, only alert if it fails
   for (const { agentGroupId, minutesLeft } of checkTokenExpiry()) {
     const key = `token:${agentGroupId}`;
     if (!shouldAlert(key)) continue;
-    const msg =
-      `⚠️ **OAuth token expiring** — agent group \`${agentGroupId}\` expires in ${minutesLeft} min. ` +
-      `Pre-spawn refresh should handle it; alerting as belt-and-suspenders.`;
-    log.warn('[health-monitor] Token near-expiry', { agentGroupId, minutesLeft });
-    await postAlert(msg);
-    await injectTask(
-      `OAuth token for agent group "${agentGroupId}" expires in ${minutesLeft} minutes. ` +
-        `Verify the pre-spawn Keychain refresh is working: check the expiresAt in ` +
-        `data/v2-sessions/${agentGroupId}/claude.json against the current time. ` +
-        `If stale, read fresh token: security find-generic-password -s "Claude Code-credentials" -w`,
-    );
+
+    log.warn('[health-monitor] Token near-expiry, attempting auto-refresh', { agentGroupId, minutesLeft });
+    const result = await tryRefreshOauthToken(agentGroupId);
+
+    const timeDesc =
+      minutesLeft < 0 ? `already expired ${Math.abs(minutesLeft)} min ago` : `expires in ${minutesLeft} min`;
+
+    if (result === 'refreshed') {
+      await postAlert(
+        `✅ **OAuth token auto-refreshed** — agent group \`${agentGroupId}\` (${timeDesc}). ` +
+          `New token written to claude.json and Keychain. No action needed.`,
+      );
+    } else {
+      // Cause is known: refresh_token expired or missing. No point asking the agent
+      // to investigate — just tell the user what to do.
+      const reason =
+        result === 'no-token'
+          ? 'no refresh token found in claude.json'
+          : 'refresh token rejected by Anthropic (likely expired)';
+      log.warn('[health-monitor] Token auto-refresh failed', { agentGroupId, result });
+      await postAlert(
+        `⚠️ **OAuth token expiring** — agent group \`${agentGroupId}\` ${timeDesc}. ` +
+          `Auto-refresh failed (${reason}). Run \`claude login\` on the host to re-authenticate.`,
+      );
+    }
   }
 
   // Check 2: Silent-fail pattern per active session
