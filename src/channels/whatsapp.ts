@@ -204,14 +204,38 @@ registerChannelAdapter('whatsapp', {
     // Flag file written on a logged-out (reason=401) close, cleared on next open.
     // Lets operator tooling surface the dead-credential state without scraping logs.
     const loggedOutFile = path.join(process.cwd(), 'store', 'whatsapp-logged-out.txt');
+    // Persisted LID→phone map. Without this, a restart wipes the mapping and
+    // inbound messages whose remoteJid is a LID can't be resolved back to the
+    // phone JID stored in messaging_groups — they hit the unknown-channel path
+    // and get silently dropped.
+    const lidMapFile = path.join(process.cwd(), 'store', 'lid-map.json');
+
+    try {
+      if (fs.existsSync(lidMapFile)) {
+        const raw = JSON.parse(fs.readFileSync(lidMapFile, 'utf8')) as Record<string, string>;
+        for (const [k, v] of Object.entries(raw)) lidToPhoneMap[k] = v;
+        log.info('Loaded persisted LID map', { count: Object.keys(lidToPhoneMap).length });
+      }
+    } catch (err) {
+      log.warn('Failed to load persisted LID map', { err });
+    }
 
     // --- Helpers ---
+
+    function persistLidMap(): void {
+      try {
+        fs.writeFileSync(lidMapFile, JSON.stringify(lidToPhoneMap));
+      } catch (err) {
+        log.warn('Failed to persist LID map', { err });
+      }
+    }
 
     function setLidPhoneMapping(lidUser: string, phoneJid: string): void {
       if (lidToPhoneMap[lidUser] === phoneJid) return;
       lidToPhoneMap[lidUser] = phoneJid;
       // Cached group metadata depends on participant IDs — invalidate
       groupMetadataCache.clear();
+      persistLidMap();
     }
 
     async function translateJid(jid: string): Promise<string> {

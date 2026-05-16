@@ -318,17 +318,25 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
       await deliverToAgent(agent, agentGroup, mg, event, userId, adapter?.supportsThreads === true, false);
       accumulatedCount++;
     } else {
-      log.debug('Message not engaged for agent (drop policy)', {
+      log.info('Message not engaged for agent (drop policy)', {
         agentGroupId: agent.agent_group_id,
         engage_mode: agent.engage_mode,
         engages,
         accessOk,
         scopeOk,
+        ignored_message_policy: agent.ignored_message_policy,
       });
     }
   }
 
   if (engagedCount + accumulatedCount === 0) {
+    log.warn('Message dropped — no agent engaged', {
+      channelType: event.channelType,
+      platformId: event.platformId,
+      messagingGroupId: mg.id,
+      userId,
+      agentCount: agents.length,
+    });
     recordDroppedMessage({
       channel_type: event.channelType,
       platform_id: event.platformId,
