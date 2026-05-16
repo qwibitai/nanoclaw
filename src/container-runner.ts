@@ -29,6 +29,7 @@ import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
+import { refreshOauthTokenIfNeeded } from './oauth-token-refresh.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
 // Provider host-side config barrel — each provider that needs host-side
 // container setup self-registers on import.
@@ -130,6 +131,15 @@ async function spawnContainer(session: Session): Promise<void> {
   // (extra mounts, env passthrough). Computed once and threaded through both
   // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
   const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
+
+  // Refresh OAuth token before spawning if it's near expiry. This handles the
+  // shutdown case: token expired while the host was off, task fires on boot.
+  // buildMounts() still does a Keychain read afterward — the two don't conflict
+  // because this writes to both claude.json and Keychain first.
+  const claudeJsonPath = path.join(DATA_DIR, 'v2-sessions', agentGroup.id, 'claude.json');
+  if (fs.existsSync(claudeJsonPath)) {
+    await refreshOauthTokenIfNeeded(claudeJsonPath, `[pre-spawn:${agentGroup.id}]`);
+  }
 
   const mounts = buildMounts(agentGroup, session, containerConfig, contribution);
   const containerName = `nanoclaw-v2-${agentGroup.folder}-${Date.now()}`;
@@ -317,8 +327,9 @@ function buildMounts(
   if (!fs.existsSync(claudeJsonHostPath)) {
     const backupsDir = path.join(claudeDir, 'backups');
     if (fs.existsSync(backupsDir)) {
-      const backups = fs.readdirSync(backupsDir)
-        .filter(f => f.startsWith('.claude.json.backup.'))
+      const backups = fs
+        .readdirSync(backupsDir)
+        .filter((f) => f.startsWith('.claude.json.backup.'))
         .sort();
       if (backups.length > 0) {
         fs.copyFileSync(path.join(backupsDir, backups[backups.length - 1]), claudeJsonHostPath);
@@ -341,7 +352,10 @@ function buildMounts(
           const existing = JSON.parse(fs.readFileSync(claudeJsonHostPath, 'utf8'));
           existing.claudeAiOauth = freshOauth;
           fs.writeFileSync(claudeJsonHostPath, JSON.stringify(existing, null, 2));
-          log.debug('Refreshed OAuth token from Keychain', { agentGroupId: agentGroup.id, expiresAt: new Date(freshOauth.expiresAt).toISOString() });
+          log.debug('Refreshed OAuth token from Keychain', {
+            agentGroupId: agentGroup.id,
+            expiresAt: new Date(freshOauth.expiresAt).toISOString(),
+          });
         }
       }
     } catch {
