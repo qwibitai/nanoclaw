@@ -1,25 +1,22 @@
 /**
  * Health monitor module.
  *
- * Runs every 5 minutes and checks for "can't run" level issues:
- *   1. OAuth token near-expiry (belt-and-suspenders on top of pre-spawn refresh)
- *   2. Silent-fail pattern: session completed processing but produced no output
- *      — the signature of a 401 auth failure swallowed by the agent-runner
+ * Runs every 5 minutes:
+ *   1. Token sweep — checks OAuth tokens for ALL agent groups, auto-refreshes
+ *      near-expiry ones, writes results to token_status table. Alerts only on
+ *      failure (refresh token rejected → manual claude login needed).
+ *   2. Silent-fail pattern — session completed processing but produced no
+ *      output, the signature of a 401 auth failure swallowed by agent-runner.
  *
- * On detection, posts a direct Discord alert to the keepalive channel and
- * injects a diagnostic task into the health-monitor agent so Claude can
- * investigate and report.
- *
- * Alert deduplication: each unique issue key is suppressed for 1 hour after
- * the first alert so the channel isn't spammed on repeated sweeps.
+ * Alert deduplication: each unique issue key is suppressed for 1 hour.
  */
 import { getActiveSessions } from '../../db/sessions.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { log } from '../../log.js';
 import { ensureHealthMonitorSetup } from './setup.js';
-import { checkTokenExpiry, checkSilentFail } from './checks.js';
+import { checkSilentFail } from './checks.js';
 import { postAlert, injectTask } from './alert.js';
-import { tryRefreshOauthToken } from './token-refresh.js';
+import { sweepAllTokens } from './token-sweep.js';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1_000;
 const ALERT_COOLDOWN_MS = 60 * 60 * 1_000;
@@ -34,38 +31,36 @@ function shouldAlert(key: string): boolean {
 }
 
 async function runChecks(): Promise<void> {
-  // Check 1: OAuth token near-expiry — attempt auto-refresh first, only alert if it fails
-  for (const { agentGroupId, minutesLeft } of checkTokenExpiry()) {
+  // Check 1: token sweep — refresh all near-expiry groups, record to token_status
+  for (const { agentGroupId, status, minutesLeft } of await sweepAllTokens()) {
+    if (status === 'ok' || status === 'no-token') continue;
+
     const key = `token:${agentGroupId}`;
     if (!shouldAlert(key)) continue;
 
-    log.warn('[health-monitor] Token near-expiry, attempting auto-refresh', { agentGroupId, minutesLeft });
-    const result = await tryRefreshOauthToken(agentGroupId);
-
     const timeDesc =
-      minutesLeft < 0 ? `already expired ${Math.abs(minutesLeft)} min ago` : `expires in ${minutesLeft} min`;
+      minutesLeft === null
+        ? 'unknown expiry'
+        : minutesLeft < 0
+          ? `already expired ${Math.abs(minutesLeft)} min ago`
+          : `expires in ${minutesLeft} min`;
 
-    if (result === 'refreshed') {
+    if (status === 'refreshed') {
       await postAlert(
         `✅ **OAuth token auto-refreshed** — agent group \`${agentGroupId}\` (${timeDesc}). ` +
           `New token written to claude.json and Keychain. No action needed.`,
       );
     } else {
-      // Cause is known: refresh_token expired or missing. No point asking the agent
-      // to investigate — just tell the user what to do.
-      const reason =
-        result === 'no-token'
-          ? 'no refresh token found in claude.json'
-          : 'refresh token rejected by Anthropic (likely expired)';
-      log.warn('[health-monitor] Token auto-refresh failed', { agentGroupId, result });
+      log.warn('[health-monitor] Token auto-refresh failed', { agentGroupId, status });
       await postAlert(
         `⚠️ **OAuth token expiring** — agent group \`${agentGroupId}\` ${timeDesc}. ` +
-          `Auto-refresh failed (${reason}). Run \`claude login\` on the host to re-authenticate.`,
+          `Auto-refresh failed (refresh token rejected by Anthropic — likely expired). ` +
+          `Run \`claude login\` on the host to re-authenticate.`,
       );
     }
   }
 
-  // Check 2: Silent-fail pattern per active session
+  // Check 2: silent-fail pattern per active session
   for (const session of getActiveSessions()) {
     if (!checkSilentFail(session)) continue;
     const agentGroup = getAgentGroup(session.agent_group_id);
