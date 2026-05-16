@@ -123,6 +123,18 @@ export async function runSlackChannel(displayName: string): Promise<ChannelFlowR
   }
 
   showPostInstallChecklist(info);
+
+  const next = ensureAnswer(
+    await brightSelect<'continue' | 'back'>({
+      message: 'Got your public URL & Slack reinstalled?',
+      options: [
+        { value: 'continue', label: 'Setup complete!' },
+        { value: 'back', label: '← Back to channel selection' },
+      ],
+      initialValue: 'continue',
+    }),
+  );
+  if (next === 'back') return BACK_TO_CHANNEL_SELECTION;
 }
 
 async function walkThroughAppCreation(): Promise<'continue' | 'back'> {
