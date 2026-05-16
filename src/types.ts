@@ -77,12 +77,28 @@ export interface TaskRunLog {
   error: string | null;
 }
 
+// --- Inline buttons (Telegram InlineKeyboard, Discord Buttons, etc.) ---
+
+export interface InlineButton {
+  text: string; // Button label shown to user
+  id: string; // Callback data ID returned when clicked
+}
+
+export interface SendMessageOptions {
+  /** Rows of inline buttons. Each inner array is one row. */
+  buttons?: InlineButton[][];
+}
+
 // --- Channel abstraction ---
 
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
+  sendMessage(
+    jid: string,
+    text: string,
+    options?: SendMessageOptions,
+  ): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;

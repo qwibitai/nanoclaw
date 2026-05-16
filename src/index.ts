@@ -53,7 +53,12 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import {
+  Channel,
+  InlineButton,
+  NewMessage,
+  RegisteredGroup,
+} from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -558,10 +563,10 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: (jid, text, options) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      return channel.sendMessage(jid, text, options ? { buttons: options.buttons } : undefined);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

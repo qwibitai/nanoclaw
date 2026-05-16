@@ -41,13 +41,33 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
+  `Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.
+
+BUTTONS: Optionally attach inline buttons (Telegram InlineKeyboard). When a user clicks a button, their click is delivered as a regular inbound message with the button's id as content (prefixed with [button_click:]). Use buttons for approvals, confirmations, quick-reply options, etc.`,
   {
     text: z.string().describe('The message text to send'),
-    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    sender: z
+      .string()
+      .optional()
+      .describe(
+        'Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.',
+      ),
+    buttons: z
+      .array(
+        z.array(
+          z.object({
+            text: z.string().describe('Button label shown to user'),
+            id: z.string().describe('Callback ID returned when button is clicked'),
+          }),
+        ),
+      )
+      .optional()
+      .describe(
+        'Inline buttons as rows. Each inner array is one row of buttons. Example: [[{"text":"Approve","id":"approve_123"},{"text":"Reject","id":"reject_123"}]]',
+      ),
   },
   async (args) => {
-    const data: Record<string, string | undefined> = {
+    const data: Record<string, unknown> = {
       type: 'message',
       chatJid,
       text: args.text,
@@ -55,6 +75,10 @@ server.tool(
       groupFolder,
       timestamp: new Date().toISOString(),
     };
+
+    if (args.buttons && args.buttons.length > 0) {
+      data.buttons = args.buttons;
+    }
 
     writeIpcFile(MESSAGES_DIR, data);
 
