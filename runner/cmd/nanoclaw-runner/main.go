@@ -12,6 +12,7 @@ import (
 
 	"github.com/nanocoai/nanoclaw/runner/internal/client"
 	"github.com/nanocoai/nanoclaw/runner/internal/config"
+	"github.com/nanocoai/nanoclaw/runner/internal/keychain"
 	"github.com/nanocoai/nanoclaw/runner/internal/protocol"
 	"github.com/nanocoai/nanoclaw/runner/internal/updater"
 )
@@ -32,6 +33,12 @@ func main() {
 	log.Printf("nanoclaw-runner version=%s commit=%s date=%s starting — name=%s central=%s",
 		version, commit, date, cfg.RunnerName, cfg.CentralURL)
 
+	kc, err := keychain.New()
+	if err != nil {
+		log.Fatalf("nanoclaw-runner: cannot initialise credential store: %v\n"+
+			"  Set NANOCLAW_RUNNER_CREDENTIAL_DIR to a writable directory.", err)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -43,7 +50,7 @@ func main() {
 		log.Printf("nanoclaw-runner: auto-update disabled")
 	}
 
-	c := client.New(cfg, func(p protocol.InboundMessagePayload) {
+	c := client.New(cfg, kc, func(p protocol.InboundMessagePayload) {
 		// Agent dispatch: v0 stub — logs the incoming message.
 		// Full agent execution (spawning claude, proxying tool calls) is Phase 2.
 		log.Printf("nanoclaw-runner: INBOUND_MESSAGE agent=%s msg=%s sender=%s",

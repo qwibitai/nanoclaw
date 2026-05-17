@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'crypto';
 
 import { getDb } from '../../db/connection.js';
+import { sendTokenInvalidate } from '../../runner-registry.js';
 import { registerResource } from '../crud.js';
 
 registerResource({
@@ -20,16 +21,28 @@ registerResource({
       default: 'persistent',
     },
     {
-      name: 'runner_token_hash',
-      type: 'string',
-      description: 'SHA-256 of the bearer token. Never shown after creation.',
-      generated: true,
-    },
-    {
       name: 'status',
       type: 'string',
       description: 'Connection state.',
       enum: ['connected', 'disconnected', 'unresponsive'],
+      generated: true,
+    },
+    {
+      name: 'bootstrap_expires_at',
+      type: 'string',
+      description: 'When the bootstrap token expires (ISO).',
+      generated: true,
+    },
+    {
+      name: 'bootstrap_used_at',
+      type: 'string',
+      description: 'When the bootstrap token was consumed (ISO).',
+      generated: true,
+    },
+    {
+      name: 'credential_rotated_at',
+      type: 'string',
+      description: 'Timestamp of last credential rotation (ISO).',
       generated: true,
     },
     { name: 'last_heartbeat', type: 'string', description: 'ISO timestamp of last heartbeat.', generated: true },
@@ -45,7 +58,9 @@ registerResource({
   customOperations: {
     add: {
       access: 'approval',
-      description: 'Create a new runner and generate its bearer token. Token is shown once.',
+      description:
+        'Create a new runner and issue a one-time bootstrap token (valid 10 minutes, single-use). ' +
+        'The runner exchanges it for a long-lived credential on first connect.',
       args: [
         { name: 'name', type: 'string', description: 'Unique name for this runner.', required: true },
         {
@@ -61,39 +76,61 @@ registerResource({
         const runnerType = (args.runner_type as string) || 'persistent';
 
         const id = randomUUID();
-        const token = randomBytes(32).toString('hex');
-        const tokenHash = createHash('sha256').update(token).digest('hex');
+        const bootstrap = randomBytes(32).toString('hex');
+        const bootstrapHash = createHash('sha256').update(bootstrap).digest('hex');
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
         const now = new Date().toISOString();
 
         getDb()
           .prepare(
-            `INSERT INTO runners (id, name, runner_type, runner_token_hash, status, created_at)
-             VALUES (?, ?, ?, ?, 'disconnected', ?)`,
+            `INSERT INTO runners (id, name, runner_type, bootstrap_token_hash, bootstrap_expires_at, status, created_at)
+             VALUES (?, ?, ?, ?, ?, 'disconnected', ?)`,
           )
-          .run(id, name, runnerType, tokenHash, now);
+          .run(id, name, runnerType, bootstrapHash, expiresAt, now);
 
-        return { id, name, runner_type: runnerType, token, note: 'Token shown once — store it securely.' };
+        return {
+          id,
+          name,
+          runner_type: runnerType,
+          bootstrap_token: bootstrap,
+          expires_in: '10 minutes (single-use)',
+          install_snippet: `NANOCLAW_RUNNER_BOOTSTRAP=${bootstrap} ./nanoclaw-runner`,
+          note: 'Bootstrap token shown once. Runner exchanges it for a long-lived credential on first connect.',
+        };
       },
     },
-    rotate: {
+    revoke: {
       access: 'approval',
       description:
-        'Rotate the bearer token for a runner. New token is shown once; old token is invalidated immediately.',
-      args: [{ name: 'id', type: 'string', description: 'Runner ID.', required: true }],
+        'Revoke the active credential for a runner. Any live connection receives TOKEN_INVALIDATE ' +
+        'and disconnects. Runner must be re-provisioned with a new bootstrap token.',
+      args: [{ name: 'name', type: 'string', description: 'Runner name.', required: true }],
       async handler(args) {
-        const id = args.id as string;
-        if (!id) throw new Error('--id is required');
+        const name = args.name as string;
+        if (!name) throw new Error('--name is required');
 
-        const runner = getDb().prepare('SELECT id, name FROM runners WHERE id = ?').get(id) as
+        const runner = getDb().prepare('SELECT id, name FROM runners WHERE name = ?').get(name) as
           | { id: string; name: string }
           | undefined;
-        if (!runner) throw new Error(`Runner not found: ${id}`);
+        if (!runner) throw new Error(`Runner not found: ${name}`);
 
-        const token = randomBytes(32).toString('hex');
-        const tokenHash = createHash('sha256').update(token).digest('hex');
-        getDb().prepare('UPDATE runners SET runner_token_hash = ? WHERE id = ?').run(tokenHash, id);
+        getDb()
+          .prepare(
+            `UPDATE runners
+             SET credential_hash = NULL, credential_rotated_at = NULL,
+                 bootstrap_token_hash = NULL, bootstrap_expires_at = NULL, bootstrap_used_at = NULL
+             WHERE id = ?`,
+          )
+          .run(runner.id);
 
-        return { id: runner.id, name: runner.name, token, note: 'Token rotated — old token is now invalid.' };
+        sendTokenInvalidate(runner.id, 'revoked');
+
+        return {
+          id: runner.id,
+          name: runner.name,
+          status: 'revoked',
+          note: 'Credential cleared. Run ncl runners add --name <name> to issue a new bootstrap token.',
+        };
       },
     },
   },

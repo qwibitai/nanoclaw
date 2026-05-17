@@ -24,7 +24,12 @@ export type MessageType =
   | 'LIFECYCLE'
   | 'REPLAY_END'
   | 'GAP_NOTICE'
-  | 'ERROR';
+  | 'ERROR'
+  // Credential lifecycle (v0.3) — IDs 100-102 reserved for future int-type protocol.
+  // Leave gap before 110-119 reserved for EVENT_EMIT (v0.4 event bus).
+  | 'TOKEN_ROTATE_REQUEST'
+  | 'TOKEN_ROTATE_ACK'
+  | 'TOKEN_INVALIDATE';
 
 export interface Frame<T extends MessageType = MessageType, P = unknown> {
   type: T;
@@ -54,6 +59,8 @@ export interface WebhookEndpoint {
 
 export interface RunnerRegisterPayload {
   runner_token: string;
+  /** 'credential' (default) or 'bootstrap' (first connect after provisioning). */
+  auth_type?: 'credential' | 'bootstrap';
   runner_name: string;
   runner_type: 'persistent' | 'ephemeral';
   runner_version: string;
@@ -93,6 +100,8 @@ export interface RunnerAckPayload {
   session_id: string;
   config_snapshot: RunnerConfig;
   replay_from_seq: number;
+  /** Present only when bootstrap auth was used — the long-lived credential to save to keychain. */
+  credential?: string;
 }
 
 // ── INBOUND_MESSAGE (C→R) ─────────────────────────────────────────────────────
@@ -236,6 +245,25 @@ export interface ErrorPayload {
   message: string;
   ref_seq?: number;
   fatal: boolean;
+}
+
+// ── TOKEN_ROTATE_REQUEST (R→C) ────────────────────────────────────────────────
+
+// No payload needed — the authenticated WS connection establishes identity.
+export type TokenRotateRequestPayload = Record<string, never>;
+
+// ── TOKEN_ROTATE_ACK (C→R) ────────────────────────────────────────────────────
+
+export interface TokenRotateAckPayload {
+  /** New long-lived credential. Runner must save to keychain and use on next RUNNER_REGISTER. */
+  new_credential: string;
+}
+
+// ── TOKEN_INVALIDATE (C→R) ────────────────────────────────────────────────────
+
+export interface TokenInvalidatePayload {
+  reason: 'revoked' | 'compromised';
+  message?: string;
 }
 
 // ── Protocol version ──────────────────────────────────────────────────────────

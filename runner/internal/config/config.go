@@ -17,8 +17,14 @@ type Config struct {
 	// RunnerName is the human-readable name registered via `ncl runners add`.
 	RunnerName string
 
-	// RunnerToken is the plaintext bearer token (hashed on central).
-	RunnerToken string
+	// BootstrapToken is the one-time bootstrap token from NANOCLAW_RUNNER_BOOTSTRAP.
+	// Used on first connect to exchange for a long-lived credential stored in keychain.
+	BootstrapToken string
+
+	// LegacyToken is a pre-bootstrap long-lived token from the deprecated
+	// NANOCLAW_RUNNER_TOKEN env var. Migrated to keychain on first connect and logged
+	// as deprecated. Will be removed in a future release.
+	LegacyToken string
 
 	// RunnerType is "persistent" or "ephemeral".
 	RunnerType string
@@ -40,10 +46,14 @@ type Config struct {
 
 	// UpdateInterval controls how often to poll for a new release.
 	UpdateInterval time.Duration
+
+	// RotationInterval controls how often the runner rotates its credential.
+	RotationInterval time.Duration
 }
 
 // Load reads configuration from environment variables.
-// Required vars: NANOCLAW_CENTRAL_URL, NANOCLAW_RUNNER_NAME, NANOCLAW_RUNNER_TOKEN.
+// Required vars: NANOCLAW_CENTRAL_URL, NANOCLAW_RUNNER_NAME.
+// Auth: one of NANOCLAW_RUNNER_BOOTSTRAP (new), NANOCLAW_RUNNER_TOKEN (deprecated), or keychain.
 func Load() (*Config, error) {
 	centralURL := os.Getenv("NANOCLAW_CENTRAL_URL")
 	if centralURL == "" {
@@ -53,11 +63,6 @@ func Load() (*Config, error) {
 	runnerName := os.Getenv("NANOCLAW_RUNNER_NAME")
 	if runnerName == "" {
 		return nil, fmt.Errorf("NANOCLAW_RUNNER_NAME is required")
-	}
-
-	runnerToken := os.Getenv("NANOCLAW_RUNNER_TOKEN")
-	if runnerToken == "" {
-		return nil, fmt.Errorf("NANOCLAW_RUNNER_TOKEN is required")
 	}
 
 	runnerType := os.Getenv("NANOCLAW_RUNNER_TYPE")
@@ -75,11 +80,13 @@ func Load() (*Config, error) {
 	reconnectMax := envInt("NANOCLAW_RECONNECT_MAX_DELAY_SEC", 60)
 	autoUpdate := envBool("NANOCLAW_RUNNER_AUTO_UPDATE", true)
 	updateInterval := envDuration("NANOCLAW_RUNNER_UPDATE_INTERVAL", 5*time.Minute)
+	rotationInterval := envDuration("NANOCLAW_RUNNER_ROTATION_INTERVAL", 24*time.Hour)
 
 	return &Config{
 		CentralURL:            centralURL,
 		RunnerName:            runnerName,
-		RunnerToken:           runnerToken,
+		BootstrapToken:        os.Getenv("NANOCLAW_RUNNER_BOOTSTRAP"),
+		LegacyToken:           os.Getenv("NANOCLAW_RUNNER_TOKEN"),
 		RunnerType:            runnerType,
 		RunnerVersion:         runnerVersion,
 		HeartbeatIntervalSec:  heartbeatSec,
@@ -87,6 +94,7 @@ func Load() (*Config, error) {
 		ReconnectMaxDelaySec:  reconnectMax,
 		AutoUpdate:            autoUpdate,
 		UpdateInterval:        updateInterval,
+		RotationInterval:      rotationInterval,
 	}, nil
 }
 

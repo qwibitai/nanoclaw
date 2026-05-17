@@ -36,6 +36,8 @@ import {
   type InboundMessagePayload,
   type ReplayEndPayload,
   type GapNoticePayload,
+  type TokenRotateAckPayload,
+  type TokenInvalidatePayload,
 } from './runner-protocol.js';
 
 // ── Replay buffer ─────────────────────────────────────────────────────────────
@@ -77,10 +79,14 @@ const connections = new Map<string, RunnerConn>();
 /** Tool-call result waiters: call_id → resolve fn. */
 const toolWaiters = new Map<string, (result: ToolResultProxyPayload) => void>();
 
-// ── Token hashing ─────────────────────────────────────────────────────────────
+// ── Token hashing + minting ───────────────────────────────────────────────────
 
 export function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function mintCredential(): string {
+  return crypto.randomBytes(32).toString('hex');
 }
 
 // ── Frame helpers ─────────────────────────────────────────────────────────────
@@ -122,7 +128,12 @@ interface RunnerRow {
   id: string;
   name: string;
   runner_type: string;
-  runner_token_hash: string;
+  runner_token_hash: string | null;
+  bootstrap_token_hash: string | null;
+  bootstrap_expires_at: string | null;
+  bootstrap_used_at: string | null;
+  credential_hash: string | null;
+  credential_rotated_at: string | null;
   status: string;
 }
 
@@ -183,9 +194,43 @@ function handleRegister(ws: WebSocket, frame: Frame<'RUNNER_REGISTER', RunnerReg
     return;
   }
 
-  if (runner.runner_token_hash !== hashToken(p.runner_token)) {
-    sendError(ws, 'AUTH_FAILED', 'Invalid runner token', true);
-    return;
+  const authType = p.auth_type ?? 'credential';
+  let credentialForAck: string | undefined;
+
+  if (authType === 'bootstrap') {
+    if (!runner.bootstrap_token_hash) {
+      sendError(ws, 'AUTH_FAILED', 'No bootstrap token set for this runner', true);
+      return;
+    }
+    if (runner.bootstrap_used_at) {
+      sendError(ws, 'AUTH_FAILED', 'Bootstrap token already used', true);
+      return;
+    }
+    if (runner.bootstrap_expires_at && new Date(runner.bootstrap_expires_at) < new Date()) {
+      sendError(ws, 'AUTH_FAILED', 'Bootstrap token expired', true);
+      return;
+    }
+    if (runner.bootstrap_token_hash !== hashToken(p.runner_token)) {
+      sendError(ws, 'AUTH_FAILED', 'Invalid bootstrap token', true);
+      return;
+    }
+    // Consume bootstrap, mint long-lived credential.
+    credentialForAck = mintCredential();
+    getDb()
+      .prepare(
+        `UPDATE runners
+         SET bootstrap_used_at = ?, credential_hash = ?
+         WHERE id = ?`,
+      )
+      .run(new Date().toISOString(), hashToken(credentialForAck), runner.id);
+    log.info('Bootstrap consumed — credential minted', { runnerId: runner.id });
+  } else {
+    // Credential auth: check credential_hash first, fall back to legacy runner_token_hash.
+    const validHash = runner.credential_hash ?? runner.runner_token_hash;
+    if (!validHash || validHash !== hashToken(p.runner_token)) {
+      sendError(ws, 'AUTH_FAILED', 'Invalid runner token', true);
+      return;
+    }
   }
 
   // Close any existing connection for this runner.
@@ -259,6 +304,7 @@ function handleRegister(ws: WebSocket, frame: Frame<'RUNNER_REGISTER', RunnerReg
     session_id: sessionId,
     config_snapshot: config,
     replay_from_seq: replayFromSeq,
+    credential: credentialForAck,
   };
   sendFrame(conn, 'RUNNER_ACK', ackPayload);
 
@@ -323,6 +369,9 @@ function handleFrame(conn: RunnerConn, raw: string): void {
       break;
     case 'STALE_TOOL_RESULT':
       handleStaleToolResult(conn, frame as Frame<'STALE_TOOL_RESULT', StaleToolResultPayload>);
+      break;
+    case 'TOKEN_ROTATE_REQUEST':
+      handleTokenRotateRequest(conn);
       break;
     default:
       sendError(conn.ws, 'UNKNOWN_MESSAGE_TYPE', `Unknown type: ${frame.type}`, false);
@@ -413,6 +462,18 @@ function handleResponse(conn: RunnerConn, frame: Frame<'RESPONSE', ResponsePaylo
   }
 }
 
+function handleTokenRotateRequest(conn: RunnerConn): void {
+  const newCredential = mintCredential();
+  getDb()
+    .prepare(`UPDATE runners SET credential_hash = ?, credential_rotated_at = ? WHERE id = ?`)
+    .run(hashToken(newCredential), new Date().toISOString(), conn.runnerId);
+
+  log.info('Runner credential rotated', { runnerId: conn.runnerId, runnerName: conn.runnerName });
+
+  const ack: TokenRotateAckPayload = { new_credential: newCredential };
+  sendFrame(conn, 'TOKEN_ROTATE_ACK', ack);
+}
+
 function handleStaleToolResult(conn: RunnerConn, frame: Frame<'STALE_TOOL_RESULT', StaleToolResultPayload>): void {
   log.info('Stale tool result discarded by runner', {
     runnerId: conn.runnerId,
@@ -450,6 +511,15 @@ export function dispatchToRunner(runnerId: string, payload: InboundMessagePayloa
     sendFrame(conn, 'INBOUND_MESSAGE', payload);
   }
   return true;
+}
+
+/** Push TOKEN_INVALIDATE to a runner's live connection, if any. */
+export function sendTokenInvalidate(runnerId: string, reason: TokenInvalidatePayload['reason'] = 'revoked'): void {
+  const conn = connections.get(runnerId);
+  if (!conn || conn.ws.readyState !== WebSocket.OPEN) return;
+  const payload: TokenInvalidatePayload = { reason };
+  sendFrame(conn, 'TOKEN_INVALIDATE', payload);
+  log.info('TOKEN_INVALIDATE sent', { runnerId, reason });
 }
 
 export function isRunnerConnected(runnerId: string): boolean {

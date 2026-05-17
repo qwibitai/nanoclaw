@@ -25,6 +25,11 @@ const (
 	TypeReplayEnd       MessageType = "REPLAY_END"
 	TypeGapNotice       MessageType = "GAP_NOTICE"
 	TypeError           MessageType = "ERROR"
+	// Credential lifecycle (v0.3). Integer IDs 100-102 reserved for future int-type protocol.
+	// IDs 110-119 reserved for EVENT_EMIT (v0.4 event bus).
+	TypeTokenRotateRequest MessageType = "TOKEN_ROTATE_REQUEST"
+	TypeTokenRotateAck     MessageType = "TOKEN_ROTATE_ACK"
+	TypeTokenInvalidate    MessageType = "TOKEN_INVALIDATE"
 )
 
 // Frame is the envelope for every message in both directions.
@@ -56,6 +61,8 @@ type LocalMCP struct {
 // RunnerRegisterPayload is the first frame sent by the runner after connecting.
 type RunnerRegisterPayload struct {
 	RunnerToken     string     `json:"runner_token"`
+	// AuthType is "credential" (default) or "bootstrap" on first connect after provisioning.
+	AuthType        string     `json:"auth_type,omitempty"`
 	RunnerName      string     `json:"runner_name"`
 	RunnerType      string     `json:"runner_type"`
 	RunnerVersion   string     `json:"runner_version"`
@@ -97,6 +104,8 @@ type RunnerAckPayload struct {
 	SessionID      string       `json:"session_id"`
 	ConfigSnapshot RunnerConfig `json:"config_snapshot"`
 	ReplayFromSeq  int64        `json:"replay_from_seq"`
+	// Credential is set only when bootstrap auth was used — the long-lived token to save.
+	Credential     string       `json:"credential,omitempty"`
 }
 
 // ── INBOUND_MESSAGE (C→R) ────────────────────────────────────────────────────
@@ -195,4 +204,19 @@ type ErrorPayload struct {
 	Message string `json:"message"`
 	RefSeq  int64  `json:"ref_seq,omitempty"`
 	Fatal   bool   `json:"fatal"`
+}
+
+// ── TOKEN_ROTATE_ACK (C→R) ────────────────────────────────────────────────────
+
+// TokenRotateAckPayload carries the new credential issued by central.
+type TokenRotateAckPayload struct {
+	NewCredential string `json:"new_credential"`
+}
+
+// ── TOKEN_INVALIDATE (C→R) ────────────────────────────────────────────────────
+
+// TokenInvalidatePayload signals that the runner's credential has been revoked.
+type TokenInvalidatePayload struct {
+	Reason  string `json:"reason"`
+	Message string `json:"message,omitempty"`
 }
