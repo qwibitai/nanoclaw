@@ -147,11 +147,7 @@ class WebhookChannelAdapter implements ChannelAdapter {
 
   // Webhook is inbound-only. Outbound replies go to the replyTo channel, not back
   // through the webhook channel. This method should never be called in practice.
-  async deliver(
-    _platformId: string,
-    _threadId: string | null,
-    _message: OutboundMessage,
-  ): Promise<string | undefined> {
+  async deliver(_platformId: string, _threadId: string | null, _message: OutboundMessage): Promise<string | undefined> {
     return undefined;
   }
 }

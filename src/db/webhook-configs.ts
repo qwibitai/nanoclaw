@@ -46,9 +46,9 @@ export function createWebhookConfig(
 }
 
 export function getWebhookConfig(messagingGroupId: string): WebhookConfig | undefined {
-  return getDb()
-    .prepare('SELECT * FROM webhook_configs WHERE messaging_group_id = ?')
-    .get(messagingGroupId) as WebhookConfig | undefined;
+  return getDb().prepare('SELECT * FROM webhook_configs WHERE messaging_group_id = ?').get(messagingGroupId) as
+    | WebhookConfig
+    | undefined;
 }
 
 export function rotateWebhookSecret(messagingGroupId: string): string {

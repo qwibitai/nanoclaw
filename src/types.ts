@@ -7,6 +7,8 @@ export interface AgentGroup {
   /** @deprecated Use container_configs.provider instead. */
   agent_provider: string | null;
   created_at: string;
+  /** NULL = central-builtin (in-process). Set to a runners.id for remote execution. */
+  runner_id?: string | null;
 }
 
 /** Per-agent-group container runtime config. Source of truth in the DB;
@@ -196,6 +198,23 @@ export interface PendingApproval {
   status: 'pending' | 'approved' | 'rejected' | 'expired';
   title: string;
   options_json: string;
+}
+
+// ── Runners (central DB) ──
+
+export type RunnerStatus = 'connected' | 'disconnected' | 'unresponsive';
+export type RunnerType = 'persistent' | 'ephemeral';
+
+export interface Runner {
+  id: string;
+  name: string;
+  runner_type: RunnerType;
+  runner_token_hash: string;
+  status: RunnerStatus;
+  last_heartbeat: string | null;
+  runner_version: string | null;
+  protocol_version: string | null;
+  created_at: string;
 }
 
 // ── Agent destinations (central DB) ──

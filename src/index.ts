@@ -8,7 +8,6 @@ import path from 'path';
 
 import { backfillContainerConfigs } from './backfill-container-configs.js';
 import { DATA_DIR } from './config.js';
-import { readEnvFile } from './env.js';
 import { enforceStartupBackoff, resetCircuitBreaker } from './circuit-breaker.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
 import { initDb } from './db/connection.js';
@@ -60,6 +59,7 @@ import './modules/index.js';
 import './cli/commands/index.js';
 import './cli/delivery-action.js';
 import { startCliServer, stopCliServer } from './cli/socket-server.js';
+import { startRunnerRegistry, stopRunnerRegistry } from './runner-registry.js';
 
 import type { ChannelAdapter, ChannelSetup } from './channels/adapter.js';
 import { initChannelAdapters, teardownChannelAdapters, getChannelAdapter } from './channels/channel-registry.js';
@@ -178,18 +178,8 @@ async function main(): Promise<void> {
   // 7. Start the `ncl` CLI socket server (data/ncl.sock).
   await startCliServer();
 
-  // 8. Dashboard (optional)
-  const dashboardEnv = readEnvFile(['DASHBOARD_SECRET', 'DASHBOARD_PORT']);
-  const dashboardSecret = process.env.DASHBOARD_SECRET || dashboardEnv.DASHBOARD_SECRET;
-  const dashboardPort = parseInt(process.env.DASHBOARD_PORT || dashboardEnv.DASHBOARD_PORT || '3100', 10);
-  if (dashboardSecret) {
-    const { startDashboard } = await import('@nanoco/nanoclaw-dashboard');
-    const { startDashboardPusher } = await import('./dashboard-pusher.js');
-    startDashboard({ port: dashboardPort, secret: dashboardSecret });
-    startDashboardPusher({ port: dashboardPort, secret: dashboardSecret, intervalMs: 60000 });
-  } else {
-    log.info('Dashboard disabled (no DASHBOARD_SECRET)');
-  }
+  // 8. Start the runner WebSocket registry (port RUNNER_WS_PORT).
+  startRunnerRegistry();
 
   log.info('NanoClaw running');
 }
@@ -207,6 +197,7 @@ async function shutdown(signal: string): Promise<void> {
   stopDeliveryPolls();
   stopHostSweep();
   await stopCliServer();
+  await stopRunnerRegistry();
   try {
     await teardownChannelAdapters();
   } finally {

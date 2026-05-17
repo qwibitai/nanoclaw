@@ -31,6 +31,7 @@ import { startTypingRefresh, stopTypingRefresh } from './modules/typing/index.js
 import { log } from './log.js';
 import { resolveSession, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
 import { wakeContainer } from './container-runner.js';
+import { dispatchToRunner, isRunnerConnected } from './runner-registry.js';
 import { getSession } from './db/sessions.js';
 import type { AgentGroup, MessagingGroup, MessagingGroupAgent } from './types.js';
 import type { InboundEvent } from './channels/adapter.js';
@@ -473,13 +474,37 @@ async function deliverToAgent(
     // Typing indicator + wake are only for the engaged branch; accumulated
     // messages sit silently until a real trigger fires.
     startTypingRefresh(session.id, session.agent_group_id, event.channelType, event.platformId, event.threadId);
-    const freshSession = getSession(session.id);
-    if (freshSession) {
-      const woke = await wakeContainer(freshSession);
-      // wakeContainer never throws — it returns false on transient spawn
-      // failure (host-sweep retries). Stop the typing indicator we just
-      // started so it doesn't leak; the inbound row stays pending.
-      if (!woke) stopTypingRefresh(freshSession.id);
+
+    if (agentGroup.runner_id && agentGroup.runner_id !== 'central-builtin') {
+      // Remote runner: dispatch via INBOUND_MESSAGE over the runner WebSocket.
+      // The session message is already written to inbound.db above for audit/replay.
+      if (isRunnerConnected(agentGroup.runner_id)) {
+        const content = safeParseContent(event.message.content);
+        dispatchToRunner(agentGroup.runner_id, {
+          message_id: messageIdForAgent(event.message.id, agentGroup.id),
+          remote_agent_id: agentGroup.id,
+          sender: content.sender ?? userId ?? 'unknown',
+          sender_destination: `${event.channelType}:${event.platformId}`,
+          text: content.text ?? '',
+          delivered_at: new Date().toISOString(),
+        });
+      } else {
+        log.warn('Remote runner not connected — message queued in inbound.db for replay on reconnect', {
+          runnerId: agentGroup.runner_id,
+          agentGroupId: agentGroup.id,
+        });
+      }
+      // Stop typing immediately — response-driven stop is a follow-up.
+      stopTypingRefresh(session.id);
+    } else {
+      const freshSession = getSession(session.id);
+      if (freshSession) {
+        const woke = await wakeContainer(freshSession);
+        // wakeContainer never throws — it returns false on transient spawn
+        // failure (host-sweep retries). Stop the typing indicator we just
+        // started so it doesn't leak; the inbound row stays pending.
+        if (!woke) stopTypingRefresh(freshSession.id);
+      }
     }
   }
 }

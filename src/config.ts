@@ -77,3 +77,4 @@ function resolveConfigTimezone(): string {
   return 'UTC';
 }
 export const TIMEZONE = resolveConfigTimezone();
+export const RUNNER_WS_PORT = parseInt(process.env.RUNNER_WS_PORT || '3031', 10);
