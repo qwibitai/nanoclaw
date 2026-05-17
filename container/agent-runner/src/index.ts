@@ -40,6 +40,25 @@ function log(msg: string): void {
 const CWD = '/workspace/agent';
 
 async function main(): Promise<void> {
+  // M1 governance: ANTHROPIC_BASE_URL must point at the platform egress proxy.
+  // The proxy terminates TLS and authenticates via the per-tenant Anthropic
+  // credential. The entrypoint script enforces this before any agent code runs;
+  // this in-process check guards against env mutation between entrypoint exit
+  // and main() start (e.g., a misconfigured wrapper that overrides the env).
+  //
+  // The prefix check `http://egress-proxy.` matches the K8s service DNS name
+  // assigned to the per-namespace egress proxy. In dev/test environments the
+  // entrypoint can override ANTHROPIC_BASE_URL to a local proxy; that URL will
+  // not match this prefix and will correctly fail here, forcing the operator
+  // to configure the dev env explicitly.
+  const proxyBase = process.env.ANTHROPIC_BASE_URL;
+  if (!proxyBase || !proxyBase.startsWith('http://egress-proxy.')) {
+    throw new Error(
+      `agent-runner refused to start: ANTHROPIC_BASE_URL must point to egress-proxy. ` +
+      `(got: ${proxyBase})`,
+    );
+  }
+
   const config = loadConfig();
   const providerName = config.provider.toLowerCase() as ProviderName;
 
