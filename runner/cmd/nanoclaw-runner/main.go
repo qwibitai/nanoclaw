@@ -15,14 +15,21 @@ import (
 	"github.com/nanocoai/nanoclaw/runner/internal/protocol"
 )
 
+// Set by goreleaser at build time via -ldflags.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("nanoclaw-runner: config error: %v", err)
 	}
 
-	log.Printf("nanoclaw-runner v%s starting — name=%s central=%s",
-		cfg.RunnerVersion, cfg.RunnerName, cfg.CentralURL)
+	log.Printf("nanoclaw-runner version=%s commit=%s date=%s starting — name=%s central=%s",
+		version, commit, date, cfg.RunnerName, cfg.CentralURL)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
