@@ -13,6 +13,7 @@ import (
 	"github.com/nanocoai/nanoclaw/runner/internal/client"
 	"github.com/nanocoai/nanoclaw/runner/internal/config"
 	"github.com/nanocoai/nanoclaw/runner/internal/protocol"
+	"github.com/nanocoai/nanoclaw/runner/internal/updater"
 )
 
 // Set by goreleaser at build time via -ldflags.
@@ -33,6 +34,14 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	if cfg.AutoUpdate {
+		u := updater.New(version, cfg.UpdateInterval)
+		go u.Run(ctx)
+		log.Printf("nanoclaw-runner: auto-update enabled (interval=%s)", cfg.UpdateInterval)
+	} else {
+		log.Printf("nanoclaw-runner: auto-update disabled")
+	}
 
 	c := client.New(cfg, func(p protocol.InboundMessagePayload) {
 		// Agent dispatch: v0 stub — logs the incoming message.

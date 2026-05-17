@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 // Config holds all runtime configuration for the runner.
@@ -33,6 +34,12 @@ type Config struct {
 
 	// ReconnectMaxDelaySec caps the exponential backoff.
 	ReconnectMaxDelaySec int
+
+	// AutoUpdate enables the background self-update goroutine.
+	AutoUpdate bool
+
+	// UpdateInterval controls how often to poll for a new release.
+	UpdateInterval time.Duration
 }
 
 // Load reads configuration from environment variables.
@@ -66,6 +73,8 @@ func Load() (*Config, error) {
 	heartbeatSec := envInt("NANOCLAW_HEARTBEAT_INTERVAL_SEC", 30)
 	reconnectBase := envInt("NANOCLAW_RECONNECT_BASE_DELAY_SEC", 2)
 	reconnectMax := envInt("NANOCLAW_RECONNECT_MAX_DELAY_SEC", 60)
+	autoUpdate := envBool("NANOCLAW_RUNNER_AUTO_UPDATE", true)
+	updateInterval := envDuration("NANOCLAW_RUNNER_UPDATE_INTERVAL", 5*time.Minute)
 
 	return &Config{
 		CentralURL:            centralURL,
@@ -76,6 +85,8 @@ func Load() (*Config, error) {
 		HeartbeatIntervalSec:  heartbeatSec,
 		ReconnectBaseDelaySec: reconnectBase,
 		ReconnectMaxDelaySec:  reconnectMax,
+		AutoUpdate:            autoUpdate,
+		UpdateInterval:        updateInterval,
 	}, nil
 }
 
@@ -85,6 +96,30 @@ func envInt(key string, defaultVal int) int {
 		return defaultVal
 	}
 	v, err := strconv.Atoi(s)
+	if err != nil {
+		return defaultVal
+	}
+	return v
+}
+
+func envBool(key string, defaultVal bool) bool {
+	s := os.Getenv(key)
+	if s == "" {
+		return defaultVal
+	}
+	v, err := strconv.ParseBool(s)
+	if err != nil {
+		return defaultVal
+	}
+	return v
+}
+
+func envDuration(key string, defaultVal time.Duration) time.Duration {
+	s := os.Getenv(key)
+	if s == "" {
+		return defaultVal
+	}
+	v, err := time.ParseDuration(s)
 	if err != nil {
 		return defaultVal
 	}
