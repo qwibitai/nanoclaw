@@ -460,9 +460,9 @@ describe('AcpClientProvider.query(): systemContext forwarding', () => {
     await collectEvents(new AcpClientProvider(), input);
 
     const promptMsg = transport.writes
-      .map(w => JSON.parse(w) as { method?: string; params?: { content?: Array<{ text?: string }> } })
+      .map(w => JSON.parse(w) as { method?: string; params?: { prompt?: Array<{ text?: string }> } })
       .find(w => w.method === 'session/prompt');
-    const text = promptMsg?.params?.content?.[0]?.text ?? '';
+    const text = promptMsg?.params?.prompt?.[0]?.text ?? '';
     expect(text).toContain('<system>');
     expect(text).toContain('You are a helpful assistant.');
     expect(text).toContain('Hello');
@@ -480,8 +480,8 @@ describe('AcpClientProvider.query(): systemContext forwarding', () => {
     await collectEvents(new AcpClientProvider(), baseInput);
 
     const promptMsg = transport.writes
-      .map(w => JSON.parse(w) as { method?: string; params?: { content?: Array<{ text?: string }> } })
+      .map(w => JSON.parse(w) as { method?: string; params?: { prompt?: Array<{ text?: string }> } })
       .find(w => w.method === 'session/prompt');
-    expect(promptMsg?.params?.content?.[0]?.text).toBe('Hello agent');
+    expect(promptMsg?.params?.prompt?.[0]?.text).toBe('Hello agent');
   });
 });
