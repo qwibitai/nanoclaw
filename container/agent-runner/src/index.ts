@@ -86,6 +86,25 @@ async function main(): Promise<void> {
     log(`Additional MCP server: ${name} (${serverConfig.command})`);
   }
 
+  // M1 platform integration: always register the platform runner-mcp server.
+  // runner-mcp is the ONLY additional tool surface permitted in hosted mode —
+  // it proxies tool calls through the neev-runner UDS (owned by the
+  // entrypoint's neev-runner process) and enforces per-tenant governance.
+  //
+  // NEEV_CHANNEL_ID scopes all runner-mcp calls to the provisioned channel;
+  // an empty string is accepted by runner-mcp (it omits the channel header),
+  // which is the correct M1 default. Full enforcement (hard error on missing
+  // NEEV_CHANNEL_ID) will be added in Task 29 once tenant-provisioning
+  // guarantees the env is always set.
+  const neevChannelId = process.env.NEEV_CHANNEL_ID ?? '';
+  mcpServers['runner'] = {
+    command: '/usr/local/bin/runner-mcp',
+    args: ['--uds', '/var/run/neev/runner.sock', '--channel-id', neevChannelId],
+    env: {},
+  };
+  log(`Platform runner-mcp registered (channel-id: ${neevChannelId || '<empty>'})`);
+  log('Active MCP servers: ' + Object.keys(mcpServers).join(', '));
+
   const provider = createProvider(providerName, {
     assistantName: config.assistantName || undefined,
     mcpServers,

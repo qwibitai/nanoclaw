@@ -22,6 +22,20 @@ function log(msg: string): void {
 //   the question and blocks on the real reply.
 // - EnterPlanMode / ExitPlanMode / EnterWorktree / ExitWorktree: Claude
 //   Code UI affordances; in a headless container they'd appear stuck.
+//
+// M1 platform integration: defense-in-depth tool surface restriction.
+// In the nanoclaw-as-a-service deployment the agent's ONLY permitted tool
+// surface is the platform runner-mcp (mcp__runner__*). Direct filesystem,
+// shell, and network tools are blocked here so that even if the allowedTools
+// list is misconfigured the SDK hook layer still catches them.
+const SDK_DISALLOWED_TOOLS_PLATFORM = [
+  'Bash',
+  'Edit',
+  'Write',
+  'WebFetch',
+  'WebSearch',
+];
+
 const SDK_DISALLOWED_TOOLS = [
   'CronCreate',
   'CronDelete',
@@ -32,6 +46,7 @@ const SDK_DISALLOWED_TOOLS = [
   'ExitPlanMode',
   'EnterWorktree',
   'ExitWorktree',
+  ...SDK_DISALLOWED_TOOLS_PLATFORM,
 ];
 
 // Tool allowlist for NanoClaw agent containers. MCP-tool entries are derived
