@@ -7,7 +7,11 @@ import { ChildProcess, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { OneCLI } from '@onecli-sh/sdk';
+// M1 platform integration: OneCLI vault replaced by platform-managed credentials.
+// The nanoclaw-as-a-service deployment does NOT use OneCLI; the nanoclaw-control
+// sandbox runs INSIDE agent-platform and cannot spawn Docker children (no DinD).
+// Credential injection is handled by the platform egress proxy (ANTHROPIC_BASE_URL
+// in each nanoclaw-agent sandbox). No OneCLI import or instance is needed here.
 
 import {
   CONTAINER_IMAGE,
@@ -15,8 +19,6 @@ import {
   CONTAINER_INSTALL_LABEL,
   DATA_DIR,
   GROUPS_DIR,
-  ONECLI_API_KEY,
-  ONECLI_URL,
   TIMEZONE,
 } from './config.js';
 import { materializeContainerJson } from './container-config.js';
@@ -46,8 +48,6 @@ import {
   writeSessionRouting,
 } from './session-manager.js';
 import type { AgentGroup, Session } from './types.js';
-
-const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 
 /** Active containers tracked by session ID. */
 const activeContainers = new Map<string, { process: ChildProcess; containerName: string }>();
@@ -105,88 +105,25 @@ export function wakeContainer(session: Session): Promise<boolean> {
   return promise;
 }
 
-async function spawnContainer(session: Session): Promise<void> {
-  const agentGroup = getAgentGroup(session.agent_group_id);
-  if (!agentGroup) {
-    log.error('Agent group not found', { agentGroupId: session.agent_group_id });
-    return;
-  }
-
-  // Refresh the destination map and default reply routing so any admin
-  // changes take effect on wake. Destinations come from the agent-to-agent
-  // module — skip when the module isn't installed (table absent).
-  if (hasTable(getDb(), 'agent_destinations')) {
-    const { writeDestinations } = await import('./modules/agent-to-agent/write-destinations.js');
-    writeDestinations(agentGroup.id, session.id);
-  }
-  writeSessionRouting(agentGroup.id, session.id);
-
-  // Materialize container.json from DB — writes fresh file and returns
-  // the config object, threaded through provider resolution, buildMounts,
-  // and buildContainerArgs so we don't re-read.
-  const containerConfig = materializeContainerJson(agentGroup.id);
-
-  // Resolve the effective provider + any host-side contribution it declares
-  // (extra mounts, env passthrough). Computed once and threaded through both
-  // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
-  const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
-
-  const mounts = buildMounts(agentGroup, session, containerConfig, contribution);
-  const containerName = `nanoclaw-v2-${agentGroup.folder}-${Date.now()}`;
-  // OneCLI agent identifier is always the agent group id — stable across
-  // sessions and reversible via getAgentGroup() for approval routing.
-  const agentIdentifier = agentGroup.id;
-  const args = await buildContainerArgs(
-    mounts,
-    containerName,
-    agentGroup,
-    containerConfig,
-    provider,
-    contribution,
-    agentIdentifier,
+// M1 platform integration: spawnContainer is intentionally a hard-error stub.
+//
+// In the nanoclaw-as-a-service deployment the nanoclaw-control host runs INSIDE
+// an agent-platform sandbox. It cannot spawn Docker children (DinD is not
+// permitted). Instead, nanoclaw-agent sandboxes are pre-provisioned per
+// agent_group by backend/service/nanoclaw/tenant_provisioning.go (Task 29) and
+// are routed to via the inbound.db mechanism. If this function is ever reached
+// it indicates a routing bug — we fail loudly so the operator can diagnose
+// rather than silently hanging on a Docker call that will never succeed.
+//
+// TODO(Task 29): replace this stub with a platform sandbox readiness check
+// (assert the pre-provisioned nanoclaw-agent pod for this agent_group_id is
+// Running, and write routing so the host's delivery loop can find it).
+async function spawnContainer(_session: Session): Promise<void> {
+  throw new Error(
+    'nanoclaw-as-a-service M1: spawnContainer is delegated to the agent-platform — ' +
+    'the agent-platform provisions one nanoclaw-agent sandbox per agent_group, which is ' +
+    'then routed via inbound.db. Do not call spawnContainer.',
   );
-
-  log.info('Spawning container', { sessionId: session.id, agentGroup: agentGroup.name, containerName });
-
-  // Clear any orphan heartbeat from a previous container instance — the
-  // sweep's ceiling check treats a missing file as "fresh spawn, give grace"
-  // (host-sweep.ts line 87). Without this, the stale mtime can trigger an
-  // immediate kill before the new container touches the file itself.
-  fs.rmSync(heartbeatPath(agentGroup.id, session.id), { force: true });
-
-  const container = spawn(CONTAINER_RUNTIME_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-
-  activeContainers.set(session.id, { process: container, containerName });
-  markContainerRunning(session.id);
-
-  // Log stderr
-  container.stderr?.on('data', (data) => {
-    for (const line of data.toString().trim().split('\n')) {
-      if (line) log.debug(line, { container: agentGroup.folder });
-    }
-  });
-
-  // stdout is unused in v2 (all IO is via session DB)
-  container.stdout?.on('data', () => {});
-
-  // No host-side idle timeout. Stale/stuck detection is driven by the host
-  // sweep reading heartbeat mtime + processing_ack claim age + container_state
-  // (see src/host-sweep.ts). This avoids killing long-running legitimate work
-  // on a wall-clock timer.
-
-  container.on('close', (code) => {
-    activeContainers.delete(session.id);
-    markContainerStopped(session.id);
-    stopTypingRefresh(session.id);
-    log.info('Container exited', { sessionId: session.id, code, containerName });
-  });
-
-  container.on('error', (err) => {
-    activeContainers.delete(session.id);
-    markContainerStopped(session.id);
-    stopTypingRefresh(session.id);
-    log.error('Container spawn error', { sessionId: session.id, err });
-  });
 }
 
 /** Kill a container for a session. */
@@ -396,6 +333,9 @@ function syncSkillSymlinks(claudeDir: string, containerConfig: import('./contain
   }
 }
 
+// buildContainerArgs is retained for reference / future Task 29 use but is
+// unreachable in M1 (spawnContainer is a stub). The agentIdentifier param
+// has been removed since it was only passed to OneCLI which is now removed.
 async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
@@ -403,7 +343,6 @@ async function buildContainerArgs(
   containerConfig: import('./container-config.js').ContainerConfig,
   provider: string,
   providerContribution: ProviderContainerContribution,
-  agentIdentifier?: string,
 ): Promise<string[]> {
   const args: string[] = ['run', '--rm', '--name', containerName, '--label', CONTAINER_INSTALL_LABEL];
 
@@ -418,19 +357,12 @@ async function buildContainerArgs(
     }
   }
 
-  // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls
-  // are routed through the agent vault for credential injection. Treated as
-  // a transient hard failure: if we can't wire the gateway, we don't spawn.
-  // The caller (router or host-sweep) catches the throw, leaves the inbound
-  // message pending, and the next sweep tick retries.
-  if (agentIdentifier) {
-    await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
-  }
-  const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
-  if (!onecliApplied) {
-    throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
-  }
-  log.info('OneCLI gateway applied', { containerName });
+  // M1 platform integration: OneCLI credential injection removed.
+  // In the agent-platform deployment, credential injection is handled by the
+  // per-tenant egress proxy bound to each nanoclaw-agent sandbox via
+  // ANTHROPIC_BASE_URL. No OneCLI gateway call is made here; container args
+  // for the nanoclaw-agent are not assembled by this host (spawnContainer is
+  // a stub — see above).
 
   // Host gateway
   args.push(...hostGatewayArgs());
