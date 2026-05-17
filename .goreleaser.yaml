@@ -1,0 +1,59 @@
+version: 2
+
+project_name: nanoclaw-runner
+
+before:
+  hooks:
+    - sh -c "cd runner && go mod tidy"
+
+builds:
+  - id: nanoclaw-runner
+    dir: runner
+    main: ./cmd/nanoclaw-runner
+    binary: nanoclaw-runner
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+
+release:
+  github:
+    owner: distillery-labs
+    name: nanoclaw
+  name_template: "nanoclaw-runner {{.Tag}}"
+  prerelease: auto
