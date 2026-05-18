@@ -107,6 +107,12 @@ export interface Channel {
     imagePaths: string[],
     caption?: string,
   ): Promise<void>;
+  // Optional: send video. Channels that support video delivery implement it.
+  sendVideo?(
+    jid: string,
+    videoPaths: string[],
+    caption?: string,
+  ): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

@@ -47,6 +47,12 @@ export class SlackChannel implements Channel {
         imagePaths: string[];
         caption?: string;
       }
+    | {
+        kind: 'video';
+        jid: string;
+        videoPaths: string[];
+        caption?: string;
+      }
   > = [];
   private flushing = false;
   private userNameCache = new Map<string, string>();
@@ -288,6 +294,33 @@ export class SlackChannel implements Channel {
     }
   }
 
+  async sendVideo(
+    jid: string,
+    videoPaths: string[],
+    caption?: string,
+  ): Promise<void> {
+    const channelId = jid.replace(/^slack:/, '');
+    if (!this.connected) {
+      this.outgoingQueue.push({ kind: 'video', jid, videoPaths, caption });
+      logger.info(
+        { jid, count: videoPaths.length, queueSize: this.outgoingQueue.length },
+        'Slack disconnected, video queued',
+      );
+      return;
+    }
+    // files.uploadV2 auto-detects video mime types from filename; the same
+    // call shape works for both images and videos.
+    await this.app.client.files.uploadV2({
+      channel_id: channelId,
+      initial_comment: caption,
+      file_uploads: videoPaths.map((p) => ({
+        file: fs.createReadStream(p),
+        filename: path.basename(p),
+      })),
+    });
+    logger.info({ jid, count: videoPaths.length }, 'Slack video(s) sent');
+  }
+
   isConnected(): boolean {
     return this.connected;
   }
@@ -379,7 +412,7 @@ export class SlackChannel implements Channel {
             { jid: item.jid, length: item.text.length },
             'Queued Slack text sent',
           );
-        } else {
+        } else if (item.kind === 'image') {
           await this.app.client.files.uploadV2({
             channel_id: channelId,
             initial_comment: item.caption,
@@ -391,6 +424,19 @@ export class SlackChannel implements Channel {
           logger.info(
             { jid: item.jid, count: item.imagePaths.length },
             'Queued Slack image(s) sent',
+          );
+        } else {
+          await this.app.client.files.uploadV2({
+            channel_id: channelId,
+            initial_comment: item.caption,
+            file_uploads: item.videoPaths.map((p) => ({
+              file: fs.createReadStream(p),
+              filename: path.basename(p),
+            })),
+          });
+          logger.info(
+            { jid: item.jid, count: item.videoPaths.length },
+            'Queued Slack video(s) sent',
           );
         }
       }

@@ -1162,4 +1162,87 @@ describe('SlackChannel', () => {
       expect(currentApp().client.files.uploadV2).toHaveBeenCalled();
     });
   });
+
+  // --- sendVideo (outbound) ---
+
+  describe('sendVideo', () => {
+    it('uploads a single video via files.uploadV2', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await channel.sendVideo!('slack:C0123456789', ['/abs/clip.mp4'], 'hey');
+
+      expect(currentApp().client.files.uploadV2).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel_id: 'C0123456789',
+          initial_comment: 'hey',
+          file_uploads: [expect.objectContaining({ filename: 'clip.mp4' })],
+        }),
+      );
+    });
+
+    it('uploads multiple videos in a single call', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await channel.sendVideo!(
+        'slack:C0123456789',
+        ['/abs/a.mp4', '/abs/b.mp4', '/abs/c.mp4'],
+        undefined,
+      );
+
+      const call = (
+        currentApp().client.files.uploadV2 as unknown as {
+          mock: { calls: unknown[][] };
+        }
+      ).mock.calls[0][0] as { file_uploads: Array<{ filename: string }> };
+      expect(call.file_uploads.length).toBe(3);
+      expect(call.file_uploads.map((f) => f.filename)).toEqual([
+        'a.mp4',
+        'b.mp4',
+        'c.mp4',
+      ]);
+    });
+
+    it('omits initial_comment when caption is undefined', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await channel.sendVideo!('slack:C0123456789', ['/abs/clip.mp4']);
+
+      const call = (
+        currentApp().client.files.uploadV2 as unknown as {
+          mock: { calls: unknown[][] };
+        }
+      ).mock.calls[0][0] as { initial_comment?: string };
+      expect(call.initial_comment).toBeUndefined();
+    });
+
+    it('queues when disconnected', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+
+      await channel.sendVideo!('slack:C0123456789', ['/abs/clip.mp4']);
+      expect(currentApp().client.files.uploadV2).not.toHaveBeenCalled();
+    });
+
+    it('flushes queued videos on reconnect', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+
+      await channel.sendVideo!('slack:C0123456789', ['/abs/clip.mp4'], 'cap');
+      await channel.connect();
+
+      expect(currentApp().client.files.uploadV2).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel_id: 'C0123456789',
+          initial_comment: 'cap',
+          file_uploads: [expect.objectContaining({ filename: 'clip.mp4' })],
+        }),
+      );
+    });
+  });
 });
