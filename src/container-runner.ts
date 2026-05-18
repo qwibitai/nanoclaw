@@ -473,6 +473,14 @@ export async function buildAgentGroupImage(agentGroupId: string): Promise<void> 
   if (!configRow) throw new Error('Container config not found');
   const aptPackages = JSON.parse(configRow.packages_apt) as string[];
   const npmPackages = JSON.parse(configRow.packages_npm) as string[];
+
+  // Validate package names to prevent command injection (CWE-78)
+  const SAFE_PACKAGE_RE = /^[a-zA-Z0-9][a-zA-Z0-9.+\-_@/]*$/;
+  for (const pkg of [...aptPackages, ...npmPackages]) {
+    if (!SAFE_PACKAGE_RE.test(pkg)) {
+      throw new Error(`Invalid package name: ${pkg}`);
+    }
+  }
   if (aptPackages.length === 0 && npmPackages.length === 0) {
     throw new Error('No packages to install. Use install_packages first.');
   }
