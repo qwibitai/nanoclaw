@@ -164,6 +164,23 @@ export interface ChannelAdapter {
    * Returning the same platform_id on repeated calls is expected.
    */
   openDM?(userHandle: string): Promise<string>;
+
+  /**
+   * Rewrite the threadId before session resolution. The router calls this
+   * only when the wiring's effective session_mode is per-thread.
+   *
+   * Use case: some platforms encode top-level posts with an ambiguous
+   * "empty thread" placeholder (e.g. Slack DMs all share an empty
+   * thread_ts), collapsing every top-level message to the same threadId.
+   * The adapter mints a per-message id so each becomes its own thread /
+   * session; the router uses it for delivery too so the reply lands
+   * in-thread.
+   *
+   * INVARIANT: `channelIdFromThreadId(rewritten)` must equal
+   * `channelIdFromThreadId(original)` — only the thread component may
+   * change, not the channel.
+   */
+  rewriteThreadIdForSession?(threadId: string, messageId: string): string;
 }
 
 /** Factory function that creates a channel adapter (returns null if credentials missing). */

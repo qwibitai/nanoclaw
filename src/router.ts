@@ -412,7 +412,17 @@ async function deliverToAgent(
     effectiveSessionMode = 'per-thread';
   }
 
-  const { session, created } = resolveSession(agent.agent_group_id, mg.id, event.threadId, effectiveSessionMode);
+  // Optional per-channel threadId rewrite — only consulted in per-thread
+  // mode. See ChannelAdapter.rewriteThreadIdForSession.
+  let effectiveThreadId = event.threadId;
+  if (effectiveSessionMode === 'per-thread' && event.threadId) {
+    const adapter = getChannelAdapter(event.channelType);
+    if (adapter?.rewriteThreadIdForSession) {
+      effectiveThreadId = adapter.rewriteThreadIdForSession(event.threadId, event.message.id);
+    }
+  }
+
+  const { session, created } = resolveSession(agent.agent_group_id, mg.id, effectiveThreadId, effectiveSessionMode);
 
   // The inbound row's (channel_type, platform_id, thread_id) is the address
   // the agent's reply will be delivered to. Normally it mirrors the source
@@ -421,7 +431,7 @@ async function deliverToAgent(
   const deliveryAddr = event.replyTo ?? {
     channelType: event.channelType,
     platformId: event.platformId,
-    threadId: event.threadId,
+    threadId: effectiveThreadId,
   };
 
   // Command gate: classify slash commands before they reach the container.
