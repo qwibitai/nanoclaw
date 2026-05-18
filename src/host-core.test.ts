@@ -838,7 +838,6 @@ describe('agent-shared session resolution', () => {
     const { session } = resolveSession('ag-1', null, null, 'agent-shared');
     expect(session.messaging_group_id).toBeNull();
   });
-
 });
 
 describe('agent-to-agent routing', () => {
