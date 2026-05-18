@@ -210,6 +210,17 @@ export function writeSessionMessage(
      * a trigger-1 message does arrive.
      */
     trigger?: 0 | 1;
+    /**
+     * For agent-to-agent inbound: the source session id that emitted the
+     * outbound message which became this inbound row. Used as the return
+     * path so the target's reply routes back to that exact session.
+     */
+    sourceSessionId?: string | null;
+    /**
+     * 1 = only deliver on the container's first poll (fresh start).
+     * Dying containers (past first poll) skip these rows.
+     */
+    onWake?: 0 | 1;
   },
 ): void {
   // Extract base64 attachment data, save to inbox, replace with file paths
@@ -228,6 +239,8 @@ export function writeSessionMessage(
       processAfter: message.processAfter ?? null,
       recurrence: message.recurrence ?? null,
       trigger: message.trigger ?? 1,
+      sourceSessionId: message.sourceSessionId ?? null,
+      onWake: message.onWake ?? 0,
     });
   } finally {
     db.close();

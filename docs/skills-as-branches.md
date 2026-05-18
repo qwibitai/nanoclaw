@@ -23,7 +23,7 @@ This replaces the previous `skills-engine/` system (three-way file merging, `.na
 
 ### Repository structure
 
-The upstream repo (`qwibitai/nanoclaw`) maintains:
+The upstream repo (`nanocoai/nanoclaw`) maintains:
 
 - `main` — core NanoClaw (no skill code)
 - `skill/discord` — main + Discord integration
@@ -46,7 +46,7 @@ Skills are split into two categories:
 **Feature skills** (in marketplace, installed on demand):
 - `/add-discord`, `/add-telegram`, `/add-slack`, `/add-gmail`, etc.
 - Each has a SKILL.md with setup instructions and a corresponding `skill/*` branch with code
-- Live in the marketplace repo (`qwibitai/nanoclaw-skills`)
+- Live in the marketplace repo (`nanocoai/nanoclaw-skills`)
 
 Users never interact with the marketplace directly. The operational skills `/setup` and `/customize` handle plugin installation transparently:
 
@@ -78,7 +78,7 @@ NanoClaw's `.claude/settings.json` registers the official marketplace:
     "nanoclaw-skills": {
       "source": {
         "source": "github",
-        "repo": "qwibitai/nanoclaw-skills"
+        "repo": "nanocoai/nanoclaw-skills"
       }
     }
   }
@@ -88,7 +88,7 @@ NanoClaw's `.claude/settings.json` registers the official marketplace:
 The marketplace repo uses Claude Code's plugin structure:
 
 ```
-qwibitai/nanoclaw-skills/
+nanocoai/nanoclaw-skills/
   .claude-plugin/
     marketplace.json              # Plugin catalog
   plugins/
@@ -213,7 +213,7 @@ A GitHub Action runs on every push to `main`:
 
 ### New users (recommended)
 
-1. Fork `qwibitai/nanoclaw` on GitHub (click the Fork button)
+1. Fork `nanocoai/nanoclaw` on GitHub (click the Fork button)
 2. Clone your fork:
    ```bash
    git clone https://github.com/<you>/nanoclaw.git
@@ -229,9 +229,9 @@ Forking is recommended because it gives users a remote to push their customizati
 
 ### Existing users migrating from clone
 
-Users who previously ran `git clone https://github.com/qwibitai/nanoclaw.git` and have local customizations:
+Users who previously ran `git clone https://github.com/nanocoai/nanoclaw.git` and have local customizations:
 
-1. Fork `qwibitai/nanoclaw` on GitHub
+1. Fork `nanocoai/nanoclaw` on GitHub
 2. Reroute remotes:
    ```bash
    git remote rename origin upstream
@@ -239,7 +239,7 @@ Users who previously ran `git clone https://github.com/qwibitai/nanoclaw.git` an
    git push --force origin main
    ```
    The `--force` is needed because the fresh fork's main is at upstream's latest, but the user wants their (possibly behind) version. The fork was just created so there's nothing to lose.
-3. From this point, `origin` = their fork, `upstream` = qwibitai/nanoclaw
+3. From this point, `origin` = their fork, `upstream` = nanocoai/nanoclaw
 
 ### Existing users migrating from the old skills engine
 
@@ -316,7 +316,7 @@ git fetch upstream main
 git checkout -b my-fix upstream/main
 # Make changes
 git push origin my-fix
-# Create PR from my-fix to qwibitai/nanoclaw:main
+# Create PR from my-fix to nanocoai/nanoclaw:main
 ```
 
 Standard fork contribution workflow. Their custom changes stay on their main and don't leak into the PR.
@@ -327,7 +327,7 @@ The flow below is for **feature skills** (branch-based). For utility skills (sel
 
 ### Contributor flow (feature skills)
 
-1. Fork `qwibitai/nanoclaw`
+1. Fork `nanocoai/nanoclaw`
 2. Branch from `main`
 3. Make the code changes (new channel file, modified integration points, updated package.json, .env.example additions, etc.)
 4. Open a PR to `main`
@@ -345,7 +345,7 @@ When a skill PR is reviewed and approved:
    ```
 2. Force-push to the contributor's PR branch, replacing it with a single commit that adds the contributor to `CONTRIBUTORS.md` (removing all code changes)
 3. Merge the slimmed PR into `main` (just the contributor addition)
-4. Add the skill's SKILL.md to the marketplace repo (`qwibitai/nanoclaw-skills`)
+4. Add the skill's SKILL.md to the marketplace repo (`nanocoai/nanoclaw-skills`)
 
 This way:
 - The contributor gets merge credit (their PR is merged)
@@ -388,7 +388,7 @@ If the community contributor is trusted, they can open a PR to add their marketp
     "nanoclaw-skills": {
       "source": {
         "source": "github",
-        "repo": "qwibitai/nanoclaw-skills"
+        "repo": "nanocoai/nanoclaw-skills"
       }
     },
     "alice-nanoclaw-skills": {
@@ -434,7 +434,7 @@ A flavor is a curated fork of NanoClaw — a combination of skills, custom chang
 
 ### Creating a flavor
 
-1. Fork `qwibitai/nanoclaw`
+1. Fork `nanocoai/nanoclaw`
 2. Merge in the skills you want
 3. Make custom changes (trigger word, prompts, integrations, etc.)
 4. Your fork's `main` IS the flavor
@@ -462,7 +462,7 @@ Then setup continues normally (dependencies, auth, container, service).
 
 After installation, the user's fork has three remotes:
 - `origin` — their fork (push customizations here)
-- `upstream` — `qwibitai/nanoclaw` (core updates)
+- `upstream` — `nanocoai/nanoclaw` (core updates)
 - `<flavor-name>` — the flavor fork (flavor updates)
 
 ### Updating a flavor
@@ -538,14 +538,14 @@ Operational skills (`setup`, `debug`, `update-nanoclaw`, `customize`, `update-sk
 
 Before:
 ```bash
-git clone https://github.com/qwibitai/NanoClaw.git
+git clone https://github.com/nanocoai/NanoClaw.git
 cd NanoClaw
 claude
 ```
 
 After:
 ```
-1. Fork qwibitai/nanoclaw on GitHub
+1. Fork nanocoai/nanoclaw on GitHub
 2. git clone https://github.com/<you>/nanoclaw.git
 3. cd nanoclaw
 4. claude
@@ -556,8 +556,8 @@ After:
 
 Updates to the setup flow:
 
-- Check if `upstream` remote exists; if not, add it: `git remote add upstream https://github.com/qwibitai/nanoclaw.git`
-- Check if `origin` points to the user's fork (not qwibitai). If it points to qwibitai, guide them through the fork migration.
+- Check if `upstream` remote exists; if not, add it: `git remote add upstream https://github.com/nanocoai/nanoclaw.git`
+- Check if `origin` points to the user's fork (not nanocoai). If it points to nanocoai, guide them through the fork migration.
 - **Install marketplace plugin:** `claude plugin install nanoclaw-skills@nanoclaw-skills --scope project` — makes all feature skills available (hot-loaded, no restart)
 - **Ask which channels to add:** present channel options (Discord, Telegram, Slack, WhatsApp, Gmail), run corresponding `/add-*` skills for selected channels
 - **Offer dependent skills:** after a channel is set up, offer relevant add-ons (e.g., Agent Swarm after Telegram, voice transcription after WhatsApp)
@@ -573,7 +573,7 @@ Marketplace configuration so the official marketplace is auto-registered:
     "nanoclaw-skills": {
       "source": {
         "source": "github",
-        "repo": "qwibitai/nanoclaw-skills"
+        "repo": "nanocoai/nanoclaw-skills"
       }
     }
   }
@@ -601,7 +601,7 @@ Operational skills (`setup`, `debug`, `update-nanoclaw`, `customize`, `update-sk
 
 ### New infrastructure
 
-- **Marketplace repo** (`qwibitai/nanoclaw-skills`) — single Claude Code plugin bundling SKILL.md files for all feature skills
+- **Marketplace repo** (`nanocoai/nanoclaw-skills`) — single Claude Code plugin bundling SKILL.md files for all feature skills
 - **CI GitHub Action** — merge-forward `main` into all `skill/*` branches on every push to `main`, using Claude (Haiku) for conflict resolution
 - **`/update-skills` skill** — checks for and applies skill branch updates using git history
 - **`CONTRIBUTORS.md`** — tracks skill contributors
@@ -650,7 +650,7 @@ Users only need to re-merge a skill branch if the skill itself was updated (not 
 > **We now recommend forking instead of cloning.** This gives you a remote to push your customizations to.
 >
 > **If you currently have a clone with local changes**, migrate to a fork:
-> 1. Fork `qwibitai/nanoclaw` on GitHub
+> 1. Fork `nanocoai/nanoclaw` on GitHub
 > 2. Run:
 >    ```
 >    git remote rename origin upstream
@@ -668,7 +668,7 @@ Users only need to re-merge a skill branch if the skill itself was updated (not 
 > **Contributing skills**
 >
 > To contribute a skill:
-> 1. Fork `qwibitai/nanoclaw`
+> 1. Fork `nanocoai/nanoclaw`
 > 2. Branch from `main` and make your code changes
 > 3. Open a regular PR
 >

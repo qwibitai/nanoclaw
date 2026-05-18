@@ -77,7 +77,7 @@ NanoClaw must live inside the workspace directory — Docker-in-Docker can only 
 ```bash
 # Clone to home first (virtiofs can corrupt git pack files during clone)
 cd ~
-git clone https://github.com/qwibitai/nanoclaw.git
+git clone https://github.com/nanocoai/nanoclaw.git
 
 # Replace with YOUR workspace path (the host path you passed to `docker sandbox create`)
 WORKSPACE=/Users/you/nanoclaw-workspace
@@ -347,7 +347,7 @@ docker sandbox network proxy <sandbox-name> \
 ### Git clone fails with "inflate: data stream error"
 Clone to a non-workspace path first, then move:
 ```bash
-cd ~ && git clone https://github.com/qwibitai/nanoclaw.git && mv nanoclaw /path/to/workspace/nanoclaw
+cd ~ && git clone https://github.com/nanocoai/nanoclaw.git && mv nanoclaw /path/to/workspace/nanoclaw
 ```
 
 ### WhatsApp QR code doesn't display

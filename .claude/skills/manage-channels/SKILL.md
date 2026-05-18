@@ -11,7 +11,13 @@ Privilege is a **user-level** concept, not a channel-level one (see `src/db/user
 
 ## Assess Current State
 
-Read the central DB (`data/v2.db`) using these canonical queries (column names match the schema, not the CLI flags — the `register` command's `--assistant-name` is stored in `agent_groups.name`):
+Read the central DB (`data/v2.db`) using these canonical queries (column names match the schema, not the CLI flags — the `register` command's `--assistant-name` is stored in `agent_groups.name`).
+
+Run each via the in-tree wrapper — the host setup deliberately ships no `sqlite3` CLI:
+
+```bash
+pnpm exec tsx scripts/q.ts data/v2.db "<query>"
+```
 
 ```sql
 SELECT id, name AS assistant_name, folder, agent_provider FROM agent_groups;

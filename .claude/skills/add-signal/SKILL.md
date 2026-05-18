@@ -90,17 +90,21 @@ No output = success.
 
 > ⚠ Stop NanoClaw before running signal-cli commands — the daemon holds an exclusive lock on its data directory while running.
 
+Run from your NanoClaw project root:
+
 ```bash
+source setup/lib/install-slug.sh
+
 # macOS
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl unload ~/Library/LaunchAgents/$(launchd_label).plist
 signal-cli -a +1YOURNUMBER updateProfile --name "YourBotName"
 # optionally: --avatar /path/to/avatar.jpg
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl load ~/Library/LaunchAgents/$(launchd_label).plist
 
 # Linux
-systemctl --user stop nanoclaw
+systemctl --user stop $(systemd_unit)
 signal-cli -a +1YOURNUMBER updateProfile --name "YourBotName"
-systemctl --user start nanoclaw
+systemctl --user start $(systemd_unit)
 ```
 
 ### Path B: Link as secondary device
@@ -185,12 +189,16 @@ Sync to container: `mkdir -p data/env && cp .env data/env/env`
 
 ### Restart
 
+Run from your NanoClaw project root:
+
 ```bash
+source setup/lib/install-slug.sh
+
 # macOS
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+launchctl kickstart -k gui/$(id -u)/$(launchd_label)
 
 # Linux
-systemctl --user restart nanoclaw
+systemctl --user restart $(systemd_unit)
 ```
 
 ## Wiring
@@ -200,7 +208,7 @@ systemctl --user restart nanoclaw
 After the service starts, send any message to the Signal number from your personal Signal app. The router auto-creates a `messaging_groups` row. Then:
 
 ```bash
-sqlite3 data/v2.db \
+pnpm exec tsx scripts/q.ts data/v2.db \
   "SELECT id, platform_id FROM messaging_groups WHERE channel_type='signal' ORDER BY created_at DESC LIMIT 5"
 ```
 
@@ -212,7 +220,7 @@ Add the Signal number to a group from your phone, send any message, then wire th
 
 ```bash
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-sqlite3 data/v2.db "
+pnpm exec tsx scripts/q.ts data/v2.db "
 INSERT OR IGNORE INTO messaging_group_agents
   (id, messaging_group_id, agent_group_id, session_mode, priority, created_at)
 VALUES
@@ -226,7 +234,7 @@ New Signal users (including the owner's Signal identity) are silently dropped wi
 
 ```bash
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-sqlite3 data/v2.db "
+pnpm exec tsx scripts/q.ts data/v2.db "
 INSERT OR REPLACE INTO user_roles (user_id, role, agent_group_id, granted_by, granted_at)
   VALUES ('signal:UUID', 'owner', NULL, 'system', '$NOW');
 INSERT OR IGNORE INTO agent_group_members (user_id, agent_group_id, added_by, added_at)
@@ -282,8 +290,13 @@ If you see `Signal daemon not reachable at 127.0.0.1:7583` and `SIGNAL_MANAGE_DA
 ### Bot not responding
 
 1. Channel initialized: `grep "Signal channel connected" logs/nanoclaw.log | tail -1`
-2. Channel wired: `sqlite3 data/v2.db "SELECT mg.platform_id, mg.name FROM messaging_groups mg JOIN messaging_group_agents mga ON mg.id = mga.messaging_group_id WHERE mg.channel_type='signal'"`
-3. Service running: `launchctl print gui/$(id -u)/com.nanoclaw` (macOS) / `systemctl --user status nanoclaw` (Linux)
+2. Channel wired: `pnpm exec tsx scripts/q.ts data/v2.db "SELECT mg.platform_id, mg.name FROM messaging_groups mg JOIN messaging_group_agents mga ON mg.id = mga.messaging_group_id WHERE mg.channel_type='signal'"`
+3. Service running: `launchctl print gui/$(id -u)/"$(. setup/lib/install-slug.sh && launchd_label)"` (macOS) / `systemctl --user status "$(. setup/lib/install-slug.sh && systemd_unit)"` (Linux)
+4. **Check for duplicate service instances** — if `logs/nanoclaw.error.log` shows `No adapter for channel type channelType="signal"` despite the adapter starting, two NanoClaw processes are racing. See the `/debug` skill section "No adapter for channel type / Messages silently lost" for the full fix.
+
+### Messages delivered but never arrive (null platformMsgId)
+
+Signal responses show `platformMsgId=undefined` in the main log. This means the delivery poll ran but found no adapter — likely a duplicate service instance issue (see above). Affected messages cannot be retried; the user must resend.
 
 ### Lost connection mid-session
 

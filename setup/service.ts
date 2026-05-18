@@ -82,6 +82,41 @@ export async function run(_args: string[]): Promise<void> {
     });
     process.exit(1);
   }
+
+  installCliSymlink(projectRoot, homeDir);
+}
+
+/**
+ * Symlink bin/ncl into ~/.local/bin so `ncl` is available from anywhere.
+ * Idempotent — overwrites an existing symlink but won't clobber a real file.
+ */
+function installCliSymlink(projectRoot: string, homeDir: string): void {
+  const source = path.join(projectRoot, 'bin', 'ncl');
+  const targetDir = path.join(homeDir, '.local', 'bin');
+  const target = path.join(targetDir, 'ncl');
+
+  try {
+    fs.mkdirSync(targetDir, { recursive: true });
+
+    // Remove existing symlink (but not a real file)
+    try {
+      const stat = fs.lstatSync(target);
+      if (stat.isSymbolicLink()) {
+        fs.unlinkSync(target);
+      } else {
+        log.warn('~/.local/bin/ncl exists and is not a symlink — skipping', { target });
+        return;
+      }
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') throw err;
+    }
+
+    fs.symlinkSync(source, target);
+    log.info('Installed ncl CLI symlink', { target, source });
+  } catch (err) {
+    log.warn('Could not install ncl CLI symlink (non-fatal)', { err });
+  }
 }
 
 function setupLaunchd(

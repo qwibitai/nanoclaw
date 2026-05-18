@@ -14,13 +14,18 @@ afterEach(() => {
   closeSessionDb();
 });
 
-function insertMessage(id: string, kind: string, content: object, opts?: { processAfter?: string; trigger?: 0 | 1 }) {
+function insertMessage(
+  id: string,
+  kind: string,
+  content: object,
+  opts?: { processAfter?: string; trigger?: 0 | 1; onWake?: 0 | 1 },
+) {
   getInboundDb()
     .prepare(
-      `INSERT INTO messages_in (id, kind, timestamp, status, process_after, trigger, content)
-     VALUES (?, ?, datetime('now'), 'pending', ?, ?, ?)`,
+      `INSERT INTO messages_in (id, kind, timestamp, status, process_after, trigger, on_wake, content)
+     VALUES (?, ?, datetime('now'), 'pending', ?, ?, ?, ?)`,
     )
-    .run(id, kind, opts?.processAfter ?? null, opts?.trigger ?? 1, JSON.stringify(content));
+    .run(id, kind, opts?.processAfter ?? null, opts?.trigger ?? 1, opts?.onWake ?? 0, JSON.stringify(content));
 }
 
 describe('formatter', () => {
@@ -47,7 +52,7 @@ describe('formatter', () => {
     insertMessage('m1', 'task', { prompt: 'Review open PRs' });
     const messages = getPendingMessages();
     const prompt = formatMessages(messages);
-    expect(prompt).toContain('[SCHEDULED TASK]');
+    expect(prompt).toContain('<task');
     expect(prompt).toContain('Review open PRs');
   });
 
@@ -55,15 +60,17 @@ describe('formatter', () => {
     insertMessage('m1', 'webhook', { source: 'github', event: 'push', payload: { ref: 'main' } });
     const messages = getPendingMessages();
     const prompt = formatMessages(messages);
-    expect(prompt).toContain('[WEBHOOK: github/push]');
+    expect(prompt).toContain('<webhook');
+    expect(prompt).toContain('source="github"');
+    expect(prompt).toContain('event="push"');
   });
 
   it('should format system messages', () => {
     insertMessage('m1', 'system', { action: 'register_group', status: 'success', result: { id: 'ag-1' } });
     const messages = getPendingMessages();
     const prompt = formatMessages(messages);
-    expect(prompt).toContain('[SYSTEM RESPONSE]');
-    expect(prompt).toContain('register_group');
+    expect(prompt).toContain('<system_response');
+    expect(prompt).toContain('action="register_group"');
   });
 
   it('should handle mixed kinds', () => {
@@ -72,7 +79,7 @@ describe('formatter', () => {
     const messages = getPendingMessages();
     const prompt = formatMessages(messages);
     expect(prompt).toContain('sender="John"');
-    expect(prompt).toContain('[SYSTEM RESPONSE]');
+    expect(prompt).toContain('<system_response');
   });
 
   it('should escape XML in content', () => {
@@ -129,6 +136,58 @@ describe('accumulate gate (trigger column)', () => {
   });
 });
 
+describe('on_wake filtering', () => {
+  it('first poll returns on_wake=1 messages', () => {
+    insertMessage('m1', 'chat', { sender: 'system', text: 'Resuming.' }, { onWake: 1 });
+    const messages = getPendingMessages(true);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].id).toBe('m1');
+  });
+
+  it('subsequent polls skip on_wake=1 messages', () => {
+    insertMessage('m1', 'chat', { sender: 'system', text: 'Resuming.' }, { onWake: 1 });
+    const messages = getPendingMessages(false);
+    expect(messages).toHaveLength(0);
+  });
+
+  it('normal messages returned regardless of isFirstPoll', () => {
+    insertMessage('m1', 'chat', { sender: 'A', text: 'hello' });
+    expect(getPendingMessages(true)).toHaveLength(1);
+
+    // Reset: mark completed so we can re-test with a fresh message
+    markCompleted(['m1']);
+    insertMessage('m2', 'chat', { sender: 'A', text: 'hello again' });
+    expect(getPendingMessages(false)).toHaveLength(1);
+  });
+
+  it('mixed batch: first poll returns both normal and on_wake messages', () => {
+    insertMessage('m1', 'chat', { sender: 'A', text: 'user msg' });
+    insertMessage('m2', 'chat', { sender: 'system', text: 'Resuming.' }, { onWake: 1 });
+    const messages = getPendingMessages(true);
+    expect(messages).toHaveLength(2);
+    expect(messages.map((m) => m.id).sort()).toEqual(['m1', 'm2']);
+  });
+
+  it('mixed batch: subsequent poll returns only normal messages', () => {
+    insertMessage('m1', 'chat', { sender: 'A', text: 'user msg' });
+    insertMessage('m2', 'chat', { sender: 'system', text: 'Resuming.' }, { onWake: 1 });
+    const messages = getPendingMessages(false);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].id).toBe('m1');
+  });
+
+  it('on_wake defaults to 0 for inserts without explicit value', () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, content)
+         VALUES ('m1', 'chat', datetime('now'), 'pending', '{"text":"hi"}')`,
+      )
+      .run();
+    // Should be returned even on non-first poll (on_wake=0)
+    expect(getPendingMessages(false)).toHaveLength(1);
+  });
+});
+
 describe('routing', () => {
   it('should extract routing from messages', () => {
     getInboundDb()
@@ -144,6 +203,76 @@ describe('routing', () => {
     expect(routing.channelType).toBe('discord');
     expect(routing.threadId).toBe('thread-456');
     expect(routing.inReplyTo).toBe('m1');
+  });
+});
+
+describe('origin metadata (from= attribute)', () => {
+  function seedDestination(name: string, channelType: string, platformId: string): void {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES (?, ?, 'channel', ?, ?, NULL)`,
+      )
+      .run(name, name, channelType, platformId);
+  }
+
+  function insertWithRouting(id: string, kind: string, content: object, channelType: string | null, platformId: string | null): void {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
+         VALUES (?, ?, datetime('now'), 'pending', ?, ?, ?)`,
+      )
+      .run(id, kind, platformId, channelType, JSON.stringify(content));
+  }
+
+  it('chat message includes from= when destination matches', () => {
+    seedDestination('discord-main', 'discord', 'chan-1');
+    insertWithRouting('m1', 'chat', { sender: 'Alice', text: 'hi' }, 'discord', 'chan-1');
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).toContain('from="discord-main"');
+  });
+
+  it('chat message falls back to raw routing when no destination matches', () => {
+    insertWithRouting('m1', 'chat', { sender: 'Alice', text: 'hi' }, 'telegram', 'chat-999');
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).toContain('from="unknown:telegram:chat-999"');
+  });
+
+  it('chat message omits from= when routing is null', () => {
+    insertMessage('m1', 'chat', { sender: 'Alice', text: 'hi' });
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).not.toContain('from=');
+  });
+
+  it('task message includes from= when destination matches', () => {
+    seedDestination('slack-ops', 'slack', 'C-OPS');
+    insertWithRouting('t1', 'task', { prompt: 'check status' }, 'slack', 'C-OPS');
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).toContain('<task');
+    expect(prompt).toContain('from="slack-ops"');
+  });
+
+  it('task message omits from= when routing is null', () => {
+    insertMessage('t1', 'task', { prompt: 'check status' });
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).toContain('<task');
+    expect(prompt).not.toContain('from=');
+  });
+
+  it('webhook message includes from= when destination matches', () => {
+    seedDestination('github-ch', 'github', 'repo-1');
+    insertWithRouting('w1', 'webhook', { source: 'github', event: 'push', payload: {} }, 'github', 'repo-1');
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).toContain('<webhook');
+    expect(prompt).toContain('from="github-ch"');
+  });
+
+  it('system message includes from= when destination matches', () => {
+    seedDestination('discord-main', 'discord', 'chan-1');
+    insertWithRouting('s1', 'system', { action: 'test', status: 'ok', result: null }, 'discord', 'chan-1');
+    const prompt = formatMessages(getPendingMessages());
+    expect(prompt).toContain('<system_response');
+    expect(prompt).toContain('from="discord-main"');
   });
 });
 

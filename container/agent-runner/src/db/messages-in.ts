@@ -10,6 +10,19 @@
 import { getConfig } from '../config.js';
 import { openInboundDb, getOutboundDb } from './connection.js';
 
+// Cache whether inbound.db has the on_wake column (added in v2.0.48).
+// The container opens inbound.db read-only, so it can't ALTER —
+// gracefully degrade when running against an older session DB.
+let _hasOnWake: boolean | null = null;
+function hasOnWakeColumn(db: ReturnType<typeof openInboundDb>): boolean {
+  if (_hasOnWake !== null) return _hasOnWake;
+  const cols = new Set(
+    (db.prepare("PRAGMA table_info('messages_in')").all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  _hasOnWake = cols.has('on_wake');
+  return _hasOnWake;
+}
+
 export interface MessageInRow {
   id: string;
   seq: number | null;
@@ -49,20 +62,22 @@ function getMaxMessagesPerPrompt(): number {
  * sees the prior context it missed. Host's countDueMessages gates waking on
  * trigger=1 separately (see src/db/session-db.ts).
  */
-export function getPendingMessages(): MessageInRow[] {
+export function getPendingMessages(isFirstPoll = false): MessageInRow[] {
   const inbound = openInboundDb();
   const outbound = getOutboundDb();
 
   try {
+    const onWakeFilter = hasOnWakeColumn(inbound) ? 'AND (on_wake = 0 OR ?1 = 1)' : '';
     const pending = inbound
       .prepare(
         `SELECT * FROM messages_in
          WHERE status = 'pending'
            AND (process_after IS NULL OR datetime(process_after) <= datetime('now'))
+           ${onWakeFilter}
          ORDER BY seq DESC
-         LIMIT ?`,
+         LIMIT ?2`,
       )
-      .all(getMaxMessagesPerPrompt()) as MessageInRow[];
+      .all(isFirstPoll ? 1 : 0, getMaxMessagesPerPrompt()) as MessageInRow[];
 
     if (pending.length === 0) return [];
 

@@ -105,6 +105,7 @@ function writeEnvOnecliUrl(url: string): void {
 // Last-known-good CLI release. Used only if BOTH the upstream installer
 // and the redirect-based version probe fail. Bump deliberately when a
 // new CLI release ships.
+const ONECLI_GATEWAY_VERSION = '1.23.0';
 const ONECLI_CLI_FALLBACK_VERSION = '1.3.0';
 const ONECLI_CLI_REPO = 'onecli/onecli-cli';
 
@@ -153,7 +154,7 @@ function installOnecli(): { stdout: string; ok: boolean } {
   if (cleanup) stdout += cleanup + '\n';
 
   // Gateway install (docker-compose based, no rate-limit concerns).
-  const gw = runInstall('curl -fsSL onecli.sh/install | sh');
+  const gw = runInstall(`export ONECLI_VERSION=${ONECLI_GATEWAY_VERSION} && curl -fsSL onecli.sh/install | sh`);
   stdout += gw.stdout;
   if (!gw.ok) {
     log.error('OneCLI gateway install failed', { stderr: gw.stderr });

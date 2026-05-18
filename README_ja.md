@@ -26,7 +26,7 @@ NanoClawは同じコア機能を提供しますが、理解できる規模のコ
 ## クイックスタート
 
 ```bash
-git clone https://github.com/qwibitai/nanoclaw.git nanoclaw-v2
+git clone https://github.com/nanocoai/nanoclaw.git nanoclaw-v2
 cd nanoclaw-v2
 bash nanoclaw.sh
 ```

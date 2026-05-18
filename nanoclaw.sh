@@ -240,7 +240,7 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" -eq 0 ]; then
       printf '  %s\n' "$(dim '3. Enable passwordless sudo:    echo "nanoclaw ALL=(ALL) NOPASSWD:ALL" | tee /etc/sudoers.d/nanoclaw')"
       printf '  %s\n' "$(dim '4. Log out:                     exit')"
       printf '  %s\n' "$(dim '5. Log back in as the new user: ssh nanoclaw@your-server')"
-      printf '  %s\n' "$(dim '6. Clone the repo:              git clone https://github.com/qwibitai/nanoclaw.git && cd nanoclaw')"
+      printf '  %s\n' "$(dim '6. Clone the repo:              git clone https://github.com/nanocoai/nanoclaw.git && cd nanoclaw')"
       printf '  %s\n\n' "$(dim '7. Re-run setup:               bash nanoclaw.sh')"
       exit 1
       ;;

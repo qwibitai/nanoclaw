@@ -82,11 +82,14 @@ For each target agent group, confirm OneCLI will inject Gmail secrets into its c
 onecli agents list
 ```
 
-If that agent's `secretMode` is `all`, you're done — Gmail secrets (identified by OneCLI's Gmail hostPattern) will auto-inject. If it's `selective`, explicitly assign the Gmail secrets:
+If that agent's `secretMode` is `all`, you're done — Gmail secrets (identified by OneCLI's Gmail hostPattern) will auto-inject. If it's `selective`, explicitly assign the Gmail secrets using the safe merge pattern (`set-secrets` replaces the entire list — always read first):
 
 ```bash
-onecli secrets list     # find Gmail secret IDs (OneCLI creates one per connected app)
-onecli agents set-secrets --id <agent-id> --secret-ids <gmail-secret-id>
+GMAIL_IDS=$(onecli secrets list | jq -r '[.data[] | select(.name | test("(?i)gmail")) | .id] | join(",")')
+CURRENT=$(onecli agents secrets --id <agent-id> | jq -r '[.data[]] | join(",")')
+MERGED=$(printf '%s' "$CURRENT,$GMAIL_IDS" | tr ',' '\n' | sort -u | paste -sd ',' -)
+onecli agents set-secrets --id <agent-id> --secret-ids "$MERGED"
+onecli agents secrets --id <agent-id>
 ```
 
 ## Phase 2: Apply Code Changes
@@ -95,7 +98,6 @@ onecli agents set-secrets --id <agent-id> --secret-ids <gmail-secret-id>
 
 ```bash
 grep -q 'GMAIL_MCP_VERSION' container/Dockerfile && \
-grep -q "mcp__gmail__\*" container/agent-runner/src/providers/claude.ts && \
 echo "ALREADY APPLIED — skip to Phase 3"
 ```
 
@@ -129,9 +131,7 @@ Pinned version matters — `minimumReleaseAge` in `pnpm-workspace.yaml` gates tr
 
 **Why the `zod-to-json-schema` pin:** `@gongrzhe/server-gmail-autoauth-mcp@1.1.11` has loose deps (`zod-to-json-schema: ^3.22.1`, `zod: ^3.22.4`). pnpm resolves `zod-to-json-schema` to the latest 3.25.x, which imports `zod/v3` — a subpath that only exists in `zod>=3.25`. But `zod` resolves to `3.24.x` (highest satisfying `^3.22.4` without breaking peer ranges). Result: `ERR_PACKAGE_PATH_NOT_EXPORTED` at import time. Pinning `zod-to-json-schema` to a pre-v3-subpath version avoids it. Re-check if you bump `GMAIL_MCP_VERSION`.
 
-### Add tools to allowlist
-
-Edit `container/agent-runner/src/providers/claude.ts`. Find `'mcp__nanoclaw__*',` in `TOOL_ALLOWLIST` and add `'mcp__gmail__*',` after it.
+**No `TOOL_ALLOWLIST` edit needed.** `container/agent-runner/src/providers/claude.ts` derives the allow-pattern dynamically from each group's `mcpServers` map (`Object.keys(this.mcpServers).map(mcpAllowPattern)`), so registering `gmail` in Phase 3 automatically allows `mcp__gmail__*`. Earlier versions of this skill instructed a static `TOOL_ALLOWLIST` edit — that's now redundant.
 
 ### Rebuild the container image
 
@@ -143,42 +143,63 @@ Must complete cleanly. The new `pnpm install -g` layer is ~60s first time (cache
 
 ## Phase 3: Wire Per-Agent-Group
 
-For each agent group that should have Gmail (ask the user — typically their personal DM and CLI agents, sometimes shared household agents), edit `groups/<folder>/container.json` to add the mount and MCP server.
+For each agent group that should have Gmail (ask the user — typically their personal DM and CLI agents, sometimes shared household agents), persist two changes to the **central DB** (`data/v2.db`): the `mcpServers.gmail` entry and an `additionalMounts` entry for `.gmail-mcp`. Both flow through `materializeContainerJson` on every spawn, so editing `groups/<folder>/container.json` by hand does **not** stick — that file is regenerated from the DB.
 
-Merge these into the group's `container.json`:
+### List groups, pick which ones get Gmail
 
-```jsonc
-{
-  "mcpServers": {
-    "gmail": {
-      "command": "gmail-mcp",
-      "args": [],
-      "env": {
-        "GMAIL_OAUTH_PATH": "/workspace/extra/.gmail-mcp/gcp-oauth.keys.json",
-        "GMAIL_CREDENTIALS_PATH": "/workspace/extra/.gmail-mcp/credentials.json"
-      }
-    }
-  },
-  "additionalMounts": [
-    {
-      "hostPath": "/home/<user>/.gmail-mcp",
-      "containerPath": ".gmail-mcp",
-      "readonly": false
-    }
-  ]
-}
+```bash
+ncl groups list
 ```
 
-Substitute `<user>` with the host user's home (use `echo $HOME`, don't assume `~` will expand — `container-runner.ts` does expand `~` via `expandPath`, but an explicit absolute path is clearer and matches what `/manage-mounts` writes).
+### Register the MCP server
+
+For each chosen `<group-id>`:
+
+```bash
+ncl groups config add-mcp-server \
+  --id <group-id> \
+  --name gmail \
+  --command gmail-mcp \
+  --args '[]' \
+  --env '{"GMAIL_OAUTH_PATH":"/workspace/extra/.gmail-mcp/gcp-oauth.keys.json","GMAIL_CREDENTIALS_PATH":"/workspace/extra/.gmail-mcp/credentials.json"}'
+```
+
+Approval behaviour depends on where you run it: from inside an agent's container `ncl` write verbs are approval-gated (admin approves before it lands); from a host operator shell with full scope, it executes immediately. Either way, the response tells you which path it took.
+
+### Add the `.gmail-mcp` mount
+
+There is no `ncl groups config add-mount` verb yet (tracked in [#2395](https://github.com/nanocoai/nanoclaw/issues/2395)). Until that ships, edit the DB directly via the in-tree wrapper (`scripts/q.ts` — `setup/verify.ts:5` codifies that NanoClaw avoids depending on the `sqlite3` CLI binary, so don't shell out to it):
+
+```bash
+GROUP_ID='<group-id>'
+HOST_PATH="$HOME/.gmail-mcp"
+MOUNT=$(jq -cn --arg h "$HOST_PATH" '{hostPath:$h, containerPath:".gmail-mcp", readonly:false}')
+pnpm exec tsx scripts/q.ts data/v2.db "UPDATE container_configs \
+  SET additional_mounts = json_insert(additional_mounts, '\$[#]', json('$MOUNT')), \
+      updated_at = datetime('now') \
+  WHERE agent_group_id = '$GROUP_ID';"
+```
+
+Run from your NanoClaw project root (where `data/v2.db` lives). The `$[#]` placeholder is SQLite JSON1's append-to-end notation; it's `\$`-escaped so bash doesn't arithmetic-expand it before sqlite sees it. `updated_at` is ISO-string everywhere else in the schema, so use `datetime('now')` — not `strftime('%s','now')`, which would silently mix epoch ints into a column of YYYY-MM-DD HH:MM:SS strings.
+
+**Switch to `ncl groups config add-mount` once #2395 lands.** Update this skill at that time.
 
 **Why the container path is relative:** `mount-security` rejects absolute `containerPath` values. Additional mounts are prefixed with `/workspace/extra/`, so `containerPath: ".gmail-mcp"` lands at `/workspace/extra/.gmail-mcp`. The MCP server's `GMAIL_OAUTH_PATH` / `GMAIL_CREDENTIALS_PATH` env vars point at that absolute location inside the container.
+
+**Why this can't be `groups/<folder>/container.json`:** post-migration `014-container-configs`, `materializeContainerJson` in `src/container-config.ts` rewrites that file from the DB on every spawn. Anything hand-edited there is silently overwritten on next restart.
 
 ## Phase 4: Build and Restart
 
 ```bash
 pnpm run build
-systemctl --user restart nanoclaw  # Linux
-# launchctl kickstart -k gui/$(id -u)/com.nanoclaw   # macOS
+```
+
+Run from your NanoClaw project root:
+
+```bash
+source setup/lib/install-slug.sh
+launchctl kickstart -k gui/$(id -u)/$(launchd_label)  # macOS
+systemctl --user restart $(systemd_unit)              # Linux
 ```
 
 ## Phase 5: Verify
@@ -203,16 +224,28 @@ Common signals:
 - `command not found: gmail-mcp` → image wasn't rebuilt or PATH doesn't include `/pnpm` (should — `ENV PATH="$PNPM_HOME:$PATH"` in Dockerfile).
 - `ENOENT: no such file or directory, open '/workspace/extra/.gmail-mcp/credentials.json'` → mount is missing. Check `~/.config/nanoclaw/mount-allowlist.json` includes a parent of `~/.gmail-mcp`.
 - `401 Unauthorized` from `gmail.googleapis.com` → OneCLI isn't injecting. Check the agent's secret mode (`onecli agents secrets --id <agent-id>`) and that the Gmail app is connected (`onecli apps get --provider gmail`).
-- Agent says "I don't have Gmail tools" → `mcp__gmail__*` wasn't added to `TOOL_ALLOWLIST`, or the agent-runner wasn't rebuilt (image cache — run `./container/build.sh` again with `--no-cache` if suspicious).
+- Agent says "I don't have Gmail tools" → the `gmail` MCP server isn't registered in this group's `mcpServers` (re-run the `ncl groups config add-mcp-server` step in Phase 3 for that group and restart it), or the agent-runner image is stale (rebuild with `./container/build.sh`, with `--no-cache` if suspicious).
 
 ## Removal
 
-1. Delete the `"gmail"` entry from `mcpServers` and the `.gmail-mcp` entry from `additionalMounts` in each group's `container.json`.
-2. Remove `'mcp__gmail__*'` from `TOOL_ALLOWLIST` in `container/agent-runner/src/providers/claude.ts`.
+1. For each group that had Gmail wired, remove the MCP server from the DB:
+   ```bash
+   ncl groups config remove-mcp-server --id <group-id> --name gmail
+   ```
+2. Remove the `.gmail-mcp` mount from the DB (no `remove-mount` verb yet — same #2395 dependency):
+   ```bash
+   pnpm exec tsx scripts/q.ts data/v2.db "UPDATE container_configs \
+     SET additional_mounts = (SELECT json_group_array(value) FROM json_each(additional_mounts) \
+                              WHERE json_extract(value, '\$.containerPath') != '.gmail-mcp'), \
+         updated_at = datetime('now') \
+     WHERE agent_group_id = '<group-id>';"
+   ```
 3. Remove the `GMAIL_MCP_VERSION` ARG and the `pnpm install -g @gongrzhe/server-gmail-autoauth-mcp` block from `container/Dockerfile`.
-4. `pnpm run build && ./container/build.sh && systemctl --user restart nanoclaw`.
+4. `pnpm run build && ./container/build.sh && systemctl --user restart "$(. setup/lib/install-slug.sh && systemd_unit)"`.
 5. (Optional) `rm -rf ~/.gmail-mcp/` if no other host-side tool needs the stubs.
 6. (Optional) Disconnect Gmail in OneCLI: `onecli apps disconnect --provider gmail`.
+
+No `TOOL_ALLOWLIST` removal step — Phase 2 no longer edits it.
 
 ## Notes
 
@@ -225,5 +258,5 @@ Common signals:
 - **MCP server:** [`@gongrzhe/server-gmail-autoauth-mcp`](https://github.com/GongRzhe/Gmail-MCP-Server) by GongRzhe — MIT-licensed.
 - **OneCLI credential stubs:** pattern documented at `https://onecli.sh/docs/guides/credential-stubs/gmail.md`.
 - **Skill pattern:** modeled on [`add-atomic-chat-tool`](../add-atomic-chat-tool/SKILL.md) and [`add-vercel`](../add-vercel/SKILL.md).
-- **Addresses:** [issue #1500](https://github.com/qwibitai/nanoclaw/issues/1500) (proxy Gmail/Calendar OAuth tokens through credential proxy) for the Gmail side.
-- **Related PRs:** [#1810](https://github.com/qwibitai/nanoclaw/pull/1810) (pre-install Gmail/Notion MCP) overlaps on the "install the MCP server in the image" idea but bundles many unrelated changes; this skill is the focused OneCLI-native version.
+- **Addresses:** [issue #1500](https://github.com/nanocoai/nanoclaw/issues/1500) (proxy Gmail/Calendar OAuth tokens through credential proxy) for the Gmail side.
+- **Related PRs:** [#1810](https://github.com/nanocoai/nanoclaw/pull/1810) (pre-install Gmail/Notion MCP) overlaps on the "install the MCP server in the image" idea but bundles many unrelated changes; this skill is the focused OneCLI-native version.

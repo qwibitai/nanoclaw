@@ -27,7 +27,7 @@ import k from 'kleur';
 import * as setupLog from '../logs.js';
 import { BACK_TO_CHANNEL_SELECTION, type ChannelFlowResult } from '../lib/back-nav.js';
 import { brightSelect } from '../lib/bright-select.js';
-import { formatNoteLink, openUrl } from '../lib/browser.js';
+import { openUrl } from '../lib/browser.js';
 import { isHeadless } from '../platform.js';
 import { askOperatorRole } from '../lib/role-prompt.js';
 import { ensureAnswer, fail, runQuietChild } from '../lib/runner.js';
@@ -126,22 +126,32 @@ export async function runSlackChannel(displayName: string): Promise<ChannelFlowR
 }
 
 async function walkThroughAppCreation(): Promise<'continue' | 'back'> {
+  // Bright-white ANSI overrides the surrounding brand-cyan from `note()`'s
+  // per-line formatter so the URL stands out against the rest of the body.
+  const linkBlock = isHeadless()
+    ? [`\x1b[97mGet started: ${SLACK_APPS_URL}\x1b[39m`, '']
+    : [];
+
   note(
     [
       "You'll create a Slack app that the assistant talks through.",
       "Free and stays inside the workspaces you pick.",
       '',
+      ...linkBlock,
       '  1. Create a new app "From scratch", name it, pick a workspace',
       '  2. OAuth & Permissions → add Bot Token Scopes:',
-      '     chat:write, im:write, channels:history, groups:history,',
-      '     im:history, channels:read, groups:read, users:read,',
-      '     reactions:write',
+      '     • im:write, im:history',
+      '     • channels:read, channels:history',
+      '     • groups:read, groups:history',
+      '     • chat:write',
+      '     • users:read',
+      '     • reactions:write',
+      '     • files:read, files:write',
       '  3. App Home → enable "Messages Tab" and "Allow users to send',
       '     slash commands and messages from the messages tab"',
       '  4. Basic Information → copy the "Signing Secret"',
       '  5. Install to Workspace → copy the "Bot User OAuth Token" (xoxb-…)',
-      formatNoteLink(SLACK_APPS_URL),
-    ].filter((line): line is string => line !== null).join('\n'),
+    ].join('\n'),
     'Create a Slack app',
   );
 
@@ -308,9 +318,9 @@ async function collectSlackUserId(): Promise<string> {
     [
       "To get your Slack member ID:",
       '',
-      '  1. In Slack, click your profile picture (top right)',
+      '  1. In Slack, click your profile picture (bottom left)',
       '  2. Click "Profile"',
-      '  3. Click the three dots (⋯) → "Copy member ID"',
+      '  3. Click the three dots (⋮) → "Copy member ID"',
     ].join('\n'),
     'Find your Slack user ID',
   );

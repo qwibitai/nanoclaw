@@ -42,7 +42,7 @@ Check remotes:
 - `git remote -v`
 
 If `upstream` is missing:
-- Ask the user for the upstream repo URL (default: `https://github.com/qwibitai/nanoclaw.git`).
+- Ask the user for the upstream repo URL (default: `https://github.com/nanocoai/nanoclaw.git`).
 - `git remote add upstream <url>`
 
 Fetch:
