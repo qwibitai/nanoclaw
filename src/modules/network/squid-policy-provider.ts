@@ -751,10 +751,12 @@ function reconfigureSquid(): void {
   if (!containerRunning(CONTAINER_NAME)) return;
   try {
     // Re-render /tmp/squid.conf from the mounted /etc/squid/squid.conf,
-    // substituting host.docker.internal → its IPv4 (see entrypoint.sh for
-    // the rationale — Squid 6 prefers IPv6, OneCLI is IPv4-only). Squid
-    // runs from /tmp/squid.conf, so the rewrite must happen on every
-    // reload, not just at startup.
+    // substituting host.docker.internal → its IPv4 on `cache_peer` lines
+    // only (see entrypoint.sh for the rationale — Squid 6 prefers IPv6,
+    // OneCLI is IPv4-only, but dstdomain ACLs must keep the hostname so
+    // they match the client's literal request URL). Squid runs from
+    // /tmp/squid.conf, so the rewrite must happen on every reload, not
+    // just at startup.
     execFileSync(
       CONTAINER_RUNTIME_BIN,
       [
@@ -764,7 +766,7 @@ function reconfigureSquid(): void {
         '-c',
         "HOST_V4=$(getent ahostsv4 host.docker.internal 2>/dev/null | awk 'NR==1 {print $1}'); " +
           'cp /etc/squid/squid.conf /tmp/squid.conf && ' +
-          'if [ -n "$HOST_V4" ]; then sed -i "s/host\\.docker\\.internal/$HOST_V4/g" /tmp/squid.conf; fi && ' +
+          'if [ -n "$HOST_V4" ]; then sed -i "/^cache_peer /s/host\\.docker\\.internal/$HOST_V4/g" /tmp/squid.conf; fi && ' +
           'squid -k reconfigure',
       ],
       { stdio: 'pipe' },

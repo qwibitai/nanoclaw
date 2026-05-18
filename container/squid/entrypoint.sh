@@ -28,11 +28,18 @@ mkdir -p /var/log/squid
 # to IPv4, so Squid's first cache_peer attempt silently fails on the IPv6
 # address and the peer is marked DEAD — every CONNECT then 500s.
 # Resolve to IPv4 here, copy the mounted config to a writable location
-# with the literal IPv4 substituted in, and run squid against the copy.
+# with the literal IPv4 substituted into the `cache_peer` line, and run
+# squid against the copy.
+#
+# Scope the sed to `cache_peer` lines only: `dstdomain host.docker.internal`
+# ACLs (used by per-agent host-service grants) must keep the hostname,
+# because Squid matches `dstdomain` against the literal hostname in the
+# client's request URL — rewriting it to an IP makes those ACLs never
+# fire and host-service traffic gets denied.
 HOST_V4=$(getent ahostsv4 host.docker.internal 2>/dev/null | awk 'NR==1 {print $1}')
 if [ -n "$HOST_V4" ]; then
   cp /etc/squid/squid.conf /tmp/squid.conf
-  sed -i "s/host\.docker\.internal/$HOST_V4/g" /tmp/squid.conf
+  sed -i "/^cache_peer /s/host\.docker\.internal/$HOST_V4/g" /tmp/squid.conf
   SQUID_CONF=/tmp/squid.conf
 else
   echo "entrypoint: warning — host.docker.internal didn't resolve to IPv4; using config as-is" >&2
