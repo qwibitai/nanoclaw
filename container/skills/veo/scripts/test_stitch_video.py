@@ -31,6 +31,22 @@ def _args(**overrides) -> SimpleNamespace:
     return SimpleNamespace(**base)
 
 
+# --- _contains_concat_breaker -----------------------------------------------
+
+
+def test_contains_concat_breaker_flags_newline():
+    assert sv._contains_concat_breaker("a\nb")
+
+
+def test_contains_concat_breaker_flags_carriage_return():
+    assert sv._contains_concat_breaker("a\rb")
+
+
+def test_contains_concat_breaker_accepts_normal_paths():
+    assert not sv._contains_concat_breaker("/tmp/foo bar.mp4")
+    assert not sv._contains_concat_breaker("/tmp/o'brien.mp4")
+
+
 def _touch_mp4(path: Path) -> str:
     path.write_bytes(b"FAKEMP4")
     return str(path)
@@ -75,6 +91,31 @@ def test_validate_accepts_happy_path(tmp_path):
     b = _touch_mp4(tmp_path / "b.mp4")
     ok, err = sv.validate_inputs(_args(inputs=[a, b]))
     assert ok and err is None
+
+
+def test_validate_rejects_newline_in_input_path(tmp_path):
+    a = _touch_mp4(tmp_path / "a.mp4")
+    # Smuggled-newline input would inject a `file '...'` directive into the
+    # concat demuxer list. Reject before ffmpeg ever sees it.
+    ok, err = sv.validate_inputs(_args(inputs=[a, "evil\nfile '/etc/passwd'\nx.mp4"]))
+    assert not ok
+    assert "newline" in err
+
+
+def test_validate_rejects_carriage_return_in_input_path(tmp_path):
+    a = _touch_mp4(tmp_path / "a.mp4")
+    ok, err = sv.validate_inputs(_args(inputs=[a, "evil\rfile.mp4"]))
+    assert not ok
+
+
+def test_validate_rejects_newline_in_audio_path(tmp_path):
+    a = _touch_mp4(tmp_path / "a.mp4")
+    b = _touch_mp4(tmp_path / "b.mp4")
+    ok, err = sv.validate_inputs(
+        _args(inputs=[a, b], audio="evil\nfile '/etc/passwd'\ny.mp3")
+    )
+    assert not ok
+    assert "newline" in err
 
 
 # --- write_concat_list -------------------------------------------------------
@@ -141,10 +182,14 @@ def _install_fake_ffmpeg(tmp_path: Path, *, exit_code: int = 0) -> str:
     - Exits with the given code.
 
     Returns the absolute path to the stub.
+
+    The stub uses /bin/bash explicitly because ${@: -1} (negative offset in
+    parameter expansion) is a bashism; under dash (the default /bin/sh on
+    Debian/Ubuntu, which is what the agent container runs) it errors.
     """
     stub = tmp_path / "fake-ffmpeg"
     stub.write_text(
-        "#!/bin/sh\n"
+        "#!/bin/bash\n"
         f"if [ {exit_code} -eq 0 ]; then\n"
         '  out="${@: -1}"\n'
         "  echo FAKEOUT > \"$out\"\n"

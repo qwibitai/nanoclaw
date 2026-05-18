@@ -34,6 +34,7 @@ def _args(**overrides) -> SimpleNamespace:
         long=False,
         api_key=None,
         poll_interval=0.0,
+        max_poll_seconds=600.0,
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -343,6 +344,40 @@ def test_run_polling_emits_progress(monkeypatch, capsys, tmp_path):
 
     captured = capsys.readouterr()
     assert "Polling..." in captured.err
+
+
+def test_run_aborts_when_max_poll_seconds_exceeded(monkeypatch, capsys, tmp_path):
+    """A Veo operation that never completes within the cap exits 1 with a
+    clear message naming the operation. Without this cap, the loop would
+    spin until the container TTL killed it."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    capture: dict = {}
+    _mock_genai_modules(monkeypatch, capture=capture)
+
+    client = capture["_client"]
+
+    # Operation that never finishes.
+    pending = SimpleNamespace(name="operations/stuck", done=False, response=None)
+    client.models.generate_videos.side_effect = (
+        lambda **kwargs: (capture.update(kwargs), pending)[1]
+    )
+    client.operations.get.return_value = pending
+
+    out = tmp_path / "out.mp4"
+    # Poll interval 5s, cap 10s -> at most 2 poll iterations before the cap fires.
+    rc = gv.run(
+        _args(
+            filename=str(out),
+            poll_interval=5.0,
+            max_poll_seconds=10.0,
+        )
+    )
+    assert rc == 1
+
+    captured = capsys.readouterr()
+    assert "max-poll-seconds" in captured.err
+    assert "operations/stuck" in captured.err
+    assert "MEDIA:" not in captured.out
 
 
 if __name__ == "__main__":

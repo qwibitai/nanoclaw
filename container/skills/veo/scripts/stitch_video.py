@@ -13,9 +13,11 @@ With unified audio overlay (strips per-clip audio, replaces with the given track
     uv run stitch_video.py --input a.mp4 --input b.mp4 --filename out.mp4 \\
         --audio soundtrack.mp3
 
-The unified-audio path mitigates Veo's per-clip audio seams. If the audio is
-shorter than the video, the remainder is silent. If longer, it is truncated to
-match the video length.
+The unified-audio path mitigates Veo's per-clip audio seams. The output uses
+ffmpeg's -shortest flag, so the result matches whichever of (video, audio) is
+shorter — if the audio is shorter than the combined video, the video is
+truncated to the audio's length; if the audio is longer, the audio is
+truncated. Pre-pad your audio (or pre-trim) if you need a specific behavior.
 """
 
 from __future__ import annotations
@@ -28,6 +30,12 @@ import tempfile
 from pathlib import Path
 
 VIDEO_SUFFIXES = {".mp4"}
+
+# Hard cap on ffmpeg execution time. Veo clips are 4-8s each; concat with audio
+# overlay re-encodes at fast preset and rarely exceeds 30s wall time even for
+# the 148s max chain. 300s leaves wide headroom while preventing a hung ffmpeg
+# from blocking the agent indefinitely.
+FFMPEG_TIMEOUT_SECONDS = 300
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,19 +72,31 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _contains_concat_breaker(path: str) -> bool:
+    """Reject paths containing characters that would corrupt ffmpeg's concat
+    demuxer file list. The list is line-oriented, so any embedded newline lets
+    a malicious filename inject an additional `file '...'` directive."""
+    return "\n" in path or "\r" in path
+
+
 def validate_inputs(args: argparse.Namespace) -> tuple[bool, str | None]:
     if not args.inputs or len(args.inputs) < 2:
         return False, "At least 2 --input clips are required."
 
     for p in args.inputs:
+        if _contains_concat_breaker(p):
+            return False, f"Input path contains newline or carriage return: {p!r}"
         path = Path(p)
         if not path.is_file():
             return False, f"Input not found: {p}"
         if path.suffix.lower() not in VIDEO_SUFFIXES:
             return False, f"Input must be .mp4: {p}"
 
-    if args.audio and not Path(args.audio).is_file():
-        return False, f"Audio not found: {args.audio}"
+    if args.audio:
+        if _contains_concat_breaker(args.audio):
+            return False, f"Audio path contains newline or carriage return: {args.audio!r}"
+        if not Path(args.audio).is_file():
+            return False, f"Audio not found: {args.audio}"
 
     return True, None
 
@@ -143,7 +163,19 @@ def run(args: argparse.Namespace) -> int:
         cmd = build_command(args, list_path, output)
 
         print(f"Running: {' '.join(shlex.quote(c) for c in cmd)}", file=sys.stderr)
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=FFMPEG_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            print(
+                f"Error: ffmpeg timed out after {FFMPEG_TIMEOUT_SECONDS}s",
+                file=sys.stderr,
+            )
+            return 1
         if result.returncode != 0:
             print(
                 f"Error: ffmpeg exited with code {result.returncode}\n{result.stderr}",

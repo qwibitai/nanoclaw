@@ -24,6 +24,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Single-frame extraction is fast (typically <2s). 60s leaves headroom for
+# slow disks while preventing a corrupt input from hanging the agent.
+FFMPEG_TIMEOUT_SECONDS = 60
+FFPROBE_TIMEOUT_SECONDS = 10
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -87,8 +92,14 @@ def probe_duration(input_path: str, ffprobe: str) -> float | None:
         input_path,
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    except FileNotFoundError:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=FFPROBE_TIMEOUT_SECONDS,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
     if result.returncode != 0:
         return None
@@ -150,7 +161,19 @@ def run(args: argparse.Namespace) -> int:
 
     cmd = build_command(args, output)
     print(f"Running: {' '.join(shlex.quote(c) for c in cmd)}", file=sys.stderr)
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=FFMPEG_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            f"Error: ffmpeg timed out after {FFMPEG_TIMEOUT_SECONDS}s",
+            file=sys.stderr,
+        )
+        return 1
     if result.returncode != 0:
         print(
             f"Error: ffmpeg exited with code {result.returncode}\n{result.stderr}",

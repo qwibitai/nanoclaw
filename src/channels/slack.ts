@@ -310,15 +310,23 @@ export class SlackChannel implements Channel {
     }
     // files.uploadV2 auto-detects video mime types from filename; the same
     // call shape works for both images and videos.
-    await this.app.client.files.uploadV2({
-      channel_id: channelId,
-      initial_comment: caption,
-      file_uploads: videoPaths.map((p) => ({
-        file: fs.createReadStream(p),
-        filename: path.basename(p),
-      })),
-    });
-    logger.info({ jid, count: videoPaths.length }, 'Slack video(s) sent');
+    try {
+      await this.app.client.files.uploadV2({
+        channel_id: channelId,
+        initial_comment: caption,
+        file_uploads: videoPaths.map((p) => ({
+          file: fs.createReadStream(p),
+          filename: path.basename(p),
+        })),
+      });
+      logger.info({ jid, count: videoPaths.length }, 'Slack video(s) sent');
+    } catch (err) {
+      this.outgoingQueue.push({ kind: 'video', jid, videoPaths, caption });
+      logger.warn(
+        { jid, err, queueSize: this.outgoingQueue.length },
+        'Failed to send Slack video, queued',
+      );
+    }
   }
 
   isConnected(): boolean {
@@ -425,7 +433,7 @@ export class SlackChannel implements Channel {
             { jid: item.jid, count: item.imagePaths.length },
             'Queued Slack image(s) sent',
           );
-        } else {
+        } else if (item.kind === 'video') {
           await this.app.client.files.uploadV2({
             channel_id: channelId,
             initial_comment: item.caption,
@@ -438,6 +446,11 @@ export class SlackChannel implements Channel {
             { jid: item.jid, count: item.videoPaths.length },
             'Queued Slack video(s) sent',
           );
+        } else {
+          // Exhaustiveness check — adding a new kind to outgoingQueue will trip
+          // this at compile time before it can silently misroute at runtime.
+          const _exhaustive: never = item;
+          void _exhaustive;
         }
       }
     } finally {

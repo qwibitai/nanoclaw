@@ -1244,5 +1244,18 @@ describe('SlackChannel', () => {
         }),
       );
     });
+
+    it('queues on upload failure (does not throw)', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      currentApp().client.files.uploadV2.mockRejectedValueOnce(
+        new Error('boom'),
+      );
+      await expect(
+        channel.sendVideo!('slack:C0123456789', ['/abs/clip.mp4']),
+      ).resolves.toBeUndefined();
+    });
   });
 });

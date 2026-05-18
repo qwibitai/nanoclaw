@@ -35,6 +35,7 @@ from pathlib import Path
 
 DEFAULT_DURATION_CAP_SECONDS = 16
 POLL_INTERVAL_SECONDS = 10
+MAX_POLL_SECONDS_DEFAULT = 600  # 10 minutes — Veo standard renders typically <5min
 
 QUALITY_TO_MODEL = {
     "fast": "veo-3.1-fast-generate-preview",
@@ -126,6 +127,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=POLL_INTERVAL_SECONDS,
         help="Seconds between polls. Default: %(default)s.",
+    )
+    parser.add_argument(
+        "--max-poll-seconds",
+        type=float,
+        default=MAX_POLL_SECONDS_DEFAULT,
+        help=(
+            "Hard cap on total polling time. The operation aborts and exits 1 "
+            "if Veo has not completed by this point. Default: %(default)ss."
+        ),
     )
     return parser
 
@@ -284,6 +294,15 @@ def run(args: argparse.Namespace) -> int:
 
     elapsed = 0.0
     while not getattr(operation, "done", False):
+        if elapsed >= args.max_poll_seconds:
+            print(
+                f"Error: Veo operation did not complete within "
+                f"--max-poll-seconds={args.max_poll_seconds:.0f}s. "
+                f"Operation name '{op_name}' may still be retrievable for up to 2 days; "
+                f"re-run with --extend-from or use a fresh prompt.",
+                file=sys.stderr,
+            )
+            return 1
         time.sleep(args.poll_interval)
         elapsed += args.poll_interval
         try:

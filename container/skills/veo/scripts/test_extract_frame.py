@@ -101,9 +101,11 @@ def test_build_command_timestamp_uses_ss(tmp_path):
 
 
 def _install_fake_ffmpeg(tmp_path: Path, *, exit_code: int = 0) -> str:
+    """Stub uses /bin/bash explicitly because ${@: -1} is a bashism that
+    errors under dash (default /bin/sh on Debian/Ubuntu)."""
     stub = tmp_path / "fake-ffmpeg"
     stub.write_text(
-        "#!/bin/sh\n"
+        "#!/bin/bash\n"
         f"if [ {exit_code} -eq 0 ]; then\n"
         '  out="${@: -1}"\n'
         "  echo FAKEPNG > \"$out\"\n"
@@ -117,9 +119,9 @@ def _install_fake_ffmpeg(tmp_path: Path, *, exit_code: int = 0) -> str:
 def _install_fake_ffprobe(tmp_path: Path, *, duration: float | None) -> str:
     stub = tmp_path / "fake-ffprobe"
     if duration is None:
-        stub.write_text("#!/bin/sh\nexit 1\n")
+        stub.write_text("#!/bin/bash\nexit 1\n")
     else:
-        stub.write_text(f"#!/bin/sh\necho {duration}\nexit 0\n")
+        stub.write_text(f"#!/bin/bash\necho {duration}\nexit 0\n")
     stub.chmod(stub.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
     return str(stub)
 
