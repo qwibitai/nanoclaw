@@ -664,10 +664,7 @@ export async function processVideoIpcFile(
       continue;
     }
     if (!abs.toLowerCase().endsWith('.mp4')) {
-      logger.warn(
-        { abs, sourceGroup },
-        'IPC video path is not .mp4, skipped',
-      );
+      logger.warn({ abs, sourceGroup }, 'IPC video path is not .mp4, skipped');
       continue;
     }
     if (!fs.existsSync(abs)) {
