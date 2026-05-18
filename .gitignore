@@ -28,6 +28,11 @@ groups/global/*
 # OS
 .DS_Store
 
+# Python build artifacts
+__pycache__/
+*.pyc
+.pytest_cache/
+
 # IDE
 .idea/
 .vscode/
