@@ -36,6 +36,7 @@ const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const IMAGES_DIR = path.join(IPC_DIR, 'images');
+const VIDEOS_DIR = path.join(IPC_DIR, 'videos');
 const WORKSPACE_ROOT = '/workspace/group';
 
 // Context from environment variables (set by the agent runner)
@@ -130,6 +131,64 @@ server.tool(
         {
           type: 'text' as const,
           text: `${relatives.length} image(s) queued for delivery.`,
+        },
+      ],
+    };
+  },
+);
+
+server.tool(
+  'send_video',
+  "Send one or more videos to the user or group. Videos must be .mp4 files that already exist inside your group workspace (/workspace/group/**). Pass a single path or an array of up to 10 paths; an array produces a single message with multiple video attachments. Paths may be relative to /workspace/group/ or absolute within it. Optional caption appears alongside the video(s). Do not delete the files immediately after calling — delivery may be queued briefly if the channel is reconnecting. Use this after generate_video.py or stitch_video.py emits a MEDIA: token.",
+  {
+    path: z
+      .union([z.string(), z.array(z.string()).min(1).max(10)])
+      .describe(
+        'Path(s) to .mp4 video file(s). Relative paths resolve against /workspace/group/. Absolute paths must be inside /workspace/group/; paths outside are rejected.',
+      ),
+    caption: z
+      .string()
+      .optional()
+      .describe('Optional caption shown with the video(s)'),
+  },
+  async (args) => {
+    const rawPaths = Array.isArray(args.path) ? args.path : [args.path];
+    const relatives: string[] = [];
+    for (const p of rawPaths) {
+      if (!p.toLowerCase().endsWith('.mp4')) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: `Video must be .mp4: ${p}`,
+            },
+          ],
+        };
+      }
+      // Re-use the image-path validator: same workspace-escape + existence checks.
+      const v = validateImagePath(p, WORKSPACE_ROOT);
+      if (!v.ok) {
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: v.error }],
+        };
+      }
+      relatives.push(v.relative);
+    }
+    writeIpcFile(VIDEOS_DIR, {
+      type: 'video',
+      chatJid,
+      groupFolder,
+      paths: relatives,
+      caption: args.caption,
+      timestamp: new Date().toISOString(),
+    });
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `${relatives.length} video(s) queued for delivery.`,
         },
       ],
     };

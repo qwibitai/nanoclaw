@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import { _initTestDatabase, storeChatMetadata } from './db.js';
 import { getAvailableGroups, _setRegisteredGroups } from './index.js';
-import { routeOutboundImage } from './router.js';
+import { routeOutboundImage, routeOutboundVideo } from './router.js';
 
 beforeEach(() => {
   _initTestDatabase();
@@ -212,6 +212,56 @@ describe('routeOutboundImage', () => {
     const ch = makeChannel(() => false);
     await expect(
       routeOutboundImage([ch], 'slack:C1', ['/abs/a.png']),
+    ).rejects.toThrow(/No channel/);
+  });
+});
+
+// --- routeOutboundVideo ---
+
+describe('routeOutboundVideo', () => {
+  function makeChannel(
+    owns: (j: string) => boolean,
+    connected = true,
+    withSendVideo = true,
+  ) {
+    return {
+      name: 'test',
+      ownsJid: owns,
+      isConnected: () => connected,
+      sendMessage: vi.fn(async () => undefined),
+      sendVideo: withSendVideo ? vi.fn(async () => undefined) : undefined,
+      connect: async () => undefined,
+      disconnect: async () => undefined,
+    } as unknown as import('./types.js').Channel;
+  }
+
+  it('dispatches to channel.sendVideo when defined', async () => {
+    const ch = makeChannel((j) => j === 'slack:C1');
+    await routeOutboundVideo([ch], 'slack:C1', ['/abs/clip.mp4'], 'hi');
+    expect(ch.sendVideo).toHaveBeenCalledWith(
+      'slack:C1',
+      ['/abs/clip.mp4'],
+      'hi',
+    );
+    expect(ch.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('falls back to sendMessage when channel lacks sendVideo', async () => {
+    const ch = makeChannel((j) => j === 'wa:123', true, false);
+    await routeOutboundVideo([ch], 'wa:123', ['/abs/clip.mp4'], 'caption');
+    expect(ch.sendMessage).toHaveBeenCalledWith('wa:123', 'caption');
+  });
+
+  it('falls back with [video] placeholder when no caption and no sendVideo', async () => {
+    const ch = makeChannel((j) => j === 'wa:123', true, false);
+    await routeOutboundVideo([ch], 'wa:123', ['/abs/clip.mp4']);
+    expect(ch.sendMessage).toHaveBeenCalledWith('wa:123', '[video]');
+  });
+
+  it('throws when no connected channel owns the jid', async () => {
+    const ch = makeChannel(() => false);
+    await expect(
+      routeOutboundVideo([ch], 'slack:C1', ['/abs/clip.mp4']),
     ).rejects.toThrow(/No channel/);
   });
 });

@@ -7,7 +7,7 @@ vi.mock('./logger.js', () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { processImageIpcFile } from './ipc.js';
+import { processImageIpcFile, processVideoIpcFile } from './ipc.js';
 import { RegisteredGroup } from './types.js';
 
 const MAIN_GROUP: RegisteredGroup = {
@@ -192,5 +192,195 @@ describe('processImageIpcFile', () => {
     );
 
     expect(sendImage).not.toHaveBeenCalled();
+  });
+});
+
+describe('processVideoIpcFile', () => {
+  let tmpDir: string;
+  let groupsDir: string;
+  let sendVideo: ReturnType<
+    typeof vi.fn<
+      (jid: string, paths: string[], caption?: string) => Promise<void>
+    >
+  >;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-ipc-vid-'));
+    groupsDir = path.join(tmpDir, 'groups');
+    fs.mkdirSync(path.join(groupsDir, 'slack_test', 'outbox'), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(groupsDir, 'slack_other', 'outbox'), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(groupsDir, 'slack_main', 'outbox'), {
+      recursive: true,
+    });
+    sendVideo = vi.fn(async () => undefined);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function registered() {
+    return {
+      'slack:C1': SLACK_TEST,
+      'slack:Cmain': MAIN_GROUP,
+    };
+  }
+
+  it('dispatches sendVideo for a valid authorized video IPC payload', async () => {
+    const vidPath = path.join(groupsDir, 'slack_test', 'outbox', 'a.mp4');
+    fs.writeFileSync(vidPath, 'MP4DATA');
+
+    await processVideoIpcFile(
+      {
+        type: 'video',
+        chatJid: 'slack:C1',
+        groupFolder: 'slack_test',
+        paths: ['outbox/a.mp4'],
+        caption: 'hello',
+      },
+      'slack_test',
+      false,
+      registered(),
+      groupsDir,
+      sendVideo,
+    );
+
+    expect(sendVideo).toHaveBeenCalledWith('slack:C1', [vidPath], 'hello');
+  });
+
+  it('rejects non-mp4 paths', async () => {
+    const movPath = path.join(groupsDir, 'slack_test', 'outbox', 'a.mov');
+    fs.writeFileSync(movPath, 'MOVDATA');
+
+    await processVideoIpcFile(
+      {
+        type: 'video',
+        chatJid: 'slack:C1',
+        groupFolder: 'slack_test',
+        paths: ['outbox/a.mov'],
+      },
+      'slack_test',
+      false,
+      registered(),
+      groupsDir,
+      sendVideo,
+    );
+
+    expect(sendVideo).not.toHaveBeenCalled();
+  });
+
+  it('rejects path traversal', async () => {
+    await processVideoIpcFile(
+      {
+        type: 'video',
+        chatJid: 'slack:C1',
+        groupFolder: 'slack_test',
+        paths: ['../../etc/passwd.mp4'],
+      },
+      'slack_test',
+      false,
+      registered(),
+      groupsDir,
+      sendVideo,
+    );
+
+    expect(sendVideo).not.toHaveBeenCalled();
+  });
+
+  it('blocks cross-group sends for non-main groups', async () => {
+    const vidPath = path.join(groupsDir, 'slack_other', 'outbox', 'x.mp4');
+    fs.writeFileSync(vidPath, 'X');
+
+    await processVideoIpcFile(
+      {
+        type: 'video',
+        chatJid: 'slack:C1',
+        groupFolder: 'slack_other',
+        paths: ['outbox/x.mp4'],
+      },
+      'slack_other',
+      false,
+      registered(),
+      groupsDir,
+      sendVideo,
+    );
+
+    expect(sendVideo).not.toHaveBeenCalled();
+  });
+
+  it('allows main group to send to any jid', async () => {
+    const vidPath = path.join(groupsDir, 'slack_main', 'outbox', 'x.mp4');
+    fs.writeFileSync(vidPath, 'X');
+
+    await processVideoIpcFile(
+      {
+        type: 'video',
+        chatJid: 'slack:C1',
+        groupFolder: 'slack_main',
+        paths: ['outbox/x.mp4'],
+      },
+      'slack_main',
+      true,
+      registered(),
+      groupsDir,
+      sendVideo,
+    );
+
+    expect(sendVideo).toHaveBeenCalledWith('slack:C1', [vidPath], undefined);
+  });
+
+  it('skips missing files but delivers surviving ones', async () => {
+    const goodPath = path.join(groupsDir, 'slack_test', 'outbox', 'ok.mp4');
+    fs.writeFileSync(goodPath, 'OK');
+
+    await processVideoIpcFile(
+      {
+        type: 'video',
+        chatJid: 'slack:C1',
+        groupFolder: 'slack_test',
+        paths: ['outbox/missing.mp4', 'outbox/ok.mp4'],
+      },
+      'slack_test',
+      false,
+      registered(),
+      groupsDir,
+      sendVideo,
+    );
+
+    expect(sendVideo).toHaveBeenCalledWith('slack:C1', [goodPath], undefined);
+  });
+
+  it('ignores payloads with missing required fields', async () => {
+    await processVideoIpcFile(
+      { type: 'video' } as unknown as Parameters<typeof processVideoIpcFile>[0],
+      'slack_test',
+      false,
+      registered(),
+      groupsDir,
+      sendVideo,
+    );
+
+    expect(sendVideo).not.toHaveBeenCalled();
+  });
+
+  it('ignores payloads with wrong type', async () => {
+    await processVideoIpcFile(
+      {
+        type: 'image',
+        chatJid: 'slack:C1',
+        paths: ['outbox/a.mp4'],
+      } as unknown as Parameters<typeof processVideoIpcFile>[0],
+      'slack_test',
+      false,
+      registered(),
+      groupsDir,
+      sendVideo,
+    );
+
+    expect(sendVideo).not.toHaveBeenCalled();
   });
 });

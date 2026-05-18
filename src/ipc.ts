@@ -13,6 +13,7 @@ import { RegisteredGroup } from './types.js';
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   sendImage: (jid: string, paths: string[], caption?: string) => Promise<void>;
+  sendVideo: (jid: string, paths: string[], caption?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -185,6 +186,48 @@ export function startIpcWatcher(deps: IpcDeps): void {
         logger.error(
           { err, sourceGroup },
           'Error reading IPC images directory',
+        );
+      }
+
+      // Process video IPC files. Mirrors the image flow above; .mp4 extension
+      // is enforced on the agent side at send_video time and re-validated here.
+      const videosDir = path.join(ipcBaseDir, sourceGroup, 'videos');
+      try {
+        if (fs.existsSync(videosDir)) {
+          const videoFiles = fs
+            .readdirSync(videosDir)
+            .filter((f) => f.endsWith('.json'));
+          for (const file of videoFiles) {
+            const filePath = path.join(videosDir, file);
+            try {
+              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              await processVideoIpcFile(
+                data,
+                sourceGroup,
+                isMain,
+                registeredGroups,
+                GROUPS_DIR,
+                deps.sendVideo,
+              );
+              fs.unlinkSync(filePath);
+            } catch (err) {
+              logger.error(
+                { file, sourceGroup, err },
+                'Error processing IPC video',
+              );
+              const errorDir = path.join(ipcBaseDir, 'errors');
+              fs.mkdirSync(errorDir, { recursive: true });
+              fs.renameSync(
+                filePath,
+                path.join(errorDir, `${sourceGroup}-${file}`),
+              );
+            }
+          }
+        }
+      } catch (err) {
+        logger.error(
+          { err, sourceGroup },
+          'Error reading IPC videos directory',
         );
       }
     }
@@ -570,6 +613,78 @@ export async function processImageIpcFile(
     logger.info(
       { chatJid: data.chatJid, count: absolute.length, sourceGroup },
       'IPC image delivered',
+    );
+  }
+}
+
+export interface VideoIpcPayload {
+  type?: string;
+  chatJid?: string;
+  groupFolder?: string;
+  paths?: string[];
+  caption?: string;
+  timestamp?: string;
+}
+
+export async function processVideoIpcFile(
+  data: VideoIpcPayload,
+  sourceGroup: string,
+  isMain: boolean,
+  registeredGroups: Record<string, RegisteredGroup>,
+  groupsRoot: string,
+  sendVideo: (jid: string, paths: string[], caption?: string) => Promise<void>,
+): Promise<void> {
+  if (
+    data.type !== 'video' ||
+    !data.chatJid ||
+    !Array.isArray(data.paths) ||
+    data.paths.length === 0
+  ) {
+    return;
+  }
+
+  const targetGroup = registeredGroups[data.chatJid];
+  if (!(isMain || (targetGroup && targetGroup.folder === sourceGroup))) {
+    logger.warn(
+      { chatJid: data.chatJid, sourceGroup },
+      'Unauthorized IPC video attempt blocked',
+    );
+    return;
+  }
+
+  const groupRoot = path.join(groupsRoot, sourceGroup);
+  const absolute: string[] = [];
+  for (const rel of data.paths) {
+    const abs = path.resolve(groupRoot, rel);
+    if (abs !== groupRoot && !abs.startsWith(groupRoot + path.sep)) {
+      logger.warn(
+        { rel, sourceGroup },
+        'IPC video path escapes group root, skipped',
+      );
+      continue;
+    }
+    if (!abs.toLowerCase().endsWith('.mp4')) {
+      logger.warn(
+        { abs, sourceGroup },
+        'IPC video path is not .mp4, skipped',
+      );
+      continue;
+    }
+    if (!fs.existsSync(abs)) {
+      logger.warn(
+        { abs, sourceGroup },
+        'IPC video file missing on host, skipped',
+      );
+      continue;
+    }
+    absolute.push(abs);
+  }
+
+  if (absolute.length) {
+    await sendVideo(data.chatJid, absolute, data.caption);
+    logger.info(
+      { chatJid: data.chatJid, count: absolute.length, sourceGroup },
+      'IPC video delivered',
     );
   }
 }

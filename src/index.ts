@@ -54,6 +54,7 @@ import {
   formatMessages,
   formatOutbound,
   routeOutboundImage,
+  routeOutboundVideo,
 } from './router.js';
 import {
   restoreRemoteControl,
@@ -768,6 +769,8 @@ async function main(): Promise<void> {
     },
     sendImage: (jid, paths, caption) =>
       routeOutboundImage(channels, jid, paths, caption),
+    sendVideo: (jid, paths, caption) =>
+      routeOutboundVideo(channels, jid, paths, caption),
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroups: async (force: boolean) => {
