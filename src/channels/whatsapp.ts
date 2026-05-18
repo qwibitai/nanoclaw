@@ -345,30 +345,37 @@ registerChannelAdapter('whatsapp', {
     ): Promise<
       Array<{
         type: string;
-        name: string | undefined;
+        name: string;
         mimeType: string | undefined;
         size: number;
         data: string;
       }>
     > {
-      const mediaTypes: Array<{ key: string; type: string }> = [
-        { key: 'imageMessage', type: 'image' },
-        { key: 'videoMessage', type: 'video' },
-        { key: 'audioMessage', type: 'audio' },
-        { key: 'documentMessage', type: 'document' },
+      // Non-document WhatsApp media (image/video/audio) usually has no
+      // fileName, so we must supply a typed extension. Without it, the
+      // shared extractor falls back to a generic extensionless
+      // `attachment-<ts>`, and when the agent forwards the saved file via
+      // `send_file`, `buildMediaMessage` keys on the extension to pick
+      // image/video/audio vs. document — extensionless ⇒ wrong as document.
+      const mediaTypes: Array<{ key: string; type: string; ext: string }> = [
+        { key: 'imageMessage', type: 'image', ext: '.jpg' },
+        { key: 'videoMessage', type: 'video', ext: '.mp4' },
+        { key: 'audioMessage', type: 'audio', ext: '.ogg' },
+        { key: 'documentMessage', type: 'document', ext: '' },
       ];
       const results: Array<{
         type: string;
-        name: string | undefined;
+        name: string;
         mimeType: string | undefined;
         size: number;
         data: string;
       }> = [];
-      for (const { key, type } of mediaTypes) {
+      for (const { key, type, ext } of mediaTypes) {
         if (!normalized[key]) continue;
         try {
           const buffer = await downloadMediaMessage(msg, 'buffer', {});
-          const name = normalized[key].fileName as string | undefined;
+          const rawName = normalized[key].fileName as string | undefined;
+          const name = rawName && rawName.length > 0 ? rawName : `${type}-${Date.now()}${ext}`;
           const mimeType = normalized[key].mimetype as string | undefined;
           results.push({
             type,
