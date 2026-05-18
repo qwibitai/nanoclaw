@@ -30,6 +30,9 @@ const (
 	TypeTokenRotateRequest MessageType = "TOKEN_ROTATE_REQUEST"
 	TypeTokenRotateAck     MessageType = "TOKEN_ROTATE_ACK"
 	TypeTokenInvalidate    MessageType = "TOKEN_INVALIDATE"
+	// Field-agent (v0.4). Integer IDs 120-129 reserved.
+	TypeClaudeInvoke MessageType = "CLAUDE_INVOKE"
+	TypeClaudeResult MessageType = "CLAUDE_RESULT"
 )
 
 // Frame is the envelope for every message in both directions.
@@ -219,4 +222,25 @@ type TokenRotateAckPayload struct {
 type TokenInvalidatePayload struct {
 	Reason  string `json:"reason"`
 	Message string `json:"message,omitempty"`
+}
+
+// ── CLAUDE_INVOKE (C→R) ──────────────────────────────────────────────────────
+
+// ClaudeInvokePayload asks the runner to execute claude --print.
+type ClaudeInvokePayload struct {
+	CorrelationID   string `json:"correlation_id"`
+	CWD             string `json:"cwd"`
+	Prompt          string `json:"prompt"`
+	ResumeSessionID string `json:"resume_session_id,omitempty"`
+}
+
+// ── CLAUDE_RESULT (R→C) ──────────────────────────────────────────────────────
+
+// ClaudeResultPayload carries the outcome of a CLAUDE_INVOKE.
+type ClaudeResultPayload struct {
+	CorrelationID string `json:"correlation_id"`
+	Stdout        string `json:"stdout"`
+	SessionID     string `json:"session_id"`
+	ExitCode      int    `json:"exit_code"`
+	Error         string `json:"error,omitempty"`
 }

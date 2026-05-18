@@ -19,6 +19,7 @@ import (
 	"nhooyr.io/websocket/wsjson"
 
 	"github.com/nanocoai/nanoclaw/runner/internal/config"
+	"github.com/nanocoai/nanoclaw/runner/internal/executor"
 	"github.com/nanocoai/nanoclaw/runner/internal/keychain"
 	"github.com/nanocoai/nanoclaw/runner/internal/protocol"
 )
@@ -32,6 +33,7 @@ type Client struct {
 	kc             *keychain.Keychain
 	startTime      time.Time
 	inboundHandler InboundHandler
+	exec           *executor.Executor
 
 	// seq is the monotonic counter for frames we send.
 	seq atomic.Int64
@@ -54,6 +56,7 @@ func New(cfg *config.Config, kc *keychain.Keychain, handler InboundHandler) *Cli
 		kc:             kc,
 		startTime:      time.Now(),
 		inboundHandler: handler,
+		exec:           executor.New(),
 	}
 }
 
@@ -314,6 +317,14 @@ func (c *Client) dispatch(ctx context.Context, conn *websocket.Conn, frame *prot
 		}
 		log.Printf("runner: gap notice — dropped=%d first_available=%d", p.DroppedCount, p.FirstAvailableSeq)
 
+	case protocol.TypeClaudeInvoke:
+		var p protocol.ClaudeInvokePayload
+		if err := json.Unmarshal(frame.Payload, &p); err != nil {
+			log.Printf("runner: decode CLAUDE_INVOKE: %v", err)
+			return
+		}
+		go c.handleClaudeInvoke(ctx, conn, p)
+
 	case protocol.TypeError:
 		var p protocol.ErrorPayload
 		if err := json.Unmarshal(frame.Payload, &p); err != nil {
@@ -330,6 +341,27 @@ func (c *Client) dispatch(ctx context.Context, conn *websocket.Conn, frame *prot
 // handleLifecycle processes a LIFECYCLE frame from central.
 func (c *Client) handleLifecycle(p protocol.LifecyclePayload) {
 	log.Printf("runner: LIFECYCLE action=%s", p.Action)
+}
+
+// handleClaudeInvoke executes claude --print for a CLAUDE_INVOKE frame and sends CLAUDE_RESULT.
+func (c *Client) handleClaudeInvoke(ctx context.Context, conn *websocket.Conn, p protocol.ClaudeInvokePayload) {
+	log.Printf("runner: CLAUDE_INVOKE correlation=%s cwd=%s resume=%q",
+		p.CorrelationID, p.CWD, p.ResumeSessionID)
+
+	result := c.exec.Invoke(ctx, p.CWD, p.Prompt, p.ResumeSessionID)
+
+	payload := protocol.ClaudeResultPayload{
+		CorrelationID: p.CorrelationID,
+		Stdout:        result.Stdout,
+		SessionID:     result.SessionID,
+		ExitCode:      result.ExitCode,
+		Error:         result.Error,
+	}
+	if err := c.sendFrame(ctx, conn, protocol.TypeClaudeResult, payload); err != nil {
+		log.Printf("runner: send CLAUDE_RESULT correlation=%s: %v", p.CorrelationID, err)
+		return
+	}
+	log.Printf("runner: CLAUDE_RESULT sent correlation=%s exit=%d", p.CorrelationID, result.ExitCode)
 }
 
 // heartbeatLoop sends HEARTBEAT frames at the configured interval.
