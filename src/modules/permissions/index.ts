@@ -227,11 +227,14 @@ async function handleSenderApprovalResponse(payload: ResponsePayload): Promise<b
   if (!row) return false;
 
   // payload.userId is the raw platform userId (e.g. "6037840640"); namespace it
-  // with the channel type so it matches users(id) format. Then verify the
-  // clicker is the designated approver OR has owner/admin privilege over this
-  // agent group — any other click is rejected so random users can't self-admit
-  // via stolen card forwarding.
-  const clickerId = payload.userId ? `${payload.channelType}:${payload.userId}` : null;
+  // with the channel type so it matches users(id) format. Some platforms
+  // (e.g. Teams "29:xxx") already include a colon — mirror resolveOrCreateUser
+  // logic and only prefix when the raw id has no colon.
+  const clickerId = payload.userId
+    ? payload.userId.includes(':')
+      ? payload.userId
+      : `${payload.channelType}:${payload.userId}`
+    : null;
   const isAuthorized =
     clickerId !== null && (clickerId === row.approver_user_id || hasAdminPrivilege(clickerId, row.agent_group_id));
   if (!isAuthorized) {
@@ -308,7 +311,11 @@ async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<
   const row = getPendingChannelApproval(payload.questionId);
   if (!row) return false;
 
-  const clickerId = payload.userId ? `${payload.channelType}:${payload.userId}` : null;
+  const clickerId = payload.userId
+    ? payload.userId.includes(':')
+      ? payload.userId
+      : `${payload.channelType}:${payload.userId}`
+    : null;
   const isAuthorized =
     clickerId !== null && (clickerId === row.approver_user_id || hasAdminPrivilege(clickerId, row.agent_group_id));
   if (!isAuthorized) {

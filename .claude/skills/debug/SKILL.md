@@ -57,7 +57,50 @@ Debug level shows:
 
 ## Common Issues
 
-### 1. "Claude Code process exited with code 1"
+### 1. "No adapter for channel type" / Messages silently lost (null platformMsgId)
+
+**Symptom:** The bot stops replying. `logs/nanoclaw.error.log` shows repeated:
+```
+WARN No adapter for channel type channelType="telegram"
+WARN No adapter for channel type channelType="signal"
+```
+The main log shows "Message delivered" entries with `platformMsgId=undefined` — meaning the delivery poll ran, found no adapter, and permanently marked the message as delivered without sending it.
+
+**Root cause: two NanoClaw service instances running simultaneously.**
+
+When a second service instance (often `nanoclaw-v2-<id>.service` running alongside `nanoclaw.service`) is active with a stale binary, it has no channel adapters registered. Its delivery poll races against the working instance and wins — permanently marking outbound messages as delivered without ever sending them.
+
+**Diagnosis:**
+```bash
+# Check for duplicate running instances
+ps aux | grep 'nanoclaw/dist/index.js' | grep -v grep
+
+# Check which services are active
+systemctl --user list-units 'nanoclaw*' --all
+
+# Confirm channel adapters registered by the current process
+grep "Channel adapter started" logs/nanoclaw.log | tail -10
+```
+
+**Fix:**
+1. Identify which service has the correct binary and EnvironmentFile (the one showing `signal`, `telegram`, `cli` all started in the log).
+2. Stop and disable the stale duplicate service:
+   ```bash
+   systemctl --user stop nanoclaw.service   # or whichever is the old one
+   systemctl --user disable nanoclaw.service
+   ```
+3. If the remaining service unit is missing `EnvironmentFile`, add it:
+   ```bash
+   # Edit the service unit — add this line under [Service]:
+   # EnvironmentFile=/home/[user]/nanoclaw/.env
+   systemctl --user daemon-reload
+   systemctl --user restart nanoclaw-v2-<id>.service
+   ```
+4. Verify only one instance runs: `ps aux | grep nanoclaw/dist/index.js | grep -v grep`
+
+**Note:** Messages that were marked delivered with a null `platform_message_id` cannot be automatically retried — they are permanently lost. The user must resend their message.
+
+### 2. "Claude Code process exited with code 1"
 
 **Check the container log file** in `groups/{folder}/logs/container-*.log`
 
@@ -279,7 +322,7 @@ rm -rf data/sessions/
 rm -rf data/sessions/{groupFolder}/.claude/
 
 # Also clear the session ID from NanoClaw's tracking (stored in SQLite)
-sqlite3 store/messages.db "DELETE FROM sessions WHERE group_folder = '{groupFolder}'"
+pnpm exec tsx scripts/q.ts store/messages.db "DELETE FROM sessions WHERE group_folder = '{groupFolder}'"
 ```
 
 To verify session resumption is working, check the logs for the same session ID across messages:

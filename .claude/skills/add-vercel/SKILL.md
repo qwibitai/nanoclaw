@@ -90,12 +90,12 @@ onecli secrets list | grep -i vercel
 OneCLI uses selective secret mode — secrets must be explicitly assigned to each agent. Get the Vercel secret ID from the output above, then assign it to every agent:
 
 ```bash
-# For each agent, add the Vercel secret to its assigned secrets list.
-# First get current assignments, then set them with the new secret appended.
-VERCEL_SECRET_ID=$(onecli secrets list 2>/dev/null | grep -B2 "Vercel" | grep '"id"' | head -1 | sed 's/.*"id": "//;s/".*//')
-for agent in $(onecli agents list 2>/dev/null | grep '"id"' | sed 's/.*"id": "//;s/".*//'); do
-  CURRENT=$(onecli agents secrets --id "$agent" 2>/dev/null | grep '"' | grep -v hint | grep -v data | sed 's/.*"//;s/".*//' | tr '\n' ',' | sed 's/,$//')
-  onecli agents set-secrets --id "$agent" --secret-ids "${CURRENT:+$CURRENT,}$VERCEL_SECRET_ID"
+# set-secrets replaces the entire list — read and merge for each agent.
+VERCEL_SECRET_ID=$(onecli secrets list | jq -r '.data[] | select(.name | test("(?i)vercel")) | .id' | head -1)
+for agent in $(onecli agents list | jq -r '.data[].id'); do
+  CURRENT=$(onecli agents secrets --id "$agent" | jq -r '[.data[]] | join(",")')
+  MERGED=$(printf '%s' "$CURRENT,$VERCEL_SECRET_ID" | tr ',' '\n' | sort -u | paste -sd ',' -)
+  onecli agents set-secrets --id "$agent" --secret-ids "$MERGED"
 done
 ```
 

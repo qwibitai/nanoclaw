@@ -108,14 +108,27 @@ export function insertMessage(
      * Host countDueMessages gates on this; container reads everything.
      */
     trigger?: 0 | 1;
+    /**
+     * For agent-to-agent inbound: the source session id that emitted the
+     * outbound message which became this inbound row. Used as the return
+     * path for the target's reply. NULL on channel-side inbound.
+     */
+    sourceSessionId?: string | null;
+    /**
+     * 1 = only deliver on the container's first poll (fresh start).
+     * Dying containers (past first poll) skip these rows.
+     */
+    onWake?: 0 | 1;
   },
 ): void {
   db.prepare(
-    `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger)
-     VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger)`,
+    `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, source_session_id, on_wake)
+     VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger, @sourceSessionId, @onWake)`,
   ).run({
     ...message,
     trigger: message.trigger ?? 1,
+    onWake: message.onWake ?? 0,
+    sourceSessionId: message.sourceSessionId ?? null,
     seq: nextEvenSeq(db),
   });
 }
@@ -239,6 +252,7 @@ export interface OutboundMessage {
   channel_type: string | null;
   thread_id: string | null;
   content: string;
+  in_reply_to: string | null;
 }
 
 export function getDueOutboundMessages(db: Database.Database): OutboundMessage[] {
@@ -305,4 +319,52 @@ export function migrateMessagesInTable(db: Database.Database): void {
     // the agent" semantics, so backfill 1 and default 1 for new inserts.
     db.prepare('ALTER TABLE messages_in ADD COLUMN trigger INTEGER NOT NULL DEFAULT 1').run();
   }
+  if (!cols.has('source_session_id')) {
+    // For agent-to-agent return-path routing. NULL on existing rows is fine —
+    // their replies fall back to the legacy "newest active session" lookup.
+    db.prepare('ALTER TABLE messages_in ADD COLUMN source_session_id TEXT').run();
+  }
+  if (!cols.has('on_wake')) {
+    // 1 = only deliver on the container's first poll (fresh start).
+    // All existing rows are normal messages, so default 0.
+    db.prepare('ALTER TABLE messages_in ADD COLUMN on_wake INTEGER NOT NULL DEFAULT 0').run();
+  }
+}
+
+/**
+ * Look up an inbound row's source_session_id by its message id. Returns null
+ * if the row doesn't exist or the column is NULL (channel inbound or
+ * pre-migration a2a inbound). Used by a2a routing to route replies back to
+ * the originating session.
+ */
+export function getInboundSourceSessionId(db: Database.Database, messageId: string): string | null {
+  const row = db.prepare('SELECT source_session_id FROM messages_in WHERE id = ?').get(messageId) as
+    | { source_session_id: string | null }
+    | undefined;
+  return row?.source_session_id ?? null;
+}
+
+/**
+ * Find the source_session_id of the most recent a2a inbound row from a
+ * specific peer (by agent group id). Used as a peer-affinity fallback in
+ * a2a routing when an outbound reply has no `in_reply_to` (e.g. the
+ * container's send_message MCP tool path didn't thread the batch's
+ * in_reply_to through).
+ *
+ * Heuristic: "the last time this peer talked to me, which session was it?"
+ * Returns null when no prior a2a inbound from that peer carries a
+ * non-null source_session_id (typical for pre-migration installs).
+ */
+export function getMostRecentPeerSourceSessionId(db: Database.Database, peerAgentGroupId: string): string | null {
+  const row = db
+    .prepare(
+      `SELECT source_session_id FROM messages_in
+        WHERE channel_type = 'agent'
+          AND platform_id = ?
+          AND source_session_id IS NOT NULL
+        ORDER BY seq DESC
+        LIMIT 1`,
+    )
+    .get(peerAgentGroupId) as { source_session_id: string | null } | undefined;
+  return row?.source_session_id ?? null;
 }

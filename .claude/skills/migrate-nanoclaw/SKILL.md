@@ -34,7 +34,7 @@ Two phases: **Extract** (build the migration guide) and **Upgrade** (use it). If
 
 Run `git status --porcelain`. If non-empty, offer to stash or commit for them (AskUserQuestion: "Stash changes" / "Commit changes" / "I'll handle it"). If they want to commit, stage and commit with a descriptive message. If they want to stash, run `git stash push -m "pre-migration stash"`.
 
-Check remotes with `git remote -v`. If `upstream` is missing, ask for the URL (default: `https://github.com/qwibitai/nanoclaw.git`), add it, then `git fetch upstream --prune`.
+Check remotes with `git remote -v`. If `upstream` is missing, ask for the URL (default: `https://github.com/nanocoai/nanoclaw.git`), add it, then `git fetch upstream --prune`.
 
 Detect upstream branch: check `git branch -r | grep upstream/` for `main` or `master`. Store as UPSTREAM_BRANCH.
 

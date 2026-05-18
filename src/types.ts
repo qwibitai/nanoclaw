@@ -4,8 +4,28 @@ export interface AgentGroup {
   id: string;
   name: string;
   folder: string;
+  /** @deprecated Use container_configs.provider instead. */
   agent_provider: string | null;
   created_at: string;
+}
+
+/** Per-agent-group container runtime config. Source of truth in the DB;
+ *  materialized to `groups/<folder>/container.json` at spawn time. */
+export interface ContainerConfigRow {
+  agent_group_id: string;
+  provider: string | null;
+  model: string | null;
+  effort: string | null;
+  image_tag: string | null;
+  assistant_name: string | null;
+  max_messages_per_prompt: number | null;
+  skills: string; // JSON: '"all"' | '["skill1","skill2"]'
+  mcp_servers: string; // JSON: Record<string, McpServerConfig>
+  packages_apt: string; // JSON: string[]
+  packages_npm: string; // JSON: string[]
+  additional_mounts: string; // JSON: AdditionalMountConfig[]
+  cli_scope: string; // 'disabled' | 'group' | 'global'
+  updated_at: string;
 }
 
 export type UnknownSenderPolicy = 'strict' | 'request_approval' | 'public';

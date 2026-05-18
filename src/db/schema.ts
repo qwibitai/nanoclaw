@@ -7,8 +7,7 @@
 export const SCHEMA = `
 -- Agent workspaces: folder, skills, CLAUDE.md.
 -- All workspaces are equal; privilege lives on users, not groups.
--- Container config (mcpServers, packages, imageTag, additionalMounts) lives
--- in groups/<folder>/container.json on disk, not in the DB.
+-- Container config lives in the container_configs table (see migration 014).
 CREATE TABLE agent_groups (
   id               TEXT PRIMARY KEY,
   name             TEXT NOT NULL,
@@ -171,7 +170,16 @@ CREATE TABLE IF NOT EXISTS messages_in (
   platform_id    TEXT,
   channel_type   TEXT,
   thread_id      TEXT,
-  content        TEXT NOT NULL
+  content        TEXT NOT NULL,
+  -- For agent-to-agent inbound rows: the source session that emitted the
+  -- triggering outbound. Used as a return path when the target replies —
+  -- the reply routes back to this exact session, not to the source agent
+  -- group's "newest" session. NULL on channel-side inbound and on a2a rows
+  -- written before this column existed.
+  source_session_id TEXT,
+  on_wake        INTEGER NOT NULL DEFAULT 0
+               -- 1 = only deliver on the container's first poll (fresh start).
+               -- Dying containers (past first poll) skip these rows.
 );
 CREATE INDEX IF NOT EXISTS idx_messages_in_series ON messages_in(series_id);
 
