@@ -1,0 +1,50 @@
+name: Feature / Enhancement
+description: Propose a new capability or improvement
+labels: ["Type: Enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read the [philosophy section in CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) before filing. Most new capabilities should be **skills**, not source code changes.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that you can't? Why does it matter?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What should NanoClaw do differently?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      description: "`trunk` = touches core routing, DB, or container infrastructure. `skill` = everything else."
+      options:
+        - trunk
+        - skill
+        - docs
+        - not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else did you consider?
+
+  - type: checkboxes
+    id: ai-assist
+    attributes:
+      label: " "
+      options:
+        - label: This proposal was drafted with AI help. I've reviewed and stand behind it.
