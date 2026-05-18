@@ -193,7 +193,7 @@ CREATE TABLE agent_destinations (
 CREATE INDEX idx_agent_dest_target ON agent_destinations(target_type, target_id);
 ```
 
-**Projection invariant (load-bearing).** The central table is the source of truth, but each running container reads from a projection in its own `inbound.db` (see [db-session.md §2.3](db-session.md#23-destinations)). Any code that mutates `agent_destinations` while a container is running must also call `writeDestinations()` (`src/modules/agent-to-agent/write-destinations.ts`) or the container will reject sends with stale data. Known call sites: `createMessagingGroupAgent()` in `src/db/messaging-groups.ts`, the `create_agent` system action in `src/delivery.ts`.
+**Projection invariant (load-bearing).** The central table is the source of truth, but each running container reads from a projection in its own `inbound.db` (see [db-session.md §2.3](db-session.md#23-destinations)). Any code that mutates `agent_destinations` while a container is running must also call `writeDestinations()` (`src/modules/agent-to-agent/write-destinations.ts`) or the container will reject sends with stale data. Known call sites: `createMessagingGroupAgent()` in `src/db/messaging-groups.ts`, the `create_agent` system action in `src/modules/agent-to-agent/create-agent.ts`.
 
 Access layer: `src/modules/agent-to-agent/db/agent-destinations.ts`.
 
