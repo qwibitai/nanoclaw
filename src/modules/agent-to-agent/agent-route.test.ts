@@ -443,4 +443,28 @@ describe('routeAgentMessage return-path', () => {
     expect(fs.existsSync(targetPath)).toBe(true);
     expect(fs.readFileSync(targetPath, 'utf-8')).toBe('fake-pdf-bytes');
   });
+
+  it('file forwarding: skips symlinked source files', async () => {
+    const secretPath = path.join(TEST_DIR, 'host-secret.txt');
+    fs.writeFileSync(secretPath, 'host-secret-bytes');
+
+    const outboxDir = path.join(sessionDir(A, S1.id), 'outbox', 'msg-with-symlink');
+    fs.mkdirSync(outboxDir, { recursive: true });
+    fs.symlinkSync(secretPath, path.join(outboxDir, 'safe-name.txt'));
+
+    await routeAgentMessage(
+      {
+        id: 'msg-with-symlink',
+        platform_id: B,
+        content: JSON.stringify({ text: 'see attached', files: ['safe-name.txt'] }),
+        in_reply_to: null,
+      },
+      S1,
+    );
+
+    const bRows = readInbound(B, SB.id);
+    expect(bRows).toHaveLength(1);
+    const parsed = JSON.parse(bRows[0].content);
+    expect(parsed.attachments).toHaveLength(0);
+  });
 });

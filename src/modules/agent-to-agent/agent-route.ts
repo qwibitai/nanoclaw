@@ -40,6 +40,11 @@ export interface ForwardedAttachment {
   localPath: string;
 }
 
+function isPathInside(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
 /**
  * Copy file attachments from the source agent's outbox into the target
  * agent's inbox. Returns attachments using the formatter's existing
@@ -57,11 +62,36 @@ export function forwardAttachedFiles(
 ): ForwardedAttachment[] {
   if (source.filenames.length === 0) return [];
 
+  if (!isSafeAttachmentName(source.messageId)) {
+    log.warn('agent-route: rejecting unsafe source outbox message id', { sourceMsgId: source.messageId });
+    return [];
+  }
+
   const sourceDir = path.join(sessionDir(source.agentGroupId, source.sessionId), 'outbox', source.messageId);
   if (!fs.existsSync(sourceDir)) {
     log.warn('agent-route: source outbox dir missing, no files forwarded', {
       sourceMsgId: source.messageId,
       sourceDir,
+    });
+    return [];
+  }
+
+  let realSourceDir: string;
+  try {
+    const sourceDirStat = fs.lstatSync(sourceDir);
+    if (!sourceDirStat.isDirectory() || sourceDirStat.isSymbolicLink()) {
+      log.warn('agent-route: rejecting unsafe source outbox dir', {
+        sourceMsgId: source.messageId,
+        sourceDir,
+      });
+      return [];
+    }
+    realSourceDir = fs.realpathSync(sourceDir);
+  } catch (err) {
+    log.warn('agent-route: failed to inspect source outbox dir', {
+      sourceMsgId: source.messageId,
+      sourceDir,
+      err,
     });
     return [];
   }
@@ -79,15 +109,33 @@ export function forwardAttachedFiles(
       continue;
     }
     const src = path.join(sourceDir, filename);
-    if (!fs.existsSync(src)) {
+    let realSrc: string;
+    try {
+      const srcStat = fs.lstatSync(src);
+      if (!srcStat.isFile() || srcStat.isSymbolicLink()) {
+        log.warn('agent-route: rejecting unsafe source outbox file', {
+          sourceMsgId: source.messageId,
+          filename,
+        });
+        continue;
+      }
+      realSrc = fs.realpathSync(src);
+    } catch {
       log.warn('agent-route: referenced file missing in source outbox, skipped', {
         sourceMsgId: source.messageId,
         filename,
       });
       continue;
     }
+    if (!isPathInside(realSourceDir, realSrc)) {
+      log.warn('agent-route: rejecting source file outside source outbox dir', {
+        sourceMsgId: source.messageId,
+        filename,
+      });
+      continue;
+    }
     const dst = path.join(targetInboxDir, filename);
-    fs.copyFileSync(src, dst);
+    fs.copyFileSync(realSrc, dst);
     attachments.push({
       name: filename,
       filename,
