@@ -9,6 +9,7 @@ import path from 'path';
 
 import { GROUPS_DIR } from '../../config.js';
 import { createAgentGroup, getAgentGroup, getAgentGroupByFolder } from '../../db/agent-groups.js';
+import { getDb } from '../../db/connection.js';
 import { getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
 import { initGroupFilesystem } from '../../group-init.js';
@@ -34,6 +35,42 @@ function notifyAgent(session: Session, text: string): void {
   }
 }
 
+/**
+ * Host-side authorization for the admin-only create_agent action.
+ *
+ * The container controls outbound system messages, so hiding the MCP tool is
+ * not a security boundary. Only sessions belonging to an agent group that is
+ * currently tied to a privileged operator may create new persistent agent
+ * groups and destination ACL rows:
+ *
+ * - a scoped admin for the same agent group; or
+ * - a global owner/admin who also has an explicit membership row for this
+ *   agent group.
+ *
+ * The explicit-membership requirement prevents a compromised untrusted child
+ * from inheriting ambient global owner/admin power just because such a user
+ * exists somewhere else in the deployment.
+ */
+function canSourceCreateAgent(agentGroupId: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1
+         FROM user_roles ur
+        WHERE (ur.role = 'admin' AND ur.agent_group_id = ?)
+           OR (ur.role IN ('owner', 'admin')
+               AND ur.agent_group_id IS NULL
+               AND EXISTS (
+                 SELECT 1
+                   FROM agent_group_members m
+                  WHERE m.agent_group_id = ?
+                    AND m.user_id = ur.user_id
+               ))
+        LIMIT 1`,
+    )
+    .get(agentGroupId, agentGroupId);
+  return !!row;
+}
+
 export async function handleCreateAgent(content: Record<string, unknown>, session: Session): Promise<void> {
   const requestId = content.requestId as string;
   const name = content.name as string;
@@ -47,6 +84,16 @@ export async function handleCreateAgent(content: Record<string, unknown>, sessio
   }
 
   const localName = normalizeName(name);
+
+  if (!canSourceCreateAgent(sourceGroup.id)) {
+    notifyAgent(session, `Cannot create agent "${name}": this source agent is not authorized to create agents.`);
+    log.warn('create_agent denied: source agent group lacks admin authorization', {
+      sessionId: session.id,
+      sourceAgentGroup: sourceGroup.id,
+      name,
+    });
+    return;
+  }
 
   // Collision in the creator's destination namespace
   if (getDestinationByName(sourceGroup.id, localName)) {
