@@ -1,0 +1,32 @@
+repos:
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier
+        language: system
+        entry: pnpm exec prettier --write
+        types: [ts]
+        files: ^src/
+        stage_fixed: true
+
+      - id: eslint
+        name: eslint
+        language: system
+        entry: pnpm exec eslint --fix
+        types: [ts]
+        files: ^src/
+        stage_fixed: true
+
+      - id: typecheck
+        name: typecheck
+        language: system
+        entry: pnpm exec tsc --noEmit
+        pass_filenames: false
+        files: ^src/.*\.tsx?$
+
+      - id: vitest
+        name: vitest
+        language: system
+        entry: pnpm exec vitest run
+        pass_filenames: false
+        files: ^src/.*\.tsx?$
