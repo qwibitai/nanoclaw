@@ -4,11 +4,18 @@ import type { ImageAttachment } from './types.js';
 
 export type { ImageAttachment } from './types.js';
 
+// MIME types we accept on the inbound side. Sharp re-encodes everything to
+// JPEG before handing it to Anthropic, so the model never sees the source
+// format — we just need sharp to be able to decode it. The bundled libheif
+// (sharp.versions.heif) covers HEIC (iPhone Photos default) and AVIF.
 const SUPPORTED: ReadonlySet<string> = new Set([
   'image/jpeg',
   'image/png',
   'image/gif',
   'image/webp',
+  'image/heic',
+  'image/heif',
+  'image/avif',
 ]);
 
 export function isSupportedImageMime(mime: string | undefined | null): boolean {

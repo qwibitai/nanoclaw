@@ -14,8 +14,14 @@ describe('isSupportedImageMime', () => {
   it('accepts image/webp', () => {
     expect(isSupportedImageMime('image/webp')).toBe(true);
   });
-  it('rejects image/heic', () => {
-    expect(isSupportedImageMime('image/heic')).toBe(false);
+  it('accepts image/heic', () => {
+    expect(isSupportedImageMime('image/heic')).toBe(true);
+  });
+  it('accepts image/heif', () => {
+    expect(isSupportedImageMime('image/heif')).toBe(true);
+  });
+  it('accepts image/avif', () => {
+    expect(isSupportedImageMime('image/avif')).toBe(true);
   });
   it('rejects application/pdf', () => {
     expect(isSupportedImageMime('application/pdf')).toBe(false);
@@ -80,5 +86,27 @@ describe('processImageBuffer', () => {
     const att = await processImageBuffer(buf, 'image/png');
     const decoded = Buffer.from(att!.data, 'base64');
     await expect(sharp(decoded).metadata()).resolves.toBeTruthy();
+  });
+
+  it('decodes HEIF/AVIF input and re-encodes as JPEG', async () => {
+    // libheif (bundled with sharp) writes HEIF as .avif. We round-trip a
+    // synthetic AVIF buffer through processImageBuffer to prove the
+    // pipeline accepts HEIF-family inputs from real iPhone Photos.
+    const avif = await sharp({
+      create: {
+        width: 200,
+        height: 200,
+        channels: 3,
+        background: { r: 10, g: 200, b: 80 },
+      },
+    })
+      .heif({ compression: 'av1' })
+      .toBuffer();
+    const att = await processImageBuffer(avif, 'image/heic');
+    expect(att).not.toBeNull();
+    expect(att!.mediaType).toBe('image/jpeg');
+    const decoded = Buffer.from(att!.data, 'base64');
+    const meta = await sharp(decoded).metadata();
+    expect(meta.format).toBe('jpeg');
   });
 });

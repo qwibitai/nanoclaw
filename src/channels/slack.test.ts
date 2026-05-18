@@ -33,7 +33,15 @@ vi.mock('../image.js', () => ({
     data: 'ZmFrZS1iYXNlNjQ=',
   })),
   isSupportedImageMime: (m: string) =>
-    ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(m),
+    [
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'image/webp',
+      'image/heic',
+      'image/heif',
+      'image/avif',
+    ].includes(m),
 }));
 
 // Mock fs — sendImage uses fs.createReadStream to attach files to uploadV2.
@@ -984,7 +992,7 @@ describe('SlackChannel', () => {
           files: [
             {
               id: 'F1',
-              mimetype: 'image/heic',
+              mimetype: 'application/pdf',
               url_private_download: 'https://u/1',
             },
             {
@@ -1051,7 +1059,7 @@ describe('SlackChannel', () => {
           files: [
             {
               id: 'F1',
-              mimetype: 'image/heic',
+              mimetype: 'application/pdf',
               url_private_download: 'https://u/1',
             },
           ],

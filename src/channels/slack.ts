@@ -159,12 +159,16 @@ export class SlackChannel implements Channel {
       const images: ImageAttachment[] = [];
       for (const file of files) {
         if (!file.mimetype || !isSupportedImageMime(file.mimetype)) {
-          if (file.mimetype) {
-            logger.debug(
-              { fileId: file.id, mime: file.mimetype },
-              'Slack non-image file skipped',
-            );
-          }
+          // Surface at warn level so silent file drops are visible in
+          // info-level logs. The agent sees zero images when this fires;
+          // without the log, that looks indistinguishable from "user
+          // attached nothing", which is impossible to debug after the fact.
+          logger.warn(
+            { fileId: file.id, fileName: file.name, mime: file.mimetype },
+            file.mimetype
+              ? 'Slack attachment skipped: unsupported MIME type'
+              : 'Slack attachment skipped: no MIME type reported',
+          );
           continue;
         }
         if (!file.url_private_download) continue;
