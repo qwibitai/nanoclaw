@@ -391,7 +391,7 @@ export function writeOutboundDirect(
     content: string;
   },
 ): void {
-  const db = openOutboundDb(agentGroupId, sessionId);
+  const db = openOutboundDbRw(agentGroupId, sessionId);
   try {
     db.prepare(
       `INSERT OR IGNORE INTO messages_out (id, seq, timestamp, kind, platform_id, channel_type, thread_id, content)

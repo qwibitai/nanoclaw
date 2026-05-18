@@ -176,15 +176,18 @@ function getAssignedAgents(runnerId: string): RunnerConfig {
       runner_id: runnerId,
       model: g.model ?? 'claude-opus-4-5',
       instructions: '',
-      mcp_servers: g.mcp_servers
-        ? (JSON.parse(g.mcp_servers) as Record<string, unknown>[]).map((s: Record<string, unknown>) => ({
-            name: String(s.name ?? ''),
-            command: String(s.command ?? ''),
-            args: (s.args as string[]) ?? [],
-            env: s.env as Record<string, string> | undefined,
-            local: Boolean(s.local ?? false),
-          }))
-        : [],
+      mcp_servers: (() => {
+        if (!g.mcp_servers) return [];
+        const parsed = JSON.parse(g.mcp_servers) as unknown;
+        if (!Array.isArray(parsed)) return [];
+        return (parsed as Record<string, unknown>[]).map((s: Record<string, unknown>) => ({
+          name: String(s.name ?? ''),
+          command: String(s.command ?? ''),
+          args: (s.args as string[]) ?? [],
+          env: s.env as Record<string, string> | undefined,
+          local: Boolean(s.local ?? false),
+        }));
+      })(),
       workspace_path: `/workspace/groups/${g.folder}`,
     })),
   };

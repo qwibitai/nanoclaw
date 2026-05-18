@@ -26,12 +26,21 @@ import { getAgentGroup } from '../../db/agent-groups.js';
 import { getInboundSourceSessionId, getMostRecentPeerSourceSessionId } from '../../db/session-db.js';
 import { getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
+import { dispatchRunnerBackedInvoke } from '../../runner-dispatch.js';
 import { log } from '../../log.js';
 import { openInboundDb, resolveSession, sessionDir, writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { hasDestination } from './db/agent-destinations.js';
 
 export { isSafeAttachmentName };
+
+function safeParseContent(raw: string): { text?: string } {
+  try {
+    return JSON.parse(raw) as { text?: string };
+  } catch {
+    return { text: raw };
+  }
+}
 
 export interface ForwardedAttachment {
   name: string;
@@ -203,7 +212,19 @@ export async function routeAgentMessage(msg: RoutableAgentMessage, session: Sess
     forwardedFileCount: countForwardedFiles(forwardedContent),
   });
   const fresh = getSession(targetSession.id);
-  if (fresh) await wakeContainer(fresh);
+  if (fresh) {
+    const targetAgentGroup = getAgentGroup(targetAgentGroupId);
+    if (targetAgentGroup?.runner_id && targetAgentGroup?.runner_cwd) {
+      const content = safeParseContent(forwardedContent);
+      void dispatchRunnerBackedInvoke(targetAgentGroup, fresh, content.text ?? '', {
+        channelType: 'agent',
+        platformId: session.agent_group_id,
+        threadId: null,
+      }).catch((err) => log.error('dispatchRunnerBackedInvoke (a2a) threw', { err }));
+    } else {
+      await wakeContainer(fresh);
+    }
+  }
 }
 
 /**
