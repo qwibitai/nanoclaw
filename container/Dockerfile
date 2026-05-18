@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y \
     git \
     python3 \
     python3-venv \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv (Python package manager for inline script dependencies)
