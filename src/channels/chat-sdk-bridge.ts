@@ -19,6 +19,7 @@ import {
   type Message as ChatMessage,
 } from 'chat';
 import { log } from '../log.js';
+import { isAudioAttachment, transcribeAudioBuffer } from '../transcription.js';
 import { SqliteStateAdapter } from '../state-sqlite.js';
 import { registerWebhookAdapter } from '../webhook-server.js';
 import { getAskQuestionRender } from '../db/sessions.js';
@@ -152,6 +153,20 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           try {
             const buffer = await att.fetchData();
             entry.data = buffer.toString('base64');
+
+            // Opt-in voice transcription: when WHISPER_BIN is set and the
+            // attachment is audio, transcribe the buffer via whisper.cpp and
+            // surface the transcript both on the attachment entry (for any
+            // downstream consumer) and inline in the message content (so the
+            // agent sees it as plain text alongside the audio file placeholder).
+            if (process.env.WHISPER_BIN && isAudioAttachment(entry)) {
+              const transcript = await transcribeAudioBuffer(buffer);
+              if (transcript) {
+                entry.transcript = transcript;
+                const existing = typeof serialized.content === 'string' ? serialized.content : '';
+                serialized.content = existing ? `${existing}\n[Voice: ${transcript}]` : `[Voice: ${transcript}]`;
+              }
+            }
           } catch (err) {
             log.warn('Failed to download attachment', { type: att.type, err });
           }
