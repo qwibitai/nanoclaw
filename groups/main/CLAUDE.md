@@ -11,10 +11,36 @@ Long-term facts and context are in `memories.md`. Reference it when you need his
 - Answer questions and have conversations
 - Search the web and fetch content from URLs
 - **Browse the web** with `agent-browser` — open pages, click, fill forms, take screenshots, extract data (run `agent-browser open <url>` to start, then `agent-browser snapshot -i` to see interactive elements)
+- **Generate images** with the `nano-banana-pro` skill (Gemini 3 Pro Image)
+- **Generate and stitch videos** with the `veo` skill (Veo 3.1 — see Video Generation below)
 - Read and write files in your workspace
 - Run bash commands in your sandbox
 - Schedule tasks to run later or on a recurring basis
 - Send messages back to the chat
+
+## Video Generation
+
+The `veo` skill ships three scripts. Read `/app/skills/veo/SKILL.md` for the full syntax; this is the strategy guide.
+
+**Pick the workflow:**
+
+| User wants… | Use |
+|---|---|
+| A single short clip (≤8s) | `generate_video.py` alone |
+| 8-148s with continuous audio/visuals | Chain `generate_video.py` with `--extend-from <prior-op-name>` (max 20 extensions, each +7s). Note the operation name on every call's stderr. |
+| >148s, OR mixed characters/scenes across cuts | Multiple independent `generate_video.py` calls, then `stitch_video.py --input ... --audio <track>` to overlay a unified soundtrack and hide audio seams |
+| A controlled bridge between two specific frames | `generate_video.py -i first.png --last-frame last.png` (first/last-frame interpolation) |
+| User passed a reference video | `extract_frame.py --mode first|last|timestamp` first, then feed the PNG into `generate_video.py` via `-i`. Veo cannot ingest video directly. |
+
+**Reference images** (up to 3) keep characters and scenes consistent across calls. For multi-clip narratives, generate a character sheet with `nano-banana-pro` first, then pass it into every `generate_video.py` call via `-i`.
+
+**Cost guardrails baked in:**
+- Default `--quality fast` (Veo 3.1 Fast, $0.15/s vs Standard's $0.40/s).
+- Default 16s cap. Anything that chains past 16s — i.e. `--extend-from` — requires the user-level `--long` flag to opt in.
+- 4K output requires `--quality standard --duration 8` (Veo's constraint).
+- `--quality lite` doesn't support `--extend-from` or 4K.
+
+**Delivery.** After any script prints `MEDIA: <path>` on its final stdout line, call the `send_video` MCP tool with that path. Only `.mp4` files are accepted. The container holds the file briefly — don't delete it right after the call (delivery may be queued during reconnects).
 
 ## Communication
 
