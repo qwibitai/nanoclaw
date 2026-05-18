@@ -145,10 +145,14 @@ console.log('updated:', db.prepare(
 
 ### 5. Choose routing mode
 
-Ask the user how they want messages routed to this agent, then run the matching commands.
+**Ask the user two questions before continuing:**
+
+1. *"Should this ACP agent be the primary agent for the channel (handles all messages), or share the channel with your existing Claude agent using a trigger prefix?"*
+2. If sharing: *"What prefix should trigger it? (e.g. `acp:`, `agent:`, `code:`)"*
+
+Then run the matching commands below.
 
 **Option A — Trigger prefix** (share a channel with the main agent)
-Only messages starting with a specific prefix go to this agent. Ask the user for their preferred prefix (e.g. `groq:`, `agent:`, `a2a:`).
 
 ```bash
 node -e "
@@ -180,8 +184,7 @@ console.log('main agent pattern updated:', updated);
 "
 ```
 
-**Option B — Default agent** (this agent handles all messages in the channel)
-No prefix needed. Wire with `engage_mode = 'always'`.
+**Option B — Primary agent** (handles all messages in the channel)
 
 ```bash
 node -e "
@@ -194,74 +197,14 @@ db.prepare(\`INSERT INTO messaging_group_agents
   .run('mga-' + Date.now(), 'YOUR-MESSAGING-GROUP-ID', ag.id,
        'per-thread', 20, new Date().toISOString(),
        'always', null, 'all', 'drop');
-console.log('wired as default agent');
+console.log('wired as primary agent');
 "
 ```
 
-If a main Claude agent is already wired to this messaging group, ask the user whether to remove it or keep it at a lower priority as a fallback.
+If an existing Claude agent is wired to this channel, ask the user whether to remove it or keep it at lower priority as a fallback.
 
 **Option C — Dedicated channel**
-The user will use a separate chat or channel exclusively for this agent. No wiring needed now — when the dedicated channel is set up, use Option B for it.
-
-## Running an ACP agent for testing
-
-### Option A — Groq test agent (subprocess mode, no server needed)
-
-1. Get a free key at https://console.groq.com
-2. Add `GROQ_API_KEY=your_key` to `.env`
-3. Copy the test agent:
-
-```bash
-git show origin/providers:scripts/test-acp-client-server.py \
-  > scripts/test-acp-client-server.py
-```
-
-4. Set subprocess mode in `acp-client.json`:
-
-```json
-{ "command": ["python3", "scripts/test-acp-client-server.py"] }
-```
-
-NanoClaw will spawn this script automatically per session. No port, no
-terminal, no server to manage.
-
-### Option B — TCP server mode (Groq)
-
-```bash
-GROQ_API_KEY=$(grep GROQ_API_KEY .env | cut -d= -f2) \
-  nohup python3 scripts/test-acp-client-server.py --tcp 7787 \
-  > logs/acp-client.log 2>&1 &
-```
-
-In `acp-client.json`: `{ "host": "host.docker.internal", "port": 7787 }`
-
-### Option C — Echo mode (no API key)
-
-```json
-{ "command": ["python3", "scripts/test-acp-client-server.py", "--echo"] }
-```
-
-Returns `"Echo: <your message>"`. Useful for testing the protocol wiring without an API key.
-
-### Option D — Any ACP-compatible agent
-
-Any process that reads JSON-RPC 2.0 from stdin and writes to stdout. Minimum
-required methods: `initialize`, `session/new`, `session/prompt`.
-
-See `docs/acp-client-code-walkthrough.md` for a minimal Python implementation.
-
-## How it works
-
-1. NanoClaw opens a connection (subprocess or TCP) to the agent.
-2. Sends `initialize` (handshake + capabilities).
-3. Sends `session/new { cwd: "/workspace" }` — gets back a `sessionId`.
-4. Sends `session/prompt` with the user's message.
-5. While waiting, `session/update` notifications arrive with streaming text chunks.
-6. The agent may send `fs/read_text_file` or `fs/write_text_file` requests at
-   any time — NanoClaw serves these from `/workspace` (path-traversal protected).
-7. When `session/prompt` responds with `stopReason: "done"`, all chunks are
-   assembled and delivered to the user.
-8. Connection is closed. Each turn opens a fresh connection.
+The user will use a separate channel exclusively for this agent. No wiring needed now — use Option B when the channel is ready.
 
 ## Troubleshooting
 
@@ -273,16 +216,11 @@ Check step 2 (config file) and step 4 (DB update).
 In TCP mode: the agent server is not running or not reachable. Use
 `host.docker.internal` (not `localhost`).
 In subprocess mode: the command path is wrong or the script has a syntax error.
-Test manually: `python3 scripts/test-acp-client-server.py --echo`
 
 **No response / timeout**
-The agent's `session/prompt` never responded with `stopReason: "done"`.
-Check the agent logs for errors. In subprocess mode, check the process
-didn't exit early.
+The agent's `session/prompt` never returned a result.
+Check the agent logs. In subprocess mode, check the process didn't exit early.
 
 **"Path outside workspace" error**
-The agent sent an `fs/read_text_file` or `fs/write_text_file` for a path
-outside `/workspace`. This is a security guard — the agent cannot access host
-filesystem paths.
-
-See `docs/acp-client-code-walkthrough.md` for the full protocol and code walkthrough.
+The agent sent an `fs/` request for a path outside `/workspace`.
+This is a security guard — the agent cannot escape the container boundary.
