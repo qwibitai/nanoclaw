@@ -177,9 +177,12 @@ const db = require('./node_modules/better-sqlite3')('./data/v2.db');
 const row = db.prepare(
   'SELECT id, engage_pattern FROM messaging_group_agents WHERE agent_group_id = ?'
 ).get('YOUR-MAIN-AGENT-GROUP-ID');
-const updated = row.engage_pattern.replace(')', '|PREFIX:)');
-db.prepare('UPDATE messaging_group_agents SET engage_pattern = ? WHERE id = ?')
-  .run(updated, row.id);
+// Handle both: existing negative lookahead (append) or simple pattern (convert)
+const updated = row.engage_pattern && row.engage_pattern.includes('(?!')
+  ? row.engage_pattern.replace(/\\)$/, '|PREFIX:)')
+  : '^(?!PREFIX:)';
+db.prepare('UPDATE messaging_group_agents SET engage_mode = ?, engage_pattern = ? WHERE id = ?')
+  .run('pattern', updated, row.id);
 console.log('main agent pattern updated:', updated);
 "
 ```
@@ -201,7 +204,16 @@ console.log('wired as primary agent');
 "
 ```
 
-If an existing Claude agent is wired to this channel, ask the user whether to remove it or keep it at lower priority as a fallback.
+If an existing Claude agent is wired to this channel, it must be removed — the router fans out to ALL matching agents so both would reply. Ask the user to confirm, then delete its wiring:
+
+```bash
+node -e "
+const db = require('./node_modules/better-sqlite3')('./data/v2.db');
+db.prepare('DELETE FROM messaging_group_agents WHERE agent_group_id = ?')
+  .run('YOUR-MAIN-AGENT-GROUP-ID');
+console.log('removed main agent wiring');
+"
+```
 
 **Option C — Dedicated channel**
 The user will use a separate channel exclusively for this agent. No wiring needed now — use Option B when the channel is ready.
