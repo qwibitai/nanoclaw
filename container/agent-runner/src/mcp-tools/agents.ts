@@ -119,12 +119,24 @@ export const updateAgent: McpToolDefinition = {
       return err('at least one of agent_provider or model must be provided');
     }
 
-    const rawProvider = args.agent_provider as string | undefined;
+    // Reject non-string values explicitly. The schema declares both as
+    // `type: 'string'`, but raw MCP args bypass the schema — a malformed
+    // call carrying e.g. `agent_provider: 123` would otherwise fall into
+    // the `: null` branch below and silently clear an existing override
+    // instead of failing fast (hard to diagnose). Null/undefined/empty
+    // string remain valid "clear" / "don't touch" signals.
+    const rawProvider = args.agent_provider;
+    if (hasProvider && rawProvider !== null && typeof rawProvider !== 'string') {
+      return err('agent_provider must be a string (empty string or null to clear)');
+    }
     const agentProvider = hasProvider
       ? (typeof rawProvider === 'string' && rawProvider.trim() ? rawProvider.trim().toLowerCase() : null)
       : undefined;
 
-    const rawModel = args.model as string | undefined;
+    const rawModel = args.model;
+    if (hasModel && rawModel !== null && typeof rawModel !== 'string') {
+      return err('model must be a string (empty string or null to clear)');
+    }
     // Empty string = intentional clear. Undefined = don't touch.
     const model = hasModel ? (typeof rawModel === 'string' && rawModel.trim() ? rawModel.trim() : null) : undefined;
 
