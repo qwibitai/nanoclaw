@@ -9,10 +9,10 @@
     },
     "fleet-host": {
       "type": "stdio",
-      "command": "socat",
+      "command": "node",
       "args": [
-        "STDIO",
-        "UNIX-CONNECT:/run/user/1001/fleet-host-mcp.sock"
+        "/workspace/global/mcp-socket-bridge.js",
+        "/tmp/fleet-host-mcp.sock"
       ]
     }
   }

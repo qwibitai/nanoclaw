@@ -338,6 +338,7 @@ function buildContainerArgs(
   }
   if (telemetryToken) {
     args.push('-e', 'TELEMETRY_REGISTRATION_TOKEN=' + telemetryToken);
+    args.push('-e', 'TELEMETRY_TOKEN=' + telemetryToken);
   }
   if (telemetryBotId) {
     args.push('-e', 'TELEMETRY_BOT_ID=' + telemetryBotId);
@@ -416,6 +417,14 @@ function buildContainerArgs(
     }
   }
 
+
+  // Bind-mount fleet-host-mcp socket so containers can reach the host MCP server
+  if (hostUid != null) {
+    const fleetSocketHost = `/run/user/${hostUid}/fleet-host-mcp.sock`;
+    if (fs.existsSync(fleetSocketHost)) {
+      args.push('-v', `${fleetSocketHost}:/tmp/fleet-host-mcp.sock`);
+    }
+  }
   args.push(CONTAINER_IMAGE);
 
   return args;

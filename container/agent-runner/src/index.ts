@@ -510,6 +510,20 @@ async function runQuery(
     };
   }
 
+  // fleet-host MCP server: host-side tools (host_command, fleet_ssh, gh_tool, cron mgmt)
+  // exposed via UNIX socket bind-mounted from host. The socket-bridge.js converts STDIO
+  // to UNIX socket because the container image does not include socat.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fsMod = fs;
+    if (fsMod.existsSync('/tmp/fleet-host-mcp.sock') && fsMod.existsSync('/workspace/global/mcp-socket-bridge.js')) {
+      mcpServers['fleet-host'] = {
+        command: 'node',
+        args: ['/workspace/global/mcp-socket-bridge.js', '/tmp/fleet-host-mcp.sock'],
+      };
+    }
+  } catch (_err) { /* best-effort */ }
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -533,6 +547,7 @@ async function runQuery(
         'mcp__brave-search__*',
         'mcp__tavily__*',
         'mcp__github__*',
+        'mcp__fleet-host__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
