@@ -299,7 +299,7 @@ export class ClaudeProvider implements AgentProvider {
         env: this.env,
         model: this.model,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        effort: this.effort as any,
+        effort: (input.effortOverride ?? this.effort) as any,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         settingSources: ['project', 'user'],

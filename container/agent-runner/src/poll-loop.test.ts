@@ -4,6 +4,7 @@ import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '
 import { getPendingMessages, markCompleted } from './db/messages-in.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
+import { detectEffortOverride } from './poll-loop.js';
 import { MockProvider } from './providers/mock.js';
 
 beforeEach(() => {
@@ -216,7 +217,13 @@ describe('origin metadata (from= attribute)', () => {
       .run(name, name, channelType, platformId);
   }
 
-  function insertWithRouting(id: string, kind: string, content: object, channelType: string | null, platformId: string | null): void {
+  function insertWithRouting(
+    id: string,
+    kind: string,
+    content: object,
+    channelType: string | null,
+    platformId: string | null,
+  ): void {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
@@ -373,5 +380,49 @@ describe('end-to-end with mock provider', () => {
     expect(outMessages).toHaveLength(1);
     expect(JSON.parse(outMessages[0].content).text).toBe('The answer is 4');
     expect(outMessages[0].in_reply_to).toBe('m1');
+  });
+});
+
+describe('detectEffortOverride', () => {
+  it('returns undefined for a plain chat batch', () => {
+    insertMessage('m1', 'chat', { sender: 'M', text: 'hey what is up' });
+    insertMessage('m2', 'chat', { sender: 'M', text: 'follow-up question' });
+    expect(detectEffortOverride(getPendingMessages())).toBeUndefined();
+  });
+
+  it('returns "max" when any chat starts with /council', () => {
+    insertMessage('m1', 'chat', { sender: 'M', text: 'background context' });
+    insertMessage('m2', 'chat', { sender: 'M', text: '/council should we ship?' });
+    expect(detectEffortOverride(getPendingMessages())).toBe('max');
+  });
+
+  it('returns "max" for /build', () => {
+    insertMessage('m1', 'chat', { sender: 'M', text: '/build the feature now' });
+    expect(detectEffortOverride(getPendingMessages())).toBe('max');
+  });
+
+  it('returns "max" for /think', () => {
+    insertMessage('m1', 'chat', { sender: 'M', text: '/think about the tradeoffs' });
+    expect(detectEffortOverride(getPendingMessages())).toBe('max');
+  });
+
+  it('is case-insensitive (matches /Council just like /council)', () => {
+    insertMessage('m1', 'chat', { sender: 'M', text: '/Council weigh in' });
+    expect(detectEffortOverride(getPendingMessages())).toBe('max');
+  });
+
+  it('does not trigger for non-heavy passthrough commands', () => {
+    insertMessage('m1', 'chat', { sender: 'M', text: '/research topic xyz' });
+    expect(detectEffortOverride(getPendingMessages())).toBeUndefined();
+  });
+
+  it('does not trigger for admin commands like /clear', () => {
+    insertMessage('m1', 'chat', { sender: 'M', text: '/clear' });
+    expect(detectEffortOverride(getPendingMessages())).toBeUndefined();
+  });
+
+  it('ignores non-chat messages (task rows never carry slash commands)', () => {
+    insertMessage('m1', 'task', { prompt: '/council pretend this is heavy' });
+    expect(detectEffortOverride(getPendingMessages())).toBeUndefined();
   });
 });
