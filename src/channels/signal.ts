@@ -590,9 +590,10 @@ export function createSignalAdapter(config: {
 
     const audioAttachment = dataMessage.attachments?.find((a) => a.contentType?.startsWith('audio/') && a.id);
     const imageAttachments = dataMessage.attachments?.filter((a) => a.contentType?.startsWith('image/') && a.id) ?? [];
+    const pdfAttachments = dataMessage.attachments?.filter((a) => a.contentType === 'application/pdf' && a.id) ?? [];
     const hasVoice = !text && !!audioAttachment;
 
-    if (!text && !hasVoice && imageAttachments.length === 0) return;
+    if (!text && !hasVoice && imageAttachments.length === 0 && pdfAttachments.length === 0) return;
 
     const sender = (envelope.sourceNumber ?? envelope.sourceUuid ?? envelope.source ?? '').trim();
     if (!sender) return;
@@ -647,17 +648,54 @@ export function createSignalAdapter(config: {
       }
     }
 
-    // Image attachments — emit `[Image: <path>]` lines so the agent's Read
-    // tool can pick them up, and surface the structured `attachments` array
-    // for consumers that prefer that shape. Without this, vision-capable
-    // models never see images sent over Signal.
-    const attachmentRefs: Array<{ path: string; contentType: string }> = [];
-    for (const img of imageAttachments) {
-      const imagePath = join(config.signalDataDir, 'attachments', img.id!);
-      const imageLine = `[Image: ${imagePath}]`;
-      content = content ? `${content}\n${imageLine}` : imageLine;
-      attachmentRefs.push({ path: imagePath, contentType: img.contentType || 'image/jpeg' });
-    }
+    // Image and PDF attachments — read each file and inline as base64 in
+    // the structured `attachments` array. The host's
+    // session-manager.extractAttachmentFiles writes the base64 to
+    // <sessionDir>/inbox/<msgId>/<filename> (which is /workspace/inbox/...
+    // inside the container) and rewrites the entry as `localPath`. The
+    // container formatter then renders `[image|document: <name> — saved
+    // to /workspace/inbox/.../...]` so the agent can Read it.
+    //
+    // Earlier versions pushed `{ path: <host-path>, ... }` instead, but the
+    // signal-cli attachments directory is not mounted into the container,
+    // so the agent received a path that didn't resolve.
+    const attachmentRefs: Array<{
+      data: string;
+      name: string;
+      type: string;
+      contentType: string;
+      size: number;
+    }> = [];
+    const inlineAttachment = (
+      att: { id?: string; contentType?: string; filename?: string },
+      kind: 'image' | 'document',
+      defaultContentType: string,
+    ) => {
+      const attachPath = join(config.signalDataDir, 'attachments', att.id!);
+      if (!existsSync(attachPath)) {
+        log.warn(`Signal: ${kind} attachment file not found`, { id: att.id, path: attachPath });
+        return;
+      }
+      try {
+        const buf = readFileSync(attachPath);
+        const ct = att.contentType || defaultContentType;
+        // Prefer the original filename when signal-cli supplies one (common
+        // for documents); otherwise synthesize <id>.<ext-from-contentType>.
+        const ext = (ct.split('/')[1] ?? 'bin').replace(/[^a-zA-Z0-9]/g, '') || 'bin';
+        const name = att.filename || `${att.id}.${ext}`;
+        attachmentRefs.push({
+          data: buf.toString('base64'),
+          name,
+          type: kind,
+          contentType: ct,
+          size: buf.length,
+        });
+      } catch (err) {
+        log.warn(`Signal: failed to read ${kind} attachment`, { id: att.id, err });
+      }
+    };
+    for (const img of imageAttachments) inlineAttachment(img, 'image', 'image/jpeg');
+    for (const pdf of pdfAttachments) inlineAttachment(pdf, 'document', 'application/pdf');
 
     const msg: InboundMessage = {
       id: String(dataMessage.timestamp ?? Date.now()),

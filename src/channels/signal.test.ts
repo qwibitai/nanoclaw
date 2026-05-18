@@ -337,31 +337,113 @@ describe('SignalAdapter', () => {
       await adapter.teardown();
     });
 
-    it('forwards image attachments as [Image: <path>] plus structured attachments array', async () => {
+    it('forwards image attachments as base64 in the structured attachments array', async () => {
       const adapter = createAdapter();
       const cfg = createMockSetup();
       await adapter.setup(cfg);
 
-      pushEvent({
-        sourceNumber: '+15555550123',
-        sourceName: 'Alice',
-        dataMessage: {
-          timestamp: 1700000000000,
-          attachments: [{ id: 'att123abc', contentType: 'image/jpeg', size: 50000 }],
-        },
-      });
+      // signal.ts reads the attachment off disk to inline its bytes; the
+      // host's session-manager.extractAttachmentFiles then saves the base64
+      // to the per-session inbox and rewrites the entry as `localPath`.
+      // Stage a real file at the path signal.ts will look at.
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const attachDir = path.join('/tmp/signal-cli-test-data', 'attachments');
+      fs.mkdirSync(attachDir, { recursive: true });
+      const fakeBytes = Buffer.from('fake-image-bytes');
+      const attachFile = path.join(attachDir, 'att123abc');
+      fs.writeFileSync(attachFile, fakeBytes);
 
-      await new Promise((r) => setTimeout(r, 50));
-      expect(cfg.onInbound).toHaveBeenCalledWith(
-        '+15555550123',
-        null,
-        expect.objectContaining({
-          content: expect.objectContaining({
-            text: expect.stringMatching(/^\[Image: .+att123abc\]$/),
-            attachments: [expect.objectContaining({ contentType: 'image/jpeg' })],
+      try {
+        pushEvent({
+          sourceNumber: '+15555550123',
+          sourceName: 'Alice',
+          dataMessage: {
+            timestamp: 1700000000000,
+            attachments: [{ id: 'att123abc', contentType: 'image/jpeg', size: 50000 }],
+          },
+        });
+
+        await new Promise((r) => setTimeout(r, 50));
+        expect(cfg.onInbound).toHaveBeenCalledWith(
+          '+15555550123',
+          null,
+          expect.objectContaining({
+            content: expect.objectContaining({
+              // No more `[Image: <hostpath>]` line in the text — the host
+              // will surface the saved file via the attachments array.
+              text: '',
+              attachments: [
+                expect.objectContaining({
+                  data: fakeBytes.toString('base64'),
+                  name: 'att123abc.jpeg',
+                  type: 'image',
+                  contentType: 'image/jpeg',
+                  size: fakeBytes.length,
+                }),
+              ],
+            }),
           }),
-        }),
-      );
+        );
+      } finally {
+        fs.unlinkSync(attachFile);
+      }
+
+      await adapter.teardown();
+    });
+
+    it('forwards PDF attachments as base64 with original filename and type=document', async () => {
+      const adapter = createAdapter();
+      const cfg = createMockSetup();
+      await adapter.setup(cfg);
+
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const attachDir = path.join('/tmp/signal-cli-test-data', 'attachments');
+      fs.mkdirSync(attachDir, { recursive: true });
+      const fakeBytes = Buffer.from('%PDF-1.4 fake');
+      const attachFile = path.join(attachDir, 'pdfid123');
+      fs.writeFileSync(attachFile, fakeBytes);
+
+      try {
+        pushEvent({
+          sourceNumber: '+15555550123',
+          sourceName: 'Alice',
+          dataMessage: {
+            timestamp: 1700000000000,
+            attachments: [
+              {
+                id: 'pdfid123',
+                contentType: 'application/pdf',
+                filename: 'report.pdf',
+                size: fakeBytes.length,
+              },
+            ],
+          },
+        });
+
+        await new Promise((r) => setTimeout(r, 50));
+        expect(cfg.onInbound).toHaveBeenCalledWith(
+          '+15555550123',
+          null,
+          expect.objectContaining({
+            content: expect.objectContaining({
+              text: '',
+              attachments: [
+                expect.objectContaining({
+                  data: fakeBytes.toString('base64'),
+                  name: 'report.pdf',
+                  type: 'document',
+                  contentType: 'application/pdf',
+                  size: fakeBytes.length,
+                }),
+              ],
+            }),
+          }),
+        );
+      } finally {
+        fs.unlinkSync(attachFile);
+      }
 
       await adapter.teardown();
     });
@@ -599,9 +681,7 @@ describe('SignalAdapter', () => {
       );
       expect((sendCalls[0].params as Record<string, unknown>).attachments).toBeUndefined();
       // Second call: attachment, no message
-      expect(sendCalls[1].params).toEqual(
-        expect.objectContaining({ recipient: ['+15555550123'] }),
-      );
+      expect(sendCalls[1].params).toEqual(expect.objectContaining({ recipient: ['+15555550123'] }));
       const attachments = (sendCalls[1].params as Record<string, unknown>).attachments as string[];
       expect(attachments).toHaveLength(1);
 
