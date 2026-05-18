@@ -10,6 +10,7 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
+import crypto from 'crypto';
 import { CronExpressionParser } from 'cron-parser';
 import { transcribeAudio } from './audio.js';
 
@@ -493,6 +494,285 @@ server.tool(
   },
 );
 
+// =====================================================================
+// Phase 4: bash_tool + python_tool
+// Inserted before the "// Start the stdio transport" block.
+//
+// Design ref: ~/work/projects/neuronbox/fleet-host-mcp/docs/phase-4-design.md
+// Deviations from design (documented in commit):
+//   - SCRATCH at /tmp/nanoclaw-scratch (container-local), not host path.
+//     Container ephemeral, scratch dies with it. Audit log persists to
+//     /workspace/ipc/audit/ which IS host-mounted.
+//   - Added a minimal bash destructive-pattern denylist beyond the
+//     design's temp-file+execFile pattern. Blocks only egregious cases
+//     (rm -rf /, dd to disk devices, mkfs, fork-bomb, curl|sh, /dev/tcp/).
+//     Valid `rm -rf node_modules/` etc. still works.
+//   - Bot detection via mount-existence (no new env vars needed).
+// =====================================================================
+
+
+const SCRATCH_DIR = '/tmp/nanoclaw-scratch';
+const AUDIT_DIR = '/workspace/ipc/audit';
+const BASH_AUDIT_LOG = `${AUDIT_DIR}/bash-tool.jsonl`;
+const PYTHON_AUDIT_LOG = `${AUDIT_DIR}/python-tool.jsonl`;
+const STDOUT_TRUNC_BYTES = 64 * 1024;
+const MAX_BUFFER_BYTES = 1024 * 1024;
+const DEFAULT_TIMEOUT_MS = 60_000;
+const MAX_TIMEOUT_MS = 300_000;
+const SCRATCH_KEEP = 50;
+
+const ENV_ALLOWLIST_BY_BOT: Record<string, readonly string[]> = {
+  x: ['TELEMETRY_TOKEN', 'MONGODB_URI', 'OPENCLAW_DB_URL', 'ANTHROPIC_API_KEY'],
+  relay: ['MONGODB_URI', 'ANTHROPIC_API_KEY', 'GITHUB_TOKEN'],
+  unknown: [],
+};
+
+// Egregious destructive patterns. Block-list is intentionally narrow so
+// legitimate ops (rm -rf node_modules, dd if=/dev/zero of=tmpfile) work.
+const BASH_DENY_PATTERNS: { name: string; re: RegExp }[] = [
+  { name: 'rm_rf_root_or_home', re: /\brm\s+(?:-[a-zA-Z]*[rRfF][a-zA-Z]*\s+)+(\/(?:\s|$|\*)|~(?:\/|\s|$))/ },
+  { name: 'dd_to_block_device', re: /\bdd\b[^|;\n]*\bof=\/dev\/(?:sd[a-z]|nvme\d|disk\d|hd[a-z]|mmcblk\d)/ },
+  { name: 'mkfs', re: /\bmkfs(?:\.[a-z0-9]+)?\b/ },
+  { name: 'fork_bomb', re: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;?\s*:/ },
+  { name: 'pipe_to_shell', re: /\b(?:curl|wget|fetch)\b[^|;\n]*\|\s*(?:sudo\s+)?(?:bash|sh|zsh|ksh|fish|dash|python3?|perl|ruby)\b/ },
+  { name: 'base64_pipe_shell', re: /\bbase64\b[^|;\n]*-d[^|;\n]*\|\s*(?:bash|sh|zsh|python3?)\b/ },
+  { name: 'bash_dev_tcp', re: /\/dev\/(?:tcp|udp)\// },
+  { name: 'chattr_immutable_strip', re: /\bchattr\s+[+-]i\b/ },
+];
+
+function detectBotKind(): 'x' | 'relay' | 'unknown' {
+  // Mount-presence is the most reliable per-bot signal; mounts are
+  // defined in each bot's docker run, no shared env keys to confuse them.
+  if (fs.existsSync('/workspace/extra/service-ssh')) return 'x';
+  if (fs.existsSync('/workspace/extra/relay-keys')) return 'relay';
+  return 'unknown';
+}
+
+function appendAuditLine(logPath: string, entry: Record<string, unknown>): void {
+  try {
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(logPath, JSON.stringify(entry) + '\n');
+  } catch {
+    // audit is best-effort; never fail the tool because audit failed
+  }
+}
+
+function pruneScratch(extension: string): void {
+  try {
+    const files = fs
+      .readdirSync(SCRATCH_DIR)
+      .filter((f) => f.endsWith(extension))
+      .map((f) => ({ f, t: fs.statSync(path.join(SCRATCH_DIR, f)).mtimeMs }))
+      .sort((a, b) => b.t - a.t);
+    for (const { f } of files.slice(SCRATCH_KEEP)) {
+      try {
+        fs.unlinkSync(path.join(SCRATCH_DIR, f));
+      } catch {
+        // ignore individual file failures
+      }
+    }
+  } catch {
+    // ignore — pruning is best-effort
+  }
+}
+
+function execFileAsync(
+  cmd: string,
+  args: string[],
+  options: { timeout: number; maxBuffer: number; env?: NodeJS.ProcessEnv },
+): Promise<{ error: (NodeJS.ErrnoException & { killed?: boolean; signal?: string }) | null; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    execFile(cmd, args, options, (error, stdout, stderr) => {
+      resolve({
+        error: error as (NodeJS.ErrnoException & { killed?: boolean; signal?: string }) | null,
+        stdout: stdout?.toString() ?? '',
+        stderr: stderr?.toString() ?? '',
+      });
+    });
+  });
+}
+
+server.tool(
+  'bash_tool',
+  `Run a bash script. Script is written to a temp file and run with 'bash <file>' — no shell quoting layer, nested quotes pass through intact. Returns {ok, rc, stdout, stderr, duration_ms, timeout_hit}. stdout/stderr truncated at 64 KB. Default timeout 60s, max 300s. Audited to /workspace/ipc/audit/bash-tool.jsonl. Rejects scripts matching a narrow destructive-pattern denylist (rm -rf /, dd of=/dev/sd*, mkfs, fork-bomb, curl|sh, /dev/tcp/, chattr -i). Legit ops like 'rm -rf node_modules' still work.`,
+  {
+    script: z.string().min(1).describe('Bash script source. Use any quoting you like; it is written verbatim to a file and executed.'),
+    timeout_ms: z.number().int().min(1000).max(MAX_TIMEOUT_MS).optional().describe(`Timeout in ms (default ${DEFAULT_TIMEOUT_MS}, max ${MAX_TIMEOUT_MS}).`),
+  },
+  async (args) => {
+    // Denylist check on raw script
+    for (const { name, re } of BASH_DENY_PATTERNS) {
+      if (re.test(args.script)) {
+        const rejection = {
+          ok: false,
+          rc: -1,
+          stdout: '',
+          stderr: '',
+          duration_ms: 0,
+          error: 'denylist_match',
+          pattern: name,
+        };
+        appendAuditLine(BASH_AUDIT_LOG, {
+          ts: new Date().toISOString(),
+          groupFolder,
+          ok: false,
+          error: 'denylist_match',
+          pattern: name,
+          script_len: args.script.length,
+        });
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(rejection) }],
+          isError: true,
+        };
+      }
+    }
+
+    fs.mkdirSync(SCRATCH_DIR, { recursive: true, mode: 0o700 });
+    const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const scriptPath = path.join(SCRATCH_DIR, `${id}.sh`);
+    fs.writeFileSync(scriptPath, args.script, { mode: 0o700 });
+    const timeout = args.timeout_ms ?? DEFAULT_TIMEOUT_MS;
+    const start = Date.now();
+    const { error, stdout, stderr } = await execFileAsync('bash', [scriptPath], {
+      timeout,
+      maxBuffer: MAX_BUFFER_BYTES,
+    });
+    const duration_ms = Date.now() - start;
+    const ok = !error;
+    const rc = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
+    const timeout_hit = error?.killed === true && error?.signal === 'SIGTERM';
+    const result = {
+      ok,
+      rc,
+      stdout: stdout.slice(0, STDOUT_TRUNC_BYTES),
+      stderr: stderr.slice(0, STDOUT_TRUNC_BYTES),
+      duration_ms,
+      timeout_hit,
+    };
+    appendAuditLine(BASH_AUDIT_LOG, {
+      ts: new Date().toISOString(),
+      id,
+      groupFolder,
+      ok,
+      rc,
+      duration_ms,
+      timeout_ms: timeout,
+      timeout_hit,
+      script_len: args.script.length,
+    });
+    pruneScratch('.sh');
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+      isError: !ok,
+    };
+  },
+);
+
+server.tool(
+  'python_tool',
+  `Run a Python 3 script. Script is written to a temp file and run with 'python3 <file>'. Returns {ok, rc, stdout, stderr, duration_ms, timeout_hit, bot_kind, env_keys_passed, env_keys_missing}. stdout/stderr truncated at 64 KB. Default timeout 60s, max 300s. Audited to /workspace/ipc/audit/python-tool.jsonl.
+
+env_keys: array of env var names to pass through from the agent-runner's env to the child python process. Per-bot allow-list:
+  - X bot:     TELEMETRY_TOKEN, MONGODB_URI, OPENCLAW_DB_URL, ANTHROPIC_API_KEY
+  - Relay bot: MONGODB_URI, ANTHROPIC_API_KEY, GITHUB_TOKEN
+Requesting a key outside the allow-list returns a structured rejection (no execution). Allowed keys that are not actually set in the container env are silently skipped and reported in env_keys_missing.`,
+  {
+    script: z.string().min(1).describe('Python script source.'),
+    env_keys: z.array(z.string()).optional().describe('Env var names to pass through (subject to per-bot allow-list).'),
+    timeout_ms: z.number().int().min(1000).max(MAX_TIMEOUT_MS).optional().describe(`Timeout in ms (default ${DEFAULT_TIMEOUT_MS}, max ${MAX_TIMEOUT_MS}).`),
+  },
+  async (args) => {
+    const botKind = detectBotKind();
+    const allowed = ENV_ALLOWLIST_BY_BOT[botKind] ?? [];
+    const requested = args.env_keys ?? [];
+    const rejected = requested.filter((k) => !allowed.includes(k));
+    if (rejected.length > 0) {
+      const rejection = {
+        ok: false,
+        rc: -1,
+        stdout: '',
+        stderr: '',
+        duration_ms: 0,
+        error: 'env_key_rejected',
+        bot_kind: botKind,
+        rejected_keys: rejected,
+        allowed_keys: allowed,
+      };
+      appendAuditLine(PYTHON_AUDIT_LOG, {
+        ts: new Date().toISOString(),
+        groupFolder,
+        bot_kind: botKind,
+        ok: false,
+        error: 'env_key_rejected',
+        rejected_keys: rejected,
+        script_len: args.script.length,
+      });
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(rejection) }],
+        isError: true,
+      };
+    }
+
+    fs.mkdirSync(SCRATCH_DIR, { recursive: true, mode: 0o700 });
+    const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const scriptPath = path.join(SCRATCH_DIR, `${id}.py`);
+    fs.writeFileSync(scriptPath, args.script, { mode: 0o700 });
+
+    const childEnv: NodeJS.ProcessEnv = { PATH: process.env.PATH ?? '/usr/bin:/bin' };
+    const env_keys_passed: string[] = [];
+    const env_keys_missing: string[] = [];
+    for (const k of requested) {
+      if (process.env[k] !== undefined) {
+        childEnv[k] = process.env[k];
+        env_keys_passed.push(k);
+      } else {
+        env_keys_missing.push(k);
+      }
+    }
+
+    const timeout = args.timeout_ms ?? DEFAULT_TIMEOUT_MS;
+    const start = Date.now();
+    const { error, stdout, stderr } = await execFileAsync('python3', [scriptPath], {
+      timeout,
+      maxBuffer: MAX_BUFFER_BYTES,
+      env: childEnv,
+    });
+    const duration_ms = Date.now() - start;
+    const ok = !error;
+    const rc = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
+    const timeout_hit = error?.killed === true && error?.signal === 'SIGTERM';
+    const result = {
+      ok,
+      rc,
+      stdout: stdout.slice(0, STDOUT_TRUNC_BYTES),
+      stderr: stderr.slice(0, STDOUT_TRUNC_BYTES),
+      duration_ms,
+      timeout_hit,
+      bot_kind: botKind,
+      env_keys_passed,
+      env_keys_missing,
+    };
+    appendAuditLine(PYTHON_AUDIT_LOG, {
+      ts: new Date().toISOString(),
+      id,
+      groupFolder,
+      bot_kind: botKind,
+      ok,
+      rc,
+      duration_ms,
+      timeout_ms: timeout,
+      timeout_hit,
+      script_len: args.script.length,
+      env_keys_passed,
+      env_keys_missing,
+    });
+    pruneScratch('.py');
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+      isError: !ok,
+    };
+  },
+);
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
