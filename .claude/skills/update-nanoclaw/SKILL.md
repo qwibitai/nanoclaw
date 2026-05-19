@@ -134,8 +134,14 @@ If Full update or Rebase:
 - If no conflicts: tell user it is clean and proceed.
 
 # Step 4A: Full update (MERGE, default)
+
+Capture the upstream SHA being merged (used by the safety guards below):
+- `UPSTREAM_SHA=$(git rev-parse upstream/$UPSTREAM_BRANCH)`
+
 Run:
 - `git merge upstream/$UPSTREAM_BRANCH --no-edit`
+
+**Critical — do NOT run `git stash`, `git reset`, or `git checkout` while in merge state** (i.e. while `.git/MERGE_HEAD` exists). All three discard `MERGE_HEAD` silently, after which the next `git commit` produces a single-parent commit instead of a merge. The upstream commits then remain orphaned from your ancestry: GitHub's compare API and any `git rev-list origin..upstream` check will keep reporting the fork as "behind upstream" even though the file content was integrated.
 
 If conflicts occur:
 - Run `git status` and identify conflicted files.
@@ -147,7 +153,26 @@ If conflicts occur:
   - Do not refactor surrounding code.
   - `git add <file>`
 - When all resolved:
+  - **Pre-commit guard** — verify `.git/MERGE_HEAD` still exists. If something cleared it during conflict resolution, restore it from the SHA captured above so the next commit becomes a proper merge:
+    ```bash
+    if [ ! -f .git/MERGE_HEAD ]; then
+      echo "$UPSTREAM_SHA" > .git/MERGE_HEAD
+    fi
+    ```
   - If merge did not auto-commit: `git commit --no-edit`
+
+**Post-commit verification** — confirm the resulting commit has 2 parents:
+```bash
+PARENT_COUNT=$(git rev-list --parents -1 HEAD | awk '{print NF-1}')
+if [ "$PARENT_COUNT" != "2" ]; then
+  echo "ERROR: merge produced a $PARENT_COUNT-parent commit (expected 2)."
+  echo "Upstream commits are NOT in your ancestry — the fork will keep reporting 'behind upstream'."
+  echo "Recover with: git reset --hard <backup-tag-from-step-1> and re-run /update-nanoclaw."
+  echo "Avoid 'git stash', 'git reset', 'git checkout' during conflict resolution."
+  exit 1
+fi
+```
+If this fails, abort the skill — do not proceed to Step 5. The user must reset to the backup tag and retry.
 
 # Step 4B: Selective update (CHERRY-PICK)
 If user chose Selective:
