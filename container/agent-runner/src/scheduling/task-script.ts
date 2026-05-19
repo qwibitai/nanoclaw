@@ -106,8 +106,11 @@ export async function applyPreTaskScripts(messages: MessageInRow[]): Promise<Tas
     touchHeartbeat();
 
     if (!result || !result.wakeAgent) {
-      const reason = result ? 'wakeAgent=false' : 'script error/no output';
-      log(`task ${msg.id} skipped: ${reason}`);
+      if (!result) {
+        log(`WARN task ${msg.id}: script exited nonzero or produced no output — skipping. Preview: ${script.slice(0, 100)}`);
+      } else {
+        log(`task ${msg.id} skipped: wakeAgent=false`);
+      }
       skipped.push(msg.id);
       continue;
     }
