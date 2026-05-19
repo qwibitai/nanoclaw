@@ -135,7 +135,7 @@ write_header
 # figlet); the bash script just streams the literal frame. clack's intro
 # then carries the "let's get you set up" framing — setup:auto sees
 # NANOCLAW_BOOTSTRAPPED=1 and skips re-printing the wordmark.
-cat "$PROJECT_ROOT/assets/setup-splash.txt"
+# cat "$PROJECT_ROOT/assets/setup-splash.txt"
 
 # ─── pre-flight: minimum hardware specs ────────────────────────────────
 # NanoClaw runs an agent container per session. Below this threshold the
