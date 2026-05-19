@@ -1,0 +1,162 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options: [patch, minor, major]
+
+concurrency:
+  group: main-write-back
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'nanocoai/nanoclaw'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # ── Pre-release verification ──────────────────────────────────────
+      # Gate 1: CI must be green on the commit we're about to tag.
+      - name: Verify CI is green on main
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          SHA=$(git rev-parse HEAD)
+          STATE=$(gh api "/repos/${{ github.repository }}/commits/$SHA/check-runs" \
+            --jq '[.check_runs[] | select(.status == "completed") | .conclusion] | unique')
+          echo "Check run conclusions on $SHA: $STATE"
+          if echo "$STATE" | grep -q -E 'failure|cancelled|timed_out'; then
+            echo "::error::CI is not green on $SHA — refusing to release."
+            exit 1
+          fi
+
+      # Gate 2: compute new version without committing yet.
+      - name: Compute new version
+        id: bump
+        run: |
+          git pull --rebase origin main
+          pnpm version ${{ inputs.version }} --no-git-tag-version
+          NEW=$(node -p "require('./package.json').version")
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "Computed new version: v$NEW"
+
+      # Auto-generate a CHANGELOG section from PRs merged since the last
+      # tag. A maintainer-written `## [<version>]` section, if present,
+      # wins — this step is a no-op in that case, so editorial control
+      # stays with whoever pre-wrote the entry.
+      - name: Auto-generate CHANGELOG entry
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          V="${{ steps.bump.outputs.version }}"
+          if [ -f CHANGELOG.md ] && grep -q "^## \[$V\]" CHANGELOG.md; then
+            echo "CHANGELOG.md already has a [$V] entry — leaving it alone."
+            exit 0
+          fi
+
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -n "$LAST_TAG" ]; then
+            TS=$(git log -1 --format=%ct "$LAST_TAG")
+            SINCE=$(date -u -d "@$TS" +%Y-%m-%dT%H:%M:%SZ)
+            echo "Listing PRs merged since $LAST_TAG ($SINCE)."
+          else
+            SINCE="1970-01-01T00:00:00Z"
+            echo "No prior tag — listing all merged PRs."
+          fi
+
+          BULLETS=$(gh api -X GET "repos/${{ github.repository }}/pulls" \
+            -f state=closed -f base=main -f sort=updated -f direction=desc \
+            -F per_page=100 \
+            --jq "[.[] | select(.merged_at != null and .merged_at > \"$SINCE\") | \"- #\(.number) \(.title) (@\(.user.login))\"] | .[]")
+
+          DATE=$(date -u +%Y-%m-%d)
+          {
+            echo "## [$V] - $DATE"
+            echo ""
+            if [ -n "$BULLETS" ]; then
+              echo "$BULLETS"
+            else
+              echo "- No PRs merged since the last release."
+            fi
+            echo ""
+          } > /tmp/new-section.md
+
+          if [ -f CHANGELOG.md ]; then
+            cat /tmp/new-section.md CHANGELOG.md > /tmp/changelog.new
+          else
+            cp /tmp/new-section.md /tmp/changelog.new
+          fi
+          mv /tmp/changelog.new CHANGELOG.md
+
+          git add CHANGELOG.md
+          git commit -m "docs: auto-generate CHANGELOG for v$V"
+          git push
+          echo "::notice::Auto-generated CHANGELOG entry for v$V. To edit it, cancel this run, push your edits to main, and re-dispatch — the pre-existing section will win on re-run."
+
+      # Gate 3: CHANGELOG must already have an entry for the new version.
+      - name: Verify CHANGELOG entry exists
+        run: |
+          V="${{ steps.bump.outputs.version }}"
+          if ! grep -q "^## \[$V\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no entry for [$V]. Add one before releasing."
+            exit 1
+          fi
+
+      # ── Release-note assembly ─────────────────────────────────────────
+      - name: Extract CHANGELOG section
+        run: |
+          V="${{ steps.bump.outputs.version }}"
+          awk -v V="$V" '
+            $0 ~ "^## \\[" V "\\]" { capture = 1; next }
+            capture && /^## \[/ { exit }
+            capture { print }
+          ' CHANGELOG.md > /tmp/release-notes.md
+          echo "Extracted $(wc -l < /tmp/release-notes.md) lines of notes:"
+          cat /tmp/release-notes.md
+
+      # ── Commit, tag, push ─────────────────────────────────────────────
+      - name: Commit and tag
+        run: |
+          V="${{ steps.bump.outputs.version }}"
+          git add package.json
+          git commit -m "v$V"
+          git tag -a "v$V" -m "Release v$V"
+          git push --follow-tags
+
+      # ── Publish Release entry ─────────────────────────────────────────
+      # --notes-file: our CHANGELOG section (the curated story)
+      # --generate-notes: appends auto-generated "New Contributors" + "Full Changelog" link
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          V="${{ steps.bump.outputs.version }}"
+          gh release create "v$V" \
+            --title "v$V" \
+            --notes-file /tmp/release-notes.md \
+            --generate-notes \
+            --verify-tag
