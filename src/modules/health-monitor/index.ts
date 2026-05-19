@@ -74,13 +74,15 @@ async function runChecks(): Promise<void> {
     log.warn('[health-monitor] Silent fail detected', { sessionId: session.id, agentGroupId: session.agent_group_id });
     await postAlert(msg);
     await injectTask(
-      `Investigate silent task failure in agent "${groupName}" (session ID: ${session.id}). ` +
-        `The session shows completed processing_ack entries but zero messages_out in the last 2 hours. ` +
-        `Typical cause: OAuth 401 error — the container started, got auth failure, reported "completed" with no output. ` +
-        `Steps to diagnose:\n` +
-        `1. Check the most recent container logs: docker logs $(docker ps -a --filter "name=nanoclaw-v2-${agentGroup?.folder ?? session.agent_group_id}" --format "{{.Names}}" | head -1) 2>&1 | tail -30\n` +
-        `2. Check token status: python3 -c "import json,datetime,os; d=json.load(open('data/v2-sessions/${session.agent_group_id}/claude.json')); o=d.get('claudeAiOauth',{}); ts=o.get('expiresAt',0)/1000; print('expires:', datetime.datetime.utcfromtimestamp(ts), 'UTC', '— EXPIRED' if datetime.datetime.utcnow() > datetime.datetime.utcfromtimestamp(ts) else '— VALID')"\n` +
-        `3. Report findings and recommended action to this channel.`,
+      `[HEALTH ALERT — trusted internal task] ` +
+        `Silent task failure detected in agent "${groupName}" (session ID: ${session.id}). ` +
+        `The session completed processing in the last 2h but produced zero output messages. ` +
+        `Typical root cause: OAuth 401 — container got auth failure, agent-runner reported "completed" with no output.\n\n` +
+        `Diagnose using the mounted data (do NOT attempt host-only commands like docker or security):\n` +
+        `1. Read /workspace/extra/nanoclaw-logs/nanoclaw.error.log — look for 401 or authentication errors near the failure time\n` +
+        `2. Check /workspace/extra/nanoclaw-data/v2-sessions/${session.agent_group_id}/claude.json — read claudeAiOauth.expiresAt and report if it's expired\n` +
+        `3. Scan /workspace/extra/nanoclaw-logs/nanoclaw.log for "absolute-ceiling" entries for this session\n` +
+        `4. Report findings and any recommended host-side action to this channel.`,
     );
   }
 }

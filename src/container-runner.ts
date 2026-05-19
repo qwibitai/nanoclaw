@@ -350,12 +350,18 @@ function buildMounts(
         const freshOauth = keychainData?.claudeAiOauth;
         if (freshOauth?.accessToken && freshOauth?.expiresAt) {
           const existing = JSON.parse(fs.readFileSync(claudeJsonHostPath, 'utf8'));
-          existing.claudeAiOauth = freshOauth;
-          fs.writeFileSync(claudeJsonHostPath, JSON.stringify(existing, null, 2));
-          log.debug('Refreshed OAuth token from Keychain', {
-            agentGroupId: agentGroup.id,
-            expiresAt: new Date(freshOauth.expiresAt).toISOString(),
-          });
+          const currentExpiry = (existing.claudeAiOauth as { expiresAt?: number } | undefined)?.expiresAt ?? 0;
+          // Only overwrite if Keychain has a strictly newer token. Prevents the
+          // Keychain read from clobbering a token that refreshOauthTokenIfNeeded
+          // already refreshed via the OAuth endpoint just above.
+          if (freshOauth.expiresAt > currentExpiry) {
+            existing.claudeAiOauth = freshOauth;
+            fs.writeFileSync(claudeJsonHostPath, JSON.stringify(existing, null, 2));
+            log.debug('Refreshed OAuth token from Keychain', {
+              agentGroupId: agentGroup.id,
+              expiresAt: new Date(freshOauth.expiresAt).toISOString(),
+            });
+          }
         }
       }
     } catch {
