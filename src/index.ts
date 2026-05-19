@@ -62,6 +62,7 @@ import { startCliServer, stopCliServer } from './cli/socket-server.js';
 
 import type { ChannelAdapter, ChannelSetup } from './channels/adapter.js';
 import { initChannelAdapters, teardownChannelAdapters, getChannelAdapter } from './channels/channel-registry.js';
+import { createDeliveryAdapter } from './channels/delivery-adapter.js';
 
 async function main(): Promise<void> {
   log.info('NanoClaw starting');
@@ -141,29 +142,11 @@ async function main(): Promise<void> {
     };
   });
 
-  // 4. Delivery adapter bridge — dispatches to channel adapters
-  const deliveryAdapter = {
-    async deliver(
-      channelType: string,
-      platformId: string,
-      threadId: string | null,
-      kind: string,
-      content: string,
-      files?: import('./channels/adapter.js').OutboundFile[],
-    ): Promise<string | undefined> {
-      const adapter = getChannelAdapter(channelType);
-      if (!adapter) {
-        log.warn('No adapter for channel type', { channelType });
-        return;
-      }
-      return adapter.deliver(platformId, threadId, { kind, content: JSON.parse(content), files });
-    },
-    async setTyping(channelType: string, platformId: string, threadId: string | null): Promise<void> {
-      const adapter = getChannelAdapter(channelType);
-      await adapter?.setTyping?.(platformId, threadId);
-    },
-  };
-  setDeliveryAdapter(deliveryAdapter);
+  // 4. Delivery adapter bridge — dispatches to channel adapters.
+  //    See src/channels/delivery-adapter.ts for the no-adapter-throws
+  //    rationale (silent NULL-platform-id deliveries are a delivery-side
+  //    cousin of PR #2167's silent-task-failure bug).
+  setDeliveryAdapter(createDeliveryAdapter({ getChannelAdapter }));
 
   // 5. Start delivery polls
   startActiveDeliveryPoll();
