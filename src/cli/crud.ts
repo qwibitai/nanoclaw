@@ -164,10 +164,15 @@ function genericCreate(def: ResourceDef) {
 
     const colNames = Object.keys(values);
     const placeholders = colNames.map((c) => `@${c}`);
-    getDb()
-      .prepare(`INSERT INTO ${def.table} (${colNames.join(', ')}) VALUES (${placeholders.join(', ')})`)
-      .run(values);
-    if (def.postCreate) def.postCreate(values);
+    // Single transaction so a postCreate throw rolls back the parent INSERT —
+    // closes the partial-state class this PR exists to fix (#2415, #2389).
+    // better-sqlite3 .transaction() is sync, which matches postCreate's
+    // signature (`(row) => void`); current hooks are pure DB writes.
+    const db = getDb();
+    db.transaction(() => {
+      db.prepare(`INSERT INTO ${def.table} (${colNames.join(', ')}) VALUES (${placeholders.join(', ')})`).run(values);
+      if (def.postCreate) def.postCreate(values);
+    })();
     return values;
   };
 }
