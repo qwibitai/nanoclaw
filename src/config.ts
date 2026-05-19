@@ -19,7 +19,9 @@ const HOME_DIR = process.env.HOME || os.homedir();
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
 export const MOUNT_ALLOWLIST_PATH = path.join(HOME_DIR, '.config', 'nanoclaw', 'mount-allowlist.json');
 export const SENDER_ALLOWLIST_PATH = path.join(HOME_DIR, '.config', 'nanoclaw', 'sender-allowlist.json');
-export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
+export const STORE_DIR = process.env.STORE_DIR
+  ? path.resolve(process.env.STORE_DIR)
+  : path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
