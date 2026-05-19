@@ -29,6 +29,7 @@ import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
+import { refreshGoogleTokens } from './google-oauth-refresh.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
 // Provider host-side config barrel — each provider that needs host-side
 // container setup self-registers on import.
@@ -145,6 +146,10 @@ async function spawnContainer(session: Session): Promise<void> {
     contribution,
     agentIdentifier,
   );
+
+  // Refresh Google OAuth tokens (~/.gmail-mcp, ~/.calendar-mcp) if expiring
+  // within 10 minutes. No-op if the files don't exist.
+  await refreshGoogleTokens();
 
   log.info('Spawning container', { sessionId: session.id, agentGroup: agentGroup.name, containerName });
 
