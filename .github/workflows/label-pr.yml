@@ -1,7 +1,12 @@
 name: Label PR
 
+# SECURITY: this workflow runs with write access to the base repo on fork PRs,
+# because `pull_request_target` executes in the context of the base branch.
+# Keep it metadata-only — do NOT add actions/checkout or any step that
+# executes PR-supplied content (install scripts, build commands, etc.).
+# See https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, edited]
 
 jobs:

@@ -1,8 +1,8 @@
 /**
  * Setup CLI entry point.
- * Usage: npx tsx setup/index.ts --step <name> [args...]
+ * Usage: pnpm exec tsx setup/index.ts --step <name> [args...]
  */
-import { logger } from '../src/logger.js';
+import { log } from '../src/log.js';
 import { emitStatus } from './status.js';
 
 const STEPS: Record<
@@ -10,13 +10,20 @@ const STEPS: Record<
   () => Promise<{ run: (args: string[]) => Promise<void> }>
 > = {
   timezone: () => import('./timezone.js'),
+  'set-env': () => import('./set-env.js'),
   environment: () => import('./environment.js'),
   container: () => import('./container.js'),
-  groups: () => import('./groups.js'),
   register: () => import('./register.js'),
+  'pair-telegram': () => import('./pair-telegram.js'),
+  groups: () => import('./groups.js'),
+  'whatsapp-auth': () => import('./whatsapp-auth.js'),
+  'signal-auth': () => import('./signal-auth.js'),
   mounts: () => import('./mounts.js'),
   service: () => import('./service.js'),
   verify: () => import('./verify.js'),
+  onecli: () => import('./onecli.js'),
+  auth: () => import('./auth.js'),
+  'cli-agent': () => import('./cli-agent.js'),
 };
 
 async function main(): Promise<void> {
@@ -25,7 +32,7 @@ async function main(): Promise<void> {
 
   if (stepIdx === -1 || !args[stepIdx + 1]) {
     console.error(
-      `Usage: npx tsx setup/index.ts --step <${Object.keys(STEPS).join('|')}> [args...]`,
+      `Usage: pnpm exec tsx setup/index.ts --step <${Object.keys(STEPS).join('|')}> [args...]`,
     );
     process.exit(1);
   }
@@ -47,7 +54,7 @@ async function main(): Promise<void> {
     await mod.run(stepArgs);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    logger.error({ err, step: stepName }, 'Setup step failed');
+    log.error('Setup step failed', { err, step: stepName });
     emitStatus(stepName.toUpperCase(), {
       STATUS: 'failed',
       ERROR: message,

@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>NanoClaw Architecture</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+      :root {
+        --bg: #0b0d12;
+        --panel: #141821;
+        --ink: #e7ecf3;
+        --muted: #8a94a6;
+        --accent: #7aa2ff;
+        --border: #232a38;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+        font-size: 15px;
+        line-height: 1.55;
+      }
+      header {
+        padding: 32px 40px 16px;
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        background: rgba(11, 13, 18, 0.92);
+        backdrop-filter: saturate(180%) blur(10px);
+        z-index: 10;
+      }
+      header h1 {
+        margin: 0 0 4px;
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      header .sub {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+      }
+      nav a {
+        color: var(--accent);
+        text-decoration: none;
+        font-size: 12px;
+        padding: 4px 10px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--panel);
+      }
+      nav a:hover { border-color: var(--accent); }
+      main {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 28px 40px 80px;
+      }
+      section {
+        margin-bottom: 48px;
+      }
+      section h2 {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0 0 6px;
+        letter-spacing: -0.005em;
+      }
+      section h2 .num {
+        color: var(--muted);
+        font-weight: 500;
+        margin-right: 8px;
+      }
+      section p.desc {
+        color: var(--muted);
+        margin: 0 0 16px;
+        max-width: 900px;
+      }
+      .diagram {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 24px;
+        overflow-x: auto;
+      }
+      .diagram svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 14px;
+        font-size: 13px;
+      }
+      th, td {
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      th {
+        color: var(--muted);
+        font-weight: 500;
+        text-transform: uppercase;
+        font-size: 11px;
+        letter-spacing: 0.04em;
+      }
+      code {
+        font-family: "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        background: #1c2230;
+        padding: 1px 6px;
+        border-radius: 4px;
+        color: #c8d4ee;
+      }
+      footer {
+        color: var(--muted);
+        font-size: 12px;
+        text-align: center;
+        padding: 20px 0 0;
+        border-top: 1px solid var(--border);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>NanoClaw Architecture</h1>
+      <div class="sub">Session-DB messaging model · Chat SDK bridge · OneCLI credential gateway · per-session containers</div>
+      <nav>
+        <a href="#overview">1 · Overview</a>
+        <a href="#flow">2 · Message Flow</a>
+        <a href="#destinations">3 · Destinations &amp; A2A</a>
+        <a href="#entities">4 · Entity Model</a>
+        <a href="#twodb">5 · Two-DB Split</a>
+      </nav>
+    </header>
+
+    <main>
+      <section id="overview">
+        <h2><span class="num">1</span>System Overview</h2>
+        <p class="desc">
+          Inbound messages land at the Chat SDK bridge, which hands off to the
+          router. The router resolves the messaging group → agent group → session
+          and writes to the session's <code>inbound.db</code>. The container runner
+          spawns a per-session container (auth via OneCLI), and the agent-runner
+          polls its DB, calls Claude, and writes responses to <code>outbound.db</code>.
+          Delivery polls the outbound DB, re-validates destinations, and ships
+          messages back through the same bridge.
+        </p>
+        <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  subgraph Platforms["Messaging Platforms"]
+    P1[Discord]
+    P2[Telegram]
+    P3[Slack]
+    P4[GitHub / Linear]
+    P5[WhatsApp / iMessage / Teams / GChat / Matrix / Webex / Email]
+  end
+
+  subgraph Host["Host Process (Node)"]
+    direction TB
+    Bridge["Chat SDK Bridge<br/>src/channels/chat-sdk-bridge.ts"]
+    Router["Router<br/>src/router.ts<br/>platformId + threadId → session"]
+    SessMgr["Session Manager<br/>src/session-manager.ts"]
+    Runner["Container Runner<br/>src/container-runner.ts<br/>OneCLI ensureAgent + spawn"]
+    Delivery["Delivery Poller<br/>src/delivery.ts<br/>1s active / 60s sweep"]
+    Sweep["Host Sweep<br/>src/host-sweep.ts"]
+    Central[("Central DB · data/v2.db<br/>agent_groups · messaging_groups<br/>messaging_group_agents · sessions<br/>pending_approvals")]
+  end
+
+  subgraph OneCLI["OneCLI Gateway (0.3.1)"]
+    Vault["Agent Vault<br/>secrets + OAuth"]
+    Approvals["configureManualApproval"]
+  end
+
+  subgraph Session["Per-Session Container"]
+    direction TB
+    PollLoop["Poll Loop<br/>container/agent-runner"]
+    Provider["Claude Agent SDK<br/>(codex / opencode planned)"]
+    MCP["MCP Tools<br/>send_message · send_file · edit_message<br/>send_card · ask_user_question · schedule_task<br/>create_agent · install_packages · add_mcp_server<br/>request_rebuild"]
+    InDB[("inbound.db<br/>host writes · even seq")]
+    OutDB[("outbound.db<br/>container writes · odd seq")]
+  end
+
+  Folder["Agent Group FS<br/>groups/*<br/>CLAUDE.md · memory · skills"]
+
+  P1 & P2 & P3 & P4 & P5 --> Bridge
+  Bridge --> Router
+  Router --> Central
+  Router --> SessMgr
+  SessMgr --> InDB
+  SessMgr --> Runner
+  Runner --> OneCLI
+  Runner --> PollLoop
+  PollLoop --> InDB
+  PollLoop --> Provider
+  Provider --> MCP
+  MCP --> OutDB
+  OutDB --> Delivery
+  Delivery --> Central
+  Delivery --> Bridge
+  Bridge --> P1 & P2 & P3 & P4 & P5
+  Sweep --> InDB
+  Sweep --> OutDB
+  Sweep --> Central
+  Runner -.mounts.-> Folder
+  MCP -.approval.-> Approvals
+  Approvals --> Central
+  Provider -.API calls.-> Vault
+</pre>
+        </div>
+      </section>
+
+      <section id="flow">
+        <h2><span class="num">2</span>Message Flow</h2>
+        <p class="desc">
+          End-to-end path of a single message. The host and container never write
+          to the same SQLite file — the split between inbound and outbound DBs is
+          what makes this lock-free under concurrent activity.
+        </p>
+        <div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  participant P as Platform (Telegram)
+  participant B as Chat SDK Bridge
+  participant R as Router
+  participant SM as Session Manager
+  participant IDB as inbound.db
+  participant C as Container (agent-runner)
+  participant ODB as outbound.db
+  participant D as Delivery Poller
+
+  P->>B: new message
+  B->>R: routeInbound(platformId, threadId, msg)
+  R->>R: resolve messaging_group → agent_group → session<br/>(agent-shared · shared · per-thread)
+  R->>SM: ensure session + DBs exist
+  R->>IDB: INSERT messages_in (even seq)
+  R->>C: wake container (spawn or signal)
+  C->>IDB: poll messages_in
+  C->>C: format xml → Claude SDK stream
+  C->>ODB: INSERT messages_out (odd seq)<br/>parse &lt;message to='name'&gt; blocks
+  D->>ODB: 1s active poll / 60s sweep
+  D->>D: hasDestination() re-validate
+  D->>B: deliver via adapter
+  B->>P: send · edit · react · file · card
+</pre>
+        </div>
+      </section>
+
+      <section id="destinations">
+        <h2><span class="num">3</span>Named Destinations &amp; Agent-to-Agent</h2>
+        <p class="desc">
+          Agents address outputs by local name. The host looks up each name against
+          the agent's destinations table at delivery time — dropping anything
+          unauthorized. The same table routes agent-to-agent messages to a sibling
+          agent's <code>inbound.db</code> with bidirectional permission rows.
+        </p>
+        <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  subgraph AgentA["Agent Group A (main)"]
+    A_out["&lt;message to='slack'&gt;...&lt;/message&gt;<br/>&lt;message to='browser-agent'&gt;...&lt;/message&gt;<br/>&lt;internal&gt;scratchpad&lt;/internal&gt;"]
+  end
+
+  subgraph Dests["inbound.db.destinations (per agent)"]
+    D1["slack → messaging_group 42"]
+    D2["browser-agent → agent_group 7<br/>(bidirectional)"]
+    D3["github → messaging_group 13"]
+  end
+
+  subgraph AgentB["Agent Group B (browser sub-agent)"]
+    B_session["own inbound.db / outbound.db<br/>inherited destination back to A"]
+  end
+
+  Slack[Slack]
+  GitHub[GitHub PR]
+
+  A_out -->|parse + lookup| Dests
+  D1 -->|deliver| Slack
+  D2 -->|write to B's inbound.db| B_session
+  D3 -->|deliver| GitHub
+  B_session -.reply via 'parent'.-> Dests
+</pre>
+        </div>
+      </section>
+
+      <section id="entities">
+        <h2><span class="num">4</span>Entity Model</h2>
+        <p class="desc">
+          Messaging groups and agent groups are many-to-many, joined via
+          <code>messaging_group_agents</code>. The <code>session_mode</code>
+          column selects one of three isolation levels.
+        </p>
+        <div class="diagram">
+<pre class="mermaid">
+erDiagram
+  agent_groups ||--o{ messaging_group_agents : wired
+  messaging_groups ||--o{ messaging_group_agents : wired
+  agent_groups ||--o{ sessions : runs
+  messaging_groups ||--o{ sessions : context
+  agent_groups ||--o{ agent_destinations : owns
+  agent_groups ||--o{ pending_approvals : requests
+
+  agent_groups {
+    int id
+    string name
+    string folder
+    string agent_provider
+    json container_config
+  }
+  messaging_groups {
+    int id
+    string channel_type
+    string platform_id
+    string name
+    bool is_group
+    string unknown_sender_policy "strict | request_approval | public"
+  }
+  users {
+    string id PK "namespaced &lt;channel&gt;:&lt;handle&gt;"
+    string kind
+    string display_name
+  }
+  user_roles {
+    string user_id FK
+    string role "owner | admin"
+    string agent_group_id FK "null = global"
+  }
+  agent_group_members {
+    string user_id FK
+    string agent_group_id FK
+  }
+  user_dms {
+    string user_id FK
+    string channel_type
+    string messaging_group_id FK
+  }
+  messaging_group_agents {
+    int messaging_group_id
+    int agent_group_id
+    string session_mode
+    json trigger_rules
+    int priority
+  }
+  sessions {
+    int id
+    int agent_group_id
+    int messaging_group_id
+    string sdk_session_id
+    string status
+  }
+</pre>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Level</th><th>session_mode</th><th>Shared</th><th>Example</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1 · Shared session</td><td><code>agent-shared</code></td><td>Workspace + memory + conversation</td><td>Slack + GitHub webhooks in one thread</td></tr>
+            <tr><td>2 · Same agent, separate sessions</td><td><code>shared</code> / <code>per-thread</code></td><td>Workspace + memory only</td><td>One agent across 3 Telegram chats</td></tr>
+            <tr><td>3 · Separate agent groups</td><td>— (different agent_group_id)</td><td>Nothing</td><td>Personal vs work channels</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="twodb">
+        <h2><span class="num">5</span>Two-DB Split</h2>
+        <p class="desc">
+          Each SQLite file has exactly one writer. The container touches a
+          heartbeat file instead of <code>UPDATE</code>-ing a liveness row, so host
+          sweep can detect staleness via <code>stat(mtime)</code> without opening the
+          DB. Host uses even seq numbers, container uses odd — collision-free.
+        </p>
+        <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  subgraph Mount["/workspace (volume mount)"]
+    In[("inbound.db")]
+    Out[("outbound.db")]
+    HB["/.heartbeat (file touch)"]
+  end
+
+  Host[Host process] -->|writes · even seq| In
+  Host -->|reads| Out
+  Container[agent-runner] -->|reads| In
+  Container -->|writes · odd seq| Out
+  Container -->|touch every poll| HB
+  HostSweep[Host sweep] -->|stat mtime| HB
+  HostSweep -->|reads processing_ack| In
+</pre>
+        </div>
+      </section>
+
+      <footer>NanoClaw · generated from docs/checklist.md, architecture.md, isolation-model.md, setup-wiring.md</footer>
+    </main>
+
+    <script>
+      mermaid.initialize({
+        startOnLoad: true,
+        theme: "dark",
+        securityLevel: "loose",
+        flowchart: { curve: "basis", padding: 18 },
+        themeVariables: {
+          background: "#141821",
+          primaryColor: "#1c2230",
+          primaryTextColor: "#e7ecf3",
+          primaryBorderColor: "#3a465e",
+          lineColor: "#6b7893",
+          secondaryColor: "#222a3a",
+          tertiaryColor: "#1a2030",
+          fontSize: "14px",
+        },
+      });
+    </script>
+  </body>
+</html>

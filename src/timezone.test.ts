@@ -1,20 +1,13 @@
 import { describe, it, expect } from 'vitest';
 
-import {
-  formatLocalTime,
-  isValidTimezone,
-  resolveTimezone,
-} from './timezone.js';
+import { formatLocalTime, isValidTimezone, resolveTimezone } from './timezone.js';
 
 // --- formatLocalTime ---
 
 describe('formatLocalTime', () => {
   it('converts UTC to local time display', () => {
     // 2026-02-04T18:30:00Z in America/New_York (EST, UTC-5) = 1:30 PM
-    const result = formatLocalTime(
-      '2026-02-04T18:30:00.000Z',
-      'America/New_York',
-    );
+    const result = formatLocalTime('2026-02-04T18:30:00.000Z', 'America/New_York');
     expect(result).toContain('1:30');
     expect(result).toContain('PM');
     expect(result).toContain('Feb');
@@ -32,9 +25,7 @@ describe('formatLocalTime', () => {
   });
 
   it('does not throw on invalid timezone, falls back to UTC', () => {
-    expect(() =>
-      formatLocalTime('2026-01-01T00:00:00.000Z', 'IST-2'),
-    ).not.toThrow();
+    expect(() => formatLocalTime('2026-01-01T00:00:00.000Z', 'IST-2')).not.toThrow();
     const result = formatLocalTime('2026-01-01T12:00:00.000Z', 'IST-2');
     // Should format as UTC (noon UTC = 12:00 PM)
     expect(result).toContain('12:00');

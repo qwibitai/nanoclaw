@@ -40,7 +40,7 @@ git remote -v
 If `upstream` is missing, add it:
 
 ```bash
-git remote add upstream https://github.com/qwibitai/nanoclaw.git
+git remote add upstream https://github.com/nanocoai/nanoclaw.git
 ```
 
 ### Merge the skill branch
@@ -48,8 +48,8 @@ git remote add upstream https://github.com/qwibitai/nanoclaw.git
 ```bash
 git fetch upstream skill/native-credential-proxy
 git merge upstream/skill/native-credential-proxy || {
-  git checkout --theirs package-lock.json
-  git add package-lock.json
+  git checkout --theirs pnpm-lock.yaml
+  git add pnpm-lock.yaml
   git merge --continue
 }
 ```
@@ -62,7 +62,7 @@ This merges in:
 - Restored platform-aware proxy bind address detection
 - Reverted setup skill to `.env`-based credential instructions
 
-If the merge reports conflicts beyond `package-lock.json`, resolve them by reading the conflicted files and understanding the intent of both sides.
+If the merge reports conflicts beyond `pnpm-lock.yaml`, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Update main group CLAUDE.md
 
@@ -77,9 +77,9 @@ with:
 ### Validate code changes
 
 ```bash
-npm install
-npm run build
-npx vitest run src/credential-proxy.test.ts src/container-runner.test.ts
+pnpm install
+pnpm run build
+pnpm exec vitest run src/credential-proxy.test.ts src/container-runner.test.ts
 ```
 
 All tests must pass and build must be clean before proceeding.
@@ -125,12 +125,15 @@ echo 'ANTHROPIC_API_KEY=<key>' >> .env
 1. Rebuild and restart:
 
 ```bash
-npm run build
+pnpm run build
 ```
 
-Then restart the service:
-- macOS: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
-- Linux: `systemctl --user restart nanoclaw`
+Then restart the service.
+
+Run from your NanoClaw project root:
+
+- macOS: `launchctl kickstart -k gui/$(id -u)/"$(. setup/lib/install-slug.sh && launchd_label)"`
+- Linux: `systemctl --user restart "$(. setup/lib/install-slug.sh && systemd_unit)"`
 - WSL/manual: stop and re-run `bash start-nanoclaw.sh`
 
 2. Check logs for successful proxy startup:
@@ -161,7 +164,7 @@ To revert to OneCLI gateway:
 
 1. Find the merge commit: `git log --oneline --merges -5`
 2. Revert it: `git revert <merge-commit> -m 1` (undoes the skill branch merge, keeps your other changes)
-3. `npm install` (re-adds `@onecli-sh/sdk`)
-4. `npm run build`
+3. `pnpm install` (re-adds `@onecli-sh/sdk`)
+4. `pnpm run build`
 5. Follow `/setup` step 4 to configure OneCLI credentials
 6. Remove `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` from `.env`

@@ -1,0 +1,8 @@
+onlyBuiltDependencies:
+  - better-sqlite3
+  - esbuild
+  - protobufjs
+  - sharp
+
+pnpm:
+  minimumReleaseAge: 4320

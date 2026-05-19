@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-import { logger } from '../src/logger.js';
+import { log } from '../src/log.js';
 import { isRoot } from './platform.js';
 import { emitStatus } from './status.js';
 
@@ -32,7 +32,7 @@ export async function run(args: string[]): Promise<void> {
   const configFile = path.join(configDir, 'mount-allowlist.json');
 
   if (isRoot()) {
-    logger.warn(
+    log.warn(
       'Running as root — mount allowlist will be written to root home directory',
     );
   }
@@ -40,9 +40,9 @@ export async function run(args: string[]): Promise<void> {
   fs.mkdirSync(configDir, { recursive: true });
 
   if (fs.existsSync(configFile) && !force) {
-    logger.info(
-      { configFile },
+    log.info(
       'Mount allowlist already exists — skipping (use --force to overwrite)',
+      { configFile },
     );
     emitStatus('CONFIGURE_MOUNTS', {
       PATH: configFile,
@@ -58,7 +58,7 @@ export async function run(args: string[]): Promise<void> {
   let nonMainReadOnly = 'true';
 
   if (empty) {
-    logger.info('Writing empty mount allowlist');
+    log.info('Writing empty mount allowlist');
     const emptyConfig = {
       allowedRoots: [],
       blockedPatterns: [],
@@ -71,7 +71,7 @@ export async function run(args: string[]): Promise<void> {
     try {
       parsed = JSON.parse(json);
     } catch {
-      logger.error('Invalid JSON input');
+      log.error('Invalid JSON input');
       emitStatus('CONFIGURE_MOUNTS', {
         PATH: configFile,
         ALLOWED_ROOTS: 0,
@@ -91,13 +91,13 @@ export async function run(args: string[]): Promise<void> {
     nonMainReadOnly = parsed.nonMainReadOnly === false ? 'false' : 'true';
   } else {
     // Read from stdin
-    logger.info('Reading mount allowlist from stdin');
+    log.info('Reading mount allowlist from stdin');
     const input = fs.readFileSync(0, 'utf-8');
     let parsed: { allowedRoots?: unknown[]; nonMainReadOnly?: boolean };
     try {
       parsed = JSON.parse(input);
     } catch {
-      logger.error('Invalid JSON from stdin');
+      log.error('Invalid JSON from stdin');
       emitStatus('CONFIGURE_MOUNTS', {
         PATH: configFile,
         ALLOWED_ROOTS: 0,
@@ -117,9 +117,9 @@ export async function run(args: string[]): Promise<void> {
     nonMainReadOnly = parsed.nonMainReadOnly === false ? 'false' : 'true';
   }
 
-  logger.info(
-    { configFile, allowedRoots, nonMainReadOnly },
+  log.info(
     'Allowlist configured',
+    { configFile, allowedRoots, nonMainReadOnly },
   );
 
   emitStatus('CONFIGURE_MOUNTS', {

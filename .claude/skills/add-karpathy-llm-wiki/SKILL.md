@@ -19,7 +19,7 @@ AskUserQuestion: "Which group should have the wiki?"
 2. **Dedicated group** — create a new group just for the wiki
 3. **Other** — pick an existing group
 
-If dedicated: ask which channel and chat, then register with `npx tsx setup/index.ts --step register`.
+If dedicated: ask which channel and chat, then register with `pnpm exec tsx setup/index.ts --step register`.
 
 ## Step 3: Design collaboratively
 
@@ -71,40 +71,16 @@ AskUserQuestion: "Want periodic wiki health checks?"
 2. **Monthly**
 3. **Skip** — lint manually
 
-If yes, create a NanoClaw scheduled task that runs in the wiki group. This is NOT a Claude Code cron job — it's a NanoClaw group task that runs in the agent container. Insert it into the SQLite database:
+If yes, ask the agent to schedule the lint task using the `schedule_task` MCP tool in conversation.
+
+## Step 6: Restart
+
+Run from your NanoClaw project root:
 
 ```bash
-npx tsx -e "
-const Database = require('better-sqlite3');
-const { CronExpressionParser } = require('cron-parser');
-const db = new Database('store/messages.db');
-const interval = CronExpressionParser.parse('<cron-expr>', { tz: process.env.TZ || 'UTC' });
-const nextRun = interval.next().toISOString();
-db.prepare('INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-  'wiki-lint',
-  '<group_folder>',
-  '<chat_jid>',
-  'Run a wiki lint pass per the wiki container skill. Check for contradictions, orphan pages, stale content, missing cross-references, and gaps. Report findings and offer to fix issues.',
-  'cron',
-  '<cron-expr>',
-  'group',
-  nextRun,
-  'active',
-  new Date().toISOString()
-);
-db.close();
-"
-```
-
-Use the group's `folder` and `chat_jid` from the registered groups table. Cron expressions: `0 10 * * 0` (weekly Sunday 10am) or `0 10 1 * *` (monthly 1st at 10am).
-
-## Step 6: Build and restart
-
-```bash
-npm run build
-./container/build.sh
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+source setup/lib/install-slug.sh
+launchctl kickstart -k gui/$(id -u)/$(launchd_label)  # macOS
+systemctl --user restart $(systemd_unit)              # Linux
 ```
 
 Tell the user to test by sending a source to the wiki group.

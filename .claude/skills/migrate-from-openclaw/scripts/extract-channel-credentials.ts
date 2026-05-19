@@ -2,7 +2,7 @@
  * Extract a channel credential from an OpenClaw configuration and write it
  * directly to the NanoClaw .env file.
  *
- * Usage: npx tsx .claude/skills/migrate-from-openclaw/scripts/extract-channel-credentials.ts \
+ * Usage: pnpm exec tsx .claude/skills/migrate-from-openclaw/scripts/extract-channel-credentials.ts \
  *          --channel telegram --state-dir ~/.openclaw --write-env .env
  *
  * Handles OpenClaw SecretRef formats:

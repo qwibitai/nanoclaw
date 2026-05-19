@@ -1,20 +1,81 @@
 ---
 name: add-whatsapp
-description: Add WhatsApp as a channel. Can replace other channels entirely or run alongside them. Uses QR code or pairing code for authentication.
+description: Add WhatsApp channel via native Baileys adapter. Direct connection — no Chat SDK bridge. Uses QR code or pairing code for authentication.
 ---
 
 # Add WhatsApp Channel
 
-This skill adds WhatsApp support to NanoClaw. It installs the WhatsApp channel code, dependencies, and guides through authentication, registration, and configuration.
+Adds WhatsApp support via the native Baileys adapter (no Chat SDK bridge).
 
-## Phase 1: Pre-flight
+## Install
+
+NanoClaw doesn't ship channels in trunk. This skill copies the native WhatsApp (Baileys) adapter and its `whatsapp-auth` setup step in from the `channels` branch. No Chat SDK bridge.
+
+### Pre-flight (idempotent)
+
+Skip to **Credentials** if all of these are already in place:
+
+- `src/channels/whatsapp.ts` exists
+- `src/channels/index.ts` contains `import './whatsapp.js';`
+- `setup/whatsapp-auth.ts` and `setup/groups.ts` both exist
+- `setup/index.ts`'s `STEPS` map contains both `'whatsapp-auth':` and `groups:`
+- `@whiskeysockets/baileys`, `qrcode`, `pino` are listed in `package.json` dependencies
+
+Otherwise continue. Every step below is safe to re-run.
+
+### 1. Fetch the channels branch
+
+```bash
+git fetch origin channels
+```
+
+### 2. Copy the adapter and setup steps
+
+```bash
+git show origin/channels:src/channels/whatsapp.ts > src/channels/whatsapp.ts
+git show origin/channels:setup/whatsapp-auth.ts   > setup/whatsapp-auth.ts
+git show origin/channels:setup/groups.ts          > setup/groups.ts
+```
+
+### 3. Append the self-registration import
+
+Append to `src/channels/index.ts` (skip if already present):
+
+```typescript
+import './whatsapp.js';
+```
+
+### 4. Register the setup steps
+
+In `setup/index.ts`, add these entries to the `STEPS` map (skip lines already present):
+
+```typescript
+groups: () => import('./groups.js'),
+'whatsapp-auth': () => import('./whatsapp-auth.js'),
+```
+
+### 5. Install the adapter packages (pinned)
+
+```bash
+pnpm install @whiskeysockets/baileys@7.0.0-rc.9 qrcode@1.5.4 @types/qrcode@1.5.6 pino@9.6.0
+```
+
+### 6. Build
+
+```bash
+pnpm run build
+```
+
+## Credentials
+
+WhatsApp uses linked-device authentication — no API key, just a one-time pairing from your phone.
 
 ### Check current state
 
-Check if WhatsApp is already configured. If `store/auth/` exists with credential files, skip to Phase 4 (Registration) or Phase 5 (Verify).
+Check if WhatsApp is already authenticated. If `store/auth/creds.json` exists, skip to "Shared vs dedicated number".
 
 ```bash
-ls store/auth/creds.json 2>/dev/null && echo "WhatsApp auth exists" || echo "No WhatsApp auth"
+test -f store/auth/creds.json && echo "WhatsApp auth exists" || echo "No WhatsApp auth"
 ```
 
 ### Detect environment
@@ -42,57 +103,6 @@ If they chose pairing code:
 
 AskUserQuestion: What is your phone number? (Digits only — country code followed by your 10-digit number, no + prefix, spaces, or dashes. Example: 14155551234 where 1 is the US country code and 4155551234 is the phone number.)
 
-## Phase 2: Apply Code Changes
-
-Check if `src/channels/whatsapp.ts` already exists. If it does, skip to Phase 3 (Authentication).
-
-### Ensure channel remote
-
-```bash
-git remote -v
-```
-
-If `whatsapp` is missing, add it:
-
-```bash
-git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
-```
-
-### Merge the skill branch
-
-```bash
-git fetch whatsapp main
-git merge whatsapp/main || {
-  git checkout --theirs package-lock.json
-  git add package-lock.json
-  git merge --continue
-}
-```
-
-This merges in:
-- `src/channels/whatsapp.ts` (WhatsAppChannel class with self-registration via `registerChannel`)
-- `src/channels/whatsapp.test.ts` (41 unit tests)
-- `src/whatsapp-auth.ts` (standalone WhatsApp authentication script)
-- `setup/whatsapp-auth.ts` (WhatsApp auth setup step)
-- `import './whatsapp.js'` appended to the channel barrel file `src/channels/index.ts`
-- `'whatsapp-auth'` step added to `setup/index.ts`
-- `@whiskeysockets/baileys`, `qrcode`, `qrcode-terminal` npm dependencies in `package.json`
-- `ASSISTANT_HAS_OWN_NUMBER` in `.env.example`
-
-If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
-
-### Validate code changes
-
-```bash
-npm install
-npm run build
-npx vitest run src/channels/whatsapp.test.ts
-```
-
-All tests must pass and build must be clean before proceeding.
-
-## Phase 3: Authentication
-
 ### Clean previous auth state (if re-authenticating)
 
 ```bash
@@ -104,7 +114,7 @@ rm -rf store/auth/
 For QR code in browser (recommended):
 
 ```bash
-npx tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
+pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
 ```
 
 (Bash timeout: 150000ms)
@@ -120,10 +130,12 @@ Tell the user:
 For QR code in terminal:
 
 ```bash
-npx tsx setup/index.ts --step whatsapp-auth -- --method qr-terminal
+pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method qr-terminal
 ```
 
-Tell the user to run `npm run auth` in another terminal, then:
+(Bash timeout: 150000ms)
+
+Tell the user:
 
 > 1. Open WhatsApp > **Settings** > **Linked Devices** > **Link a Device**
 > 2. Scan the QR code displayed in the terminal
@@ -135,7 +147,7 @@ Tell the user to have WhatsApp open on **Settings > Linked Devices > Link a Devi
 Run the auth process in the background and poll `store/pairing-code.txt` for the code:
 
 ```bash
-rm -f store/pairing-code.txt && npx tsx setup/index.ts --step whatsapp-auth -- --method pairing-code --phone <their-phone-number> > /tmp/wa-auth.log 2>&1 &
+rm -f store/pairing-code.txt && pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method pairing-code --phone <their-phone-number> > /tmp/wa-auth.log 2>&1 &
 ```
 
 Then immediately poll for the code (do NOT wait for the background command to finish):
@@ -155,10 +167,10 @@ Display the code to the user the moment it appears. Tell them:
 After the user enters the code, poll for authentication to complete:
 
 ```bash
-for i in $(seq 1 60); do grep -q 'AUTH_STATUS: authenticated' /tmp/wa-auth.log 2>/dev/null && echo "authenticated" && break; grep -q 'AUTH_STATUS: failed' /tmp/wa-auth.log 2>/dev/null && echo "failed" && break; sleep 2; done
+for i in $(seq 1 60); do grep -q 'STATUS: authenticated' /tmp/wa-auth.log 2>/dev/null && echo "authenticated" && break; grep -q 'STATUS: failed' /tmp/wa-auth.log 2>/dev/null && echo "failed" && break; sleep 2; done
 ```
 
-**If failed:** qr_timeout → re-run. logged_out → delete `store/auth/` and re-run. 515 → re-run. timeout → ask user, offer retry.
+**If failed:** logged_out → delete `store/auth/` and re-run. timeout → ask user, offer retry.
 
 ### Verify authentication succeeded
 
@@ -166,128 +178,43 @@ for i in $(seq 1 60); do grep -q 'AUTH_STATUS: authenticated' /tmp/wa-auth.log 2
 test -f store/auth/creds.json && echo "Authentication successful" || echo "Authentication failed"
 ```
 
-### Configure environment
+### Shared vs dedicated number
 
-Channels auto-enable when their credentials are present — WhatsApp activates when `store/auth/creds.json` exists.
+AskUserQuestion: Is this a shared phone number (personal WhatsApp) or a dedicated number?
+- **Shared number** — your personal WhatsApp (bot prefixes messages with its name)
+- **Dedicated number** — a separate phone/SIM for the assistant
 
-Sync to container environment:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
-## Phase 4: Registration
-
-### Configure trigger and channel type
-
-Get the bot's WhatsApp number: `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
-
-AskUserQuestion: Is this a shared phone number (personal WhatsApp) or a dedicated number (separate device)?
-- **Shared number** - Your personal WhatsApp number (recommended: use self-chat or a solo group)
-- **Dedicated number** - A separate phone/SIM for the assistant
-
-AskUserQuestion: What trigger word should activate the assistant?
-- **@Andy** - Default trigger
-- **@Claw** - Short and easy
-- **@Claude** - Match the AI name
-
-AskUserQuestion: What should the assistant call itself?
-- **Andy** - Default name
-- **Claw** - Short and easy
-- **Claude** - Match the AI name
-
-AskUserQuestion: Where do you want to chat with the assistant?
-
-**Shared number options:**
-- **Self-chat** (Recommended) - Chat in your own "Message Yourself" conversation
-- **Solo group** - A group with just you and the linked device
-- **Existing group** - An existing WhatsApp group
-
-**Dedicated number options:**
-- **DM with bot** (Recommended) - Direct message the bot's number
-- **Solo group** - A group with just you and the bot
-- **Existing group** - An existing WhatsApp group
-
-### Get the JID
-
-**Self-chat:** JID = your phone number with `@s.whatsapp.net`. Extract from auth credentials:
+If dedicated, add to `.env`:
 
 ```bash
-node -e "const c=JSON.parse(require('fs').readFileSync('store/auth/creds.json','utf-8'));console.log(c.me?.id?.split(':')[0]+'@s.whatsapp.net')"
+ASSISTANT_HAS_OWN_NUMBER=true
 ```
 
-**DM with bot:** Ask for the bot's phone number. JID = `NUMBER@s.whatsapp.net`
+## Next Steps
 
-**Group (solo, existing):** Run group sync and list available groups:
+If you're in the middle of `/setup`, return to the setup flow now.
 
-```bash
-npx tsx setup/index.ts --step groups
-npx tsx setup/index.ts --step groups --list
-```
+Otherwise, run `/manage-channels` to wire this channel to an agent group.
 
-The output shows `JID|GroupName` pairs. Present candidates as AskUserQuestion (names only, not JIDs).
+## Channel Info
 
-### Register the chat
+- **type**: `whatsapp`
+- **terminology**: WhatsApp calls them "groups" and "chats." A "chat" is a 1:1 DM; a "group" has multiple members.
+- **how-to-find-id**: DMs use `<phone>@s.whatsapp.net` (e.g. `14155551234@s.whatsapp.net`). Groups use `<id>@g.us`. To find your number: `node -e "const c=JSON.parse(require('fs').readFileSync('store/auth/creds.json','utf-8'));console.log(c.me?.id?.split(':')[0]+'@s.whatsapp.net')"`. Groups are auto-discovered — check `pnpm exec tsx scripts/q.ts data/v2.db "SELECT platform_id, name FROM messaging_groups WHERE channel_type='whatsapp' AND is_group=1"`.
+- **supports-threads**: no
+- **typical-use**: Interactive chat — direct messages or small groups
+- **default-isolation**: Same agent group if you're the only participant across multiple chats. Separate agent group if different people are in different groups.
 
-```bash
-npx tsx setup/index.ts --step register \
-  --jid "<jid>" \
-  --name "<chat-name>" \
-  --trigger "@<trigger>" \
-  --folder "whatsapp_main" \
-  --channel whatsapp \
-  --assistant-name "<name>" \
-  --is-main \
-  --no-trigger-required  # Only for main/self-chat
-```
+### Features
 
-For additional groups (trigger-required):
+- Markdown formatting — `**bold**`→`*bold*`, `*italic*`→`_italic_`, headings→bold, code blocks preserved
+- Approval questions — `ask_user_question` renders with `/approve`, `/reject` slash commands
+- File attachments — send and receive images, video, audio, documents
+- Reactions — send emoji reactions on messages
+- Typing indicators — composing presence updates
+- Credential requests — text fallback (WhatsApp has no modal support)
 
-```bash
-npx tsx setup/index.ts --step register \
-  --jid "<group-jid>" \
-  --name "<group-name>" \
-  --trigger "@<trigger>" \
-  --folder "whatsapp_<group-name>" \
-  --channel whatsapp
-```
-
-## Phase 5: Verify
-
-### Build and restart
-
-```bash
-npm run build
-```
-
-Restart the service:
-
-```bash
-# macOS (launchd)
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
-
-# Linux (systemd)
-systemctl --user restart nanoclaw
-
-# Linux (nohup fallback)
-bash start-nanoclaw.sh
-```
-
-### Test the connection
-
-Tell the user:
-
-> Send a message to your registered WhatsApp chat:
-> - For self-chat / main: Any message works
-> - For groups: Use the trigger word (e.g., "@Andy hello")
->
-> The assistant should respond within a few seconds.
-
-### Check logs if needed
-
-```bash
-tail -f logs/nanoclaw.log
-```
+Not supported (WhatsApp linked device limitation): edit messages, delete messages.
 
 ## Troubleshooting
 
@@ -296,77 +223,45 @@ tail -f logs/nanoclaw.log
 QR codes expire after ~60 seconds. Re-run the auth command:
 
 ```bash
-rm -rf store/auth/ && npx tsx src/whatsapp-auth.ts
+rm -rf store/auth/ && pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
 ```
 
 ### Pairing code not working
 
-Codes expire in ~60 seconds. To retry:
+Codes expire in ~60 seconds. Delete auth and retry:
 
 ```bash
-rm -rf store/auth/ && npx tsx src/whatsapp-auth.ts --pairing-code --phone <phone>
+rm -rf store/auth/ && pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method pairing-code --phone <phone>
 ```
 
-Enter the code **immediately** when it appears. Also ensure:
-1. Phone number is digits only — country code + number, no `+` prefix (e.g., `14155551234` where `1` is country code, `4155551234` is the number)
-2. Phone has internet access
-3. WhatsApp is updated to the latest version
+Ensure: digits only (no `+`), phone has internet, WhatsApp is updated.
 
 If pairing code keeps failing, switch to QR-browser auth instead:
 
 ```bash
-rm -rf store/auth/ && npx tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
+rm -rf store/auth/ && pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
 ```
 
-### "conflict" disconnection
+### "waiting for this message" on reactions
 
-This happens when two instances connect with the same credentials. Ensure only one NanoClaw process is running:
+Signal sessions corrupted from rapid restarts. Clear sessions.
+
+Run from your NanoClaw project root:
 
 ```bash
-pkill -f "node dist/index.js"
-# Then restart
+source setup/lib/install-slug.sh
+systemctl --user stop $(systemd_unit)
+rm store/auth/session-*.json
+systemctl --user start $(systemd_unit)
 ```
 
 ### Bot not responding
 
-Check:
-1. Auth credentials exist: `ls store/auth/creds.json`
-3. Chat is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE '%whatsapp%' OR jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net'"`
-4. Service is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
-5. Logs: `tail -50 logs/nanoclaw.log`
+1. Auth exists: `test -f store/auth/creds.json`
+2. Connected: `grep "Connected to WhatsApp" logs/nanoclaw.log | tail -1`
+3. Channel wired: `pnpm exec tsx scripts/q.ts data/v2.db "SELECT mg.platform_id, mg.name FROM messaging_groups mg JOIN messaging_group_agents mga ON mg.id=mga.messaging_group_id WHERE mg.channel_type='whatsapp'"`
+4. Service running: `systemctl --user status "$(. setup/lib/install-slug.sh && systemd_unit)"`
 
-### Group names not showing
+### "conflict" disconnection
 
-Run group metadata sync:
-
-```bash
-npx tsx setup/index.ts --step groups
-```
-
-This fetches all group names from WhatsApp. Runs automatically every 24 hours.
-
-## After Setup
-
-If running `npm run dev` while the service is active:
-
-```bash
-# macOS:
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-npm run dev
-# When done testing:
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
-
-# Linux:
-# systemctl --user stop nanoclaw
-# npm run dev
-# systemctl --user start nanoclaw
-```
-
-## Removal
-
-To remove WhatsApp integration:
-
-1. Delete auth credentials: `rm -rf store/auth/`
-2. Remove WhatsApp registrations: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net'"`
-3. Sync env: `mkdir -p data/env && cp .env data/env/env`
-4. Rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+Two instances connected with same credentials. Ensure only one NanoClaw process is running.

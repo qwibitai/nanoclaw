@@ -26,7 +26,7 @@ Before using this skill, ensure:
 1. **NanoClaw is installed and running** - WhatsApp connected, service active
 2. **Dependencies installed**:
    ```bash
-   npm ls playwright dotenv-cli || npm install playwright dotenv-cli
+   pnpm ls playwright dotenv-cli || pnpm install playwright dotenv-cli
    ```
 3. **CHROME_PATH configured** in `.env` (if Chrome is not at default location):
    ```bash
@@ -38,9 +38,11 @@ Before using this skill, ensure:
 
 ## Quick Start
 
+Run from your NanoClaw project root:
+
 ```bash
 # 1. Setup authentication (interactive)
-npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
+pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/setup.ts
 # Verify: data/x-auth.json should exist after successful login
 
 # 2. Rebuild container to include skill
@@ -48,10 +50,11 @@ npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
 # Verify: Output shows "COPY .claude/skills/x-integration/agent.ts"
 
 # 3. Rebuild host and restart service
-npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
-# Verify: launchctl list | grep nanoclaw (macOS) or systemctl --user status nanoclaw (Linux)
+pnpm run build
+source setup/lib/install-slug.sh
+launchctl kickstart -k gui/$(id -u)/$(launchd_label)  # macOS
+# Linux: systemctl --user restart $(systemd_unit)
+# Verify: launchctl list | grep "$(launchd_label)" (macOS) or systemctl --user status $(systemd_unit) (Linux)
 ```
 
 ## Configuration
@@ -225,7 +228,7 @@ COPY container/agent-runner/package*.json ./
 COPY container/agent-runner/ ./
 ```
 
-Then add COPY line after `COPY container/agent-runner/ ./` and before `RUN npm run build`:
+Then add COPY line after `COPY container/agent-runner/ ./` and before `RUN pnpm run build`:
 ```dockerfile
 # Copy skill MCP tools
 COPY .claude/skills/x-integration/agent.ts ./src/skills/x-integration/
@@ -247,7 +250,7 @@ echo "Chrome not found - update CHROME_PATH in .env"
 ### 2. Run Authentication
 
 ```bash
-npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
+pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/setup.ts
 ```
 
 This opens Chrome for manual X login. Session saved to `data/x-browser-profile/`.
@@ -270,16 +273,23 @@ cat data/x-auth.json  # Should show {"authenticated": true, ...}
 
 ### 4. Restart Service
 
+Run from your NanoClaw project root:
+
 ```bash
-npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+pnpm run build
+source setup/lib/install-slug.sh
+launchctl kickstart -k gui/$(id -u)/$(launchd_label)  # macOS
+# Linux: systemctl --user restart $(systemd_unit)
 ```
 
-**Verify success:**
+**Verify success.**
+
+Run from your NanoClaw project root:
+
 ```bash
-launchctl list | grep nanoclaw  # macOS — should show PID and exit code 0 or -
-# Linux: systemctl --user status nanoclaw
+source setup/lib/install-slug.sh
+launchctl list | grep "$(launchd_label)"  # macOS — should show PID and exit code 0 or -
+# Linux: systemctl --user status $(systemd_unit)
 ```
 
 ## Usage via WhatsApp
@@ -317,36 +327,39 @@ ls -la data/x-browser-profile/ 2>/dev/null | head -5
 ### Re-authenticate (if expired)
 
 ```bash
-npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
+pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/setup.ts
 ```
 
 ### Test Post (will actually post)
 
 ```bash
-echo '{"content":"Test tweet - please ignore"}' | npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/post.ts
+echo '{"content":"Test tweet - please ignore"}' | pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/post.ts
 ```
 
 ### Test Like
 
 ```bash
-echo '{"tweetUrl":"https://x.com/user/status/123"}' | npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/like.ts
+echo '{"tweetUrl":"https://x.com/user/status/123"}' | pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/like.ts
 ```
 
 Or export `CHROME_PATH` manually before running:
 
 ```bash
 export CHROME_PATH="/path/to/chrome"
-echo '{"content":"Test"}' | npx tsx .claude/skills/x-integration/scripts/post.ts
+echo '{"content":"Test"}' | pnpm exec tsx .claude/skills/x-integration/scripts/post.ts
 ```
 
 ## Troubleshooting
 
 ### Authentication Expired
 
+Run from your NanoClaw project root:
+
 ```bash
-npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/setup.ts
+source setup/lib/install-slug.sh
+launchctl kickstart -k gui/$(id -u)/$(launchd_label)  # macOS
+# Linux: systemctl --user restart $(systemd_unit)
 ```
 
 ### Browser Lock Files

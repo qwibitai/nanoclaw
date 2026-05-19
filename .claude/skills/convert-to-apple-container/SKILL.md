@@ -58,7 +58,7 @@ git remote -v
 If `upstream` is missing, add it:
 
 ```bash
-git remote add upstream https://github.com/qwibitai/nanoclaw.git
+git remote add upstream https://github.com/nanocoai/nanoclaw.git
 ```
 
 ### Merge the skill branch
@@ -80,8 +80,8 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 ### Validate code changes
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm run build
 ```
 
 All tests must pass and build must be clean before proceeding.
@@ -171,9 +171,12 @@ Expected: Both operations succeed.
 
 ### Full integration test
 
+Run from your NanoClaw project root:
+
 ```bash
-npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+pnpm run build
+source setup/lib/install-slug.sh
+launchctl kickstart -k gui/$(id -u)/$(launchd_label)
 ```
 
 Send a message via WhatsApp and verify the agent responds.

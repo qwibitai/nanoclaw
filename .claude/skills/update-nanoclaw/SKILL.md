@@ -11,14 +11,15 @@ Run `/update-nanoclaw` in Claude Code.
 
 ## How it works
 
-**Preflight**: checks for clean working tree (`git status --porcelain`). If `upstream` remote is missing, asks you for the URL (defaults to `https://github.com/qwibitai/nanoclaw.git`) and adds it. Detects the upstream branch name (`main` or `master`).
+**Preflight**: checks for clean working tree (`git status --porcelain`). If `upstream` remote is missing, asks you for the URL (defaults to `https://github.com/nanocoai/nanoclaw.git`) and adds it. Detects the upstream branch name (`main` or `master`).
 
 **Backup**: creates a timestamped backup branch and tag (`backup/pre-update-<hash>-<timestamp>`, `pre-update-<hash>-<timestamp>`) before touching anything. Safe to run multiple times.
 
 **Preview**: runs `git log` and `git diff` against the merge base to show upstream changes since your last sync. Groups changed files into categories:
 - **Skills** (`.claude/skills/`): unlikely to conflict unless you edited an upstream skill
-- **Source** (`src/`): may conflict if you modified the same files
-- **Build/config** (`package.json`, `tsconfig*.json`, `container/`): review needed
+- **Host source** (`src/`): may conflict if you modified the same files
+- **Container** (`container/`): triggers container rebuild
+- **Build/config** (`package.json`, `pnpm-lock.yaml`, `tsconfig*.json`): lockfile changes trigger dep install
 
 **Update paths** (you pick one):
 - `merge` (default): `git merge upstream/<branch>`. Resolves all conflicts in one pass.
@@ -30,7 +31,7 @@ Run `/update-nanoclaw` in Claude Code.
 
 **Conflict resolution**: opens only conflicted files, resolves the conflict markers, keeps your local customizations intact.
 
-**Validation**: runs `npm run build` and `npm test`.
+**Validation**: runs `pnpm run build` and `pnpm test`. If container files changed, also runs the container typecheck and `./container/build.sh`.
 
 **Breaking changes check**: after validation, reads CHANGELOG.md for any `[BREAKING]` entries introduced by the update. If found, shows each breaking change and offers to run the recommended skill to migrate.
 
@@ -68,7 +69,7 @@ If output is non-empty:
 Confirm remotes:
 - `git remote -v`
 If `upstream` is missing:
-- Ask the user for the upstream repo URL (default: `https://github.com/qwibitai/nanoclaw.git`).
+- Ask the user for the upstream repo URL (default: `https://github.com/nanocoai/nanoclaw.git`).
 - Add it: `git remote add upstream <user-provided-url>`
 - Then: `git fetch upstream --prune`
 
@@ -108,9 +109,10 @@ Show file-level impact from upstream:
 
 Bucket the upstream changed files:
 - **Skills** (`.claude/skills/`): unlikely to conflict unless the user edited an upstream skill
-- **Source** (`src/`): may conflict if user modified the same files
-- **Build/config** (`package.json`, `package-lock.json`, `tsconfig*.json`, `container/`, `launchd/`): review needed
-- **Other**: docs, tests, misc
+- **Host source** (`src/`): may conflict if user modified the same files
+- **Container** (`container/`): triggers container rebuild (+ typecheck if `agent-runner/src/` changed)
+- **Build/config** (`package.json`, `pnpm-lock.yaml`, `tsconfig*.json`): lockfile changes trigger dep install
+- **Other**: docs, tests, setup scripts, misc
 
 **Large drift check:** If the upstream commit count and age suggest the user has a lot of catching up to do, mention that `/migrate-nanoclaw` might be a better fit — it extracts customizations and reapplies them on clean upstream instead of merging. Offer it as an option but don't push.
 
@@ -173,10 +175,30 @@ If it gets messy (more than 3 rounds of conflicts):
   - `git rebase --abort`
   - Recommend merge instead.
 
+# Step 4.5: Install dependencies (if lockfiles changed)
+Check if the merge changed any lockfiles or package manifests:
+- `git diff <backup-tag-from-step-1>..HEAD --name-only | grep -E '^(pnpm-lock\.yaml|package\.json)$'`
+  - If matched: `pnpm install`
+- `git diff <backup-tag-from-step-1>..HEAD --name-only | grep -E '^container/agent-runner/(bun\.lock|package\.json)$'`
+  - If matched AND `command -v bun` succeeds: `cd container/agent-runner && bun install`
+  - If bun is not installed on the host, skip — container deps will be installed during `./container/build.sh`
+
+Skip this step if neither lockfile changed.
+
 # Step 5: Validation
-Run:
-- `npm run build`
-- `npm test` (do not fail the flow if tests are not configured)
+Check which areas changed to determine what to validate:
+- `CHANGED_FILES=$(git diff --name-only <backup-tag-from-step-1>..HEAD)`
+
+**Host build** (always):
+- `pnpm run build`
+- `pnpm test` (do not fail the flow if tests are not configured)
+
+**Container typecheck** (only if `container/agent-runner/src/` files are in CHANGED_FILES AND bun types are available):
+- Check: `pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit`
+- If this fails because bun types are missing (`Cannot find type definition file for 'bun'`), skip with a note — type errors will surface at container runtime instead
+
+**Container image rebuild** (only if any `container/` files are in CHANGED_FILES):
+- `./container/build.sh`
 
 If build fails:
 - Show the error.
@@ -209,8 +231,10 @@ If one or more `[BREAKING]` lines are found:
 - For each skill the user selects, invoke it using the Skill tool.
 - After all selected skills complete (or if user chose Skip), proceed to Step 7 (skill updates check).
 
-# Step 7: Check for skill updates
-After the summary, check if skills are distributed as branches in this repo:
+# Step 7: Check for skill and channel/provider updates
+
+## 7a: Skill branches
+Check if skills are distributed as branches in this repo:
 - `git branch -r --list 'upstream/skill/*'`
 
 If any `upstream/skill/*` branches exist:
@@ -218,7 +242,21 @@ If any `upstream/skill/*` branches exist:
   - Option 1: "Yes, check for updates" (description: "Runs /update-skills to check for and apply skill branch updates")
   - Option 2: "No, skip" (description: "You can run /update-skills later any time")
 - If user selects yes, invoke `/update-skills` using the Skill tool.
-- After the skill completes (or if user selected no), proceed to Step 8.
+
+## 7b: Channel and provider updates
+Detect installed channels by reading `src/channels/index.ts` and collecting all `import './<name>.js';` lines (excluding `cli`). For providers, check `src/providers/index.ts` the same way.
+
+If any channels/providers are installed AND `upstream/channels` or `upstream/providers` branches exist:
+- List the installed channels/providers.
+- Use AskUserQuestion to ask: "Would you like to update your installed channels/providers? Re-running `/add-<name>` is safe — it only updates code files, credentials and wiring are untouched."
+  - One option per installed channel/provider (e.g., "Update Slack (/add-slack)")
+  - "Skip — I'll update them later"
+  - Set `multiSelect: true`
+- For each selected option, invoke the corresponding `/add-<channel>` or `/add-<provider>` skill.
+
+If no channels/providers are installed, skip silently.
+
+Proceed to Step 8.
 
 # Step 8: Summary + rollback instructions
 Show:
@@ -232,9 +270,10 @@ Show:
 Tell the user:
 - To rollback: `git reset --hard <backup-tag-from-step-1>`
 - Backup branch also exists: `backup/pre-update-<HASH>-<TIMESTAMP>`
-- Restart the service to apply changes:
-  - If using launchd: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist && launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist`
-  - If running manually: restart `npm run dev`
+- Restart the service to apply changes. The unit/label names are per-install — derive them with `setup/lib/install-slug.sh`. Run from your NanoClaw project root:
+  - **macOS (Darwin)**: `source setup/lib/install-slug.sh && launchctl kickstart -k gui/$(id -u)/$(launchd_label)`
+  - **Linux**: `source setup/lib/install-slug.sh && systemctl --user restart $(systemd_unit)` (or, if you want to confirm the unit name first: `systemctl --user list-units --type=service | grep "$(. setup/lib/install-slug.sh && systemd_unit)"`)
+  - **Manual** (no service found): restart `pnpm run dev`
 
 
 ## Diagnostics

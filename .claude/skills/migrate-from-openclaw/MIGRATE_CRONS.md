@@ -68,7 +68,7 @@ Source: `src/db.ts`
 Insert directly into the SQLite database. This requires groups to be registered first (Phase 1). Use the registered group's `folder` and `chat_jid`:
 
 ```bash
-npx tsx -e "
+pnpm exec tsx -e "
 const Database = require('better-sqlite3');
 const { CronExpressionParser } = require('cron-parser');
 const db = new Database('store/messages.db');

@@ -1,7 +1,7 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env pnpm exec tsx
 /**
  * X Integration - Quote Tweet
- * Usage: echo '{"tweetUrl":"https://x.com/user/status/123","comment":"My thoughts"}' | npx tsx quote.ts
+ * Usage: echo '{"tweetUrl":"https://x.com/user/status/123","comment":"My thoughts"}' | pnpm exec tsx quote.ts
  */
 
 import { getBrowserContext, navigateToTweet, runScript, validateContent, config, ScriptResult } from '../lib/browser.js';

@@ -1,112 +1,209 @@
-export interface AdditionalMount {
-  hostPath: string; // Absolute path on host (supports ~ for home)
-  containerPath?: string; // Optional — defaults to basename of hostPath. Mounted at /workspace/extra/{value}
-  readonly?: boolean; // Default: true for safety
-}
+// ── Central DB entities ──
 
-/**
- * Mount Allowlist - Security configuration for additional mounts
- * This file should be stored at ~/.config/nanoclaw/mount-allowlist.json
- * and is NOT mounted into any container, making it tamper-proof from agents.
- */
-export interface MountAllowlist {
-  // Directories that can be mounted into containers
-  allowedRoots: AllowedRoot[];
-  // Glob patterns for paths that should never be mounted (e.g., ".ssh", ".gnupg")
-  blockedPatterns: string[];
-  // If true, non-main groups can only mount read-only regardless of config
-  nonMainReadOnly: boolean;
-}
-
-export interface AllowedRoot {
-  // Absolute path or ~ for home (e.g., "~/projects", "/var/repos")
-  path: string;
-  // Whether read-write mounts are allowed under this root
-  allowReadWrite: boolean;
-  // Optional description for documentation
-  description?: string;
-}
-
-export interface ContainerConfig {
-  additionalMounts?: AdditionalMount[];
-  timeout?: number; // Default: 300000 (5 minutes)
-}
-
-export interface RegisteredGroup {
+export interface AgentGroup {
+  id: string;
   name: string;
   folder: string;
-  trigger: string;
-  added_at: string;
-  containerConfig?: ContainerConfig;
-  requiresTrigger?: boolean; // Default: true for groups, false for solo chats
-  isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
-}
-
-export interface NewMessage {
-  id: string;
-  chat_jid: string;
-  sender: string;
-  sender_name: string;
-  content: string;
-  timestamp: string;
-  is_from_me?: boolean;
-  is_bot_message?: boolean;
-  thread_id?: string;
-  reply_to_message_id?: string;
-  reply_to_message_content?: string;
-  reply_to_sender_name?: string;
-}
-
-export interface ScheduledTask {
-  id: string;
-  group_folder: string;
-  chat_jid: string;
-  prompt: string;
-  script?: string | null;
-  schedule_type: 'cron' | 'interval' | 'once';
-  schedule_value: string;
-  context_mode: 'group' | 'isolated';
-  next_run: string | null;
-  last_run: string | null;
-  last_result: string | null;
-  status: 'active' | 'paused' | 'completed';
+  /** @deprecated Use container_configs.provider instead. */
+  agent_provider: string | null;
   created_at: string;
 }
 
-export interface TaskRunLog {
-  task_id: string;
-  run_at: string;
-  duration_ms: number;
-  status: 'success' | 'error';
-  result: string | null;
-  error: string | null;
+/** Per-agent-group container runtime config. Source of truth in the DB;
+ *  materialized to `groups/<folder>/container.json` at spawn time. */
+export interface ContainerConfigRow {
+  agent_group_id: string;
+  provider: string | null;
+  model: string | null;
+  effort: string | null;
+  image_tag: string | null;
+  assistant_name: string | null;
+  max_messages_per_prompt: number | null;
+  skills: string; // JSON: '"all"' | '["skill1","skill2"]'
+  mcp_servers: string; // JSON: Record<string, McpServerConfig>
+  packages_apt: string; // JSON: string[]
+  packages_npm: string; // JSON: string[]
+  additional_mounts: string; // JSON: AdditionalMountConfig[]
+  cli_scope: string; // 'disabled' | 'group' | 'global'
+  updated_at: string;
 }
 
-// --- Channel abstraction ---
+export type UnknownSenderPolicy = 'strict' | 'request_approval' | 'public';
 
-export interface Channel {
-  name: string;
-  connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
-  isConnected(): boolean;
-  ownsJid(jid: string): boolean;
-  disconnect(): Promise<void>;
-  // Optional: typing indicator. Channels that support it implement it.
-  setTyping?(jid: string, isTyping: boolean): Promise<void>;
-  // Optional: sync group/chat names from the platform.
-  syncGroups?(force: boolean): Promise<void>;
+export interface MessagingGroup {
+  id: string;
+  channel_type: string;
+  platform_id: string;
+  name: string | null;
+  is_group: number; // 0 | 1
+  unknown_sender_policy: UnknownSenderPolicy;
+  /**
+   * When set, the owner explicitly denied registering this channel — the
+   * router drops silently and does not re-escalate. Cleared by any explicit
+   * wiring mutation (admin command). See migration 012.
+   *
+   * Optional on the TS type so pre-migration-012 callers that build
+   * MessagingGroup objects in code (fixtures, etc.) don't need to update;
+   * the column itself defaults to NULL in SQLite.
+   */
+  denied_at?: string | null;
+  created_at: string;
 }
 
-// Callback type that channels use to deliver inbound messages
-export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
+// ── Identity & privilege ──
 
-// Callback for chat metadata discovery.
-// name is optional — channels that deliver names inline (Telegram) pass it here;
-// channels that sync names separately (via syncGroups) omit it.
-export type OnChatMetadata = (
-  chatJid: string,
-  timestamp: string,
-  name?: string,
-  channel?: string,
-  isGroup?: boolean,
-) => void;
+/**
+ * User = a messaging-platform identifier. Namespaced so distinct channels
+ * with numeric IDs don't collide: "phone:+1555...", "tg:123", "discord:456",
+ * "email:a@x.com". A single human with a phone AND a telegram handle has
+ * two separate users — no cross-channel linking (yet).
+ */
+export interface User {
+  id: string;
+  kind: string; // 'phone' | 'email' | 'discord' | 'telegram' | 'matrix' | ...
+  display_name: string | null;
+  created_at: string;
+}
+
+export type UserRoleKind = 'owner' | 'admin';
+
+/**
+ * Role grant. Owner is always global. Admin is either global
+ * (agent_group_id = null) or scoped to a specific agent group.
+ * Admin @ A implicitly makes the user a member of A — we do not require
+ * a separate agent_group_members row for admins.
+ */
+export interface UserRole {
+  user_id: string;
+  role: UserRoleKind;
+  agent_group_id: string | null;
+  granted_by: string | null;
+  granted_at: string;
+}
+
+/** "Known" membership in an agent group — required for unprivileged users. */
+export interface AgentGroupMember {
+  user_id: string;
+  agent_group_id: string;
+  added_by: string | null;
+  added_at: string;
+}
+
+/** Cached DM channel for a user on a specific channel_type. */
+export interface UserDm {
+  user_id: string;
+  channel_type: string;
+  messaging_group_id: string;
+  resolved_at: string;
+}
+
+export type EngageMode = 'pattern' | 'mention' | 'mention-sticky';
+export type SenderScope = 'all' | 'known';
+export type IgnoredMessagePolicy = 'drop' | 'accumulate';
+
+export interface MessagingGroupAgent {
+  id: string;
+  messaging_group_id: string;
+  agent_group_id: string;
+  engage_mode: EngageMode;
+  /**
+   * Regex source string used when engage_mode='pattern'. `'.'` is the sentinel
+   * for "match every message" (the "always" flavor). Ignored for 'mention' /
+   * 'mention-sticky' modes.
+   */
+  engage_pattern: string | null;
+  sender_scope: SenderScope;
+  ignored_message_policy: IgnoredMessagePolicy;
+  session_mode: 'shared' | 'per-thread' | 'agent-shared';
+  priority: number;
+  created_at: string;
+}
+
+export interface Session {
+  id: string;
+  agent_group_id: string;
+  messaging_group_id: string | null;
+  thread_id: string | null;
+  agent_provider: string | null;
+  status: 'active' | 'closed';
+  container_status: 'running' | 'idle' | 'stopped';
+  last_active: string | null;
+  created_at: string;
+}
+
+// ── Session DB entities ──
+
+export type MessageInKind = 'chat' | 'chat-sdk' | 'task' | 'webhook' | 'system';
+export type MessageInStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+export interface MessageIn {
+  id: string;
+  kind: MessageInKind;
+  timestamp: string;
+  status: MessageInStatus;
+  status_changed: string | null;
+  process_after: string | null;
+  recurrence: string | null;
+  tries: number;
+  platform_id: string | null;
+  channel_type: string | null;
+  thread_id: string | null;
+  content: string; // JSON blob
+}
+
+export interface MessageOut {
+  id: string;
+  in_reply_to: string | null;
+  timestamp: string;
+  delivered: number; // 0 | 1
+  deliver_after: string | null;
+  recurrence: string | null;
+  kind: string;
+  platform_id: string | null;
+  channel_type: string | null;
+  thread_id: string | null;
+  content: string; // JSON blob
+}
+
+// ── Pending questions (central DB) ──
+
+export interface PendingQuestion {
+  question_id: string;
+  session_id: string;
+  message_out_id: string;
+  platform_id: string | null;
+  channel_type: string | null;
+  thread_id: string | null;
+  title: string;
+  options: import('./channels/ask-question.js').NormalizedOption[];
+  created_at: string;
+}
+
+// ── Pending approvals (central DB) ──
+
+export interface PendingApproval {
+  approval_id: string;
+  session_id: string | null;
+  request_id: string;
+  action: string;
+  payload: string; // JSON
+  created_at: string;
+  agent_group_id: string | null;
+  channel_type: string | null;
+  platform_id: string | null;
+  platform_message_id: string | null;
+  expires_at: string | null;
+  status: 'pending' | 'approved' | 'rejected' | 'expired';
+  title: string;
+  options_json: string;
+}
+
+// ── Agent destinations (central DB) ──
+
+export interface AgentDestination {
+  agent_group_id: string;
+  local_name: string;
+  target_type: 'channel' | 'agent';
+  target_id: string;
+  created_at: string;
+}
