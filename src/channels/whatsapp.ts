@@ -151,10 +151,41 @@ function transformForWhatsApp(text: string): string {
   return text;
 }
 
-/** Convert Claude's markdown to WhatsApp-native formatting. */
-function formatWhatsApp(text: string): string {
+// WhatsApp tags `@<phone-digits>` (5–15 digit local part — covers short test
+// numbers up to ITU E.164 max). A leading `+` is accepted but stripped so
+// the literal in text matches the digits in the JID — WhatsApp clients
+// scan the rendered text for `@<digits>` and cross-reference it with the
+// contextInfo.mentionedJid list to draw the bold/clickable tag.
+const MENTION_RE = /(^|[^\w@+])@\+?(\d{5,15})(?!\d)/g;
+
+/** Extract `@<digits>` mentions from text and normalize them. */
+export function parseWhatsAppMentions(text: string): { text: string; mentions: string[] } {
+  const mentions = new Set<string>();
+  const out = text.replace(MENTION_RE, (_full, lead: string, digits: string) => {
+    mentions.add(`${digits}@s.whatsapp.net`);
+    return `${lead}@${digits}`;
+  });
+  return { text: out, mentions: [...mentions] };
+}
+
+/**
+ * Convert Claude's markdown to WhatsApp-native formatting and extract any
+ * `@<phone>` mentions. Code-block regions are passed through untouched so
+ * phone-like sequences inside code aren't tagged.
+ */
+function formatWhatsApp(text: string): { text: string; mentions: string[] } {
   const segments = splitProtectedRegions(text);
-  return segments.map(({ content, isProtected }) => (isProtected ? content : transformForWhatsApp(content))).join('');
+  const mentions = new Set<string>();
+  const out = segments
+    .map(({ content, isProtected }) => {
+      if (isProtected) return content;
+      const transformed = transformForWhatsApp(content);
+      const { text: withMentions, mentions: found } = parseWhatsAppMentions(transformed);
+      for (const m of found) mentions.add(m);
+      return withMentions;
+    })
+    .join('');
+  return { text: out, mentions: [...mentions] };
 }
 
 /** Map file extension to Baileys media message type. */
@@ -192,6 +223,7 @@ registerChannelAdapter('whatsapp', {
     // State
     let sock: WASocket;
     let connected = false;
+    let shuttingDown = false;
     let setupConfig: ChannelSetup;
 
     // LID → phone JID mapping (WhatsApp's new ID system)
@@ -200,7 +232,7 @@ registerChannelAdapter('whatsapp', {
     let botPhoneJid: string | undefined;
 
     // Outgoing queue for messages sent while disconnected
-    const outgoingQueue: Array<{ jid: string; text: string }> = [];
+    const outgoingQueue: Array<{ jid: string; text: string; mentions?: string[] }> = [];
     let flushing = false;
 
     // Sent message cache for retry/re-encrypt requests
@@ -321,7 +353,9 @@ registerChannelAdapter('whatsapp', {
         log.info('Flushing outgoing message queue', { count: outgoingQueue.length });
         while (outgoingQueue.length > 0) {
           const item = outgoingQueue.shift()!;
-          const sent = await sock.sendMessage(item.jid, { text: item.text });
+          const payload: { text: string; mentions?: string[] } = { text: item.text };
+          if (item.mentions && item.mentions.length > 0) payload.mentions = item.mentions;
+          const sent = await sock.sendMessage(item.jid, payload);
           if (sent?.key?.id && sent.message) {
             sentMessageCache.set(sent.key.id, sent.message);
           }
@@ -373,14 +407,16 @@ registerChannelAdapter('whatsapp', {
       return results;
     }
 
-    async function sendRawMessage(jid: string, text: string): Promise<string | undefined> {
+    async function sendRawMessage(jid: string, text: string, mentions?: string[]): Promise<string | undefined> {
       if (!connected) {
-        outgoingQueue.push({ jid, text });
+        outgoingQueue.push({ jid, text, mentions });
         log.info('WA disconnected, message queued', { jid, queueSize: outgoingQueue.length });
         return;
       }
       try {
-        const sent = await sock.sendMessage(jid, { text });
+        const payload: { text: string; mentions?: string[] } = { text };
+        if (mentions && mentions.length > 0) payload.mentions = mentions;
+        const sent = await sock.sendMessage(jid, payload);
         if (sent?.key?.id && sent.message) {
           sentMessageCache.set(sent.key.id, sent.message);
           if (sentMessageCache.size > SENT_MESSAGE_CACHE_MAX) {
@@ -390,7 +426,7 @@ registerChannelAdapter('whatsapp', {
         }
         return sent?.key?.id ?? undefined;
       } catch (err) {
-        outgoingQueue.push({ jid, text });
+        outgoingQueue.push({ jid, text, mentions });
         log.warn('Failed to send, message queued', { jid, err, queueSize: outgoingQueue.length });
         return undefined;
       }
@@ -455,9 +491,13 @@ registerChannelAdapter('whatsapp', {
         if (connection === 'close') {
           connected = false;
           const reason = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
-          const shouldReconnect = reason !== DisconnectReason.loggedOut;
+          // Don't auto-reconnect during shutdown — a parallel connectSocket()
+          // initializes useMultiFileAuthState which can truncate creds.json
+          // mid-write when the process exits, leaving a 0-byte creds file
+          // and forcing a fresh QR pairing on next start.
+          const shouldReconnect = !shuttingDown && reason !== DisconnectReason.loggedOut;
 
-          log.info('WhatsApp connection closed', { reason, shouldReconnect });
+          log.info('WhatsApp connection closed', { reason, shouldReconnect, shuttingDown });
 
           if (shouldReconnect) {
             log.info('Reconnecting...');
@@ -725,8 +765,15 @@ registerChannelAdapter('whatsapp', {
           for (const file of message.files!) {
             try {
               const ext = path.extname(file.filename).toLowerCase();
-              const caption = !captionUsed ? text : undefined;
+              let caption: string | undefined;
+              let captionMentions: string[] | undefined;
+              if (!captionUsed && text) {
+                const formatted = formatWhatsApp(text);
+                caption = formatted.text;
+                captionMentions = formatted.mentions.length > 0 ? formatted.mentions : undefined;
+              }
               const mediaMsg = buildMediaMessage(file.data, file.filename, ext, caption);
+              if (captionMentions) mediaMsg.mentions = captionMentions;
               const sent = await sock.sendMessage(platformId, mediaMsg);
               if (sent?.key?.id && sent.message) {
                 sentMessageCache.set(sent.key.id, sent.message);
@@ -740,9 +787,9 @@ registerChannelAdapter('whatsapp', {
         }
 
         if (text) {
-          const formatted = formatWhatsApp(text);
+          const { text: formatted, mentions } = formatWhatsApp(text);
           const prefixed = ASSISTANT_HAS_OWN_NUMBER ? formatted : `${ASSISTANT_NAME}: ${formatted}`;
-          return sendRawMessage(platformId, prefixed);
+          return sendRawMessage(platformId, prefixed, mentions);
         }
       },
 
@@ -755,6 +802,7 @@ registerChannelAdapter('whatsapp', {
       },
 
       async teardown() {
+        shuttingDown = true;
         connected = false;
         sock?.end(undefined);
         log.info('WhatsApp adapter shut down');
