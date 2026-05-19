@@ -69,6 +69,15 @@ export interface ResourceDef {
   };
   /** Non-standard verbs (grant, revoke, add, remove, restart, etc.). */
   customOperations?: Record<string, CustomOperation>;
+  /**
+   * Runs after a successful `create` INSERT, with the row that was just
+   * written. Used to wire in side effects that the central row alone
+   * doesn't trigger — e.g. creating a `container_configs` row when a new
+   * agent group is added, or the companion `agent_destinations` row when a
+   * wiring is added. The hook receives the same `values` object that was
+   * inserted, so generated fields like `id` and `created_at` are populated.
+   */
+  postCreate?: (row: Record<string, unknown>) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,9 +164,15 @@ function genericCreate(def: ResourceDef) {
 
     const colNames = Object.keys(values);
     const placeholders = colNames.map((c) => `@${c}`);
-    getDb()
-      .prepare(`INSERT INTO ${def.table} (${colNames.join(', ')}) VALUES (${placeholders.join(', ')})`)
-      .run(values);
+    // Single transaction so a postCreate throw rolls back the parent INSERT —
+    // closes the partial-state class this PR exists to fix (#2415, #2389).
+    // better-sqlite3 .transaction() is sync, which matches postCreate's
+    // signature (`(row) => void`); current hooks are pure DB writes.
+    const db = getDb();
+    db.transaction(() => {
+      db.prepare(`INSERT INTO ${def.table} (${colNames.join(', ')}) VALUES (${placeholders.join(', ')})`).run(values);
+      if (def.postCreate) def.postCreate(values);
+    })();
     return values;
   };
 }

@@ -1,3 +1,5 @@
+import { ensureAgentDestinationForWiring } from '../../db/messaging-groups.js';
+import type { MessagingGroupAgent } from '../../types.js';
 import { registerResource } from '../crud.js';
 
 registerResource({
@@ -67,4 +69,13 @@ registerResource({
     { name: 'created_at', type: 'string', description: 'Auto-set.', generated: true },
   ],
   operations: { list: 'open', get: 'open', create: 'approval', update: 'approval', delete: 'approval' },
+  postCreate: (row) => {
+    // Create the companion `agent_destinations` row so the agent has a
+    // local name it can address this chat by. Without this, the agent
+    // generates a response, but delivery's ACL drops the outbound message
+    // (no destination matches the target) and the reply is silently lost.
+    // `createMessagingGroupAgent` does this automatically; the generic
+    // CRUD path doesn't, hence this hook. See issue #2389.
+    ensureAgentDestinationForWiring(row as unknown as MessagingGroupAgent);
+  },
 });
