@@ -39,7 +39,7 @@ import {
 import type { GroupMetadata, WAMessageKey, WAMessage, WASocket } from '@whiskeysockets/baileys';
 
 import { isSafeAttachmentName } from '../attachment-safety.js';
-import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, DATA_DIR, GROUPS_DIR } from '../config.js';
+import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, DATA_DIR, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
 import { getAgentGroup } from '../db/agent-groups.js';
 import { getMessagingGroupByPlatform, getMessagingGroupAgents } from '../db/messaging-groups.js';
 import { readEnvFile } from '../env.js';
@@ -698,7 +698,7 @@ registerChannelAdapter('whatsapp', {
               // platform-confirmed mentions so the router auto-creates an
               // approval-required messaging_group when the chat is unknown,
               // instead of silently dropping.
-              isMention: !isGroup ? true : undefined,
+              isMention: !isGroup ? true : TRIGGER_PATTERN.test(content) ? true : undefined,
               isGroup,
               content: {
                 text: content,
